@@ -98,9 +98,12 @@ function mapStageFailure(row: StageFailureRow): EnrichmentFailure {
  */
 const NOT_FILE_MISSING = { OR: [{ failureClass: null }, { failureClass: { not: "FILE_MISSING" } }] };
 
+/** A stage record of a library song: Discover songs are never enriched, so their old failures are not listed. */
+const LIBRARY_SONG_STAGE = { track: { album: { location: "LIBRARY" as const } } };
+
 /** The TrackStage `where` for the failure list: open failures only. */
 function stageFailureWhere(stages: string[], includeSkipped: boolean): any {
-    const where: any = { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING };
+    const where: any = { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE };
     if (includeSkipped) {
         // Blocked rows are the parked ones; only list them when asked for.
         where.status = { in: ["failed", "blocked"] };
@@ -294,16 +297,16 @@ class EnrichmentFailureService {
                     },
                 }),
                 prisma.trackStage.count({
-                    where: { stage: "recording", status: "failed", ...NOT_FILE_MISSING },
+                    where: { stage: "recording", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
                 }),
                 prisma.trackStage.count({
-                    where: { stage: "analysis", status: "failed", ...NOT_FILE_MISSING },
+                    where: { stage: "analysis", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
                 }),
                 prisma.trackStage.count({
-                    where: { stage: "embedding", status: "failed", ...NOT_FILE_MISSING },
+                    where: { stage: "embedding", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
                 }),
                 prisma.trackStage.count({
-                    where: { stage: "fingerprint", status: "failed", ...NOT_FILE_MISSING },
+                    where: { stage: "fingerprint", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
                 }),
             ]);
 
@@ -474,7 +477,8 @@ class EnrichmentFailureService {
                     ? Object.keys(ENTITY_TYPE_BY_STAGE)
                     : STAGES_BY_ENTITY_TYPE[entityType as string] ?? [];
             const result = await prisma.trackStage.updateMany({
-                where: { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING },
+                // The failures the list shows: a Discover song's old record stays as it is, so a like still enriches it.
+                where: { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
                 data: {
                     status: "blocked",
                     retryable: false,

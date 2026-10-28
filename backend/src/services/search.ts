@@ -1,7 +1,9 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { NOT_MISSING } from "../utils/libraryEligibility";
+import { IN_LIBRARY, NOT_MISSING } from "../utils/libraryEligibility";
+import { artistTaggedWithGenre, genreKey } from "../utils/genreSql";
+import { searchRows } from "./textMatch";
 
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
@@ -12,6 +14,23 @@ interface SearchOptions {
     limit?: number;
     offset?: number;
 }
+
+const ARTIST_FIELDS = { id: true, name: true, mbid: true, heroUrl: true } as const;
+const ALBUM_FIELDS = {
+    id: true, title: true, artistId: true, year: true, coverUrl: true, artist: { select: { name: true } },
+} as const;
+const TRACK_FIELDS = {
+    id: true, title: true, albumId: true, duration: true,
+    album: { select: { title: true, artistId: true, artist: { select: { name: true } } } },
+} as const;
+const EPISODE_FIELDS = {
+    id: true, title: true, description: true, podcastId: true, publishedAt: true, duration: true, audioUrl: true,
+    podcast: { select: { title: true } },
+} as const;
+const AUDIOBOOK_FIELDS = {
+    id: true, title: true, author: true, narrator: true, series: true, description: true, coverUrl: true, duration: true,
+} as const;
+const PODCAST_FIELDS = { id: true, title: true, author: true, description: true, imageUrl: true, episodeCount: true } as const;
 
 /** Shows and episodes are each user's own: only those of the shows they follow are searched. */
 interface FollowedSearchOptions extends SearchOptions {
@@ -142,28 +161,30 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
-        const results = await prisma.artist.findMany({
-            where: {
-                name: {
-                    contains: query,
-                    mode: "insensitive",
-                },
-                albums: {
-                    some: {},
-                },
-            },
-            select: {
-                id: true,
-                name: true,
-                mbid: true,
-                heroUrl: true,
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                name: "asc",
-            },
-        });
+        const results = await searchRows(
+            query,
+            limit,
+            offset,
+            ({ skip, take }) =>
+                prisma.artist.findMany({
+                    where: {
+                        name: { contains: query, mode: "insensitive" },
+                        albums: {
+                            some: { location: "LIBRARY" },
+                        },
+                    },
+                    select: ARTIST_FIELDS,
+                    take,
+                    skip,
+                    orderBy: [{ name: "asc" }, { id: "asc" }],
+                }),
+            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                SELECT a.id FROM "Artist" a
+                 WHERE a.name ~ ${pattern}
+                   AND EXISTS (SELECT 1 FROM "Album" al WHERE al."artistId" = a.id AND al.location = 'LIBRARY')
+                 ORDER BY a.name ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
+            (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS }),
+        );
 
         return results.map((r) => ({ ...r, rank: 0 }));
     }
@@ -193,7 +214,7 @@ export class SearchService {
           ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
         FROM "Artist" a
         WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id AND alb.location = 'LIBRARY')
         ORDER BY rank DESC, a.name ASC
         LIMIT ${limit}
         OFFSET ${offset}
@@ -211,43 +232,30 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
-        const results = await prisma.album.findMany({
-            where: {
-                OR: [
-                    {
-                        title: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
+        const results = await searchRows(
+            query,
+            limit,
+            offset,
+            ({ skip, take }) =>
+                prisma.album.findMany({
+                    where: {
+                        location: "LIBRARY",
+                        OR: [
+                            { title: { contains: query, mode: "insensitive" } },
+                            { artist: { name: { contains: query, mode: "insensitive" } } },
+                        ],
                     },
-                    {
-                        artist: {
-                            name: {
-                                contains: query,
-                                mode: "insensitive",
-                            },
-                        },
-                    },
-                ],
-            },
-            select: {
-                id: true,
-                title: true,
-                artistId: true,
-                year: true,
-                coverUrl: true,
-                artist: {
-                    select: {
-                        name: true,
-                    },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                title: "asc",
-            },
-        });
+                    select: ALBUM_FIELDS,
+                    take,
+                    skip,
+                    orderBy: [{ title: "asc" }, { id: "asc" }],
+                }),
+            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
+                 WHERE al.location = 'LIBRARY' AND (al.title ~ ${pattern} OR ar.name ~ ${pattern})
+                 ORDER BY al.title ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
+            (ids) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS }),
+        );
 
         return results.map((r) => ({
             id: r.id,
@@ -290,6 +298,7 @@ export class SearchService {
             FROM "Album" a
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND a.location = 'LIBRARY'
 
             UNION ALL
 
@@ -304,6 +313,7 @@ export class SearchService {
             FROM "Album" a
             INNER JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND a.location = 'LIBRARY'
           ) combined
           ORDER BY id, rank DESC
         ) deduped
@@ -324,37 +334,24 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<TrackSearchResult[]> {
-        const results = await prisma.track.findMany({
-            where: {
-                title: {
-                    contains: query,
-                    mode: "insensitive",
-                },
-                ...NOT_MISSING,
-            },
-            select: {
-                id: true,
-                title: true,
-                albumId: true,
-                duration: true,
-                album: {
-                    select: {
-                        title: true,
-                        artistId: true,
-                        artist: {
-                            select: {
-                                name: true,
-                            },
-                        },
-                    },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                title: "asc",
-            },
-        });
+        const results = await searchRows(
+            query,
+            limit,
+            offset,
+            ({ skip, take }) =>
+                prisma.track.findMany({
+                    where: { title: { contains: query, mode: "insensitive" }, ...NOT_MISSING, ...IN_LIBRARY },
+                    select: TRACK_FIELDS,
+                    take,
+                    skip,
+                    orderBy: [{ title: "asc" }, { id: "asc" }],
+                }),
+            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+                 WHERE t.title ~ ${pattern} AND t."missingSince" IS NULL AND al.location = 'LIBRARY'
+                 ORDER BY t.title ASC, t.id ASC LIMIT ${take} OFFSET ${skip}`,
+            (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }),
+        );
 
         return results.map((r) => ({
             id: r.id,
@@ -398,6 +395,7 @@ export class SearchService {
         LEFT JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
         AND t."missingSince" IS NULL
+        AND a.location = 'LIBRARY'
         ORDER BY rank DESC, t.title ASC
         LIMIT ${limit}
         OFFSET ${offset}
@@ -460,44 +458,31 @@ export class SearchService {
         offset = 0,
         userId,
     }: FollowedSearchOptions): Promise<EpisodeSearchResult[]> {
-        const results = await prisma.podcastEpisode.findMany({
-            where: {
-                podcast: { subscriptions: { some: { userId } } },
-                OR: [
-                    {
-                        title: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
+        const results = await searchRows(
+            query,
+            limit,
+            offset,
+            ({ skip, take }) =>
+                prisma.podcastEpisode.findMany({
+                    where: {
+                        podcast: { subscriptions: { some: { userId } } },
+                        OR: [
+                            { title: { contains: query, mode: "insensitive" } },
+                            { description: { contains: query, mode: "insensitive" } },
+                        ],
                     },
-                    {
-                        description: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
-                    },
-                ],
-            },
-            select: {
-                id: true,
-                title: true,
-                description: true,
-                podcastId: true,
-                publishedAt: true,
-                duration: true,
-                audioUrl: true,
-                podcast: {
-                    select: {
-                        title: true,
-                    },
-                },
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                publishedAt: "desc",
-            },
-        });
+                    select: EPISODE_FIELDS,
+                    take,
+                    skip,
+                    orderBy: [{ publishedAt: "desc" }, { id: "asc" }],
+                }),
+            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                SELECT e.id FROM "PodcastEpisode" e
+                 WHERE (e.title ~ ${pattern} OR e.description ~ ${pattern})
+                   AND EXISTS (SELECT 1 FROM "PodcastSubscription" s WHERE s."podcastId" = e."podcastId" AND s."userId" = ${userId})
+                 ORDER BY e."publishedAt" DESC, e.id ASC LIMIT ${take} OFFSET ${skip}`,
+            (ids) => prisma.podcastEpisode.findMany({ where: { id: { in: ids } }, select: EPISODE_FIELDS }),
+        );
 
         return results.map((r) => ({
             id: r.id,
@@ -611,51 +596,31 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AudiobookSearchResult[]> {
-        const results = await prisma.audiobook.findMany({
-            where: {
-                OR: [
-                    {
-                        title: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
+        const results = await searchRows(
+            query,
+            limit,
+            offset,
+            ({ skip, take }) =>
+                prisma.audiobook.findMany({
+                    where: {
+                        OR: [
+                            { title: { contains: query, mode: "insensitive" } },
+                            { author: { contains: query, mode: "insensitive" } },
+                            { narrator: { contains: query, mode: "insensitive" } },
+                            { series: { contains: query, mode: "insensitive" } },
+                        ],
                     },
-                    {
-                        author: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
-                    },
-                    {
-                        narrator: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
-                    },
-                    {
-                        series: {
-                            contains: query,
-                            mode: "insensitive",
-                        },
-                    },
-                ],
-            },
-            select: {
-                id: true,
-                title: true,
-                author: true,
-                narrator: true,
-                series: true,
-                description: true,
-                coverUrl: true,
-                duration: true,
-            },
-            take: limit,
-            skip: offset,
-            orderBy: {
-                title: "asc",
-            },
-        });
+                    select: AUDIOBOOK_FIELDS,
+                    take,
+                    skip,
+                    orderBy: [{ title: "asc" }, { id: "asc" }],
+                }),
+            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                SELECT b.id FROM "Audiobook" b
+                 WHERE b.title ~ ${pattern} OR b.author ~ ${pattern} OR b.narrator ~ ${pattern} OR b.series ~ ${pattern}
+                 ORDER BY b.title ASC, b.id ASC LIMIT ${take} OFFSET ${skip}`,
+            (ids) => prisma.audiobook.findMany({ where: { id: { in: ids } }, select: AUDIOBOOK_FIELDS }),
+        );
 
         return results.map((r) => ({
             ...r,
@@ -678,44 +643,32 @@ export class SearchService {
         }
 
         try {
-            const results = await prisma.podcast.findMany({
-                where: {
-                    subscriptions: { some: { userId } },
-                    OR: [
-                        {
-                            title: {
-                                contains: query,
-                                mode: "insensitive",
-                            },
+            const results = await searchRows(
+                query,
+                limit,
+                offset,
+                ({ skip, take }) =>
+                    prisma.podcast.findMany({
+                        where: {
+                            subscriptions: { some: { userId } },
+                            OR: [
+                                { title: { contains: query, mode: "insensitive" } },
+                                { author: { contains: query, mode: "insensitive" } },
+                                { description: { contains: query, mode: "insensitive" } },
+                            ],
                         },
-                        {
-                            author: {
-                                contains: query,
-                                mode: "insensitive",
-                            },
-                        },
-                        {
-                            description: {
-                                contains: query,
-                                mode: "insensitive",
-                            },
-                        },
-                    ],
-                },
-                select: {
-                    id: true,
-                    title: true,
-                    author: true,
-                    description: true,
-                    imageUrl: true,
-                    episodeCount: true,
-                },
-                take: limit,
-                skip: offset,
-                orderBy: {
-                    title: "asc",
-                },
-            });
+                        select: PODCAST_FIELDS,
+                        take,
+                        skip,
+                        orderBy: [{ title: "asc" }, { id: "asc" }],
+                    }),
+                (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
+                    SELECT p.id FROM "Podcast" p
+                     WHERE (p.title ~ ${pattern} OR p.author ~ ${pattern} OR p.description ~ ${pattern})
+                       AND EXISTS (SELECT 1 FROM "PodcastSubscription" s WHERE s."podcastId" = p.id AND s."userId" = ${userId})
+                     ORDER BY p.title ASC, p.id ASC LIMIT ${take} OFFSET ${skip}`,
+                (ids) => prisma.podcast.findMany({ where: { id: { in: ids } }, select: PODCAST_FIELDS }),
+            );
 
             return results;
         } catch (error) {
@@ -808,22 +761,21 @@ export class SearchService {
         if (tracks.length === 0) return [];
 
         const trackIds = tracks.map((t) => t.id);
-        const tracksWithGenre = await prisma.track.findMany({
-            where: {
-                id: { in: trackIds },
-                trackGenres: {
-                    some: {
-                        genre: {
-                            name: {
-                                equals: genre,
-                                mode: "insensitive",
-                            },
-                        },
-                    },
-                },
+        // Genre names are compared as genreKeys here, not in SQL: on SQL_ASCII the database folds ASCII case only.
+        const wanted = genreKey(genre);
+        const candidates = await prisma.track.findMany({
+            where: { id: { in: trackIds } },
+            select: {
+                id: true,
+                trackGenres: { select: { genre: { select: { name: true } } } },
+                album: { select: { artist: { select: { genres: true, userGenres: true } } } },
             },
-            select: { id: true },
         });
+        const tracksWithGenre = candidates.filter(
+            (t) =>
+                (wanted !== "" && t.trackGenres.some((tg) => genreKey(tg.genre.name) === wanted)) ||
+                artistTaggedWithGenre(t.album.artist.genres, t.album.artist.userGenres, genre),
+        );
 
         const genreTrackIds = new Set(tracksWithGenre.map((t) => t.id));
         return tracks.filter((t) => genreTrackIds.has(t.id));

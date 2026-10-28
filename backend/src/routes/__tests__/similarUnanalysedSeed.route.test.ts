@@ -1,6 +1,6 @@
 /**
  * "Similar tracks" for a seed with no embedding answers 404, not arbitrary
- * tracks, on the vibe and recommendations routes. Real routers, service and
+ * tracks, on the vibe route. Real router, service and
  * database; auth, redis, logger and featureDetection are mocked.
  */
 
@@ -48,7 +48,6 @@ jest.mock("../../services/featureDetection", () => ({
 
 import { prisma } from "../../utils/db";
 import vibeRouter from "../vibe";
-import recommendationsRouter from "../recommendations";
 import { SELF_SCORE } from "../../services/matching/formula";
 import { MATCHING_MODEL, buildMatching } from "../../services/matching/state";
 
@@ -104,9 +103,6 @@ const UNIT_VECTOR = `[${["1", ...Array(511).fill("0")].join(",")}]`;
 const vibeApp = express();
 vibeApp.use("/api/vibe", vibeRouter);
 
-const recApp = express();
-recApp.use("/api/recommendations", recommendationsRouter);
-
 beforeAll(async () => {
     await seedTrack(UNANALYSED_ID);
     await seedTrack(SEED_ID);
@@ -146,25 +142,6 @@ describe("similar tracks for an unanalysed seed (S2)", () => {
         });
     });
 
-    it("GET /api/recommendations/tracks answers 404 for an unanalysed seed", async () => {
-        const res = await request(recApp).get(`/api/recommendations/tracks`).query({
-            seedTrackId: UNANALYSED_ID,
-        });
-        expect(res.status).toBe(404);
-        expect(res.body).toEqual({
-            error: "No similar tracks found",
-            message: "This track may not have been analyzed yet, or no analyzer is running",
-        });
-    });
-
-    it("GET /api/recommendations/tracks keeps its 404 for a missing seed", async () => {
-        const res = await request(recApp).get(`/api/recommendations/tracks`).query({
-            seedTrackId: MISSING_ID,
-        });
-        expect(res.status).toBe(404);
-        expect(res.body).toEqual({ error: "Track not found" });
-    });
-
     it("an analysed seed still returns its neighbours with the documented shape", async () => {
         const res = await request(vibeApp).get(`/api/vibe/similar/${SEED_ID}`);
         expect(res.status).toBe(200);
@@ -178,13 +155,4 @@ describe("similar tracks for an unanalysed seed (S2)", () => {
         expect(res.body.tracks[0].artist.name).toBe(`A ${NEIGHBOUR_ID}`);
     });
 
-    // The diversification query returns BIGINT row numbers; none may reach the
-    // JSON body, which cannot serialize them.
-    it("GET /api/recommendations/tracks serves 200 for an analysed seed", async () => {
-        const res = await request(recApp).get(`/api/recommendations/tracks`).query({
-            seedTrackId: SEED_ID,
-        });
-        expect(res.status).toBe(200);
-        expect(JSON.stringify(res.body)).toContain(NEIGHBOUR_ID);
-    });
 });

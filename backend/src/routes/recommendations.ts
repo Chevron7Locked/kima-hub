@@ -3,7 +3,6 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
-import { findSimilarTracks } from "../services/hybridSimilarity";
 
 const router = Router();
 
@@ -17,8 +16,9 @@ router.get("/for-you", async (req, res) => {
         const limitNum = parseInt(limit as string, 10);
 
         // Get user's most played artists
+        // Plays of library songs only: a Discover song feeds nothing until its album is liked into the library.
         const recentPlays = await prisma.play.findMany({
-            where: { userId },
+            where: { userId, track: { album: { location: "LIBRARY" } } },
             orderBy: { playedAt: "desc" },
             take: 50,
             include: {
@@ -209,7 +209,7 @@ router.get("/", async (req, res) => {
                 select: { id: true, mbid: true, name: true, heroUrl: true },
             }),
             prisma.album.findMany({
-                where: { artistId: { in: similarArtistIds } },
+                where: { artistId: { in: similarArtistIds }, location: "LIBRARY" },
                 include: { artist: true },
                 orderBy: { year: "desc" },
             }),
@@ -316,6 +316,7 @@ router.get("/albums", async (req, res) => {
             where: {
                 artistId: { in: similarArtists.map((sa) => sa.toArtistId) },
                 id: { not: seedAlbumId as string }, // Exclude seed album
+                location: "LIBRARY",
             },
             include: {
                 artist: true,
@@ -330,6 +331,7 @@ router.get("/albums", async (req, res) => {
             genreMatchAlbums = await prisma.album.findMany({
                 where: {
                     id: { not: seedAlbumId as string },
+                    location: "LIBRARY",
                     tracks: {
                         some: {
                             trackGenres: {
@@ -381,68 +383,6 @@ router.get("/albums", async (req, res) => {
         logger.error("Get album recommendations error:", error);
         res.status(500).json({
             error: "Failed to get album recommendations",
-        });
-    }
-});
-
-// GET /recommendations/tracks?seedTrackId=
-router.get("/tracks", async (req, res) => {
-    try {
-        const { seedTrackId } = req.query;
-
-        if (!seedTrackId) {
-            return res.status(400).json({ error: "seedTrackId required" });
-        }
-
-        // Get seed track
-        const seedTrack = await prisma.track.findUnique({
-            where: { id: seedTrackId as string },
-            include: {
-                album: {
-                    include: {
-                        artist: true,
-                    },
-                },
-            },
-        });
-
-        if (!seedTrack) {
-            return res.status(404).json({ error: "Track not found" });
-        }
-
-        // Local hybrid similarity (CLAP embeddings + audio features), so every
-        // result is a track in the library.
-        const similarTracks = await findSimilarTracks(seedTrackId as string, 20);
-
-        // Same contract as /vibe/similar: no similar rows means the seed has
-        // no fingerprint (or no analyzer is running), and the caller must get
-        // a 404 rather than an empty-but-successful payload.
-        if (similarTracks.length === 0) {
-            return res.status(404).json({
-                error: "No similar tracks found",
-                message: "This track may not have been analyzed yet, or no analyzer is running",
-            });
-        }
-
-        const recommendations = similarTracks.map((t) => ({
-            ...t,
-            artist: t.artistName,
-            inLibrary: true,
-        }));
-
-        res.json({
-            seedTrack: {
-                id: seedTrack.id,
-                title: seedTrack.title,
-                artist: seedTrack.album.artist.name,
-                album: seedTrack.album.title,
-            },
-            recommendations,
-        });
-    } catch (error) {
-        logger.error("Get track recommendations error:", error);
-        res.status(500).json({
-            error: "Failed to get track recommendations",
         });
     }
 });

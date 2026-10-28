@@ -218,7 +218,7 @@ export const SCORED_SONGS = Prisma.sql`
     JOIN "Album" a ON a.id = t."albumId"
     JOIN "Artist" ar ON ar.id = a."artistId"
     WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-      AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+      AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
 `;
 
 /**

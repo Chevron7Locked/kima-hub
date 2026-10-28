@@ -2,15 +2,12 @@
 // music-switch-2026-10-17 cutoffs.json, in the lab archive.
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { logger } from "../../utils/logger";
 import { nightMixGenerator } from "./nightPlays";
 import {
     ProgrammaticMix,
     albumCoverUrls,
     getMixColor,
-    randomSample,
     sampledMix,
-    sampleTracks,
     seededTracks,
     sampleMix,
     getSeededRandom,
@@ -19,11 +16,8 @@ import {
 import { recipeMixGenerator } from "./recipeMix";
 import { weekdayOf } from "./mixDay";
 import { STEADY_BEAT } from "./recipes";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
 import { spellingsOf } from "../stats/playable";
-import type { MoodType } from "../moodBucketService";
 
-const MIN_TRACKS_DAILY = 8;
 const WEEKLY_TRACK_LIMIT = 20;
 
 // MOOD MIXES: each draws from its recipe in recipes.json
@@ -367,8 +361,9 @@ export async function generateMinorKeyMix(
     // Felt energy (arousal) in the upper half of this library, whatever level the library sits at.
     const [{ median }] = await prisma.$queryRaw<Array<{ median: number | null }>>`
         SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY arousal) AS median
-        FROM "Track"
-        WHERE "missingSince" IS NULL AND "analysisStatus" = 'completed' AND arousal IS NOT NULL
+        FROM "Track" t
+        WHERE t."missingSince" IS NULL AND t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL
+          AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
     `;
     if (median === null) return null;
 
@@ -384,152 +379,4 @@ export async function generateMinorKeyMix(
         seed: getSeededRandom(`minor-key-${today}`),
         where: Prisma.sql`t."analysisStatus" = 'completed' AND t."keyScale" = 'minor' AND t.arousal >= ${median}`,
     });
-}
-
-export type MoodOnDemandParams = {
-    mood?: MoodType;
-    valence?: { min?: number; max?: number };
-    energy?: { min?: number; max?: number };
-    danceability?: { min?: number; max?: number };
-    acousticness?: { min?: number; max?: number };
-    instrumentalness?: { min?: number; max?: number };
-    arousal?: { min?: number; max?: number };
-    bpm?: { min?: number; max?: number };
-    keyScale?: "major" | "minor";
-    moodHappy?: { min?: number; max?: number };
-    moodSad?: { min?: number; max?: number };
-    moodRelaxed?: { min?: number; max?: number };
-    moodAggressive?: { min?: number; max?: number };
-    moodParty?: { min?: number; max?: number };
-    limit?: number;
-};
-
-export async function generateMoodOnDemand(
-    _userId: string,
-    params: MoodOnDemandParams
-): Promise<ProgrammaticMix | null> {
-    const where: any = {
-        analysisStatus: "completed",
-        ...NOT_MISSING,
-    };
-
-    // Mood path: the named mood selects the bucket pool — the
-    // head verdict is the membership, no score cutoffs. Legacy callers pass
-    // the head columns (moodHappy: { min: … }); they name the same mood and
-    // their thresholds are ignored.
-    const LEGACY_MOOD_PARAMS: [string, MoodType][] = [
-        ["moodHappy", "happy"],
-        ["moodSad", "sad"],
-        ["moodRelaxed", "chill"],
-        ["moodAggressive", "aggressive"],
-        ["moodParty", "party"],
-    ];
-    const mood =
-        params.mood ??
-        LEGACY_MOOD_PARAMS.find(([key]) => (params as any)[key] !== undefined)
-            ?.[1];
-    for (const [key] of LEGACY_MOOD_PARAMS) delete (params as any)[key];
-    if (mood) {
-        const bucketSize = await prisma.moodBucket.count({ where: { mood } });
-        if (bucketSize < MIN_TRACKS_DAILY) {
-            logger.debug(
-                `[MoodMixer] Bucket "${mood}" has ${bucketSize} tracks (need ${MIN_TRACKS_DAILY})`
-            );
-            return null;
-        }
-        where.moodBuckets = { some: { mood } };
-    }
-
-    if (params.valence) {
-        where.valence = where.valence || {};
-        if (params.valence.min !== undefined)
-            where.valence.gte = Math.max(
-                where.valence.gte || 0,
-                params.valence.min
-            );
-        if (params.valence.max !== undefined)
-            where.valence.lte = Math.min(
-                where.valence.lte ?? 1,
-                params.valence.max
-            );
-    }
-    if (params.energy) {
-        where.energy = where.energy || {};
-        if (params.energy.min !== undefined)
-            where.energy.gte = Math.max(
-                where.energy.gte || 0,
-                params.energy.min
-            );
-        if (params.energy.max !== undefined)
-            where.energy.lte = Math.min(
-                where.energy.lte ?? 1,
-                params.energy.max
-            );
-    }
-    if (params.danceability) {
-        where.danceability = where.danceability || {};
-        if (params.danceability.min !== undefined)
-            where.danceability.gte = Math.max(
-                where.danceability.gte || 0,
-                params.danceability.min
-            );
-        if (params.danceability.max !== undefined)
-            where.danceability.lte = Math.min(
-                where.danceability.lte ?? 1,
-                params.danceability.max
-            );
-    }
-    if (params.acousticness) {
-        where.acousticness = {};
-        if (params.acousticness.min !== undefined)
-            where.acousticness.gte = params.acousticness.min;
-        if (params.acousticness.max !== undefined)
-            where.acousticness.lte = params.acousticness.max;
-    }
-    if (params.instrumentalness) {
-        where.instrumentalness = {};
-        if (params.instrumentalness.min !== undefined)
-            where.instrumentalness.gte = params.instrumentalness.min;
-        if (params.instrumentalness.max !== undefined)
-            where.instrumentalness.lte = params.instrumentalness.max;
-    }
-    if (params.arousal) {
-        where.arousal = {};
-        if (params.arousal.min !== undefined)
-            where.arousal.gte = params.arousal.min;
-        if (params.arousal.max !== undefined)
-            where.arousal.lte = params.arousal.max;
-    }
-    if (params.bpm) {
-        where.bpm = {};
-        if (params.bpm.min !== undefined) where.bpm.gte = params.bpm.min;
-        if (params.bpm.max !== undefined) where.bpm.lte = params.bpm.max;
-    }
-    if (params.keyScale) {
-        where.keyScale = params.keyScale;
-    }
-
-    const tracks = await sampleTracks({
-        where,
-        include: { album: { select: { coverUrl: true } } },
-        take: 100,
-    });
-
-    const limit = params.limit || 15;
-    if (tracks.length < Math.min(limit, 8)) return null;
-
-    const shuffled = randomSample(tracks, limit);
-    const coverUrls = albumCoverUrls(shuffled);
-
-    const timestamp = Date.now();
-    return {
-        id: `mood-on-demand-${timestamp}`,
-        type: "mood-on-demand",
-        name: "Custom Mood Mix",
-        description: "Generated just for you",
-        trackIds: shuffled.map((t) => t.id),
-        coverUrls,
-        trackCount: shuffled.length,
-        color: getMixColor("mood"),
-    };
 }

@@ -65,14 +65,14 @@ export async function getVibeMap(): Promise<MapState> {
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL
+        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
         ORDER BY te.track_id
     `;
     const snap = await currentMoodSnapshot();
     if (rows.length === 0) {
         const { vibeEmbeddings } = await featureDetection.getFeatures();
         const [{ waiting }] = await prisma.$queryRaw<Array<{ waiting: boolean }>>`
-            SELECT EXISTS (SELECT 1 FROM "Track" t WHERE t."missingSince" IS NULL) AS waiting
+            SELECT EXISTS (SELECT 1 FROM "Track" t WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')) AS waiting
         `;
         if (vibeEmbeddings && waiting) return { status: "computing" };
     }

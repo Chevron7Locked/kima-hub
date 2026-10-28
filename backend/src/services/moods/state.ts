@@ -54,6 +54,9 @@ export async function updateMoods(tx: Prisma.TransactionClient): Promise<number>
             FROM track_embeddings te
             LEFT JOIN track_moods m ON m.track_id = te.track_id
             WHERE te.model_version = ${MOOD_HEADS.model}
+              -- Library songs only: a Discover song is never scored.
+              AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
+                          WHERE lt.id = te.track_id AND la.location = 'LIBRARY')
               AND (m.track_id IS NULL
                    OR m.embedded_at IS DISTINCT FROM te.analyzed_at
                    OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})
@@ -84,7 +87,7 @@ async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> 
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
         WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
     `;
     return crypto.createHash("sha256").update(JSON.stringify([MOOD_STATE_VERSION, row.n, row.h])).digest("hex");
 }
@@ -113,7 +116,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
         WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
     `;
     if (row.n === 0) return null;
     const finite = (column: StatColumn): number => {
@@ -263,7 +266,7 @@ export async function moodProgress(): Promise<{ total: number; completed: number
         JOIN "Track" t ON t.id = te.track_id
         LEFT JOIN track_moods m ON m.track_id = te.track_id
         WHERE te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL
+          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
           AND vector_dims(te.embedding) = ${MOOD_HEADS.dims}
           AND vector_norm(te.embedding) > 0
     `;

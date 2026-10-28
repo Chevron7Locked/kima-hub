@@ -65,7 +65,7 @@ export interface SeedRow {
 }
 
 /**
- * The listener's most-heard songs of the lookback, most heard first; songs heard equally often go by the most recent
+ * The listener's most-heard library songs of the lookback, most heard first; songs heard equally often go by the most recent
  * listen, so a light listener's seeds are what they played lately, not whichever ids sort first.
  */
 export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
@@ -73,7 +73,9 @@ export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
     return prisma.$queryRaw<SeedRow[]>`
         SELECT p."trackId" AS id, count(*)::int AS plays
         FROM "Play" p
-        WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard
+        JOIN "Track" t ON t.id = p."trackId"
+        JOIN "Album" a ON a.id = t."albumId"
+        WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard AND a.location = 'LIBRARY'
         GROUP BY p."trackId"
         ORDER BY plays DESC, max(p."playedAt") DESC, p."trackId"
         LIMIT ${FAMILIAR_SEEDS}

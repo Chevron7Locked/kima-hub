@@ -48,7 +48,7 @@ for (const name of mbGenres.genres) {
     if (!MB_GENRE.has(key)) MB_GENRE.set(key, name.toLowerCase());
 }
 
-/** An artist's user-added and enriched genres that are MusicBrainz genres, each in MusicBrainz's spelling. */
+/** An artist's genres (getMergedGenres: the person's list when they set one, else the enriched one) that are MusicBrainz genres, each in MusicBrainz's spelling. */
 export function matchingGenres(artist: { genres?: unknown; userGenres?: unknown }): string[] {
     const names = new Set<string>();
     for (const tag of getMergedGenres(artist)) {
@@ -95,6 +95,9 @@ async function updateFeel(tx: Prisma.TransactionClient): Promise<number> {
             FROM track_embeddings te
             LEFT JOIN matching_feel f ON f.track_id = te.track_id
             WHERE te.model_version = ${MATCHING_MODEL}
+              -- Library songs only: a Discover song is never scored.
+              AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
+                          WHERE lt.id = te.track_id AND la.location = 'LIBRARY')
               AND (f.track_id IS NULL
                    OR f.embedded_at IS DISTINCT FROM te.analyzed_at
                    OR f.probe IS DISTINCT FROM ${PROBE_ID})
@@ -126,7 +129,7 @@ async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> 
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL
+        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
     `;
     return crypto.createHash("sha256").update(JSON.stringify([STATE_VERSION, row.n, row.h])).digest("hex");
 }
@@ -145,7 +148,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         FROM track_embeddings te
         JOIN matching_feel f ON f.track_id = te.track_id AND f.embedded_at = te.analyzed_at AND f.probe = ${PROBE_ID}
         JOIN "Track" t ON t.id = te.track_id
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL
+        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
     `;
     if (stats.n === 0) return null;
 
@@ -158,7 +161,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL
+        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
         GROUP BY ar.id
     `;
     const soundSpread = 1 - stats.meanNorm * stats.meanNorm;
@@ -256,7 +259,7 @@ export async function matchingProgress(): Promise<{ total: number; completed: nu
         LEFT JOIN matching_feel f ON f.track_id = te.track_id
         LEFT JOIN matching_map m ON m.track_id = te.track_id
         WHERE te.model_version = ${MATCHING_MODEL}
-          AND t."missingSince" IS NULL
+          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
           AND vector_dims(te.embedding) = ${PROBE_DIMS}
           AND vector_norm(te.embedding) > 0
     `;

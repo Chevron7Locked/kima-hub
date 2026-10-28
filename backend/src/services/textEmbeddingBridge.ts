@@ -198,7 +198,7 @@ function searchableSql(vector: string): Prisma.Sql {
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."missingSince" IS NULL AND te.model_version = ${MATCHING_MODEL}
+        WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND te.model_version = ${MATCHING_MODEL}
     `;
 }
 

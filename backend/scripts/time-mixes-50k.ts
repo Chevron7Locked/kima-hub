@@ -164,11 +164,6 @@ async function main() {
                 analysisStatus: kind < 0.04 ? "pending" : "completed",
                 missingSince: kind >= 0.09 && kind < 0.12 ? new Date() : null,
                 corrupt: kind >= 0.12 && kind < 0.15,
-                moodHappy: r4(rng()),
-                moodSad: r4(rng()),
-                moodRelaxed: r4(rng()),
-                moodAggressive: r4(rng()),
-                moodParty: r4(rng()),
             };
         });
         await inChunks(tracks, (data) => prisma.track.createMany({ data }));

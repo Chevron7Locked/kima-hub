@@ -42,7 +42,6 @@ import {
     generateTempoFlow,
     generateVocalDetox,
     generateMinorKeyMix,
-    generateMoodOnDemand,
 } from "./moodMixes";
 import { generateDayMix } from "./timeMixes";
 import {
@@ -356,13 +355,6 @@ class ProgrammaticPlaylistService {
         }
 
         return finalMixes;
-    }
-
-    generateMoodOnDemand(
-        userId: string,
-        params: Parameters<typeof generateMoodOnDemand>[1]
-    ): ReturnType<typeof generateMoodOnDemand> {
-        return generateMoodOnDemand(userId, params);
     }
 }
 

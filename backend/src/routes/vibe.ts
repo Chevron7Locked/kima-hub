@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from "express";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { logger } from "../utils/logger";
-import { prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
 import { UserFacingError } from "../utils/errors";
 import { findSimilarTracks } from "../services/hybridSimilarity";
@@ -308,35 +307,6 @@ router.get("/mood/:trackId", requireAuth, async (req, res) => {
     } catch (error) {
         logger.error("Track mood error:", error);
         res.status(500).json({ error: "Failed to read the track's mood" });
-    }
-});
-
-/**
- * GET /api/vibe/status
- * Get embedding analysis progress statistics
- */
-router.get("/status", requireAuth, async (_req, res) => {
-    try {
-        const totalTracks = await prisma.track.count();
-
-        const embeddedTracks = await prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*) as count FROM track_embeddings
-        `;
-
-        const embeddedCount = Number(embeddedTracks[0]?.count || 0);
-        const progress = totalTracks > 0
-            ? Math.round((embeddedCount / totalTracks) * 100)
-            : 0;
-
-        res.json({
-            totalTracks,
-            embeddedTracks: embeddedCount,
-            progress,
-            isComplete: embeddedCount >= totalTracks && totalTracks > 0,
-        });
-    } catch (error) {
-        logger.error("Vibe status error:", error);
-        res.status(500).json({ error: "Failed to get embedding status" });
     }
 });
 

@@ -39,6 +39,8 @@ jest.mock('../../utils/db', () => ({
             findUnique: jest.fn(),
         },
         track: { findMany: jest.fn() },
+        // The listener's current Discover suggestions, for the "recommended" and "all" choices.
+        discoveryAlbum: { findMany: jest.fn().mockResolvedValue([{ rgMbid: 'rg-mine' }]) },
         // Which playlists held the album's songs (read before it is deleted): none here.
         playlistItem: { findMany: jest.fn().mockResolvedValue([]) },
         $transaction: jest.fn(async (fn: (tx: any) => Promise<any[]>) => fn(prisma)),
@@ -87,6 +89,11 @@ import fs from 'fs';
 function makeApp() {
     const app = express();
     app.use(express.json());
+    // The library router signs the listener in (requireAuthOrToken) before these routes; mounted bare here.
+    app.use((req: any, _res: any, next: any) => {
+        req.user = { id: 'test-admin', username: 'admin', role: 'admin' };
+        next();
+    });
     app.use('/', albumRoutes);
     return app;
 }
@@ -154,8 +161,13 @@ describe('GET /albums -- list albums', () => {
         const res = await request(app).get('/albums?filter=discovery');
         expect(res.status).toBe(200);
 
+        // The listener's own Discover albums only.
         const findManyCall = (prisma.album.findMany as jest.Mock).mock.calls[0][0];
-        expect(findManyCall.where.location).toBe('DISCOVER');
+        expect(findManyCall.where.AND[0]).toEqual({ location: 'DISCOVER', rgMbid: { in: ['rg-mine'] } });
+        expect((prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0].where).toEqual({
+            userId: 'test-admin',
+            status: 'ACTIVE',
+        });
     });
 
     it('respects limit and offset query params', async () => {

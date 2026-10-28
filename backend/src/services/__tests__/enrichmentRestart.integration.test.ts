@@ -40,7 +40,7 @@ beforeAll(async () => {
         data: {
             id: `${P}trk`, albumId: `${P}alb`, title: "Wipe Track", trackNo: 1, duration: 200,
             filePath: `/tmp/${P}.flac`, fileModified: new Date(), fileSize: 1000,
-            bpm: 120, energy: 0.8, valence: 0.4, moodHappy: 0.9, moodTags: ["happy"], essentiaGenres: ["rock"],
+            bpm: 120, energy: 0.8, valence: 0.4, moodTags: ["happy"], essentiaGenres: ["rock"],
             analysisStatus: "completed", analysisVersion: "2.1b6-enhanced-v3", analyzedAt: new Date(),
             vibeAnalysisStatus: "completed", recordingMbid: `${P}-rec`, acoustidFingerprint: "AQAA",
             isrc: "GBAYE0601498", isrcSource: "musicbrainz", displayTitle: "My Title", hasUserOverrides: true,
@@ -165,7 +165,7 @@ describe("wiping the enrichment", () => {
     it("clears every track's analysis and sends it back through analysis and embedding", async () => {
         const t = await prisma.track.findUniqueOrThrow({ where: { id: `${P}trk` } });
         expect(t).toMatchObject({
-            bpm: null, energy: null, valence: null, moodHappy: null, moodTags: [], essentiaGenres: [],
+            bpm: null, energy: null, valence: null, moodTags: [], essentiaGenres: [],
             analysisStatus: "pending", analysisVersion: null, analyzedAt: null, vibeAnalysisStatus: "pending",
         });
         const stages = await prisma.trackStage.findMany({ where: { trackId: `${P}trk` }, orderBy: { stage: "asc" } });

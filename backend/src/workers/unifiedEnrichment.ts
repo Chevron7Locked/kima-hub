@@ -117,9 +117,9 @@ export const PREREQUISITE_STAGE: Record<StageName, StagePrerequisite | null> = {
     recording: { stage: "fingerprint", wait: "settled" },
     // Reads only the audio file (the Essentia analyzer decodes it itself).
     analysis: null,
-    // The sound vector reads the track's analysis: only a done analysis unblocks it; a closed one closes this
-    // record too, and a later answer reopens it. Across the library the two heavy models run one at a time
-    // (analysisStillRunning).
+    // CLAP reads the audio file, not the analysis's data — it needs no features MusiCNN writes. The wait is
+    // the one-at-a-time rule (analysisStillRunning) plus this record's lifecycle: a closed analysis closes this
+    // record too, and a later answer reopens it.
     embedding: { stage: "analysis", wait: "output" },
     // Reads only the audio file (fpcalc on the local binary).
     fingerprint: null,
@@ -185,6 +185,7 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
               LEFT JOIN "TrackStage" ts ON ts."trackId" = t.id AND ts.stage = 'analysis'
              WHERE t."missingSince" IS NULL
                AND t."filePath" IS NOT NULL
+               AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
                AND (ts.id IS NULL
                     OR ts.status IN ('pending', 'working')
                     OR (ts.status = 'failed' AND ts.retryable = true
@@ -196,18 +197,28 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
 
 /**
  * The other half of one at a time: analysis that comes due while sound vectors are being made (songs added
- * mid-run, a retry whose delay ran out) waits for the tracks CLAP holds a live claim on, then goes first again. A
+ * mid-run, a retry whose delay ran out) waits while CLAP is working, then analysis goes first again. A
  * CLAP analyzer that is not running holds nothing back.
  */
 export async function vectorsInFlight(): Promise<boolean> {
     if (await bothAtOnce()) return false;
     if (!(await featureDetection.clapRunning())) return false;
+    // The count the CLAP worker publishes the moment a job starts and ends. A
+    // re-run resets the embedding stage rows to pending while CLAP is still
+    // computing the batch it already took, so the rows cannot show that work;
+    // the published count can, and it is current within a second of the batch
+    // starting. A key the worker never wrote counts as nothing running.
+    const inflight = await getRedis().get("clap:worker:inflight");
+    if (inflight !== null && Number(inflight) > 0) return true;
+    // A dispatched job whose CLAP worker has not started running yet is counted
+    // by neither check above (the count starts when the job runs): its stage
+    // row is claimed with a live lease, so it keeps analysis waiting through
+    // the handoff. One whose lease ran out is an attempt that died; it holds
+    // nothing, and the embedding stage re-offers it once analysis is done.
     const [row] = await prisma.$queryRaw<Array<{ busy: boolean }>>`
         SELECT EXISTS (
             SELECT 1 FROM "TrackStage"
              WHERE stage = 'embedding' AND status = 'working'
-               -- A live claim. One whose lease ran out is an attempt that died; it holds nothing, and the
-               -- embedding stage re-offers it once analysis is done.
                AND "nextRetryAt" > ${new Date()}
         ) AS busy
     `;
@@ -294,6 +305,8 @@ export async function getNextWork(
                            AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= $3)))
                 -- A missing file is skipped, not failed: the scan clears the flag when it returns.
                 AND t."missingSince" IS NULL
+                -- A Discover song is never enriched; a like moves its album to the library, and it is due from then.
+                AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
                 -- The prerequisite's record, as its edge declares (StageWaitKind).
                   AND ($5::text IS NULL
                      OR EXISTS (SELECT 1 FROM "TrackStage" prev
@@ -2339,7 +2352,8 @@ export async function executeArtistsPhase(): Promise<number> {
                 { enrichmentStatus: "failed" },
                 { enrichmentStatus: "unresolvable", lastEnriched: { lt: sevenDaysAgo } },
             ],
-            albums: { some: {} },
+            // An artist known only from Discover is not enriched: Discover shows its name, nothing more.
+            albums: { some: { location: "LIBRARY" } },
         },
         select: { id: true, name: true },
         take: ARTIST_BATCH_SIZE,
@@ -2850,8 +2864,10 @@ export function invalidateEnrichmentProgress(): void {
 /** Enrichment progress per stage, read from the records and the analysis queue. */
 async function computeEnrichmentProgress() {
     // Artist progress
+    // The artists enrichment works on: those with a library album (executeArtistsPhase).
     const artistCounts = await prisma.artist.groupBy({
         by: ["enrichmentStatus"],
+        where: { albums: { some: { location: "LIBRARY" } } },
         _count: true,
     });
 
@@ -2863,7 +2879,7 @@ async function computeEnrichmentProgress() {
         artistCounts.find((s) => s.enrichmentStatus === "pending")?._count || 0;
     // Still to answer: waiting, in flight, or failed and due a retry; only artists with albums are enriched.
     const artistsOwed = await prisma.artist.count({
-        where: { enrichmentStatus: { in: ["pending", "enriching", "failed"] }, albums: { some: {} } },
+        where: { enrichmentStatus: { in: ["pending", "enriching", "failed"] }, albums: { some: { location: "LIBRARY" } } },
     });
 
     // Per-stage counts come from TrackStage, one LEFT JOIN from Track per stage, so
@@ -2899,6 +2915,8 @@ async function computeEnrichmentProgress() {
                 FROM "Track" t
                 LEFT JOIN "TrackStage" ts
                          ON ts."trackId" = t.id AND ts.stage = ${stage}
+                -- Library songs only: Discover songs are never enriched, so they are never owed.
+                WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
             `;
             return {
                 total: Number(row?.total ?? 0),
@@ -2924,6 +2942,7 @@ async function computeEnrichmentProgress() {
           FROM "TrackStage" ts
           JOIN "Track" t ON t.id = ts."trackId"
          WHERE t."missingSince" IS NULL
+           AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
            AND ts.stage = 'recording'
            AND (ts.status = 'pending'
                 OR (ts.status = 'failed' AND ts.retryable

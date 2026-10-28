@@ -23,7 +23,6 @@ jest.mock('../../utils/redis', () => ({
     redisClient: { get: jest.fn(), setex: jest.fn(), del: jest.fn() },
 }));
 
-jest.mock('../../services/enrichment', () => ({ enrichmentService: {} }));
 jest.mock('../../workers/unifiedEnrichment', () => ({
     getEnrichmentProgress: jest.fn(),
     runFullEnrichment: jest.fn(),

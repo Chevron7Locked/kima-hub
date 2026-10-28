@@ -7,7 +7,7 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { LIBRARY_LOCATION } from "../services/libraryFilters";
+import { relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
     expiredExclusions: number;
@@ -122,122 +122,9 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         }
     }
 
-    // 4. Move LIBRARY albums that belong to a discovery download to DISCOVER:
-    // featured-artist or album mismatches with the job, or a scan that ran before
-    // the DiscoveryAlbum row existed.
-    
-    const discoveryJobs = await prisma.downloadJob.findMany({
-        where: {
-            discoveryBatchId: { not: null },
-            status: { in: ["pending", "processing", "completed"] },
-        },
-    });
-    
-    // Build sets of discovery album titles AND artist names (normalized)
-    const discoveryAlbumTitles = new Set<string>();
-    const discoveryArtistNames = new Set<string>();
-    const discoveryArtistMbids = new Set<string>();
-    
-    for (const job of discoveryJobs) {
-        const metadata = job.metadata as any;
-        const albumTitle = (metadata?.albumTitle || "").toLowerCase().trim();
-        const artistName = (metadata?.artistName || "").toLowerCase().trim();
-        const artistMbid = metadata?.artistMbid;
-        if (albumTitle) discoveryAlbumTitles.add(albumTitle);
-        if (artistName) discoveryArtistNames.add(artistName);
-        if (artistMbid) discoveryArtistMbids.add(artistMbid);
-    }
-    
-    // Also check DiscoveryAlbum table for ALL discoveries (not just active)
-    // This catches albums where Lidarr downloaded a different album than requested
-    const allDiscoveryAlbums = await prisma.discoveryAlbum.findMany();
-    for (const da of allDiscoveryAlbums) {
-        discoveryAlbumTitles.add(da.albumTitle.toLowerCase().trim());
-        discoveryArtistNames.add(da.artistName.toLowerCase().trim());
-        if (da.artistMbid) discoveryArtistMbids.add(da.artistMbid);
-    }
-    
-    // Find LIBRARY albums that might be discovery
-    const libraryAlbums = await prisma.album.findMany({
-        where: { location: LIBRARY_LOCATION },
-        include: { artist: true },
-    });
-    
-    let mislocatedAlbumsFixed = 0;
-    for (const album of libraryAlbums) {
-        const normalizedTitle = album.title.toLowerCase().trim();
-        const normalizedArtist = album.artist.name.toLowerCase().trim();
-        
-        // Match criteria:
-        // 1. Album title matches a discovery download, OR
-        // 2. Artist name matches a discovery download (catches Lidarr downloading wrong album), OR
-        // 3. Artist MBID matches a discovery download
-        const albumMatches = discoveryAlbumTitles.has(normalizedTitle);
-        const artistNameMatches = discoveryArtistNames.has(normalizedArtist);
-        const artistMbidMatches = album.artist.mbid ? discoveryArtistMbids.has(album.artist.mbid) : false;
-        
-        if (!albumMatches && !artistNameMatches && !artistMbidMatches) continue;
-        
-        // An artist with any protected OwnedAlbum record is kept:
-        // - native_scan = real user library from before discovery
-        // - discovery_liked = user liked a discovery album (should be kept!)
-        const hasProtectedOwnedAlbum = await prisma.ownedAlbum.findFirst({
-            where: {
-                artistId: album.artistId,
-                source: { in: ["native_scan", "discovery_liked"] },
-            },
-        });
-        
-        if (hasProtectedOwnedAlbum) {
-            // Artist has protected content - this album should stay as LIBRARY
-            continue;
-        }
-        
-        // Also check if artist has any LIKED discovery albums (double-check)
-        const hasLikedDiscovery = await prisma.discoveryAlbum.findFirst({
-            where: {
-                artistMbid: album.artist.mbid || undefined,
-                status: { in: ["LIKED", "MOVED"] },
-            },
-        });
-        
-        if (hasLikedDiscovery) {
-            // User liked albums from this artist - don't touch
-            continue;
-        }
+    // 4. Move LIBRARY albums that Discover's records say came from Discover to DISCOVER (relocateDiscoverAlbums).
+    const mislocatedAlbumsFixed = (await relocateDiscoverAlbums({ dryRun: false })).length;
 
-        // Safety: don't relocate albums whose tracks are referenced by playlists
-        const hasPlaylistReference = await prisma.playlistItem.findFirst({
-            where: { track: { albumId: album.id } },
-            select: { id: true },
-        });
-
-        if (hasPlaylistReference) {
-            logger.debug(
-                `     Skipping mislocated album (referenced by playlist): ${album.artist.name} - ${album.title}`
-            );
-            continue;
-        }
-
-        const reason = albumMatches
-            ? `album title "${album.title}" matches discovery` 
-            : artistNameMatches
-                ? `artist "${album.artist.name}" matches discovery`
-                : `artist MBID matches discovery`;
-        logger.debug(
-            `     Fixing mislocated album: ${album.artist.name} - ${album.title} (LIBRARY -> DISCOVER, ${reason})`
-        );
-        
-        // Update album location
-        await prisma.album.update({
-            where: { id: album.id },
-            data: { location: "DISCOVER" },
-        });
-
-        // The OwnedAlbum record stays: a user's keep is never undone here.
-        mislocatedAlbumsFixed++;
-    }
-    
     report.mislocatedAlbums = mislocatedAlbumsFixed;
     if (mislocatedAlbumsFixed > 0) {
         logger.debug(`     Fixed ${mislocatedAlbumsFixed} mislocated albums`);

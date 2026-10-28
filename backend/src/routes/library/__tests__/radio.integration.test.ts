@@ -102,11 +102,22 @@ afterAll(async () => {
 
 // ---- clause vocabulary -----------------------------------------------------
 
-const playable = (r: Row) => r.missingSince === null && !r.corrupt;
+// A library song whose file can play: Discover songs live only in Discover.
+const playable = (r: Row) => r.missingSince === null && !r.corrupt && r.album.location === "LIBRARY";
 const inRecipe = (recipe: string) => (r: Row) => members.get(recipe)!.has(r.id);
 const year = (r: Row) => r.album.originalYear ?? r.album.year;
-const artistGenres = (r: Row) =>
-    [...((r.album.artist.genres as string[] | null) ?? []), ...((r.album.artist.userGenres as string[] | null) ?? [])];
+// Only a JSON array of strings counts as a list of genres (utils/genreSql.ts): a bare string, an
+// object, JSON null read as an empty list.
+const asGenreList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : [];
+
+// The genres the server reads for an artist's row: getMergedGenres (utils/metadataOverrides.ts) —
+// the artist's person-set genres when they are a non-empty list, else the enriched ones. A person's
+// list REPLACES the enriched one, so a genre the person removed no longer selects the artist.
+const artistGenres = (r: Row) => {
+    const personSet = asGenreList(r.album.artist.userGenres);
+    return personSet.length > 0 ? personSet : asGenreList(r.album.artist.genres);
+};
 
 interface RadioTrack {
     id: string;
@@ -413,8 +424,10 @@ async function untaggedSongs(): Promise<Set<string>> {
         FROM track_moods m
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
+        JOIN "Album" a ON a.id = t."albumId"
         WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model} AND t.id LIKE ${`${PREFIX}%`}
           AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+          AND a.location = 'LIBRARY'
           AND cardinality(t."moodTags") = 0
     `;
     return new Set(scored.map((row) => row.id));
@@ -587,7 +600,10 @@ describe("radio: favorites with no plays at all returns random tracks", () => {
 describe("radio: genre with an artist whose genres are not a JSON array", () => {
     let odd: string;
     beforeAll(async () => {
-        odd = rows.find((r) => artistGenres(r).some((g) => g.toLowerCase().includes("rock")))!.album.artist.id;
+        // An artist whose ENRICHED genres hold "rock" (no person-set list, so the enriched ones are
+        // what selects it). Non-array columns on it must read as no genres, not fail the request.
+        odd = rows.find((r) => asGenreList(r.album.artist.genres).some((g) => g.toLowerCase().includes("rock"))
+            && asGenreList(r.album.artist.userGenres).length === 0)!.album.artist.id;
         await prisma.artist.update({ where: { id: odd }, data: { genres: "rock", userGenres: { rock: true } } });
     });
 

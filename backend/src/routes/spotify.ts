@@ -11,7 +11,6 @@ import { z } from "zod";
 import { spotifyService } from "../services/spotify";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
 import { deezerService } from "../services/deezer";
-import { readSessionLog, getSessionLogPath } from "../utils/playlistLogger";
 import { parseM3U } from "../services/m3uParser";
 
 const router = Router();
@@ -408,24 +407,6 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
             return res.status(400).json({ error: error.message });
         }
         safeError(res, "M3U import", error);
-    }
-});
-
-/**
- * GET /api/spotify/import/session-log
- * Get the current session log for debugging import issues
- */
-router.get("/import/session-log", async (_req, res) => {
-    try {
-        const log = readSessionLog();
-        const logPath = getSessionLogPath();
-
-        res.json({
-            path: logPath,
-            content: log,
-        });
-    } catch (error) {
-        safeError(res, "Session log", error);
     }
 });
 

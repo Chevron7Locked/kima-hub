@@ -2,7 +2,6 @@ import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { safeError } from "../utils/errors";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { enrichmentService } from "../services/enrichment";
 import { prisma } from "../utils/db";
 import {
   getEnrichmentProgress,
@@ -241,84 +240,6 @@ router.post("/sync", requireAuth, requireAdmin, async (_req, res) => {
     });
   } catch (error) {
     safeError(res, "Trigger incremental sync", error);
-  }
-});
-
-/**
- * POST /enrichment/artist/:id
- * Enrich a single artist
- */
-router.post("/artist/:id", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user!.id;
-    const settings = await enrichmentService.getSettings(userId);
-
-    if (!settings.enabled) {
-      return res.status(400).json({ error: "Enrichment is not enabled" });
-    }
-
-    const enrichmentData = await enrichmentService.enrichArtist(
-      req.params.id,
-      settings,
-    );
-
-    if (!enrichmentData) {
-      return res.status(404).json({ error: "No enrichment data found" });
-    }
-
-    if (enrichmentData.confidence > 0.3) {
-      await enrichmentService.applyArtistEnrichment(
-        req.params.id,
-        enrichmentData,
-      );
-    }
-
-    res.json({
-      success: true,
-      confidence: enrichmentData.confidence,
-      data: enrichmentData,
-    });
-  } catch (error) {
-    safeError(res, "Enrich artist", error);
-  }
-});
-
-/**
- * POST /enrichment/album/:id
- * Enrich a single album
- */
-router.post("/album/:id", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user!.id;
-    const settings = await enrichmentService.getSettings(userId);
-
-    if (!settings.enabled) {
-      return res.status(400).json({ error: "Enrichment is not enabled" });
-    }
-
-    const enrichmentData = await enrichmentService.enrichAlbum(
-      req.params.id,
-      settings,
-    );
-
-    if (!enrichmentData) {
-      return res.status(404).json({ error: "No enrichment data found" });
-    }
-
-    if (enrichmentData.confidence > 0.3) {
-      await enrichmentService.applyAlbumEnrichment(
-        req.params.id,
-        enrichmentData,
-      );
-    }
-
-    res.json({
-      success: true,
-      confidence: enrichmentData.confidence,
-      data: enrichmentData,
-    });
-  } catch (error) {
-    safeError(res, "Enrich album", error);
   }
 });
 

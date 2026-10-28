@@ -593,15 +593,6 @@ class DeezerService {
         return (body?.data || []).map((playlist: any) => mapPlaylistPreview(playlist, "Unknown", 0));
     }
 
-    async getChartPlaylists(limit: number = 20): Promise<DeezerPlaylistPreview[]> {
-        try {
-            return await this.fetchChartPlaylists(limit);
-        } catch (error: any) {
-            logger.error("Deezer chart playlists error:", error.message);
-            return [];
-        }
-    }
-
     async searchPlaylists(query: string, limit: number = 20): Promise<DeezerPlaylistPreview[]> {
         try {
             return await this.fetchPlaylistSearch(query, limit);

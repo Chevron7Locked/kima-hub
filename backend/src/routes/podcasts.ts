@@ -246,7 +246,6 @@ async function namedCategories(ids: number[]): Promise<Array<{ id: number; name:
     }
 }
 
-
 /**
  * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and,
  * like a podcast app's "up next", each show's newest episode while it is still unplayed, newest first.
@@ -978,36 +977,6 @@ router.get("/:id/refresh", requireAuth, async (req, res) => {
         });
     } catch (error) {
         answerUpstreamFailure(res, "Error refreshing podcast", error, "The show's feed is gone", "The show's feed did not answer; try again shortly");
-    }
-});
-
-/**
- * GET /podcasts/:podcastId/episodes/:episodeId/cache-status
- * Check if a podcast episode is cached locally
- * Used by frontend to know when it's safe to reload for seeking
- * Also returns download progress if downloading
- */
-router.get("/:podcastId/episodes/:episodeId/cache-status", async (req, res) => {
-    try {
-        const { episodeId } = req.params;
-
-        const { getCachedFilePath, isDownloading, getDownloadProgress } =
-            await import("../services/podcastDownload");
-
-        const cachedPath = await getCachedFilePath(episodeId);
-        const downloading = isDownloading(episodeId);
-        const progress = getDownloadProgress(episodeId);
-
-        res.json({
-            episodeId,
-            cached: !!cachedPath,
-            downloading,
-            downloadProgress: progress?.progress ?? null, // 0-100 or null
-            path: cachedPath ? true : false, // Don't expose actual path
-        });
-    } catch (error: any) {
-        logger.error("[PODCAST] Cache status check failed:", error);
-        res.status(500).json({ error: "Failed to check cache status" });
     }
 });
 

@@ -357,6 +357,15 @@ async function runStartupTasks() {
         logger.error("[STARTUP] Audiobook auto-sync failed:", err);
     }
 
+    // Once: albums the old scanner filed as Discover by guesswork go to the library unless Discover's records or its
+    // Lidarr tag say otherwise. Before the artist counts, which then count the albums where they now are.
+    try {
+        const { sortDiscoverAlbums } = await import("./services/discovery/sortDiscoverAlbums");
+        await sortDiscoverAlbums();
+    } catch (err) {
+        logger.error("[STARTUP] Sorting the albums filed as Discover failed:", err);
+    }
+
     // Auto-backfill artist counts if needed
     try {
         const { isBackfillNeeded, backfillAllArtistCounts } = await import("./services/artistCountsService");

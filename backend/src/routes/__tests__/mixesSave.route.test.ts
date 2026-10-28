@@ -105,6 +105,23 @@ describe("saving a mix as a playlist", () => {
         expect(announced()).toEqual([{ playlistId: res.body.id, deleted: false }]);
     });
 
+    it("leaves out a song whose album has moved to Discover since the mix was made", async () => {
+        const artist = await prisma.artist.findFirstOrThrow({ where: { name: `${MARK} Artist` } });
+        const discover = await prisma.album.create({
+            data: { rgMbid: `${MARK}-rg-disc`, identityKey: `${MARK}-album-disc`, primaryType: "Album", title: `${MARK} Discover Album`, artistId: artist.id, location: "DISCOVER" },
+        });
+        const discoverSong = await prisma.track.create({
+            data: { title: `${MARK} Discover Song`, albumId: discover.id, trackNo: 1, duration: 100, filePath: `/${MARK}/disc.flac`, fileModified: new Date(), fileSize: 1000 },
+        });
+        await cacheMixes([{ id: "mix-5", name: `${MARK} Moved`, trackIds: [songs[0], discoverSong.id, songs[1]] }]);
+
+        const res = await request(app).post("/mixes/mix-5/save").send({});
+
+        expect(res.status).toBe(200);
+        const items = await prisma.playlistItem.findMany({ where: { playlistId: res.body.id }, orderBy: { rank: "asc" } });
+        expect(items.map((i) => i.trackId)).toEqual([songs[0], songs[1]]);
+    });
+
     it("refuses a mix none of whose songs the library still has: no empty playlist, nobody told", async () => {
         await cacheMixes([{ id: "mix-4", name: `${MARK} Gone`, trackIds: ["deleted-one", "deleted-two"] }]);
 

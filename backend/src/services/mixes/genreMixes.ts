@@ -2,32 +2,35 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
-import { NOT_MISSING } from "../../utils/libraryEligibility";
+import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
 import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
+
+const ERA_MIN_TRACKS = 15;
 
 export async function generateEraMix(
     _userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    const albumYears = await prisma.album.groupBy({
-        by: ["year", "originalYear", "displayYear"],
-        where: { tracks: { some: NOT_MISSING } },
+    // The decades with enough library songs for a mix (ERA_MIN_TRACKS): picking one with too few gave no mix that day.
+    const albums = await prisma.album.findMany({
+        where: { location: "LIBRARY", tracks: { some: NOT_MISSING } },
+        select: { year: true, originalYear: true, displayYear: true, _count: { select: { tracks: { where: NOT_MISSING } } } },
     });
-
-    const decades = new Set<number>();
-    albumYears.forEach((album) => {
+    const songsIn = new Map<number, number>();
+    for (const album of albums) {
         const effectiveYear = getEffectiveYear(album);
         if (effectiveYear) {
             const decade = getDecadeFromYear(effectiveYear);
-            decades.add(decade);
+            songsIn.set(decade, (songsIn.get(decade) ?? 0) + album._count.tracks);
         }
-    });
+    }
+    const decades = [...songsIn].filter(([, songs]) => songs >= ERA_MIN_TRACKS).map(([decade]) => decade);
 
-    if (decades.size === 0) return null;
+    if (decades.length === 0) return null;
 
     // Ranked by the day's seed, so a decade appearing or leaving changes the pick only if it is the one picked.
-    const selectedDecade = seededOrder([...decades], getSeededRandom(`era-${today}`), String)[0];
+    const selectedDecade = seededOrder(decades, getSeededRandom(`era-${today}`), String)[0];
 
     return sampledMix({
         id: `era-${selectedDecade}-${today}`,
@@ -36,7 +39,7 @@ export async function generateEraMix(
         description: `Random picks from the ${selectedDecade}s`,
         colorType: "era",
         take: 100,
-        minTracks: 15,
+        minTracks: ERA_MIN_TRACKS,
         limit: TRACK_LIMIT,
         seed: getSeededRandom(`era-${selectedDecade}-${today}`),
         // The album's year as getEffectiveYear reads it: the display year, then the original year, then the year.
@@ -51,7 +54,7 @@ export async function generateGenreMix(
 ): Promise<ProgrammaticMix | null> {
     const genres = await prisma.genre.findMany({
         include: {
-            _count: { select: { trackGenres: true } },
+            _count: { select: { trackGenres: { where: { track: { ...NOT_MISSING, ...IN_LIBRARY } } } } },
         },
         orderBy: {
             trackGenres: { _count: "desc" },

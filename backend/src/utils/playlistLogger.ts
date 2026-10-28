@@ -58,28 +58,6 @@ function writeToSessionLog(component: string, level: string, message: string): v
 }
 
 /**
- * Get the path to the current session log
- */
-export function getSessionLogPath(): string {
-    ensureLogsDir();
-    return SESSION_LOG;
-}
-
-/**
- * Read the current session log contents
- */
-export function readSessionLog(): string {
-    try {
-        if (fs.existsSync(SESSION_LOG)) {
-            return fs.readFileSync(SESSION_LOG, 'utf-8');
-        }
-        return 'No session log found';
-    } catch (error) {
-        return `Error reading session log: ${error}`;
-    }
-}
-
-/**
  * Log a message from any component to the unified session log
  * Use this for Soulseek, organize, etc.
  */

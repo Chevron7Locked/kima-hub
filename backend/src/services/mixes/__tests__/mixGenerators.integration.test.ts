@@ -82,16 +82,14 @@ afterAll(async () => {
 // ---- clause vocabulary -----------------------------------------------------
 
 const ge = (x: number | null, v: number) => x !== null && x >= v;
-const le = (x: number | null, v: number) => x !== null && x <= v;
-const within = (x: number | null, lo: number, hi: number) => x !== null && x >= lo && x <= hi;
 const done = (r: Row) => r.analysisStatus === "completed";
-const inBucket = (m: string) => (r: Row) => r.buckets.includes(m);
-const playable = (r: Row) => r.missingSince === null && !r.corrupt;
+// A library song whose file can play: Discover songs live only in Discover.
+const playable = (r: Row) => r.missingSince === null && !r.corrupt && r.album.location === "LIBRARY";
 
 /** The library's median arousal over finished, present tracks, interpolated as Postgres's percentile_cont. */
 function medianArousal(): number {
     const xs = rows
-        .filter((r) => done(r) && r.missingSince === null && r.arousal !== null)
+        .filter((r) => done(r) && r.missingSince === null && r.arousal !== null && r.album.location === "LIBRARY")
         .map((r) => r.arousal!)
         .sort((a, b) => a - b);
     const at = (xs.length - 1) / 2;
@@ -133,8 +131,6 @@ interface Case {
      * and judge the spread over the mixes that picked what the first one did.
      */
     spread?: "dates" | "repeat" | "grouped";
-    /** The id is a timestamp, not a date, so it is not stable for a date. */
-    idIsTimestamp?: boolean;
 }
 
 const year = (r: Row) => r.album.originalYear ?? r.album.year;
@@ -167,23 +163,6 @@ const cases: Case[] = [
       clause: (r) => r.album.location === "LIBRARY" && r.playsUser1 <= 2 },
     { name: "Artist Similar", size: 20, seeded: false, spread: "repeat", run: () => discovery.generateArtistSimilarMix(lib.user1),
       clause: (r) => SIMILAR.includes(r.album.artist.normalizedName) },
-    { name: "Mood on demand, happy bucket", size: 15, seeded: false, spread: "repeat", idIsTimestamp: true,
-      run: () => mood.generateMoodOnDemand(lib.user1, { mood: "happy" }),
-      clause: (r) => done(r) && inBucket("happy")(r) },
-    { name: "Mood on demand, legacy moodSad param", size: 15, seeded: false, spread: "repeat", idIsTimestamp: true,
-      run: () => mood.generateMoodOnDemand(lib.user1, { moodSad: { min: 0.5 } } as any),
-      clause: (r) => done(r) && inBucket("sad")(r) },
-    { name: "Mood on demand, ranges", size: 20, seeded: false, spread: "repeat", idIsTimestamp: true,
-      run: () => mood.generateMoodOnDemand(lib.user1, { valence: { min: 0.6 }, energy: { min: 0.3, max: 0.5 }, limit: 20 }),
-      clause: (r) => done(r) && ge(r.valence, 0.6) && within(r.energy, 0.3, 0.5) },
-    { name: "Mood on demand, party bucket + ranges + key", size: 15, seeded: false, spread: "repeat", idIsTimestamp: true,
-      run: () => mood.generateMoodOnDemand(lib.user1, {
-          mood: "party", danceability: { min: 0.5 }, keyScale: "minor", bpm: { min: 80, max: 170 }, arousal: { max: 0.8 },
-      }),
-      clause: (r) => done(r) && inBucket("party")(r) && ge(r.danceability, 0.5) && r.keyScale === "minor" && within(r.bpm, 80, 170) && le(r.arousal, 0.8) },
-    { name: "Mood on demand, acousticness and instrumentalness", size: 15, seeded: false, spread: "repeat", idIsTimestamp: true,
-      run: () => mood.generateMoodOnDemand(lib.user1, { acousticness: { min: 0.7 }, instrumentalness: { max: 0.3 } }),
-      clause: (r) => done(r) && ge(r.acousticness, 0.7) && le(r.instrumentalness, 0.3) },
 ];
 
 /** Names of the artists the faked similarity lookup returns: artists 10 to 17. */
@@ -278,16 +257,10 @@ describe.each(cases)("$name", (c) => {
         });
     }
 
-    if (c.idIsTimestamp) {
-        it("names each mix by the moment it was made, not by a date", () => {
-            for (const mix of mixes) expect(mix.id).toMatch(/^mood-on-demand-\d{13}$/);
-        });
-    } else {
-        it("keeps the mix id for a date", async () => {
-            const again = await c.run(callDates[0]);
-            expect(again!.id).toBe(mixes[0].id);
-        });
-    }
+    it("keeps the mix id for a date", async () => {
+        const again = await c.run(callDates[0]);
+        expect(again!.id).toBe(mixes[0].id);
+    });
 });
 
 // ---- mixes drawn from a recipe ---------------------------------------------
@@ -461,7 +434,8 @@ describe("Top Tracks", () => {
     it("is the user's 20 most played tracks, most played first", async () => {
         const mix = await discovery.generateTopTracksMix(lib.user1);
         // user1 plays 25 tracks 40..16 times (none of them with a missing file), so the order is unambiguous.
-        const expected = [...rows].sort((a, b) => b.playsUser1 - a.playsUser1).slice(0, 20);
+        // Library songs only: a Discover song is never in a mix.
+        const expected = rows.filter((r) => r.album.location === "LIBRARY").sort((a, b) => b.playsUser1 - a.playsUser1).slice(0, 20);
         expect(mix!.trackIds).toHaveLength(20);
         expect(mix!.trackIds).toEqual(expected.map((r) => r.id));
         expect(mix!.trackCount).toBe(20);

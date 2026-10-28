@@ -753,13 +753,6 @@ model Track {
   instrumentalness            Float?
   acousticness                Float?
   speechiness                 Float?
-  moodHappy                   Float?
-  moodSad                     Float?
-  moodRelaxed                 Float?
-  moodAggressive              Float?
-  moodParty                   Float?
-  moodAcoustic                Float?
-  moodElectronic              Float?
   danceabilityMl              Float?
   moodTags                    String[]
   essentiaGenres              String[]
@@ -831,13 +824,6 @@ model Track {
   @@index([fileModified])
   @@index([hasUserOverrides])
   @@index([instrumentalness])
-  @@index([moodAcoustic])
-  @@index([moodAggressive])
-  @@index([moodElectronic])
-  @@index([moodHappy])
-  @@index([moodParty])
-  @@index([moodRelaxed])
-  @@index([moodSad])
   @@index([searchVector], type: Gin)
   @@index([title])
   @@index([valence])

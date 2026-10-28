@@ -24,8 +24,6 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
-import fs from "fs";
-import path from "path";
 import { prisma } from "../../utils/db";
 import {
     MOODS,
@@ -140,8 +138,6 @@ async function seed() {
                 analysisStatus: "completed", analysisMode: "enhanced", analysisVersion: "2.1b6-enhanced-v3",
                 analyzedAt: new Date(Date.UTC(2026, 8, 24, 0, n)),
                 arousal: 0.3 + (n % 5) * 0.1, instrumentalness: 0.2 + (n % 3) * 0.3, acousticness: 0.1 + (n % 4) * 0.2,
-                // The old heads say the opposite of the learned moods: they must not decide anything.
-                moodHappy: 0.99, moodSad: 0.99, moodRelaxed: 0.01, moodAggressive: 0.99, moodParty: 0.01,
             },
         });
         await prisma.$executeRawUnsafe(
@@ -332,8 +328,6 @@ describe("mood buckets and the mood snapshot (database)", () => {
         expect(await bucketsNow()).toEqual(before);
         expect(moodOutput((await currentMoodSnapshot()).views.get(idOf(4))).dominantMood).toBe(dominant);
         expect((await mapTracks()).find((t) => t.id === idOf(4))!.dominantMood).toBe(dominant);
-        await moodBucketService.backfillAllTracks();
-        expect(await bucketsNow()).toEqual(before);
 
         // The same statistics back: nothing to rebuild.
         await prisma.$transaction((tx) => buildMoodState(tx));
@@ -379,36 +373,5 @@ describe("mood buckets and the mood snapshot (database)", () => {
         expect((await mapTracks()).find((t) => t.id === idOf(0))!.dominantMood).toBe(UNANALYZED);
         expect(await prisma.moodBucket.count({ where: { trackId: idOf(0) } })).toBe(0);
         await expectBucketsToFollowTheRule();
-    });
-
-    it("the inverted-heads migration re-queues exactly the rows the broken analyzer wrote", async () => {
-        await prisma.track.update({
-            where: { id: idOf(5) },
-            data: { analysisVersion: "2.1b6-enhanced-v2", danceabilityMl: 0.3, moodAcoustic: 0.4, moodTags: ["happy"], analysisRetryCount: 2 },
-        });
-        await prisma.track.update({
-            where: { id: idOf(6) },
-            data: { analysisMode: "standard", analysisVersion: "2.1b6-enhanced-v2", moodTags: ["chill"] },
-        });
-        const sql = fs.readFileSync(
-            path.join(__dirname, "../../../prisma/migrations/20260924120000_reset_inverted_mood_heads/migration.sql"),
-            "utf8",
-        );
-        await prisma.$executeRawUnsafe(sql);
-
-        const reset = await prisma.track.findUniqueOrThrow({ where: { id: idOf(5) } });
-        expect(reset.analysisStatus).toBe("pending");
-        expect(reset.analysisRetryCount).toBe(0);
-        expect([reset.moodHappy, reset.moodSad, reset.moodRelaxed, reset.moodAggressive, reset.moodParty,
-            reset.moodAcoustic, reset.moodElectronic, reset.danceabilityMl]).toEqual(Array(8).fill(null));
-        expect(reset.moodTags).toEqual([]);
-
-        // Fixed-analyzer rows and standard-mode rows are left alone.
-        const fixed = await prisma.track.findUniqueOrThrow({ where: { id: idOf(7) } });
-        expect(fixed.analysisStatus).toBe("completed");
-        expect(fixed.moodParty).not.toBeNull();
-        const standard = await prisma.track.findUniqueOrThrow({ where: { id: idOf(6) } });
-        expect(standard.analysisStatus).toBe("completed");
-        expect(standard.moodTags).toEqual(["chill"]);
     });
 });

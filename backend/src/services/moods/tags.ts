@@ -104,7 +104,7 @@ export async function writeMoodTags(): Promise<number> {
                     FROM (
                         SELECT tr.id,
                                CASE WHEN te.track_id IS NOT NULL
-                                         AND tr."missingSince" IS NULL AND tr.corrupt = false
+                                         AND tr."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = tr."albumId" AND la.location = 'LIBRARY') AND tr.corrupt = false
                                          AND tr."analysisStatus" = 'completed'
                                     THEN ${tags} ELSE '{}'::text[] END AS tags
                         FROM "Track" tr

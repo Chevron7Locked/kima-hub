@@ -218,12 +218,6 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
             analysisStatus: r.analysisStatus,
             missingSince: r.missing ? new Date() : null,
             corrupt: r.corrupt,
-            // The five mood-head readings, spread like the rest.
-            moodHappy: r4(rng()),
-            moodSad: r4(rng()),
-            moodRelaxed: r4(rng()),
-            moodAggressive: r4(rng()),
-            moodParty: r4(rng()),
         };
     });
     await inChunks(trackRows, (data) => prisma.track.createMany({ data }));

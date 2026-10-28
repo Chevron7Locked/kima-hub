@@ -213,44 +213,6 @@ router.get("/upcoming", async (req, res) => {
 });
 
 /**
- * GET /releases/recent
- * 
- * Get recently released albums (last X days) that user might want to download
- */
-router.get("/recent", async (req, res) => {
-    try {
-        const daysBack = parseInt(req.query.days as string) || 30;
-        
-        const now = new Date();
-        const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() - daysBack);
-
-        const releases = await lidarrService.getCalendar(startDate, now);
-        
-        const libraryMbids = await ownedRgMbids(releases);
-
-        // Filter to releases not in library and sort (newest first)
-        const notInLibrary = releases
-            .filter(r => !r.hasFile && !libraryMbids.has(r.albumMbid))
-            .sort((a, b) => 
-                new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime()
-            );
-
-        const checked = await withReleaseArtwork(notInLibrary);
-
-        res.json({
-            releases: checked,
-            count: notInLibrary.length,
-            daysBack,
-            inLibraryCount: releases.length - notInLibrary.length,
-        });
-    } catch (error: any) {
-        logger.error("[Releases] Recent error:", error.message);
-        res.status(500).json({ error: "Failed to fetch recent releases" });
-    }
-});
-
-/**
  * POST /releases/download/:albumMbid
  * 
  * Download a release from the radar

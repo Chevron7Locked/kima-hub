@@ -334,42 +334,4 @@ describe("hybridSimilarity diversification (DB, shipped functions)", () => {
         expect(maxCount(countsBy(rows, (r) => r.artistId))).toBeLessThanOrEqual(4);
     }, 60_000);
 
-    // ------------------------------------------------------------------
-    // The features-only fallback (no CLAP) must obey the same caps.
-    // ------------------------------------------------------------------
-    it("features-only fallback: same 2-per-album / 4-per-artist caps and full length", async () => {
-        setMode("featuresOnly");
-        const loud = {
-            energy: 0.9, valence: 0.9, arousal: 0.9, bpm: 128,
-            danceabilityMl: 0.9, acousticness: 0.9, instrumentalness: 0.9,
-            key: "C", keyScale: "major",
-        };
-        const quiet = {
-            energy: 0.1, valence: 0.1, arousal: 0.1, bpm: 70,
-            danceabilityMl: 0.1, acousticness: 0.1, instrumentalness: 0.1,
-            key: "F#", keyScale: "minor",
-        };
-        await seedCrowdedLibrary({
-            prefix: "feat",
-            seedArtistId: "featArtist",
-            seedAlbumId: "featBig",
-            seedAlbumTracks: 12,
-            scatteredAlbums: 12,
-            scatteredArtists: 12,
-            seedFeatures: loud,
-            otherFeatures: quiet,
-        });
-
-        const rows = await findSimilarTracks("trk_cap_feat_sa0", 20);
-
-        expect(rows).toHaveLength(20);
-        // Every seed-album track matches the seed on all eight features
-        // (similarity 1.0) and every scattered track is maximally far
-        // (similarity ~0.17), so the uncapped list is 20 from the seed's
-        // album; the capped one takes 1 and fills from the scattered albums.
-        expect(rows.filter((r) => r.albumId === "alb_cap_featBig")).toHaveLength(1);
-        expect(rows.filter((r) => r.artistId === "art_cap_featArtist")).toHaveLength(1);
-        expect(maxCount(countsBy(rows, (r) => r.albumId))).toBeLessThanOrEqual(2);
-        expect(maxCount(countsBy(rows, (r) => r.artistId))).toBeLessThanOrEqual(4);
-    });
 });

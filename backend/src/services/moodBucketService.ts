@@ -180,7 +180,7 @@ async function librarySignature(): Promise<{ signature: string; pending: number 
         LEFT JOIN track_embeddings te ON te.track_id = t.id AND te.model_version = ${MOOD_HEADS.model}
                                      AND vector_dims(te.embedding) = ${MOOD_HEADS.dims} AND vector_norm(te.embedding) > 0
         LEFT JOIN track_moods m ON m.track_id = t.id
-        WHERE t."missingSince" IS NULL
+        WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
           AND (t."analysisStatus" IN ('pending', 'queued', 'processing')
                OR (te.track_id IS NOT NULL AND (m.embedded_at IS DISTINCT FROM te.analyzed_at
                                                 OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})))
@@ -202,7 +202,7 @@ async function buildSnapshot(signature: string, pending: number): Promise<MoodSn
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
         WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND t.corrupt = false AND t."analysisStatus" = 'completed'
+          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
     `;
     const stats = Object.fromEntries(MOODS.map((m) => [m.field, state.moods[m.learned]])) as Record<MoodField, MoodStats>;
     const dist = new MoodDistribution(rows, stats);
@@ -591,21 +591,6 @@ class MoodBucketService {
             where: { userId, mood },
             data: { servedTrackIds: trackIds },
         });
-    }
-
-    /**
-     * Rebuild all mood buckets from the current snapshot (admin backfill). While the library has no current mood
-     * statistics that is the last snapshot, so the buckets come back as they were; before this process has seen any
-     * statistics there is nothing to judge by, and the buckets are left as they are.
-     */
-    async backfillAllTracks(): Promise<{ processed: number; assigned: number }> {
-        const { snapshot: snap } = await refreshMoodSnapshot();
-        if (snap.signature === NO_STATISTICS) {
-            logger.info("[MoodBucket] No mood statistics yet; the buckets are left as they are");
-            return { processed: 0, assigned: 0 };
-        }
-        const result = await this.rebuildBuckets(snap);
-        return { processed: result.tracks, assigned: result.assignments };
     }
 }
 

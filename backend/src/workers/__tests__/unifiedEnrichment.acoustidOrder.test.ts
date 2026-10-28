@@ -655,8 +655,8 @@ describe("AcoustID paused", () => {
 });
 
 describe("AcoustID first, and the album it names", () => {
-    // Real ids and titles from a recorded AcoustID batch reply and the MusicBrainz release
-    // (services/__tests__/fixtures/acoustid/batch-lookup-3.json, fixtures/mb/release-dangerous-days.json):
+    // Real ids and titles from a recorded AcoustID batch reply
+    // (services/__tests__/fixtures/acoustid/batch-lookup-3.json):
     // AcoustID lists a compilation first and the album the file is on third.
     const FUTURE_CLUB = "ac559309-3f00-4db6-95ce-1c1dca916677";
     const DANGEROUS_DAYS = "f765fa78-96b2-4a72-b8c7-c1d7eecbae92";

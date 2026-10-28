@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken, requireAdmin } from "../middleware/auth";
+import { requireAuthOrToken } from "../middleware/auth";
 import { programmaticPlaylistService } from "../services/mixes";
 import { nightZone } from "../services/mixes/nightPlays";
 import {
@@ -13,6 +13,7 @@ import { redisClient } from "../utils/redis";
 import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 import { rankForPosition } from "../utils/lexoRank";
 import { announcePlaylistChange } from "../services/playlistEvents";
+import { IN_LIBRARY } from "../utils/libraryEligibility";
 
 const router = Router();
 
@@ -99,8 +100,9 @@ async function getMixesForUser(userId: string, requested?: string): Promise<any[
 
 /** Full track rows for the given ids, in the order the ids list them. */
 async function loadTracksInMixOrder(trackIds: string[]): Promise<any[]> {
+    // Library songs only: a mix kept from before a song's album left the library never plays it.
     const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds } },
+        where: { id: { in: trackIds }, ...IN_LIBRARY },
         include: {
             album: {
                 include: {
@@ -246,30 +248,6 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
     }
 });
 
-router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
-    try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
-
-        logger.debug(
-            `[MIXES] Starting mood bucket backfill requested by user ${userId}`
-        );
-
-        const result = await moodBucketService.backfillAllTracks();
-
-        res.json({
-            success: true,
-            processed: result.processed,
-            assigned: result.assigned,
-        });
-    } catch (error) {
-        logger.error("Backfill mood buckets error:", error);
-        res.status(500).json({ error: "Failed to backfill mood buckets" });
-    }
-});
-
 router.post("/refresh", async (req, res) => {
     try {
         const userId = getRequestUserId(req);
@@ -330,10 +308,13 @@ router.post("/:id/save", async (req, res) => {
             });
         }
 
-        // Mixes are cached: a song deleted since the mix was made is left out, in the mix's order otherwise.
+        // Mixes are cached: a song deleted since the mix was made, or whose album has left the library (Discover songs
+        // live only in Discover), is left out, in the mix's order otherwise; the same rule as loadTracksInMixOrder.
         const mixTrackIds: string[] = [...new Set<string>(mix.trackIds)];
         const present = new Set(
-            (await prisma.track.findMany({ where: { id: { in: mixTrackIds } }, select: { id: true } })).map((t) => t.id)
+            (
+                await prisma.track.findMany({ where: { id: { in: mixTrackIds }, ...IN_LIBRARY }, select: { id: true } })
+            ).map((t) => t.id)
         );
         const trackIds = mixTrackIds.filter((id) => present.has(id));
         if (trackIds.length === 0) {

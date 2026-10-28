@@ -51,14 +51,6 @@ jest.mock("../../utils/systemSettings", () => ({
     invalidateSystemSettingsCache: jest.fn(),
 }));
 
-jest.mock("../../services/enrichment", () => ({
-    enrichmentService: {
-        startEnrichment: jest.fn().mockResolvedValue(undefined),
-        stopEnrichment: jest.fn().mockResolvedValue(undefined),
-        pauseEnrichment: jest.fn().mockResolvedValue(undefined),
-        resumeEnrichment: jest.fn().mockResolvedValue(undefined),
-    },
-}));
 
 jest.mock("../../services/rateLimiter", () => ({
     rateLimiter: {

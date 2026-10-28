@@ -17,12 +17,19 @@ jest.mock("../../services/gpuRuntime", () => ({
     embeddingsDeferredForGpu: jest.fn().mockResolvedValue(false),
 }));
 
+import Redis from "ioredis";
 import { prisma } from "../../utils/db";
+import { config } from "../../config";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { featureDetection } from "../../services/featureDetection";
 import { sourcePauseController } from "../../services/sourcePauseController";
-import { getNextWork } from "../unifiedEnrichment";
+import { getNextWork, vectorsInFlight } from "../unifiedEnrichment";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+
+// The key the CLAP worker publishes its running-job count to; written here the
+// same way the analyzer writes it (plain SET on the shared Redis).
+const inflightRedis = new Redis(config.redisUrl);
+const INFLIGHT_KEY = "clap:worker:inflight";
 
 const P = "onehm";
 const A = `${P}_a`;
@@ -53,6 +60,9 @@ beforeEach(async () => {
     (featureDetection.analyzerRunning as jest.Mock).mockResolvedValue(true);
     (featureDetection.clapRunning as jest.Mock).mockResolvedValue(true);
     (sourcePauseController.isPaused as jest.Mock).mockResolvedValue(false);
+    // A worker that published no running jobs starts every test, whatever a
+    // previous one left on the shared key.
+    await inflightRedis.set(INFLIGHT_KEY, "0");
     // Only this file's tracks: every other track in the database counts as analysed.
     await prisma.$executeRawUnsafe(
         `INSERT INTO "TrackStage" (id, "trackId", stage, status) SELECT '${P}_ts_' || id, id, 'analysis', 'done' FROM "Track" t
@@ -72,6 +82,10 @@ const bothAtOnce = async (on: boolean) => {
 };
 
 afterEach(() => bothAtOnce(false));
+
+// Leave the published count at zero when the file's tests are done (an afterEach, not an
+// afterAll: the shared ioredis clients are closed before the file's afterAll hooks run).
+afterEach(() => inflightRedis.set(INFLIGHT_KEY, "0"));
 
 afterAll(async () => {
     await prisma.trackStage.deleteMany({ where: { OR: [{ trackId: { startsWith: P } }, { id: { startsWith: `${P}_ts_` } }] } });
@@ -140,5 +154,29 @@ it("runs both side by side when an admin chose that", async () => {
     await prisma.trackStage.create({
         data: { trackId: A, stage: "embedding", status: "working", startedAt: new Date(), nextRetryAt: new Date(Date.now() + 900_000) },
     });
+    expect(await offered("analysis")).toEqual([B]);
+});
+
+it("holds analysis while CLAP reports running jobs, with no embedding rows left", async () => {
+    // A re-run resets the embedding stage rows to pending, so the claim-row
+    // check sees nothing; the worker's published count is all that is left.
+    await analysis(B, { status: "pending" });
+    await inflightRedis.set(INFLIGHT_KEY, "2");
+    expect(await vectorsInFlight()).toBe(true);
+    expect(await offered("analysis")).toEqual([]);
+
+    // The count falls to zero when the jobs finish: analysis goes first again.
+    await inflightRedis.set(INFLIGHT_KEY, "0");
+    expect(await vectorsInFlight()).toBe(false);
+    expect(await offered("analysis")).toEqual([B]);
+});
+
+it("ignores the running-job count when the CLAP heartbeat is stale", async () => {
+    // A worker that died mid-batch leaves its count published; the stale
+    // heartbeat says no CLAP is running, so analysis must not wait for it.
+    await analysis(B, { status: "pending" });
+    await inflightRedis.set(INFLIGHT_KEY, "3");
+    (featureDetection.clapRunning as jest.Mock).mockResolvedValue(false);
+    expect(await vectorsInFlight()).toBe(false);
     expect(await offered("analysis")).toEqual([B]);
 });

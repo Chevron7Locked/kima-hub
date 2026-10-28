@@ -175,14 +175,6 @@ router.get("/track/:trackId", requireAuth, async (req, res) => {
                 arousal: true,
                 instrumentalness: true,
                 acousticness: true,
-                // MusiCNN mood predictions
-                moodHappy: true,
-                moodSad: true,
-                moodRelaxed: true,
-                moodAggressive: true,
-                moodParty: true,
-                moodAcoustic: true,
-                moodElectronic: true,
                 moodTags: true,
                 essentiaGenres: true,
             },
@@ -435,7 +427,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             );
         }
 
-        // Owed work: analysed tracks whose embedding question is open. After a force,
+        // Owed work: analysed library songs whose embedding question is open (Discover songs are never enriched). After a force,
         // the old rows still exist, so the "row missing" filter does not apply.
         const owedRows = force
             ? await prisma.$queryRaw<Array<{ count: bigint }>>`
@@ -444,6 +436,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                   WHERE ts.stage = 'embedding'
                     AND ts.status IN ('pending', 'failed', 'working')
                     AND ts.retryable = true
+                    AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
                     AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
               `
             : await prisma.$queryRaw<Array<{ count: bigint }>>`
@@ -452,6 +445,7 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                   WHERE ts.stage = 'embedding'
                     AND ts.status IN ('pending', 'failed', 'working')
                     AND ts.retryable = true
+                    AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
                     AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
                     AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")
               `;

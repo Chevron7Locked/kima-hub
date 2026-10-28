@@ -1249,6 +1249,8 @@ describe("every shipped recipe on the synthetic library", () => {
         const tracks = await prisma.track.findMany({
             where: {
                 id: { startsWith: S }, missingSince: null, corrupt: false, analysisStatus: "completed",
+                // Library songs only: Discover songs live only in Discover.
+                album: { location: "LIBRARY" },
                 trackEmbedding: { trackMood: { weights: MOOD_HEADS.version } },
             },
             include: { album: { select: { artistId: true } }, trackEmbedding: { include: { trackMood: true } } },

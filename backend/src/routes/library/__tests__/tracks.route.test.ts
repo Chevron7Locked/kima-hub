@@ -1,5 +1,5 @@
 /**
- * GET /tracks/:id with all 15 audio feature fields, with null features when
+ * GET /tracks/:id with all 8 audio feature fields, with null features when
  * unanalysed, 404 for an unknown id, and the list transform's matching shape.
  */
 
@@ -80,13 +80,6 @@ const ANALYZED_TRACK = {
     keyScale: 'Am',
     instrumentalness: 0.1,
     analysisMode: 'essentia',
-    moodHappy: 0.2,
-    moodSad: 0.6,
-    moodRelaxed: 0.1,
-    moodAggressive: 0.5,
-    moodParty: 0.3,
-    moodAcoustic: 0.2,
-    moodElectronic: 0.7,
     album: BASE_ALBUM,
 };
 
@@ -102,13 +95,6 @@ const UNANALYZED_TRACK = {
     keyScale: null,
     instrumentalness: null,
     analysisMode: null,
-    moodHappy: null,
-    moodSad: null,
-    moodRelaxed: null,
-    moodAggressive: null,
-    moodParty: null,
-    moodAcoustic: null,
-    moodElectronic: null,
     album: BASE_ALBUM,
 };
 
@@ -120,7 +106,7 @@ describe('GET /tracks/:id -- track detail', () => {
     beforeAll(() => { app = makeApp(); });
     beforeEach(() => { jest.clearAllMocks(); });
 
-    it('returns 200 with all 15 audio feature fields for an analyzed track', async () => {
+    it('returns 200 with all 8 audio feature fields for an analyzed track', async () => {
         (prisma.track.findUnique as jest.Mock).mockResolvedValue(ANALYZED_TRACK);
 
         const res = await request(app).get('/tracks/track-1');
@@ -133,7 +119,7 @@ describe('GET /tracks/:id -- track detail', () => {
         expect(body.artist.name).toBe('Radiohead');
         expect(body.album.title).toBe('OK Computer');
 
-        // Verify all 15 audio feature fields are present
+        // Verify all 8 audio feature fields are present
         const audioFeatures = body.audioFeatures;
         expect(audioFeatures).toBeDefined();
         expect(audioFeatures.bpm).toBe(120.5);
@@ -144,13 +130,6 @@ describe('GET /tracks/:id -- track detail', () => {
         expect(audioFeatures.keyScale).toBe('Am');
         expect(audioFeatures.instrumentalness).toBe(0.1);
         expect(audioFeatures.analysisMode).toBe('essentia');
-        expect(audioFeatures.moodHappy).toBe(0.2);
-        expect(audioFeatures.moodSad).toBe(0.6);
-        expect(audioFeatures.moodRelaxed).toBe(0.1);
-        expect(audioFeatures.moodAggressive).toBe(0.5);
-        expect(audioFeatures.moodParty).toBe(0.3);
-        expect(audioFeatures.moodAcoustic).toBe(0.2);
-        expect(audioFeatures.moodElectronic).toBe(0.7);
     });
 
     it('returns 200 with null audio features for an un-analyzed track', async () => {
@@ -163,7 +142,7 @@ describe('GET /tracks/:id -- track detail', () => {
         expect(body.id).toBe('track-2');
         expect(body.title).toBe('Karma Police');
 
-        // Verify all 15 audio feature fields are present but null
+        // Verify all 8 audio feature fields are present but null
         const audioFeatures = body.audioFeatures;
         expect(audioFeatures).toBeDefined();
         expect(audioFeatures.bpm).toBeNull();
@@ -174,13 +153,6 @@ describe('GET /tracks/:id -- track detail', () => {
         expect(audioFeatures.keyScale).toBeNull();
         expect(audioFeatures.instrumentalness).toBeNull();
         expect(audioFeatures.analysisMode).toBeNull();
-        expect(audioFeatures.moodHappy).toBeNull();
-        expect(audioFeatures.moodSad).toBeNull();
-        expect(audioFeatures.moodRelaxed).toBeNull();
-        expect(audioFeatures.moodAggressive).toBeNull();
-        expect(audioFeatures.moodParty).toBeNull();
-        expect(audioFeatures.moodAcoustic).toBeNull();
-        expect(audioFeatures.moodElectronic).toBeNull();
     });
 
     it('returns 404 for an unknown track id', async () => {
@@ -193,15 +165,13 @@ describe('GET /tracks/:id -- track detail', () => {
 });
 
 describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio route integration)', () => {
-    it('returns the exact 15-field shape for an analyzed track', () => {
+    it('returns the exact 8-field shape for an analyzed track', () => {
         const result = toAudioFeaturesDTO(ANALYZED_TRACK);
 
         // Verify all 15 fields are present
         const expectedFields = [
             'bpm', 'energy', 'valence', 'arousal', 'danceability',
             'keyScale', 'instrumentalness', 'analysisMode',
-            'moodHappy', 'moodSad', 'moodRelaxed', 'moodAggressive',
-            'moodParty', 'moodAcoustic', 'moodElectronic',
         ];
         for (const field of expectedFields) {
             expect(result).toHaveProperty(field);
@@ -216,13 +186,6 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
         expect(result.keyScale).toBe('Am');
         expect(result.instrumentalness).toBe(0.1);
         expect(result.analysisMode).toBe('essentia');
-        expect(result.moodHappy).toBe(0.2);
-        expect(result.moodSad).toBe(0.6);
-        expect(result.moodRelaxed).toBe(0.1);
-        expect(result.moodAggressive).toBe(0.5);
-        expect(result.moodParty).toBe(0.3);
-        expect(result.moodAcoustic).toBe(0.2);
-        expect(result.moodElectronic).toBe(0.7);
     });
 
     it('returns null for all fields when track has null feature columns', () => {
@@ -231,8 +194,6 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
         const nullFields = [
             'bpm', 'energy', 'valence', 'arousal', 'danceability',
             'keyScale', 'instrumentalness', 'analysisMode',
-            'moodHappy', 'moodSad', 'moodRelaxed', 'moodAggressive',
-            'moodParty', 'moodAcoustic', 'moodElectronic',
         ];
         for (const field of nullFields) {
             expect(result[field as keyof typeof result]).toBeNull();
@@ -252,13 +213,6 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
             keyScale: null,
             instrumentalness: null,
             analysisMode: null,
-            moodHappy: null,
-            moodSad: null,
-            moodRelaxed: null,
-            moodAggressive: null,
-            moodParty: null,
-            moodAcoustic: null,
-            moodElectronic: null,
             album: BASE_ALBUM,
         };
 
@@ -274,12 +228,5 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
         expect(result.keyScale).toBeNull();
         expect(result.instrumentalness).toBeNull();
         expect(result.analysisMode).toBeNull();
-        expect(result.moodHappy).toBeNull();
-        expect(result.moodSad).toBeNull();
-        expect(result.moodRelaxed).toBeNull();
-        expect(result.moodAggressive).toBeNull();
-        expect(result.moodParty).toBeNull();
-        expect(result.moodAcoustic).toBeNull();
-        expect(result.moodElectronic).toBeNull();
     });
 });

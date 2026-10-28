@@ -92,7 +92,6 @@ const systemSettingsSchema = z.object({
   spotifyClientId: z.string().nullable().optional(),
   spotifyClientSecret: z.string().nullable().optional(),
 
-
   // Storage Paths
   musicPath: z.string().optional(),
   downloadPath: z.string().optional(),
@@ -380,7 +379,6 @@ router.post("/test-fanart", async (req, res) => {
       return res.status(400).json({ error: "API key is required" });
     }
 
-
     // Test with a known artist (The Beatles MBID)
     const testMbid = "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d";
 
@@ -410,7 +408,6 @@ router.post("/test-audiobookshelf", async (req, res) => {
     if (!url || !apiKey) {
       return res.status(400).json({ error: "URL and API key are required" });
     }
-
 
     const response = await axios.get(`${url}/api/libraries`, {
       headers: {
@@ -499,51 +496,6 @@ router.post("/test-soulseek", async (req, res) => {
     }
   } catch (error) {
     safeError(res, "Soulseek connection test", error);
-  }
-});
-
-// Test Spotify credentials
-router.post("/test-spotify", async (req, res) => {
-  try {
-    const { clientId, clientSecret } = req.body;
-
-    if (!clientId || !clientSecret) {
-      return res.status(400).json({
-        error: "Client ID and Client Secret are required",
-      });
-    }
-
-    // Test credentials by trying to get an access token
-    try {
-      const response = await axios.post(
-        "https://accounts.spotify.com/api/token",
-        "grant_type=client_credentials",
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Authorization: `Basic ${Buffer.from(
-              `${clientId}:${clientSecret}`,
-            ).toString("base64")}`,
-          },
-          timeout: 10000,
-        },
-      );
-
-      if (response.data.access_token) {
-        res.json({
-          success: true,
-          message: "Spotify credentials are valid",
-        });
-      } else {
-        res.status(400).json({
-          error: "Invalid Spotify credentials",
-        });
-      }
-    } catch (tokenError) {
-      safeError(res, "Spotify credentials test", tokenError, 502);
-    }
-  } catch (error) {
-    safeError(res, "Spotify credentials test", error);
   }
 });
 

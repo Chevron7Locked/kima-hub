@@ -146,11 +146,6 @@ jest.mock("../../workers/podcastEnrichmentWorker", () => ({
 }));
 
 // Services the control routes reach through to the network.
-jest.mock("../../services/enrichment", () => ({
-    enrichmentService: {
-        enrichArtist: jest.fn(), enrichAlbum: jest.fn(), enrichTrack: jest.fn(),
-    },
-}));
 jest.mock("../../services/imageBackfill", () => ({ repairBrokenCovers: jest.fn() }));
 jest.mock("../../services/mbidReassign", () => ({
     DuplicateMbidError: class extends Error {},

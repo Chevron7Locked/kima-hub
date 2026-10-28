@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
+import { IN_LIBRARY } from "../../utils/libraryEligibility";
 
 export interface ProgrammaticMix {
     id: string;
@@ -144,7 +145,6 @@ export function getSeededRandom(seed: string): number {
  * that takes the first n changes by at most one song when one song joins or leaves the candidates.
  */
 export function seededKey(seed: number | string, id: string): string {
-    // createHash, not the one-shot crypto.hash, which Node 20 lacks before 20.12; the split stack builds on node:20-slim.
     return crypto.createHash("md5").update(`${seed}:${id}`).digest("hex");
 }
 
@@ -273,7 +273,7 @@ export async function tracksByIds<I extends Prisma.TrackInclude>(
 }
 
 /**
- * Ids of up to `take` tracks drawn uniformly at random from every track
+ * Ids of up to `take` library songs drawn uniformly at random from every one
  * matching `where`, not from the first rows the database returns. A draw that
  * must repeat for a day is seededTrackIds.
  */
@@ -283,7 +283,7 @@ export async function sampleTrackIds(args: {
 }): Promise<string[]> {
     assertTake(args.take);
     const rows = await prisma.track.findMany({
-        where: args.where,
+        where: { AND: [args.where, IN_LIBRARY] },
         select: { id: true },
         orderBy: { id: "asc" },
     });
@@ -294,7 +294,7 @@ export async function sampleTrackIds(args: {
 }
 
 /**
- * Ids of up to `take` tracks whose file is there and that match `where`, a condition on "Track" t and its "Album" a,
+ * Ids of up to `take` library songs whose file is there and that match `where`, a condition on "Track" t and its "Album" a,
  * ranked by seededKeySql: the draw drawIds(every matching id, take, seed) makes, picked in the database, so neither the
  * matching ids nor their hashing reach the server's event loop however large the library.
  */
@@ -304,7 +304,7 @@ export async function seededTrackIds(where: Prisma.Sql, take: number, seed: numb
         SELECT t.id
         FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE t."missingSince" IS NULL AND ${where}
+        WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${where}
         ORDER BY ${seededKeySql(seed, Prisma.sql`t.id`)}
         LIMIT ${take}
     `;
@@ -322,7 +322,7 @@ export async function seededTracks<I extends Prisma.TrackInclude>(args: {
 }
 
 /**
- * Ids of every track no user has played, in id order. Written as an anti-join
+ * Ids of every library song no user has played, in id order. Written as an anti-join
  * because Prisma's `plays: { none: {} }` becomes `id NOT IN (SELECT trackId
  * FROM Play)`, which Postgres runs as a rescan of Play for every track once
  * Play is too large to hash (about a minute and a half at 50,000 tracks and
@@ -336,6 +336,7 @@ export async function unplayedTrackIds(
         SELECT t.id
         FROM "Track" t
         WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)
+          AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
           AND (${!args.excludeMissing} OR t."missingSince" IS NULL)
           AND (${!args.excludeCorrupt} OR t.corrupt = false)
         ORDER BY t.id

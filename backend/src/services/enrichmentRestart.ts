@@ -87,8 +87,7 @@ async function resetAnalysis(tx: Tx): Promise<number> {
             valence = NULL, arousal = NULL, "deamValence" = NULL, "deamArousal" = NULL,
             "clapValenceRaw" = NULL, "clapArousalRaw" = NULL,
             instrumentalness = NULL, acousticness = NULL, speechiness = NULL,
-            "moodHappy" = NULL, "moodSad" = NULL, "moodRelaxed" = NULL, "moodAggressive" = NULL,
-            "moodParty" = NULL, "moodAcoustic" = NULL, "moodElectronic" = NULL, "danceabilityMl" = NULL,
+            "danceabilityMl" = NULL,
             "moodTags" = '{}', "essentiaGenres" = '{}',
             "analysisStatus" = 'pending', "analysisVersion" = NULL, "analysisMode" = NULL,
             "analyzedAt" = NULL, "analysisError" = NULL, "analysisRetryCount" = 0, "analysisStartedAt" = NULL
