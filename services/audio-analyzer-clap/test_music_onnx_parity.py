@@ -51,7 +51,7 @@ def _missing_reference():
         return f'music checkpoint not present at {CKPT}'
     for mod in ('torch', 'laion_clap'):
         if importlib.util.find_spec(mod) is None:
-            return f'{mod} not installed (use a venv with requirements-torch.txt)'
+            return f'{mod} not installed (use a venv with requirements-export.txt)'
     return None
 
 

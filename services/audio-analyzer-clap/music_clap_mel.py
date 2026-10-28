@@ -37,11 +37,6 @@ def quantize(audio: np.ndarray) -> np.ndarray:
     return ((x * 32767.0).astype(np.int16) / 32767.0).astype(np.float32)
 
 
-def crop_overflow(n_samples: int) -> int:
-    """How many start positions a too-long clip has beyond the first (0 when it fits)."""
-    return max(0, n_samples - WINDOW_SAMPLES)
-
-
 def fit_window(audio: np.ndarray, crop_start: Optional[int] = None) -> np.ndarray:
     """Cut or tile a clip to exactly 480000 samples the way laion_clap's non-fusion path does.
 

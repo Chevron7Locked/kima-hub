@@ -3,7 +3,7 @@
 Scores the CLAP audio embedding that powers the vibe map and "more like this"
 against **human judgments**, so every vibe change can be measured instead of
 eyeballed. It embeds each evaluation set's audio with the **shipped** analyzer
-code (`analyzer.CLAPAnalyzer.get_audio_embedding`, `CLAP_BACKEND=onnx`,
+code (`analyzer.CLAPAnalyzer.get_audio_embedding` on ONNX Runtime,
 `models/hf_audio.onnx`, five 10 s windows, mean, L2-normalise), caches the
 vectors, and scores them.
 
@@ -29,7 +29,7 @@ the image. Data defaults to `eval/.cache/data`; point `KIMA_EVAL_DATA` at a
 bigger disk or at existing copies (symlinks are fine). Embeddings are cached in
 `eval/.cache/emb/<model-sha>-<recipe-sha>/` (git-ignored): a re-run only scores,
 which takes seconds. The cache key includes the sha256 of the model file and of
-`analyzer.py`, `onnx_backend.py` and `clap_mel.py`, so any edit to those files
+`analyzer.py`, `onnx_backend.py` and `music_clap_mel.py`, so any edit to those files
 re-embeds rather than reusing stale vectors. Results go to
 `eval/.cache/results-<timestamp>.json` (or `--out`).
 
@@ -294,7 +294,7 @@ max vs GeM (generalised-mean pooling, Radenović et al.) would barely differ
 there. Only Memo2496 (2,496 full instrumental tracks) spans a whole track, and
 it carries valence/arousal only. What a test-server run needs:
 - an embedder variant that returns the per-window vectors
-  (`CLAPAnalyzer._embed_window` for each `compute_window_offsets` offset) and
+  (`OnnxCLAPBackend.embed_clips` over the `compute_window_offsets` windows) and
   caches them under a new key, e.g. `v1win-...` with shape (n, 5, 512);
 - about 12,500 window inferences for Memo2496 alone (~36% of the 34,000
   windows in the whole 45-minute Mac run, so roughly 15-20 minutes at that

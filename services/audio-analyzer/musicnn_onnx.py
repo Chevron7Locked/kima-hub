@@ -39,13 +39,6 @@ GPU_GROUP = 4
 # name -> file stem under the model directory; the embedding graph's output is its dense layer.
 GRAPHS: Dict[str, str] = {
     'musicnn': 'msd-musicnn-1',
-    'mood_happy': 'mood_happy-msd-musicnn-1',
-    'mood_sad': 'mood_sad-msd-musicnn-1',
-    'mood_relaxed': 'mood_relaxed-msd-musicnn-1',
-    'mood_aggressive': 'mood_aggressive-msd-musicnn-1',
-    'mood_party': 'mood_party-msd-musicnn-1',
-    'mood_acoustic': 'mood_acoustic-msd-musicnn-1',
-    'mood_electronic': 'mood_electronic-msd-musicnn-1',
     'danceability': 'danceability-msd-musicnn-1',
     'deam': 'deam-msd-musicnn-2',
     'emomusic': 'emomusic-msd-musicnn-2',

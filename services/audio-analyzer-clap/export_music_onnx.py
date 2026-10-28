@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Exports both towers of the music CLAP checkpoint (music_audioset_epoch_15_esc_90.14.pt, the one
-v1.10.0 ran through laion_clap) to ONNX. Needs torch and laion_clap, so run it in a throwaway venv
-with requirements-torch.txt; Kima's images never run it.
+v1.10.0 ran through laion_clap) to ONNX. Needs torch and laion_clap (requirements-export.txt); the
+image's export stage runs it, and the analyzer never imports it.
 
   music_audio.onnx  input  mel [batch, 1, 1001, 64] (music_clap_mel.MusicClapMel)
                     output embedding [batch, 512], L2-normalised

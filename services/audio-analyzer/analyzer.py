@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Essentia audio analyzer: BPM, key, loudness and energy from Essentia; moods,
+Essentia audio analyzer: BPM, key, loudness and energy from Essentia;
 valence/arousal and danceability from the MusiCNN models (ONNX Runtime, CPU or
 GPU). Without the models no track is analysed. Jobs arrive over Redis; results go
 to PostgreSQL.
@@ -226,27 +226,12 @@ MODEL_DIR = '/app/models'
 # used: a broken head; CLAP zero-shot answers instrumentalness.
 MUSICNN_GRAPH = os.path.join(MODEL_DIR, 'msd-musicnn-1.onnx')
 
-# Output column order of each head, from the "classes" field of Essentia's model
-# metadata (essentia.upf.edu/models/classification-heads/<head>/). The positive
-# class is first for some heads and second for others.
+# Output column order of the classification head, from the "classes" field of Essentia's model
+# metadata (essentia.upf.edu/models/classification-heads/<head>/).
 HEAD_CLASSES = {
-    'mood_happy': ['happy', 'non_happy'],
-    'mood_sad': ['non_sad', 'sad'],
-    'mood_relaxed': ['non_relaxed', 'relaxed'],
-    'mood_aggressive': ['aggressive', 'not_aggressive'],
-    'mood_party': ['non_party', 'party'],
-    'mood_acoustic': ['acoustic', 'non_acoustic'],
-    'mood_electronic': ['electronic', 'non_electronic'],
     'danceability': ['danceable', 'not_danceable'],
 }
 HEAD_POSITIVE_CLASS = {
-    'mood_happy': 'happy',
-    'mood_sad': 'sad',
-    'mood_relaxed': 'relaxed',
-    'mood_aggressive': 'aggressive',
-    'mood_party': 'party',
-    'mood_acoustic': 'acoustic',
-    'mood_electronic': 'electronic',
     'danceability': 'danceable',
 }
 
@@ -412,7 +397,7 @@ def _decode_to_stereo(file_path: str, duration: int = 90):
 
 class AudioAnalyzer:
     """
-    Audio analysis: Essentia's signal measures and the MusiCNN models' moods,
+    Audio analysis: Essentia's signal measures and the MusiCNN models'
     valence/arousal and danceability. Without the models a track is not analysed:
     no hand-made estimate stands in for them.
 
@@ -525,13 +510,6 @@ class AudioAnalyzer:
             'arousal': None,
             'instrumentalness': None,  # instrumentalness and acousticness come from CLAP zero-shot
             'acousticness': None,
-            'moodHappy': None,
-            'moodSad': None,
-            'moodRelaxed': None,
-            'moodAggressive': None,
-            'moodParty': None,
-            'moodAcoustic': None,
-            'moodElectronic': None,
             'danceabilityMl': None,
             'essentiaGenres': [],
             'analysisMode': None,
@@ -608,7 +586,7 @@ class AudioAnalyzer:
             result['loudness'] = round(integrated, 2) if integrated is not None else None
             result['dynamicRange'] = round(loudness_range, 2) if loudness_range is not None else None
 
-            # The models' answers: moods, valence/arousal, danceability. A failure fails the
+            # The models' answers: valence/arousal and danceability. A failure fails the
             # track and it is retried, never stored with anything in their place.
             try:
                 audio_16k = self.resampler(audio_44k)
@@ -642,18 +620,7 @@ class AudioAnalyzer:
             preds = self.prediction_models[model_name](embeddings)
             return round(max(0.0, min(1.0, float(np.mean(preds[:, positive_class_index(model_name)])))), 3)
 
-        # Each mood head is an independent binary classifier, stored raw; the backend
-        # (moodBucketService) compares moods within the library.
-        mood_heads = {
-            'moodHappy': 'mood_happy',
-            'moodSad': 'mood_sad',
-            'moodRelaxed': 'mood_relaxed',
-            'moodAggressive': 'mood_aggressive',
-            'moodParty': 'mood_party',
-            'moodAcoustic': 'mood_acoustic',
-            'moodElectronic': 'mood_electronic',
-        }
-        result: Dict[str, Any] = {field: positive_prob(head) for field, head in mood_heads.items()}
+        result: Dict[str, Any] = {}
 
         # Valence and arousal: the mean of the DEAM and emoMusic regressions, each [frames, 2]
         # on a 1-9 scale, mapped to 0-1 by VA_MAP.
@@ -667,7 +634,6 @@ class AudioAnalyzer:
         result['danceabilityMl'] = positive_prob('danceability')
         result['danceability'] = result['danceabilityMl']
 
-        logger.info(f"ML Moods: H={result['moodHappy']}, S={result['moodSad']}, R={result['moodRelaxed']}, A={result['moodAggressive']}, P={result['moodParty']}")
         return result
 
 
@@ -1214,13 +1180,6 @@ class AnalysisWorker:
                     "deamValence" = %s,
                     "deamArousal" = %s,
                     "essentiaGenres" = %s,
-                    "moodHappy" = %s,
-                    "moodSad" = %s,
-                    "moodRelaxed" = %s,
-                    "moodAggressive" = %s,
-                    "moodParty" = %s,
-                    "moodAcoustic" = %s,
-                    "moodElectronic" = %s,
                     "danceabilityMl" = %s,
                     "analysisMode" = %s,
                     "analysisVersion" = %s,
@@ -1239,13 +1198,6 @@ class AnalysisWorker:
                 features['valence'],
                 features['arousal'],
                 features['essentiaGenres'],
-                features.get('moodHappy'),
-                features.get('moodSad'),
-                features.get('moodRelaxed'),
-                features.get('moodAggressive'),
-                features.get('moodParty'),
-                features.get('moodAcoustic'),
-                features.get('moodElectronic'),
                 features.get('danceabilityMl'),
                 features['analysisMode'],
                 ESSENTIA_VERSION,

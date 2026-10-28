@@ -1,6 +1,5 @@
-"""Each Essentia mood head is read from its positive-class column: column 0 for
-happy, aggressive, acoustic, electronic and danceability, column 1 for sad,
-relaxed and party (from each head's model metadata)."""
+"""The danceability head is read from its positive-class column (column 0, from the head's model metadata);
+valence and arousal are the mean of the two regressions."""
 
 import re
 import json
@@ -17,13 +16,6 @@ import analyzer
 
 # Positive-class column per head, straight from each head's metadata "classes".
 EXPECTED_POSITIVE_COLUMN = {
-    'mood_happy': 0,        # ['happy', 'non_happy']
-    'mood_sad': 1,          # ['non_sad', 'sad']
-    'mood_relaxed': 1,      # ['non_relaxed', 'relaxed']
-    'mood_aggressive': 0,   # ['aggressive', 'not_aggressive']
-    'mood_party': 1,        # ['non_party', 'party']
-    'mood_acoustic': 0,     # ['acoustic', 'non_acoustic']
-    'mood_electronic': 0,   # ['electronic', 'non_electronic']
     'danceability': 0,      # ['danceable', 'not_danceable']
 }
 
@@ -68,31 +60,12 @@ class ExtractMoodsTest(unittest.TestCase):
 
     def test_each_head_reads_its_positive_column(self):
         out = _analyzer_with(self._heads())._extract_ml_features(np.zeros(16000))
-        self.assertEqual(out['moodHappy'], 0.9)
-        self.assertEqual(out['moodAggressive'], 0.9)
-        self.assertEqual(out['moodAcoustic'], 0.9)
-        self.assertEqual(out['moodElectronic'], 0.9)
         self.assertEqual(out['danceabilityMl'], 0.9)
         self.assertEqual(out['danceability'], 0.9)
-        self.assertEqual(out['moodSad'], 0.1)
-        self.assertEqual(out['moodRelaxed'], 0.1)
-        self.assertEqual(out['moodParty'], 0.1)
-
-    def test_heads_are_independent_not_paired(self):
-        # Bittersweet: confidently happy AND sad. Each head keeps its own value; the pair
-        # need not sum to 1.
-        heads = self._heads(mood_happy=_Head([0.8, 0.2]), mood_sad=_Head([0.3, 0.7]),
-                            mood_relaxed=_Head([0.01, 0.99]),
-                            mood_aggressive=_Head([0.01, 0.99]))
-        out = _analyzer_with(heads)._extract_ml_features(np.zeros(16000))
-        self.assertEqual(out['moodHappy'], 0.8)
-        self.assertEqual(out['moodSad'], 0.7)
-        # A calm track: relaxed 0.99, aggressive 0.01, not 0.5/0.5 for saturated heads.
-        self.assertEqual(out['moodRelaxed'], 0.99)
-        self.assertEqual(out['moodAggressive'], 0.01)
+        self.assertNotIn('moodHappy', out)
 
     def test_a_failed_head_fails_the_track_rather_than_storing_a_gap(self):
-        for head in ('mood_party', 'deam', 'danceability'):
+        for head in ('emomusic', 'deam', 'danceability'):
             heads = self._heads(**{head: _Head(None, fail=True)})
             with self.assertRaises(RuntimeError, msg=head):
                 _analyzer_with(heads)._extract_ml_features(np.zeros(16000))
@@ -148,9 +121,7 @@ class NoMoodTagsTest(unittest.TestCase):
         a.loudness_ebu = lambda pair: (None, None, -14.0, 6.0)
         a.resampler = lambda audio: audio
         # Values past every cut-off the analyzer used to tag with.
-        a._extract_ml_features = lambda audio: dict(
-            moodHappy=0.9, moodSad=0.9, moodRelaxed=0.9, moodAggressive=0.9,
-            valence=0.9, arousal=0.9, danceability=0.9)
+        a._extract_ml_features = lambda audio: dict(valence=0.9, arousal=0.9, danceability=0.9)
         out = a.analyze('/music/x.flac')
         self.assertNotIn('_error', out)
         self.assertEqual((out['bpm'], out['analysisMode']), (150.0, 'enhanced'))
@@ -252,11 +223,12 @@ class ResultWriteTest(unittest.TestCase):
         self.assertIsNone(re.search(r'\b(valence|arousal)\s*=', update_sql))
         self.assertEqual(update_sql.count('%s'), len(update_params))
 
-    def test_save_results_leaves_mood_tags_to_the_mood_step(self):
+    def test_save_results_leaves_moods_to_the_mood_step(self):
         w = _worker()
         w._save_results({"trackId": "t1", "filePath": "/x.flac", "jobId": "t1-1-r0"}, _features())
         update_sql, _ = w.db.cursor.statements[1]
         self.assertNotIn('moodTags', update_sql)
+        self.assertNotIn('moodHappy', update_sql)
 
 
 if __name__ == '__main__':

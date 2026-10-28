@@ -101,10 +101,6 @@ def test_a_start_forgets_the_last_start_s_gpu_answer(tmp_path, monkeypatch):
     analyzer.main()
     assert json.loads((root / "state.json").read_text())["provider"]["active"] is False
     assert json.loads((root / "state.json").read_text())["provider"]["measured"] is False
-    monkeypatch.setattr(analyzer, "CLAP_BACKEND", "torch")
-    analyzer.main()
-    provider = json.loads((root / "state.json").read_text())["provider"]
-    assert provider["measured"] is True and provider["active"] is False, "a torch start left the page applying"
 
 
 def _runtime_at(tmp_path, monkeypatch):
@@ -389,19 +385,29 @@ def test_the_sound_vector_worker_keeps_its_heartbeat_while_it_finishes_running_j
     spec.loader.exec_module(analyzer)
     monkeypatch.setattr(analyzer, "HEARTBEAT_SECONDS", 0.05)
     beats = []
+    writes = []
 
     class Redis:
-        def set(self, key, value):
+        # The third write of a beat carries the in-flight key's expiry, so the stub
+        # takes the keyword arguments: a signature that refused them would raise and
+        # _beat would swallow it, leaving the in-flight write invisible to this test.
+        def set(self, key, value, **opts):
             beats.append(key)
+            writes.append((key, value, opts))
 
     class SlowClose:
         async def close(self):
             await asyncio.sleep(0.4)
 
     worker = analyzer.BullMQVibeWorker.__new__(analyzer.BullMQVibeWorker)
-    worker._redis_client, worker._active_concurrency = Redis(), 1
+    # The attributes a worker starts with before any job runs; _beat publishes them.
+    worker._redis_client, worker._active_concurrency, worker._jobs_in_flight = Redis(), 1, 0
     asyncio.run(worker._close(SlowClose()))
     assert beats.count("clap:worker:heartbeat") >= 3, beats
+    inflight = [w for w in writes if w[0] == "clap:worker:inflight"]
+    assert inflight, ("the in-flight key is never written", writes)
+    assert all(w[1] == "0" for w in inflight), inflight
+    assert all(w[2].get("ex") == analyzer.INFLIGHT_TTL_SECONDS for w in inflight), inflight
 
 
 def test_a_runtime_without_cuda_libraries_adds_no_empty_entry_to_the_library_path(tmp_path, monkeypatch):

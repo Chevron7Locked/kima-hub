@@ -108,7 +108,6 @@ def test_idle_unload_frees_the_onnx_sessions_and_the_next_track_loads_them_again
             import numpy as np
             return np.ones((len(clips), 512), dtype=np.float32)
 
-    monkeypatch.setattr(analyzer, "CLAP_BACKEND", "onnx")
     monkeypatch.setattr(onnx_backend, "OnnxCLAPBackend", FakeBackend)
     a = analyzer.CLAPAnalyzer()
     held = a._ensure_onnx_backend()

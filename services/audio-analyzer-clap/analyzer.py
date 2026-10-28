@@ -20,25 +20,12 @@ import numpy as np
 import librosa
 import requests
 
-# CPU thread limiting must be set before importing torch
+# CPU thread limits, set before the numeric libraries load.
 THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
 os.environ['OMP_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['OPENBLAS_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['MKL_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
-
-# Only the torch backend needs PyTorch; the shipped images run ONNX
-# (CLAP_BACKEND=onnx) and do not install it, so the import is optional.
-try:
-    import torch
-
-    torch.set_num_threads(THREADS_PER_WORKER)
-    DEVICE = torch.device('cpu')
-    TORCH_AVAILABLE = True
-except ImportError:  # ONNX-only image: torch is deliberately not installed
-    torch = None
-    DEVICE = None
-    TORCH_AVAILABLE = False
 
 import redis
 import psycopg2
@@ -62,14 +49,10 @@ MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
 # How long a job holds its BullMQ lock; CLAP inference can take 30-60 s.
 JOB_LOCK_MS = 300000
 HEARTBEAT_SECONDS = 30
-# ONNX is the default; the shipped images carry no PyTorch. 'torch' works only
-# in a build that installs requirements-torch.txt.
-CLAP_BACKEND = os.getenv('CLAP_BACKEND', 'onnx').lower()
-if CLAP_BACKEND == 'torch' and not TORCH_AVAILABLE:
-    logger.error(
-        "CLAP_BACKEND=torch requested but PyTorch is not installed in this image; "
-        "no embeddings will be produced. Use CLAP_BACKEND=onnx (the default)."
-    )
+# The in-flight count lives no longer than its writer keeps beating: a count
+# no live worker refreshes is gone after 3 heartbeats, so a stale count is
+# never what holds analysis back.
+INFLIGHT_TTL_SECONDS = 3 * HEARTBEAT_SECONDS
 # Resolve the ONNX model path the same way the backend does: default to the
 # analyzer's own models/ directory (where the validated music_audio.onnx lives),
 # overridable with CLAP_ONNX_MODEL_PATH.
@@ -170,13 +153,11 @@ class CLAPAnalyzer:
     """
     LAION CLAP model wrapper for generating audio and text embeddings.
 
-    Runs LAION-CLAP's music checkpoint (music_audioset_epoch_15_esc_90.14, HTSAT-base audio encoder):
-    ONNX by default, laion_clap with torch when CLAP_BACKEND=torch. Supports idle model unloading
-    to free memory when no work is pending.
+    Runs LAION-CLAP's music checkpoint (music_audioset_epoch_15_esc_90.14, HTSAT-base audio encoder)
+    exported to ONNX. Supports idle model unloading to free memory when no work is pending.
     """
 
     def __init__(self):
-        self.model = None
         self.onnx_backend = None
         self.onnx_text_backend = None
         self._lock = threading.Lock()
@@ -185,11 +166,11 @@ class CLAPAnalyzer:
         self._prompt_embs: dict = {}
 
     def _ensure_onnx_backend(self):
-        """Load the ONNX backend on first use (only when CLAP_BACKEND=onnx) and return it. The caller
-        keeps that reference, so an idle unload cannot pull the model out from under a track being
-        embedded; a broken model fails here, not at the first embed."""
+        """Load the ONNX backend on first use and return it. The caller keeps that reference, so an
+        idle unload cannot pull the model out from under a track being embedded; a broken model
+        fails here, not at the first embed."""
         with self._lock:
-            if self.onnx_backend is not None or CLAP_BACKEND != 'onnx':
+            if self.onnx_backend is not None:
                 return self.onnx_backend
             from onnx_backend import OnnxCLAPBackend
             backend = OnnxCLAPBackend(CLAP_ONNX_MODEL_PATH)
@@ -200,9 +181,9 @@ class CLAPAnalyzer:
             return backend
 
     def _ensure_onnx_text_backend(self):
-        """Load the ONNX text backend on first use (CLAP_BACKEND=onnx). It is apart from the audio
-        backend: the text model is a different 500MB file and loads only when a text path is used."""
-        if self.onnx_text_backend is None and CLAP_BACKEND == 'onnx':
+        """Load the ONNX text backend on first use. It is apart from the audio backend: the text model
+        is a different 500MB file and loads only when a text path is used."""
+        if self.onnx_text_backend is None:
             from onnx_backend import OnnxTextCLAPBackend, ONNX_TEXT_MODEL_PATH
             backend = OnnxTextCLAPBackend(ONNX_TEXT_MODEL_PATH)
             backend.load_model()
@@ -212,83 +193,33 @@ class CLAPAnalyzer:
         return self.onnx_text_backend
 
     def _text_embeddings(self, prompts: list[str]) -> list:
-        """A list of 512-d float32 vectors, as laion_clap's get_text_embedding
-        returns. With CLAP_BACKEND=onnx this is OnnxTextCLAPBackend, one
-        unpadded prompt at a time; otherwise, or if it is unavailable, laion_clap.
-        """
-        if CLAP_BACKEND == 'onnx':
-            text_backend = self._ensure_onnx_text_backend()
-            try:
-                embs = text_backend.embed_text(prompts)
-                return [embs[i] for i in range(embs.shape[0])]
-            except Exception as e:
-                logger.critical(
-                    f"ONNX text backend FAILED with CLAP_BACKEND=onnx pinned; "
-                    f"NOT falling back to torch. Text embeddings for "
-                    f"{len(prompts)} prompts failed: {e}",
-                    exc_info=True,
-                )
-                raise
-        # torch path
-        self.ensure_model()
-        return self.model.get_text_embedding(prompts, use_tensor=False)
-
-    def load_model(self):
-        """Load the CLAP model (thread-safe, idempotent)"""
-        with self._lock:
-            if self.model is not None:
-                return
-
-            logger.info("Loading LAION CLAP model (torch backend)...")
-            if not TORCH_AVAILABLE:
-                raise RuntimeError(
-                    "The torch CLAP backend was requested but PyTorch is not "
-                    "installed in this image (shipped images are ONNX-only). "
-                    "Set CLAP_BACKEND=onnx."
-                )
-            try:
-                import laion_clap
-
-                self.model = laion_clap.CLAP_Module(
-                    enable_fusion=False,
-                    amodel='HTSAT-base'
-                )
-                self.model.load_ckpt('/app/models/music_audioset_epoch_15_esc_90.14.pt')
-
-                self.model = self.model.to(DEVICE).eval()
-                self._model_loaded = True
-                self.last_work_time = time.time()
-
-                logger.info("CLAP model loaded successfully on CPU")
-            except Exception as e:
-                logger.exception(f"Failed to load CLAP model: {e}")
-                raise
+        """A list of 512-d float32 vectors from OnnxTextCLAPBackend, one unpadded prompt at a time."""
+        text_backend = self._ensure_onnx_text_backend()
+        try:
+            embs = text_backend.embed_text(prompts)
+            return [embs[i] for i in range(embs.shape[0])]
+        except Exception as e:
+            logger.critical(f"ONNX text backend failed; text embeddings for {len(prompts)} prompts: {e}", exc_info=True)
+            raise
 
     def unload_model(self):
-        """Unload the CLAP models (torch, or the ONNX sound and text sessions) to free
-        memory; they load again with the next track or search."""
+        """Unload the ONNX sound and text sessions to free memory; they load again with the
+        next track or search."""
         with self._lock:
-            if self.model is None and self.onnx_backend is None and self.onnx_text_backend is None:
+            if self.onnx_backend is None and self.onnx_text_backend is None:
                 return
             logger.info("Unloading CLAP model to free memory...")
-            self.model = None
             self.onnx_backend = None
             self.onnx_text_backend = None
             self._model_loaded = False
             gc.collect()
-            # Force glibc to return freed pages to OS (Python/PyTorch hold RSS otherwise)
+            # Force glibc to return freed pages to the OS (Python holds RSS otherwise)
             try:
                 import ctypes
                 ctypes.CDLL("libc.so.6").malloc_trim(0)
             except (OSError, AttributeError):  # not glibc: nothing to trim
                 pass
             logger.info("CLAP model unloaded")
-
-    def ensure_model(self):
-        """Ensure model is loaded, reloading if it was unloaded for idle"""
-        if self.model is None:
-            logger.info("Reloading CLAP model (new work arrived)...")
-            self.load_model()
 
     def _load_window(self, audio_path: str, start: float, window_seconds: float,
                      duration: float) -> Tuple[Optional[np.ndarray], int]:
@@ -315,16 +246,12 @@ class CLAPAnalyzer:
             return None, 0
 
     def get_audio_embedding(self, audio_path: str) -> Optional[np.ndarray]:
-        """512-d embedding of a track: five 10 s windows (see window offsets) embedded by the
-        active backend, averaged and L2-normalised. The length is the file's own, to the
-        sample. Returns None on error.
+        """512-d embedding of a track: five 10 s windows (see window offsets) embedded together,
+        averaged and L2-normalised. The length is the file's own, to the sample. Returns None
+        on error.
         """
         self.last_work_time = time.time()
-        if CLAP_BACKEND == 'onnx':
-            # ONNX path never touches laion_clap -- don't try to load it.
-            onnx_backend = self._ensure_onnx_backend()
-        else:
-            self.ensure_model()
+        onnx_backend = self._ensure_onnx_backend()
 
         if not os.path.exists(audio_path):
             logger.error(f"Audio file not found: {audio_path}")
@@ -342,28 +269,18 @@ class CLAPAnalyzer:
 
         # A track with a window that failed has no vector: the other windows are never
         # averaged as if they were the whole track.
-        if CLAP_BACKEND == 'onnx':
-            clips = []
-            for start in offsets:
-                audio, _ = self._load_window(audio_path, start, WINDOW_SECONDS, duration)
-                if audio is None:
-                    logger.error(f"Window at {start:.1f}s of {audio_path} failed to load; no vector")
-                    return None
-                clips.append(audio)
-            try:
-                vectors = list(onnx_backend.embed_clips(clips))
-            except Exception as e:
-                # Never fall back to torch: a re-embed must stay in one vector space.
-                logger.critical(f"ONNX backend failed on {audio_path}: {e}", exc_info=True)
+        clips = []
+        for start in offsets:
+            audio, _ = self._load_window(audio_path, start, WINDOW_SECONDS, duration)
+            if audio is None:
+                logger.error(f"Window at {start:.1f}s of {audio_path} failed to load; no vector")
                 return None
-        else:
-            vectors = []
-            for start in offsets:
-                vec = self._embed_window(audio_path, start, duration)
-                if vec is None:
-                    logger.error(f"Window at {start:.1f}s of {audio_path} failed; no vector")
-                    return None
-                vectors.append(vec)
+            clips.append(audio)
+        try:
+            vectors = list(onnx_backend.embed_clips(clips))
+        except Exception as e:
+            logger.critical(f"ONNX backend failed on {audio_path}: {e}", exc_info=True)
+            return None
 
         # Mean of the window vectors, then L2-normalize -> 512-d.
         combined = np.mean(np.vstack(vectors), axis=0).astype(np.float32)
@@ -372,29 +289,8 @@ class CLAPAnalyzer:
             combined = combined / norm
         return combined.astype(np.float32)
 
-    def _embed_window(self, audio_path: str, start: float, duration: float) -> Optional[np.ndarray]:
-        """One window (starting at `start` seconds) through the torch backend: a
-        512-d L2-normalised vector, or None on error. The ONNX backend embeds a
-        track's windows together (`OnnxCLAPBackend.embed_clips`)."""
-        try:
-            audio, sr = self._load_window(audio_path, start, WINDOW_SECONDS, duration)
-            if audio is None:
-                return None
-            with self._lock:
-                embedding = self.model.get_audio_embedding_from_data([audio], use_tensor=False)[0]
-            if embedding.shape[0] != 512:
-                logger.warning(f"Unexpected embedding dimension: {embedding.shape}")
-            vec = embedding.astype(np.float32)
-            n = np.linalg.norm(vec)
-            return vec / n if n > 0 else vec
-        except Exception as e:
-            logger.exception(f"Failed to embed window at {start:.1f}s of {audio_path}: {e}")
-            return None
-
     def get_text_embedding(self, text: str) -> Optional[np.ndarray]:
         """512-d embedding of a text query, or None on error."""
-        if CLAP_BACKEND != 'onnx':
-            self.ensure_model()
         self.last_work_time = time.time()
 
         if not text or not text.strip():
@@ -420,8 +316,6 @@ class CLAPAnalyzer:
     def _prompt_similarity(self, audio_embedding: np.ndarray, group: str) -> float:
         """Mean cosine between a track's vector and one prompt group's text vectors, which are
         embedded once per process."""
-        if CLAP_BACKEND != 'onnx':
-            self.ensure_model()
         embs = self._prompt_embs.get(group)
         if embs is None:
             with self._lock:
@@ -512,6 +406,11 @@ class BullMQVibeWorker:
             max(1, min(os.cpu_count() or 8, int(concurrency))) if concurrency else load_configured_workers()
         )
         self._active_concurrency = None
+        # Jobs this worker is computing right now. The backend reads the published
+        # count to keep MusiCNN and CLAP one at a time across a re-run, where a
+        # track's embedding stage rows are reset to pending while the job CLAP
+        # already took is still running.
+        self._jobs_in_flight = 0
 
     def set_concurrency(self, count: int) -> int:
         """Ask the worker to run `count` jobs at once. Applied within seconds."""
@@ -616,6 +515,10 @@ class BullMQVibeWorker:
         self._redis_client = redis.from_url(REDIS_URL)
         self._active_concurrency = self.desired_concurrency
         self._connect_pool(self._active_concurrency)
+        # Announce an empty run before taking jobs: a previous process's count
+        # (a crash's stale '1', say) stops holding the backend's analysis back
+        # the moment this worker is up, not at its next heartbeat.
+        await self._publish_inflight()
         bullmq_worker = self.build_worker(self._active_concurrency)
         logger.info(f"[BullMQ] Worker started with concurrency {self._active_concurrency}")
 
@@ -631,7 +534,9 @@ class BullMQVibeWorker:
                         f"[BullMQ] Concurrency {self._active_concurrency} -> {target}, replacing worker"
                     )
                     try:
-                        await bullmq_worker.close()
+                        # Beats while the running jobs finish, so the heartbeat and the in-flight
+                        # count stay live for as long as CLAP is still working.
+                        await self._close(bullmq_worker)
                     except Exception as e:
                         logger.error(f"[BullMQ] Error closing worker for resize: {e}")
                     # With every job drained, no connection is checked out:
@@ -667,18 +572,44 @@ class BullMQVibeWorker:
     async def _beat(self) -> None:
         """featureDetection and the settings screen read the heartbeat to decide whether an analyzer is
         running. The effective concurrency rides along so the backend can report what is in force rather
-        than what was merely requested."""
+        than what was merely requested. The in-flight job count rides along too: the backend's one-at-a-time
+        rule reads it to hold analysis back while CLAP works (see _publish_inflight)."""
+        client = self._redis_client
+        if client is None:  # not connected yet: the next beat carries the news
+            return
         beat = str(int(time.time() * 1000))
         active = self._active_concurrency
+        inflight = str(self._jobs_in_flight)
         try:
             await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: (
-                    self._redis_client.set("clap:worker:heartbeat", beat),
-                    self._redis_client.set("clap:worker:concurrency", str(active)),
+                    client.set("clap:worker:heartbeat", beat),
+                    client.set("clap:worker:concurrency", str(active)),
+                    client.set("clap:worker:inflight", inflight, ex=INFLIGHT_TTL_SECONDS),
                 ),
             )
         except Exception:  # a missed beat is made up by the next one
+            pass
+
+    async def _publish_inflight(self) -> None:
+        """Publish how many jobs this worker is computing right now, so the
+        backend sees a new batch start within a second of taking it, not at the
+        next heartbeat. The write carries the heartbeat expiry (see
+        INFLIGHT_TTL_SECONDS), so a crash's leftover count lapses on its own.
+        A missed write must not break the job: _beat writes the
+        same key, so the next beat makes it up."""
+        client = self._redis_client
+        if client is None:
+            return
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: client.set(
+                    "clap:worker:inflight", str(self._jobs_in_flight), ex=INFLIGHT_TTL_SECONDS
+                ),
+            )
+        except Exception:
             pass
 
     async def _process_job(self, job, _token: str) -> dict:
@@ -690,6 +621,19 @@ class BullMQVibeWorker:
         if not track_id:
             raise ValueError(f"Invalid job data (no trackId): {job.data}")
 
+        # Counted from the moment the job is taken: the backend's one-at-a-time
+        # rule reads the published count, so a re-run that resets the tracks'
+        # embedding rows while this batch is computing still holds analysis back.
+        self._jobs_in_flight += 1
+        await self._publish_inflight()
+        try:
+            return await self._run_job(job, track_id, file_path, job_id)
+        finally:
+            self._jobs_in_flight -= 1
+            await self._publish_inflight()
+
+    async def _run_job(self, job, track_id: str, file_path: str, job_id) -> dict:
+        """One embedding job, running inside the in-flight count _process_job keeps."""
         loop = asyncio.get_running_loop()
         if not await loop.run_in_executor(None, self._claim_is_current, track_id, job_id):
             logger.info(f"[BullMQ] Skipped {track_id}: claim {job_id} was re-issued")
@@ -1085,10 +1029,8 @@ def main():
     logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
     logger.info("=" * 60)
 
-    # Model is shared across all workers but loaded lazily on first job
-    # (ensure_model() is called automatically when work arrives).
-    # This avoids ~20s of CPU-heavy model loading at startup when audio
-    # analysis hasn't finished yet and there's no CLAP work to do.
+    # Model is shared across all workers but loaded lazily on the first job, so
+    # an analyzer with no CLAP work yet does not load it at startup.
     analyzer = CLAPAnalyzer()
 
     # Everything stops on stop_event; the job worker and control messages on jobs_stop, which a restart
@@ -1135,13 +1077,10 @@ def main():
 
     # Each start begins unmeasured, so the settings page never reads an earlier start's answer. The model
     # loads on the first job, so an idle analyzer would never say whether the GPU took effect: one session
-    # opened now measures it. A backend other than ONNX never uses the runtime, which is its answer.
+    # opened now measures it.
     if os.path.isdir(gpu_runtime.ROOT):
-        if CLAP_BACKEND == 'onnx':
-            gpu_runtime.record_provider(False, 'not measured since this start', measured=False)
-        else:
-            gpu_runtime.record_provider(False, f'the {CLAP_BACKEND} backend does not use the GPU runtime')
-    if CLAP_BACKEND == 'onnx' and gpu_runtime.request_gpu():
+        gpu_runtime.record_provider(False, 'not measured since this start', measured=False)
+    if gpu_runtime.request_gpu():
         threading.Thread(target=probe_gpu_session, name="GpuProbe", daemon=True).start()
 
     # Main loop: unload an idle model, and restart when the GPU switch changed: the runtime is put

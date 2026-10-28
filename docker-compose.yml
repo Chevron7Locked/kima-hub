@@ -294,11 +294,6 @@ services:
             NUM_WORKERS: ${CLAP_WORKERS:-2}
             THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
             MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
-            # ONNX everywhere: the same backend the
-            # all-in-one image runs, so every embedding shares one vector
-            # space. This image is torch-free; CLAP_BACKEND=torch here makes
-            # the analyzer refuse to embed rather than fall back.
-            CLAP_BACKEND: ${CLAP_BACKEND:-onnx}
             DATA_DIR: /
         volumes:
             - ${MUSIC_PATH:-./music}:/music:ro

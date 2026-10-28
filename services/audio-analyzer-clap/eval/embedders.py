@@ -40,7 +40,7 @@ class EmbedderSpec:
             raise FileNotFoundError(self.model_path)
         if kind == 'v1':
             self.recipe_files = [os.path.join(SERVICE_DIR, f)
-                                 for f in ('analyzer.py', 'onnx_backend.py', 'clap_mel.py')]
+                                 for f in ('analyzer.py', 'onnx_backend.py', 'music_clap_mel.py')]
         else:
             self.recipe_files = [os.path.join(self.engine_dir, 'vibe_engine', 'ear', '__init__.py')]
         self.model_sha256 = _sha256(self.model_path)
@@ -78,7 +78,6 @@ def _init_worker(spec: EmbedderSpec, threads: int) -> None:
         os.environ[v] = str(threads)
     if spec.kind == 'v1':
         os.environ['THREADS_PER_WORKER'] = str(threads)
-        os.environ['CLAP_BACKEND'] = 'onnx'
         os.environ['CLAP_ONNX_MODEL_PATH'] = spec.model_path
         sys.path.insert(0, SERVICE_DIR)
         import logging
