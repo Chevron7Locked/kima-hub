@@ -391,7 +391,8 @@ interface ResultRowProps {
     isDownloading: boolean;
     onToggleSelect: (key: string) => void;
     onDownload: (result: SoulseekResult) => void;
-    animationDelay: number;
+    /** Rows of the flat list rise in a cascade, each this far behind the one above; grouped rows do not animate. */
+    animationDelay?: number;
 }
 
 function ResultRow({
@@ -412,14 +413,8 @@ function ResultRow({
 
     return (
         <div
-            className={cn(RESULT_GRID, "items-center hover:bg-white/5 transition-colors rounded")}
-            style={
-                animationDelay > 0
-                    ? {
-                          animation: `fadeSlideIn 150ms ${animationDelay}ms both`,
-                      }
-                    : undefined
-            }
+            className={cn(RESULT_GRID, "items-center hover:bg-white/5 transition-colors rounded", animationDelay !== undefined && "animate-rise")}
+            style={animationDelay !== undefined ? { animationDelay: `${animationDelay}ms` } : undefined}
         >
             <div className="flex items-center justify-center">
                 <input
@@ -526,7 +521,6 @@ function GroupedView({
                                         isDownloading={downloadingFiles.has(getResultKey(result))}
                                         onToggleSelect={onToggleSelect}
                                         onDownload={onDownload}
-                                        animationDelay={0}
                                     />
                                 ))}
                             </div>
