@@ -213,7 +213,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
     );
 }
 
-/** The original full wipe: the identification step and everything after it. */
+/** Re-runs everything: the identification step and every step after it. */
 export async function wipeEnrichment(): Promise<EnrichmentWipe> {
     return rerunEnrichment("identification");
 }

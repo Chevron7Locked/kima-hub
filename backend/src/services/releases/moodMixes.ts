@@ -21,11 +21,7 @@ export const MOOD_MIX_RELEASE = "1.11.0";
 /** "remove" is the retired-mix wording of "rebuild": both clear the mix. */
 export type MoodMixDecision = "rebuild" | "keep" | "remove";
 
-/**
- * Display names of the moods 1.11 dropped, as the app showed them up to 1.10.1
- * (MOOD_CONFIG in moodBucketService), so a saved playlist carries the name the
- * user knew the mix by.
- */
+/** Legacy display names of the retired moods, so a saved playlist carries the name the listener knew the mix by. */
 const RETIRED_MOOD_NAMES: Record<string, string> = {
     energetic: "High Energy",
     focus: "Focus Mode",

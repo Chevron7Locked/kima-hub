@@ -18,7 +18,7 @@ export interface MoodStation {
     personal?: { kind: "night"; description: string };
 }
 
-/** The stations in the order they were approved (stations_2026-10-24.json); five share their mix's recipe. */
+/** The stations in their approved order; five share their mix's recipe. */
 const STATIONS: MoodStation[] = [
     { value: "calm", name: "Calm", recipe: "calm-station" },
     { value: "energy", name: "Energy", recipe: "energy-station" },
@@ -44,7 +44,7 @@ const PERSONAL: Record<string, NonNullable<MoodStation["personal"]>> = {
 const WILDCARD_SUBTITLE = "Songs with no mood tag";
 
 /**
- * A part the subtitle names: what the recipe leans toward, not what it pushes away (Kevin 10-25), so a "low:" part
+ * A part the subtitle names: what the recipe leans toward, not what it pushes away, so a "low:" part
  * is left out, except arousal, the felt-energy reading, which reads either way.
  */
 const named = ({ signal, weight }: RecipeComponent): boolean => weight > 0 || signal === "arousal";

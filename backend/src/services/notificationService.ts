@@ -26,9 +26,6 @@ interface CreateNotificationParams {
 }
 
 class NotificationService {
-    /**
-     * Create a new notification for a user
-     */
     async create(params: CreateNotificationParams) {
         const { userId, type, title, message, metadata, groupKey, renotify } = params;
 
@@ -91,9 +88,7 @@ class NotificationService {
         eventBus.emit({ type: "notification:cleared", userId, payload: { id: row.id } });
     }
 
-    /**
-     * Delete every user's alert under a group key, once its cause is gone
-     */
+    /** Delete every user's alert under a group key, once its cause is gone. */
     async resolve(groupKey: string) {
         const rows = await prisma.notification.findMany({
             where: { groupKey },
@@ -125,9 +120,6 @@ class NotificationService {
         }
     }
 
-    /**
-     * Get all uncleared notifications for a user
-     */
     async getForUser(userId: string, includeRead = true) {
         return prisma.notification.findMany({
             where: {
@@ -140,9 +132,6 @@ class NotificationService {
         });
     }
 
-    /**
-     * Get unread count for a user
-     */
     async getUnreadCount(userId: string) {
         return prisma.notification.count({
             where: {
@@ -153,9 +142,6 @@ class NotificationService {
         });
     }
 
-    /**
-     * Mark a notification as read
-     */
     async markAsRead(id: string, userId: string) {
         const result = await prisma.notification.updateMany({
             where: { id, userId },
@@ -165,9 +151,6 @@ class NotificationService {
         return result;
     }
 
-    /**
-     * Mark all notifications as read for a user
-     */
     async markAllAsRead(userId: string) {
         const result = await prisma.notification.updateMany({
             where: { userId, cleared: false },
@@ -177,9 +160,7 @@ class NotificationService {
         return result;
     }
 
-    /**
-     * Clear a notification (remove from view but keep in DB)
-     */
+    /** Clear a notification: hidden from the tray, kept in the database (trimGroup and resolve delete). */
     async clear(id: string, userId: string) {
         const result = await prisma.notification.updateMany({
             where: { id, userId },
@@ -195,9 +176,6 @@ class NotificationService {
         return result;
     }
 
-    /**
-     * Clear all notifications for a user
-     */
     async clearAll(userId: string) {
         const result = await prisma.notification.updateMany({
             where: { userId },
@@ -214,9 +192,6 @@ class NotificationService {
     }
     // === Convenience methods for common notification types ===
 
-    /**
-     * Notify user that a download completed
-     */
     async notifyDownloadComplete(
         userId: string,
         subject: string,
@@ -232,9 +207,6 @@ class NotificationService {
         });
     }
 
-    /**
-     * Notify user that a download failed
-     */
     async notifyDownloadFailed(
         userId: string,
         subject: string,
@@ -262,9 +234,6 @@ class NotificationService {
         });
     }
 
-    /**
-     * Notify user that a Spotify import completed
-     */
     async notifyImportComplete(
         userId: string,
         playlistName: string,

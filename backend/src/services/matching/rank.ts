@@ -1,6 +1,6 @@
 /**
  * The ranking pass every vibe feature uses: the library scored against a weighted set
- * of input tracks with the 1.11 formula, `Σ_i w_i · s(t, i)`, in one exact scan. Eligible tracks have a sound vector of the
+ * of input tracks with the matching formula, `Σ_i w_i · s(t, i)`, in one exact scan. Eligible tracks have a sound vector of the
  * probe's model, current feel, and a present file.
  */
 import { Prisma } from "@prisma/client";

@@ -28,13 +28,9 @@ import { moodStateOf } from "./state";
 export const TAG_LINE_Z = RECIPE_LINE;
 
 /**
- * The statistics row (version, inputs fingerprint and when it was written) the last complete pass in this process wrote
- * every track's tags from. Tags read the scores, which songs are eligible (a present, readable file with finished
- * analysis and current scores) and, for defined moods, what the definitions read. The inputs fingerprint (state.ts)
- * covers the scores, the eligible songs and the arousal, instrumental, acoustic, tempo, tempo confidence and key scale
- * readings. The skip is safe only because no definition reads anything outside the fingerprint; tags.test.ts fails if
- * one starts to. The row is rewritten whenever the fingerprint changes, so a pass over the same
- * row would change nothing.
+ * The statistics row (version, inputs fingerprint, written at) the last complete tag pass in this process read. The
+ * row is rewritten whenever its inputs fingerprint (state.ts) changes, so a pass over the same row would change
+ * nothing; that holds only while no definition reads outside the fingerprint, which tags.test.ts checks.
  */
 let taggedFrom: string | null = null;
 
