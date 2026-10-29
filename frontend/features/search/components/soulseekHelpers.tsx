@@ -35,7 +35,7 @@ export const getQualityBadge = (result: SoulseekResult) => {
     );
 };
 
-export const parseFilename = (
+const parseFilename = (
     filename: string,
 ): { artist: string; title: string } => {
     const match = filename.match(/([^/\\]+)\.(?:mp3|flac|m4a|wav)$/i);

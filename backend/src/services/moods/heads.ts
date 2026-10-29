@@ -24,7 +24,7 @@ export const RETIRED_MOODS: readonly Mood[] = ["night"];
 /** The moods a recipe, a definition or a tag may use: every learned mood but the retired ones. */
 export const LIVE_MOODS: readonly Mood[] = MOODS.filter((mood) => !RETIRED_MOODS.includes(mood));
 
-export interface MoodHead {
+interface MoodHead {
     weights: number[];
     bias: number;
 }

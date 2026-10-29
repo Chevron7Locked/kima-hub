@@ -19,7 +19,7 @@ import { MIN_LISTEN_WINDOW_SECONDS } from "./stats/listens";
 
 
 
-export type ListenVerdict = "heard" | "unclear" | "skipped" | "never-counts";
+type ListenVerdict = "heard" | "unclear" | "skipped" | "never-counts";
 
 export interface Listen {
     trackId: string;
@@ -134,7 +134,7 @@ export async function listensOf(userId: string): Promise<Listen[]> {
     return out;
 }
 
-export interface FalseStartTrack {
+interface FalseStartTrack {
     trackId: string;
     title: string;
     artist: string;

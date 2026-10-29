@@ -17,6 +17,7 @@ import { GradientSpinner } from "../ui/GradientSpinner";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/relative-time";
 import { ListHeader } from "./ListHeader";
+import { ActivityIcon } from "./ActivityIcon";
 
 export interface ImportJob {
     id: string;
@@ -162,7 +163,7 @@ function ImportJobCard({
 
     return (
         <li className="group flex items-start gap-2.5 px-3 py-2 transition-colors duration-150 hover:bg-white/[0.04] focus-within:bg-white/[0.04]">
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.04]">
+            <ActivityIcon>
                 {isActive ? (
                     cancelling ? (
                         <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />
@@ -174,7 +175,7 @@ function ImportJobCard({
                 ) : (
                     <AlertCircle aria-hidden="true" className="h-3.5 w-3.5 text-danger-light" />
                 )}
-            </span>
+            </ActivityIcon>
 
             <div className="min-w-0 flex-1">
                 <p className="flex items-baseline gap-2">

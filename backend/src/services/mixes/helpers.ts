@@ -199,7 +199,7 @@ export const MIX_SONG_ALBUM = { select: { coverUrl: true, artistId: true, artist
 type MixSong = { id: string; album: { coverUrl: string | null; artistId: string; artist: { identityKey: string } } };
 
 /** Up to `limit` of `ordered`, in that order, at most 2 per artist (capByArtist). */
-export function cappedByArtist<T extends MixSong>(ordered: T[], limit: number): T[] {
+function cappedByArtist<T extends MixSong>(ordered: T[], limit: number): T[] {
     const byId = new Map(ordered.map((t) => [t.id, t]));
     const keyed = ordered.map((t) => ({ id: t.id, artistId: songArtistKey(t.id, t.album.artistId, t.album.artist.identityKey) }));
     return capByArtist(keyed, limit).map((id) => byId.get(id)!);
@@ -311,7 +311,7 @@ export async function seededTrackIds(where: Prisma.Sql, take: number, seed: numb
  * MIN_MIX_TRACKS, or than `limit` if smaller, then no cap). Each artist's songs are numbered in the database in the
  * day's order, so only the first three of each artist reach the server, however large the match.
  */
-export async function seededCappedTrackIds(where: Prisma.Sql, limit: number, seed: number): Promise<string[]> {
+async function seededCappedTrackIds(where: Prisma.Sql, limit: number, seed: number): Promise<string[]> {
     assertTake(limit);
     const key = seededKeySql(seed, Prisma.sql`t.id`);
     const rows = await prisma.$queryRaw<{ id: string; n: number }[]>`

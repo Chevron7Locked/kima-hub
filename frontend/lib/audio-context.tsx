@@ -1,4 +1,3 @@
-export type { Track } from "./audio-state-context";
 
 export { useAudioState } from "./audio-state-context";
 export { useAudioPlayback } from "./audio-playback-context";

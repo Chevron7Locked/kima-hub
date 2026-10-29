@@ -12,7 +12,7 @@ import http from "http";
 import path from "path";
 import type { AddressInfo } from "net";
 
-export interface Exchange {
+interface Exchange {
     seq: number;
     at: string;
     method: string;

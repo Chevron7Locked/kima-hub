@@ -147,7 +147,7 @@ export function knownSuffix(mime: string | null): string | null {
     return m && Object.prototype.hasOwnProperty.call(SUFFIXES, m) ? SUFFIXES[m] : null;
 }
 
-export function mimeToSuffix(mime: string | null): string {
+function mimeToSuffix(mime: string | null): string {
     return knownSuffix(mime) ?? "mp3";
 }
 

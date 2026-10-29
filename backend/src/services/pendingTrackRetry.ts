@@ -14,7 +14,7 @@ import { requestScan } from "../workers/scanRequest";
 type Matches = Awaited<ReturnType<typeof soulseekService.searchTrack>>["allMatches"];
 
 const NO_ALBUM = "Unknown Album";
-export const SOULSEEK_UNAVAILABLE = "Soulseek is turned off or not set up";
+const SOULSEEK_UNAVAILABLE = "Soulseek is turned off or not set up";
 
 /**
  * The music folder Soulseek downloads into, or the reason Soulseek cannot fetch anything here. Soulseek's own check

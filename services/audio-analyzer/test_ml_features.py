@@ -103,7 +103,7 @@ class NoMoodTagsTest(unittest.TestCase):
 
     @mock.patch.object(analyzer, 'ESSENTIA_AVAILABLE', True)
     def test_an_analysis_carries_no_mood_tags(self):
-        # Values past every cut-off the analyzer used to tag with.
+        # Extreme readings (fast tempo, high valence, arousal and danceability) produce no mood tags.
         a = stubbed_analyzer(
             rhythm=lambda audio: (150.0, [0.5, 1.0], 3.0, None, [0.5]),
             ml=lambda audio: dict(valence=0.9, arousal=0.9, danceability=0.9),

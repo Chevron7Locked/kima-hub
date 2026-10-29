@@ -13,7 +13,7 @@ const PROBE_TIMEOUT_MS = 5000;
  * Whether the fpcalc binary runs. ACOUSTID_DISABLED=true counts as absent, so
  * the feature list and the service agree on one answer.
  */
-export function fpcalcPresent(): boolean {
+function fpcalcPresent(): boolean {
     if (process.env.ACOUSTID_DISABLED === "true") {
         return false;
     }

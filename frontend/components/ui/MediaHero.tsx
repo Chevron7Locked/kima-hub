@@ -17,7 +17,7 @@ interface HeroCoverProps {
 }
 
 /** The 140/192 cover box under a hero: one place the size, ring and shadow live. */
-export const HeroCover = memo(function HeroCover({
+const HeroCover = memo(function HeroCover({
     image,
     alt,
     shape,

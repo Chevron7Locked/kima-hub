@@ -3,7 +3,7 @@
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
 
-export type ShareEntityType = "playlist" | "track" | "album";
+type ShareEntityType = "playlist" | "track" | "album";
 
 const SHARE_ENTITY_TYPES: ShareEntityType[] = [
     "playlist",

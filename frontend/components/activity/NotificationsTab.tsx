@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { timeAgo } from "@/lib/relative-time";
 import { ListHeader } from "./ListHeader";
+import { ActivityIcon } from "./ActivityIcon";
 
 export function NotificationsTab() {
     const {
@@ -92,12 +93,7 @@ export function NotificationsTab() {
                             key={notification.id}
                             className="group relative flex items-start gap-2.5 px-3 py-2 transition-colors duration-150 hover:bg-white/[0.04] focus-within:bg-white/[0.04]"
                         >
-                            <span className="relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.04]">
-                                {getIcon(notification.type)}
-                                {!notification.read && (
-                                    <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-brand" />
-                                )}
-                            </span>
+                            <ActivityIcon unread={!notification.read}>{getIcon(notification.type)}</ActivityIcon>
 
                             <div className="min-w-0 flex-1">
                                 <p

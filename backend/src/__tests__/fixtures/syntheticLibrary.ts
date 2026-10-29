@@ -76,7 +76,7 @@ export interface LibraryHandle {
     user2: string;
 }
 
-export const trackId = (prefix: string, i: number) => `${prefix}trk_${String(i).padStart(5, "0")}`;
+const trackId = (prefix: string, i: number) => `${prefix}trk_${String(i).padStart(5, "0")}`;
 
 /** Writes the library under `prefix`. Call `removeSyntheticLibrary(prefix)` when done. */
 export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandle> {

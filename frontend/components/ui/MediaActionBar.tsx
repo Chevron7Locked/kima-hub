@@ -103,6 +103,7 @@ export const MediaActionButton = memo(function MediaActionButton({
         <button
             onClick={onClick}
             title={label}
+            aria-label={label}
             disabled={disabled}
             className={cn(
                 "h-8 w-8 hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all disabled:opacity-50",

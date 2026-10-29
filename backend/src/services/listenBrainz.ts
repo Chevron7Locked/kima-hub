@@ -20,7 +20,7 @@ export interface SimilarArtist {
     url: string;
 }
 
-export interface ChartArtist {
+interface ChartArtist {
     type: "music";
     id: string;
     name: string;
@@ -31,7 +31,7 @@ export interface ChartArtist {
 }
 
 /** One of an artist's most-listened recordings, sitewide (popularity API). */
-export interface LbTopRecording {
+interface LbTopRecording {
     recordingMbid: string;
     title: string;
     releaseMbid: string | null;

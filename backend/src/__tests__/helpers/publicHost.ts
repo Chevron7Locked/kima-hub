@@ -6,7 +6,7 @@ import http from "http";
  * address, the local server's included, so tests reach it under this name: the name is checked as a public
  * address, and a connection to it lands on 127.0.0.1 at the URL's port (the one stand-in, for the internet).
  */
-export const PUBLIC_HOST = "public.test";
+const PUBLIC_HOST = "public.test";
 const PUBLIC_ADDRESS = "93.184.216.34";
 
 /** `http://public.test:<port>` for a local server on that port. Call routePublicHost first. */

@@ -13,7 +13,7 @@ export type ActivityKind = "notifications" | "downloads" | "imports" | "history"
 /** What an activity area shows: everything merged, or one kind. */
 export type ActivityView = "all" | ActivityKind;
 
-export const ACTIVITY_VIEWS: readonly ActivityView[] = ["all", "notifications", "downloads", "imports", "history"];
+const ACTIVITY_VIEWS: readonly ActivityView[] = ["all", "notifications", "downloads", "imports", "history"];
 
 export const isActivityView = (value: unknown): value is ActivityView =>
     ACTIVITY_VIEWS.includes(value as ActivityView);

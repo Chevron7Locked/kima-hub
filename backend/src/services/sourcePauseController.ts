@@ -9,7 +9,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { isRateLimited } from "./enrichmentErrorCodeClassifier";
 
-export type SourceName = string;
+type SourceName = string;
 
 /** How long a source rests after a rate limit before it is tried again. */
 const DEFAULT_PAUSE_WINDOW_MS = 30_000;

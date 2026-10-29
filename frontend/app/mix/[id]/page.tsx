@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { TrackRow } from "@/components/ui/TrackRow";
+import { MediaActionButton } from "@/components/ui/MediaActionBar";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
@@ -232,13 +233,12 @@ export default function MixPage() {
                     )}
 
                     {mix.tracks && mix.tracks.length > 1 && (
-                        <button
+                        <MediaActionButton
+                            icon={<Shuffle className="w-5 h-5" />}
+                            label={`Shuffle play ${mix.name}`}
                             onClick={handleShuffle}
-                            aria-label={`Shuffle play ${mix.name}`}
-                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-[var(--text-secondary)] hover:text-white transition-all"
-                        >
-                            <Shuffle className="w-5 h-5" />
-                        </button>
+                            shape="circle"
+                        />
                     )}
 
                     <button

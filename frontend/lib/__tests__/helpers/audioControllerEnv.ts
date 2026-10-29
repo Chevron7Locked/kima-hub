@@ -40,7 +40,7 @@ export function createFakeAudioElement() {
 
 export type FakeAudioElement = ReturnType<typeof createFakeAudioElement>;
 
-export function installEnv(): { created: FakeAudioElement[] } {
+function installEnv(): { created: FakeAudioElement[] } {
     const created: FakeAudioElement[] = [];
     const fakeDocument = {
         visibilityState: "visible",

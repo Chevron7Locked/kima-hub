@@ -38,7 +38,7 @@ export function sameName(a: string | null | undefined, b: string | null | undefi
 }
 
 /** An artist and title as one key for lookup, or null when either has no letters or digits. */
-export const albumNameKey = (artist: string, title: string) => {
+const albumNameKey = (artist: string, title: string) => {
     const a = nameKey(artist);
     const t = nameKey(title);
     return a && t ? `${a}\u0000${t}` : null;

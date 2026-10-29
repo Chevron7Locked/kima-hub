@@ -59,7 +59,7 @@ export interface RecipeComponent {
     weight: number;
 }
 
-export interface RecipeFilters {
+interface RecipeFilters {
     /** Inclusive BPM band; a song passes when its tempo, double or half falls inside, on a steady beat. */
     bpm?: [number, number];
     /** Inclusive bounds on CLAP's instrumental probability. */

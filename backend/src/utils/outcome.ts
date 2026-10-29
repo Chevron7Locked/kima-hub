@@ -4,7 +4,7 @@
  * call is never allowed to look like "the source has nothing".
  */
 
-export type OutcomeError = {
+type OutcomeError = {
     /** Stable machine code, e.g. "TIMEOUT", "HTTP_500", "MALFORMED". */
     code: string;
     /** Human-readable cause, from the real error — never a stand-in. */

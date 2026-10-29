@@ -11,7 +11,7 @@ import { sourcePauseController } from "./sourcePauseController";
 import { notificationService } from "./notificationService";
 import { createLidarrClient, isLidarrConfigured } from "./lidarrClient";
 
-export const LIDARR_UNHEALTHY = "LIDARR_UNHEALTHY";
+const LIDARR_UNHEALTHY = "LIDARR_UNHEALTHY";
 const ALERT_KEY = "lidarr-health";
 const CHECK_INTERVAL_MS = 60_000;
 const BACKOFF_MS = [1, 2, 5, 15].map((minutes) => minutes * 60_000);

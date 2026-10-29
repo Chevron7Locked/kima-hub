@@ -22,7 +22,7 @@ export interface SpotifyTrack {
     coverUrl: string | null;
 }
 
-export interface SpotifyPlaylist {
+interface SpotifyPlaylist {
     id: string;
     name: string;
     description: string | null;
