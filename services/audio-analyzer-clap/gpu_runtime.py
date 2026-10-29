@@ -397,41 +397,38 @@ def _install():
         shutil.rmtree(tmp_root, ignore_errors=True)
 
 
-def _next_action(retry_failed):
-    """What the switches ask of the disk: install when the runtime is wanted and missing (after a failed
-    attempt only when retry_failed). Nothing is ever removed: an installed runtime that nothing wants stays
-    on disk, inert (each process puts it on its path only while its own switch is on)."""
+def _install_wanted(retry_failed):
+    """Whether the switches ask for an install: the runtime is wanted and missing (after a failed attempt only
+    when retry_failed). Nothing is ever removed: an installed runtime that nothing wants stays on disk, inert
+    (each process puts it on its path only while its own switch is on)."""
     status = read_state().get('status')
-    if not read_enabled():
-        return None
-    if is_installed() or status == 'installing':
-        return None
-    return 'install' if retry_failed or status != 'failed' else None
+    if not read_enabled() or is_installed() or status == 'installing':
+        return False
+    return retry_failed or status != 'failed'
 
 
-def _start(action):
-    """Caller holds _lock."""
+def _start():
+    """Starts the install thread. Caller holds _lock."""
     global _install_thread
-    if action == 'install':
-        _cancel.clear()
-    _install_thread = threading.Thread(target=_converge, args=(action,), name='gpu-runtime-install',
-                                       daemon=True)
+    _cancel.clear()
+    _install_thread = threading.Thread(target=_converge, name='gpu-runtime-install', daemon=True)
     _install_thread.start()
 
 
-def _converge(action):
-    """Run `action`, then whatever the switches ask for by the time it ends, so a request that came in
-    while this thread was busy is carried out. A failed step ends the run instead of repeating."""
+def _converge():
+    """Install, then again if the switches still ask for it when that ends, so a request that came in while
+    this thread was busy is carried out. A failed install ends the run instead of repeating."""
     global _install_thread
-    while action:
+    again = True
+    while again:
         outcome = _install()
         with _lock:
-            action = None if outcome == 'failed' else _next_action(retry_failed=False)
+            again = outcome != 'failed' and _install_wanted(retry_failed=False)
             if not read_enabled():
                 _forget_failure()  # both switches went off while it ran: nobody is waiting on this answer
-            if action == 'install':
+            if again:
                 _cancel.clear()
-            if action is None:
+            else:
                 _install_thread = None
 
 
@@ -467,7 +464,7 @@ def dispatch(action):
             return 'skipped_disabled'
         if is_installed():
             return 'skipped_installed'
-        _start(action)
+        _start()
         return 'started'
 
 
@@ -485,8 +482,7 @@ def reconcile():
             _write_state({'status': 'failed', 'reason': 'install_failed', 'detail': ABANDONED})
         if not read_enabled():
             _forget_failure()
-        action = _next_action(retry_failed=True)
-        if action is None:
+        if not _install_wanted(retry_failed=True):
             return 'nothing_to_do'
-        _start(action)
-        return action
+        _start()
+        return 'install'

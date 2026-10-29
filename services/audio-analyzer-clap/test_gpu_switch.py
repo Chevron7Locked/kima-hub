@@ -231,7 +231,7 @@ def test_a_start_never_removes_an_installed_runtime_whatever_the_switches_say(tm
     assert gpu_runtime.reconcile() == "nothing_to_do"
     _settle()
     assert ran == [] and gpu_runtime.is_installed()
-    assert gpu_runtime._next_action(retry_failed=True) is None
+    assert gpu_runtime._install_wanted(retry_failed=True) is False
 
 
 def test_a_start_retries_an_install_its_predecessor_was_killed_in(tmp_path, monkeypatch):
@@ -251,8 +251,8 @@ def test_a_failed_download_is_not_repeated_and_waits_for_a_restart_or_a_click(tm
     assert gpu_runtime.dispatch("install") == "started"
     _settle()
     assert ran == ["install"]
-    assert gpu_runtime._next_action(retry_failed=False) is None
-    assert gpu_runtime._next_action(retry_failed=True) == "install"
+    assert gpu_runtime._install_wanted(retry_failed=False) is False
+    assert gpu_runtime._install_wanted(retry_failed=True) is True
 
 
 def test_a_restart_finishes_running_jobs_within_their_lock_while_search_keeps_answering(monkeypatch):
