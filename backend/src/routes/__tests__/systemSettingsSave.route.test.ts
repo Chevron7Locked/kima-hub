@@ -81,11 +81,11 @@ it("a server with no settings yet starts from the schema's defaults", async () =
         fanartEnabled: false,
         audiobookshelfEnabled: false,
         audiobookshelfUrl: "http://localhost:13378",
-        musicPath: "/music",
         downloadPath: "/downloads",
         autoSync: true,
         transcodeCacheMaxGb: 10,
         maxQueueLength: 10000,
         soulseekConcurrentDownloads: 4,
     });
+    expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).musicPath).toBe("/music");
 });

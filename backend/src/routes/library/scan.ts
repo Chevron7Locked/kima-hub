@@ -12,13 +12,6 @@ const router = Router();
 
 router.post("/scan", requireAdmin, async (req, res) => {
   try {
-    if (!config.music.musicPath) {
-      return res.status(500).json({
-        error:
-          "Music path not configured. Please set MUSIC_PATH environment variable.",
-      });
-    }
-
     // Soulseek downloads are filed first; a failure there does not stop the scan.
     try {
       await organizeSingles();

@@ -4,7 +4,6 @@ import { subsonicAuth } from "../../middleware/subsonicAuth";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { scanQueue } from "../../workers/queues";
 import { requestScan } from "../../workers/scanRequest";
-import { config } from "../../config";
 import { requireSubsonicAdmin } from "./userHelpers";
 import { findApiKeyUser } from "../../services/users/apiKeyStore";
 // Every async handler here goes through wrap(): in Express 4 a rejected handler
@@ -130,9 +129,6 @@ subsonicRouter.all("/getScanStatus.view", wrap(async (req: Request, res: Respons
 subsonicRouter.all("/startScan.view", wrap(async (req: Request, res: Response) => {
     // Admin only, like the REST scan route.
     if (!requireSubsonicAdmin(req, res)) return;
-    if (!config.music.musicPath) {
-        return subsonicError(req, res, SubsonicError.GENERIC, "Music path not configured");
-    }
 
     await withQueueDeadline(
         requestScan({ userId: req.user!.id, source: "subsonic-scan" }),

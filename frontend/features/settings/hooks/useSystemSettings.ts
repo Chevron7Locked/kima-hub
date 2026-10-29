@@ -55,6 +55,10 @@ export function useSystemSettings() {
         currentAdminRef.current = adminId;
     }, [adminId]);
 
+    // The music folder as loaded: a save sends it only when it was changed here, so a tab left open does not put
+    // back a folder someone else has since changed.
+    const loadedMusicPathRef = useRef<string | null>(null);
+
     const fetchSystemSettings = useCallback(() => {
         const askedFor = adminId;
         const current = () => currentAdminRef.current === askedFor;
@@ -74,7 +78,11 @@ export function useSystemSettings() {
                     return sanitized as unknown as SystemSettings;
                 };
 
-                if (current()) setSystemSettings(sanitizeSettings(sysData));
+                if (current()) {
+                    const loaded = sanitizeSettings(sysData);
+                    loadedMusicPathRef.current = loaded.musicPath;
+                    setSystemSettings(loaded);
+                }
             })
             .catch((error) => {
                 if (current()) setLoadError(error instanceof Error ? error.message : "Failed to load settings");
@@ -105,7 +113,10 @@ export function useSystemSettings() {
     }, [adminId, fetchSystemSettings]);
 
     const saveSystemSettings = async (settingsToSave: SystemSettings) => {
-        await api.updateSystemSettings(settingsToSave);
+        const { musicPath, ...rest } = settingsToSave;
+        const changedFolder = musicPath !== loadedMusicPathRef.current;
+        await api.updateSystemSettings(changedFolder ? settingsToSave : rest);
+        if (changedFolder) loadedMusicPathRef.current = musicPath;
     };
 
     const updateSystemSettings = (updates: Partial<SystemSettings>) => {

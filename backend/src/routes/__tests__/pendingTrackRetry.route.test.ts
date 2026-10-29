@@ -39,6 +39,9 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import playlistsRoutes from "../playlists";
+import { config, useMusicFolder } from "../../config";
+
+const startFolder = config.music.musicPath;
 import notificationRoutes from "../notifications";
 
 const P = "ptr";
@@ -74,6 +77,7 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
+    useMusicFolder("/music");
     await cleanup();
     for (const id of [OWNER, OTHER]) await prisma.user.create({ data: { id, username: id, passwordHash: "x" } });
 });
@@ -90,6 +94,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+    useMusicFolder(startFolder);
     await cleanup();
     await closeEngineConnections();
 });
@@ -130,13 +135,6 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
 
         expect(await settled(res.body.downloadJobId)).toMatchObject({ status: "failed", error: "peer went away" });
         expect(mockScan).not.toHaveBeenCalled();
-    });
-
-    it("refuses without a music folder", async () => {
-        const pt = await pending("Point of Disgust");
-        mockSettings.mockResolvedValue({ musicPath: null });
-
-        expect((await retry(pt.id).expect(400)).body.error).toBe("Music path not configured");
     });
 
     it("fails the job when the search itself fails", async () => {

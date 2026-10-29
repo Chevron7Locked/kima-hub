@@ -1,4 +1,6 @@
 import { Router } from "express";
+import path from "path";
+import fs from "fs";
 import axios from "axios";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAdmin } from "../middleware/auth";
@@ -18,6 +20,7 @@ import {
     gpuSupported,
 } from "../services/gpuRuntime";
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
+import { config, musicFolderProblem, musicPathFixedByEnv, useMusicFolder } from "../config";
 import { createLidarrClient } from "../services/lidarrClient";
 import { safeError } from "../utils/errors";
 
@@ -110,6 +113,18 @@ const systemSettingsSchema = z.object({
   podcastChartCountry: z.string().trim().toLowerCase().regex(/^[a-z]{2}$/).optional(),
 });
 
+/** Whether the library's songs are in `folder`: yes with no songs yet, or when most of a sample's files are there. */
+async function libraryFoundIn(folder: string): Promise<boolean> {
+  const sample = await prisma.track.findMany({
+    where: { missingSince: null },
+    select: { filePath: true },
+    orderBy: { id: "asc" },
+    take: 50,
+  });
+  const found = sample.filter((t) => fs.existsSync(path.join(folder, t.filePath))).length;
+  return found * 2 > sample.length || sample.length === 0;
+}
+
 // GET /system-settings
 router.get("/", async (_req, res) => {
   try {
@@ -125,7 +140,8 @@ router.get("/", async (_req, res) => {
     // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
     const resolved = await resolveEncryptedSettings({ ...settings });
 
-    res.json(resolved);
+    // The folder actually in use, which MUSIC_PATH can fix whatever the row says.
+    res.json({ ...resolved, musicPath: config.music.musicPath, musicPathFixedByEnv: musicPathFixedByEnv() });
   } catch (error) {
     logger.error("Get system settings error:", error);
     res.status(500).json({ error: "Failed to get system settings" });
@@ -136,6 +152,30 @@ router.get("/", async (_req, res) => {
 router.post("/", async (req, res) => {
   try {
     const data = systemSettingsSchema.parse(req.body);
+
+    // One music folder for scans and downloads alike; a new one is checked, then used at once.
+    // Only a changed folder is checked: every save sends it back, and one in use that is briefly missing (a disk not
+    // mounted yet) must not block saving anything else.
+    if (data.musicPath !== undefined) {
+      const folder = path.resolve(data.musicPath.trim());
+      if (folder === path.resolve(config.music.musicPath)) {
+        delete data.musicPath;
+      } else if (musicPathFixedByEnv()) {
+        return res.status(400).json({
+          error: `The music folder is set by the server's MUSIC_PATH (${config.music.musicPath}) and cannot be changed here`,
+        });
+      } else {
+        const problem = musicFolderProblem(folder);
+        if (problem) return res.status(400).json({ error: problem });
+        // Scans drop songs they keep not finding, so a folder without the library would empty it.
+        if (!(await libraryFoundIn(folder))) {
+          return res.status(400).json({
+            error: `None of the library's songs are in ${folder}; move the music there first`,
+          });
+        }
+        data.musicPath = folder;
+      }
+    }
 
     // Encrypt every supplied field from ENCRYPTED_FIELDS; fields the
     // payload omits stay untouched by the upsert.
@@ -154,6 +194,7 @@ router.post("/", async (req, res) => {
     });
 
     invalidateSystemSettingsCache();
+    if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
 
     // Reconnect Soulseek only when a connection setting actually changed: the P2P
     // credentials or the slskd backend (mode, URL, API key).

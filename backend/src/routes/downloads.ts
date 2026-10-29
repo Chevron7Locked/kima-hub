@@ -4,7 +4,6 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { config } from "../config";
-import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
@@ -68,8 +67,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
 
         // Every download a person asks for goes to the music folder as "library"; a downloadType a client
         // still sends is ignored. Discover's own jobs are marked "discovery" in acquisitionService.
-        const settings = await getSystemSettings();
-        const rootFolderPath = settings?.musicPath || config.music.musicPath;
+        const rootFolderPath = config.music.musicPath;
 
         if (type === "artist") {
             const jobs = await processArtistDownload(
@@ -179,12 +177,11 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                 },
             });
             if (existingJob) {
-                const settings = await getSystemSettings();
                 return res.json({
                     id: existingJob.id,
                     status: existingJob.status,
                     downloadType: "library",
-                    rootFolderPath: settings?.musicPath || config.music.musicPath,
+                    rootFolderPath: config.music.musicPath,
                     message: "Download already in progress",
                     duplicate: true,
                 });

@@ -4,6 +4,7 @@ import { notificationService } from "../services/notificationService";
 import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
+import { config } from "../config";
 import {
     createRetryJob,
     downloadSources,
@@ -442,23 +443,7 @@ router.post(
                 );
 
                 const settings = await getSystemSettings();
-                const musicPath = settings?.musicPath;
-
-                if (!musicPath) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Music path not configured",
-                            completedAt: new Date(),
-                        },
-                    });
-                    return res.json({
-                        success: false,
-                        newJobId: newJobRecord.id,
-                        error: "Music path not configured",
-                    });
-                }
+                const musicPath = config.music.musicPath;
 
                 // Build track from album info (single track search using album as title)
                 const tracks = [

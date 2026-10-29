@@ -7,7 +7,6 @@
 
 import type { Job } from "bullmq";
 import { scanQueue } from "./queues";
-import { config } from "../config";
 import type { ScanJobData } from "./processors/scanProcessor";
 
 export interface ScanRequest {
@@ -74,7 +73,6 @@ export async function requestScan(req: ScanRequest): Promise<ScanRequestResult> 
 
     const data: ScanJobData = {
         userId: req.userId,
-        musicPath: config.music.musicPath,
         source: req.source,
         albumMbid: req.albumMbid,
         artistMbid: req.artistMbid,

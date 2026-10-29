@@ -36,6 +36,8 @@ export interface SystemSettings {
     slskdApiKey: string | null;
     // Storage
     musicPath: string;
+    /** The server's MUSIC_PATH fixes the music folder, so it cannot be changed here. */
+    musicPathFixedByEnv?: boolean;
     downloadPath: string;
     // Advanced
     transcodeCacheMaxGb: number;

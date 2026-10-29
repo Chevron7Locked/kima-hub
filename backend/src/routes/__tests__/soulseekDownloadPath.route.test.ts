@@ -7,7 +7,6 @@ const mockDownloadTrack = jest.fn();
 jest.mock("../../services/soulseek", () => ({
     soulseekService: { isAvailable: jest.fn().mockResolvedValue(true), downloadTrack: (...a: unknown[]) => mockDownloadTrack(...a) },
 }));
-jest.mock("../../utils/systemSettings", () => ({ getSystemSettings: jest.fn().mockResolvedValue({ musicPath: "/srv/music" }) }));
 jest.mock("../../workers/scanRequest", () => ({ requestScan: jest.fn().mockResolvedValue({ queued: true }) }));
 
 import express from "express";
@@ -16,18 +15,23 @@ import path from "path";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import soulseekRoutes from "../soulseek";
+import { config, useMusicFolder } from "../../config";
+
+const startFolder = config.music.musicPath;
 
 const ADMIN = "zz-slsk-dlpath-admin";
 const app = express().use(express.json()).use("/soulseek", soulseekRoutes);
 const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 
 beforeAll(async () => {
+    useMusicFolder("/srv/music");
     await prisma.user.create({ data: { id: ADMIN, username: ADMIN, passwordHash: "x", role: "admin", tokenVersion: 0 } });
 });
 
 beforeEach(() => mockDownloadTrack.mockReset().mockResolvedValue({ success: false, error: "stand-in" }));
 
 afterAll(async () => {
+    useMusicFolder(startFolder);
     await prisma.downloadJob.deleteMany({ where: { userId: ADMIN } });
     await prisma.user.deleteMany({ where: { id: ADMIN } });
     await prisma.$disconnect();

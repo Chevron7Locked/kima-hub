@@ -1,7 +1,6 @@
 /**
- * The organizer reads the music folder from `getSystemSettings().musicPath`
- * only, and moves a file by rename or copy → verify → unlink. Real files in a
- * temp dir.
+ * The organizer works in the one music folder (the one scans read), and moves a
+ * file by rename or copy → verify → unlink. Real files in a temp dir.
  */
 
 import fs from "fs";
@@ -30,6 +29,10 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 import { organizeSingles } from "../organizeSingles";
+import { config, useMusicFolder } from "../../config";
+
+const startFolder = config.music.musicPath;
+afterAll(() => useMusicFolder(startFolder));
 
 let root: string;
 
@@ -41,7 +44,8 @@ beforeEach(() => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "01 one.flac"), Buffer.alloc(1024, 7));
     fs.writeFileSync(path.join(dir, "02 two.flac"), Buffer.alloc(2048, 7));
-    mockGetSystemSettings.mockResolvedValue({ musicPath: root });
+    useMusicFolder(root);
+    mockGetSystemSettings.mockResolvedValue({ musicPath: "/somewhere/else" });
 });
 
 afterEach(() => {
@@ -73,21 +77,11 @@ it("runs once: the marker stops a second migration", async () => {
     expect(fs.existsSync(path.join(root, "Singles", "Late", "new.flac"))).toBe(false);
 });
 
-it("fails closed when the settings row has no music path", async () => {
-    mockGetSystemSettings.mockResolvedValue({ musicPath: null });
+it("works in the folder scans read, whatever the settings row holds", async () => {
+    await organizeSingles();
 
-    await expect(organizeSingles()).rejects.toThrow(/not configured/);
-    // Nothing was moved.
-    expect(
-        fs.readdirSync(path.join(root, "Soulseek", "Artist X - Album Y (2024)")),
-    ).toHaveLength(2);
-});
-
-it("ignores MUSIC_PATH in the environment (one source, no fallback)", async () => {
-    process.env.MUSIC_PATH = root; // must not be read
-    mockGetSystemSettings.mockResolvedValue(null); // no settings row
-
-    await expect(organizeSingles()).rejects.toThrow(/not configured/);
+    expect(fs.existsSync(path.join(root, "Singles", "Artist X", "Album Y", "01 one.flac"))).toBe(true);
+    expect(fs.existsSync("/somewhere/else")).toBe(false);
 });
 
 it("keeps the sources and skips the marker when the cross-device copy comes up short", async () => {

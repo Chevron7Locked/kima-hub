@@ -8,7 +8,6 @@ import { coversBasePath } from "../../services/imageStorage";
 
 export interface ScanJobData {
     userId?: string; // Optional: scans can be triggered without a user
-    musicPath?: string; // Optional: use custom path or default from config
     albumMbid?: string; // Optional: the album a download or retry brought in
     artistMbid?: string; // Optional: the artist of a retried track
     source?: string; // Optional: source of scan (e.g., "lidarr-webhook", "discover-weekly-completion", "spotify-import")
@@ -37,7 +36,6 @@ export async function processScan(
 ): Promise<ScanResult> {
     const {
         userId,
-        musicPath,
         albumMbid,
         artistMbid,
         source,
@@ -82,8 +80,8 @@ export async function processScan(
         }
     }, coverCachePath);
 
-    // Use provided music path or fall back to config
-    const scanPath = musicPath || config.music.musicPath;
+    // The music folder in use when the scan runs, so a folder changed in Settings is the one scanned.
+    const scanPath = config.music.musicPath;
 
     logger.debug(`[ScanJob ${job.id}] Scanning path: ${scanPath}`);
 

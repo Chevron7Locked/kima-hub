@@ -98,7 +98,6 @@ class DiscoverWeeklyService {
 
         try {
             discoveryLogger.section("CONFIGURATION CHECK");
-            const settings = await getSystemSettings();
 
             const weekStart = resolveGenerationWeekStart(new Date());
 
@@ -212,7 +211,7 @@ class DiscoverWeeklyService {
 
             discoveryLogger.section("STEP 4: CREATE BATCH & JOBS");
 
-            const musicPath = settings?.musicPath || appConfig.music.musicPath;
+            const musicPath = appConfig.music.musicPath;
 
             const batch = await prisma.$transaction(async (tx) => {
                 const newBatch = await tx.discoveryBatch.create({

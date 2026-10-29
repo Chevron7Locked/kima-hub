@@ -7,7 +7,7 @@
 import type { DownloadJob, PlaylistPendingTrack } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { getSystemSettings } from "../utils/systemSettings";
+import { config } from "../config";
 import { soulseekService } from "./soulseek";
 import { requestScan } from "../workers/scanRequest";
 
@@ -21,10 +21,8 @@ export const SOULSEEK_UNAVAILABLE = "Soulseek is turned off or not set up";
  * covers its off switch and an account set by environment variable.
  */
 export async function soulseekTarget(): Promise<{ musicPath: string } | { problem: string }> {
-    const settings = await getSystemSettings();
-    if (!settings?.musicPath) return { problem: "Music path not configured" };
     if (!(await soulseekService.isAvailable())) return { problem: SOULSEEK_UNAVAILABLE };
-    return { musicPath: settings.musicPath };
+    return { musicPath: config.music.musicPath };
 }
 
 /** The job a retry of this pending song is recorded on. */

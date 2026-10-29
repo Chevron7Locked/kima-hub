@@ -118,6 +118,7 @@ export default function SettingsPage() {
         setIsSaving(true);
         saveStatus.setLoading();
         let hasError = false;
+        let reason: string | null = null;
 
         try {
             await saveUserSettings(userSettings);
@@ -132,13 +133,15 @@ export default function SettingsPage() {
             } catch (error) {
                 console.error("Failed to save system settings:", error);
                 hasError = true;
+                // The server says what it refused (a music folder that does not exist, say).
+                reason = error instanceof Error ? error.message : null;
             }
         }
 
         setIsSaving(false);
 
         if (hasError) {
-            saveStatus.setError("Couldn't save");
+            saveStatus.setError(reason ? `Couldn't save: ${reason.toLowerCase()}` : "Couldn't save");
         } else {
             setSaved(snapshot(userSettings));
             saveStatus.setSuccess("Saved");

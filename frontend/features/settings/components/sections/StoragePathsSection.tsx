@@ -40,13 +40,18 @@ export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionP
 
             <SettingsRow
                 label="Music library path"
-                description="Path to your music library"
+                description={
+                    settings.musicPathFixedByEnv
+                        ? <>Set by the server&apos;s <span className="font-mono">MUSIC_PATH</span>. Scans and downloads both use this folder.</>
+                        : "The folder Kima scans and downloads into, as the server sees it. A change applies on save."
+                }
             >
                 <SettingsInput
                     value={settings.musicPath}
                     onChange={(v) => onUpdate({ musicPath: v })}
                     placeholder="/music"
                     className="w-64"
+                    disabled={settings.musicPathFixedByEnv}
                 />
             </SettingsRow>
 

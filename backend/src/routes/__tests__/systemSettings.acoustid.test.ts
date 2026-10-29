@@ -36,6 +36,7 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { config } from "../../config";
 
 afterAll(async () => {
     // The router reaches jobs/queueCleaner, which enqueues through the real
@@ -57,7 +58,7 @@ const baseRow: Record<string, unknown> = {
     fanartEnabled: false,
     audiobookshelfEnabled: false,
     audiobookshelfUrl: "http://localhost:13378",
-    musicPath: "/music",
+    musicPath: config.music.musicPath,
     downloadPath: "/downloads",
     autoSync: true,
     transcodeCacheMaxGb: 10,

@@ -5,7 +5,6 @@ import { safeError } from "../utils/errors";
 import { Router } from "express";
 import { requireAuth, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
-import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
 import { prisma } from "../utils/db";
@@ -13,6 +12,7 @@ import fs from "fs";
 import { pathInMusicFolder } from "../utils/musicFolderPath";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
+import { config } from "../config";
 
 const router = Router();
 
@@ -326,14 +326,7 @@ router.post(
                 logger.warn(`[Soulseek] Derived artist/title from filename: "${resolvedArtist}" - "${resolvedTitle}"`);
             }
 
-            const settings = await getSystemSettings();
-            const musicPath = settings?.musicPath;
-
-            if (!musicPath) {
-                return res.status(400).json({
-                    error: "Music path not configured",
-                });
-            }
+            const musicPath = config.music.musicPath;
 
             const destPath = pathInMusicFolder(musicPath, resolvedArtist, album || "Unknown Album", fileName);
 

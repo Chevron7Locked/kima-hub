@@ -7,7 +7,7 @@ import path from "path";
 import { pathInMusicFolder } from "../utils/musicFolderPath";
 import { readdir, copyFile, unlink, mkdir, rmdir, writeFile, stat, rename } from "fs/promises";
 import { sessionLog } from "../utils/playlistLogger";
-import { getSystemSettings } from "../utils/systemSettings";
+import { config } from "../config";
 
 /** Async existsSync equivalent -- avoids blocking the event loop on a stat check. */
 async function pathExists(p: string): Promise<boolean> {
@@ -213,15 +213,8 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
 export async function organizeSingles(): Promise<void> {
     sessionLog('ORGANIZE', '=== STARTING SINGLES ORGANIZATION ===');
 
-    // The music folder comes from the settings row, like every download writer, never from env.
-    const settings = await getSystemSettings();
-    const musicPath = settings?.musicPath;
-
-    if (!musicPath) {
-        const error = "Music path is not configured — set it on the Settings page.";
-        sessionLog('ORGANIZE', error, 'ERROR');
-        throw new Error(error);
-    }
+    // The one music folder: the one scans read and every download writes to.
+    const musicPath = config.music.musicPath;
 
     sessionLog('ORGANIZE', `Music path: ${musicPath.replace(/\\/g, "/")}`);
 

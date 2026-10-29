@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import fs from "fs";
 import { z } from "zod";
 import {
     validateMusicConfig,
@@ -61,6 +62,27 @@ export async function initializeMusicConfig() {
         // Don't exit process - allow app to start for other features
         // Music features will fail gracefully if config is invalid
     }
+}
+
+/** Whether the server's MUSIC_PATH fixes the music folder, so Settings cannot change it. */
+export function musicPathFixedByEnv(): boolean {
+    return !!process.env.MUSIC_PATH;
+}
+
+/** Why `folder` cannot be the music folder (missing, not a folder, unreadable), or null when it can. */
+export function musicFolderProblem(folder: string): string | null {
+    try {
+        if (!fs.statSync(folder).isDirectory()) return `${folder} is not a folder`;
+        fs.accessSync(folder, fs.constants.R_OK);
+        return null;
+    } catch (err: any) {
+        return err?.code === "ENOENT" ? `${folder} does not exist on the server` : `${folder} cannot be read`;
+    }
+}
+
+/** Makes `folder` the music folder at once, for scans, downloads, imports and Lidarr alike. */
+export function useMusicFolder(folder: string): void {
+    musicConfig = { ...musicConfig, musicPath: folder };
 }
 
 const PUBLIC_VIBE_TOKEN_MIN = 32;

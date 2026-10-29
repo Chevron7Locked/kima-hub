@@ -218,8 +218,7 @@ class SimpleDownloadManager {
                 return { success: true, correlationId };
             }
 
-            const settings = await getSystemSettings();
-            const musicPath = settings?.musicPath || config.music.musicPath;
+            const musicPath = config.music.musicPath;
 
             // MusicBrainz answers a merged album's old id with the album it became,
             // so Lidarr is asked for the id it knows.

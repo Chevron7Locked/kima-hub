@@ -4,6 +4,7 @@
  */
 
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import { prisma } from "../utils/db";
 import { getSystemSettings } from "../utils/systemSettings";
 import { soulseekService } from "./soulseek";
@@ -417,14 +418,7 @@ class AcquisitionService {
         }
 
         const settings = await getSystemSettings();
-        const musicPath = settings?.musicPath;
-        if (!musicPath) {
-            logger.error(`[Acquisition] Music path not configured`);
-            return requests.map(() => ({
-                success: false,
-                error: "Music path not configured",
-            }));
-        }
+        const musicPath = config.music.musicPath;
 
         const tracksToDownload = requests.map((req) => ({
             artist: req.artistName,
@@ -491,11 +485,7 @@ class AcquisitionService {
             `[Acquisition/Soulseek] Downloading: ${request.artistName} - ${request.albumTitle}`
         );
 
-        const settings = await getSystemSettings();
-        const musicPath = settings?.musicPath;
-        if (!musicPath) {
-            return { success: false, error: "Music path not configured" };
-        }
+        const musicPath = config.music.musicPath;
 
         if (!request.mbid && (!request.requestedTracks || request.requestedTracks.length === 0)) {
             return {

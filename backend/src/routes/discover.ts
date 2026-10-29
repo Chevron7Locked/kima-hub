@@ -19,6 +19,7 @@ import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discove
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
+import { config } from "../config";
 
 const router = Router();
 
@@ -693,11 +694,7 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
             return res.json({ success: true, queued: 0, message });
         }
 
-        const settings = await getSystemSettings();
-        const musicPath = settings?.musicPath;
-        if (!musicPath) {
-            return res.status(400).json({ error: "Music path not configured" });
-        }
+        const musicPath = config.music.musicPath;
 
         const batch = await prisma.$transaction(async (tx) => {
             const newBatch = await tx.discoveryBatch.create({

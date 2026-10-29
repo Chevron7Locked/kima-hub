@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { config } from "../config";
 import path from "path";
 import { withRetry } from "../utils/async";
 import pLimit from "p-limit";
@@ -2127,11 +2128,6 @@ class SpotifyImportService {
       return;
     }
 
-    const settings = await getSystemSettings();
-    if (!settings?.musicPath) {
-      jobLogger?.debug(`Auto-retry: No music path configured, skipping`);
-      return;
-    }
 
     jobLogger?.info(
       `Auto-retrying ${pendingTracks.length} unmatched track(s) via per-track search...`,
@@ -2161,7 +2157,7 @@ class SpotifyImportService {
           track.title,
           albumName,
           searchResult.allMatches,
-          settings.musicPath,
+          config.music.musicPath,
         );
 
         if (result.success) {
@@ -2703,7 +2699,7 @@ class SpotifyImportService {
     playlistName: string,
     entries: M3UEntry[],
   ): Promise<{ playlistId: string; matched: number; unmatched: number; total: number }> {
-    const musicRoot = process.env.MUSIC_PATH || "/music";
+    const musicRoot = config.music.musicPath;
     const matchedTrackIds: string[] = [];
     const unmatchedEntries: M3UEntry[] = [];
 
