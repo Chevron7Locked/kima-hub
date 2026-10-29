@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SettingsSection, SettingsRow, SettingsInput, SettingsToggle, SettingsSelect, ConnectionTestButton } from "../ui";
+import { SettingsSection, SettingsRow, SettingsToggle, SettingsSelect, ConnectionRows } from "../ui";
 import { ConnectionTestResult, SystemSettings } from "../../types";
 import { useConnectionTest } from "../../hooks/useConnectionTest";
 import { api } from "@/lib/api";
@@ -62,31 +62,16 @@ export function LidarrSection({ settings, onUpdate, onTest, isTesting }: LidarrS
 
             {settings.lidarrEnabled && (
                 <>
-                    <SettingsRow label="Lidarr URL">
-                        <SettingsInput
-                            value={settings.lidarrUrl}
-                            onChange={(v) => onUpdate({ lidarrUrl: v })}
-                            placeholder="http://localhost:8686"
-                            className="w-64"
-                        />
-                    </SettingsRow>
-
-                    <SettingsRow label="API Key">
-                        <SettingsInput
-                            type="password"
-                            value={settings.lidarrApiKey}
-                            onChange={(v) => onUpdate({ lidarrApiKey: v })}
-                            placeholder="Enter API key"
-                            className="w-64"
-                        />
-                    </SettingsRow>
-
-                    <div className="pt-2">
-                        <ConnectionTestButton
-                            connection={connection}
-                            disabled={isTesting || !settings.lidarrUrl || !settings.lidarrApiKey}
-                        />
-                    </div>
+                    <ConnectionRows
+                        urlLabel="Lidarr URL"
+                        url={settings.lidarrUrl}
+                        onUrl={(v) => onUpdate({ lidarrUrl: v })}
+                        urlPlaceholder="http://localhost:8686"
+                        apiKey={settings.lidarrApiKey}
+                        onApiKey={(v) => onUpdate({ lidarrApiKey: v })}
+                        connection={connection}
+                        isTesting={isTesting}
+                    />
 
                     <SettingsRow
                         label="Remove junk downloads"

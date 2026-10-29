@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { Trash2, Loader2, ArrowLeft } from "lucide-react";
 import type { DiscoverConfig } from "@/features/discover/types";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface ConfigSliderProps {
     label: string;
@@ -84,18 +85,10 @@ export function DiscoverSettingsTab({
         }, 500);
     }
 
+    const [confirmClear, setConfirmClear] = useState(false);
+
     async function handleClearPlaylist() {
         if (isClearing) return;
-
-        const confirmed = window.confirm(
-            "clear discovery playlist?\n\n" +
-                "• liked albums will be moved to your library\n" +
-                "• non-liked albums will be deleted\n\n" +
-                "this action cannot be undone."
-        );
-
-        if (!confirmed) return;
-
         setIsClearing(true);
         try {
             const result = await api.clearDiscoverPlaylist();
@@ -178,7 +171,7 @@ export function DiscoverSettingsTab({
                         Remove current playlist / Liked albums → library / Others → deleted
                     </p>
                     <button
-                        onClick={handleClearPlaylist}
+                        onClick={() => setConfirmClear(true)}
                         disabled={isClearing}
                         className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-danger/30 hover:border-danger hover:bg-danger/10 text-danger-light transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-xs"
                     >
@@ -196,6 +189,14 @@ export function DiscoverSettingsTab({
                     </button>
                 </div>
             </div>
+            <ConfirmDialog
+                isOpen={confirmClear}
+                onClose={() => setConfirmClear(false)}
+                onConfirm={() => void handleClearPlaylist()}
+                title="clear discovery playlist?"
+                message="liked albums move to your library and the rest are deleted. this cannot be undone."
+                confirmText="clear"
+            />
         </div>
     );
 }

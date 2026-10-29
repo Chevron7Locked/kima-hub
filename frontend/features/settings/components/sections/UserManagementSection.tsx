@@ -31,28 +31,25 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
     const [creating, setCreating] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [createStatus, setCreateStatus] = useState<StatusType>("idle");
     const [createMessage, setCreateMessage] = useState("");
     const [deleteStatus, setDeleteStatus] = useState<StatusType>("idle");
     const [deleteMessage, setDeleteMessage] = useState("");
 
-    const fetchUsers = () => {
-        return api
+    // A reload after a create or delete keeps the list on screen until the new one arrives.
+    const loadUsers = () =>
+        api
             .get<User[]>("/auth/users")
-            .then(setUsers)
-            .catch((error) => {
-                console.error("Failed to load users:", error);
+            .then((loaded) => {
+                setUsers(loaded);
+                setLoadFailed(false);
             })
+            .catch(() => setLoadFailed(true))
             .finally(() => setLoading(false));
-    };
-
-    const loadUsers = () => {
-        setLoading(true);
-        return fetchUsers();
-    };
 
     useEffect(() => {
-        fetchUsers();
+        loadUsers();
     }, []);
 
     const handleCreate = async () => {
@@ -84,8 +81,8 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
         }
     };
 
-    // Each opening of the dialog starts clean: a status from an earlier delete
-    // must not show against another user.
+    // Its own dialog, not ConfirmDialog: it stays open to show a failed delete. Each opening starts clean, so a
+    // status from an earlier delete never shows against another user.
     const openDelete = (userId: string) => {
         setDeleteStatus("idle");
         setDeleteMessage("");
@@ -179,6 +176,13 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
                 <div className="space-y-1">
                     {loading ? (
                         <div className="py-4 text-xs text-[var(--text-muted)]">Loading users...</div>
+                    ) : loadFailed && users.length === 0 ? (
+                        <div className="py-4 text-xs text-[var(--text-muted)]">
+                            Couldn&apos;t load the users.{" "}
+                            <button type="button" onClick={() => void loadUsers()} className="text-brand hover:text-brand-hover">
+                                Try again
+                            </button>
+                        </div>
                     ) : users.length === 0 ? (
                         <div className="py-4 text-xs text-[var(--text-muted)]">No users found</div>
                     ) : (

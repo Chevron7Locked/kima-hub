@@ -7,6 +7,7 @@ import { notify } from "@/lib/notify";
 import { GradientSpinner } from "./ui/GradientSpinner";
 import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { CachedImage } from "@/components/ui/CachedImage";
 
 interface MetadataEditorProps {
@@ -61,15 +62,10 @@ export function MetadataEditor({
     const dialogRef = useRef<HTMLDivElement>(null);
     useDialog(dialogRef, isOpen, handleClose);
 
+    const [confirmReset, setConfirmReset] = useState(false);
+    // An album's MusicBrainz id is its release group's; artists and songs have their own.
+    const mbidField = type === "album" ? "rgMbid" : "mbid";
     const handleReset = async () => {
-        if (
-            !confirm(
-                "reset all metadata to original values? this cannot be undone."
-            )
-        ) {
-            return;
-        }
-
         setIsResetting(true);
         try {
             if (type === "artist") {
@@ -304,23 +300,8 @@ export function MetadataEditor({
                                 </label>
                                 <input
                                     type="text"
-                                    value={
-                                        type === "artist"
-                                            ? formData.mbid || ""
-                                            : type === "album"
-                                            ? formData.rgMbid || ""
-                                            : formData.mbid || ""
-                                    }
-                                    onChange={(e) =>
-                                        handleChange(
-                                            type === "artist"
-                                                ? "mbid"
-                                                : type === "album"
-                                                ? "rgMbid"
-                                                : "mbid",
-                                            e.target.value
-                                        )
-                                    }
+                                    value={formData[mbidField] || ""}
+                                    onChange={(e) => handleChange(mbidField, e.target.value)}
                                     placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                                     className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none text-sm"
                                 />
@@ -400,7 +381,7 @@ export function MetadataEditor({
                             {hasOverrides && (
                                 <Button
                                     variant="danger"
-                                    onClick={handleReset}
+                                    onClick={() => setConfirmReset(true)}
                                     disabled={isSaving || isResetting}
                                 >
                                     {isResetting
@@ -436,6 +417,14 @@ export function MetadataEditor({
                     </div>
                 </div>
             )}
+            <ConfirmDialog
+                isOpen={confirmReset}
+                onClose={() => setConfirmReset(false)}
+                onConfirm={() => void handleReset()}
+                title="reset metadata?"
+                message="every field goes back to its original value. this cannot be undone."
+                confirmText="reset"
+            />
         </>
     );
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { UserSettings } from "../types";
+import { settleFor } from "./settleFor";
 
 const defaultSettings: UserSettings = {
     playbackQuality: "original",
@@ -26,17 +27,7 @@ export function useSettingsData() {
     const fetchSettings = useCallback(() => {
         const askedFor = userId;
         const current = () => currentUserRef.current === askedFor;
-        return api
-            .getSettings()
-            .then((loaded) => {
-                if (current()) setSettings(loaded);
-            })
-            .catch((error) => {
-                if (current()) setLoadError(error instanceof Error ? error.message : "Failed to load settings");
-            })
-            .finally(() => {
-                if (current()) setIsLoading(false);
-            });
+        return settleFor(api.getSettings(), current, setSettings, setLoadError, setIsLoading);
     }, [userId]);
 
     const loadSettings = () => {

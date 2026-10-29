@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsSection, SettingsRow, SettingsInput, SettingsToggle, ConnectionTestButton } from "../ui";
+import { SettingsSection, SettingsRow, SettingsToggle, ConnectionRows } from "../ui";
 import { ConnectionTestResult, SystemSettings } from "../../types";
 import { useConnectionTest } from "../../hooks/useConnectionTest";
 
@@ -34,31 +34,16 @@ export function AudiobookshelfSection({ settings, onUpdate, onTest, isTesting }:
 
             {settings.audiobookshelfEnabled && (
                 <>
-                    <SettingsRow label="Server URL">
-                        <SettingsInput
-                            value={settings.audiobookshelfUrl}
-                            onChange={(v) => onUpdate({ audiobookshelfUrl: v })}
-                            placeholder="http://localhost:13378"
-                            className="w-64"
-                        />
-                    </SettingsRow>
-
-                    <SettingsRow label="API Key">
-                        <SettingsInput
-                            type="password"
-                            value={settings.audiobookshelfApiKey}
-                            onChange={(v) => onUpdate({ audiobookshelfApiKey: v })}
-                            placeholder="Enter API key"
-                            className="w-64"
-                        />
-                    </SettingsRow>
-
-                    <div className="pt-2">
-                        <ConnectionTestButton
-                            connection={connection}
-                            disabled={isTesting || !settings.audiobookshelfUrl || !settings.audiobookshelfApiKey}
-                        />
-                    </div>
+                    <ConnectionRows
+                        urlLabel="Server URL"
+                        url={settings.audiobookshelfUrl}
+                        onUrl={(v) => onUpdate({ audiobookshelfUrl: v })}
+                        urlPlaceholder="http://localhost:13378"
+                        apiKey={settings.audiobookshelfApiKey}
+                        onApiKey={(v) => onUpdate({ audiobookshelfApiKey: v })}
+                        connection={connection}
+                        isTesting={isTesting}
+                    />
                 </>
             )}
         </SettingsSection>

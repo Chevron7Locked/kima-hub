@@ -2,12 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { SettingsSection, SettingsRow, SettingsInput } from "../ui";
+import { SettingsSection, SettingsRow, SettingsInput, CopyButton } from "../ui";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { Button } from "@/components/ui/Button";
-import { copyText } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { usePublicConfig } from "@/hooks/useQueries";
 
@@ -107,12 +106,7 @@ export function SubsonicSection() {
                     <span className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg tabular-nums break-all flex-1 min-w-0">
                         {serverUrl}
                     </span>
-                    <button
-                        onClick={() => void copyText(serverUrl)}
-                        className="text-xs text-brand hover:text-brand-hover transition-colors shrink-0"
-                    >
-                        Copy
-                    </button>
+                    <CopyButton text={serverUrl} />
                 </div>
             </SettingsRow>
 
@@ -162,12 +156,7 @@ export function SubsonicSection() {
                         <code className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono break-all flex-1 min-w-0 overflow-hidden">
                             {newToken}
                         </code>
-                        <button
-                            onClick={() => void copyText(newToken)}
-                            className="text-xs text-brand hover:text-brand-hover transition-colors shrink-0 pt-2"
-                        >
-                            Copy
-                        </button>
+                        <CopyButton text={newToken} className="pt-2" />
                     </div>
                 </div>
             )}

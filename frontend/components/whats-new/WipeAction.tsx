@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Button } from "@/components/ui/Button";
 import { refreshOpenCount } from "./useVersionChip";
 import { BothAtOnceSwitch, BOTH_AT_ONCE_DESCRIPTION, BOTH_AT_ONCE_LABEL } from "@/components/enrichment/BothAtOnceSwitch";
 import type { ReleaseItem } from "./types";
@@ -68,16 +69,16 @@ export function WipeAction({ item, done, onDone }: { item: WipeItem; done: boole
                     Wiped. Your library is running through the engine in the background.
                 </p>
             ) : (
-                <button
-                    type="button"
+                <Button
+                    variant="primary"
                     onClick={() => setConfirming(true)}
                     disabled={starting}
                     data-testid="wipe-run"
-                    className="self-start min-h-11 py-2.5 px-4 rounded-lg bg-brand hover:bg-brand-hover text-black text-sm font-semibold flex items-center gap-2 transition-colors disabled:opacity-60"
+                    className="self-start"
                 >
                     {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     {starting ? "Starting..." : item.cta}
-                </button>
+                </Button>
             )}
             {error && <p className="text-sm text-danger-light">{error}</p>}
             <div className="flex items-start justify-between gap-4 mt-2">

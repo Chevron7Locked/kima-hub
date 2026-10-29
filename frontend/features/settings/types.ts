@@ -12,7 +12,7 @@ export interface UserSettings {
 export interface SystemSettings {
     // Lidarr
     lidarrEnabled: boolean;
-    /// Operator-only by default; on, signed-in members may acquire (never delete).
+    /** Operator-only by default; on, signed-in members may acquire (never delete). */
     allowMemberAcquire: boolean;
     lidarrUrl: string;
     lidarrApiKey: string;
@@ -27,10 +27,10 @@ export interface SystemSettings {
     audiobookshelfEnabled: boolean;
     audiobookshelfUrl: string;
     audiobookshelfApiKey: string;
-    // Soulseek (direct connection via slsk-client)
+    // Soulseek: the built-in direct connection, or an slskd server
     soulseekUsername: string;
     soulseekPassword: string;
-    // Soulseek backend: "p2p" = built-in client, "slskd" = external slskd REST API
+    // "p2p" = the built-in client, "slskd" = an external slskd REST API
     soulseekMode: "p2p" | "slskd";
     slskdUrl: string | null;
     slskdApiKey: string | null;

@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
+import { settleFor } from "./settleFor";
 import { useAuth } from "@/lib/auth-context";
 import { ConnectionTestResult, SystemSettings } from "../types";
 
@@ -62,34 +63,19 @@ export function useSystemSettings() {
     const fetchSystemSettings = useCallback(() => {
         const askedFor = adminId;
         const current = () => currentAdminRef.current === askedFor;
-        return api.getSystemSettings()
-            .then((sysData) => {
-                // Null strings become empty strings for controlled inputs.
-                const sanitizeSettings = (settings: Record<string, unknown>): SystemSettings => {
-                    const sanitized: Record<string, unknown> = {};
-                    for (const key in settings) {
-                        const value = settings[key];
-                        if (value === null && typeof defaultSystemSettings[key as keyof SystemSettings] === 'string') {
-                            sanitized[key] = '';
-                        } else {
-                            sanitized[key] = value;
-                        }
-                    }
-                    return sanitized as unknown as SystemSettings;
-                };
-
-                if (current()) {
-                    const loaded = sanitizeSettings(sysData);
-                    loadedMusicPathRef.current = loaded.musicPath;
-                    setSystemSettings(loaded);
-                }
-            })
-            .catch((error) => {
-                if (current()) setLoadError(error instanceof Error ? error.message : "Failed to load settings");
-            })
-            .finally(() => {
-                if (current()) setIsLoading(false);
-            });
+        // Null strings become empty strings for controlled inputs.
+        const show = (sysData: Record<string, unknown>) => {
+            const sanitized: Record<string, unknown> = {};
+            for (const key in sysData) {
+                const value = sysData[key];
+                const wantsString = typeof defaultSystemSettings[key as keyof SystemSettings] === "string";
+                sanitized[key] = value === null && wantsString ? "" : value;
+            }
+            const loaded = sanitized as unknown as SystemSettings;
+            loadedMusicPathRef.current = loaded.musicPath;
+            setSystemSettings(loaded);
+        };
+        return settleFor(api.getSystemSettings(), current, show, setLoadError, setIsLoading);
     }, [adminId]);
 
     const loadSystemSettings = () => {

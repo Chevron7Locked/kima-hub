@@ -47,11 +47,9 @@ interface CacheSectionProps {
 function ProgressBar({
     progress,
     color = "bg-brand",
-    showPercentage = true,
 }: {
     progress: number;
     color?: string;
-    showPercentage?: boolean;
 }) {
     return (
         <div className="flex items-center gap-2 flex-1">
@@ -61,11 +59,7 @@ function ProgressBar({
                     style={{ width: `${Math.min(100, progress)}%` }}
                 />
             </div>
-            {showPercentage && (
-                <span className="text-xs tabular-nums text-[var(--text-muted)] w-10 text-right">
-                    {progress}%
-                </span>
-            )}
+            <span className="text-xs tabular-nums text-[var(--text-muted)] w-10 text-right">{progress}%</span>
         </div>
     );
 }
@@ -518,7 +512,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         staleTime: 1000,
     });
 
-    // Everything below only changes while a run is in flight, so it polls only then.
+    // Everything below only changes while a run is in flight (stopping and failed included), so it polls only then.
     const enrichmentActive =
         !!enrichmentState?.status && enrichmentState.status !== "idle";
 
@@ -645,8 +639,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             }
             await api.syncLibraryEnrichment();
             refetchProgress();
-        } catch (err) {
-            console.error("Sync error:", err);
+        } catch {
             setError("Failed to sync");
             setSyncing(false);
         }
@@ -666,8 +659,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refetchProgress();
             void queryClient.invalidateQueries({ queryKey: ["enrichment-failure-counts"] });
             void queryClient.invalidateQueries({ queryKey: ["enrichment-failures-inline"] });
-        } catch (err) {
-            console.error(failure, err);
+        } catch {
             setError(failure);
         } finally {
             setBusy(false);
@@ -707,8 +699,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         try {
             const result = await api.cleanupStaleJobs();
             setCleanupResult(result);
-        } catch (err) {
-            console.error("Stale job cleanup error:", err);
+        } catch {
             setError("Failed to cleanup stale jobs");
         } finally {
             setCleaningStaleJobs(false);
@@ -723,8 +714,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             const result = await api.retryFailedAnalysis();
             setRetryResult({ reset: result.reset });
             refetchProgress();
-        } catch (err) {
-            console.error("Retry failed analysis error:", err);
+        } catch {
             setError("Failed to retry analysis");
         } finally {
             setRetryingFailed(false);
@@ -745,8 +735,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             for (const key of ["enrichment-status", ...alsoRefresh]) {
                 queryClient.invalidateQueries({ queryKey: [key] });
             }
-        } catch (err) {
-            console.error(failure, err);
+        } catch {
             setError(failure);
         }
     };
@@ -758,6 +747,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const handleStop = () =>
         controlEnrichment(() => api.stopEnrichment(), "Failed to stop enrichment", ["enrichment-progress"]);
 
+    // A run that can still be paused, resumed or stopped; it also holds back the buttons that would start another.
     const isEnrichmentActive =
         enrichmentState?.status === "running" ||
         enrichmentState?.status === "paused";
@@ -995,32 +985,20 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             {isEnrichmentActive && (
                                 <>
                                     {enrichmentState?.status === "running" ? (
-                                        <button
-                                            onClick={handlePause}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-warning/20 border border-warning/30 text-warning rounded-lg
-                                            hover:bg-warning/30 transition-colors"
-                                        >
+                                        <Button size="sm" onClick={handlePause}>
                                             <Pause className="w-3 h-3" />
                                             Pause
-                                        </button>
+                                        </Button>
                                     ) : (
-                                        <button
-                                            onClick={handleResume}
-                                            className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-success/20 border border-success/30 text-success rounded-lg
-                                            hover:bg-success/30 transition-colors"
-                                        >
+                                        <Button size="sm" onClick={handleResume}>
                                             <Play className="w-3 h-3" />
                                             Resume
-                                        </button>
+                                        </Button>
                                     )}
-                                    <button
-                                        onClick={handleStop}
-                                        className="flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs tabular-nums bg-danger/20 border border-danger/30 text-danger-light rounded-lg
-                                        hover:bg-danger/30 transition-colors"
-                                    >
+                                    <Button size="sm" variant="danger" onClick={handleStop}>
                                         <StopCircle className="w-3 h-3" />
                                         Stop
-                                    </button>
+                                    </Button>
                                 </>
                             )}
                         </div>
@@ -1064,32 +1042,30 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                 </p>
                                             </>
                                         ) : (
-                                            <>
-                                        <div className="flex items-center gap-2">
-                                            {enrichmentState.status ===
-                                                "running" && (
-                                                <GradientSpinner size="sm" />
-                                            )}
-                                            {enrichmentState.status ===
-                                                "paused" && (
-                                                <Pause className="w-3 h-3 text-warning" />
-                                            )}
-                                            {enrichmentState.status ===
-                                                "stopping" && (
-                                                <StopCircle className="w-3 h-3 text-danger-light animate-pulse" />
-                                            )}
-                                            <span className="text-[var(--text-secondary)] tabular-nums">
+                                            <div className="flex items-center gap-2">
                                                 {enrichmentState.status ===
-                                                    "running" &&
-                                                    `Processing ${phaseLabel(enrichmentState.currentPhase)}...`}
+                                                    "running" && (
+                                                    <GradientSpinner size="sm" />
+                                                )}
                                                 {enrichmentState.status ===
-                                                "paused" && "Enrichment paused"}
+                                                    "paused" && (
+                                                    <Pause className="w-3 h-3 text-warning" />
+                                                )}
                                                 {enrichmentState.status ===
-                                                    "stopping" &&
-                                                    "Stopping..."}
-                                            </span>
-                                        </div>
-                                            </>
+                                                    "stopping" && (
+                                                    <StopCircle className="w-3 h-3 text-danger-light animate-pulse" />
+                                                )}
+                                                <span className="text-[var(--text-secondary)] tabular-nums">
+                                                    {enrichmentState.status ===
+                                                        "running" &&
+                                                        `Processing ${phaseLabel(enrichmentState.currentPhase)}...`}
+                                                    {enrichmentState.status ===
+                                                    "paused" && "Enrichment paused"}
+                                                    {enrichmentState.status ===
+                                                        "stopping" &&
+                                                        "Stopping..."}
+                                                </span>
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -1099,7 +1075,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
                 <SettingsRow
                     label="Transcode cache size"
-                    description="Server restart required for changes"
+                    description="The most disk space transcoded copies may use. Applies when saved."
                 >
                     <div className="flex items-center gap-3">
                         <input
@@ -1205,10 +1181,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         id="gpu-onnx-toggle"
                         label="NVIDIA GPU for vibe embeddings"
                         description="Run vibe embeddings on an NVIDIA GPU. Downloads about 2 GB of pinned packages into the data directory (they take about 3.4 GB) the first time. Applies on its own within a minute: the analyzer finishes the songs it is on, then restarts."
-                        gpu={gpuStatus ?? null}
-                        on={gpuStatus?.enabled ?? false}
-                        effective={gpuStatus?.effective ?? false}
-                        fellBack={gpuStatus?.fellBack ?? false}
+                        gpu={gpuStatus}
+                        on={gpuStatus.enabled}
+                        effective={gpuStatus.effective}
+                        fellBack={gpuStatus.fellBack}
                         pending={setGpuMutation.isPending}
                         onChange={(checked) => setGpuMutation.mutate(checked)}
                     />
@@ -1218,10 +1194,10 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         id="gpu-analysis-toggle"
                         label="NVIDIA GPU for audio analysis"
                         description="Run the mood, valence and arousal models on an NVIDIA GPU. Uses the same download as vibe embeddings. Applies on its own within a minute: the analyzer finishes the songs it is on, then restarts."
-                        gpu={gpuStatus ?? null}
-                        on={gpuStatus?.analysis ?? false}
-                        effective={gpuStatus?.analysisEffective ?? false}
-                        fellBack={gpuStatus?.analysisFellBack ?? false}
+                        gpu={gpuStatus}
+                        on={gpuStatus.analysis}
+                        effective={gpuStatus.analysisEffective}
+                        fellBack={gpuStatus.analysisFellBack}
                         pending={setGpuAnalysisMutation.isPending}
                         onChange={(checked) => setGpuAnalysisMutation.mutate(checked)}
                     />
