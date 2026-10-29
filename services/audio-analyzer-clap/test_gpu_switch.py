@@ -118,7 +118,6 @@ def _want(root, on):
 
 
 def _fake_steps(root, monkeypatch, gate=None, install_fails=False):
-    import threading
     ran = []
 
     def install():
@@ -133,7 +132,7 @@ def _fake_steps(root, monkeypatch, gate=None, install_fails=False):
         return "installed"
 
     monkeypatch.setattr(gpu_runtime, "_install", install)
-    return ran, threading
+    return ran
 
 
 def _settle():
@@ -203,7 +202,7 @@ def test_switching_off_with_nothing_downloading_changes_nothing_on_disk(tmp_path
     root = _runtime_at(tmp_path, monkeypatch)
     (root / "site" / "onnxruntime").mkdir(parents=True)
     gpu_runtime.update_state(status="installed")
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, False)
     assert gpu_runtime.dispatch("cancel") == "nothing_to_cancel"
     assert gpu_runtime.dispatch("install") == "skipped_disabled"
@@ -215,7 +214,7 @@ def test_switching_on_again_after_both_were_off_needs_no_download(tmp_path, monk
     root = _runtime_at(tmp_path, monkeypatch)
     (root / "site" / "onnxruntime").mkdir(parents=True)
     gpu_runtime.update_state(status="installed")
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, False)
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "skipped_installed"
@@ -227,7 +226,7 @@ def test_a_start_never_removes_an_installed_runtime_whatever_the_switches_say(tm
     root = _runtime_at(tmp_path, monkeypatch)
     (root / "site" / "onnxruntime").mkdir(parents=True)
     gpu_runtime.update_state(status="installed")
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, False)
     assert gpu_runtime.reconcile() == "nothing_to_do"
     _settle()
@@ -238,7 +237,7 @@ def test_a_start_never_removes_an_installed_runtime_whatever_the_switches_say(tm
 def test_a_start_retries_an_install_its_predecessor_was_killed_in(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
     gpu_runtime.update_state(status="installing", startedEpoch=__import__("time").time())
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, True)
     assert gpu_runtime.reconcile() == "install"
     _settle()
@@ -247,7 +246,7 @@ def test_a_start_retries_an_install_its_predecessor_was_killed_in(tmp_path, monk
 
 def test_a_failed_download_is_not_repeated_and_waits_for_a_restart_or_a_click(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
-    ran, _ = _fake_steps(root, monkeypatch, install_fails=True)
+    ran = _fake_steps(root, monkeypatch, install_fails=True)
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "started"
     _settle()
@@ -465,7 +464,7 @@ def test_switching_off_forgets_any_failed_step_including_a_removal_an_older_vers
 
 def test_a_start_with_both_switches_off_forgets_a_failure_left_by_a_killed_install_or_an_older_version(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, False)
     gpu_runtime.update_state(status="failed", reason="removal_failed", detail="left files")
     assert gpu_runtime.reconcile() == "nothing_to_do"
@@ -478,7 +477,7 @@ def test_a_start_with_both_switches_off_forgets_a_failure_left_by_a_killed_insta
 
 def test_a_start_with_a_switch_on_keeps_the_failure_and_tries_again(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
-    ran, _ = _fake_steps(root, monkeypatch)
+    ran = _fake_steps(root, monkeypatch)
     _want(root, True)
     gpu_runtime.update_state(status="failed", reason="no_network", detail="index unreachable")
     assert gpu_runtime.reconcile() == "install"
@@ -524,7 +523,7 @@ def test_a_download_killed_by_a_cancel_that_was_then_taken_back_starts_again(tmp
 def test_a_cancel_that_arrives_after_a_switch_went_back_on_changes_nothing(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
     gate = __import__("threading").Event()
-    ran, _ = _fake_steps(root, monkeypatch, gate=gate)
+    ran = _fake_steps(root, monkeypatch, gate=gate)
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "started"
     assert gpu_runtime.dispatch("cancel") == "still_wanted"
@@ -553,7 +552,7 @@ def test_a_cancelled_download_ends_as_cancelled_even_if_a_switch_goes_back_on_at
 def test_an_install_that_fails_after_both_switches_went_off_leaves_no_failure_behind(tmp_path, monkeypatch):
     root = _runtime_at(tmp_path, monkeypatch)
     gate = __import__("threading").Event()
-    ran, _ = _fake_steps(root, monkeypatch, gate=gate, install_fails=True)
+    ran = _fake_steps(root, monkeypatch, gate=gate, install_fails=True)
     _want(root, True)
     assert gpu_runtime.dispatch("install") == "started"
     _want(root, False)

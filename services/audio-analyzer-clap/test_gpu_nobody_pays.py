@@ -82,11 +82,16 @@ def test_an_installed_runtime_with_both_switches_off_stays_and_is_never_removed_
     assert gr.request_gpu() is False
 
 
-def test_env_wrapper_exports_nothing_when_toggle_off(tmp_path):
-    out = subprocess.run(
+def _wrapped_env_text(data_dir, **extra):
+    """The environment gpu_env.sh hands the analyzer, as `env` prints it, from empty library paths."""
+    return subprocess.run(
         ["bash", os.path.join(SERVICE_DIR, "gpu_env.sh"), "env"],
-        env={**os.environ, "DATA_DIR": str(tmp_path), "PYTHONPATH": "", "LD_LIBRARY_PATH": ""},
+        env={**os.environ, "DATA_DIR": str(data_dir), "PYTHONPATH": "", "LD_LIBRARY_PATH": "", **extra},
         capture_output=True, text=True, check=True).stdout
+
+
+def test_env_wrapper_exports_nothing_when_toggle_off(tmp_path):
+    out = _wrapped_env_text(tmp_path)
     assert "gpu-onnx" not in out
     lines = dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
     assert lines.get("PYTHONPATH", "") == ""
@@ -100,18 +105,12 @@ def test_env_wrapper_activates_only_when_enabled_and_installed(tmp_path):
     root = tmp_path / "gpu-onnx"
     (root / "state.json").write_text(json.dumps({"status": "installed"}))
     # Installed but NOT enabled: still nothing (the toggle is the only switch).
-    out = subprocess.run(
-        ["bash", os.path.join(SERVICE_DIR, "gpu_env.sh"), "env"],
-        env={**os.environ, "DATA_DIR": str(tmp_path), "PYTHONPATH": "", "LD_LIBRARY_PATH": ""},
-        capture_output=True, text=True, check=True).stdout
+    out = _wrapped_env_text(tmp_path)
     assert "gpu-onnx" not in out
     # Only the audio-analysis switch on: the sound-vector analyzer still gets nothing.
     (root / "enabled.json").write_text(json.dumps({"enabled": True, "soundVectors": False, "analysis": True}))
     def wrapped_env(**extra):
-        return dict(l.split("=", 1) for l in subprocess.run(
-            ["bash", os.path.join(SERVICE_DIR, "gpu_env.sh"), "env"],
-            env={**os.environ, "DATA_DIR": str(tmp_path), "PYTHONPATH": "", "LD_LIBRARY_PATH": "", **extra},
-            capture_output=True, text=True, check=True).stdout.splitlines() if "=" in l)
+        return dict(l.split("=", 1) for l in _wrapped_env_text(tmp_path, **extra).splitlines() if "=" in l)
     assert str(site) not in wrapped_env().get("PYTHONPATH", "")
     analysis = wrapped_env(KIMA_GPU_FOR="analysis")
     assert str(site / "nvidia" / "cublas" / "lib") in analysis.get("LD_LIBRARY_PATH", "")

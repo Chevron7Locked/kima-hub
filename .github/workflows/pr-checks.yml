@@ -159,7 +159,7 @@ jobs:
               # the real model.
               run: >-
                   python -m pytest test_gpu_nobody_pays.py test_gpu_switch.py test_reports.py test_one_thread.py test_onnx_runtime_ready.py
-                  test_window_offsets.py test_window_sweep.py test_music_onnx_parity.py test_analyzer_inflight.py test_bullmq_worker.py test_gpu_smoke_site.py test_pool_resize.py -v
+                  test_window_offsets.py test_window_sweep.py test_music_onnx_parity.py test_analyzer_inflight.py test_bullmq_worker.py test_gpu_smoke_site.py test_pool_resize.py test_claims.py -v
                   --deselect test_onnx_runtime_ready.py::test_ensure_onnx_backend_eagerly_loads_model
 
     build-docker:

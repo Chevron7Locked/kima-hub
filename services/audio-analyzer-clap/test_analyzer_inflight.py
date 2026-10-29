@@ -44,9 +44,18 @@ def point_music_at(tmp_path, monkeypatch):
     monkeypatch.setattr(analyzer, "MUSIC_PATH", str(tmp_path))
 
 
+def inflight_writes(redis_client):
+    """Every (value, expiry) written to the inflight key, in order."""
+    return [
+        (c.args[1], c.kwargs.get("ex"))
+        for c in redis_client.set.call_args_list
+        if c.args[0] == INFLIGHT_KEY
+    ]
+
+
 def published_values(redis_client):
     """Every value written to the inflight key, in order."""
-    return [c.args[1] for c in redis_client.set.call_args_list if c.args[0] == INFLIGHT_KEY]
+    return [value for value, _ in inflight_writes(redis_client)]
 
 
 def test_counter_returns_to_zero_after_a_success(tmp_path, monkeypatch):
@@ -92,15 +101,6 @@ def test_counter_returns_to_zero_after_the_claim_skip():
     assert result == {"skipped": True}
     assert worker._jobs_in_flight == 0
     assert published_values(worker._redis_client) == ["1", "0"]
-
-
-def inflight_writes(redis_client):
-    """Every (value, expiry) written to the inflight key, in order."""
-    return [
-        (c.args[1], c.kwargs.get("ex"))
-        for c in redis_client.set.call_args_list
-        if c.args[0] == INFLIGHT_KEY
-    ]
 
 
 def test_a_beat_expires_the_inflight_count_after_three_heartbeats():
