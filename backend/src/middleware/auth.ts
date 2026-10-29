@@ -248,40 +248,36 @@ export async function requireAuth(
     return res.status(401).json({ error: "Not authenticated" });
 }
 
-export async function requireAdmin(
+/**
+ * The signed-in user (reused when an auth guard already ran on this request) must pass `allowed`: 401 without a
+ * user, 403 with `refusal` when they don't pass.
+ */
+async function requireUserWho(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
+    allowed: (user: NonNullable<Request["user"]>) => boolean | Promise<boolean>,
+    refusal: string
 ) {
-    // Reuse the user when requireAuth already ran on this request.
     const user = req.user ?? (await authenticateRequest(req, false));
     if (!user) {
         return res.status(401).json({ error: "Not authenticated" });
     }
     req.user = user;
-    if (user.role !== "admin") {
-        return res.status(403).json({ error: "Admin access required" });
+    if (!(await allowed(user))) {
+        return res.status(403).json({ error: refusal });
     }
     next();
 }
 
+export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+    return requireUserWho(req, res, next, (user) => user.role === "admin", "Admin access required");
+}
+
 // The acquisition gate (#238, rule in utils/acquirePermission) on a route. Deleting is never here; every
 // destructive route keeps requireAdmin.
-export async function requireAcquirePermission(
-    req: Request,
-    res: Response,
-    next: NextFunction
-) {
-    // Reuse the user when an auth guard already ran on this request.
-    const user = req.user ?? (await authenticateRequest(req, false));
-    if (!user) {
-        return res.status(401).json({ error: "Not authenticated" });
-    }
-    req.user = user;
-    if (!(await mayAcquire(user))) {
-        return res.status(403).json({ error: ACQUIRE_REFUSED });
-    }
-    next();
+export async function requireAcquirePermission(req: Request, res: Response, next: NextFunction) {
+    return requireUserWho(req, res, next, mayAcquire, ACQUIRE_REFUSED);
 }
 
 
