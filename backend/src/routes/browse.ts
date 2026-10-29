@@ -45,28 +45,6 @@ function deezerPlaylistToUnified(playlist: DeezerPlaylistPreview): PlaylistPrevi
 }
 
 /**
- * GET /api/browse/playlists/featured
- * Get featured/chart playlists from Deezer
- */
-router.get("/playlists/featured", async (req, res) => {
-    try {
-        const limit = parseLimit(req.query.limit, 50, 200);
-        logger.debug(`[Browse] Fetching featured playlists (limit: ${limit})...`);
-
-        const playlists = await deezerService.getFeaturedPlaylists(limit);
-        logger.debug(`[Browse] Got ${playlists.length} Deezer playlists`);
-
-        res.json({
-            playlists: playlists.map(deezerPlaylistToUnified),
-            total: playlists.length,
-            source: "deezer",
-        });
-    } catch (error) {
-        safeError(res, "Browse featured playlists", error);
-    }
-});
-
-/**
  * GET /api/browse/playlists/search
  * Search for playlists on Deezer
  */
@@ -101,6 +79,10 @@ router.get("/playlists/search", async (req, res) => {
 router.get("/playlists/:id", async (req, res) => {
     try {
         const { id } = req.params;
+        // Deezer playlist ids are numbers; anything else cannot exist there.
+        if (!/^\d+$/.test(id)) {
+            return res.status(404).json({ error: "Playlist not found" });
+        }
         const playlist = await withRetry(() => deezerService.getPlaylist(id));
 
         if (!playlist) {

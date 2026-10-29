@@ -1152,43 +1152,4 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
     }
 });
 
-/**
- * POST /playlists/:id/pending/reconcile
- * Add this playlist's pending tracks that now match the library (its owner only).
- */
-router.post("/:id/pending/reconcile", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const playlistId = req.params.id;
-
-        // Check ownership
-        const playlist = await prisma.playlist.findUnique({
-            where: { id: playlistId },
-        });
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        if (playlist.userId !== userId) {
-            return res.status(403).json({ error: "Access denied" });
-        }
-
-        // Import and run reconciliation
-        const { spotifyImportService } = await import(
-            "../services/spotifyImport"
-        );
-        const result = await spotifyImportService.reconcilePendingTracks(playlistId);
-
-        res.json({
-            message: "Reconciliation complete",
-            tracksAdded: result.tracksAdded,
-            playlistsUpdated: result.playlistsUpdated,
-        });
-    } catch (error) {
-        logger.error("Reconcile pending tracks error:", error);
-        res.status(500).json({ error: "Failed to reconcile pending tracks" });
-    }
-});
-
 export default router;

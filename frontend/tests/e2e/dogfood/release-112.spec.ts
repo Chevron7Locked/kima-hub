@@ -981,6 +981,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                     "/api/discover/exclusions",
                     "/api/library/cover-art-colors?url=x",
                     "/api/analysis/track/x",
+                    "/api/browse/playlists/featured",
                 ]) {
                     const res = await api.get(path, { headers: bearer(token) });
                     expect(res.status(), `GET ${path}`).toBe(404);
@@ -993,6 +994,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                     ["PATCH", "/api/downloads/x"],
                     ["DELETE", "/api/discover/exclusions"],
                     ["DELETE", "/api/discover/exclusions/x"],
+                    ["POST", "/api/playlists/x/pending/reconcile"],
                 ]) {
                     const res = await api.fetch(path, { method, headers: bearer(token), data: {} });
                     expect(res.status(), `${method} ${path}`).toBe(404);
@@ -1001,7 +1003,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
             await session.step("the pages opened here never asked for a removed endpoint", async () => {
                 // Plays and downloads keep their POST and DELETE; only the GET forms were removed.
-                const removed = asked.filter((u) => /^GET \S*\/api\/(vibe\/status|recommendations(\/tracks|\/albums)?|releases\/(recent|upcoming)|offline\/|plays|downloads\/(?!failed)[^/?]+|artists\/preview\/[^/]+\/[^/?]+|discover\/(generate\/status|exclusions)|library\/cover-art-colors|analysis\/track\/[^/?]+)(\?|$)/.test(u) || /\/api\/offline\//.test(u));
+                const removed = asked.filter((u) => /^GET \S*\/api\/(vibe\/status|recommendations(\/tracks|\/albums)?|releases\/(recent|upcoming)|offline\/|plays|downloads\/(?!failed)[^/?]+|artists\/preview\/[^/]+\/[^/?]+|discover\/(generate\/status|exclusions)|library\/cover-art-colors|browse\/playlists\/featured|analysis\/track\/[^/?]+)(\?|$)/.test(u) || /\/api\/offline\//.test(u));
                 expect(removed).toEqual([]);
             });
 
