@@ -1,6 +1,7 @@
 /**
  * GET /artists orders by name on the stored `sortName`, not on an article
- * stripped inline. The tests check the SQL text.
+ * stripped inline, and every sort runs through the one list query. The tests
+ * check the SQL text.
  */
 
 jest.mock('p-limit', () => () => (fn: (...args: any[]) => any) => fn());
@@ -16,7 +17,6 @@ const mockQueryRaw = jest.fn();
 
 jest.mock('../../../utils/db', () => {
     const actualPrisma = {
-        artist: { findMany: jest.fn(), count: jest.fn() },
         $queryRaw: (...args: any[]) => mockQueryRaw(...args),
         $transaction: (fn: any) => fn(actualPrisma),
     };
@@ -65,7 +65,6 @@ jest.mock('../../../utils/errors', () => ({
 import express from 'express';
 import request from 'supertest';
 import artistRoutes from '../artists';
-import { prisma } from '../../../utils/db';
 
 function makeApp() {
     const app = express();
@@ -81,27 +80,12 @@ function sqlOf(call: any[]): string {
 
 /**
  * The SELECT that fetches the rows, not the COUNT that paginates them. The
- * handler issues both inside one transaction, and only the first carries an
- * ORDER BY, so "the last call" would assert against the wrong statement.
+ * handler issues both, and only the first carries an ORDER BY, so "the last
+ * call" would assert against the wrong statement.
  */
 function orderingSql(): string {
     const call = mockQueryRaw.mock.calls.find((c) => sqlOf(c).includes('ORDER BY'));
     return call ? sqlOf(call) : '';
-}
-
-/**
- * Just the ORDER BY clause. Asserting that `"sortName"` appears ANYWHERE in
- * the statement would also pass if the column were merely selected while the
- * ordering used something else entirely -- a weaker claim than the one being
- * made.
- */
-function orderByClause(): string {
-    const sql = orderingSql();
-    const from = sql.indexOf('ORDER BY');
-    if (from === -1) return '';
-    const rest = sql.slice(from);
-    const limit = rest.indexOf('LIMIT');
-    return limit === -1 ? rest : rest.slice(0, limit);
 }
 
 /**
@@ -132,7 +116,7 @@ describe('GET /artists alphabetical ordering', () => {
     it.each(['name', 'name-desc'])('orders %s on the stored sortName column', async (sortBy) => {
         await request(makeApp()).get(`/artists?sortBy=${sortBy}`).expect(200);
 
-        expect(orderByClause()).toContain('"sortName"');
+        expect(interpolatedText()).toContain('"sortName"');
     });
 
     // Direction and column are separate claims: pinning only the column would
@@ -159,14 +143,9 @@ describe('GET /artists alphabetical ordering', () => {
         expect(sql.toLowerCase()).not.toContain("'^the");
     });
 
-    it('appends a unique id tiebreaker to non-name sorts', async () => {
-        (prisma.artist.findMany as jest.Mock).mockResolvedValue([]);
-        (prisma.artist.count as jest.Mock).mockResolvedValue(0);
-
+    it('orders tracks by track count, with the id as tiebreaker, through the same query', async () => {
         await request(makeApp()).get('/artists?sortBy=tracks').expect(200);
 
-        expect(prisma.artist.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({ orderBy: [{ totalTrackCount: 'desc' }, { id: 'asc' }] }),
-        );
+        expect(interpolatedText()).toContain('"totalTrackCount" DESC, a.id ASC');
     });
 });
