@@ -1226,12 +1226,11 @@ model PlayAuditIgnore {
 
 /// One answer per track per stage: `stage` is the question ("recording", "analysis",
 /// "embedding", "fingerprint"), `status` its answer (pending | working | done | failed |
-/// blocked) and `evidence` the probe behind it. `failureClass` is the classifier's
-/// Disposition (DAMAGED | UNSUPPORTED | MULTICANNEL | INCONCLUSIVE), null while nothing has failed.
+/// blocked) and `evidence` the probe behind it. `failureClass` says why it failed: the error classifier's class
+/// (FailureClass) or one the worker sets (PERMANENT, DEPENDENCY_CLOSED, FILE_MISSING); null while nothing has failed.
 model TrackStage {
   id               String    @id @default(cuid())
   trackId          String
-  /// Question being answered: "fingerprint" | "recording" | "analysis" | "embedding".
   stage            String
   status           String    @default("pending")
   /// Which producer answers this stage ("analyzer", "clap", "musicbrainz"…).
@@ -1268,9 +1267,8 @@ model TrackStage {
   @@map("TrackStage")
 }
 
-/// One record per *source*, so a paused source is one row rather than one per waiting track.
-/// A source pause is a fact about MusicBrainz/AcoustID/
-/// ListenBrainz, not about 2,787 tracks that all happen to be waiting on it.
+/// One record per source (MusicBrainz, AcoustID, ListenBrainz…), so a paused source is one row, not one per
+/// waiting track.
 model SourceAttempt {
   id               String    @id @default(cuid())
   /// "musicbrainz" | "acoustid" | "listenbrainz" | …
