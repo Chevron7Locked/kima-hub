@@ -79,6 +79,16 @@ describe("notificationPolicyService.hasAlreadyNotified (via evaluateNotification
         });
     });
 
+    it("takes one album spelled with another apostrophe or accent for the same album", async () => {
+        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(
+            makeJob({ metadata: { artistName: "Sigur Rós", albumTitle: "Ágætis byrjun" } }),
+        );
+        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
+            { id: "job-0", metadata: { artistName: "Sigur Ros", albumTitle: "Agaetis Byrjun", notificationSent: true } },
+        ]);
+        expect((await notificationPolicyService.evaluateNotification("job-1", "complete")).shouldNotify).toBe(false);
+    });
+
     it("finds a matching job anywhere in the returned window", async () => {
         (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob());
         (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([

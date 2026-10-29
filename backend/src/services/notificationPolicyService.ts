@@ -5,6 +5,11 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { nameKey } from "./nameFold";
+
+/** A download's artist or album name as compared for duplicates: nameKey, or its plain text when that has no letters. */
+const duplicateKey = (name: unknown) =>
+    typeof name === "string" ? nameKey(name) || name.toLowerCase().trim() : "";
 
 interface NotificationDecision {
     shouldNotify: boolean;
@@ -212,8 +217,8 @@ class NotificationPolicyService {
      */
     private async hasAlreadyNotified(job: any): Promise<boolean> {
         const metadata = (job.metadata as any) || {};
-        const artistName = metadata?.artistName?.toLowerCase().trim() || "";
-        const albumTitle = metadata?.albumTitle?.toLowerCase().trim() || "";
+        const artistName = duplicateKey(metadata?.artistName);
+        const albumTitle = duplicateKey(metadata?.albumTitle);
 
         if (!artistName || !albumTitle) {
             return false;
@@ -235,10 +240,8 @@ class NotificationPolicyService {
 
         for (const otherJob of otherJobs) {
             const otherMeta = (otherJob.metadata as any) || {};
-            const otherArtist =
-                otherMeta?.artistName?.toLowerCase().trim() || "";
-            const otherAlbum =
-                otherMeta?.albumTitle?.toLowerCase().trim() || "";
+            const otherArtist = duplicateKey(otherMeta?.artistName);
+            const otherAlbum = duplicateKey(otherMeta?.albumTitle);
 
             if (
                 otherArtist === artistName &&
