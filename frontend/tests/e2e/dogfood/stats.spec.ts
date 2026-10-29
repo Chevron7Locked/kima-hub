@@ -406,6 +406,10 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         });
 
         await session.step("a queue longer than the limit is clamped, not rejected", async () => {
+            // A Kima page saves the playback state on its own (on pause, on leaving), so no Kima page is open while
+            // the probe is written and read back; the last save of leaving lands before it.
+            await page.goto("about:blank");
+            await page.waitForTimeout(1500);
             const limitRes = await page.request.get(`/api/playback-state/limit`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
@@ -428,6 +432,8 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
             const state = await read.json();
             expect(Array.isArray(state.queue)).toBe(true);
             expect(state.queue.length).toBe(maxQueueLength);
+            await page.goto("/");
+            await settle(page);
         });
 
         await session.step("the queue is not written to localStorage", async () => {
@@ -838,7 +844,9 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
                 const periodSelect = p.getByRole("combobox", { name: "period" });
                 await expect(periodSelect).toBeVisible();
                 await periodSelect.selectOption("30d");
-                await expect(p.locator("main h1").first()).toHaveText(/last 30 days/i);
+                // The 30-day view's heading: the period's name, or its empty state on a user with no plays (the
+                // all-time empty state says "no plays yet" instead).
+                await expect(p.locator("main h1").first()).toHaveText(/last 30 days|no plays in this period/i);
             } finally {
                 session.setActivePage(page);
                 await phone.close();

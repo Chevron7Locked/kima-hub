@@ -247,7 +247,14 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 await page.waitForTimeout(5_000);
                 res = await publicApi.get("/api/public/vibe/library", { headers });
             }
-            expect(res.status()).toBe(200);
+            // The export serves its last build and rebuilds in the background when the library has changed, so the
+            // first answer after the scan can still be the build from before it: ask again until it has the library.
+            for (const deadline = Date.now() + 5 * 60_000; ; ) {
+                expect(res.status()).toBe(200);
+                if (((await res.json()) as { tracks: unknown[] }).tracks.length > 0 || Date.now() > deadline) break;
+                await page.waitForTimeout(5_000);
+                res = await publicApi.get("/api/public/vibe/library", { headers });
+            }
             const etag = res.headers()["etag"];
             expect(etag, "the export must carry an ETag").toBeTruthy();
             const body = (await res.json()) as { version: number; tracks: { id: string; xyz: number[] }[]; excluded: number };

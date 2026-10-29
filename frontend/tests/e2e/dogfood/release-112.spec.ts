@@ -218,6 +218,18 @@ test.describe("Release 1.12 (non-podcast)", () => {
 
         let total = 0;
         await session.step("start from a finished, idle library", async () => {
+            // Earlier tests start enrichment work of their own (the GPU flip, scans); wait for the library to be
+            // finished, idle and mapped rather than fail on work they left running.
+            await expect
+                .poll(
+                    async () => {
+                        const p = await progress();
+                        const m = await mapState();
+                        return p.isFullyComplete && p.similarity.completed === p.similarity.total && (await status()).status === "idle" && !m.computing;
+                    },
+                    { timeout: 20 * 60_000, intervals: [10_000, 30_000], message: "the library never finished enrichment before the re-run" },
+                )
+                .toBe(true);
             const p = await progress();
             total = p.similarity.total;
             expect(total, "the library has no songs").toBeGreaterThan(0);

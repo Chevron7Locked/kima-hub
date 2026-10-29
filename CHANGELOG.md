@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The public vibe feed is rebuilt as soon as the library changes.** It was rebuilt only when someone asked for it, so the first request after a change got the copy from before it (on a feed nobody had read for days, a days-old one). With the feed on, Kima now checks every 30 seconds and rebuilds when anything in it changed.
 - **Pages full of covers no longer run into the image limit.** The server allowed 500 picture requests a minute from one address; a page shows 50 to 80, so a person clicking quickly through a few pages saw blank covers for the rest of the minute. The limit is now 3,000 a minute.
 - **Release radar in the sidebar.** The page of new and upcoming albums from the artists you follow is in the rail and the phone menu; nothing linked to it before.
 - **Analysis drops seven unused mood readings.** The audio analyzer no longer computes MusiCNN's seven raw mood scores (happy, sad, relaxed, aggressive, party, acoustic, electronic) and the database no longer stores them: moods come from the learned mood step, and nothing read these. Analysis does a little less work per song.
