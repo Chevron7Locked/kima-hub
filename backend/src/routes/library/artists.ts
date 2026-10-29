@@ -27,6 +27,7 @@ import { failureCause } from "../../utils/outcome";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { resolveWithinMusicRoot } from "./trackPath";
+import { config } from "../../config";
 import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
 import { listenBrainzService } from "../../services/listenBrainz";
@@ -900,6 +901,61 @@ router.get("/artists/:id", async (req, res) => {
   }
 });
 
+/** Files a deleted album leaves behind that nobody needs once its songs are gone: art, tags, rips' side files, system files. */
+const LEFTOVER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".nfo", ".cue", ".lrc", ".log"]);
+const LEFTOVER_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
+
+/**
+ * Whether everything under `dir` is leftovers. Any other file, any link, an empty folder inside it (one another program
+ * made, such as Lidarr for an artist it watches) or anything unreadable says no.
+ */
+function onlyLeftovers(dir: string, inner = false): boolean {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    if (inner && entries.length === 0) return false;
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) return false;
+      if (entry.isDirectory()) {
+        if (!onlyLeftovers(path.join(dir, entry.name), true)) return false;
+      } else if (!LEFTOVER_NAMES.has(entry.name.toLowerCase()) && !LEFTOVER_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * After an artist's song files are deleted: each folder that held them goes, with what is left in it, when that is
+ * only leftovers, and so does each parent the same holds for, up to the music root. A folder is never removed for its
+ * name, so music filed by genre or in shared folders keeps everyone else's files.
+ */
+function removeEmptiedFolders(songPaths: string[]): void {
+  const root = path.resolve(config.music.musicPath);
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    return;
+  }
+  const folders = [...new Set(songPaths.map((p) => path.dirname(p)))].sort((a, b) => b.length - a.length);
+  for (const folder of folders) {
+    for (let dir = folder; dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const real = fs.realpathSync(dir);
+        if (!real.startsWith(realRoot + path.sep) || !onlyLeftovers(real)) break;
+        fs.rmSync(real, { recursive: true, force: true });
+      } catch (err: any) {
+        logger.warn(`[DELETE] Could not tidy folder ${dir}: ${err?.message ?? err}`);
+        break;
+      }
+    }
+  }
+}
+
 router.delete("/artists/:id", requireAdmin, async (req, res) => {
   try {
     const artist = await prisma.artist.findUnique({
@@ -918,91 +974,28 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
     }
 
     let deletedFiles = 0;
-    const artistFoldersToDelete = new Set<string>();
+    const deletedPaths: string[] = [];
 
     for (const album of artist.albums) {
       for (const track of album.tracks) {
-        if (track.filePath) {
-          try {
-            const absolutePath = resolveWithinMusicRoot(track.filePath);
-            if (!absolutePath) {
-              logger.warn(
-                `[DELETE] Refused out-of-root track path: ${track.filePath}`,
-              );
-              continue;
-            }
-
-            if (fs.existsSync(absolutePath)) {
-              fs.unlinkSync(absolutePath);
-              deletedFiles++;
-
-              const pathParts = track.filePath.split(path.sep);
-              // Everything added to this set is handed to rmSync(recursive,
-              // force) below, so the segments are resolved rather than joined --
-              // the same rule the file path above follows. A refused folder is
-              // simply not queued.
-              const actualArtistFolder =
-                pathParts.length >= 2 && pathParts[0].toLowerCase() === "soulseek"
-                  ? resolveWithinMusicRoot(pathParts[0], pathParts[1])
-                  : pathParts[0]
-                    ? resolveWithinMusicRoot(pathParts[0])
-                    : null;
-              if (actualArtistFolder) {
-                artistFoldersToDelete.add(actualArtistFolder);
-              }
-            }
-          } catch (err) {
-            logger.warn("[DELETE] Could not delete file:", err);
-          }
-        }
-      }
-    }
-
-    for (const artistFolder of artistFoldersToDelete) {
-      try {
-        if (fs.existsSync(artistFolder)) {
-          logger.debug(`[DELETE] Attempting to delete folder: ${artistFolder}`);
-
-          fs.rmSync(artistFolder, {
-            recursive: true,
-            force: true,
-          });
-          logger.debug(
-            `[DELETE] Successfully deleted artist folder: ${artistFolder}`,
-          );
-        }
-      } catch (err: any) {
-        logger.error(
-          `[DELETE] Failed to delete artist folder ${artistFolder}:`,
-          err?.message || err,
-        );
-      }
-    }
-
-    // artist.name is a tag value, not a path segment the scanner produced -- an
-    // artist tagged "../../tmp" would otherwise reach rmSync(recursive, force)
-    // just below. A refused path drops out of the list rather than throwing:
-    // an artist with one bad row must still be deletable.
-    const commonPaths = [
-      resolveWithinMusicRoot(artist.name),
-      resolveWithinMusicRoot("Soulseek", artist.name),
-    ].filter((p): p is string => p !== null);
-
-    for (const commonPath of commonPaths) {
-      if (fs.existsSync(commonPath) && !artistFoldersToDelete.has(commonPath)) {
+        if (!track.filePath) continue;
         try {
-          fs.rmSync(commonPath, { recursive: true, force: true });
-          logger.debug(
-            `[DELETE] Deleted additional artist folder: ${commonPath}`,
-          );
-        } catch (err: any) {
-          logger.error(
-            `[DELETE] Could not delete ${commonPath}:`,
-            err?.message,
-          );
+          const absolutePath = resolveWithinMusicRoot(track.filePath);
+          if (!absolutePath) {
+            logger.warn(`[DELETE] Refused out-of-root track path: ${track.filePath}`);
+            continue;
+          }
+          if (fs.existsSync(absolutePath)) {
+            fs.unlinkSync(absolutePath);
+            deletedFiles++;
+          }
+          deletedPaths.push(absolutePath);
+        } catch (err) {
+          logger.warn("[DELETE] Could not delete file:", err);
         }
       }
     }
+    removeEmptiedFolders(deletedPaths);
 
     let lidarrDeleted = false;
     let lidarrError: string | null = null;
