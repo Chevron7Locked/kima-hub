@@ -1,6 +1,8 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { HeroBackdrop } from "@/components/ui/HeroBackdrop";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { cn } from "@/lib/cn";
@@ -67,12 +69,18 @@ interface MediaHeroProps {
     titleGap?: "gap-2" | "gap-3";
     /** The dot-separated meta line under the title. */
     meta: ReactNode;
-    /** A block under the meta line: the genre chip. */
+    /** A block under the meta line: the genre chip, the tags. */
     metaExtra?: ReactNode;
+    /** A short description between the title and the meta line, shown from the medium breakpoint up. */
+    description?: string;
+    /** A link back to the list this page belongs to, above the hero. */
+    back?: { href: string; label: string };
+    /** The cover box's background behind a missing cover. */
+    coverBgClass?: string;
     children?: ReactNode;
 }
 
-/** The music hero: backdrop, cover, eyebrow, title, meta. Album and artist share this skeleton. */
+/** The page hero: backdrop, cover, eyebrow, title, meta. Albums, artists, audiobooks and podcasts share it. */
 export function MediaHero({
     image,
     coverImage,
@@ -89,19 +97,32 @@ export function MediaHero({
     titleGap = "gap-2",
     meta,
     metaExtra,
+    description,
+    back,
+    coverBgClass,
     children,
 }: MediaHeroProps) {
     return (
         <div className="relative animate-rise">
             <HeroBackdrop image={image} alt={alt} colors={colors} tint={tint} fallback={fallback} />
 
-            <div className="relative page-shell pt-16 pb-6">
+            <div className={cn("relative page-shell pb-6", back ? "pt-8" : "pt-16")}>
+                {back && (
+                    <Link
+                        href={back.href}
+                        className="inline-flex items-center gap-2 text-xs tabular-nums text-[var(--text-muted)] hover:text-white transition-colors mb-6"
+                    >
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                        {back.label}
+                    </Link>
+                )}
                 <div className="flex items-end gap-6">
                     <HeroCover
                         image={coverImage ?? image}
                         alt={alt}
                         shape={shape}
                         fallbackIcon={fallbackIcon}
+                        bgClass={coverBgClass}
                     />
 
                     <div className="flex-1 min-w-0 pb-1">
@@ -115,6 +136,11 @@ export function MediaHero({
                             </h1>
                             {titleExtra}
                         </div>
+                        {description && (
+                            <p className="text-sm text-[var(--text-muted)] line-clamp-2 max-w-3xl mb-3 hidden md:block">
+                                {description}
+                            </p>
+                        )}
                         <div className="flex flex-wrap items-center gap-1 text-sm text-[var(--text-secondary)] mb-1">
                             {meta}
                         </div>
