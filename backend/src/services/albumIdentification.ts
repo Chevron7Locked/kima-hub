@@ -69,11 +69,13 @@ export function voteAlbumReleaseGroup(albumTitle: string, songs: AlbumSongAnswer
     if (tally.size === 0) return none("no-agreeing-album");
 
     const most = Math.max(...[...tally.values()].map((row) => row.votes));
-    let leaders = [...tally.entries()].filter(([, row]) => row.votes === most);
-    if (leaders.length > 1) {
+    const top = [...tally.entries()].filter(([, row]) => row.votes === most);
+    let leaders = top;
+    if (top.length > 1) {
+        // A tie goes to the one album whose title is exactly this one's, if there is one.
         const exact = albumIdentityKey(albumTitle);
-        leaders = leaders.filter(([, row]) => albumIdentityKey(row.title) === exact);
-        if (leaders.length !== 1) return none("tie", most, [...tally.entries()].filter(([, r]) => r.votes === most).map(([id]) => id));
+        leaders = top.filter(([, row]) => albumIdentityKey(row.title) === exact);
+        if (leaders.length !== 1) return none("tie", most, top.map(([id]) => id));
     }
     const [releaseGroupId, winner] = leaders[0];
     if (winner.votes * 2 <= songs.length) return none("short-of-majority", winner.votes, [releaseGroupId]);
@@ -109,10 +111,8 @@ export async function fillAlbumFromCatalogue(
     }
 }
 
-/** Albums worked on per round (asked about or voted on; an album already decided does not count),
- * and the time a round may take before it stops at the next album. These bounds and the two
- * put-aside times below are chosen limits, not measured ones: they decide how long work waits,
- * never which album an id names. */
+/** Albums worked on per round (an album already decided does not count) and how long a round may take. Chosen
+ * limits, not measured: they decide how long work waits, never which album an id names. */
 const ALBUMS_PER_ROUND = 10;
 const ROUND_BUDGET_MS = 20_000;
 /** A verdict is remembered this long (an unmatched AcoustID reply's lifetime), unless the songs change. */
