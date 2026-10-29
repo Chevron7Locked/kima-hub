@@ -46,10 +46,19 @@ from psycopg2.extras import RealDictCursor
 # analyzer reports carries the signature the backend's classifier reads.
 from classifier import (
     classify_failure,
+    classify_with_codec,
     tag_error,
     Disposition,
 )
-from musicnn_onnx import PATCH_SECONDS
+from musicnn_onnx import (
+    ANSWERS_FILE,
+    MIN_COSINE,
+    PATCH_SECONDS,
+    MusicnnBody,
+    MusicnnOnnx,
+    MusicnnServer,
+    embedding_cosine,
+)
 import gpu_switch
 
 # True when the wrapper started this process with the GPU runtime ("GPU for audio analysis" on and the
@@ -62,7 +71,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('audio-analyzer')
 
-# Essentia imports (will fail gracefully if not installed for testing)
+# Essentia is optional at import, so the module loads where it is not installed.
 ESSENTIA_AVAILABLE = False
 try:
     import essentia
@@ -87,19 +96,15 @@ MIN_ANALYZE_SECONDS = max(3.0, PATCH_SECONDS)
 # A stage job id ends in its claim: <key>-<attempt>-r<redelivered> (backend `claimOf`).
 CLAIM_IN_JOB_ID = re.compile(r'-(\d+)-r(\d+)$')
 SILENCE_PEAK = 10 ** (-80 / 20)
-# A reading outside these bounds is the meter or a corrupt decode failing, never the music:
-# integrated loudness is bounded at +0.5 LUFS, just above digital full scale (0 LUFS); below
-# -70 LUFS is below anything with audible content; a range past 60 LU cannot exist. They catch,
-# at the source, garbage such as +2868.2 LUFS; nothing outside the bounds
-# reaches the row.
+# Past these a reading is the meter or a corrupt decode failing, never the music, and is not stored:
+# loudness above +0.5 LUFS (digital full scale is 0) or below -70 (nothing audible); a range over 60 LU.
 LOUDNESS_RANGE_OK = (-70.0, 0.5)
 DYNAMIC_RANGE_OK = (0.0, 60.0)
 
 # How long to block waiting for work, in seconds (at least 5).
 BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', '5')))
 
-# Idle timeout before unloading ML models from memory (seconds)
-# Models are reloaded automatically when new work arrives
+# Seconds idle before the models are unloaded; the next job loads them again.
 MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
 
 # Debounce delay for worker resize (seconds) -- prevents pool churn when user drags a slider
@@ -198,9 +203,7 @@ NUM_WORKERS = _get_workers_from_db()
 ESSENTIA_VERSION = '2.1b6-enhanced-v5'
 
 # Valence and arousal on 0-1: alpha + beta * raw, raw the two heads' mean on their 1-9 scale, fitted by least squares
-# to Memo2496's human ratings and chosen against the Soundtracks sets' (services/audio-analyzer-clap/eval/
-# music-switch-2026-10-17/va_mapping.json). It replaced a x2.5 stretch about 5 clipped to 1-9, which agreed worse
-# with the ratings and put 18% of a library's arousal at an edge.
+# to Memo2496's human ratings and chosen against the Soundtracks sets'.
 VA_MAP = {'valence': (0.22618388390710234, 0.06503314529834055),
           'arousal': (0.007891416107343032, 0.10103310536880765)}
 
@@ -417,8 +420,7 @@ class AudioAnalyzer:
             self._load_ml_models(musicnn_server)
 
     def _init_essentia(self):
-        """Initialize Essentia algorithms for basic feature extraction"""
-        # Basic feature extractors (always available)
+        """The Essentia extractors every analysis uses: tempo, key, loudness."""
         self.rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
         self.key_extractor = es.KeyExtractor()
         # EBU R128: integrated loudness (LUFS) and loudness range (LU).
@@ -426,7 +428,7 @@ class AudioAnalyzer:
         self.rms = es.RMS()
         self.resampler = es.Resample(inputSampleRate=44100, outputSampleRate=16000)
 
-        logger.info("Essentia basic algorithms initialized")
+        logger.info("Essentia extractors initialized")
 
     def _load_ml_models(self, musicnn_server=None):
         """Load MusiCNN and its heads: HEAD_CLASSES' and the two valence/arousal
@@ -436,16 +438,14 @@ class AudioAnalyzer:
             self.models_error = f'MusiCNN graph not found at {MUSICNN_GRAPH}'
             return
         try:
-            from musicnn_onnx import MusicnnOnnx
-            models = MusicnnOnnx(MODEL_DIR, use_gpu=False, threads=THREADS_PER_WORKER, server=musicnn_server)
+            models = MusicnnOnnx(MODEL_DIR, threads=THREADS_PER_WORKER, server=musicnn_server)
         except Exception as e:
             self.models_error = f'MusiCNN models failed to load: {e}'
             logger.error(self.models_error)
             return
         self.musicnn_model = models.embeddings
         for head in models.heads():
-            if head in HEAD_CLASSES or head in ('deam', 'emomusic'):
-                self.prediction_models[head] = (lambda name: lambda embeddings: models.predict(name, embeddings))(head)
+            self.prediction_models[head] = (lambda name: lambda embeddings: models.predict(name, embeddings))(head)
         logger.info(f"MusiCNN on {'the GPU (main process)' if models.on_gpu else 'CPU'}, {len(self.prediction_models)} heads")
         missing = [m for m in [*HEAD_CLASSES, 'deam', 'emomusic'] if m not in self.prediction_models]
         self.enhanced_mode = not missing
@@ -467,7 +467,8 @@ class AudioAnalyzer:
             file_path, duration=max_duration)
         if samples is None:
             logger.error(f"Decode failed for {file_path}: {stderr}")
-            self._last_load_error = tag_error(stderr, cls, "unknown")
+            # An unsupported file names its codec ("UNSUPPORTED::dts -- ..."), which the failure list shows.
+            self._last_load_error = tag_error(stderr, cls, classify_with_codec(stderr)[1])
             return None
         if rc != 0:
             # Tolerant decode: samples arrived despite ffmpeg reporting a
@@ -543,8 +544,6 @@ class AudioAnalyzer:
             return result
 
         try:
-            # === BASIC FEATURES (always extracted) ===
-
             # Tempo: none is stored when the extractor fails; an onset count is not a tempo.
             try:
                 bpm, beats, confidence, _, _ = self.rhythm_extractor(audio_44k)
@@ -693,9 +692,6 @@ def _analyze_track_in_process(args: Tuple[str, str]) -> Tuple[str, str, Dict[str
         features = _process_analyzer.analyze(full_path)
         return (track_id, file_path, features)
 
-    except UnicodeDecodeError as e:
-        logger.error(f"UTF-8 decoding error for track {track_id}: {e}")
-        return (track_id, file_path, {'_error': f'UTF-8 encoding error: {e}'})
     except Exception as e:
         logger.error(f"Analysis error for {file_path}: {e}")
         return (track_id, file_path, {'_error': str(e)})
@@ -729,7 +725,6 @@ class AnalysisWorker:
             _record_gpu_provider(False)
             return None
         try:
-            from musicnn_onnx import ANSWERS_FILE, MIN_COSINE, MusicnnBody, MusicnnServer, embedding_cosine
             body = MusicnnBody(MODEL_DIR, use_gpu=True)
             if not body.on_gpu:
                 logger.warning("GPU for audio analysis is on but ONNX Runtime has no CUDA provider here; running on CPU")
@@ -917,7 +912,7 @@ class AnalysisWorker:
             self._gpu_server = None
         self.musicnn_server = None
         gc.collect()
-        # Force glibc to return freed pages to OS (Python/PyTorch hold RSS otherwise)
+        # Hand freed pages back to the OS; glibc keeps them otherwise.
         try:
             import ctypes
             ctypes.CDLL("libc.so.6").malloc_trim(0)

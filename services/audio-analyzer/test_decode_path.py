@@ -288,6 +288,17 @@ class TestWhenTheLengthLies:
             assert 89.0 <= duration <= 90.5, f"header {header}: expected a 90s window, got {duration}s"
             assert self._tone_only(samples, sr), f"header {header}: the window reached into the silence at an end"
 
+def test_a_decode_failing_on_a_missing_codec_names_that_codec(monkeypatch):
+    """The failure list shows the stage's error message, so an unsupported file says which codec it is."""
+    stderr = "[dts @ 0x1] Decoder not found\nunsupported codec dts"
+    monkeypatch.setattr(
+        analyzer, "_decode_to_stereo",
+        lambda *a, **k: (None, None, 0, None, ["ffmpeg"], 1, stderr, analyzer.classify_failure(stderr)),
+    )
+    monkeypatch.setattr(analyzer, "ESSENTIA_AVAILABLE", True)
+    worker = analyzer.AudioAnalyzer.__new__(analyzer.AudioAnalyzer)
+    assert worker.load_audio("/x.dts") is None
+    assert worker._last_load_error.startswith("UNSUPPORTED::dts -- ")
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
