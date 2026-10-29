@@ -23,7 +23,7 @@ export function useAudio() {
         currentIndex: state.currentIndex,
         isShuffle: state.isShuffle,
         repeatMode: state.repeatMode,
-        playerMode: state.playerMode,
+        overlayOpen: state.overlayOpen,
         volume: state.volume,
         isMuted: state.isMuted,
 
@@ -57,8 +57,8 @@ export function useAudio() {
         seek: controls.seek,
         skipForward: controls.skipForward,
         skipBackward: controls.skipBackward,
-        setPlayerMode: controls.setPlayerMode,
-        returnToPreviousMode: controls.returnToPreviousMode,
+        openOverlay: controls.openOverlay,
+        closeOverlay: controls.closeOverlay,
         setVolume: controls.setVolume,
         toggleMute: controls.toggleMute,
 

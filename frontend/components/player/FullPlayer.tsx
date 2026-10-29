@@ -50,7 +50,7 @@ export function FullPlayer() {
         resumeWithGesture,
         next,
         previous,
-        setPlayerMode,
+        openOverlay,
         seek,
         skipForward,
         skipBackward,
@@ -357,7 +357,7 @@ export function FullPlayer() {
                         <KeyboardShortcutsTooltip />
 
                         <button
-                            onClick={() => setPlayerMode("overlay")}
+                            onClick={openOverlay}
                             className={cn(
                                 "transition-all duration-200 border-l border-white/[0.08] pl-3",
                                 hasMedia

@@ -14,7 +14,6 @@ import { api } from "@/lib/api";
 import { episodeForPlayer, type ShowWithEpisodes } from "./podcast-episode";
 import { STORAGE_KEYS } from "./storage-keys";
 
-export type PlayerMode = "full" | "mini" | "overlay";
 
 /** A song as the player holds it. */
 export interface Track {
@@ -90,8 +89,8 @@ interface AudioStateContextType {
     shuffleIndices: number[];
 
     // UI state
-    playerMode: PlayerMode;
-    previousPlayerMode: PlayerMode;
+    /** Whether the full-screen player is open over the page. */
+    overlayOpen: boolean;
     volume: number;
     isMuted: boolean;
 
@@ -113,8 +112,7 @@ interface AudioStateContextType {
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
     setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
     setShuffleIndices: (indices: SetStateAction<number[]>) => void;
-    setPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
-    setPreviousPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
+    setOverlayOpen: (open: SetStateAction<boolean>) => void;
     setVolume: (volume: SetStateAction<number>) => void;
     setIsMuted: (muted: SetStateAction<boolean>) => void;
     setRepeatOneCount: (count: SetStateAction<number>) => void;
@@ -202,11 +200,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         () => (readStorage(STORAGE_KEYS.REPEAT_MODE) as "off" | "one" | "all") ?? "off"
     );
     const [repeatOneCount, setRepeatOneCount] = useState(0);
-    const [playerMode, setPlayerMode] = useState<PlayerMode>(
-        () => (readStorage(STORAGE_KEYS.PLAYER_MODE) as PlayerMode) ?? "full"
-    );
-    const [previousPlayerMode, setPreviousPlayerMode] =
-        useState<PlayerMode>("full");
+    // Stored as "overlay" while it is open; any other value (an older visit's "mini" or "full") reads as closed.
+    const [overlayOpen, setOverlayOpen] = useState(() => readStorage(STORAGE_KEYS.PLAYER_MODE) === "overlay");
     const [volume, setVolume] = useState(
         () => { const v = readStorage(STORAGE_KEYS.VOLUME); return v ? parseFloat(v) : 0.5; }
     );
@@ -432,7 +427,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 );
                 localStorage.setItem(STORAGE_KEYS.IS_SHUFFLE, isShuffle.toString());
                 localStorage.setItem(STORAGE_KEYS.REPEAT_MODE, repeatMode);
-                localStorage.setItem(STORAGE_KEYS.PLAYER_MODE, playerMode);
+                localStorage.setItem(STORAGE_KEYS.PLAYER_MODE, overlayOpen ? "overlay" : "closed");
                 localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
                 localStorage.setItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
             } catch (error) {
@@ -449,7 +444,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         currentIndex,
         isShuffle,
         repeatMode,
-        playerMode,
+        overlayOpen,
         volume,
         isMuted,
     ]);
@@ -641,8 +636,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-            playerMode,
-            previousPlayerMode,
+            overlayOpen,
             volume,
             isMuted,
             activeOperation,
@@ -656,8 +650,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setIsShuffle,
             setRepeatMode,
             setShuffleIndices,
-            setPlayerMode,
-            setPreviousPlayerMode,
+            setOverlayOpen,
             setVolume,
             setIsMuted,
             setRepeatOneCount,
@@ -673,8 +666,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-            playerMode,
-            previousPlayerMode,
+            overlayOpen,
             volume,
             isMuted,
             activeOperation,

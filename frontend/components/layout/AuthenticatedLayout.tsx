@@ -10,7 +10,6 @@ import { BottomNavigation } from "./BottomNavigation";
 import { UniversalPlayer } from "../player/UniversalPlayer";
 import { MediaControlsHandler } from "../player/MediaControlsHandler";
 import { WhatsNewGate } from "@/components/whats-new/WhatsNewGate";
-import { PlayerModeWrapper } from "../player/PlayerModeWrapper";
 import { ActivityPanel } from "./ActivityPanel";
 import { UnifiedPanel } from "./UnifiedPanel";
 import { GalaxyBackground } from "../ui/GalaxyBackground";
@@ -102,18 +101,18 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         // A television: the 10-foot layout driven by a remote.
         if (isTV) {
             return (
-                <PlayerModeWrapper>
+                <>
                     <SkipLink />
                     <MediaControlsHandler />
                     <WhatsNewGate />
                     <TVLayout>{children}</TVLayout>
-                </PlayerModeWrapper>
+                </>
             );
         }
 
         if (isMobileOrTablet) {
             return (
-                <PlayerModeWrapper>
+                <>
                     <SkipLink />
                     <div className="h-dvh bg-black overflow-hidden flex flex-col">
                         <MediaControlsHandler />
@@ -149,12 +148,12 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
 
                         <BottomNavigation />
                     </div>
-                </PlayerModeWrapper>
+                </>
             );
         }
 
         return (
-            <PlayerModeWrapper>
+            <>
                 <SkipLink />
                 <div
                     className="h-dvh bg-black overflow-hidden flex flex-col"
@@ -180,7 +179,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     </div>
                     <UniversalPlayer />
                 </div>
-            </PlayerModeWrapper>
+            </>
         );
     }
 

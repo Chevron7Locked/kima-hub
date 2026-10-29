@@ -84,7 +84,7 @@ export function VibePanelSheet({
     clearSignal,
     intro,
 }: VibePanelSheetProps) {
-    const { playbackType, isPlaying, pause, resumeWithGesture, setPlayerMode } = usePlayerControls();
+    const { playbackType, isPlaying, pause, resumeWithGesture, openOverlay } = usePlayerControls();
     const { title: playingTitle, subtitle: playingSubtitle, coverUrl } = useMediaInfo(100);
     const hasPlayback = !!playbackType;
 
@@ -319,7 +319,7 @@ export function VibePanelSheet({
                     >
                         <button
                             type="button"
-                            onClick={() => setPlayerMode("overlay")}
+                            onClick={openOverlay}
                             className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                             aria-label="Open the full player"
                         >

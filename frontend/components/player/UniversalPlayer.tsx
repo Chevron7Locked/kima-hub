@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 export function UniversalPlayer() {
-    const { playerMode, setPlayerMode, currentTrack, currentAudiobook, currentPodcast, isPlaying } =
+    const { overlayOpen, openOverlay, currentTrack, currentAudiobook, currentPodcast, isPlaying } =
         useAudio();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
@@ -38,19 +38,19 @@ export function UniversalPlayer() {
             // Where the sheet carries the player, the track is already visible
             // and controllable; spend the one automatic switch so that leaving
             // the page does not open the overlay for a play the user just made.
-            if (!sheetOwnsPlayback) setPlayerMode("overlay");
+            if (!sheetOwnsPlayback) openOverlay();
             hasAutoSwitchedRef.current = true;
         }
 
         lastMediaIdRef.current = currentMediaId;
-    }, [currentTrack?.id, currentAudiobook?.id, currentPodcast?.id, isPlaying, isMobileOrTablet, sheetOwnsPlayback, setPlayerMode]);
+    }, [currentTrack?.id, currentAudiobook?.id, currentPodcast?.id, isPlaying, isMobileOrTablet, sheetOwnsPlayback, openOverlay]);
 
     const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
 
     return (
         <>
             {/* The desktop bar shows even with nothing playing; the <audio> element lives in ConditionalAudioProvider. */}
-            {playerMode === "overlay" && hasMedia ? (
+            {overlayOpen && hasMedia ? (
                 <OverlayPlayer />
             ) : isMobileOrTablet ? (
                 /* On mobile/tablet: only mini player (no full player), except where the page owns it */

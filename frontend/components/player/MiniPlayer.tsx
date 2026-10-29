@@ -24,7 +24,7 @@ export function MiniPlayer() {
         progress,
         pause,
         resumeWithGesture,
-        setPlayerMode,
+        openOverlay,
     } = usePlayerControls();
     const [isMinimized, setIsMinimized] = useState(false);
     const [isDismissed, setIsDismissed] = useState(false);
@@ -68,7 +68,7 @@ export function MiniPlayer() {
         if (swipeOffset > 80) {
             setIsMinimized(true);
         } else if (swipeOffset < -80) {
-            if (isPlaying) setPlayerMode("overlay");
+            if (isPlaying) openOverlay();
             else setIsDismissed(true);
         }
 
@@ -174,7 +174,7 @@ export function MiniPlayer() {
 
                 <div
                     className="relative flex items-center gap-3 px-3 py-3 cursor-pointer landscape-short:py-1"
-                    onClick={() => setPlayerMode("overlay")}
+                    onClick={openOverlay}
                 >
                     {/* Album Art - expand button for keyboard/AT users */}
                     <button
@@ -182,7 +182,7 @@ export function MiniPlayer() {
                         aria-label="Expand player"
                         onClick={(e) => {
                             e.stopPropagation();
-                            setPlayerMode("overlay");
+                            openOverlay();
                         }}
                     >
                         {coverUrl ? (

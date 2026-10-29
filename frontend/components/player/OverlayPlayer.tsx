@@ -48,7 +48,7 @@ export function OverlayPlayer() {
         resumeWithGesture,
         next,
         previous,
-        returnToPreviousMode,
+        closeOverlay,
         seek,
         skipForward,
         skipBackward,
@@ -129,7 +129,7 @@ export function OverlayPlayer() {
                     onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        returnToPreviousMode();
+                        closeOverlay();
                     }}
                     className="text-[var(--text-secondary)] hover:text-white transition-colors p-2 -ml-2 rounded-full hover:bg-white/10"
                     title="close"
@@ -213,7 +213,7 @@ export function OverlayPlayer() {
                         {mediaLink ? (
                             <Link
                                 href={mediaLink}
-                                onClick={returnToPreviousMode}
+                                onClick={closeOverlay}
                                 className="block hover:underline"
                             >
                                 <p data-player-title className="text-[23px] font-semibold text-[var(--text-primary)] mb-1 tracking-[-0.2px] line-clamp-2">
@@ -228,7 +228,7 @@ export function OverlayPlayer() {
                         {artistLink ? (
                             <Link
                                 href={artistLink}
-                                onClick={returnToPreviousMode}
+                                onClick={closeOverlay}
                                 className="block hover:underline"
                             >
                                 <p className="text-[15px] text-[var(--text-secondary)] truncate">

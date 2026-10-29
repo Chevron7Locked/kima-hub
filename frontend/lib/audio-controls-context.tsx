@@ -16,7 +16,6 @@ import {
     Track,
     Audiobook,
     Podcast,
-    PlayerMode,
     VibeOperation,
 } from "./audio-state-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -77,8 +76,9 @@ interface AudioControlsContextType {
     skipBackward: (seconds?: number) => void;
 
     // Player mode controls
-    setPlayerMode: (mode: PlayerMode) => void;
-    returnToPreviousMode: () => void;
+    /** Opens the full-screen player over the page. */
+    openOverlay: () => void;
+    closeOverlay: () => void;
 
     // Volume controls
     setVolume: (volume: number) => void;
@@ -886,21 +886,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const skipForward = useCallback((seconds: number = 30) => skipBy(seconds), [skipBy]);
     const skipBackward = useCallback((seconds: number = 30) => skipBy(-seconds), [skipBy]);
 
-    const setPlayerModeWithHistory = useCallback(
-        (mode: PlayerMode) => {
-            state.setPreviousPlayerMode(state.playerMode);
-            state.setPlayerMode(mode);
-        },
-        [state]
-    );
-
-    const returnToPreviousMode = useCallback(() => {
-        const targetMode =
-            state.playerMode === "overlay" ? "mini" : state.previousPlayerMode;
-        const temp = state.playerMode;
-        state.setPlayerMode(targetMode);
-        state.setPreviousPlayerMode(temp);
-    }, [state]);
+    const openOverlay = useCallback(() => state.setOverlayOpen(true), [state]);
+    const closeOverlay = useCallback(() => state.setOverlayOpen(false), [state]);
 
     const setVolumeControl = useCallback(
         (newVolume: number) => {
@@ -1628,8 +1615,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             seek,
             skipForward,
             skipBackward,
-            setPlayerMode: setPlayerModeWithHistory,
-            returnToPreviousMode,
+            openOverlay,
+            closeOverlay,
             setVolume: setVolumeControl,
             toggleMute,
             startVibeMode,
@@ -1658,8 +1645,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             seek,
             skipForward,
             skipBackward,
-            setPlayerModeWithHistory,
-            returnToPreviousMode,
+            openOverlay,
+            closeOverlay,
             setVolumeControl,
             toggleMute,
             startVibeMode,

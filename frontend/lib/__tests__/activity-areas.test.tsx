@@ -29,7 +29,7 @@ vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => null }));
 vi.mock("@/hooks/useMediaQuery", () => ({ useIsMobile: () => true, useIsTablet: () => false }));
 vi.mock("@/hooks/usePlayerControls", () => ({
-    usePlayerControls: () => ({ playbackType: null, isPlaying: false, pause: () => {}, resumeWithGesture: () => {}, setPlayerMode: () => {} }),
+    usePlayerControls: () => ({ playbackType: null, isPlaying: false, pause: () => {}, resumeWithGesture: () => {}, openOverlay: () => {} }),
 }));
 vi.mock("@/hooks/useMediaInfo", () => ({ useMediaInfo: () => ({ title: "", subtitle: "", coverUrl: null }) }));
 
