@@ -4,12 +4,10 @@ import crypto from "crypto";
  * A random play order that spreads each artist's songs through the whole order, so a station whose pool is mostly one
  * artist does not play them in long runs. Every item is kept; only the order is chosen.
  *
- * 1. Spread, after Spotify's shuffle (Poláček 2014, "How to shuffle songs?", engineering.atspotify.com, itself after
- *    Fiedler's "Balanced Shuffle", keyj.emphy.de/balanced-shuffle): an artist with c songs gets them in a random order,
- *    about 1/c of the way apart, each gap varying from 0.8 to 1.2 of that, from a random offset in the first gap.
- *    Spotify places every artist on one line and sorts; then where the others happen to bunch, a big artist's songs
- *    bunch too (7 of 20 in a row for an artist with 20% of the songs). Here the artists take places in the order
- *    itself instead, largest first, each spread evenly over the places still free.
+ * 1. Spread, after Spotify's balanced shuffle: an artist with c songs gets them in a random order, about 1/c of the
+ *    way apart, each gap varying from 0.8 to 1.2 of that, from a random offset in the first gap. Unlike Spotify's one
+ *    sorted line (where others bunch, a big artist bunches too), artists take places in the order itself, largest
+ *    first, each spread evenly over the places still free.
  * 2. Repair: two songs of one artist can still land side by side. The order is rebuilt from those places, taking the
  *    earliest song whose artist is not the one just played. Songs can be ordered with no artist
  *    twice in a row exactly when the largest artist has at most one more song than all the others together (each
@@ -38,13 +36,14 @@ export function spreadByArtist<T>(
 }
 
 /** What came before an order (spreadByArtist step 4). */
-export interface Follows<T> {
+export type Follows<T> = {
     /** The artist of the song played just before the order. */
     previousArtist?: string;
-    /** The songs heard just before the order; they are kept out of its first `window` places. */
-    recent?: (item: T) => boolean;
-    window?: number;
-}
+} & (
+    | { recent?: undefined; window?: undefined }
+    /** The songs heard just before the order, kept out of its first `window` places. */
+    | { recent: (item: T) => boolean; window: number }
+);
 
 function spreadOnce<T>(items: readonly T[], artistOf: (item: T) => string, random: () => number, previousArtist?: string): T[] {
     const n = items.length;
@@ -192,7 +191,7 @@ function runsOfMajority<T>(
  */
 function keepRecentLate<T>(order: T[], artistOf: (item: T) => string, follows: Follows<T>, random: () => number): T[] {
     const isRecent = follows.recent!;
-    const window = Math.min(follows.window ?? 0, Math.floor(order.length / 2));
+    const window = Math.min(follows.window!, Math.floor(order.length / 2));
     const places = new Map<string, number[]>();
     const songs = new Map<string, T[]>();
     order.forEach((item, i) => {
@@ -243,7 +242,6 @@ function keepRecentLate<T>(order: T[], artistOf: (item: T) => string, follows: F
     for (const [artist, list] of songs) list.forEach((song, k) => (out[places.get(artist)![k]] = song));
     return out;
 }
-
 
 function shuffleInPlace<T>(array: T[], random: () => number): void {
     for (let i = array.length - 1; i > 0; i--) {
