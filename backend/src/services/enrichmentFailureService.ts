@@ -1,21 +1,13 @@
 /**
- * Enrichment failures for the settings screen, with selective retry. Per-track
- * stage failures are read from TrackStage and mapped onto the EnrichmentFailure
- * shape; the EnrichmentFailure table holds only entities without stage records
- * (artists, podcasts). Failures are resolved rather than deleted;
- * cleanupOldResolved purges rows that have stayed resolved.
+ * Enrichment failures for the settings screen. A song's failures are its TrackStage records, shown in the
+ * EnrichmentFailure shape; the EnrichmentFailure table holds artists and podcasts. Resolved rows are deleted 30 days on.
  */
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { STAGE_RETRY_CAP } from "../workers/stageRetry";
 
-/**
- * The track stages whose failures the failures API serves, and the
- * EnrichmentFailure entityType each maps to — the vocabulary the frontend
- * already knows (recording→"track", analysis→"audio", embedding→"vibe",
- * fingerprint→"scan").
- */
+/** Each song stage's failure type, as the settings screen names it. */
 const ENTITY_TYPE_BY_STAGE: Record<string, "track" | "audio" | "vibe" | "scan"> = {
     recording: "track",
     analysis: "audio",
@@ -29,16 +21,22 @@ const STAGES_BY_ENTITY_TYPE: Record<string, string[]> = Object.entries(
     return acc;
 }, {});
 
-/** True for the failure entityTypes that are backed by TrackStage rows. */
-function isTrackStageEntityType(
-    entityType: string | undefined,
-): boolean {
-    return (
-        entityType === "track" ||
-        entityType === "audio" ||
-        entityType === "vibe" ||
-        entityType === "scan"
-    );
+const STAGE_ENTITY_TYPES = new Set<string>(Object.values(ENTITY_TYPE_BY_STAGE));
+
+/** True for the failure types that are a song's stage records. */
+function isTrackStageEntityType(entityType: string | undefined): boolean {
+    return entityType !== undefined && STAGE_ENTITY_TYPES.has(entityType);
+}
+
+const LEDGER_TYPES = ["artist", "podcast"];
+
+/** The stages and ledger types a failure type covers; no type covers them all. */
+function failureScope(entityType: string | undefined): { stages: string[]; ledgerTypes: string[] } {
+    if (entityType === undefined) return { stages: Object.keys(ENTITY_TYPE_BY_STAGE), ledgerTypes: LEDGER_TYPES };
+    return {
+        stages: isTrackStageEntityType(entityType) ? STAGES_BY_ENTITY_TYPE[entityType] : [],
+        ledgerTypes: LEDGER_TYPES.includes(entityType) ? [entityType] : [],
+    };
 }
 
 /** A TrackStage row joined with its track title, as the reads fetch it. */
@@ -59,10 +57,7 @@ interface StageFailureRow {
     track: { title: string | null };
 }
 
-/**
- * Map a TrackStage row onto the EnrichmentFailure response shape. The
- * mapping is the contract: the settings UI renders these fields unchanged.
- */
+/** A stage record in the failure shape the settings screen shows. */
 function mapStageFailure(row: StageFailureRow): EnrichmentFailure {
     const blocked = row.status === "blocked";
     const lastFailedAt = row.finishedAt ?? row.startedAt ?? new Date(0);
@@ -147,9 +142,7 @@ interface GetFailuresOptions {
 }
 
 class EnrichmentFailureService {
-    /**
-     * Record a failure (or increment retry count if already exists)
-     */
+    /** Records an artist's or podcast's failure, counting a repeat. */
     async recordFailure(input: RecordFailureInput): Promise<EnrichmentFailure> {
         const {
             entityType,
@@ -175,7 +168,7 @@ class EnrichmentFailureService {
                 errorMessage,
                 errorCode,
                 retryCount: 1,
-                maxRetries: 3,
+                maxRetries: STAGE_RETRY_CAP,
                 metadata: serializedMeta,
             },
             update: {
@@ -211,19 +204,8 @@ class EnrichmentFailureService {
             offset = 0,
         } = options;
 
-        const readStages =
-            entityType === undefined || isTrackStageEntityType(entityType);
-        const stages = readStages
-            ? entityType === undefined
-                ? Object.keys(ENTITY_TYPE_BY_STAGE)
-                : STAGES_BY_ENTITY_TYPE[entityType as string] ?? []
-            : [];
-        const ledgerTypes =
-            entityType === undefined
-                ? ["artist", "podcast"]
-                : entityType === "artist" || entityType === "podcast"
-                ? [entityType]
-                : [];
+        const { stages, ledgerTypes } = failureScope(entityType);
+        const readStages = stages.length > 0;
 
         const ledgerWhere = {
             entityType: { in: ledgerTypes },
@@ -265,12 +247,7 @@ class EnrichmentFailureService {
         return { failures: merged.slice(offset, offset + limit), total: stageTotal + ledgerTotal };
     }
 
-    /**
-     * Get failure counts by type.
-     *
-     * Track-stage buckets (track/audio/vibe/scan) count open TrackStage
-     * failures; artist/podcast count open EnrichmentFailure rows.
-     */
+    /** Open failures by type: song types count stage records, artist and podcast count ledger rows. */
     async getFailureCounts(): Promise<{
         artist: number;
         track: number;
@@ -296,18 +273,10 @@ class EnrichmentFailureService {
                         skipped: false,
                     },
                 }),
-                prisma.trackStage.count({
-                    where: { stage: "recording", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
-                }),
-                prisma.trackStage.count({
-                    where: { stage: "analysis", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
-                }),
-                prisma.trackStage.count({
-                    where: { stage: "embedding", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
-                }),
-                prisma.trackStage.count({
-                    where: { stage: "fingerprint", status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
-                }),
+                prisma.trackStage.count({ where: stageFailureWhere(["recording"], false) }),
+                prisma.trackStage.count({ where: stageFailureWhere(["analysis"], false) }),
+                prisma.trackStage.count({ where: stageFailureWhere(["embedding"], false) }),
+                prisma.trackStage.count({ where: stageFailureWhere(["fingerprint"], false) }),
             ]);
 
         return {
@@ -327,11 +296,7 @@ class EnrichmentFailureService {
         };
     }
 
-    /**
-     * Get a single failure by ID. TrackStage-backed entries carry their
-     * stage-record id; ledger entries their EnrichmentFailure id — try the
-     * stage record first, then the ledger.
-     */
+    /** One failure by id: a stage record's id, else a ledger row's. */
     async getFailure(id: string): Promise<EnrichmentFailure | null> {
         const stage = await prisma.trackStage.findFirst({
             where: { id, stage: { in: Object.keys(ENTITY_TYPE_BY_STAGE) } },
@@ -345,11 +310,7 @@ class EnrichmentFailureService {
         }) as unknown as EnrichmentFailure | null;
     }
 
-    /**
-     * Split a list of failure ids into stage-record ids (TrackStage-backed
-     * entries) and ledger ids (EnrichmentFailure rows), so the mutations
-     * below can serve both kinds with the same route contract.
-     */
+    /** Failure ids split into stage-record ids and ledger ids. */
     private async splitIds(ids: string[]): Promise<{
         stageIds: string[];
         ledgerIds: string[];
@@ -404,12 +365,7 @@ class EnrichmentFailureService {
         return stageCount + ledgerCount;
     }
 
-    /**
-     * Reset retry count for failures (prepare for retry).
-     *
-     * A stage record's retry budget is its `failures`; the ledger row's is
-     * `retryCount`.
-     */
+    /** Restores the failures' retries: a stage record's `failures`, a ledger row's `retryCount`. */
     async resetRetryCount(ids: string[]): Promise<number> {
         const { stageIds, ledgerIds } = await this.splitIds(ids);
 
@@ -463,63 +419,7 @@ class EnrichmentFailureService {
         return result.count;
     }
 
-    /**
-     * Resolve all unresolved failures, optionally by type, without deleting any:
-     * stage records are parked `blocked`, ledger rows are resolved once and keep
-     * any human disposition.
-     */
-    async resolveAllFailures(entityType?: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan"): Promise<number> {
-        let total = 0;
-
-        if (entityType === undefined || isTrackStageEntityType(entityType)) {
-            const stages =
-                entityType === undefined
-                    ? Object.keys(ENTITY_TYPE_BY_STAGE)
-                    : STAGES_BY_ENTITY_TYPE[entityType as string] ?? [];
-            const result = await prisma.trackStage.updateMany({
-                // The failures the list shows: a Discover song's old record stays as it is, so a like still enriches it.
-                where: { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE },
-                data: {
-                    status: "blocked",
-                    retryable: false,
-                    nextRetryAt: null,
-                    decidedAt: new Date(),
-                    decidedBy: "resolved-all-via-failures-api",
-                },
-            });
-            total += result.count;
-        }
-
-        const ledgerTypes =
-            entityType === undefined
-                ? ["artist", "podcast"]
-                : entityType === "artist" || entityType === "podcast"
-                ? [entityType]
-                : [];
-
-        if (ledgerTypes.length > 0) {
-            const result = await prisma.enrichmentFailure.updateMany({
-                where: {
-                    entityType: { in: ledgerTypes },
-                    resolved: false,
-                    skipped: false,
-                },
-                data: {
-                    resolved: true,
-                    resolvedAt: new Date(),
-                },
-            });
-            total += result.count;
-        }
-
-        logger.info(`Resolved ${total} enrichment failures${entityType ? ` of type ${entityType}` : ""}`);
-
-        return total;
-    }
-
-    /**
-     * Cleanup old resolved failures (older than specified days)
-     */
+    /** Deletes ledger rows resolved more than `olderThanDays` ago. */
     async cleanupOldResolved(olderThanDays: number = 30): Promise<number> {
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
@@ -538,6 +438,7 @@ class EnrichmentFailureService {
         );
         return result.count;
     }
+
     /**
      * Which failures still have their subject: the artist, the track (for track, audio, vibe and scan failures) or the
      * podcast. One query per kind. An unknown kind counts as existing, so nothing is resolved by mistake.
@@ -570,7 +471,6 @@ class EnrichmentFailureService {
         cleaned: number;
         checked: number;
     }> {
-        // Get all unresolved failures
         const failures = await prisma.enrichmentFailure.findMany({
             where: { resolved: false, skipped: false },
             select: { id: true, entityType: true, entityId: true },
@@ -609,10 +509,7 @@ class EnrichmentFailureService {
         return { cleaned: toResolve.length, checked: failures.length };
     }
 
-    /**
-     * Resolve an entity's leftover failure rows after it enriched
-     * successfully.
-     */
+    /** Resolves an entity's open failure rows once it has enriched. */
     async resolveByEntity(entityType: "vibe" | "audio" | "artist" | "podcast", entityId: string): Promise<boolean> {
         const result = await prisma.enrichmentFailure.updateMany({
             where: {
@@ -634,8 +531,6 @@ class EnrichmentFailureService {
 
         return result.count > 0;
     }
-
 }
 
-// Singleton instance
 export const enrichmentFailureService = new EnrichmentFailureService();

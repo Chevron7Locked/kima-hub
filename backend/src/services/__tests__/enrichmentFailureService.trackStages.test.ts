@@ -177,6 +177,15 @@ describe("getFailures reads track stages from TrackStage", () => {
         expect(scanList.failures.map((f) => f.entityId)).toContain(scan);
     });
 
+    it("a type it does not know lists nothing, even one named like a built-in object key", async () => {
+        const song = id("unk");
+        await seedTrack(song);
+        await putStage(song, "recording", "failed", { error: "x" });
+        for (const entityType of ["nonsense", "constructor", "toString", "__proto__"]) {
+            await expect(enrichmentFailureService.getFailures({ entityType } as never)).resolves.toEqual({ failures: [], total: 0 });
+        }
+    });
+
     it("getFailure resolves a TrackStage id to the mapped failure", async () => {
         const trackId = id("one");
         await seedTrack(trackId);

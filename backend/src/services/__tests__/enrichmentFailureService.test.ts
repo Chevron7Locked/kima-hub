@@ -3,6 +3,7 @@
  */
 
 import { enrichmentFailureService } from "../enrichmentFailureService";
+import { STAGE_RETRY_CAP } from "../../workers/stageRetry";
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -26,8 +27,8 @@ describe("EnrichmentFailureService", () => {
 
     describe("recordFailure", () => {
         const baseInput = {
-            entityType: "audio" as const,
-            entityId: "track-123",
+            entityType: "artist" as const,
+            entityId: "artist-123",
             entityName: "Test Track",
             errorMessage: "Analysis failed: timeout",
             errorCode: "MAX_RETRIES_EXCEEDED",
@@ -43,8 +44,8 @@ describe("EnrichmentFailureService", () => {
             const call = mockUpsert.mock.calls[0][0];
             expect(call.where).toEqual({
                 entityType_entityId: {
-                    entityType: "audio",
-                    entityId: "track-123",
+                    entityType: "artist",
+                    entityId: "artist-123",
                 },
             });
         });
@@ -70,14 +71,15 @@ describe("EnrichmentFailureService", () => {
             expect(call.update.resolvedAt).toBeNull();
         });
 
-        it("sets retryCount=1 and maxRetries=3 in create branch", async () => {
+        // An artist is retried until STAGE_RETRY_CAP (artistEnrichment.ts), the cap stage records show too.
+        it("sets retryCount=1 and maxRetries=STAGE_RETRY_CAP in create branch", async () => {
             mockUpsert.mockResolvedValue({ id: "fail-1", ...baseInput });
 
             await enrichmentFailureService.recordFailure(baseInput);
 
             const call = mockUpsert.mock.calls[0][0];
             expect(call.create.retryCount).toBe(1);
-            expect(call.create.maxRetries).toBe(3);
+            expect(call.create.maxRetries).toBe(STAGE_RETRY_CAP);
         });
 
         it("increments retryCount in update branch", async () => {
