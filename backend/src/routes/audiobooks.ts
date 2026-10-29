@@ -40,6 +40,15 @@ export function resolveCorsOrigin(
 
 const router = Router();
 
+// The id goes into requests made with Audiobookshelf's key, and Express has already decoded any %2F in it: only
+// what an Audiobookshelf id can be (letters, digits, "_", "-") is let through.
+router.param("id", (_req, res, next, id: string) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+        return res.status(404).json({ error: "Audiobook not found" });
+    }
+    next();
+});
+
 /** The progress sub-object every audiobook response carries, in one shape. */
 function progressDto(progress: AudiobookProgress) {
     return {

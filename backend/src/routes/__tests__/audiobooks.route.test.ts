@@ -80,6 +80,7 @@ import type { Response } from "express";
 import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { audiobookCacheService } from "../../services/audiobookCache";
+import { audiobookshelfService } from "../../services/audiobookshelf";
 import audiobooksRoutes from "../audiobooks";
 
 function createApp() {
@@ -404,5 +405,32 @@ describe("POST /audiobooks/sync", () => {
         expect(res.status).toBe(500);
         expect(res.body.success).toBe(false);
         expect(res.body.error).toBe("Audiobook sync failed");
+    });
+});
+
+
+describe("an audiobook id", () => {
+    const app = createApp();
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
+    });
+
+    // The id goes into Audiobookshelf requests made with its key; Express decodes %2F, so a crafted id could aim them
+    // elsewhere. Audiobookshelf ids are letters, digits, "_" and "-".
+    it.each([
+        ["get", "/audiobooks/..%2Fusers%3F"],
+        ["get", "/audiobooks/..%2Fusers%3F/stream"],
+        ["post", "/audiobooks/..%2Fme%3F/progress"],
+        ["delete", "/audiobooks/..%2Fme%3F/progress"],
+        ["get", "/audiobooks/..%2F..%2Fx/cover"],
+    ] as const)("that is not one is refused at %s %s before Audiobookshelf is asked", async (method, path) => {
+        const res = await request(app)[method](path).send({ currentTime: 1, duration: 2 });
+        expect(res.status).toBe(404);
+        expect(audiobookshelfService.streamAudiobook).not.toHaveBeenCalled();
+        expect(audiobookshelfService.updateProgress).not.toHaveBeenCalled();
+        expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
+        expect(prisma.audiobook.findUnique).not.toHaveBeenCalled();
     });
 });
