@@ -1,18 +1,17 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { TrackRow } from "@/components/ui/TrackRow";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Play, Pause, Music, Shuffle, Save, ListPlus } from "lucide-react";
-import { cn } from "@/lib/cn";
-import { formatTime, plural } from "@/lib/format";
+import { plural } from "@/lib/format";
 import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
-import { CachedImage } from "@/components/ui/CachedImage";
 import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -269,77 +268,23 @@ export default function MixPage() {
                             {mix.tracks.map((track: MixTrack, index: number) => {
                                 const isCurrentlyPlaying = currentTrack?.id === track.id;
                                 return (
-                                    <div
+                                    <TrackRow
                                         key={track.id}
-                                        data-track-index={index}
+                                        rowProps={{ "data-track-index": index }}
                                         onDoubleClick={() => handlePlayTrack(index)}
                                         onTouchEnd={handleRowTouchEnd}
-                                        className={cn(
-                                            "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer touch-manipulation",
-                                            isCurrentlyPlaying && "bg-white/10"
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-center">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handlePlayTrack(index);
-                                                }}
-                                                className="min-h-[44px] min-w-[44px] flex items-center justify-center"
-                                                aria-label={isCurrentlyPlaying && isPlaying ? `Pause ${shownTitle(track)}` : `Play ${shownTitle(track)}`}
-                                            >
-                                                <span
-                                                    className={cn(
-                                                        "text-sm group-hover:hidden",
-                                                        isCurrentlyPlaying ? "text-brand" : "text-[var(--text-secondary)]"
-                                                    )}
-                                                >
-                                                    {isCurrentlyPlaying && isPlaying ? (
-                                                        <Music className="w-4 h-4 text-brand animate-pulse" />
-                                                    ) : (
-                                                        index + 1
-                                                    )}
-                                                </span>
-                                                <Play className="w-4 h-4 text-white hidden group-hover:block" />
-                                            </button>
-                                        </div>
-
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="relative w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
-                                                {track.album?.coverUrl ? (
-                                                    <CachedImage
-                                                        src={api.getCoverArtUrl(track.album.coverUrl, 100)}
-                                                        alt={track.title}
-                                                        fill
-                                                        sizes="40px"
-                                                        className="object-cover"
-                                                    />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center">
-                                                        <Music className="w-5 h-5 text-[var(--text-muted)]" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p
-                                                    className={cn(
-                                                        "text-sm font-medium truncate",
-                                                        isCurrentlyPlaying ? "text-brand" : "text-white"
-                                                    )}
-                                                >
-                                                    {shownTitle(track)}
-                                                </p>
-                                                <p className="text-xs text-[var(--text-secondary)] truncate">
-                                                    {track.album.artist.name}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <p className="hidden md:flex items-center text-sm text-[var(--text-secondary)] truncate">
-                                            {track.album.title}
-                                        </p>
-
-                                        <div className="flex items-center justify-end gap-2">
+                                        className="px-4"
+                                        columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px]"
+                                        index={index}
+                                        current={isCurrentlyPlaying}
+                                        playing={isPlaying}
+                                        onPlay={() => handlePlayTrack(index)}
+                                        title={shownTitle(track)}
+                                        subtitle={track.album.artist.name}
+                                        coverUrl={track.album?.coverUrl ? api.getCoverArtUrl(track.album.coverUrl, 100) : null}
+                                        extras={[<span key="album" className="truncate">{track.album.title}</span>]}
+                                        duration={track.duration}
+                                        actions={
                                             <button
                                                 className="min-h-[44px] min-w-[44px] rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-all flex items-center justify-center touch-reveal"
                                                 onClick={(e) => {
@@ -350,11 +295,8 @@ export default function MixPage() {
                                             >
                                                 <ListPlus className="w-4 h-4" />
                                             </button>
-                                            <span className="text-sm text-[var(--text-secondary)] w-12 text-right">
-                                                {formatTime(track.duration)}
-                                            </span>
-                                        </div>
-                                    </div>
+                                        }
+                                    />
                                 );
                             })}
                         </div>
