@@ -29,10 +29,8 @@ PATCH_HOP = 93
 PATCH_SECONDS = ((PATCH_FRAMES - 1) * HOP_SIZE + FRAME_SIZE) / 16000.0
 EMBEDDING_SIZE = 200
 
-# Patches per model call. One call over a whole 90 s track (59 patches) held 2.4-3.9 GB per worker
-# process in ONNX Runtime's memory pool and was slower. On four library tracks: CPU at 1 patch takes
-# 1.71 s a track and 129 MB, GPU at 4 patches 108 ms. Every call has the same shape (the last group
-# is padded), so the pool stays at one size.
+# Patches per model call: one call over a whole track held gigabytes per worker in ONNX Runtime's memory pool and
+# was slower. Every call has the same shape (the last group is padded), so the pool stays at one size.
 CPU_GROUP = 1
 GPU_GROUP = 4
 
@@ -95,8 +93,7 @@ class MusicnnBody:
         import onnxruntime as ort
         providers: list = ['CPUExecutionProvider']
         if use_gpu and 'CUDAExecutionProvider' in ort.get_available_providers():
-            # TF32 (on by default for this GPU) moved head values by up to 6e-4; full float32
-            # matches the CPU within 2e-6 at the same speed.
+            # Full float32, not TF32: TF32 moved head values off the CPU's answers.
             providers = [('CUDAExecutionProvider', {'use_tf32': 0}), 'CPUExecutionProvider']
         path = os.path.join(model_dir, GRAPHS['musicnn'] + '.onnx')
         if not os.path.exists(path):
@@ -219,11 +216,11 @@ class MusicnnOnnx:
     process's MusicnnServer when ``server`` is its address. The heads are one or two small layers
     over 200 numbers a patch and always run here on the CPU."""
 
-    def __init__(self, model_dir: str, use_gpu: bool, threads: int = 1,
-                 server: Optional[Tuple[str, bytes]] = None):
+    def __init__(self, model_dir: str, threads: int = 1, server: Optional[Tuple[str, bytes]] = None):
         import onnxruntime as ort
         self._model_dir, self._threads = model_dir, threads
-        self.body = RemoteBody(server) if server else MusicnnBody(model_dir, use_gpu, threads)
+        # In a worker the body is the CPU's; the GPU is reached only through the main process's server.
+        self.body = RemoteBody(server) if server else MusicnnBody(model_dir, False, threads)
         self._cpu_body: Optional[MusicnnBody] = None
         self.on_gpu = self.body.on_gpu
         self.sessions = {}

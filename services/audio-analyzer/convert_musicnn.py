@@ -107,7 +107,7 @@ def reference(pb_dir: str, answers: str) -> None:
 def gate(onnx_dir: str, answers: str) -> None:
     import onnxruntime
     expected = np.load(answers)
-    onnx_models = MusicnnOnnx(onnx_dir, use_gpu=False)
+    onnx_models = MusicnnOnnx(onnx_dir)
     if sorted(onnx_models.heads()) != sorted(k for k in expected.files if k != 'musicnn'):
         raise SystemExit(f'MusiCNN gate: heads {sorted(onnx_models.heads())} vs answers {sorted(expected.files)}')
     reference_embedding = expected['musicnn']
