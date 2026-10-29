@@ -1,6 +1,7 @@
 import axios from "axios";
 import { isBlockedFetch, UnresolvedAddressError } from "./ssrf";
 import { TimeoutError } from "./timeout";
+import { errorChain } from "./errorChain";
 
 /** An upstream answered, but not with what was asked for (an error page, a garbled or empty reply). */
 export class UpstreamReplyError extends Error {
@@ -19,11 +20,6 @@ function unreachedByFetch(e: unknown): boolean {
     );
 }
 
-/** The error and what it wraps, outermost first. */
-function* chain(error: unknown): Generator<unknown> {
-    for (let e = error, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) yield e;
-}
-
 /**
  * How an upstream's failure (Apple, a feed's host, a preview's host) is answered, never as Kima's own 500:
  * - "missing": the address guard refused it, or the upstream's 4xx says it has no such thing (gone, forbidden, an
@@ -34,7 +30,7 @@ function* chain(error: unknown): Generator<unknown> {
 export function upstreamFailure(error: unknown): "missing" | "down" | null {
     if (isBlockedFetch(error)) return "missing";
     let upstream = false;
-    for (const e of chain(error)) {
+    for (const e of errorChain(error)) {
         if (axios.isAxiosError(e)) {
             const status = e.response?.status;
             if (status && status >= 400 && status < 500 && status !== 429) return "missing";
@@ -48,7 +44,7 @@ export function upstreamFailure(error: unknown): "missing" | "down" | null {
 
 /** Whether the upstream never gave a usable answer at all: unreachable, timed out, throttled or a 5xx. */
 export function upstreamUnreachable(error: unknown): boolean {
-    for (const e of chain(error)) {
+    for (const e of errorChain(error)) {
         if (e instanceof TimeoutError || unreachedByFetch(e)) return true;
         if (axios.isAxiosError(e)) {
             const status = e.response?.status;

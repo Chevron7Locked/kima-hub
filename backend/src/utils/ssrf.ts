@@ -6,6 +6,7 @@ import net from "net";
 import type { Duplex } from "stream";
 import { Agent } from "undici";
 import { logger } from "./logger";
+import { errorChain } from "./errorChain";
 
 /**
  * Addresses a fetch on behalf of a feed or a user must never reach: this machine, private and shared networks,
@@ -82,8 +83,8 @@ async function checkAddress(url: string): Promise<AddressCheck> {
     return { ok: false, kind: "blocked", reason: "Blocked: internal address" };
   }
 
-  // Block obvious internal hostnames
-  if (hostname === "localhost" || hostname === "0.0.0.0") {
+  // This machine by name ("0.0.0.0" and the like are IPs, judged above).
+  if (hostname === "localhost") {
     return { ok: false, kind: "blocked", reason: "Blocked hostname: localhost" };
   }
 
@@ -129,7 +130,7 @@ export class UnresolvedAddressError extends Error {
  * keeps the error as a cause; undici (Node's fetch) re-creates it as a plain error named by its message.
  */
 export function isBlockedFetch(error: unknown): boolean {
-  for (let e = error, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
+  for (const e of errorChain(error)) {
     if (e instanceof BlockedAddressError) return true;
     const message = (e as { message?: unknown }).message;
     if (typeof message === "string" && message.startsWith("BlockedAddressError: ")) return true;
@@ -162,27 +163,22 @@ function refuseInternalIp(host: string | null | undefined): BlockedAddressError 
   return new BlockedAddressError(`Blocked: ${ip} is an internal address`);
 }
 
-class GuardedHttpAgent extends http.Agent {
-  createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
-    const refused = refuseInternalIp(options.host);
-    if (refused) {
-      callback?.(refused, undefined as unknown as Duplex);
-      return undefined;
+/** An http or https agent that refuses, before connecting, a host written as an internal IP. */
+function refusingInternalIps<T extends new (...args: any[]) => http.Agent>(Base: T) {
+  return class extends Base {
+    createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
+      const refused = refuseInternalIp(options.host);
+      if (refused) {
+        callback?.(refused, undefined as unknown as Duplex);
+        return undefined;
+      }
+      return super.createConnection(options, callback);
     }
-    return super.createConnection(options, callback);
-  }
+  };
 }
 
-class GuardedHttpsAgent extends https.Agent {
-  createConnection(options: http.ClientRequestArgs, callback?: (err: Error | null, stream: Duplex) => void): Duplex | null | undefined {
-    const refused = refuseInternalIp(options.host);
-    if (refused) {
-      callback?.(refused, undefined as unknown as Duplex);
-      return undefined;
-    }
-    return super.createConnection(options, callback);
-  }
-}
+const GuardedHttpAgent = refusingInternalIps(http.Agent);
+const GuardedHttpsAgent = refusingInternalIps(https.Agent);
 
 /**
  * axios options for an address that came from a feed or a user. Every connection's address is checked as it is

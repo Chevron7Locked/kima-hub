@@ -197,6 +197,18 @@ describe("which addresses are internal", () => {
         expect(isBlockedIp(ip)).toBe(internal);
     });
 
+    it("refuses this machine by name and by the unspecified address", async () => {
+        expect(await validateUrlForFetch("http://localhost/")).toMatch(/Blocked/);
+        expect(await validateUrlForFetch("http://0.0.0.0/")).toMatch(/internal address/);
+        expect(await validateUrlForFetch("http://0.0.0.0:8080/x")).toMatch(/internal address/);
+    });
+
+    it("refuses an internal IP over https too, before connecting", async () => {
+        const error = await axios.get(`https://127.0.0.1:${port}/secret`, { ...guardedAxios, timeout: 5000 }).catch((e) => e);
+        expect(isBlockedFetch(error)).toBe(true);
+        expect(String(error.message)).toMatch(/Blocked: 127\.0\.0\.1 is an internal address/);
+    });
+
     it("checks an address written as the host itself, without a name lookup", async () => {
         expect(await validateUrlForFetch("http://[::ffff:7f00:1]/")).toMatch(/internal address/);
         expect(await validateUrlForFetch("http://[2606:4700:4700::1111]/")).toBeNull();
