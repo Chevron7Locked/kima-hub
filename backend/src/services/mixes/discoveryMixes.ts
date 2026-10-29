@@ -31,27 +31,13 @@ export async function generateTopTracksMix(
         take: TRACK_LIMIT,
     });
 
-    logger.debug(
-        `[TOP TRACKS MIX] Found ${playStats.length} unique played tracks`
+    if (playStats.length < 5) return null;
+
+    // The plays already count only present library songs; tracksByIds keeps their most-played order.
+    const orderedTracks = await tracksByIds(
+        playStats.map((p) => p.trackId),
+        { album: { select: { coverUrl: true } } },
     );
-    if (playStats.length < 5) {
-        logger.debug(
-            `[TOP TRACKS MIX] FAILED: Only ${playStats.length} tracks (need at least 5)`
-        );
-        return null;
-    }
-
-    const trackIds = playStats.map((p) => p.trackId);
-    const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds }, ...NOT_MISSING, ...IN_LIBRARY },
-        include: {
-            album: { select: { coverUrl: true } },
-        },
-    });
-
-    const orderedTracks = trackIds
-        .map((id) => tracks.find((t) => t.id === id))
-        .filter((t) => t !== undefined);
 
     const coverUrls = albumCoverUrls(orderedTracks);
 
@@ -119,13 +105,7 @@ export async function generateArtistSimilarMix(
         },
     });
 
-    logger.debug(
-        `[ARTIST SIMILAR MIX] Found ${recentPlays.length} plays in last 7 days`
-    );
-    if (recentPlays.length === 0) {
-        logger.debug(`[ARTIST SIMILAR MIX] FAILED: No plays in last 7 days`);
-        return null;
-    }
+    if (recentPlays.length === 0) return null;
 
     const artistPlayCounts = new Map<string, number>();
     recentPlays.forEach((play) => {
@@ -144,24 +124,13 @@ export async function generateArtistSimilarMix(
         where: { id: topArtistId },
     });
 
-    if (!topArtist || !topArtist.name) {
-        logger.debug(
-            `[ARTIST SIMILAR MIX] FAILED: Top artist not found or has no name`
-        );
-        return null;
-    }
-
-    logger.debug(`[ARTIST SIMILAR MIX] Top artist: ${topArtist.name}`);
+    if (!topArtist || !topArtist.name) return null;
 
     try {
         const similarArtists = await getSimilarArtists(
             topArtist.mbid || "",
             topArtist.name,
             10
-        );
-
-        logger.debug(
-            `[ARTIST SIMILAR MIX] similarity source returned ${similarArtists.length} similar artists`
         );
 
         const similarArtistNormalized = similarArtists.map((a) =>
@@ -171,7 +140,7 @@ export async function generateArtistSimilarMix(
             where: { normalizedName: { in: similarArtistNormalized } },
             include: {
                 albums: {
-                    where: { location: "LIBRARY" },
+                    where: { location: LIBRARY_LOCATION },
                     include: {
                         tracks: {
                             where: NOT_MISSING,
@@ -182,24 +151,11 @@ export async function generateArtistSimilarMix(
             },
         });
 
-        logger.debug(
-            `[ARTIST SIMILAR MIX] Found ${artistsInLibrary.length} similar artists in library`
-        );
-
         const tracks = artistsInLibrary.flatMap((artist) =>
             artist.albums.flatMap((album) => album.tracks)
         );
 
-        logger.debug(
-            `[ARTIST SIMILAR MIX] Total tracks from similar artists: ${tracks.length}`
-        );
-
-        if (tracks.length < 5) {
-            logger.debug(
-                `[ARTIST SIMILAR MIX] FAILED: Only ${tracks.length} tracks (need at least 5)`
-            );
-            return null;
-        }
+        if (tracks.length < 5) return null;
 
         return sampleMix(
             {

@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { logger } from "../../utils/logger";
 import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
 import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
@@ -73,7 +72,6 @@ export async function mixableGenres(): Promise<{ id: string; name: string }[]> {
         take: 20,
     });
 
-    logger.debug(`[GENRE MIX] Found ${genres.length} genres total`);
     const reach = genres.length
         ? await prisma.$queryRaw<{ genreId: string; capped: number }[]>`
               SELECT "genreId", sum(least(n, 2))::int AS capped
@@ -98,13 +96,7 @@ export async function generateGenreMix(
     today: string
 ): Promise<ProgrammaticMix | null> {
     const validGenres = await mixableGenres();
-    logger.debug(
-        `[GENRE MIX] ${validGenres.length} genres have >= 5 tracks`
-    );
-    if (validGenres.length === 0) {
-        logger.debug(`[GENRE MIX] FAILED: No genres with enough tracks`);
-        return null;
-    }
+    if (validGenres.length === 0) return null;
 
     const selectedGenre = seededOrder(validGenres, getSeededRandom(`genre-${today}`), (g) => g.id)[0];
 
