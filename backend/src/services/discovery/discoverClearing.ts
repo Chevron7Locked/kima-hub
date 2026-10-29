@@ -1,13 +1,7 @@
 /**
- * How Discover albums are found, cleared and reported. Every path that removes a Discover album (clear, the weekly
- * regeneration, the sweeps for albums no suggestion covers) goes through here, so they agree on four rules:
- *
- * - The scanned album a suggestion or download job became is found one way (`findScannedAlbum`).
- * - Lidarr's files are Lidarr's to delete. When Lidarr does not delete an album it holds, the album stays in Discover
- *   exactly as it was and the listener is told in the tray; Kima never deletes those files itself.
- * - Kima deletes files only of an album a completed Soulseek download record positively names. Any other album that
- *   Lidarr did not delete stays as it is and is reported, as does one whose files could not all be deleted.
- * - The rows go only after the files are gone, so a later scan cannot bring the files back as the library's.
+ * Every path that removes a Discover album (clear, the weekly run, the orphan sweeps) goes through here. Lidarr deletes
+ * the albums it holds; Kima deletes files only for an album a completed Soulseek download names; anything not deleted
+ * stays as it is and is reported in the tray. Rows go only after the files, so a scan cannot bring them back.
  */
 import fs from "fs";
 import path from "path";
@@ -22,7 +16,6 @@ import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEve
 import { resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
 import { RUNNING_BATCH, lookupKey, sameName } from "./discoverEvidence";
-import { nameKey } from "../nameFold";
 
 /** A suggestion row's names, for comparing with a record's. */
 interface NamedRow {
@@ -49,10 +42,9 @@ export interface ClearFailure {
 }
 
 /**
- * The scanned album a Discover suggestion or download job became: by release-group id, else by title and artist name
- * with case, accents and punctuation ignored, as the two can differ between the record and the album the scanner made. On a name match, `at` says
- * which album to take first when a listener's own copy has the same name: the Discover one for a like or a clear, the
- * library one for an unlike.
+ * The scanned album a Discover suggestion or download job became: by release-group id, else by artist and title
+ * (sameName). When a listener's own copy has the same name, `at` picks: Discover for a like or a clear, the library for
+ * an unlike.
  */
 export async function findScannedAlbum(ref: AlbumRef, at: "DISCOVER" | "LIBRARY") {
     const exact = await prisma.album.findUnique({ where: { rgMbid: ref.rgMbid }, include: { artist: true } });
@@ -81,11 +73,7 @@ export async function findDiscoverAlbum(ref: AlbumRef) {
     return album?.location === "DISCOVER" ? album : null;
 }
 
-/**
- * Remove one folder inside the music root, and only when it is empty (no recursive delete), so a folder that
- * still holds a file the library kept, or one the scan has not indexed, survives. The music root itself and
- * anything outside it are never touched.
- */
+/** Removes a folder inside the music root only when it is empty; the root itself and anything outside it are left. */
 function removeEmptyDirectoryUnderMusicRoot(dirPath: string): void {
     const musicRoot = path.resolve(config.music.musicPath);
     if (!dirPath.startsWith(musicRoot + path.sep)) return;
@@ -114,9 +102,9 @@ function fileFailureReason(error: NodeJS.ErrnoException): string {
 }
 
 /**
- * Delete a DISCOVER album's own song files (where its tracks' stored paths say, inside the music root). A path that
- * leaves the music root is refused and skipped; a file already gone counts as deleted. Every file is tried; if any
- * could not be deleted the reason comes back and no folder is touched. Otherwise the album and artist folders go if empty.
+ * Deletes a DISCOVER album's song files inside the music root (a path outside it is skipped, a file already gone
+ * counts as deleted). If any file stays, the reason comes back and no folder is touched; otherwise empty album and
+ * artist folders go.
  */
 async function deleteAlbumFiles(albumId: string): Promise<{ failed: string } | null> {
     const tracks = await prisma.track.findMany({ where: { albumId }, select: { filePath: true } });
@@ -151,26 +139,24 @@ async function deleteAlbumFiles(albumId: string): Promise<{ failed: string } | n
 
 /** The songs' Discover records, playlist entries, songs and album, in one transaction; playlists are told after it. */
 async function deleteAlbumRows(albumId: string | null, suggestionId: string | null): Promise<void> {
-    const cleared = { artistId: null as string | null };
-    const playlists = await prisma.$transaction(async (tx) => {
+    const { playlists, artistId } = await prisma.$transaction(async (tx) => {
         const album = albumId
             ? await tx.album.findFirst({ where: { id: albumId, location: "DISCOVER" }, include: { tracks: { select: { id: true } } } })
             : null;
         const trackIds = album?.tracks.map((t) => t.id) ?? [];
         const owners = [...(suggestionId ? [{ discoveryAlbumId: suggestionId }] : []), ...(trackIds.length ? [{ trackId: { in: trackIds } }] : [])];
         if (owners.length > 0) await tx.discoveryTrack.deleteMany({ where: { OR: owners } });
-        if (!album) return [];
+        if (!album) return { playlists: [], artistId: null };
         // The songs' playlist entries go with them: told once the transaction commits.
         const holding = await playlistsHoldingTracks(tx, { albumId: album.id });
         await tx.track.deleteMany({ where: { albumId: album.id } });
         await tx.album.delete({ where: { id: album.id } });
-        cleared.artistId = album.artistId;
-        return holding;
+        return { playlists: holding, artistId: album.artistId };
     });
     announcePlaylistsChanged(playlists);
-    if (cleared.artistId) {
+    if (artistId) {
         // The album is gone either way; a recount that fails is caught up by the next scan's.
-        await updateArtistCounts(cleared.artistId).catch((error) =>
+        await updateArtistCounts(artistId).catch((error) =>
             logger.warn("[DiscoverClear] Artist counts not updated after clearing an album:", error),
         );
     }
@@ -219,9 +205,8 @@ const UNKNOWN_SOURCE =
     "Kima can't tell where this album's files came from, so it left them; delete them in Lidarr or by hand";
 
 /**
- * Whether a download record positively shows the album's files came from Soulseek: a completed download job that names
- * the album (by release-group id, or artist and title) whose last attempt was Soulseek and that never had a Lidarr album.
- * Any job for the album that touched Lidarr voids it. A track-only import or a job already deleted leaves no record.
+ * Whether a completed download job naming the album (by id, or artist and title) last fetched it from Soulseek; any
+ * job for the album that touched Lidarr says no.
  */
 async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<boolean> {
     const candidates = await prisma.downloadJob.findMany({
@@ -237,27 +222,24 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
 }
 
 /** One Discover album to clear: its names, the Lidarr album id if known, and the suggestion row it belongs to if any. */
-export interface ClearTarget extends AlbumRef {
+interface ClearTarget extends AlbumRef {
     lidarrAlbumId: number | null;
     suggestionId: string | null;
 }
 
-export type ClearResult = { cleared: true } | { cleared: false; reason: string };
+type ClearResult = { cleared: true } | { cleared: false; reason: string };
 
 /**
- * Clear one Discover album. Lidarr's album: Lidarr deletes it (through the identity check in lidarrRemoval) and, only
- * if it did, the rows go. A known Soulseek album: its song files and empty folders go, then the rows. Anything else, or
- * a file that cannot be deleted: nothing changes and the reason comes back. With no scanned DISCOVER album, only
- * Lidarr's copy (if any) is dealt with. If the scanned album is the library's, nothing of it is touched.
+ * Clears one Discover album: Lidarr's is deleted by Lidarr (lidarrRemoval), a known Soulseek one by deleting its
+ * files, then the rows go. Anything else, or a file that stays, changes nothing and returns the reason. A scanned album
+ * that is the library's is left; only the record's rows go.
  */
 export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResult> {
-    const scanned = await findScannedAlbum(target, "DISCOVER");
-    if (scanned?.location === "LIBRARY") {
-        // The listener's own album: neither Lidarr nor the files are touched, only this record's rows go.
+    const album = await findScannedAlbum(target, "DISCOVER");
+    if (album?.location === "LIBRARY") {
         await deleteAlbumRows(null, target.suggestionId);
         return { cleared: true };
     }
-    const album = scanned;
     const rgMbids = [...new Set([target.rgMbid, ...(album ? [album.rgMbid] : [])])];
     const holding = await lidarrHolding(target, rgMbids);
     if ("unknown" in holding) return { cleared: false, reason: holding.unknown };
@@ -315,13 +297,10 @@ export async function clearSuggestion(suggestion: SuggestionRow): Promise<Sugges
 
     const release = () =>
         prisma.discoveryAlbum.updateMany({ where: { id: suggestion.id, status: "DELETED" }, data: { status: "ACTIVE" } });
-    let result: ClearResult;
-    try {
-        result = await clearDiscoverAlbum({ ...suggestion, suggestionId: suggestion.id });
-    } catch (error) {
+    const result = await clearDiscoverAlbum({ ...suggestion, suggestionId: suggestion.id }).catch(async (error) => {
         await release();
         throw error;
-    }
+    });
     if (result.cleared) return { outcome: "cleared" };
     await release();
     logger.warn(`[DiscoverClear] Kept ${suggestion.artistName} - ${suggestion.albumTitle} in Discover: ${result.reason}`);
@@ -408,7 +387,7 @@ async function albumsInRunningBatches() {
     for (const job of jobs) {
         if (job.targetMbid) ids.add(job.targetMbid);
         const metadata = job.metadata as JobMetadata;
-        names.add(`${nameKey(metadata?.artistName)}\u0000${nameKey(metadata?.albumTitle)}`);
+        if (metadata?.artistName && metadata.albumTitle) names.add(lookupKey(metadata.artistName, metadata.albumTitle));
     }
     return { ids, names };
 }
@@ -454,7 +433,7 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
     let cleared = 0;
     const failures: OrphanFailure[] = [];
     for (const album of albums) {
-        if (running.ids.has(album.rgMbid) || running.names.has(`${nameKey(album.artist.name)}\u0000${nameKey(album.title)}`)) continue;
+        if (running.ids.has(album.rgMbid) || running.names.has(lookupKey(album.artist.name, album.title))) continue;
         if (await discoverAlbumIsCovered(album, suggested)) continue;
         const ref = { rgMbid: album.rgMbid, artistName: album.artist.name, albumTitle: album.title };
         const result = await clearOrReport({ ...ref, lidarrAlbumId: null, suggestionId: null });
@@ -464,7 +443,18 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
     return { cleared, failures };
 }
 
-export const orphanFailureGroupKey = "discover-clear-orphans";
+const orphanFailureGroupKey = "discover-clear-orphans";
+
+/** The tray row for albums that were not deleted. */
+function notDeletedRow(failures: ClearFailure[]) {
+    const listing = failures.map((f) => `${f.artistName} - ${f.albumTitle}: ${f.reason}`).join("; ");
+    return {
+        type: "error" as const,
+        title: `${failures.length} Discover album${failures.length === 1 ? "" : "s"} not deleted`,
+        message: `These Discover albums were not deleted, so they stay as they are: ${listing}. Clear Discover again to try once more.`,
+        metadata: { lidarrFailed: failures },
+    };
+}
 
 /**
  * Tells everyone but the caller about the orphans that were not deleted: each named listener in their own tray row,
@@ -481,14 +471,7 @@ export async function reportOrphanFailures(callerId: string, failures: OrphanFai
         }
         for (const [listener, list] of byListener) await reportLidarrFailures(listener, list, { complete: false });
         if (unnamed.length > 0) {
-            const listing = unnamed.map((f) => `${f.artistName} - ${f.albumTitle}: ${f.reason}`).join("; ");
-            await notificationService.notifyAdmins({
-                type: "error",
-                title: `${unnamed.length} Discover album${unnamed.length === 1 ? "" : "s"} not deleted`,
-                message: `These Discover albums were not deleted, so they stay as they are: ${listing}. Clear Discover again to try once more.`,
-                metadata: { lidarrFailed: unnamed },
-                groupKey: orphanFailureGroupKey,
-            });
+            await notificationService.notifyAdmins({ ...notDeletedRow(unnamed), groupKey: orphanFailureGroupKey });
         } else {
             await notificationService.resolveFor(callerId, orphanFailureGroupKey);
         }
@@ -497,7 +480,7 @@ export async function reportOrphanFailures(callerId: string, failures: OrphanFai
     }
 }
 
-export const lidarrFailureGroupKey = (userId: string) => `discover-clear-lidarr:${userId}`;
+const lidarrFailureGroupKey = (userId: string) => `discover-clear-lidarr:${userId}`;
 
 /**
  * The listener's one tray row for albums Lidarr did not delete. Failures write it (a repeat replaces it);
@@ -511,16 +494,7 @@ export async function reportLidarrFailures(
     const groupKey = lidarrFailureGroupKey(userId);
     try {
         if (failures.length > 0) {
-            const listing = failures.map((f) => `${f.artistName} - ${f.albumTitle}: ${f.reason}`).join("; ");
-            await notificationService.create({
-                userId,
-                type: "error",
-                title: `${failures.length} Discover album${failures.length === 1 ? "" : "s"} not deleted`,
-                message: `These Discover albums were not deleted, so they stay as they are: ${listing}. Clear Discover again to try once more.`,
-                metadata: { lidarrFailed: failures },
-                groupKey,
-                renotify: options.renotify,
-            });
+            await notificationService.create({ userId, ...notDeletedRow(failures), groupKey, renotify: options.renotify });
         } else if (options.complete) {
             await notificationService.resolve(groupKey);
         }

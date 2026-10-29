@@ -272,6 +272,15 @@ describe("DISCOVER albums no suggestion covers", () => {
         expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(1);
     });
 
+    it("a running download of another album does not keep one whose title has no letters either", async () => {
+        const dots = await addAlbum({ key: "dots", rg: `${P}_rg_dots`, title: "..." });
+        await addSoulseekJob(`${P}_rg_dots`, "...");
+        await addSoulseekJob(`${P}_rg_bangs`, "!!!", { batchStatus: "downloading" });
+        const res = await request(app()).delete("/discover/clear");
+        expect(res.body.orphanedAlbumsDeleted).toBe(1);
+        expect(await prisma.album.count({ where: { id: dots.albumId } })).toBe(0);
+    });
+
     it("keeps an album Lidarr cannot be asked about, and says so in the tray", async () => {
         const orphan = await addAlbum({ key: "lid", rg: RG_ORPHAN });
         const port = await deadPort();
