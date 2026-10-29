@@ -1,24 +1,10 @@
 /**
- * The one-time sort of albums the old scanner filed by guesswork. It filed an album as Discover on guesses (a title
- * shared with any Discover download, an artist Discover had once suggested), so listeners' own albums sat in Discover;
- * and it missed Discover's own downloads whenever the names differed by so much as an apostrophe, so those sat in the
- * library. The records that tell them apart are deleted after 30 days. What still tells them apart:
- *
- * - Discover's own records (discoverEvidence): a like or the listener's own request makes an album the library's; a
- *   Discover download keeps it in Discover. A suggestion alone says nothing: the old playlist recorded listeners' own
- *   albums as suggestions.
- * - Lidarr: Kima tags the artists Discover adds to Lidarr and takes the tag off when a listener asks for one of their
- *   albums themselves. An album whose artist still carries the tag and whose files Lidarr itself downloaded came from
- *   Discover. An album the listener got another way (Soulseek, by hand) is not one Lidarr holds.
- *
- * Albums filed as Discover stay there only on that evidence; the rest are the library's.
- *
- * Library albums that came from Discover go back to Discover unless the listeners made them theirs: a liked song, a
- * song in a playlist, edits to the album, songs played (KEEP_PLAYS plays across KEEP_SONGS different songs), another
- * album by the same artist that a listener got themselves, or a second library copy of the same album.
- *
- * Without Lidarr, only the records speak. When Lidarr is set up but does not answer, the sort waits for the next start
- * rather than guess.
+ * The one-time sort of albums the old scanner filed by guesswork. An album filed as Discover stays there only on
+ * evidence: a Discover download record (discoverEvidence; a suggestion alone says nothing), or Lidarr holding its files
+ * for an artist that still carries Kima's Discover tag. A library album that came from Discover goes back unless its
+ * listeners made it theirs: a liked song, a song in a playlist, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another
+ * album by the artist they got themselves, or a second library copy. Without Lidarr only the records count; a Lidarr
+ * that does not answer defers the sort.
  */
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -35,8 +21,8 @@ import {
 import { nameKey } from "../nameFold";
 
 /** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
-export const KEEP_PLAYS = 3;
-export const KEEP_SONGS = 3;
+const KEEP_PLAYS = 3;
+const KEEP_SONGS = 3;
 
 export interface DiscoverSortResult {
     toLibrary: number;
@@ -137,12 +123,8 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     let keptByLidarr = 0;
     for (const album of albums.filter((a) => a.location === "DISCOVER")) {
         const evidence = discoverEvidence(named(album), records);
-        const held = evidence === null && heldByLidarr(album);
-        const stays = evidence !== null ? isDiscoverEvidence(evidence) : held;
-        if (evidence !== null) {
-            if (stays) keptByRecords++;
-            else toLibrary.push(album);
-        } else if (held) keptByLidarr++;
+        if (evidence !== null && isDiscoverEvidence(evidence)) keptByRecords++;
+        else if (evidence === null && heldByLidarr(album)) keptByLidarr++;
         else toLibrary.push(album);
     }
 
@@ -167,7 +149,8 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     // Two library copies of one album (same artist, same title): one is a listener's own, and which one cannot be
     // told, so both stay.
     const copies = new Map<string, number>();
-    const copyKey = (album: SortedAlbum) => `${album.artistId}\u0000${nameKey(album.title)}`;
+    // A title with no letters or digits folds to nothing, so it keys on its exact text.
+    const copyKey = (album: SortedAlbum) => `${album.artistId}\u0000${nameKey(album.title) || `exact\u0000${album.title}`}`;
     for (const album of library) copies.set(copyKey(album), (copies.get(copyKey(album)) ?? 0) + 1);
     const listened = await albumsListenersKept(fromDiscover.map((a) => a.id));
     const toDiscover: SortedAlbum[] = [];

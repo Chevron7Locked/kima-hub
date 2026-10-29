@@ -137,6 +137,24 @@ describe("Discover downloads the old scanner put in the library", () => {
         expect([await location("gwam"), await location("gwamToo")]).toEqual(["LIBRARY", "LIBRARY"]);
     });
 
+    it("two albums whose titles have no letters are not taken for copies of one album", async () => {
+        const punct = { name: "Sda Punct", mbid: null };
+        await albums({
+            dots: { artist: punct, title: "...", location: "LIBRARY", owned: true },
+            bangs: { artist: punct, title: "!!!", location: "LIBRARY", owned: true },
+        });
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: new Date(Date.UTC(2026, 9, 19)), targetSongCount: 1 } });
+        for (const key of ["dots", "bangs"]) {
+            await prisma.downloadJob.create({
+                data: {
+                    userId: USER, subject: `Sda Punct - ${key}`, type: "album", status: "completed", targetMbid: `${P}rg_${key}`,
+                    discoveryBatchId: batch.id, metadata: { downloadType: "discovery" },
+                },
+            });
+        }
+        expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 2, keptByActivity: 0 });
+    });
+
     it("stay when played 3 times across 3 songs, not 3 plays of one song", async () => {
         await albums({ gwam: discoverDownload });
         await plays("gwam", [0, 1, 2]);
