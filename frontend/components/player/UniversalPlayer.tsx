@@ -49,9 +49,7 @@ export function UniversalPlayer() {
 
     return (
         <>
-            {/* Conditional UI rendering based on mode and device */}
-            {/* Note: <audio> element is rendered by ConditionalAudioProvider */}
-            {/* Always show player UI (like Spotify), even when no media is playing */}
+            {/* The desktop bar shows even with nothing playing; the <audio> element lives in ConditionalAudioProvider. */}
             {playerMode === "overlay" && hasMedia ? (
                 <OverlayPlayer />
             ) : isMobileOrTablet ? (

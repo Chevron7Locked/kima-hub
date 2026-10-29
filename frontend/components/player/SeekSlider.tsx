@@ -16,8 +16,8 @@ interface SeekSliderProps {
     className?: string;
     /** Whether to show the drag handle on hover/drag */
     showHandle?: boolean;
-    /** Variant styling */
-    variant?: "default" | "minimal" | "overlay";
+    /** The desktop bar's look, or the full-screen player's. */
+    variant?: "default" | "overlay";
 }
 
 export function SeekSlider({
@@ -160,7 +160,6 @@ export function SeekSlider({
 
     const displayProgress =
         previewProgress !== null ? previewProgress : progress;
-    const isActive = hasMedia;
 
     const getTooltipText = () => {
         if (!hasMedia) return undefined;
@@ -169,21 +168,11 @@ export function SeekSlider({
 
     const getVariantStyles = () => {
         switch (variant) {
-            case "minimal":
-                return {
-                    container: "h-1",
-                    track: "bg-white/[0.15]",
-                    progress: isActive
-                        ? "bg-brand"
-                        : hasMedia
-                        ? "bg-brand/50"
-                        : "bg-gray-600",
-                };
             case "overlay":
                 return {
                     container: "h-1",
                     track: "bg-white/20",
-                    progress: isActive
+                    progress: hasMedia
                         ? "bg-gradient-to-r from-brand to-brand-dark"
                         : "bg-white/40",
                 };
@@ -191,11 +180,7 @@ export function SeekSlider({
                 return {
                     container: "h-1",
                     track: "bg-white/[0.15]",
-                    progress: isActive
-                        ? "bg-brand group-hover:bg-brand"
-                        : hasMedia
-                        ? "bg-white/50"
-                        : "bg-gray-600",
+                    progress: hasMedia ? "bg-brand" : "bg-gray-600",
                 };
         }
     };
@@ -209,7 +194,7 @@ export function SeekSlider({
                 "relative rounded-full transition-all",
                 styles.container,
                 styles.track,
-                isActive ? "cursor-pointer group" : "cursor-not-allowed",
+                hasMedia ? "cursor-pointer group" : "cursor-not-allowed",
                 isDragging && "h-2", // Expand when dragging
                 className
             )}
@@ -228,7 +213,7 @@ export function SeekSlider({
                 )}
                 style={{ width: `${displayProgress}%` }}
             >
-                {showHandle && isActive && (
+                {showHandle && hasMedia && (
                     <div
                         className={cn(
                             "absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-brand rounded-full transition-opacity ",

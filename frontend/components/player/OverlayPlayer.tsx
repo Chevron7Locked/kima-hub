@@ -6,8 +6,6 @@ import { PlayCountLine } from "@/features/stats/PlayCountLine";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import {
-    Play,
-    Pause,
     SkipBack,
     SkipForward,
     ChevronDown,
@@ -15,15 +13,14 @@ import {
     Shuffle,
     Repeat,
     Repeat1,
-    Loader2,
     RotateCcw,
     RotateCw,
-    RefreshCw,
     MicVocal,
 } from "lucide-react";
 import { formatTime, formatMediaDuration } from "@/lib/format";
 import { shuffleState } from "@/lib/shuffle";
 import { cn } from "@/lib/cn";
+import { PlayPauseButton } from "./PlayPauseButton";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { SeekSlider } from "./SeekSlider";
 import { SleepTimer } from "./SleepTimer";
@@ -142,7 +139,7 @@ export function OverlayPlayer() {
                 <span className="text-xs text-[var(--text-muted)] font-medium">
                     Now Playing
                 </span>
-                <div className="w-11" /> {/* Spacer for centering */}
+                <div className="w-11" aria-hidden="true" />
             </div>
 
             {/* Main Content - Portrait vs Landscape */}
@@ -247,7 +244,6 @@ export function OverlayPlayer() {
                             trackId={playbackType === "track" ? currentTrack?.id : null}
                             className="mt-1"
                         />
-
                     </div>
 
                     <div className="mb-6">
@@ -293,36 +289,14 @@ export function OverlayPlayer() {
                             <SkipBack className="w-8 h-8" />
                         </button>
 
-                        <button
-                            onClick={isPlaying ? pause : resumeWithGesture}
-                            className={cn(
-                                "w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 transition-all",
-                                audioError
-                                    ? "bg-danger text-black hover:bg-danger-light"
-                                    : isBuffering
-                                    ? "bg-brand/80 text-black"
-                                    : "bg-brand text-black"
-                            )}
-                            title={
-                                audioError
-                                    ? "retry playback"
-                                    : isBuffering
-                                    ? "buffering..."
-                                    : isPlaying
-                                    ? "pause"
-                                    : "play"
-                            }
-                        >
-                            {audioError ? (
-                                <RefreshCw className="w-7 h-7" />
-                            ) : isBuffering ? (
-                                <Loader2 className="w-7 h-7 animate-spin" />
-                            ) : isPlaying ? (
-                                <span className="animate-pop"><Pause className="w-7 h-7" /></span>
-                            ) : (
-                                <span className="animate-pop"><Play className="w-7 h-7 ml-1" /></span>
-                            )}
-                        </button>
+                        <PlayPauseButton
+                            isPlaying={isPlaying}
+                            isBuffering={isBuffering}
+                            audioError={audioError}
+                            onPlay={resumeWithGesture}
+                            onPause={pause}
+                            size="lg"
+                        />
 
                         <button
                             onClick={next}

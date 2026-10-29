@@ -5,8 +5,6 @@ import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { PlayCountLine } from "@/features/stats/PlayCountLine";
 import Link from "next/link";
 import {
-    Play,
-    Pause,
     SkipBack,
     SkipForward,
     Volume2,
@@ -17,14 +15,13 @@ import {
     Repeat1,
     RotateCcw,
     RotateCw,
-    Loader2,
     AudioWaveform,
-    RefreshCw,
     MicVocal,
 } from "lucide-react";
 import { KeyboardShortcutsTooltip } from "./KeyboardShortcutsTooltip";
 import { shuffleState } from "@/lib/shuffle";
 import { cn } from "@/lib/cn";
+import { PlayPauseButton } from "./PlayPauseButton";
 import { formatTime, formatMediaDuration } from "@/lib/format";
 import { SeekSlider } from "./SeekSlider";
 import { SleepTimer } from "./SleepTimer";
@@ -78,7 +75,6 @@ export function FullPlayer() {
     };
 
     return (
-        <>
         <div className="relative flex-shrink-0" role="region" aria-label="now playing">
             <div className="bg-black border-t border-white/[0.08] h-24">
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand/40 to-transparent" />
@@ -192,51 +188,15 @@ export function FullPlayer() {
                                 <SkipBack className="w-5 h-5" />
                             </button>
 
-                            <button
-                                onClick={isPlaying ? pause : resumeWithGesture}
-                                className={cn(
-                                    "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 relative group",
-                                    audioError
-                                        ? "bg-danger text-white hover:scale-110 hover:bg-danger-light"
-                                        : hasMedia && !isBuffering
-                                        ? "bg-brand text-black hover:scale-110"
-                                        : isBuffering
-                                        ? "bg-brand/80 text-black"
-                                        : "bg-gray-700 text-[var(--text-muted)] cursor-not-allowed"
-                                )}
+                            <PlayPauseButton
+                                isPlaying={isPlaying}
+                                isBuffering={isBuffering}
+                                audioError={audioError}
+                                onPlay={resumeWithGesture}
+                                onPause={pause}
                                 disabled={!hasMedia}
-                                aria-label={
-                                    audioError
-                                        ? "Retry playback"
-                                        : isBuffering
-                                        ? "Buffering..."
-                                        : isPlaying
-                                        ? "Pause"
-                                        : "Play"
-                                }
-                                title={
-                                    audioError
-                                        ? "retry playback"
-                                        : isBuffering
-                                        ? "buffering..."
-                                        : isPlaying
-                                        ? "pause"
-                                        : "play"
-                                }
-                            >
-                                {hasMedia && !isBuffering && !audioError && (
-                                    <div className="absolute inset-0 rounded-full bg-brand blur-md opacity-0 group-hover:opacity-50 transition-opacity duration-200" />
-                                )}
-                                {audioError ? (
-                                    <RefreshCw className="w-5 h-5 relative z-(--z-raised)" />
-                                ) : isBuffering ? (
-                                    <Loader2 className="w-5 h-5 animate-spin relative z-(--z-raised)" />
-                                ) : isPlaying ? (
-                                    <span className="animate-pop"><Pause className="w-5 h-5 relative z-(--z-raised)" /></span>
-                                ) : (
-                                    <span className="animate-pop"><Play className="w-5 h-5 ml-0.5 relative z-(--z-raised)" /></span>
-                                )}
-                            </button>
+                                glow
+                            />
 
                             <button
                                 onClick={next}
@@ -414,6 +374,5 @@ export function FullPlayer() {
                 </div>
             </div>
         </div>
-        </>
     );
 }

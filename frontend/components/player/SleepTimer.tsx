@@ -13,11 +13,7 @@ function formatPreset(mins: number): string {
     return `${mins} minutes`;
 }
 
-interface SleepTimerProps {
-    size?: "sm" | "md";
-}
-
-export function SleepTimer({ size = "md" }: SleepTimerProps) {
+export function SleepTimer() {
     const { isActive, remainingSeconds, displayRemaining, setTimer, clearTimer } = useSleepTimer();
     const [isOpen, setIsOpen] = useState(false);
     const [customMinutes, setCustomMinutes] = useState("");
@@ -52,8 +48,6 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
         }
     };
 
-    const iconSize = size === "sm" ? "w-3.5 h-3.5" : "w-4 h-4";
-
     return (
         <div className="relative">
             <button
@@ -70,7 +64,7 @@ export function SleepTimer({ size = "md" }: SleepTimerProps) {
                 aria-haspopup="dialog"
                 title={isActive ? `Sleep timer: ${displayRemaining} remaining`.toLowerCase() : "sleep timer"}
             >
-                <Timer className={iconSize} />
+                <Timer className="w-4 h-4" />
                 {isActive && remainingSeconds !== null && (
                     <span className="text-micro tabular-nums font-medium text-brand">
                         {displayRemaining}

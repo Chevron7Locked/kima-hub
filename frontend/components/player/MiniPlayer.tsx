@@ -3,15 +3,11 @@
 import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import {
-    Play,
-    Pause,
     Music as MusicIcon,
-    Loader2,
     ChevronLeft,
     AlertTriangle,
-    RefreshCw,
 } from "lucide-react";
-import { cn } from "@/lib/cn";
+import { PlayPauseButton } from "./PlayPauseButton";
 import { useState, useRef } from "react";
 import { VibeToggleButton } from "./VibeToggleButton";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -50,15 +46,12 @@ export function MiniPlayer() {
 
     const { title, subtitle, coverUrl, hasMedia } = useMediaInfo(100);
 
-    // Check if controls should be enabled (only for tracks)
+    // The vibe button is for music only.
     const canSkip = playbackType === "track";
 
     if (!hasMedia) return null;
 
-    // Handle swipe gestures:
-    // - Swipe RIGHT: minimize to tab
-    // - Swipe LEFT + playing: open overlay
-    // - Swipe LEFT + not playing: dismiss completely
+    // A swipe right tucks the player into a tab; a swipe left opens the full player while playing, or dismisses it.
     const handleTouchStart = (e: React.TouchEvent) => {
         touchStartX.current = e.touches[0].clientX;
     };
@@ -66,26 +59,17 @@ export function MiniPlayer() {
     const handleTouchMove = (e: React.TouchEvent) => {
         if (touchStartX.current === null) return;
         const deltaX = e.touches[0].clientX - touchStartX.current;
-        // Track both directions, cap at ±150px
         setSwipeOffset(Math.max(-150, Math.min(150, deltaX)));
     };
 
     const handleTouchEnd = () => {
         if (touchStartX.current === null) return;
 
-        // Swipe RIGHT (positive) → minimize to tab
         if (swipeOffset > 80) {
             setIsMinimized(true);
-        }
-        // Swipe LEFT (negative) → open overlay OR dismiss
-        else if (swipeOffset < -80) {
-            if (isPlaying) {
-                // If playing, open full-screen overlay
-                setPlayerMode("overlay");
-            } else {
-                // If not playing, dismiss completely
-                setIsDismissed(true);
-            }
+        } else if (swipeOffset < -80) {
+            if (isPlaying) setPlayerMode("overlay");
+            else setIsDismissed(true);
         }
 
         setSwipeOffset(0);
@@ -188,125 +172,85 @@ export function MiniPlayer() {
                     />
                 </div>
 
-                        {/* Player content - more spacious padding */}
-                        <div
-                            className="relative flex items-center gap-3 px-3 py-3 cursor-pointer landscape-short:py-1"
-                            onClick={() => setPlayerMode("overlay")}
-                        >
-                            {/* Album Art - expand button for keyboard/AT users */}
-                            <button
-                                className="relative w-12 h-12 flex-shrink-0 rounded-[12px] overflow-hidden bg-black/30 shadow-[0_3px_6px_rgba(0,0,0,0.45)] landscape-short:w-10 landscape-short:h-10"
-                                aria-label="Expand player"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setPlayerMode("overlay");
-                                }}
-                            >
-                                {coverUrl ? (
-                                    <CachedImage
-                                        src={coverUrl}
-                                        alt={title}
-                                        fill
-                                        sizes="48px"
-                                        className="object-cover"
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center">
-                                        <MusicIcon className="w-5 h-5 text-[var(--text-secondary)]" />
-                                    </div>
-                                )}
-                            </button>
-
-                            <div className="flex-1 min-w-0">
-                                {audioError ? (
-                                    <>
-                                        <div className="flex items-center gap-1">
-                                            <AlertTriangle className="w-3.5 h-3.5 text-danger-light flex-shrink-0" />
-                                            <p className="text-danger-light text-sm font-medium truncate leading-tight">
-                                                Playback Error
-                                            </p>
-                                        </div>
-                                        <p className="text-danger-light/70 text-xs truncate leading-tight mt-0.5">
-                                            Tap retry to reconnect
-                                        </p>
-                                    </>
-                                ) : (
-                                    <>
-                                        <p data-player-title className="text-[15px] font-semibold text-[var(--text-primary)] truncate leading-tight">
-                                            {title}
-                                        </p>
-                                        <p className="text-[13px] text-[var(--text-secondary)] truncate leading-tight mt-0.5">
-                                            {subtitle}
-                                        </p>
-                                    </>
-                                )}
+                <div
+                    className="relative flex items-center gap-3 px-3 py-3 cursor-pointer landscape-short:py-1"
+                    onClick={() => setPlayerMode("overlay")}
+                >
+                    {/* Album Art - expand button for keyboard/AT users */}
+                    <button
+                        className="relative w-12 h-12 flex-shrink-0 rounded-[12px] overflow-hidden bg-black/30 shadow-[0_3px_6px_rgba(0,0,0,0.45)] landscape-short:w-10 landscape-short:h-10"
+                        aria-label="Expand player"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setPlayerMode("overlay");
+                        }}
+                    >
+                        {coverUrl ? (
+                            <CachedImage
+                                src={coverUrl}
+                                alt={title}
+                                fill
+                                sizes="48px"
+                                className="object-cover"
+                            />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <MusicIcon className="w-5 h-5 text-[var(--text-secondary)]" />
                             </div>
+                        )}
+                    </button>
 
-                            {/* Controls - Vibe button (for music only) & Play/Pause */}
-                            <div
-                                className="flex items-center gap-1.5 flex-shrink-0"
-                                onClick={(e) => e.stopPropagation()}
-                                role="group"
-                                aria-label="Playback controls"
-                            >
-                                <VibeToggleButton
-                                    unavailable={!canSkip}
-                                    hideWhenUnavailable
-                                    className="w-10 h-10 flex items-center justify-center rounded-full transition-colors"
-                                    iconClassName="w-5 h-5"
-                                    idleClassName="text-[var(--text-primary)] hover:text-brand"
-                                    activeClassName="text-brand"
-                                />
+                    <div className="flex-1 min-w-0">
+                        {audioError ? (
+                            <>
+                                <div className="flex items-center gap-1">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-danger-light flex-shrink-0" />
+                                    <p className="text-danger-light text-sm font-medium truncate leading-tight">
+                                        Playback Error
+                                    </p>
+                                </div>
+                                <p className="text-danger-light/70 text-xs truncate leading-tight mt-0.5">
+                                    Tap retry to reconnect
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p data-player-title className="text-[15px] font-semibold text-[var(--text-primary)] truncate leading-tight">
+                                    {title}
+                                </p>
+                                <p className="text-[13px] text-[var(--text-secondary)] truncate leading-tight mt-0.5">
+                                    {subtitle}
+                                </p>
+                            </>
+                        )}
+                    </div>
 
-                                <button
-                                    onClick={() => {
-                                        if (isPlaying) {
-                                            pause();
-                                        } else {
-                                            resumeWithGesture();
-                                        }
-                                    }}
-                                    className={cn(
-                                        "w-10 h-10 rounded-full flex items-center justify-center transition",
-                                        audioError
-                                            ? "bg-danger text-white hover:bg-danger-light"
-                                            : isBuffering
-                                            ? "bg-brand/80 text-black"
-                                            : "bg-brand text-black hover:scale-105"
-                                    )}
-                                    aria-label={
-                                        audioError
-                                            ? "Retry playback"
-                                            : isBuffering
-                                            ? "Buffering..."
-                                            : isPlaying
-                                            ? "Pause"
-                                            : "Play"
-                                    }
-                                    title={
-                                        audioError
-                                            ? "retry playback"
-                                            : isBuffering
-                                            ? "buffering..."
-                                            : isPlaying
-                                            ? "pause"
-                                            : "play"
-                                    }
-                                >
-                                    {audioError ? (
-                                        <RefreshCw className="w-5 h-5" />
-                                    ) : isBuffering ? (
-                                        <Loader2 className="w-5 h-5 animate-spin" />
-                                    ) : isPlaying ? (
-                                        <Pause className="w-5 h-5" />
-                                    ) : (
-                                        <Play className="w-5 h-5 ml-0.5" />
-                                    )}
-                                </button>
-                            </div>
-                        </div>
+                    {/* Controls - Vibe button (for music only) & Play/Pause */}
+                    <div
+                        className="flex items-center gap-1.5 flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        role="group"
+                        aria-label="Playback controls"
+                    >
+                        <VibeToggleButton
+                            unavailable={!canSkip}
+                            hideWhenUnavailable
+                            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors"
+                            iconClassName="w-5 h-5"
+                            idleClassName="text-[var(--text-primary)] hover:text-brand"
+                            activeClassName="text-brand"
+                        />
+
+                        <PlayPauseButton
+                            isPlaying={isPlaying}
+                            isBuffering={isBuffering}
+                            audioError={audioError}
+                            onPlay={resumeWithGesture}
+                            onPause={pause}
+                        />
+                    </div>
+                </div>
             </div>
         </div>
     );
-
 }
