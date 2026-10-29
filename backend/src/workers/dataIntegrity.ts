@@ -1,19 +1,20 @@
 /**
- * Periodic database cleanup. It deletes only rows that carry no user decision:
- * expired exclusions, orphaned discovery tracks, temp and album-less artists,
- * and notifications older than 30 days. Albums and OwnedAlbum keeps are reported
- * for a human, never deleted.
+ * The daily database check. It deletes only rows that carry no listener's decision (expired exclusions, orphaned
+ * Discover song rows, temp and album-less artists, notifications older than 30 days), moves albums Discover's records
+ * say are Discover's (relocateDiscoverAlbums) and merges temp artists into real ones. Albums and OwnedAlbum keeps
+ * that look orphaned are only reported.
  */
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
     expiredExclusions: number;
     orphanedDiscoveryTracks: number;
     mislocatedAlbums: number;
     orphanedAlbums: number;
+    emptyAlbums: number;
     orphanedOwnedAlbums: number;
     consolidatedArtists: number;
     orphanedArtists: number;
@@ -28,13 +29,13 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         orphanedDiscoveryTracks: 0,
         mislocatedAlbums: 0,
         orphanedAlbums: 0,
+        emptyAlbums: 0,
         orphanedOwnedAlbums: 0,
         consolidatedArtists: 0,
         orphanedArtists: 0,
         oldNotifications: 0,
     };
 
-    // 1. Remove expired DiscoverExclusion records
     const expiredExclusions = await prisma.discoverExclusion.deleteMany({
         where: {
             expiresAt: { lt: new Date() },
@@ -42,21 +43,16 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     });
     report.expiredExclusions = expiredExclusions.count;
     if (expiredExclusions.count > 0) {
-        logger.debug(
-            `     Removed ${expiredExclusions.count} expired exclusions`
-        );
+        logger.debug(`[DataIntegrity] Removed ${expiredExclusions.count} expired exclusions`);
     }
 
-    // 2. Clean up orphaned DiscoveryTrack records (tracks whose Track record was deleted)
-    // 2a. Rows explicitly left with no track
+    // Discover song rows with no song, or whose song was deleted: trackId has no foreign key by design, so only an
+    // anti-join finds the second kind.
     const orphanedDiscoveryTracksNull = await prisma.discoveryTrack.deleteMany({
         where: {
             trackId: null,
         },
     });
-    // 2b. Rows whose Track was deleted out from under them. trackId has no FK
-    // constraint by design, so deleting a Track never nulls or cascades this
-    // out; an anti-join against Track is the only way to catch these.
     const orphanedDiscoveryTracksDangling = await prisma.$executeRaw`
         DELETE FROM "DiscoveryTrack"
         WHERE "trackId" IS NOT NULL
@@ -66,71 +62,39 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     `;
     report.orphanedDiscoveryTracks = orphanedDiscoveryTracksNull.count + orphanedDiscoveryTracksDangling;
     if (report.orphanedDiscoveryTracks > 0) {
-        logger.debug(
-            `     Removed ${report.orphanedDiscoveryTracks} orphaned discovery track records`
-        );
+        logger.debug(`[DataIntegrity] Removed ${report.orphanedDiscoveryTracks} orphaned discovery track records`);
     }
 
-    // 3. Report orphaned DISCOVER albums (no active DiscoveryAlbum and no OwnedAlbum)
+    // DISCOVER albums no live suggestion (by id, or artist and title by nameKey) and no keep names: reported, not
+    // deleted, since a scan can bring them back.
     const discoverAlbums = await prisma.album.findMany({
         where: { location: "DISCOVER" },
         include: { artist: true },
     });
-
     if (discoverAlbums.length > 0) {
-        // Batch the per-album existence checks (3 * N sequential queries) into a
-        // handful of bulk lookups + in-memory Set/Map matching.
-        const activeDiscoveryAlbums = await prisma.discoveryAlbum.findMany({
+        const suggestions = await prisma.discoveryAlbum.findMany({
             where: { status: { in: ["ACTIVE", "LIKED", "MOVED"] } },
             select: { rgMbid: true, albumTitle: true, artistName: true },
         });
-        const activeRgMbids = new Set(
-            activeDiscoveryAlbums.filter((d) => d.rgMbid !== null).map((d) => d.rgMbid as string)
+        const suggestedIds = new Set(suggestions.map((d) => d.rgMbid));
+        const suggestedNames = new Set(suggestions.map((d) => lookupKey(d.artistName, d.albumTitle)));
+        const kept = new Set(
+            (await prisma.ownedAlbum.findMany({ select: { artistId: true, rgMbid: true } })).map((o) => `${o.artistId}::${o.rgMbid}`),
         );
-        const hasActiveNullRgMbid = activeDiscoveryAlbums.some((d) => d.rgMbid === null);
-        const activeTitleArtistPairs = new Set(
-            activeDiscoveryAlbums.map(
-                (d) => `${d.albumTitle.toLowerCase().trim()}::${d.artistName.toLowerCase().trim()}`
-            )
-        );
-
-        const ownedAlbums = await prisma.ownedAlbum.findMany({
-            select: { artistId: true, rgMbid: true },
-        });
-        const ownedArtistRgMbidPairs = new Set(
-            ownedAlbums.map((o) => `${o.artistId}::${o.rgMbid ?? "\0"}`)
-        );
-
-        const orphanCandidates = discoverAlbums.filter((album) => {
-            const hasActiveRecord =
-                (album.rgMbid ? activeRgMbids.has(album.rgMbid) : hasActiveNullRgMbid) ||
-                activeTitleArtistPairs.has(
-                    `${album.title.toLowerCase().trim()}::${album.artist.name.toLowerCase().trim()}`
-                );
-            const hasOwnedRecord = ownedArtistRgMbidPairs.has(`${album.artistId}::${album.rgMbid ?? "\0"}`);
-            return !hasActiveRecord && !hasOwnedRecord;
-        });
-
-        if (orphanCandidates.length > 0) {
-            // Reported, not deleted: a scan can bring them back.
-            for (const album of orphanCandidates) {
-                report.orphanedAlbums++;
-                logger.warn(
-                    `     Orphaned album (kept, needs a decision): ${album.artist.name} - ${album.title}`
-                );
-            }
+        for (const album of discoverAlbums) {
+            const suggested = suggestedIds.has(album.rgMbid) || suggestedNames.has(lookupKey(album.artist.name, album.title));
+            if (suggested || kept.has(`${album.artistId}::${album.rgMbid}`)) continue;
+            report.orphanedAlbums++;
+            logger.warn(`[DataIntegrity] Orphaned album (kept, needs a decision): ${album.artist.name} - ${album.title}`);
         }
     }
 
-    // 4. Move LIBRARY albums that Discover's records say came from Discover to DISCOVER (relocateDiscoverAlbums).
-    const mislocatedAlbumsFixed = (await relocateDiscoverAlbums({ dryRun: false })).length;
-
-    report.mislocatedAlbums = mislocatedAlbumsFixed;
-    if (mislocatedAlbumsFixed > 0) {
-        logger.debug(`     Fixed ${mislocatedAlbumsFixed} mislocated albums`);
+    report.mislocatedAlbums = (await relocateDiscoverAlbums({ dryRun: false })).length;
+    if (report.mislocatedAlbums > 0) {
+        logger.debug(`[DataIntegrity] Moved ${report.mislocatedAlbums} albums Discover's records say are Discover's`);
     }
 
-    // 5. Report albums with no tracks (their files are gone)
+    // Albums with no songs left: reported, not deleted.
     const emptyAlbums = await prisma.album.findMany({
         where: {
             tracks: { none: {} },
@@ -138,41 +102,28 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         include: { artist: true },
     });
 
+    report.emptyAlbums = emptyAlbums.length;
     for (const album of emptyAlbums) {
-        report.orphanedAlbums++;
-        logger.warn(
-            `     Empty album kept (no tracks, needs a decision): ${album.artist.name} - ${album.title}`
-        );
+        logger.warn(`[DataIntegrity] Empty album kept (no tracks, needs a decision): ${album.artist.name} - ${album.title}`);
     }
 
-    // 6. Report orphaned OwnedAlbum records (no matching Album record).
-    // A keep is a user decision, and a rescan can recreate the Album.
-    const orphanedOwnedAlbums = await prisma.$queryRawUnsafe<
-        { artistId: string; rgMbid: string | null; source: string }[]
-    >(
-        `SELECT oa."artistId", oa."rgMbid", oa.source
-           FROM "OwnedAlbum" oa
-          WHERE NOT EXISTS (
-              SELECT 1 FROM "Album" a WHERE a."rgMbid" = oa."rgMbid"
-          )`,
-    );
-    report.orphanedOwnedAlbums = orphanedOwnedAlbums.length;
-    if (orphanedOwnedAlbums.length > 0) {
-        logger.warn(
-            `     Orphaned OwnedAlbum records (kept, need a decision): ${orphanedOwnedAlbums.length}`,
-        );
+    // Keeps whose album is gone: a keep is a listener's decision and a rescan can bring the album back, so reported.
+    const [{ count: orphanedOwnedAlbums }] = await prisma.$queryRaw<[{ count: number }]>`
+        SELECT count(*)::int AS count
+          FROM "OwnedAlbum" oa
+         WHERE NOT EXISTS (SELECT 1 FROM "Album" a WHERE a."rgMbid" = oa."rgMbid")
+    `;
+    report.orphanedOwnedAlbums = orphanedOwnedAlbums;
+    if (orphanedOwnedAlbums > 0) {
+        logger.warn(`[DataIntegrity] Orphaned OwnedAlbum records (kept, need a decision): ${orphanedOwnedAlbums}`);
     }
 
-    // 7. Consolidate duplicate artists (same name, one with temp MBID, one with real)
+    // An artist with a temp id whose name a real artist has: its albums move to the real one and it goes.
     const tempArtists = await prisma.artist.findMany({
-        where: {
-            mbid: { startsWith: "temp-" },
-        },
-        include: { albums: true },
+        where: { mbid: { startsWith: "temp-" } },
     });
 
     if (tempArtists.length > 0) {
-        // One batched lookup instead of a findFirst per temp artist
         const realArtists = await prisma.artist.findMany({
             where: {
                 normalizedName: { in: tempArtists.map((t) => t.normalizedName) },
@@ -184,70 +135,40 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         );
 
         for (const tempArtist of tempArtists) {
-            // Find a real artist with the same normalized name
             const realArtist = realArtistByNormalizedName.get(tempArtist.normalizedName);
 
             if (realArtist) {
-                // Move all albums from temp artist to real artist
                 await prisma.album.updateMany({
                     where: { artistId: tempArtist.id },
                     data: { artistId: realArtist.id },
                 });
 
-                // Delete SimilarArtist relations
                 await prisma.similarArtist.deleteMany({
-                    where: {
-                        OR: [
-                            { fromArtistId: tempArtist.id },
-                            { toArtistId: tempArtist.id },
-                        ],
-                    },
+                    where: { OR: [{ fromArtistId: tempArtist.id }, { toArtistId: tempArtist.id }] },
                 });
-
-                // Delete temp artist
                 await prisma.artist.delete({
                     where: { id: tempArtist.id },
                 });
 
                 report.consolidatedArtists++;
-                logger.debug(
-                    `     Consolidated "${tempArtist.name}" (temp) into real artist`
-                );
+                logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
             }
         }
     }
 
-    // 8. Clean up orphaned artists (no albums)
-    const orphanedArtists = await prisma.artist.findMany({
-        where: {
-            albums: { none: {} },
-        },
-    });
-
-    if (orphanedArtists.length > 0) {
-        // Delete SimilarArtist relations first
+    // Artists with no albums go, with their similar-artist links.
+    const orphanedArtistIds = (
+        await prisma.artist.findMany({ where: { albums: { none: {} } }, select: { id: true } })
+    ).map((a) => a.id);
+    if (orphanedArtistIds.length > 0) {
         await prisma.similarArtist.deleteMany({
-            where: {
-                OR: [
-                    { fromArtistId: { in: orphanedArtists.map((a) => a.id) } },
-                    {
-                        toArtistId: {
-                            in: orphanedArtists.map((a) => a.id),
-                        },
-                    },
-                ],
-            },
+            where: { OR: [{ fromArtistId: { in: orphanedArtistIds } }, { toArtistId: { in: orphanedArtistIds } }] },
         });
-
-        // Delete orphaned artists
-        await prisma.artist.deleteMany({
-            where: { id: { in: orphanedArtists.map((a) => a.id) } },
-        });
-
-        report.orphanedArtists = orphanedArtists.length;
+        await prisma.artist.deleteMany({ where: { id: { in: orphanedArtistIds } } });
+        report.orphanedArtists = orphanedArtistIds.length;
     }
 
-    // 9. Notifications are news, not history: drop anything older than 30 days
+    // Notifications are news, not history: anything older than 30 days goes.
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const oldNotifications = await prisma.notification.deleteMany({
@@ -255,7 +176,6 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     });
     report.oldNotifications = oldNotifications.count;
 
-    // Summary
     logger.debug(`[DataIntegrity] Check complete: ${JSON.stringify(report)}`);
 
     return report;

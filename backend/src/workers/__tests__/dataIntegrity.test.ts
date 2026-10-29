@@ -6,6 +6,7 @@
  */
 
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 
 import { runDataIntegrityCheck } from "../dataIntegrity";
 
@@ -17,6 +18,7 @@ async function wipe(): Promise<void> {
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryAlbum" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoverExclusion" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE 'dint_%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE 'dint_%'`);
 }
 
@@ -30,6 +32,37 @@ afterAll(async () => {
 });
 
 describe("data integrity check", () => {
+    it("matches a Discover album to its suggestion by the shared name fold, and counts an empty album as empty", async () => {
+        await prisma.user.create({ data: { id: id("user2"), username: id("user2"), passwordHash: "x" } });
+        await prisma.artist.create({ data: { id: id("art2"), name: "Röyksopp", identityKey: id("k2") } });
+        // Suggested as "Royksopp - Don't Go"; the scanner made "Röyksopp - Don’t Go" under another id.
+        await prisma.discoveryAlbum.create({
+            data: { id: id("da2"), userId: id("user2"), rgMbid: id("rg-suggested"), artistName: "Royksopp", albumTitle: "Don't Go", weekStartDate: new Date() },
+        });
+        await prisma.album.create({
+            data: { id: id("alb2"), rgMbid: id("rg-scanned"), artistId: id("art2"), identityKey: id("ik2"), title: "Don’t Go", primaryType: "Album", location: "DISCOVER" },
+        });
+        await prisma.track.create({
+            data: { id: id("t2"), albumId: id("alb2"), title: "x", trackNo: 1, duration: 1, filePath: "/tmp/dint2.flac", fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.album.create({
+            data: { id: id("alb3"), rgMbid: id("rg-empty"), artistId: id("art2"), identityKey: id("ik3"), title: "Nothing Left", primaryType: "Album" },
+        });
+        const warn = jest.spyOn(logger, "warn");
+        let report: Awaited<ReturnType<typeof runDataIntegrityCheck>>;
+        let warned: string[];
+        try {
+            report = await runDataIntegrityCheck();
+            warned = warn.mock.calls.map((c) => String(c[0]));
+        } finally {
+            warn.mockRestore();
+        }
+
+        expect(warned.filter((w) => w.includes("Don’t Go"))).toEqual([]);
+        expect(warned.some((w) => w.includes("Nothing Left"))).toBe(true);
+        expect(report.emptyAlbums).toBeGreaterThanOrEqual(1);
+    });
+
     it("keeps every OwnedAlbum keep whose album is missing and reports them", async () => {
         // A user kept a discovery album; its Album row was removed
         // out-of-band (pruned, rgMbid corrected). The keep is a decision.
