@@ -26,7 +26,7 @@ export function useAudio() {
         playerMode: state.playerMode,
         volume: state.volume,
         isMuted: state.isMuted,
-        
+
         // Vibe operation state
         activeOperation: state.activeOperation,
 
@@ -44,7 +44,6 @@ export function useAudio() {
         playAudiobook: controls.playAudiobook,
         playPodcast: controls.playPodcast,
         pause: controls.pause,
-        resume: controls.resume,
         resumeWithGesture: controls.resumeWithGesture,
         next: controls.next,
         previous: controls.previous,
@@ -62,7 +61,7 @@ export function useAudio() {
         returnToPreviousMode: controls.returnToPreviousMode,
         setVolume: controls.setVolume,
         toggleMute: controls.toggleMute,
-        
+
         // Vibe mode controls
         startVibeMode: controls.startVibeMode,
         stopVibeMode: controls.stopVibeMode,

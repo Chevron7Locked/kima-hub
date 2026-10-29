@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
 import type { ListeningRow } from "../types";
+import { episodeForPlayer } from "@/lib/podcast-episode";
 
 type EpisodeToPlay = Parameters<ReturnType<typeof useAudio>["playPodcast"]>[0];
 
@@ -34,14 +35,9 @@ export function usePlayEpisode() {
 
     const toggle = useCallback(
         (row: ListeningRow) =>
-            toggleEpisode({
-                id: keyOf(row),
-                title: row.episode.title,
-                podcastTitle: row.podcast.title,
-                coverUrl: row.episode.coverUrl || row.podcast.coverUrl || "",
-                duration: row.episode.duration,
-                progress: row.episode.progress ?? null,
-            }),
+            toggleEpisode(
+                episodeForPlayer(row.podcast.id, row.podcast, row.episode, row.episode.coverUrl || row.podcast.coverUrl)
+            ),
         [toggleEpisode],
     );
 

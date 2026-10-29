@@ -25,7 +25,7 @@ import { api, getApiBaseUrl } from "@/lib/api";
 import { useAudioController } from "./audio-controller-context";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { notify } from "@/lib/notify";
-import { BookSession, BookSessionUnavailableError } from "@/lib/book-session";
+import { BookSession } from "@/lib/book-session";
 import { appendTracks, insertTrack, isLastInPlayOrder, removeTrack } from "@/lib/queue-edit";
 import { refillAndResume, startStationSession, type StationSession } from "@/lib/station-refill";
 import { shuffleArray } from "@/lib/shuffle";
@@ -56,7 +56,6 @@ interface AudioControlsContextType {
 
     // Playback controls
     pause: () => void;
-    resume: () => void;
     resumeWithGesture: () => void;
     next: () => void;
     previous: () => void;
@@ -129,6 +128,16 @@ function getNextTrackInfo(
     }
 
     return queue[nextIndex] ? { ...queue[nextIndex], index: nextIndex } : null;
+}
+
+/** A saved position as the player shows it: where, how far through, whether finished. */
+function progressAt(position: number, duration: number, isFinished: boolean) {
+    return {
+        currentTime: position,
+        progress: duration > 0 ? (position / duration) * 100 : 0,
+        isFinished,
+        lastPlayedAt: new Date(),
+    };
 }
 
 const OPERATION_NAMES: Record<string, string> = {
@@ -333,7 +342,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             try {
                 session = await BookSession.open(audiobook);
             } catch (err) {
-                if (err instanceof BookSessionUnavailableError || err instanceof Error) {
+                if (err instanceof Error) {
                     notify.error("Couldn't load audiobook -- Audiobookshelf is unreachable");
                 }
                 return;
@@ -364,19 +373,17 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [state]
     );
 
-    const playAudiobook = useCallback(
-        (audiobook: Audiobook) => {
-            const resumeAt = audiobook.progress?.currentTime ?? 0;
-            startAudiobookSession(audiobook, resumeAt).catch(() => notify.error("Couldn't start the audiobook"));
-        },
-        [startAudiobookSession]
-    );
-
     const playAudiobookAt = useCallback(
         (audiobook: Audiobook, bookTime: number) => {
             startAudiobookSession(audiobook, bookTime).catch(() => notify.error("Couldn't start the audiobook"));
         },
         [startAudiobookSession]
+    );
+
+    /** Plays a book from where the listener left it. */
+    const playAudiobook = useCallback(
+        (audiobook: Audiobook) => playAudiobookAt(audiobook, audiobook.progress?.currentTime ?? 0),
+        [playAudiobookAt]
     );
 
     const playPodcast = useCallback(
@@ -494,11 +501,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         controllerRef.current?.play();
     }, []);
 
-    const resume = useCallback(async () => {
-        await loadRestoredState();
-        await playOrRefill();
-    }, [loadRestoredState, playOrRefill]);
-
     const resumeWithGesture = useCallback(async () => {
         await loadRestoredState();
         await playOrRefill();
@@ -531,12 +533,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                         ...prev,
                         trackIndex: file.index,
                         trackOffset: file.startOffset,
-                        progress: {
-                            currentTime: clampedTime,
-                            progress: prev.duration > 0 ? (clampedTime / prev.duration) * 100 : 0,
-                            isFinished: false,
-                            lastPlayedAt: new Date(),
-                        },
+                        progress: progressAt(clampedTime, prev.duration, false),
                     } : prev);
 
                     if (file.index !== currentTrackIdx) {
@@ -558,21 +555,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.playbackType === "podcast" &&
                 state.currentPodcast
             ) {
-                state.setCurrentPodcast((prev) => {
-                    if (!prev) return prev;
-                    const duration = prev.duration || 0;
-                    const progressPercent =
-                        duration > 0 ? (clampedTime / duration) * 100 : 0;
-                    return {
-                        ...prev,
-                        progress: {
-                            currentTime: clampedTime,
-                            progress: progressPercent,
-                            isFinished: false,
-                            lastPlayedAt: new Date(),
-                        },
-                    };
-                });
+                state.setCurrentPodcast((prev) =>
+                    prev ? { ...prev, progress: progressAt(clampedTime, prev.duration || 0, false) } : prev
+                );
                 controllerRef.current?.seek(clampedTime);
             } else {
                 controllerRef.current?.seek(clampedTime);
@@ -596,33 +581,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         state.setRepeatOneCount(0);
 
-        let nextIndex: number;
-        if (state.isShuffle) {
-            const currentShufflePos = state.shuffleIndices.indexOf(
-                state.currentIndex
-            );
-            if (currentShufflePos < state.shuffleIndices.length - 1) {
-                nextIndex = state.shuffleIndices[currentShufflePos + 1];
-            } else {
-                if (state.repeatMode === "all") {
-                    nextIndex = state.shuffleIndices[0];
-                } else {
-                    controllerRef.current?.pause();
-                    return;
-                }
-            }
-        } else {
-            if (state.currentIndex < state.queue.length - 1) {
-                nextIndex = state.currentIndex + 1;
-            } else {
-                if (state.repeatMode === "all") {
-                    nextIndex = 0;
-                } else {
-                    controllerRef.current?.pause();
-                    return;
-                }
-            }
+        const nextTrack = getNextTrackInfo(
+            state.queue,
+            state.currentIndex,
+            state.isShuffle,
+            state.shuffleIndices,
+            state.repeatMode
+        );
+        if (!nextTrack) {
+            controllerRef.current?.pause();
+            return;
         }
+        const nextIndex = nextTrack.index;
 
         state.setCurrentIndex(nextIndex);
         state.setCurrentTrack(state.queue[nextIndex]);
@@ -637,7 +607,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (state.queue.length === 0) return;
 
         if (currentTimeRef.current > 3) {
-            setCurrentTimeRef.current(0);
             seek(0);
             return;
         }
@@ -652,7 +621,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (currentShufflePos > 0) {
                 prevIndex = state.shuffleIndices[currentShufflePos - 1];
             } else {
-                setCurrentTimeRef.current(0);
                 seek(0);
                 return;
             }
@@ -660,7 +628,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (state.currentIndex > 0) {
                 prevIndex = state.currentIndex - 1;
             } else {
-                setCurrentTimeRef.current(0);
                 seek(0);
                 return;
             }
@@ -894,12 +861,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setRepeatOneCount(0);
     }, [state]);
 
-    const updateCurrentTime = useCallback(
-        (time: number) => {
-            playback.setCurrentTime(time);
-        },
-        [playback]
-    );
+    const updateCurrentTime = playback.setCurrentTime;
 
     /** Skip by `delta` seconds; skips in quick succession add up into one seek. */
     const skipBy = useCallback(
@@ -1122,16 +1084,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setCurrentAudiobook((prev) => {
                     if (!prev || prev.id !== audiobook.id) return prev;
                     const dur = prev.duration || 0;
-                    const pos = isFinished ? dur : totalBookTime;
-                    return {
-                        ...prev,
-                        progress: {
-                            currentTime: pos,
-                            progress: dur > 0 ? (pos / dur) * 100 : 0,
-                            isFinished,
-                            lastPlayedAt: new Date(),
-                        },
-                    };
+                    return { ...prev, progress: progressAt(isFinished ? dur : totalBookTime, dur, isFinished) };
                 });
                 dispatchQueryEvent("audiobook-progress-updated");
             } catch (err) {
@@ -1181,16 +1134,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setCurrentPodcast((prev) => {
                     if (!prev || prev.id !== podcast.id) return prev;
                     const dur = prev.duration || 0;
-                    const pos = isFinished ? dur : currentTime;
-                    return {
-                        ...prev,
-                        progress: {
-                            currentTime: pos,
-                            progress: dur > 0 ? (pos / dur) * 100 : 0,
-                            isFinished: finished,
-                            lastPlayedAt: new Date(),
-                        },
-                    };
+                    return { ...prev, progress: progressAt(isFinished ? dur : currentTime, dur, finished) };
                 });
                 // The episode and what was saved, so a page showing it updates that row alone.
                 dispatchQueryEvent("podcast-progress-updated", { podcastId, episodeId, progress: saved });
@@ -1241,18 +1185,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     const file = session.fileByIndex(currentTrackIdx);
 
                     if (file && !session.isLastFile(file)) {
-                        const nextFileIdx = session.files.indexOf(file) + 1;
-                        const nextFile = session.files[nextFileIdx];
-                        if (nextFile) {
-                            state.setCurrentAudiobook((prev) =>
-                                prev ? { ...prev, trackIndex: nextFile.index, trackOffset: nextFile.startOffset } : prev
-                            );
-                            ctrl.load(
-                                api.getAudiobookStreamUrl(audiobook.id, nextFile.index),
-                                { autoplay: true, seekTo: 0 }
-                            );
-                            return;
-                        }
+                        const nextFile = session.files[session.files.indexOf(file) + 1];
+                        state.setCurrentAudiobook((prev) =>
+                            prev ? { ...prev, trackIndex: nextFile.index, trackOffset: nextFile.startOffset } : prev
+                        );
+                        ctrl.load(
+                            api.getAudiobookStreamUrl(audiobook.id, nextFile.index),
+                            { autoplay: true, seekTo: 0 }
+                        );
+                        return;
                     }
 
                     if (file && session.isLastFile(file)) {
@@ -1329,11 +1270,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             api.prewarmTrack(nextTrack.id);
 
             if (repeatModeRef.current === "one") return;
-            const ctrl2 = controllerRef.current;
-            if (!ctrl2) return;
             pendingGaplessNextRef.current = nextTrack;
-            ctrl2.setExpectedNext(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration);
-            ctrl2.preloadNext();
+            ctrl.setExpectedNext(api.getStreamUrl(nextTrack.id), nextTrack.id, nextTrack.duration);
+            ctrl.preloadNext();
         };
 
         ctrl.on("timeupdate", handleTimeUpdate);
@@ -1418,7 +1357,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         if (!ctrl) return;
 
         // Reset consecutive error count on any transition INTO "playing".
-         
+
         const unsubscribePlayReset = ctrl.subscribe((snap) => {
             if (snap.status === "playing") {
                 consecutiveErrorCountRef.current = 0;
@@ -1536,7 +1475,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         ctrl.on("error", handleError);
         return () => {
-            if (typeof unsubscribePlayReset === "function") unsubscribePlayReset();
+            unsubscribePlayReset();
             ctrl.off("error", handleError);
         };
     }, [controller, state]);
@@ -1583,13 +1522,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
         });
 
-        // Also stop on ended (ended event still exists).
         ctrl.on("ended", stop);
         if (ctrl.isPlaying()) start();
 
         return () => {
             stop();
-            if (typeof unsubscribe === "function") unsubscribe();
+            unsubscribe();
             ctrl.off("ended", stop);
         };
     }, [controller]);
@@ -1677,7 +1615,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playPodcast,
             nextPodcastEpisode,
             pause,
-            resume,
             resumeWithGesture,
             next,
             previous,
@@ -1708,7 +1645,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playPodcast,
             nextPodcastEpisode,
             pause,
-            resume,
             resumeWithGesture,
             next,
             previous,

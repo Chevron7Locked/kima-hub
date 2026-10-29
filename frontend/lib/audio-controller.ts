@@ -24,6 +24,9 @@ function listenerAdder(el: HTMLAudioElement, store: ListenerStore) {
     };
 }
 
+/** How long after a load, swap or return to the foreground silence is not taken for a stalled stream. */
+const DETECTOR_ARM_MS = 15000;
+
 export class AudioController {
     // ACTIVE element -- drives the reducer, emits external events.
     private audio: HTMLAudioElement;
@@ -287,7 +290,7 @@ export class AudioController {
                     // public load()) -- the recovery ladder's own reloads
                     // (e.g. the hidden/blocked->retry path) dispatch this
                     // effect directly without going through load().
-                    this.armDetectorUntil = Date.now() + 15000;
+                    this.armDetectorUntil = Date.now() + DETECTOR_ARM_MS;
                     this.lastAnalyserCurrentTime = this.audio.currentTime;
                     this.audio.src = effect.src;
                     this.audio.load();
@@ -310,69 +313,21 @@ export class AudioController {
                     // by the time the first audio frames need routing. Must NOT be awaited
                     // or chained -- play() must remain synchronous for the iOS event-tail grant.
                     this.ensureContextRunning();
-                    this.audio.play().then(() => {
-                        // Play succeeded -- nothing to do; native-playing fires
-                    }).catch((err: unknown) => {
-                        if (!(err instanceof DOMException)) {
-                            this.dispatch({
-                                type: "play-rejected",
-                                reason: "other",
-                                generation: capturedGen,
-                                now: Date.now(),
+                    const reject = (reason: "abort" | "not-allowed" | "other") =>
+                        this.dispatch({ type: "play-rejected", reason, generation: capturedGen, now: Date.now() });
+                    // native-playing reports a play that worked; only a refusal needs handling here.
+                    this.audio.play().catch((err: unknown) => {
+                        if (!(err instanceof DOMException)) return reject("other");
+                        if (err.name !== "NotAllowedError") return reject(err.name === "AbortError" ? "abort" : "other");
+                        // A refusal can come while the element is still loading; one retry 100 ms later tells that
+                        // apart from a real autoplay block. Superseded generations are ignored by the policy.
+                        setTimeout(() => {
+                            if (this.snapshot.generation !== capturedGen) return;
+                            this.audio.play().catch((retryErr: unknown) => {
+                                if (!(retryErr instanceof DOMException)) return reject("other");
+                                reject(retryErr.name === "AbortError" ? "abort" : "not-allowed");
                             });
-                            return;
-                        }
-                        const name = (err as DOMException).name;
-                        if (name === "AbortError") {
-                            // Superseded generations are silently ignored by the policy.
-                            this.dispatch({
-                                type: "play-rejected",
-                                reason: "abort",
-                                generation: capturedGen,
-                                now: Date.now(),
-                            });
-                        } else if (name === "NotAllowedError") {
-                            // Retry once after a short delay -- in headless Playwright
-                            // the element may still be loading when play() is first
-                            // called; a brief retry lets the browser settle.
-                            setTimeout(() => {
-                                if (this.snapshot.generation !== capturedGen) return;
-                                this.audio.play().catch((retryErr: unknown) => {
-                                    if (!(retryErr instanceof DOMException)) {
-                                        this.dispatch({
-                                            type: "play-rejected",
-                                            reason: "other",
-                                            generation: capturedGen,
-                                            now: Date.now(),
-                                        });
-                                        return;
-                                    }
-                                    const rName = (retryErr as DOMException).name;
-                                    if (rName === "AbortError") {
-                                        this.dispatch({
-                                            type: "play-rejected",
-                                            reason: "abort",
-                                            generation: capturedGen,
-                                            now: Date.now(),
-                                        });
-                                    } else {
-                                        this.dispatch({
-                                            type: "play-rejected",
-                                            reason: "not-allowed",
-                                            generation: capturedGen,
-                                            now: Date.now(),
-                                        });
-                                    }
-                                });
-                            }, 100);
-                        } else {
-                            this.dispatch({
-                                type: "play-rejected",
-                                reason: "other",
-                                generation: capturedGen,
-                                now: Date.now(),
-                            });
-                        }
+                        }, 100);
                     });
                     break;
                 }
@@ -529,10 +484,8 @@ export class AudioController {
         this.audioNext = this.createOwnedElement("next");
         this.attachNativeListeners(this.audio, this.nativeListeners);
         this.attachIdleListeners(this.audioNext, this.nativeListenersNext);
-        this.audio.volume = this.isMuted ? 0 : this.volume;
-        this.audio.muted = this.isMuted;
-        this.audioNext.volume = this.isMuted ? 0 : this.volume;
-        this.audioNext.muted = this.isMuted;
+        this.syncVolume(this.audio);
+        this.syncVolume(this.audioNext);
 
         // The fresh idle element has no buffer -- drop the stale preload
         // bookkeeping and re-issue the preload from the cached expected-next
@@ -688,19 +641,14 @@ export class AudioController {
         // rejection, which arrives a microtask later, has nothing to unwind and
         // the fallback still runs.
         const swapGen = this.snapshot.generation;
-        let p: ReturnType<HTMLAudioElement["play"]> | undefined;
+        let p: ReturnType<HTMLAudioElement["play"]>;
         try {
             p = this.audioNext.play();
         } catch {
             this.onSwapFailed();
             return;
         }
-        if (p && typeof p.then === "function") {
-            p.then(() => this.onSwapCommitted(swapGen)).catch(() => this.onSwapFailed());
-        } else {
-            // No promise returned (old browsers) -- treat as committed.
-            this.onSwapCommitted(swapGen);
-        }
+        p.then(() => this.onSwapCommitted(swapGen)).catch(() => this.onSwapFailed());
     }
 
     private onSwapCommitted(swapGen: number): void {
@@ -740,10 +688,8 @@ export class AudioController {
         this.audioNext.pause();
         this.audioNext.removeAttribute("src");
         this.audioNext.load();
-        // Sync volume/mute onto the reused idle element so the NEXT
-        // swap carries no jump even if setVolume/setMuted fired in between.
-        this.audioNext.volume = this.isMuted ? 0 : this.volume;
-        this.audioNext.muted = this.isMuted;
+        // The reused idle element takes the current volume, so the next swap carries no jump.
+        this.syncVolume(this.audioNext);
 
         this.preloadedTrackId = null;
         this.idleReady = false;
@@ -766,7 +712,7 @@ export class AudioController {
 
         // Re-arm the silence detector for the freshly-active element -- the
         // swap bypasses load(), which is where this normally happens.
-        this.armDetectorUntil = Date.now() + 15000;
+        this.armDetectorUntil = Date.now() + DETECTOR_ARM_MS;
         this.lastAnalyserCurrentTime = null;
         this.silentStreak = 0;
         this.rebuildCount = 0;
@@ -799,7 +745,6 @@ export class AudioController {
 
     subscribe(fn: (snap: EngineSnapshot) => void): () => void {
         this.subscribers.add(fn);
-        // Call immediately with current snapshot
         try {
             fn(this.snapshot);
         } catch (err) {
@@ -842,7 +787,7 @@ export class AudioController {
 
     load(src: string, opts: { autoplay?: boolean; seekTo?: number; expectedDurationS?: number } = {}): void {
         const { autoplay = false, seekTo, expectedDurationS } = opts;
-        this.armDetectorUntil = Date.now() + 15000;
+        this.armDetectorUntil = Date.now() + DETECTOR_ARM_MS;
         this.lastAnalyserCurrentTime = this.audio.currentTime;
 
         // Same-src dedup: if already loading this src, only update intent
@@ -934,7 +879,7 @@ export class AudioController {
     }
 
     notifyForeground(): void {
-        this.armDetectorUntil = Date.now() + 15000;
+        this.armDetectorUntil = Date.now() + DETECTOR_ARM_MS;
         this.lastAnalyserCurrentTime = this.audio.currentTime;
         this.dispatch({ type: "foreground", now: Date.now() });
     }
@@ -996,6 +941,12 @@ export class AudioController {
         this.preloadedTrackId = null;
     }
 
+    /** Gives an element the controller's volume and mute (muted too: volume is read-only on iOS). */
+    private syncVolume(el: HTMLAudioElement): void {
+        el.volume = this.isMuted ? 0 : this.volume;
+        el.muted = this.isMuted;
+    }
+
     setVolume(volume: number): void {
         this.volume = Math.max(0, Math.min(1, volume));
         if (!this.isMuted) {
@@ -1009,7 +960,6 @@ export class AudioController {
         // audio.muted, since audio.volume is read-only on iOS.
         this.audio.muted = muted;
         this.audioNext.muted = muted;
-        // Also set volume for non-iOS devices
         if (!muted) {
             this.audio.volume = this.volume;
             this.audioNext.volume = this.volume;
@@ -1033,8 +983,8 @@ export class AudioController {
                 this.isMuted = true;
             }
 
-            this.audio.volume = this.isMuted ? 0 : this.volume;
-            this.audioNext.volume = this.isMuted ? 0 : this.volume;
+            this.syncVolume(this.audio);
+            this.syncVolume(this.audioNext);
         } catch (error) {
             console.error("[AudioController] Failed to initialize from storage:", error);
         }

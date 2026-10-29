@@ -92,6 +92,7 @@ export function formatListeners(count: number | undefined): string {
 
     return `${count.toLocaleString()} listeners`;
 }
+
 export function normalizeNFC(str: string): string {
     return str.normalize("NFC");
 }

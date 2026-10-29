@@ -44,7 +44,7 @@ function QueueCover({ coverArt }: { coverArt?: string | null }) {
 /** The queue. `withNowPlaying` false leaves out the playing row, for a panel that shows it above. */
 export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }) {
     const { currentTrack, queue, currentIndex, activeOperation, setQueue } = useAudioState();
-    const { playTracks, pause, resume, removeFromQueue, clearQueue } = useAudioControls();
+    const { playTracks, pause, resumeWithGesture, removeFromQueue, clearQueue } = useAudioControls();
     const { isPlaying } = useAudioPlayback();
     const [confirmClear, setConfirmClear] = useState(false);
 
@@ -59,7 +59,7 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
         if (isPlaying) {
             pause();
         } else {
-            resume();
+            resumeWithGesture();
         }
     };
 

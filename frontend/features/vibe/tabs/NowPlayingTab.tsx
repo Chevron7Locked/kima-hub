@@ -116,7 +116,7 @@ function ArtistBio({ bio, artistId }: { bio: string; artistId?: string }) {
 export function NowPlayingStrip() {
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { pause, resume } = useAudioControls();
+    const { pause, resumeWithGesture } = useAudioControls();
 
     if (!currentTrack) {
         return (
@@ -149,7 +149,7 @@ export function NowPlayingStrip() {
             </div>
             <button
                 type="button"
-                onClick={() => (isPlaying ? pause() : resume())}
+                onClick={() => (isPlaying ? pause() : resumeWithGesture())}
                 aria-label={isPlaying ? "pause" : "play"}
                 className={cn(
                     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-brand/60",

@@ -8,37 +8,25 @@ import {
     useRef,
     ReactNode,
     useMemo,
+    type SetStateAction,
 } from "react";
 import { api } from "@/lib/api";
-import type { Episode } from "@/features/podcast/types";
+import { episodeForPlayer, type ShowWithEpisodes } from "./podcast-episode";
 import { STORAGE_KEYS } from "./storage-keys";
 
 export type PlayerMode = "full" | "mini" | "overlay";
 
-// Audio features for vibe mode visualization
+/** A song as the player holds it. */
 export interface Track {
     id: string;
     title: string;
     artist: { name: string; id?: string; mbid?: string };
     album: { title: string; coverArt?: string; id?: string };
     duration: number;
-    filePath?: string;
-    // Metadata override fields
+    // A listener's edits to the song's tags.
     displayTitle?: string | null;
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
-    // Audio features for vibe mode visualization
-    audioFeatures?: {
-        bpm?: number | null;
-        energy?: number | null;
-        valence?: number | null;
-        arousal?: number | null;
-        danceability?: number | null;
-        keyScale?: string | null;
-        instrumentalness?: number | null;
-        analysisMode?: string | null;
-        // ML mood predictions
-    } | null;
 }
 
 export interface AudiobookTrack {
@@ -79,8 +67,6 @@ export interface Podcast {
         lastPlayedAt: Date;
     } | null;
 }
-
-type SetStateAction<T> = T | ((prev: T) => T);
 
 export type VibeOperation =
     | { type: 'idle' }
@@ -227,9 +213,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [isMuted, setIsMuted] = useState(
         () => readStorage(STORAGE_KEYS.IS_MUTED) === "true"
     );
-    const [isHydrated] = useState(
-        () => typeof window !== "undefined"
-    );
     const [lastServerSync, setLastServerSync] = useState<Date | null>(null);
 
     // Refs for polling effect to avoid restarting the interval on every state change
@@ -295,10 +278,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 const [podcastId, episodeId] = podcastData.id.split(":");
                 if (podcastId && episodeId) {
                     api.getPodcast(podcastId)
-                        .then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
-                            const episode = podcast.episodes?.find(
-                                (ep: Episode) => ep.id === episodeId
-                            );
+                        .then((podcast: ShowWithEpisodes) => {
+                            const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                             if (episode && episode.progress) {
                                 setCurrentPodcast({
                                     ...podcastData,
@@ -379,19 +360,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     const [podcastId, episodeId] =
                         serverState.podcastId.split(":");
                     api.getPodcast(podcastId)
-                        .then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
-                            const episode = podcast.episodes?.find(
-                                (ep: Episode) => ep.id === episodeId
-                            );
+                        .then((podcast: ShowWithEpisodes) => {
+                            const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                             if (episode) {
-                                setCurrentPodcast({
-                                    id: serverState.podcastId,
-                                    title: episode.title,
-                                    podcastTitle: podcast.title,
-                                    coverUrl: podcast.coverUrl,
-                                    duration: episode.duration,
-                                    progress: episode.progress,
-                                });
+                                setCurrentPodcast(episodeForPlayer(podcastId, podcast, episode));
                                 setPlaybackType("podcast");
                                 setCurrentTrack(null);
                                 setCurrentAudiobook(null);
@@ -428,8 +400,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
     // Save state to localStorage whenever it changes (debounced)
     useEffect(() => {
-        if (!isHydrated || typeof window === "undefined") return;
-
         const timeoutId = setTimeout(() => {
             try {
                 if (currentAudiobook) {
@@ -482,21 +452,16 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         playerMode,
         volume,
         isMuted,
-        isHydrated,
     ]);
 
     useEffect(() => {
-        if (!isHydrated) return;
         if (!playbackType) return;
 
         const saveToServer = async () => {
             try {
                 // Sliced to the server's queue limit, fetched once and remembered.
-                const limitedQueue = queue?.slice(0, queueLimitRef.current);
-                const adjustedIndex = Math.min(
-                    currentIndex,
-                    (limitedQueue?.length || 1) - 1
-                );
+                const limitedQueue = queue.slice(0, queueLimitRef.current);
+                const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
 
                 const result = await api.savePlaybackState({
                     playbackType,
@@ -528,14 +493,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         queue,
         currentIndex,
         isShuffle,
-        isHydrated,
     ]);
 
     // Poll server for changes from other devices (pauses when tab is hidden)
     useEffect(() => {
-        if (!isHydrated) return;
-        if (typeof document === "undefined") return;
-
         let isAuthenticated = true;
         let mounted = true;
         let isVisible = !document.hidden;
@@ -617,20 +578,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     ) {
                         const [podcastId, episodeId] =
                             serverState.podcastId.split(":");
-                        const podcast: { title: string; coverUrl: string; episodes?: Episode[] } = await api.getPodcast(podcastId);
+                        const podcast: ShowWithEpisodes = await api.getPodcast(podcastId);
                         if (!mounted) return;
-                        const episode = podcast.episodes?.find(
-                            (ep: Episode) => ep.id === episodeId
-                        );
+                        const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                         if (episode) {
-                            setCurrentPodcast({
-                                id: serverState.podcastId,
-                                title: episode.title,
-                                podcastTitle: podcast.title,
-                                coverUrl: podcast.coverUrl,
-                                duration: episode.duration,
-                                progress: episode.progress,
-                            });
+                            setCurrentPodcast(episodeForPlayer(podcastId, podcast, episode));
                             setPlaybackType("podcast");
                             setCurrentTrack(null);
                             setCurrentAudiobook(null);
@@ -672,14 +624,12 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             clearInterval(pollInterval);
         };
     }, [
-        isHydrated,
         playbackType,
         currentTrack?.id,
         currentAudiobook?.id,
         currentPodcast?.id,
     ]);
 
-    // Memoize the context value to prevent unnecessary re-renders
     const value = useMemo(
         () => ({
             currentTrack,
@@ -691,7 +641,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-                playerMode,
+            playerMode,
             previousPlayerMode,
             volume,
             isMuted,
@@ -723,7 +673,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-                playerMode,
+            playerMode,
             previousPlayerMode,
             volume,
             isMuted,

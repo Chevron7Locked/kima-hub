@@ -36,7 +36,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [duration, setDuration] = useState(0);
     const [isBuffering, setIsBuffering] = useState(false);
     const [audioError, setAudioError] = useState<string | null>(null);
-    const [isHydrated] = useState(() => typeof window !== "undefined");
 
     const lastSeekTimeRef = useRef(0);
 
@@ -60,7 +59,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }, [state.playbackType, state.currentAudiobook?.trackOffset]);
 
     // Sync currentTime from audiobook/podcast progress when not playing
-    const progressKey = isHydrated && !isPlaying
+    const progressKey = !isPlaying
         ? `${state.playbackType}-${state.currentAudiobook?.progress?.currentTime}-${state.currentPodcast?.progress?.currentTime}`
         : null;
     const [prevProgressKey, setPrevProgressKey] = useState<string | null>(progressKey);
@@ -83,7 +82,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     usePlayReporting(
         controller as Parameters<typeof usePlayReporting>[0],
         state.currentTrack?.id ?? null,
-        state.currentTrack?.duration ?? duration ?? null,
+        state.currentTrack?.duration ?? duration,
     );
 
     const liveTrack = state.playbackType === "track" ? state.currentTrack : null;
@@ -123,7 +122,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         });
 
         return () => {
-            if (typeof unsubscribe === "function") unsubscribe();
+            unsubscribe();
         };
     }, [controller]);
 
@@ -164,12 +163,10 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         channel.onmessage = (event: MessageEvent) => {
             const msg = event.data;
             if (msg?.type === "playback-claimed" && msg.tabId !== tabId) {
-                 
                 controller.pause("system");
             }
         };
 
-         
         const unsubscribe = controller.subscribe((snap: EngineSnapshot) => {
             const { status } = snap;
             if (status === "playing" && prevStatusForBc !== "playing") {
@@ -181,7 +178,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         });
 
         return () => {
-            if (typeof unsubscribe === "function") unsubscribe();
+            unsubscribe();
             channel.close();
         };
     }, [controller]);

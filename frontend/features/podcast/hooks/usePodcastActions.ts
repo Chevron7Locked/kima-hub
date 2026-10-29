@@ -10,6 +10,7 @@ import { Podcast, Episode, PodcastPreview } from "../types";
 import { queryKeys, refreshFollowedShows } from "@/hooks/useQueries";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { useEpisodeToggle } from "./usePlayEpisode";
+import { episodeForPlayer } from "@/lib/podcast-episode";
 
 export function usePodcastActions(podcastId: string) {
     const router = useRouter();
@@ -56,14 +57,7 @@ export function usePodcastActions(podcastId: string) {
     }, [podcastId, router, queryClient]);
 
     const toPlay = useCallback(
-        (episode: Episode, podcast: Podcast) => ({
-            id: `${podcastId}:${episode.id}`,
-            title: episode.title,
-            podcastTitle: podcast.title,
-            coverUrl: podcast.coverUrl,
-            duration: episode.duration,
-            progress: episode.progress || null,
-        }),
+        (episode: Episode, podcast: Podcast) => episodeForPlayer(podcastId, podcast, episode),
         [podcastId]
     );
 
