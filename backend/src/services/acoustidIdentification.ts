@@ -81,10 +81,8 @@ function toIdentification(
 export async function readIdentityTags(
     track: IdentifiableTrack
 ): Promise<IdentityTags | null> {
-    // The stored path is relative to the music folder; the tag reader and
-    // fpcalc both need the real file. Same escape-safe resolution the
-    // stream route uses -- a path that would leave the music folder is
-    // not opened.
+    // The stored path is relative to the music folder; a path that would leave it is not opened (the stream route's
+    // resolution).
     const absolutePath = resolveWithinMusicRoot(track.filePath);
     if (!absolutePath) {
         logger.warn(
@@ -121,16 +119,16 @@ export async function readIdentityTags(
 /**
  * AcoustID for a track whose tags do not name its recording, using the tagged or
  * stored (`Track.acoustidFingerprint`) fingerprint; a reply saved by
- * `prefetchAcoustidReplies` answers without a request. `permanent` means
- * no fingerprint or no client key; the stage gate normally keeps the question
- * open until a fingerprint exists.
+ * `prefetchAcoustidReplies` answers without a request. `tags` is the caller's read of them (null: unreadable), so
+ * the file is read only when it is left out. `permanent` means no fingerprint or no client key; the stage gate
+ * normally keeps the question open until a fingerprint exists.
  */
 export async function identifyTrackByAcoustid(
     track: IdentifiableTrack,
     tags?: IdentityTags | null,
     stored?: { fingerprint: string } | null
 ): Promise<Outcome<TrackIdentification>> {
-    const known = tags ?? (await readIdentityTags(track));
+    const known = tags === undefined ? await readIdentityTags(track) : tags;
     if (!known) {
         // The file's tags are unreadable, but a stored fingerprint can
         // still drive the lookup — with the duration the scanner measured.
@@ -140,8 +138,7 @@ export async function identifyTrackByAcoustid(
         return noFingerprint();
     }
 
-    // Path 1: what the file itself already knows -- the recording id tag
-    // answers with no network call at all.
+    // The recording id tag answers with no network call.
     if (known.recordingMbid) {
         acoustidTrackIdentityTotal.inc({
             path: "recording_tag",
@@ -157,7 +154,7 @@ export async function identifyTrackByAcoustid(
         );
     }
 
-    // Path 2: the tag's fingerprint, else the fingerprint stage's stored answer.
+    // The tag's fingerprint, else the fingerprint stage's stored one.
     if (known.fingerprint) {
         return askAcoustid(track, known.fingerprint, known.duration, "tag_fingerprint");
     }

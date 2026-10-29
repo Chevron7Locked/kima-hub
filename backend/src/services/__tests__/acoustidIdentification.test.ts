@@ -172,6 +172,12 @@ describe("identifyTrackByAcoustid: the stored fingerprint", () => {
         }
     });
 
+    it("does not read the file again when the caller already found its tags unreadable", async () => {
+        const out = await identifyTrackByAcoustid(track("a.flac"), null, null);
+        expect(mockParseFile).not.toHaveBeenCalled();
+        expect(out.kind).toBe("permanent");
+    });
+
     it("passes a lookup failure through as the same kind — the question stays open", async () => {
         mockParseFile.mockResolvedValue(tags({ acoustid_fingerprint: "TAGFP" }));
         mockLookup.mockResolvedValue({
