@@ -1,8 +1,6 @@
 /**
- * Global Rate Limiter Service
- *
- * Provides centralized rate limiting with exponential backoff for all external API calls.
- * Implements circuit breaker pattern to pause requests when rate limited.
+ * One queue per outside service, at that service's rate, with backoff and retries on a rate-limit reply. Five
+ * rate limits in a row open a breaker that holds the service's next requests for a while.
  */
 
 import PQueue from "p-queue";
@@ -60,7 +58,6 @@ interface RateLimitConfig {
 interface ServiceConfig {
     musicbrainz: RateLimitConfig;
     deezer: RateLimitConfig;
-    lidarr: RateLimitConfig;
     coverart: RateLimitConfig;
     lrclib: RateLimitConfig;
     songlink: RateLimitConfig;
@@ -71,7 +68,6 @@ interface ServiceConfig {
     listenbrainz: RateLimitConfig;
 }
 
-// Service-specific rate limit configurations
 const SERVICE_CONFIGS: ServiceConfig = {
     musicbrainz: {
         intervalCap: 1, // 1 request per second (MusicBrainz is strict)
@@ -84,13 +80,6 @@ const SERVICE_CONFIGS: ServiceConfig = {
         intervalCap: 25, // Deezer is more lenient
         interval: 5000,
         concurrency: 5,
-        maxRetries: 2,
-        baseDelay: 500,
-    },
-    lidarr: {
-        intervalCap: 10, // Local service, can be faster
-        interval: 1000,
-        concurrency: 3,
         maxRetries: 2,
         baseDelay: 500,
     },
@@ -154,6 +143,14 @@ const SERVICE_CONFIGS: ServiceConfig = {
 
 type ServiceName = keyof ServiceConfig;
 
+/** How long an opened breaker first holds a service; each reopening doubles it, up to the cap. */
+const CIRCUIT_RESET_MS = 30_000;
+const CIRCUIT_MAX_RESET_MS = 60_000;
+/** Rate limits in a row that open the breaker. */
+const FAILURES_TO_OPEN = 5;
+/** The longest one backoff waits. */
+const MAX_BACKOFF_MS = 60_000;
+
 interface CircuitState {
     isOpen: boolean;
     openedAt: number;
@@ -161,12 +158,18 @@ interface CircuitState {
     resetAfterMs: number;
 }
 
+/** Closes the breaker, its next hold back to CIRCUIT_RESET_MS: once its wait is over, or when the service answers. */
+function closeCircuit(circuit: CircuitState): void {
+    circuit.isOpen = false;
+    circuit.consecutiveFailures = 0;
+    circuit.resetAfterMs = CIRCUIT_RESET_MS;
+}
+
 class GlobalRateLimiter {
     private queues: Map<ServiceName, PQueue> = new Map();
     private circuitBreakers: Map<ServiceName, CircuitState> = new Map();
 
     constructor() {
-        // Initialize queues for each service
         for (const [service, config] of Object.entries(SERVICE_CONFIGS)) {
             this.queues.set(
                 service as ServiceName,
@@ -182,16 +185,13 @@ class GlobalRateLimiter {
                 isOpen: false,
                 openedAt: 0,
                 consecutiveFailures: 0,
-                resetAfterMs: 30000, // 30 seconds default
+                resetAfterMs: CIRCUIT_RESET_MS,
             });
         }
 
         logger.debug("Global rate limiter initialized");
     }
 
-    /**
-     * Execute a request with rate limiting and automatic retry
-     */
     /** Raise a ticket's place: a request still waiting moves up now, and its retries queue at the new place. */
     raise(service: ServiceName, ticket: QueueTicket, priority: number): void {
         if (priority <= ticket.priority) return;
@@ -205,6 +205,7 @@ class GlobalRateLimiter {
         }
     }
 
+    /** Runs `requestFn` in the service's queue, retrying a rate-limit reply with backoff. */
     async execute<T>(
         service: ServiceName,
         requestFn: () => Promise<T>,
@@ -225,29 +226,20 @@ class GlobalRateLimiter {
             throw new Error(`Unknown service: ${service}`);
         }
 
-        // Check circuit breaker
         const circuit = this.circuitBreakers.get(service)!;
         if (circuit.isOpen) {
             const elapsed = Date.now() - circuit.openedAt;
             if (elapsed < circuit.resetAfterMs) {
-                // Circuit is open, wait or throw
                 const waitTime = circuit.resetAfterMs - elapsed;
-                logger.debug(
-                    `Circuit breaker open for ${service} - waiting ${waitTime}ms`
-                );
+                logger.debug(`Circuit breaker open for ${service} - waiting ${waitTime}ms`);
                 await this.sleep(waitTime, options?.signal);
             }
-            // Reset circuit to initial state
-            circuit.isOpen = false;
-            circuit.consecutiveFailures = 0;
-            circuit.resetAfterMs = 30000; // Reset to initial 30 seconds
+            closeCircuit(circuit);
         }
 
-        // Execute with retry logic
-        let lastError: Error | null = null;
         const maxRetries = options?.skipRetry ? 0 : config.maxRetries;
 
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        for (let attempt = 0; ; attempt++) {
             try {
                 const id = `${service}-${++ticketSeq}`;
                 ticket.waitingId = id;
@@ -265,15 +257,10 @@ class GlobalRateLimiter {
 
                 // The service answered: it is not rate limiting any more, so a breaker opened while this request
                 // was retrying closes too, or the next caller would sleep out a wait nothing needs.
-                circuit.consecutiveFailures = 0;
-                circuit.isOpen = false;
-                circuit.resetAfterMs = 30000;
+                closeCircuit(circuit);
                 return result as T;
             } catch (error: any) {
-                lastError = error;
-
-                // Check if it's a rate limit error
-                // MusicBrainz returns 503 (not 429) for rate limiting
+                // MusicBrainz answers a rate limit with 503, not 429.
                 const isRateLimit =
                     error.response?.status === 429 ||
                     (service === "musicbrainz" && error.response?.status === 503) ||
@@ -283,7 +270,6 @@ class GlobalRateLimiter {
                 if (isRateLimit) {
                     circuit.consecutiveFailures++;
 
-                    // Calculate backoff delay
                     const delay = this.calculateBackoff(
                         attempt,
                         config.baseDelay,
@@ -295,14 +281,10 @@ class GlobalRateLimiter {
                         }) - backing off ${delay}ms`
                     );
 
-                    // If too many failures, open circuit
-                    if (circuit.consecutiveFailures >= 5) {
+                    if (circuit.consecutiveFailures >= FAILURES_TO_OPEN) {
                         circuit.isOpen = true;
                         circuit.openedAt = Date.now();
-                        circuit.resetAfterMs = Math.min(
-                            60000,
-                            circuit.resetAfterMs * 2
-                        );
+                        circuit.resetAfterMs = Math.min(CIRCUIT_MAX_RESET_MS, circuit.resetAfterMs * 2);
                         logger.warn(
                             `Circuit breaker opened for ${service} - will reset in ${circuit.resetAfterMs}ms`
                         );
@@ -314,17 +296,12 @@ class GlobalRateLimiter {
                     }
                 }
 
-                // Non-rate-limit error or max retries reached
                 throw error;
             }
         }
-
-        throw lastError || new Error("Request failed after retries");
     }
 
-    /**
-     * Calculate exponential backoff delay
-     */
+    /** The wait before a retry: the reply's Retry-After when it gives one, else exponential backoff with jitter. */
     private calculateBackoff(
         attempt: number,
         baseDelay: number,
@@ -337,30 +314,22 @@ class GlobalRateLimiter {
         if (retryAfter) {
             const parsed = parseInt(retryAfter, 10);
             if (!isNaN(parsed) && parsed > 0) {
-                return Math.min(parsed * 1000, 60000);
+                return Math.min(parsed * 1000, MAX_BACKOFF_MS);
             }
         }
 
-        // Exponential backoff with jitter
         const exponentialDelay = baseDelay * Math.pow(2, attempt);
         const jitter = Math.random() * 1000;
-        return Math.min(exponentialDelay + jitter, 60000); // Cap at 60 seconds
+        return Math.min(exponentialDelay + jitter, MAX_BACKOFF_MS);
     }
 
-    /**
-     * Update concurrency multiplier for parallel enrichment processing
-     * This allows power users to increase enrichment speed while respecting API rate limits
-     * @param multiplier 1-5, where 1 is conservative and 5 is maximum
-     */
+    /** Scales every service's concurrency by 1-5, never past its per-interval cap. */
     updateConcurrencyMultiplier(multiplier: number) {
         const clampedMultiplier = Math.max(1, Math.min(5, multiplier));
         logger.debug(`[Rate Limiter] Updating concurrency multiplier to ${clampedMultiplier}`);
-        
-        // Update all service queues with new concurrency
         for (const [service, config] of Object.entries(SERVICE_CONFIGS)) {
             const queue = this.queues.get(service as ServiceName);
             if (queue) {
-                // Scale concurrency by multiplier, but never exceed intervalCap (rate limit)
                 const newConcurrency = Math.min(
                     config.concurrency * clampedMultiplier,
                     config.intervalCap
@@ -387,8 +356,6 @@ class GlobalRateLimiter {
     }
 }
 
-// Singleton instance
 export const rateLimiter = new GlobalRateLimiter();
 
-// Export types for use in other services
 export type { ServiceName };

@@ -1,6 +1,6 @@
 /**
  * CJS mock for p-queue (pure ESM package incompatible with Jest's CJS runner).
- * Provides the minimal PQueue API used by rateLimiter.ts.
+ * Provides the minimal PQueue API the services use.
  * Functions are executed immediately -- no rate limiting in tests.
  */
 class PQueue {
