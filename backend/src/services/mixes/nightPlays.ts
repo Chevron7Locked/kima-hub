@@ -1,16 +1,12 @@
 /**
  * Night is a person's own habit, not a sound the mood heads can learn, so the Late Night station and mix and the
- * Midnight Drive mix play from what this listener actually plays after dark: their finished listens (`Play.heard`)
- * between NIGHT_START_HOUR and NIGHT_END_HOUR in their own time zone, whatever the songs' moods. Only that user's plays
- * count. The mood scores still carry a `night` column (the stored scores and statistics are unchanged, so nothing is
- * retrained) but no tag, recipe or definition uses it (moods/heads.ts RETIRED_MOODS).
+ * Midnight Drive mix play from this listener's finished listens (`Play.heard`) between NIGHT_START_HOUR and
+ * NIGHT_END_HOUR in their own time zone, whatever the songs' moods. The `night` mood is retired (moods/heads.ts).
  *
- * A listener with few night plays is a cold start. Under COLD_START_SONGS distinct night songs the list is filled with
- * songs that sound like their own night plays (the vibe similarity every similar-song feature uses, weighted by how
- * often each was played), and with no night plays at all, or no similarity data, with the recipe the station and mix
- * have always had, now without the night part (calm, low energy, groovy, sexy; for Midnight Drive its driving recipe).
- * A library with no mood statistics yet falls back to its playable songs, so the station never answers empty while the
- * library has songs.
+ * Under COLD_START_SONGS distinct night songs the list is filled with songs that sound like their night plays (the
+ * matching engine, weighted by plays); with no night plays or no similarity data, with the fallback recipe (calm, low
+ * energy, groovy, sexy; driving for Midnight Drive). Before the library has mood statistics that recipe has no songs,
+ * so a listener with no night plays gets none.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
@@ -35,21 +31,21 @@ import { FAMILIAR_SEEDS } from "./familiarity";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 
 /** A play counts as night from this local hour (inclusive) ... */
-export const NIGHT_START_HOUR = 22;
+const NIGHT_START_HOUR = 22;
 /** ... until this local hour (exclusive), so 22:00 to 03:59. */
-export const NIGHT_END_HOUR = 4;
+const NIGHT_END_HOUR = 4;
 /** Fewer distinct night songs than this is a cold start: the list is filled with similar songs. */
 export const COLD_START_SONGS = 30;
 /**
  * How many songs a cold-start station holds: one page of the radio route (100), so a listener with five night plays
  * does not hear the same five come round. Songs that are the listener's own come first and are never dropped.
  */
-export const STATION_FILL = 100;
+const STATION_FILL = 100;
 /**
  * Only plays this recent count as night plays. A habit is read from the recent past, and the bound lets the database
  * use the (user, play time) index instead of reading every play the user has ever made (years of them, for some).
  */
-export const NIGHT_LOOKBACK_DAYS = 365;
+const NIGHT_LOOKBACK_DAYS = 365;
 
 /** A song the listener played at night, with how often. */
 export interface NightSong extends StationSong {
@@ -72,7 +68,7 @@ export async function nightZone(requested?: string): Promise<string> {
 
 /** Where the library's energy band is kept; under `mixes:` so the enrichment re-run that clears the mixes cache clears it. */
 export const ENERGY_BAND_KEY = "mixes:energy-band";
-export const ENERGY_BAND_CACHE_SECONDS = 3 * 3600;
+const ENERGY_BAND_CACHE_SECONDS = 3 * 3600;
 /** A library with no readings yet is asked again soon, since the readings arrive with analysis. */
 const ENERGY_BAND_EMPTY_CACHE_SECONDS = 60;
 
@@ -191,8 +187,8 @@ async function fallbackSongs(recipeId: string, userId?: string): Promise<Station
     }
 }
 
-/** Ids not yet in `have`, in order. */
-function without(songs: StationSong[], have: Iterable<StationSong>): StationSong[] {
+/** The songs not yet in `have`, in order. */
+function without(songs: StationSong[], have: Iterable<{ id: string }>): StationSong[] {
     const seen = new Set<string>();
     for (const s of have) seen.add(s.id);
     return songs.filter((s) => !seen.has(s.id));
@@ -221,7 +217,7 @@ export async function nightStationPool(
 }
 
 /** How a night mix ranks the listener's night songs. */
-export type NightRanking = "plays" | "drive";
+type NightRanking = "plays" | "drive";
 
 /**
  * The songs a night mix plays, in order. With COLD_START_SONGS or more night songs the mix is a fresh draw each day
@@ -276,14 +272,14 @@ export async function nightMixTracks(
             logger.debug(`[Mixes] ${spec.fallbackRecipe}: no night plays and no recipe members`);
             return null;
         }
-        const rest = without(members, picked.map((id) => ({ id, artistId: "" })));
+        const rest = without(members, picked.map((id) => ({ id })));
         picked = [...picked, ...drawMembers(rest, seed, limit - picked.length)];
     }
     return picked.length >= MIN_MIX_TRACKS ? picked : null;
 }
 
 /** A night mix as the Home page lists it: the same shape as every recipe mix. */
-export async function nightMix(
+async function nightMix(
     spec: RecipeMixSpec & { ranking: NightRanking },
     userId: string,
     today: string,
