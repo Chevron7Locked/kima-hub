@@ -100,7 +100,6 @@ describe("acoustidService.lookup", () => {
                 // No title was given to compare, so only the length agreed.
                 titleAgrees: false,
                 title: "Song",
-                artist: "Artist",
             });
             expect(res.evidence).toMatchObject({ score: 0.92 });
         }
@@ -242,18 +241,6 @@ describe("acoustidService key precedence", () => {
         // the baked config default alone).
         expect(mockGetSystemSettings).toHaveBeenCalled();
         expect(post.mock.calls[0][1]).toContain("client=operator-key");
-    });
-
-    it("prefers an explicitly passed key over the settings value", async () => {
-        const post = setupClient();
-        post.mockResolvedValue(lookupResponse([]));
-        mockGetSystemSettings.mockResolvedValue({ acoustidApiKey: "operator-key" });
-
-        await acoustidService.lookup(200, "fp", { clientKey: "explicit-key" });
-
-        const body: string = post.mock.calls[0][1];
-        expect(body).toContain("client=explicit-key");
-        expect(body).not.toContain("operator-key");
     });
 
     it("falls back to the baked config default when settings hold nothing", async () => {

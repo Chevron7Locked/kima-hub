@@ -1,3 +1,13 @@
+/**
+ * AcoustID lookup client. The POST body is form-encoded with `meta` as
+ * "recordings%20releasegroups" (the server does not decode '+'), and the length
+ * goes in `duration`. Results without a `recordings` array are skipped.
+ * Failures come back as `Outcome` kinds, never as a null that means "nothing".
+ *
+ * AcoustID's rate limit is per app key, shared by every install on the same key, so
+ * identification asks for many fingerprints per request (`lookupMany`) and keeps each
+ * reply: a song is asked once, and `lookup` answers from the saved reply.
+ */
 import axios, { AxiosInstance } from "axios";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger";
@@ -9,16 +19,6 @@ import { Outcome, answered, absent, rateLimited, transient, permanent } from "..
 import { titlesAgree } from "./albumIdentity";
 import { lengthsAgree, versionOf } from "./recordingMatch";
 
-/**
- * AcoustID lookup client. The POST body is form-encoded with `meta` as
- * "recordings%20releasegroups" (the server does not decode '+'), and the length
- * goes in `duration`. Results without a `recordings` array are skipped.
- * Failures come back as `Outcome` kinds, never as a null that means "nothing".
- *
- * AcoustID's rate limit is per app key, shared by every install on the same key, so
- * identification asks for many fingerprints per request (`lookupMany`) and keeps each
- * reply: a song is asked once, and `lookup` answers from the saved reply.
- */
 interface AcoustIDRecording {
     id: string;
     title?: string;
@@ -55,7 +55,6 @@ export interface AcoustIDResult {
     /** The pick's title (and version) is the track's. When false, the pick only has the track's length. */
     titleAgrees: boolean;
     title: string;
-    artist: string;
 }
 
 /** Confidence floor: below this AcoustID is effectively guessing. */
@@ -87,11 +86,10 @@ class AcoustIDService {
     }
 
     /**
-     * An explicit key, else the encrypted SystemSettings key, else the config
-     * default. Never throws; getSystemSettings is imported lazily to avoid a cycle.
+     * The encrypted SystemSettings key, else the config default. Never throws; getSystemSettings is imported lazily to
+     * avoid a cycle.
      */
-    private async resolveApiKey(explicit?: string): Promise<string | undefined> {
-        if (explicit) return explicit;
+    private async resolveApiKey(): Promise<string | undefined> {
         try {
             const { getSystemSettings } = await import("../utils/systemSettings");
             const settings = await getSystemSettings();
@@ -113,6 +111,16 @@ class AcoustIDService {
         return Object.entries(params)
             .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
             .join("&");
+    }
+
+    /** One lookup request through the rate limiter: its reply's body, if any. */
+    private async ask<T>(params: Record<string, string>): Promise<T | undefined> {
+        const response = await rateLimiter.execute("acoustid", () =>
+            this.client.post("/v2/lookup", this.formEncode(params), {
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            })
+        );
+        return response?.data as T | undefined;
     }
 
     /** Where the reply for this fingerprint and length is kept: one key per question asked. */
@@ -162,7 +170,6 @@ class AcoustIDService {
             candidates: candidates.map((rec) => rec.id),
             titleAgrees,
             title: recording.title || "",
-            artist: artist?.name || "",
         };
     }
 
@@ -177,9 +184,9 @@ class AcoustIDService {
     }
 
     /** Whether a batch may be asked now: a key, the source not paused, no batch failure in the last minute. */
-    async mayAskInBatches(options: { clientKey?: string } = {}): Promise<boolean> {
+    async mayAskInBatches(): Promise<boolean> {
         if (Date.now() < this.batchesHeldUntil) return false;
-        if (!(await this.resolveApiKey(options.clientKey))) return false;
+        if (!(await this.resolveApiKey())) return false;
         return !(await sourcePauseController.isPaused("acoustid"));
     }
 
@@ -189,12 +196,9 @@ class AcoustIDService {
      * a rate limit pauses the source and stops, any other failure stops, and every song not
      * answered here is asked on its own by `lookup`. Returns how many songs were asked.
      */
-    async lookupMany(
-        entries: { duration: number; fingerprint: string }[],
-        options: { clientKey?: string } = {}
-    ): Promise<number> {
-        if (!(await this.mayAskInBatches(options))) return 0;
-        const apiKey = (await this.resolveApiKey(options.clientKey))!;
+    async lookupMany(entries: { duration: number; fingerprint: string }[]): Promise<number> {
+        if (!(await this.mayAskInBatches())) return 0;
+        const apiKey = (await this.resolveApiKey())!;
 
         const owed = new Map<string, { duration: number; fingerprint: string }>();
         for (const entry of entries) {
@@ -217,12 +221,7 @@ class AcoustIDService {
                 params[`fingerprint.${i}`] = entry.fingerprint.trim();
             });
             try {
-                const response = await rateLimiter.execute("acoustid", () =>
-                    this.client.post("/v2/lookup", this.formEncode(params), {
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    })
-                );
-                const data = response?.data as AcoustIDBatchResponse | undefined;
+                const data = await this.ask<AcoustIDBatchResponse>(params);
                 if (!data || data.status !== "ok" || !Array.isArray(data.fingerprints)) {
                     logger.debug(`[AcoustID] Batch reply unusable (status '${data?.status ?? "unreadable"}')`);
                     this.batchesHeldUntil = Date.now() + BATCH_HOLD_MS;
@@ -250,12 +249,8 @@ class AcoustIDService {
      * Ask AcoustID which recording a fingerprint is; never throws. `duration` is the track's length in
      * seconds, `fingerprint` fpcalc's, and `title` the track's own (`pickFingerprintMatch`).
      */
-    async lookup(
-        duration: number,
-        fingerprint: string,
-        options: { clientKey?: string; title?: string } = {}
-    ): Promise<Outcome<AcoustIDResult>> {
-        const apiKey = await this.resolveApiKey(options.clientKey);
+    async lookup(duration: number, fingerprint: string, options: { title?: string } = {}): Promise<Outcome<AcoustIDResult>> {
+        const apiKey = await this.resolveApiKey();
         if (!apiKey) {
             logger.debug("[AcoustID] No client key configured; not asking");
             return permanent(
@@ -282,21 +277,12 @@ class AcoustIDService {
             let results = await this.savedResults(key);
             const saved = results !== null;
             if (!results) {
-                const body = this.formEncode({
+                const data = await this.ask<AcoustIDLookupResponse>({
                     client: apiKey,
                     duration: String(Math.round(duration)),
                     fingerprint: fingerprint.trim(),
                     meta: "recordings releasegroups",
                 });
-                const response = await rateLimiter.execute("acoustid", () =>
-                    this.client.post("/v2/lookup", body, {
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded",
-                        },
-                    })
-                );
-
-                const data = response?.data as AcoustIDLookupResponse | undefined;
                 if (!data || data.status !== "ok") {
                     return transient(
                         "BAD_RESPONSE",
