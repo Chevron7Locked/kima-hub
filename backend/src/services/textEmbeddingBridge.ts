@@ -203,12 +203,9 @@ function searchableSql(vector: string): Prisma.Sql {
 }
 
 /**
- * The ranking half of searchTracksByText, for an already-embedded query. The vector index answers it, scanning on past
- * deleted or filtered-out vectors up to a cap (utils/knn.ts). Where that still comes back short (right after a re-run
- * on a large library, or fewer searchable tracks than `limit`), a second query reads the distance of every searchable
- * track instead, so the answer is full and exact at any library size. That read runs after the index's transaction
- * has ended, so Prisma's 5-second limit on an interactive transaction does not cut it off on a large library or a
- * slow disk; it needs none of the transaction's index settings.
+ * The ranking half of searchTracksByText: the vector index (scanning on past filtered-out vectors, utils/knn.ts),
+ * and where that comes back short, an exact read of every searchable track's distance, so the answer is full at any
+ * library size. That read runs after the index's transaction, outside Prisma's 5-second interactive limit.
  */
 export async function searchTracksByEmbedding(
     embedding: number[],

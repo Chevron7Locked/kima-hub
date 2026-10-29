@@ -8,7 +8,7 @@ import { featureDetection } from "./featureDetection";
 import { MATCHING_MODEL } from "./matching/state";
 import { currentMoodSnapshot, moodOutput } from "./moodBucketService";
 
-export interface MapTrack {
+interface MapTrack {
     id: string;
     x: number;
     y: number;

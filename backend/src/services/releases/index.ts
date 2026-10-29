@@ -14,6 +14,12 @@ import { MOOD_MIX_RELEASE, moodMixState, type MoodMixState } from "./moodMixes";
 
 export { findRelease, GPU_CHOICE_KEY } from "./catalog";
 
+/** The GPU question's answer is the switch itself, not a stored choice. */
+async function gpuChoiceAnswer(): Promise<boolean> {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { gpuOnnxEnabled: true } });
+    return settings?.gpuOnnxEnabled ?? false;
+}
+
 async function isAdminUser(userId: string): Promise<boolean> {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
     return user?.role === "admin";
@@ -77,10 +83,7 @@ export async function currentReleaseFor(
     const asked = choicesIn(release).map((c) => c.key);
     const rows = await prisma.releaseChoice.findMany({ where: { userId, key: { in: asked } }, select: { key: true, enabled: true } });
     const answers: Record<string, boolean> = Object.fromEntries(rows.map((row) => [row.key, row.enabled]));
-    if (asked.includes(GPU_CHOICE_KEY)) {
-        const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { gpuOnnxEnabled: true } });
-        answers[GPU_CHOICE_KEY] = settings?.gpuOnnxEnabled ?? false;
-    }
+    if (asked.includes(GPU_CHOICE_KEY)) answers[GPU_CHOICE_KEY] = await gpuChoiceAnswer();
     const done: string[] = [];
     const mixItems = release.items.filter(isMoodMixItem).map((i) => i.key);
     if (mixItems.length > 0) {
@@ -203,11 +206,7 @@ export async function changelogFor(userId: string): Promise<{ releases: Changelo
     ]);
     const seen = new Set(acks.map((a) => a.version));
     const answers = new Map(choices.map((c) => [c.key, c]));
-    if (answers.has(GPU_CHOICE_KEY)) {
-        const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { gpuOnnxEnabled: true } });
-        const gpu = answers.get(GPU_CHOICE_KEY)!;
-        gpu.enabled = settings?.gpuOnnxEnabled ?? false;
-    }
+    if (answers.has(GPU_CHOICE_KEY)) answers.get(GPU_CHOICE_KEY)!.enabled = await gpuChoiceAnswer();
     let openCount = 0;
     const releases = await Promise.all(
         filtered.map(async (r): Promise<ChangelogRelease> => {
