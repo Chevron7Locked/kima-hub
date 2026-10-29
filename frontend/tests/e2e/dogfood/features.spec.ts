@@ -180,7 +180,8 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
             const tab = panel.getByRole("tab", { name: /^alerts/ });
             await tab.click();
             await expect(tab).toHaveAttribute("aria-selected", "true");
-            const rows = panel.getByText(/^library scan finished$/i);
+            // A row reads "new: Library scan finished" to a screen reader until it is read, so match the row, not its text.
+            const rows = panel.getByRole("listitem").filter({ hasText: /library scan finished/i });
             await expect(rows.first()).toBeVisible({ timeout: 10_000 });
             expect(await rows.count()).toBe(1);
             if (wasClosed) await panel.getByRole("button", { name: "hide panel" }).click();

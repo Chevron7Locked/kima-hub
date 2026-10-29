@@ -554,7 +554,9 @@ test.describe("Vibe, phone layout", () => {
             bottomOf(state.sheet) + 0.5,
         );
 
-        const actionsBox = await page.locator('[data-testid="vibe-sheet-actions"]').boundingBox();
+        // The action row is hidden while the results are open; measure it only when it is on the page.
+        const actions = page.locator('[data-testid="vibe-sheet-actions"]');
+        const actionsBox = (await actions.count()) ? await actions.boundingBox() : null;
         const buttonBoxes: Rect[] = await page.evaluate(() =>
             [...document.querySelectorAll("button")]
                 .filter((b) => /^(play this track|match vibe|similar|song path)\b/i.test(b.getAttribute("aria-label") ?? ""))

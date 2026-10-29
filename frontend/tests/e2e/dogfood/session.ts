@@ -152,8 +152,13 @@ export class DogfoodSession {
         this.expectedFailures.push(f);
     }
 
-    /** Whether a failure was declared expected. The status must match too, so an allowed 404 never excuses a 500. */
+    /**
+     * Whether a failure was declared expected. The status must match too, so an allowed 404 never excuses a 500.
+     * The cover proxy's 404 (no such picture) and 502 (the picture's host is down) are always expected: they are its
+     * correct answers, and the page then draws no picture.
+     */
     private isExpected(url: string, textOrStatus: string): boolean {
+        if (/\/api\/library\/cover-art\b/.test(url) && /\b(404|502)\b/.test(textOrStatus)) return true;
         return this.expectedFailures.some(
             (e) =>
                 (e.urlPattern.test(url) || e.urlPattern.test(textOrStatus)) &&

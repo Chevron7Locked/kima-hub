@@ -241,7 +241,8 @@ test.describe("Search", () => {
     });
 
     test("typing in search triggers results", async ({ page }) => {
-        await searchFor(page, "a");
+        // Search starts at two characters.
+        await searchFor(page, "lo");
         await expect(page.getByText("Scanning library and network...")).toBeHidden({ timeout: 30_000 });
     });
 
@@ -389,8 +390,9 @@ test.describe("Asset Loading", () => {
         const brokenAssets: string[] = [];
         page.on("response", (resp) => {
             const url = resp.url();
-            // A cover-art 404 is the server's "this album has no art"; the page then draws no image (CachedImage).
-            const noArt = url.includes("/cover-art") && resp.status() === 404;
+            // A cover-art 404 (no such picture) or 502 (its host is down) is the proxy's right answer; the page then
+            // draws no image (CachedImage).
+            const noArt = url.includes("/cover-art") && (resp.status() === 404 || resp.status() === 502);
             if ((url.includes("cover") || url.includes("image") || url.includes(".jpg") || url.includes(".webp")) && resp.status() >= 400 && !noArt) {
                 brokenAssets.push(`${resp.status()} ${url.slice(0, 100)}`);
             }
@@ -609,8 +611,9 @@ test.describe("Full Audit", () => {
         let route = "";
         page.on("console", (msg) => {
             const text = msg.text();
-            // The browser logs each cover-art 404 (an album with no art) as a failed resource; that is not an error.
-            const noArt = text.includes("404") && msg.location().url.includes("/cover-art");
+            // The browser logs each cover-art 404 or 502 (no picture, or its host down) as a failed resource; that is not
+            // an error.
+            const noArt = /\b(404|502)\b/.test(text) && msg.location().url.includes("/cover-art");
             if (msg.type() === "error" && !isBrowserNoise(text) && !text.includes("net::ERR") && !noArt) {
                 allErrors.push(`${route}: ${text.slice(0, 200)}`);
             }

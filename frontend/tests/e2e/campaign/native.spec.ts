@@ -188,6 +188,14 @@ test.describe(`native campaign (${ARCH})`, () => {
                     return s.installed && s.effective && s.analysisEffective;
                 }, { timeout: 30 * 60_000, intervals: [10_000, 30_000, 30_000] })
                 .toBeTruthy();
+
+            // The rebuild this test started finishes before the next test, which needs a finished library.
+            await expect
+                .poll(async () => {
+                    const res = await api.get("/api/enrichment/progress", { headers: auth() });
+                    return res.ok() && (await res.json()).isFullyComplete === true;
+                }, { timeout: 30 * 60_000, intervals: [10_000, 30_000, 30_000], message: "the rebuild this test started never finished" })
+                .toBe(true);
         });
 
         test("6L. both worker counts can be set to the CPU core count, and are put back", async () => {
