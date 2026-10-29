@@ -123,7 +123,6 @@ function estimateBitrateFromMime(mime: string | null): number {
     if (m.includes("flac")) return 900;
     if (m.includes("wav")) return 1400;
     if (m.includes("aac") || m.includes("mp4")) return 256;
-    if (m.includes("ogg") || m.includes("vorbis")) return 192;
     if (m.includes("opus")) return 128;
     return 192;
 }

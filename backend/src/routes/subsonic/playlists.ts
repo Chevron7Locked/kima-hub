@@ -37,30 +37,43 @@ playlistRouter.all("/getPlaylists.view", wrap(async (req, res) => {
     });
 }));
 
+/** A playlist with its owner's name and its songs in order, each with album and artist. */
+function loadPlaylist(id: string) {
+    return prisma.playlist.findUnique({
+        where: { id },
+        include: {
+            user: { select: { username: true } },
+            items: {
+                orderBy: { rank: "asc" },
+                include: { track: { include: { album: { include: { artist: true } } } } },
+            },
+        },
+    });
+}
+
+function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlaylist>>>) {
+    const entries = playlist.items.map(({ track }) => {
+        const { album } = track;
+        return mapSong(track, album, album.artist.displayName || album.artist.name, album.artist.id);
+    });
+    return {
+        "@_id": playlist.id,
+        "@_name": playlist.name,
+        "@_songCount": playlist.items.length,
+        "@_duration": Math.round(playlist.items.reduce((sum, i) => sum + (i.track.duration ?? 0), 0)),
+        "@_public": playlist.isPublic,
+        "@_owner": playlist.user.username,
+        ...(entries.length > 0 ? { entry: entries } : {}),
+    };
+}
+
 playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
     const id = req.query.id as string | undefined;
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "id is required");
     }
 
-    const playlist = await prisma.playlist.findUnique({
-        where: { id },
-        include: {
-            user: { select: { username: true } },
-            items: {
-                orderBy: { rank: "asc" },
-                include: {
-                    track: {
-                        include: {
-                            album: {
-                                include: { artist: true },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    });
+    const playlist = await loadPlaylist(id);
 
     if (!playlist) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Playlist not found");
@@ -70,28 +83,7 @@ playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
     }
 
-    let totalDuration = 0;
-    const entries = playlist.items.map((item) => {
-        const { track } = item;
-        const { album } = track;
-        const artist = album.artist;
-        const artistName = artist.displayName || artist.name;
-        const artistId = artist.id;
-        totalDuration += track.duration ?? 0;
-        return mapSong(track, album, artistName, artistId);
-    });
-
-    return subsonicOk(req, res, {
-        playlist: {
-            "@_id": playlist.id,
-            "@_name": playlist.name,
-            "@_songCount": playlist.items.length,
-            "@_duration": Math.round(totalDuration),
-            "@_public": playlist.isPublic,
-            "@_owner": playlist.user.username,
-            ...(entries.length > 0 ? { entry: entries } : {}),
-        },
-    });
+    return subsonicOk(req, res, { playlist: playlistReply(playlist) });
 }));
 
 /** Whether every id names a song in the library: a playlist change naming one that does not is refused whole. */
@@ -172,43 +164,12 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
 
     if (changed) announcePlaylistChange(userId, resolvedPlaylistId);
 
-    // Return the full playlist per OpenSubsonic spec (since 1.14.0)
-    const created = await prisma.playlist.findUnique({
-        where: { id: resolvedPlaylistId },
-        include: {
-            user: { select: { username: true } },
-            items: {
-                orderBy: { rank: "asc" },
-                include: { track: { include: { album: { include: { artist: true } } } } },
-            },
-        },
-    });
-
+    // The whole playlist, as getPlaylist shows it (OpenSubsonic, since 1.14.0).
+    const created = await loadPlaylist(resolvedPlaylistId);
     if (!created) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Playlist not found after creation");
     }
-
-    let totalDuration = 0;
-    const entries = created.items.map((item) => {
-        const { track } = item;
-        const { album } = track;
-        const artistName = album.artist.displayName || album.artist.name;
-        const artistId = album.artist.id;
-        totalDuration += track.duration ?? 0;
-        return mapSong(track, album, artistName, artistId);
-    });
-
-    return subsonicOk(req, res, {
-        playlist: {
-            "@_id": created.id,
-            "@_name": created.name,
-            "@_songCount": created.items.length,
-            "@_duration": Math.round(totalDuration),
-            "@_public": created.isPublic,
-            "@_owner": created.user.username,
-            ...(entries.length > 0 ? { entry: entries } : {}),
-        },
-    });
+    return subsonicOk(req, res, { playlist: playlistReply(created) });
 }));
 
 playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {

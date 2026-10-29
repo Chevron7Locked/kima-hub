@@ -353,6 +353,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     }
 
     const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
+    const responseKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
 
     // `id` may be an artist, album or song; clients usually send a song id.
     let artistId: string | null = null;
@@ -374,8 +375,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     }
 
     if (!artistId) {
-        const emptyKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
-        return subsonicOk(req, res, { [emptyKey]: {} });
+        return subsonicOk(req, res, { [responseKey]: {} });
     }
 
     const similarArtists = await prisma.similarArtist.findMany({
@@ -391,13 +391,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     const artistIds = Array.from(
         new Set([artistId, ...similarArtists.map((item) => item.toArtistId)])
     );
-
-    if (artistIds.length === 0) {
-        const emptyKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
-        return subsonicOk(req, res, { [emptyKey]: {} });
-    }
-
-    const artistIdList = artistIds.map((artistId) => Prisma.sql`${artistId}`);
+    const artistIdList = artistIds.map((id) => Prisma.sql`${id}`);
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
@@ -408,7 +402,6 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     `;
     const songs = rows.map(songOf);
 
-    const responseKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
     return subsonicOk(req, res, {
         [responseKey]: songs.length > 0 ? { song: songs } : {},
     });

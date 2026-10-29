@@ -189,7 +189,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         },
     });
 
-    if (!album || album.location !== "LIBRARY") {
+    if (!album || album.location !== LIBRARY_LOCATION) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Directory not found");
     }
 
@@ -230,7 +230,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
             },
         },
     });
-    if (!album || album.location !== "LIBRARY") {
+    if (!album || album.location !== LIBRARY_LOCATION) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Album not found");
     }
 
@@ -266,7 +266,7 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
             },
         },
     });
-    if (!track || track.album.location !== "LIBRARY") {
+    if (!track || track.album.location !== LIBRARY_LOCATION) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
@@ -296,6 +296,9 @@ type AlbumWithArtist = {
     };
     _count?: { tracks: number };
     tracks?: { duration: number | null }[];
+    // The raw album-list queries count and total the songs themselves.
+    songCount?: number;
+    totalDuration?: number | bigint;
 };
 
 // The four raw album-list queries read the same columns in the same row
@@ -475,12 +478,10 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
     const albumList = albums.map((a) => {
         const artistName = a.artist.displayName || a.artist.name;
         const genre = firstArtistGenre(a.artist.genres, a.artist.userGenres);
-        const songCount = a._count?.tracks
-            ?? (a as unknown as { songCount?: number }).songCount
-            ?? 0;
+        const songCount = a._count?.tracks ?? a.songCount ?? 0;
         const duration = a.tracks
             ? a.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0)
-            : Number((a as unknown as { totalDuration?: number | bigint }).totalDuration ?? 0);
+            : Number(a.totalDuration ?? 0);
         return mapAlbum({ ...a, artistId: a.artist.id, songCount, duration, genre }, artistName);
     });
 
@@ -491,12 +492,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 // ===================== GENRES =====================
 
 libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
-    // Genres live on artists (from enrichment), not on albums. One rule for every surface: the
-    // shared list (computeGenreTotals) merges the spellings of one genre (genreKey), names each
-    // genre by the spelling carrying the most songs, counts each artist once per genre, reads each
-    // artist's genres through getMergedGenres (a person's tags replace the enriched ones when
-    // they set any), and
-    // drops an artist's tag of its own name. Subsonic lists every genre with its album counts.
+    // Genres live on artists; computeGenreTotals is the one shared list, with its album and song counts.
     const artists = await prisma.artist.findMany({
         where: { libraryAlbumCount: { gt: 0 } },
         select: {
