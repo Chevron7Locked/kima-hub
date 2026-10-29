@@ -43,14 +43,19 @@ export class AcquisitionError extends Error {
         this.type = type;
         this.isRecoverable = isRecoverable;
         this.originalError = originalError;
-        
+
         if (Error.captureStackTrace) {
             Error.captureStackTrace(this, AcquisitionError);
         }
     }
 }
 
+// The name from before Kima was renamed: it is the tag already on users' Lidarr artists, so it stays.
 const DISCOVERY_TAG_LABEL = "lidify-discovery";
+
+/** Lidarr's download queue, every item (unknown artists too) on one page. */
+const queuePage = (client: AxiosInstance) =>
+    client.get("/api/v1/queue", { params: { page: 1, pageSize: 1000, includeUnknownArtistItems: true } });
 
 // Lidarr ends a search with "{n} reports downloaded"; n counts grabs, not results.
 const NOTHING_GRABBED = /\b0 reports downloaded/;
@@ -561,11 +566,8 @@ class LidarrService {
 
     /** Start Lidarr's search for one album and wait for it, up to 30 s; a longer search is reported as running. */
     private async runAlbumSearch(albumId: number): Promise<SearchCommand> {
-        const command = await this.client!.post("/api/v1/command", {
-            name: "AlbumSearch",
-            albumIds: [albumId],
-        });
-        return { commandId: command.data.id, ...(await this.waitForCommand(command.data.id)) };
+        const commandId = await this.startAlbumSearch(albumId);
+        return { commandId, ...(await this.waitForCommand(commandId)) };
     }
 
     /**
@@ -692,7 +694,7 @@ class LidarrService {
      * bundle, so the artist's releases are searched. Any other rejection leaves it alone. True when the
      * grab started.
      */
-    async tryBundleGrab(artistId: number, album: { title: string; releaseDate?: string; id: number }): Promise<boolean> {
+    private async tryBundleGrab(artistId: number, album: { title: string; releaseDate?: string; id: number }): Promise<boolean> {
         let releases: any[] = [];
         try {
             releases = (
@@ -835,7 +837,7 @@ class LidarrService {
                     deleteFiles: deleteFiles,
                     addImportListExclusion: false,
                 },
-                timeout: this.API_TIMEOUT_DEFAULT, // 30 second timeout
+                timeout: this.API_TIMEOUT_DEFAULT,
             });
 
             logger.debug(
@@ -1043,7 +1045,7 @@ class LidarrService {
         }
     }
 
-    async getTags(): Promise<LidarrTag[]> {
+    private async getTags(): Promise<LidarrTag[]> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
@@ -1059,7 +1061,7 @@ class LidarrService {
         }
     }
 
-    async createTag(label: string): Promise<LidarrTag | null> {
+    private async createTag(label: string): Promise<LidarrTag | null> {
         await this.ensureInitialized();
 
         if (!this.enabled || !this.client) {
@@ -1156,26 +1158,6 @@ class LidarrService {
         }
     }
 
-    async getArtistsByTag(tagId: number): Promise<LidarrArtist[]> {
-        await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return [];
-        }
-
-        try {
-            const artists = await this.getArtistList();
-
-            return artists.filter((artist) => artist.tags?.includes(tagId));
-        } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to get artists by tag:",
-                error.message
-            );
-            return [];
-        }
-    }
-
     /**
      * The artists that still carry Discover's tag, read without changing anything: null when Lidarr is not set up,
      * and an error when it does not answer, so a caller never mistakes an unreachable Lidarr for "no artist is
@@ -1191,12 +1173,17 @@ class LidarrService {
         return artists.filter((artist) => artist.tags?.includes(tag.id));
     }
 
+    /**
+     * The artists carrying Discover's tag, for the clean-ups: none when Lidarr is off, cannot be read, or has no such
+     * tag. Looking does not create the tag.
+     */
     async getDiscoveryArtists(): Promise<LidarrArtist[]> {
-        const tagId = await this.getOrCreateDiscoveryTag();
-        if (!tagId) {
+        try {
+            return (await this.readDiscoveryTaggedArtists()) ?? [];
+        } catch (error: any) {
+            logger.error("[LIDARR] Failed to read Discover's artists:", error.message);
             return [];
         }
-        return this.getArtistsByTag(tagId);
     }
 
     /** Takes the discovery tag off an artist, as when the user likes an album and the artist becomes owned. */
@@ -1320,9 +1307,7 @@ class LidarrService {
     async getQueueItems(): Promise<LidarrQueueItem[]> {
         const client = await this.requireClient();
 
-        const response = await client.get("/api/v1/queue", {
-            params: { page: 1, pageSize: 1000, includeUnknownArtistItems: true },
-        });
+        const response = await queuePage(client);
         return (response.data as LidarrQueueResponse).records;
     }
 
@@ -1423,9 +1408,7 @@ class LidarrService {
 
         try {
             const [queueResponse, albumResponse] = await Promise.all([
-                client.get("/api/v1/queue", {
-                    params: { page: 1, pageSize: 1000, includeUnknownArtistItems: true },
-                }),
+                queuePage(client),
                 client.get("/api/v1/album"),
             ]);
             if (!Array.isArray(albumResponse.data)) {
