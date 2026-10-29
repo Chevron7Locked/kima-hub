@@ -1,5 +1,7 @@
 """MusiCNN runs in fixed-size groups (every model call one shape, padding never in the result), and
 workers reach the main process's one GPU session through MusicnnServer."""
+import os
+
 import numpy as np
 
 import musicnn_onnx
@@ -190,7 +192,7 @@ def test_a_gpu_session_that_answers_off_essentias_is_not_used(tmp_path, monkeypa
     monkeypatch.setattr(analyzer, "GPU_ANALYSIS", True)
     monkeypatch.setattr(analyzer, "ML_MODELS_AVAILABLE", True)
     gpu_body = _body(4)
-    monkeypatch.setattr(musicnn_onnx, "MusicnnBody", lambda model_dir, use_gpu: gpu_body)
+    monkeypatch.setattr(analyzer, "MusicnnBody", lambda model_dir, use_gpu: gpu_body)
     worker = analyzer.AnalysisWorker.__new__(analyzer.AnalysisWorker)
     provider = tmp_path / "gpu-onnx" / "analysis-provider.json"
     checked = []
@@ -201,12 +203,12 @@ def test_a_gpu_session_that_answers_off_essentias_is_not_used(tmp_path, monkeypa
             return cosine
         return check
 
-    monkeypatch.setattr(musicnn_onnx, "embedding_cosine", answers(0.9990))
+    monkeypatch.setattr(analyzer, "embedding_cosine", answers(0.9990))
     assert worker._start_musicnn_server() is None
     assert checked == [(gpu_body.run, "musicnn-answers.npz")]
     assert json.loads(provider.read_text())["active"] is False
 
-    monkeypatch.setattr(musicnn_onnx, "embedding_cosine", answers(0.9999998))
+    monkeypatch.setattr(analyzer, "embedding_cosine", answers(0.9999998))
     assert worker._start_musicnn_server() is not None
     assert json.loads(provider.read_text())["active"] is True
 
@@ -219,8 +221,8 @@ def test_an_idle_analyzer_lets_the_gpu_session_go_and_opens_it_again_with_work(t
     monkeypatch.setattr(analyzer, "GPU_ANALYSIS", True)
     monkeypatch.setattr(analyzer, "ML_MODELS_AVAILABLE", True)
     bodies = [_body(4), _body(4)]
-    monkeypatch.setattr(musicnn_onnx, "MusicnnBody", lambda model_dir, use_gpu: bodies.pop(0))
-    monkeypatch.setattr(musicnn_onnx, "embedding_cosine", lambda run, path: 0.9999999)
+    monkeypatch.setattr(analyzer, "MusicnnBody", lambda model_dir, use_gpu: bodies.pop(0))
+    monkeypatch.setattr(analyzer, "embedding_cosine", lambda run, path: 0.9999999)
 
     class Pool:
         def shutdown(self, wait=True):
@@ -263,6 +265,17 @@ def test_replacing_a_stuck_pool_kills_its_workers(monkeypatch):
     worker._drop_pool()
     assert worker.executor is None and not worker.pool_active, "dropping the pool started a new one"
 
+    # Asked of the kernel: the pool's own thread can reap a killed worker first, and then the Process object never
+    # learns its exit code and reports it alive for good.
+    def gone(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
     for process in stuck:
-        process.join(timeout=10)
-        assert not process.is_alive()
+        until = real_time.time() + 10
+        while not gone(process.pid) and real_time.time() < until:
+            real_time.sleep(0.05)
+        assert gone(process.pid)
