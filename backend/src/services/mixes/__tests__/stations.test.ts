@@ -58,7 +58,7 @@ describe("the shipped stations", () => {
         expect(res.status).toBe(200);
 
         const stations: Array<Record<string, unknown>> = res.body.stations;
-        // The approved names and order (kima-labs stations_2026-10-24.json; Kevin 10-24 01:19 named Wildcard).
+        // The approved names and order.
         expect(stations.map((s) => [s.value, s.name])).toEqual([
             ["calm", "Calm"], ["energy", "Energy"], ["intense", "Intense"], ["happy", "Happy"],
             ["melancholy", "Melancholy"], ["focus-calm", "Focus: Calm"], ["focus-energy", "Focus: Energy"], ["feel-good", "Feel-good"],

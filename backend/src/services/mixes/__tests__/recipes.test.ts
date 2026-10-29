@@ -26,7 +26,7 @@ describe("the shipped recipes", () => {
     });
 
     it("gives the stations of 10-24 the approved blends", () => {
-        // kima-labs research/w5-mixes-2026-10-22/stations_2026-10-24.json, two of them.
+        // Two of the approved station blends.
         expect(getRecipe("feel-good-station").components).toHaveLength(15);
         expect(getRecipe("focus-calm-station")).toMatchObject({
             components: [{ signal: "focus", weight: 0.75 }, { signal: "calm", weight: 0.25 }],

@@ -1,5 +1,5 @@
 /**
- * The learned moods' weights (moodHeads.json, generated in kima-labs from W1's shipped models). Each mood's
+ * The learned moods' weights (moodHeads.json, generated from the trained mood models). Each mood's
  * standardisation is folded into its weights and bias, so its score for a sound vector is one dot product:
  * the logit of that mood's model.
  */

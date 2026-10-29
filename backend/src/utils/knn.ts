@@ -14,8 +14,7 @@ export function efFor(limit: number): number {
  * The most index entries an iterative scan visits before it stops (pgvector's
  * default is 20,000). Measured on 50,000 real music-CLAP vectors right after a
  * vectors re-run, with 100 written back: 20,000 filled 40 of 50 results and
- * 40,000 filled 49.5, the most any higher value reached
- * (kima-eval-data/moods/knn_scan_2026-10-24/run.txt).
+ * 40,000 filled 49.5, the most any higher value reached.
  */
 export const MAX_SCAN_TUPLES = 40000;
 
