@@ -102,3 +102,17 @@ it("keeps nothing from a download that ends short of the host's Content-Length",
     expect(got.cached).toBeNull();
     expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${P}-cut.tmp`))).toBe(false);
 }, 30_000);
+
+it("keeps a complete cached file whatever the feed now declares, and drops one its record does not match", async () => {
+    const id = `${P}-full`;
+    expect((await download("full")).cached).not.toBeNull();
+
+    // A size from somewhere other than the download (the feed's enclosure length) does not judge the cache.
+    await prisma.podcastEpisode.update({ where: { id }, data: { fileSize: DECLARED } });
+    expect(await getCachedFilePath(id)).not.toBeNull();
+
+    // A file that no longer matches what was recorded is incomplete: it and its record go.
+    await fs.promises.appendFile(path.join(cacheRoot, "podcast-audio", `${id}.mp3`), Buffer.alloc(500));
+    expect(await getCachedFilePath(id)).toBeNull();
+    expect(await prisma.podcastDownload.count({ where: { episodeId: id } })).toBe(0);
+}, 30_000);
