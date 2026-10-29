@@ -7,14 +7,17 @@ import { notificationService } from "../../services/notificationService";
 import { coversBasePath } from "../../services/imageStorage";
 
 export interface ScanJobData {
-    userId?: string; // Optional: scans can be triggered without a user
-    albumMbid?: string; // Optional: the album a download or retry brought in
-    artistMbid?: string; // Optional: the artist of a retried track
-    source?: string; // Optional: source of scan (e.g., "lidarr-webhook", "discover-weekly-completion", "spotify-import")
-    discoveryBatchId?: string; // Optional: Discovery Weekly batch ID
-    spotifyImportJobId?: string; // Optional: Spotify Import job ID
+    /** Absent for scans nobody asked for. */
+    userId?: string;
+    /** The album a download or retry brought in. */
+    albumMbid?: string;
+    /** The artist of a retried track. */
+    artistMbid?: string;
+    /** What asked for the scan ("manual-scan", "lidarr-webhook", "discover-weekly-completion", "spotify-import", "retry-…"). */
+    source?: string;
+    discoveryBatchId?: string;
+    spotifyImportJobId?: string;
 }
-
 
 const SCAN_RESULT_KEY = "library-scan";
 
@@ -55,12 +58,8 @@ export async function processScan(
         logger.debug(`[ScanJob ${job.id}] Artist MBID: ${artistMbid}`);
     }
 
-    // Report progress
     await job.updateProgress(0);
 
-    const coverCachePath = coversBasePath();
-
-    // Create scanner with progress callback and cover cache path
     let lastEmittedPercent = -1;
     const scanner = new MusicScannerService((progress) => {
         const percent = Math.floor(
@@ -69,7 +68,6 @@ export async function processScan(
         job.updateProgress(percent).catch((err) =>
             logger.error(`Failed to update job progress:`, err)
         );
-        // Emit SSE every 1% for smooth progress
         if (userId && percent >= lastEmittedPercent + 1) {
             lastEmittedPercent = percent;
             eventBus.emit({
@@ -78,7 +76,7 @@ export async function processScan(
                 payload: { jobId: String(job.id), progress: percent },
             });
         }
-    }, coverCachePath);
+    }, coversBasePath());
 
     // The music folder in use when the scan runs, so a folder changed in Settings is the one scanned.
     const scanPath = config.music.musicPath;
@@ -114,8 +112,8 @@ export async function processScan(
         }
 
         logger.debug(
-              `[ScanJob ${job.id}] Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt}`
-          );
+            `[ScanJob ${job.id}] Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt}`
+        );
 
         // A Lidarr import can bring a new artist: queue its enrichment now.
         if (source === "lidarr-webhook" && albumMbid) {
@@ -146,10 +144,10 @@ export async function processScan(
             }
         }
 
-        // If this scan was for Discovery Weekly, build the final playlist
+        // The scan after a Discover batch's downloads builds its playlist.
         if (source === "discover-weekly-completion" && discoveryBatchId) {
             logger.debug(
-                `[ScanJob ${job.id}]  Building Discovery Weekly playlist for batch ${discoveryBatchId}...`
+                `[ScanJob ${job.id}] Building Discovery Weekly playlist for batch ${discoveryBatchId}`
             );
             try {
                 const { discoverWeeklyService } = await import(
@@ -159,20 +157,20 @@ export async function processScan(
                     discoveryBatchId
                 );
                 logger.debug(
-                    `[ScanJob ${job.id}] Discovery Weekly playlist complete!`
+                    `[ScanJob ${job.id}] Discovery Weekly playlist complete`
                 );
             } catch (error: any) {
                 logger.error(
-                    `[ScanJob ${job.id}]  Failed to build Discovery playlist:`,
+                    `[ScanJob ${job.id}] Failed to build Discovery playlist:`,
                     error.message
                 );
             }
         }
 
-        // If this scan was for Spotify Import, build the final playlist
+        // The scan after a Spotify import's downloads builds its playlist.
         if (source === "spotify-import" && spotifyImportJobId) {
             logger.debug(
-                `[ScanJob ${job.id}]  Building Spotify Import playlist for job ${spotifyImportJobId}...`
+                `[ScanJob ${job.id}] Building Spotify Import playlist for job ${spotifyImportJobId}`
             );
             try {
                 const { spotifyImportService } = await import(
@@ -182,11 +180,11 @@ export async function processScan(
                     spotifyImportJobId
                 );
                 logger.debug(
-                    `[ScanJob ${job.id}] Spotify Import playlist complete!`
+                    `[ScanJob ${job.id}] Spotify Import playlist complete`
                 );
             } catch (error: any) {
                 logger.error(
-                    `[ScanJob ${job.id}]  Failed to build Spotify Import playlist:`,
+                    `[ScanJob ${job.id}] Failed to build Spotify Import playlist:`,
                     error.message
                 );
             }
@@ -200,58 +198,28 @@ export async function processScan(
             logger.error(`[ScanJob ${job.id}] Failed to reconcile download jobs:`, error.message);
         }
 
-        // Reconcile Spotify-import pending tracks against new or updated tracks, manual syncs and retried downloads.
-        const shouldReconcile =
-            result.tracksAdded > 0 ||
-            result.tracksUpdated > 0 ||
-            manual ||
-            source?.startsWith("retry-");
-        if (shouldReconcile) {
+        // Songs still waiting in imported and Discover playlists are matched again when the scan added or updated
+        // songs, was asked for by hand, or followed a retried download.
+        if (result.tracksAdded > 0 || result.tracksUpdated > 0 || manual || source?.startsWith("retry-")) {
             try {
+                const { spotifyImportService } = await import("../../services/spotifyImport");
+                const reconciled = await spotifyImportService.reconcilePendingTracks();
                 logger.debug(
-                    `[ScanJob ${job.id}] Checking for pending playlist tracks to reconcile...`
+                    `[ScanJob ${job.id}] Reconciled ${reconciled.tracksAdded} pending tracks to ${reconciled.playlistsUpdated} playlists`,
                 );
-                const { spotifyImportService } = await import(
-                    "../../services/spotifyImport"
-                );
-                const reconcileResult =
-                    await spotifyImportService.reconcilePendingTracks();
-                if (reconcileResult.tracksAdded > 0) {
-                    logger.debug(
-                        `[ScanJob ${job.id}] ✓ Reconciled ${reconcileResult.tracksAdded} pending tracks to ${reconcileResult.playlistsUpdated} playlists`
-                    );
-                } else {
-                    logger.debug(
-                        `[ScanJob ${job.id}] No pending tracks to reconcile`
-                    );
-                }
             } catch (error) {
-                logger.error(
-                    `[ScanJob ${job.id}] Failed to reconcile pending tracks:`,
-                    error
-                );
+                logger.error(`[ScanJob ${job.id}] Failed to reconcile pending tracks:`, error);
             }
-        }
-
-        // Reconcile Discovery Weekly tracks
-        // This backfills Discovery Weekly playlists with albums that downloaded after initial playlist creation
-        // Run on: new tracks added OR manual sync
-        if (shouldReconcile) {
             try {
-                logger.debug(
-                    `[ScanJob ${job.id}] Checking for Discovery Weekly tracks to reconcile...`
-                );
-                const { discoverWeeklyService } = await import(
-                    "../../services/discoverWeekly"
-                );
+                const { discoverWeeklyService } = await import("../../services/discoverWeekly");
                 const discoverResult = await discoverWeeklyService.reconcileDiscoveryTracks();
                 if (discoverResult.tracksAdded > 0) {
                     logger.info(
-                        `[SCAN] Discovery Weekly reconciliation: ${discoverResult.tracksAdded} tracks added across ${discoverResult.batchesChecked} batches`
+                        `[SCAN] Discovery Weekly reconciliation: ${discoverResult.tracksAdded} tracks added across ${discoverResult.batchesChecked} batches`,
                     );
                 }
             } catch (error) {
-                logger.error('[SCAN] Discovery Weekly reconciliation failed:', error);
+                logger.error("[SCAN] Discovery Weekly reconciliation failed:", error);
             }
         }
 
@@ -260,7 +228,7 @@ export async function processScan(
         if (result.tracksAdded > 0) {
             try {
                 logger.debug(
-                    `[ScanJob ${job.id}] ${result.tracksAdded} new track(s) added — starting an enrichment cycle`
+                    `[ScanJob ${job.id}] ${result.tracksAdded} new track(s) added; starting an enrichment cycle`
                 );
                 const { triggerEnrichmentNow } = await import(
                     "../unifiedEnrichment"
