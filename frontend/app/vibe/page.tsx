@@ -84,10 +84,11 @@ function MapIconButton({ icon: Icon, compact, className, ...props }: { icon: Luc
     );
 }
 
-function toQueueTrack(t: { id: string; title: string; duration?: number; artist: { id: string; name: string }; album: { id: string; title: string; coverUrl: string | null } }): Track {
+function toQueueTrack(t: { id: string; title: string; displayTitle?: string | null; duration?: number; artist: { id: string; name: string }; album: { id: string; title: string; coverUrl: string | null } }): Track {
     return {
         id: t.id,
         title: t.title,
+        displayTitle: t.displayTitle,
         duration: t.duration ?? 0,
         artist: { name: t.artist.name, id: t.artist.id },
         album: { title: t.album.title, coverArt: t.album.coverUrl ?? undefined, id: t.album.id },
@@ -216,6 +217,7 @@ export default function VibePage() {
             const tracks: Track[] = steps.map((t) => ({
                 id: t.id,
                 title: t.title,
+                displayTitle: t.displayTitle,
                 duration: t.duration,
                 artist: { name: t.artistName, id: t.artistId },
                 album: { title: t.albumTitle, coverArt: t.albumCoverUrl ?? undefined, id: t.albumId },

@@ -16,10 +16,12 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { shownTitle } from "@/lib/track-title";
 
 interface MixTrack {
     id: string;
     title: string;
+    displayTitle?: string | null;
     duration: number;
     albumId: string;
     album: {
@@ -71,6 +73,7 @@ export default function MixPage() {
         return tracks.map((track) => ({
             id: track.id,
             title: track.title,
+            displayTitle: track.displayTitle,
             artist: {
                 name: track.album.artist.name,
                 id: track.album.artist.id,
@@ -283,7 +286,7 @@ export default function MixPage() {
                                                     handlePlayTrack(index);
                                                 }}
                                                 className="min-h-[44px] min-w-[44px] flex items-center justify-center"
-                                                aria-label={isCurrentlyPlaying && isPlaying ? `Pause ${track.title}` : `Play ${track.title}`}
+                                                aria-label={isCurrentlyPlaying && isPlaying ? `Pause ${shownTitle(track)}` : `Play ${shownTitle(track)}`}
                                             >
                                                 <span
                                                     className={cn(
@@ -324,7 +327,7 @@ export default function MixPage() {
                                                         isCurrentlyPlaying ? "text-brand" : "text-white"
                                                     )}
                                                 >
-                                                    {track.title}
+                                                    {shownTitle(track)}
                                                 </p>
                                                 <p className="text-xs text-[var(--text-secondary)] truncate">
                                                     {track.album.artist.name}
@@ -343,7 +346,7 @@ export default function MixPage() {
                                                     e.stopPropagation();
                                                     handleAddToQueue(track);
                                                 }}
-                                                aria-label={`Add ${track.title} to queue`}
+                                                aria-label={`Add ${shownTitle(track)} to queue`}
                                             >
                                                 <ListPlus className="w-4 h-4" />
                                             </button>

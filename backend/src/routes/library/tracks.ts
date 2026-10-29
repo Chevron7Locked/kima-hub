@@ -1157,6 +1157,7 @@ router.get("/radio", async (req, res) => {
     const transformedTracks = ordered.map((track) => ({
       id: track.id,
       title: track.title,
+      displayTitle: track.displayTitle,
       duration: track.duration,
       trackNo: track.trackNo,
       discNumber: track.discNumber,

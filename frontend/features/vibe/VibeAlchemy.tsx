@@ -119,6 +119,7 @@ export function VibeAlchemy({ library, onHighlight, onClose }: VibeAlchemyProps)
         const playable: Track[] = results.map((t) => ({
             id: t.id,
             title: t.title,
+            displayTitle: t.displayTitle,
             duration: t.duration,
             album: { title: t.album.title, coverArt: t.album.coverUrl ?? undefined, id: t.album.id },
             artist: { name: t.artist.name, id: t.artist.id },

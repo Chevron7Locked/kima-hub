@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
 import type { LibraryTrack } from "../types";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { shownTitle } from "@/lib/track-title";
 
 interface LibraryTracksListProps {
     tracks: LibraryTrack[];
@@ -114,7 +115,7 @@ export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
                                         : "text-white"
                                 )}
                             >
-                                {track.title}
+                                {shownTitle(track)}
                             </p>
                             <p className="text-xs text-[var(--text-secondary)] truncate">
                                 <Link

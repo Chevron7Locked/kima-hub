@@ -375,6 +375,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
               select: {
                 id: true,
                 title: true,
+                displayTitle: true,
                 trackNo: true,
                 discNumber: true,
                 duration: true,
@@ -487,10 +488,6 @@ router.get("/artists/:id", async (req, res) => {
       source: "database" as const,
     }));
 
-    logger.debug(
-      `[Artist] Found ${dbAlbums.length} albums from database (actual owned files)`,
-    );
-
     // Inline guard, not a boolean intermediate: the type predicate has to be in
     // the condition for the id to narrow to string inside the block.
     if (isMbid(artist.mbid)) {
@@ -501,11 +498,7 @@ router.get("/artists/:id", async (req, res) => {
         const cachedDisco = await redisClient.get(discoCacheKey);
         if (cachedDisco && cachedDisco !== "NOT_FOUND") {
           releaseGroups = JSON.parse(cachedDisco);
-          logger.debug(
-            `[Artist] Using cached discography (${releaseGroups.length} albums)`,
-          );
         } else {
-          logger.debug(`[Artist] Fetching discography from MusicBrainz...`);
           const fetched = await musicBrainzService.getReleaseGroups(
             artist.mbid,
             ["album", "ep"],
@@ -519,22 +512,14 @@ router.get("/artists/:id", async (req, res) => {
               24 * 60 * 60,
               JSON.stringify(releaseGroups),
             );
-          } else if (fetched.kind === "absent") {
-            logger.debug(
-              `[Artist] MusicBrainz has no release-groups for ${artist.mbid}`,
-            );
-          } else {
-            // A failed question is not "no discography" — the catch
-            // below serves database albums and logs the real cause.
+          } else if (fetched.kind !== "absent") {
+            // An artist MusicBrainz has no albums for shows the database's. A failed question is not "no
+            // discography": the catch below serves database albums and logs the real cause.
             throw new Error(
               `Discography lookup ${fetched.kind}: ${failureCause(fetched)}`,
             );
           }
         }
-
-        logger.debug(
-          `  Got ${releaseGroups.length} albums from MusicBrainz (before filtering)`,
-        );
 
         const excludedSecondaryTypes = [
           "Live",
@@ -558,10 +543,6 @@ router.get("/artists/:id", async (req, res) => {
             excludedSecondaryTypes.includes(type),
           );
         });
-
-        logger.debug(
-          `  Filtered to ${filteredReleaseGroups.length} studio albums/EPs`,
-        );
 
         const mbAlbums = filteredReleaseGroups.map((rg: any) => ({
           id: rg.id,
@@ -590,22 +571,11 @@ router.get("/artists/:id", async (req, res) => {
 
         albumsWithOwnership = [...dbAlbums, ...mbAlbumsFiltered];
 
-        logger.debug(
-          `  Total albums: ${albumsWithOwnership.length} (${dbAlbums.length} owned from database, ${mbAlbumsFiltered.length} from MusicBrainz)`,
-        );
-        logger.debug(
-          `  Owned: ${
-            albumsWithOwnership.filter((a) => a.owned).length
-          }, Available: ${albumsWithOwnership.filter((a) => !a.owned).length}`,
-        );
       } catch (error) {
         logger.error(`Failed to fetch MusicBrainz discography:`, error);
         albumsWithOwnership = dbAlbums;
       }
     } else {
-      logger.debug(
-        `[Artist] No valid MBID, using ${dbAlbums.length} albums from database`,
-      );
       albumsWithOwnership = dbAlbums;
     }
 
@@ -620,7 +590,6 @@ router.get("/artists/:id", async (req, res) => {
     // joined against the owned library so owned rows play and unowned rows
     // preview. When both sources are unavailable the local floor applies:
     // the user's most played by this artist, then MB first-release date.
-    let popularitySource = "local";
     const ownedByMbid = new Map<string, any>();
     const ownedByTitle = new Map<string, any>();
     for (const t of allTracks) {
@@ -698,7 +667,6 @@ router.get("/artists/:id", async (req, res) => {
               playCount: r.playCount,
             }))
           );
-          popularitySource = "listenbrainz";
         }
       } catch (lbError) {
         logger.warn(
@@ -723,7 +691,6 @@ router.get("/artists/:id", async (req, res) => {
               playCount: r.rank,
             }))
           );
-          popularitySource = "deezer";
         }
       } catch (dzError) {
         logger.warn(
@@ -733,14 +700,12 @@ router.get("/artists/:id", async (req, res) => {
       }
     }
     topTracks = global;
-    logger.debug(
-      `[Artist] Popular tracks from ${popularitySource} (${global.length})`,
-    );
     if (topTracks.length === 0) {
       const played = await prisma.$queryRaw<
         Array<{
           id: string;
           title: string;
+          displayTitle: string | null;
           duration: number;
           albumId: string;
           albumTitle: string;
@@ -750,7 +715,7 @@ router.get("/artists/:id", async (req, res) => {
           playCount: bigint;
         }>
       >`
-        SELECT t.id, t.title, t.duration,
+        SELECT t.id, t.title, t."displayTitle", t.duration,
                t."albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
                a."artistId", ar.name AS "artistName",
                COUNT(p.id)::bigint AS "playCount"
@@ -759,7 +724,7 @@ router.get("/artists/:id", async (req, res) => {
         JOIN "Artist" ar ON ar.id = a."artistId"
         JOIN "Play" p ON p."trackId" = t.id AND p."userId" = ${userId}
         WHERE a."artistId" = ${artist.id} AND a.location = 'LIBRARY'
-        GROUP BY t.id, t.title, t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
+        GROUP BY t.id, t.title, t."displayTitle", t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
         HAVING COUNT(p.id) > 0
         ORDER BY COUNT(p.id) DESC, MAX(p."playedAt") DESC
         LIMIT 10
@@ -779,9 +744,6 @@ router.get("/artists/:id", async (req, res) => {
             coverArt: t.albumCoverUrl,
           },
         }));
-        logger.debug(
-          `[Artist] Top tracks from local listens (${played.length})`,
-        );
       } else {
         // Cold start: earliest-released tracks per MusicBrainz, falling back
         // to the plain first-10 slice when MB has nothing.
@@ -811,9 +773,6 @@ router.get("/artists/:id", async (req, res) => {
             .slice(0, 10)
             .map(({ t, date }) => ({ ...unplayedTop(t), releaseDate: date === "9999" ? null : date }));
           topTracks = dated;
-          logger.debug(
-            `[Artist] No local plays; top tracks by MB first-release-date (${dated.length})`,
-          );
         } catch (mbError) {
           logger.warn(
             `[Artist] MB first-release fallback failed for ${artist.name}:`,
@@ -840,21 +799,12 @@ router.get("/artists/:id", async (req, res) => {
     }> | null;
 
     if (enrichedSimilar && enrichedSimilar.length > 0) {
-      logger.debug(
-        `[Artist] Using ${enrichedSimilar.length} similar artists from enriched JSON`,
-      );
-
       similarArtists = await resolveSimilarArtists(enrichedSimilar.slice(0, 10));
     } else {
       const cachedSimilar = await redisClient.get(similarCacheKey);
       if (cachedSimilar && cachedSimilar !== "NOT_FOUND") {
         similarArtists = JSON.parse(cachedSimilar);
-        logger.debug(
-          `[Artist] Using cached similar artists (${similarArtists.length})`,
-        );
       } else {
-        logger.debug(`[Artist] Fetching similar artists (ListenBrainz, then Deezer)...`);
-
         try {
           const similar = await getSimilarArtists(isMbid(artist.mbid) ? artist.mbid : "", artist.name, 10);
 
@@ -864,9 +814,6 @@ router.get("/artists/:id", async (req, res) => {
             similarCacheKey,
             24 * 60 * 60,
             JSON.stringify(similarArtists),
-          );
-          logger.debug(
-            `[Artist] Cached ${similarArtists.length} similar artists`,
           );
         } catch (error) {
           logger.error(`[Artist] Failed to fetch similar artists:`, error);
@@ -1006,7 +953,6 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
           true,
         );
         if (lidarrResult.success) {
-          logger.debug(`[DELETE] Lidarr: ${lidarrResult.message}`);
           lidarrDeleted = true;
         } else {
           logger.warn(`[DELETE] Lidarr deletion note: ${lidarrResult.message}`);
@@ -1021,21 +967,12 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
       }
     }
 
-    logger.debug(
-      `[DELETE] Deleting artist from database: ${artist.name} (${artist.id})`,
-    );
     // Its songs' playlist entries go with it: tell those playlists once it is gone.
     const playlists = await playlistsHoldingTracks(prisma, { album: { artistId: artist.id } });
     await prisma.artist.delete({
       where: { id: artist.id },
     });
     announcePlaylistsChanged(playlists);
-
-    logger.debug(
-      `[DELETE] Successfully deleted artist: ${
-        artist.name
-      } (${deletedFiles} files${lidarrDeleted ? ", removed from Lidarr" : ""})`,
-    );
 
     res.json({
       message: "Artist deleted successfully",

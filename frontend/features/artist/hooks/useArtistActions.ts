@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useAudioControls } from '@/lib/audio-context';
-import { Artist, Album, Track } from '../types';
+import { Artist, Album } from '../types';
 import { shuffleArray } from '@/lib/shuffle';
 
 interface FormattedTrack {
@@ -39,6 +39,7 @@ async function loadAllOwnedTracks(artist: Artist, albums: Album[]) {
     const formattedTracks = albumData.tracks.map((track: Record<string, unknown>) => ({
       id: track.id,
       title: track.title,
+      displayTitle: track.displayTitle,
       trackNumber: Number(track.trackNumber ?? 0),
       discNumber: Number(track.discNumber ?? 1),
       artist: { name: artist.name, id: artist.id },
@@ -63,7 +64,7 @@ async function loadAllOwnedTracks(artist: Artist, albums: Album[]) {
 
 export function useArtistActions() {
   // Use controls-only hook to avoid re-renders from playback state changes
-  const { playTrack: playTrackFromContext, playTracks } = useAudioControls();
+  const { playTracks } = useAudioControls();
 
   const playOwnedTracks = useCallback(
     async (artist: Artist | null, albums: Album[], shuffle: boolean) => {
@@ -97,26 +98,8 @@ export function useArtistActions() {
     [playOwnedTracks]
   );
 
-  const playTrack = useCallback(
-    (track: Track, artist: Artist) => {
-      playTrackFromContext({
-        id: track.id,
-        title: track.title,
-        artist: { name: artist.name, id: artist.id },
-        album: {
-          title: track.album?.title || 'Unknown Album',
-          coverArt: track.album?.coverArt,
-          id: track.album?.id,
-        },
-        duration: track.duration,
-      });
-    },
-    [playTrackFromContext]
-  );
-
   return {
     playAll,
     shufflePlay,
-    playTrack,
   };
 }

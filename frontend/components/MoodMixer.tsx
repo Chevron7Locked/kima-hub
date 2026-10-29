@@ -117,6 +117,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                 const tracks: Track[] = mix.tracks.map((t) => ({
                     id: t.id,
                     title: t.title,
+                    displayTitle: t.displayTitle,
                     artist: {
                         name: t.album?.artist?.name || "Unknown Artist",
                         id: t.album?.artist?.id,

@@ -8,6 +8,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { cascadeStyle } from "@/lib/motion";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { shownTitle } from "@/lib/track-title";
 
 // A top track without a library album is not owned, so it can only be previewed.
 const isUnownedTrack = (track: Track) =>
@@ -102,7 +103,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                     {coverUrl ? (
                                         <CachedImage
                                             src={coverUrl}
-                                            alt={track.title}
+                                            alt={shownTitle(track)}
                                             width={40}
                                             height={40}
                                             className="object-cover"
@@ -123,7 +124,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         )}
                                     >
                                         <span className="truncate">
-                                            {track.displayTitle ?? track.title}
+                                            {shownTitle(track)}
                                         </span>
                                         {isUnowned && (
                                             <span className="shrink-0 text-micro bg-white/10 text-[var(--text-secondary)] px-1.5 py-0.5 rounded font-medium">
@@ -154,7 +155,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             e.stopPropagation();
                                             onPreview(track);
                                         }}
-                                        aria-label={isPreviewPlaying ? `stop the preview of ${track.title}` : `play a preview of ${track.title}`}
+                                        aria-label={isPreviewPlaying ? `stop the preview of ${shownTitle(track)}` : `play a preview of ${shownTitle(track)}`}
                                         className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-hover:translate-y-0 focus-visible:translate-y-0 can-hover:translate-y-1 transition-[opacity,transform] duration-150 hover:bg-white/10 text-[var(--text-secondary)] hover:text-white touch-reveal"
                                     >
                                         {isPreviewPlaying ? (

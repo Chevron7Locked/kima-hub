@@ -7,6 +7,7 @@ import { Track } from "../types";
 const formatTrackForAudio = (track: Track) => ({
     id: track.id,
     title: track.title,
+    displayTitle: track.displayTitle,
     duration: track.duration,
     artist: {
         id: track.album?.artist?.id,

@@ -20,7 +20,7 @@ const ALBUM_FIELDS = {
     id: true, title: true, artistId: true, year: true, coverUrl: true, artist: { select: { name: true } },
 } as const;
 const TRACK_FIELDS = {
-    id: true, title: true, albumId: true, duration: true,
+    id: true, title: true, displayTitle: true, albumId: true, duration: true,
     album: { select: { title: true, artistId: true, artist: { select: { name: true } } } },
 } as const;
 const EPISODE_FIELDS = {
@@ -77,6 +77,8 @@ export interface AlbumSearchResult {
 export interface TrackSearchResult {
     id: string;
     title: string;
+    /** The title as edited in Kima, if it was. */
+    displayTitle: string | null;
     albumId: string;
     albumTitle: string;
     artistId: string;
@@ -356,6 +358,7 @@ export class SearchService {
         return results.map((r) => ({
             id: r.id,
             title: r.title,
+            displayTitle: r.displayTitle,
             albumId: r.albumId,
             albumTitle: r.album.title,
             artistId: r.album.artistId,
@@ -384,6 +387,7 @@ export class SearchService {
         SELECT
           t.id,
           t.title,
+          t."displayTitle",
           t."albumId",
           t.duration,
           a.title as "albumTitle",

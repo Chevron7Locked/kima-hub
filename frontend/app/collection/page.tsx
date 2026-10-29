@@ -299,6 +299,7 @@ export default function LibraryPage() {
         return libraryTracks.map((track) => ({
             id: track.id,
             title: track.title,
+            displayTitle: track.displayTitle,
             duration: track.duration,
             artist: {
                 id: track.album?.artist?.id,

@@ -9,6 +9,7 @@ import { Album, Track } from "../types";
 const toQueueTrack = (track: Track, album: Album) => ({
     id: track.id,
     title: track.title,
+    displayTitle: track.displayTitle,
     duration: track.duration,
     artist: {
         name: track.artist?.name || album.artist?.name || "",

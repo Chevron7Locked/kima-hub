@@ -6,6 +6,7 @@ import type { ColorPalette } from "@/hooks/useImageColor";
 import { formatNumber, formatTime } from "@/lib/format";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
+import { shownTitle } from "@/lib/track-title";
 
 interface TrackListProps {
     tracks: Track[];
@@ -149,7 +150,7 @@ const TrackRow = memo(
                             )}
                         >
                             <span className="truncate">
-                                {track.displayTitle ?? track.title}
+                                {shownTitle(track)}
                             </span>
                             {isMissingTrack && (
                                 <span className="shrink-0 text-micro bg-warning/20 text-warning px-1.5 py-0.5 rounded border border-warning/30 font-medium">

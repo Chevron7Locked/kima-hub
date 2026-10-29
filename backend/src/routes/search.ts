@@ -34,6 +34,7 @@ function transformSearchResults(serviceResults: SearchResults) {
         tracks: serviceResults.tracks.map((track) => ({
             id: track.id,
             title: track.title,
+            displayTitle: track.displayTitle,
             albumId: track.albumId,
             duration: track.duration,
             trackNo: 0,
@@ -203,7 +204,7 @@ router.get("/discover", async (req, res) => {
                 return local.map((t) => ({
                     type: "track",
                     id: t.id,
-                    name: t.title,
+                    name: t.displayTitle || t.title,
                     artist: t.artistName,
                     album: t.albumTitle,
                     listeners: 0,

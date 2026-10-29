@@ -54,10 +54,12 @@ import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { copyText } from "@/lib/clipboard";
 import { openActivityPanel } from "@/hooks/useActivityPanel";
+import { shownTitle } from "@/lib/track-title";
 
 interface Track {
     id: string;
     title: string;
+    displayTitle?: string | null;
     duration: number;
     album: {
         id?: string;
@@ -75,6 +77,7 @@ function toAudioTrack(track: Track): AudioTrack {
     return {
         id: track.id,
         title: track.title,
+        displayTitle: track.displayTitle,
         artist: { name: track.album.artist.name, id: track.album.artist.id },
         album: { title: track.album.title, coverArt: track.album.coverArt, id: track.album.id },
         duration: track.duration,
@@ -702,7 +705,7 @@ export default function PlaylistDetailPage() {
                                         playlistItem.track.album.coverArt,
                                         100
                                     )}
-                                    alt={playlistItem.track.title}
+                                    alt={shownTitle(playlistItem.track)}
                                     fill
                                     sizes="40px"
                                     className="object-cover"
@@ -724,7 +727,7 @@ export default function PlaylistDetailPage() {
                             >
                                 {formatTrackDisplay(
                                     {
-                                        title: playlistItem.track.title,
+                                        title: shownTitle(playlistItem.track),
                                         artist: playlistItem.track.album.artist.name,
                                         album: playlistItem.track.album.title,
                                     },

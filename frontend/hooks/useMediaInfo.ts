@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useAudioState } from "@/lib/audio-context";
 import { api } from "@/lib/api";
+import { shownTitle } from "@/lib/track-title";
 
 export interface MediaInfo {
     title: string;
@@ -31,7 +32,7 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
                 ? `/artist/${currentTrack.artist.id}`
                 : null;
             return {
-                title: currentTrack.title,
+                title: shownTitle(currentTrack),
                 subtitle: currentTrack.artist?.name || "Unknown Artist",
                 coverUrl: currentTrack.album?.coverArt
                     ? api.getCoverArtUrl(currentTrack.album.coverArt, coverSize)

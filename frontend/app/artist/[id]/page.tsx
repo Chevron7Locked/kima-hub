@@ -97,6 +97,7 @@ export default function ArtistPage() {
         const formattedTracks = playableTracks.map((t: Track) => ({
             id: t.id,
             title: t.title,
+            displayTitle: t.displayTitle,
             artist: { name: artist.name, id: artist.id },
             album: {
                 title: t.album?.title || "Unknown",

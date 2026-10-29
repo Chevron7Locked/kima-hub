@@ -13,6 +13,7 @@ import { SELF_SCORE, blendSelfScore } from "../services/matching/formula";
 import { matchingContext, rankMatches, weightedTracks } from "../services/matching/rank";
 import { createHash } from "node:crypto";
 import { parseLimit } from "./library/paging";
+import { prisma } from "../utils/db";
 
 /** A requested result count: 1 to 100, 20 when missing or not a number. */
 function resultLimit(value: unknown): number {
@@ -69,6 +70,12 @@ router.get("/map", requireAuth, async (req, res) => {
     }
 });
 
+/** The edited titles of these songs, by id (null for a song not edited), for answers the player queues. */
+async function editedTitles(ids: string[]): Promise<Map<string, string | null>> {
+    const rows = await prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true, displayTitle: true } });
+    return new Map(rows.map((r) => [r.id, r.displayTitle]));
+}
+
 /**
  * POST /api/vibe/path
  * Generate a smooth musical journey between two tracks.
@@ -94,7 +101,14 @@ router.post("/path", requireAuth, async (req, res) => {
             mode: mode === "discovery" ? "discovery" : "smooth",
         });
 
-        res.json(result);
+        const titles = await editedTitles([result.startTrack.id, ...result.path.map((t) => t.id), result.endTrack.id]);
+        const withTitle = <T extends { id: string }>(t: T) => ({ ...t, displayTitle: titles.get(t.id) ?? null });
+        res.json({
+            ...result,
+            startTrack: withTitle(result.startTrack),
+            path: result.path.map(withTitle),
+            endTrack: withTitle(result.endTrack),
+        });
     } catch (error) {
         if (error instanceof UserFacingError) {
             return res.status(error.statusCode).json({ error: error.message });
@@ -163,6 +177,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
 
         const rows = await rankMatches(ctx, inputs, { limit, counted: addIds });
         const scale = Math.sqrt(blendSq * SELF_SCORE);
+        const titles = await editedTitles(rows.map((t) => t.id));
 
         res.json({
             tracks: rows.map((t) => {
@@ -170,6 +185,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
                 return {
                     id: t.id,
                     title: t.title,
+                    displayTitle: titles.get(t.id) ?? null,
                     duration: t.duration,
                     distance: 1 - match,
                     similarity: Math.min(1, Math.max(0, match)),
@@ -202,11 +218,13 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
             });
         }
 
+        const titles = await editedTitles(tracks.map((t) => t.id));
         res.json({
             sourceTrackId: trackId,
             tracks: tracks.map((t) => ({
                 id: t.id,
                 title: t.title,
+                displayTitle: titles.get(t.id) ?? null,
                 duration: t.duration,
                 distance: t.distance,
                 similarity: t.similarity,
@@ -262,11 +280,13 @@ router.post("/search", requireAuth, async (req, res) => {
 
         logger.debug(`[VIBE-SEARCH] "${sanitizeForLog(trimmedQuery)}": ${rows.length} tracks, top: ${rows[0]?.title || "none"}`);
 
+        const titles = await editedTitles(rows.map((row) => row.id));
         res.json({
             query: trimmedQuery,
             tracks: rows.map((row) => ({
                 id: row.id,
                 title: row.title,
+                displayTitle: titles.get(row.id) ?? null,
                 duration: row.duration,
                 trackNo: row.trackNo,
                 distance: row.distance,

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { shownTitle } from "@/lib/track-title";
 
 const OPERATION_STYLES: Record<string, { label: string; borderColor: string }> = {
     drift: { label: "Song Path", borderColor: "var(--color-brand)" },
@@ -90,12 +91,12 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                 <button
                     data-queue-now
                     onClick={handleTogglePlayback}
-                    aria-label={isPlaying ? `pause ${currentTrack.title}` : `play ${currentTrack.title}`}
+                    aria-label={isPlaying ? `pause ${shownTitle(currentTrack)}` : `play ${shownTitle(currentTrack)}`}
                     className="flex items-center gap-3 px-3 py-2.5 bg-white/5 border-b border-white/5 shrink-0 w-full text-left hover:bg-white/8 transition-colors"
                 >
                     <QueueCover coverArt={currentTrack.album?.coverArt} />
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white truncate">{currentTrack.title}</p>
+                        <p className="text-sm text-white truncate">{shownTitle(currentTrack)}</p>
                         <p className="text-xs text-[var(--text-muted)] truncate">
                             {currentTrack.artist?.name}
                         </p>
@@ -152,12 +153,12 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                             <button
                                 type="button"
                                 onClick={() => handlePlayFromIndex(index)}
-                                aria-label={`play ${track.title}`}
+                                aria-label={`play ${shownTitle(track)}`}
                                 className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
                             >
                                 <QueueCover coverArt={track.album?.coverArt} />
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-[var(--text-primary)] truncate">{track.title}</p>
+                                    <p className="text-sm text-[var(--text-primary)] truncate">{shownTitle(track)}</p>
                                     <p className="text-xs text-[var(--text-muted)] truncate">
                                         {track.artist?.name}
                                     </p>
@@ -179,7 +180,7 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                                         type="button"
                                         onClick={() => swap(index, index - 1)}
                                         disabled={index <= currentIndex + 1}
-                                        aria-label={`move ${track.title} up`}
+                                        aria-label={`move ${shownTitle(track)} up`}
                                         className={rowAction}
                                     >
                                         <ChevronUp aria-hidden="true" className="h-4 w-4" />
@@ -188,7 +189,7 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                                         type="button"
                                         onClick={() => swap(index, index + 1)}
                                         disabled={index >= queue.length - 1}
-                                        aria-label={`move ${track.title} down`}
+                                        aria-label={`move ${shownTitle(track)} down`}
                                         className={rowAction}
                                     >
                                         <ChevronDown aria-hidden="true" className="h-4 w-4" />
@@ -196,7 +197,7 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                                     <button
                                         type="button"
                                         onClick={() => removeFromQueue(index)}
-                                        aria-label={`remove ${track.title} from the queue`}
+                                        aria-label={`remove ${shownTitle(track)} from the queue`}
                                         className={cn(rowAction, "hover:bg-danger/10 hover:text-danger-light")}
                                     >
                                         <X aria-hidden="true" className="h-4 w-4" />

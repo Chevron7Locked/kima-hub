@@ -36,6 +36,7 @@ interface MoodBucketMix {
 interface VibePathTrack {
     id: string;
     title: string;
+    displayTitle?: string | null;
     duration: number;
     albumId: string;
     albumTitle: string;
@@ -48,6 +49,7 @@ interface VibePathTrack {
 interface VibeTrack {
     id: string;
     title: string;
+    displayTitle?: string | null;
     duration: number;
     trackNo?: number;
     distance: number;

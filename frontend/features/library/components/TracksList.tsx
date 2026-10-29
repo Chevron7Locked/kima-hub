@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
+import { shownTitle } from "@/lib/track-title";
 
 interface TracksListProps {
     tracks: Track[];
@@ -102,7 +103,7 @@ const TrackRow = memo(
                                     track.album.coverArt,
                                     80,
                                 )}
-                                alt={track.title}
+                                alt={shownTitle(track)}
                                 fill
                                 sizes="40px"
                                 className="object-cover"
@@ -116,7 +117,7 @@ const TrackRow = memo(
                                 isCurrentlyPlaying ? "text-brand" : "text-white",
                             )}
                         >
-                            {track.displayTitle ?? track.title}
+                            {shownTitle(track)}
                         </h3>
                         <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
                             {track.album?.artist?.name}
@@ -155,7 +156,7 @@ const TrackRow = memo(
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            onDelete(track.id, track.title);
+                            onDelete(track.id, shownTitle(track));
                         }}
                         className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all duration-150 border border-transparent hover:border-danger/30 touch-reveal"
                         title="delete track"

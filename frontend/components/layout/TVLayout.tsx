@@ -12,6 +12,7 @@ import { formatTime, clampTime, formatMediaDuration } from "@/lib/format";
 import { RefreshCw, SkipBack, SkipForward, Shuffle, Repeat } from "lucide-react";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { KimaMark } from "@/components/ui/KimaMark";
+import { shownTitle } from "@/lib/track-title";
 
 const tvNavigation = [
     { name: "Home", href: "/" },
@@ -92,7 +93,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
     let coverUrl: string | null = null;
 
     if (playbackType === "track" && currentTrack) {
-        title = currentTrack.title;
+        title = shownTitle(currentTrack);
         artist = currentTrack.artist?.name || "";
         coverUrl = currentTrack.album?.coverArt
             ? api.getCoverArtUrl(currentTrack.album.coverArt, 96)

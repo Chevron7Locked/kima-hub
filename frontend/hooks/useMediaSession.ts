@@ -6,6 +6,7 @@ import { useAudioController } from "@/lib/audio-controller-context";
 import { api } from "@/lib/api";
 import type { AudioController } from "@/lib/audio-controller";
 import type { EngineSnapshot } from "@/lib/audio-engine-policy";
+import { shownTitle } from "@/lib/track-title";
 
 const ARTWORK_SIZES = [96, 128, 192, 256, 384, 512];
 
@@ -193,7 +194,7 @@ export function useMediaSession() {
                 ? getAbsoluteUrl(api.getCoverArtUrl(currentTrack.album.coverArt, 512))
                 : undefined;
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: currentTrack.title,
+                title: shownTitle(currentTrack),
                 artist: currentTrack.artist?.name || "Unknown Artist",
                 album: currentTrack.album?.title || "Unknown Album",
                 artwork: artworkFrom(coverUrl, fallbackArtwork),

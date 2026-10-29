@@ -1037,6 +1037,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const vibeTracks: Track[] = response.tracks.map((t) => ({
                 id: t.id,
                 title: t.title,
+                displayTitle: t.displayTitle,
                 duration: t.duration,
                 artist: { name: t.artist.name, id: t.artist.id },
                 album: {

@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { queryKeys } from "@/hooks/useQueries";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { shownTitle } from "@/lib/track-title";
 
 export function NowPlayingTab() {
     const { currentTrack, queue, currentIndex } = useAudioState();
@@ -62,7 +63,7 @@ export function NowPlayingTab() {
 
                 <div className="min-w-0 flex-1">
                     <p className="text-base font-semibold text-white truncate">
-                        {currentTrack.title}
+                        {shownTitle(currentTrack)}
                     </p>
                     <p className="text-sm text-[var(--text-secondary)] truncate">
                         {currentTrack.artist?.name || "Unknown Artist"}
@@ -140,7 +141,7 @@ export function NowPlayingStrip() {
             </span>
             <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium tracking-[-0.01em] text-[var(--text-primary)]">
-                    {currentTrack.title}
+                    {shownTitle(currentTrack)}
                 </p>
                 <p className="truncate text-xs text-[var(--text-secondary)]">
                     {[currentTrack.artist?.name, currentTrack.album?.title].filter(Boolean).join(" · ")}
