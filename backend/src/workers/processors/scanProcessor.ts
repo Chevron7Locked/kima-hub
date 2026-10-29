@@ -4,7 +4,7 @@ import { MusicScannerService, type ScanResult } from "../../services/musicScanne
 import { config } from "../../config";
 import { eventBus } from "../../services/eventBus";
 import { notificationService } from "../../services/notificationService";
-import * as path from "path";
+import { coversBasePath } from "../../services/imageStorage";
 
 export interface ScanJobData {
     userId?: string; // Optional: scans can be triggered without a user
@@ -60,11 +60,7 @@ export async function processScan(
     // Report progress
     await job.updateProgress(0);
 
-    // Prepare cover cache path (store alongside transcode cache)
-    const coverCachePath = path.join(
-        config.music.transcodeCachePath,
-        "../covers"
-    );
+    const coverCachePath = coversBasePath();
 
     // Create scanner with progress callback and cover cache path
     let lastEmittedPercent = -1;

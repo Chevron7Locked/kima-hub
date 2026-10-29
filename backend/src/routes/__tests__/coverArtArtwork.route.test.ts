@@ -10,6 +10,7 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             findFirst: jest.fn(),
             update: jest.fn().mockResolvedValue({}),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
     },
 }));
@@ -131,9 +132,10 @@ describe("the cover-art route asks every source", () => {
 
             expect(res.status).toBe(302);
             expect(res.headers.location).toBe(FOUND);
-            expect(prisma.album.update).toHaveBeenCalledWith(
-                expect.objectContaining({ data: { coverUrl: FOUND } }),
-            );
+            expect(prisma.album.updateMany).toHaveBeenCalledWith({
+                where: { id: "a1", coverUrl: "native:a1.jpg" },
+                data: { coverUrl: FOUND },
+            });
         });
     });
 

@@ -295,12 +295,11 @@ router.get(
             }
 
             const { seriesName } = req.params;
-            const decodedSeriesName = decodeURIComponent(seriesName);
 
             // Read from cached database
             const audiobooks = await prisma.audiobook.findMany({
                 where: {
-                    series: decodedSeriesName,
+                    series: seriesName,
                 },
                 orderBy: {
                     seriesSequence: "asc",

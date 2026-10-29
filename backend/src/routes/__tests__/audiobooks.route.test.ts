@@ -225,6 +225,15 @@ describe("GET /audiobooks/series/:seriesName", () => {
         expect(book.trackCount).toBe(2);
     });
 
+    it.each(["100% Hits", "Fifty%2FFifty", "A/B"])("looks up the series named %p as sent", async (name) => {
+        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([]);
+
+        const res = await request(app).get(`/audiobooks/series/${encodeURIComponent(name)}`);
+
+        expect(res.status).toBe(200);
+        expect((prisma.audiobook.findMany as jest.Mock).mock.calls.at(-1)[0].where).toEqual({ series: name });
+    });
+
     it("omits trackCount when numTracks is NULL", async () => {
         (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRowNullTracks]);
 

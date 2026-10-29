@@ -1,9 +1,9 @@
-import { Router, Response } from "express";
+import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
 import { imageLimiter } from "../../middleware/rateLimiter";
-import { config, USER_AGENT } from "../../config";
+import { USER_AGENT } from "../../config";
 import { findAlbumArtwork } from "../../services/artwork";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
@@ -12,54 +12,29 @@ import { upstreamFailure } from "../../utils/upstream";
 import {
   resizeImageBuffer,
   getResizedImagePath,
+  resolveInCoversDir,
 } from "../../services/imageStorage";
 import crypto from "crypto";
-import path from "path";
 import fs from "fs";
 
-function validateCoverPath(basePath: string, userPath: string): string | null {
-  const resolvedBase = path.resolve(basePath);
-  const resolvedPath = path.resolve(resolvedBase, userPath);
-
-  if (
-    !resolvedPath.startsWith(resolvedBase + path.sep) &&
-    resolvedPath !== resolvedBase
-  ) {
-    return null;
-  }
-
-  return resolvedPath;
+/** Every cover answer's headers: readable from any page (with credentials for a named origin), cached for good. */
+function coverHeaders(origin: string | undefined): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": origin || "*",
+    ...(origin ? { "Access-Control-Allow-Credentials": "true" } : {}),
+    "Cross-Origin-Resource-Policy": "cross-origin",
+    "Cache-Control": "public, max-age=31536000, immutable",
+  };
 }
-
-const applyCoverArtCorsHeaders = (res: Response, origin?: string) => {
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-};
 
 async function serveNativeImage(
   coverCachePath: string,
   nativePath: string,
   size: string | undefined,
-  req: any,
-  res: any,
-): Promise<void> {
-  const requestOrigin = req.headers.origin;
-  const headers: Record<string, string> = {
-    "Content-Type": "image/jpeg",
-    "Cache-Control": "public, max-age=31536000, immutable",
-    "Cross-Origin-Resource-Policy": "cross-origin",
-  };
-  if (requestOrigin) {
-    headers["Access-Control-Allow-Origin"] = requestOrigin;
-    headers["Access-Control-Allow-Credentials"] = "true";
-  } else {
-    headers["Access-Control-Allow-Origin"] = "*";
-  }
+  req: Request,
+  res: Response,
+) {
+  const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin) };
 
   const width = size ? parseInt(size, 10) : 0;
 
@@ -91,12 +66,16 @@ async function serveNativeImage(
   }
 }
 
+/** The only Audiobookshelf address this route asks for: a book's cover (what the audiobook sync stores). */
+const AUDIOBOOK_COVER_PATH = /^items\/[A-Za-z0-9_-]+\/cover$/;
+
 async function serveAudiobookCover(
   audiobookPath: string,
-  req: any,
-  res: any,
-): Promise<void> {
-  if (audiobookPath.includes("..") || audiobookPath.includes("://")) {
+  req: Request,
+  res: Response,
+) {
+  // The request carries Audiobookshelf's key, so nothing but a cover is ever asked for.
+  if (!AUDIOBOOK_COVER_PATH.test(audiobookPath)) {
     return res.status(400).json({ error: "Invalid audiobook cover path" });
   }
 
@@ -105,7 +84,12 @@ async function serveAudiobookCover(
     settings?.audiobookshelfUrl || process.env.AUDIOBOOKSHELF_URL || "";
   const audiobookshelfApiKey =
     settings?.audiobookshelfApiKey || process.env.AUDIOBOOKSHELF_API_KEY || "";
-  const coverUrl = `${audiobookshelfUrl.replace(/\/$/, "")}/api/${audiobookPath}`;
+  let coverUrl: string;
+  try {
+    coverUrl = new URL(audiobookPath, new URL(`${audiobookshelfUrl.replace(/\/$/, "")}/api/`)).href;
+  } catch {
+    return res.status(404).json({ error: "Audiobook cover art not found" });
+  }
 
   logger.debug(
     `[COVER-ART] Fetching audiobook cover: ${coverUrl.substring(0, 100)}...`,
@@ -130,10 +114,50 @@ async function serveAudiobookCover(
   if (contentType) {
     res.setHeader("Content-Type", contentType);
   }
-  applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.set(coverHeaders(req.headers.origin));
 
   return res.send(imageBuffer);
+}
+
+/**
+ * A cover stored in the covers folder: 400 for a path outside it. When the file is gone, the album it belonged to is
+ * looked up in every artwork source, and what is found is remembered and redirected to; otherwise 404.
+ */
+async function serveStoredCover(nativePath: string, size: string | undefined, req: Request, res: Response) {
+  const file = resolveInCoversDir(nativePath);
+  if (!file) {
+    return res.status(400).json({ error: "Invalid cover path" });
+  }
+  if (fs.existsSync(file)) {
+    return serveNativeImage(file, nativePath, size, req, res);
+  }
+
+  logger.warn(`[COVER-ART] Stored cover not found: ${file}, asking the artwork sources`);
+  const albumId = nativePath.replace(".jpg", "");
+  try {
+    const album = await prisma.album.findUnique({
+      where: { id: albumId },
+      include: { artist: true },
+    });
+    if (album?.artist) {
+      const found = await findAlbumArtwork({
+        rgMbid: album.rgMbid,
+        artistName: album.artist.name,
+        albumTitle: album.title,
+      });
+      if (found) {
+        // Remembered only on the album whose cover this path is.
+        await prisma.album.updateMany({
+          where: { id: albumId, coverUrl: `native:${nativePath}` },
+          data: { coverUrl: found.url },
+        });
+        return res.redirect(found.url);
+      }
+    }
+  } catch (error) {
+    logger.error(`[COVER-ART] Artwork lookup for ${albumId} failed:`, error);
+  }
+  return res.status(404).json({ error: "Cover art not found" });
 }
 
 const router = Router();
@@ -185,132 +209,25 @@ function answerImageFetchFailure(
 
 router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
   try {
-    const { size, url } = req.query;
-    let coverUrl: string;
-
-    if (url) {
-      const decodedUrl = decodeURIComponent(url as string);
-
-      if (decodedUrl.startsWith("audiobook__")) {
-        return serveAudiobookCover(
-          decodedUrl.replace("audiobook__", ""),
-          req,
-          res,
-        );
-      }
-
-      if (decodedUrl.startsWith("native:")) {
-        const nativePath = decodedUrl.replace("native:", "");
-        const coversBase = path.resolve(
-          config.music.transcodeCachePath,
-          "../covers",
-        );
-        const coverCachePath = validateCoverPath(coversBase, nativePath);
-
-        if (!coverCachePath) {
-          return res.status(400).json({ error: "Invalid cover path" });
-        }
-
-        if (!fs.existsSync(coverCachePath)) {
-          logger.error(`[COVER-ART] Native cover not found: ${coverCachePath}`);
-          return res.status(404).json({ error: "Cover art not found" });
-        }
-
-        return serveNativeImage(
-          coverCachePath,
-          nativePath,
-          size as string | undefined,
-          req,
-          res,
-        );
-      }
-
-      coverUrl = decodedUrl;
-    } else {
-      const coverId = req.params.id;
-      if (!coverId) {
-        return res.status(400).json({ error: "No cover ID or URL provided" });
-      }
-
-      const decodedId = decodeURIComponent(coverId);
-
-      if (decodedId.startsWith("native:")) {
-        const nativePath = decodedId.replace("native:", "");
-        const coversBase = path.resolve(
-          config.music.transcodeCachePath,
-          "../covers",
-        );
-        const coverCachePath = validateCoverPath(coversBase, nativePath);
-
-        if (!coverCachePath) {
-          return res.status(400).json({ error: "Invalid cover path" });
-        }
-
-        if (fs.existsSync(coverCachePath)) {
-          return serveNativeImage(
-            coverCachePath,
-            nativePath,
-            size as string | undefined,
-            req,
-            res,
-          );
-        }
-
-        logger.warn(
-          `[COVER-ART] Native cover not found: ${coverCachePath}, trying Deezer fallback`,
-        );
-
-        const albumId = nativePath.replace(".jpg", "");
-        try {
-          const album = await prisma.album.findUnique({
-            where: { id: albumId },
-            include: { artist: true },
-          });
-
-          if (album && album.artist) {
-            // The stored file is gone. Ask every source rather than Deezer
-            // alone, and remember whatever we find so the next request for
-            // this album does not have to.
-            const found = await findAlbumArtwork({
-              rgMbid: album.rgMbid,
-              artistName: album.artist.name,
-              albumTitle: album.title,
-            });
-
-            if (found) {
-              await prisma.album.update({
-                where: { id: albumId },
-                data: { coverUrl: found.url },
-              });
-
-              return res.redirect(found.url);
-            }
-          }
-        } catch (error) {
-          logger.error(
-            `[COVER-ART] Failed to fetch Deezer fallback for ${albumId}:`,
-            error,
-          );
-        }
-
-        return res.status(404).json({ error: "Cover art not found" });
-      }
-
-      if (decodedId.startsWith("audiobook__")) {
-        return serveAudiobookCover(
-          decodedId.replace("audiobook__", ""),
-          req,
-          res,
-        );
-      } else if (
-        decodedId.startsWith("http://") ||
-        decodedId.startsWith("https://")
-      ) {
-        coverUrl = decodedId;
-      } else {
-        return res.status(400).json({ error: "Invalid cover ID format" });
-      }
+    // Express has already decoded the query and the path once; the address is used exactly as sent.
+    const size = typeof req.query.size === "string" ? req.query.size : undefined;
+    const queryUrl = typeof req.query.url === "string" ? req.query.url : undefined;
+    const address = queryUrl || req.params.id;
+    if (!address) {
+      return res.status(400).json({ error: "No cover ID or URL provided" });
     }
+
+    if (address.startsWith("audiobook__")) {
+      return serveAudiobookCover(address.replace("audiobook__", ""), req, res);
+    }
+    if (address.startsWith("native:")) {
+      return serveStoredCover(address.replace("native:", ""), size, req, res);
+    }
+    // A path id is a picture's address or nothing; a query url is fetched and checked by the address guard.
+    if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
+      return res.status(400).json({ error: "Invalid cover ID format" });
+    }
+    const coverUrl = address;
 
     const cacheKey = `cover-art:${crypto
       .createHash("md5")
@@ -342,9 +259,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         if (cachedData.contentType) {
           res.setHeader("Content-Type", cachedData.contentType);
         }
-        applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-        res.setHeader("ETag", cachedData.etag);
+        res.set({ ...coverHeaders(req.headers.origin), ETag: cachedData.etag });
         return res.send(imageBuffer);
       } else {
         logger.debug(
@@ -394,9 +309,9 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     }
 
     const etag = crypto.createHash("md5").update(imageBuffer).digest("hex");
+    const contentType = imageResponse.headers.get("content-type");
 
     try {
-      const contentType = imageResponse.headers.get("content-type");
       await redisClient.setex(
         cacheKey,
         7 * 24 * 60 * 60,
@@ -414,14 +329,10 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       return res.status(304).end();
     }
 
-    const contentType = imageResponse.headers.get("content-type");
     if (contentType) {
       res.setHeader("Content-Type", contentType);
     }
-
-    applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    res.setHeader("ETag", etag);
+    res.set({ ...coverHeaders(req.headers.origin), ETag: etag });
 
     res.send(imageBuffer);
   } catch (error) {
@@ -433,10 +344,6 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
 router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
   try {
     const { mbid } = req.params;
-
-    if (!mbid) {
-      return res.status(400).json({ error: "Valid MBID required" });
-    }
 
     // Albums the library lacks are named from MusicBrainz, since every source but the archive searches by name.
     const album = await prisma.album.findFirst({

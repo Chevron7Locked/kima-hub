@@ -183,7 +183,7 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
         const shareLink = await loadUsableShareLink(req.params.token, res);
         if (!shareLink) return;
 
-        const coverArtId = decodeURIComponent(req.params.coverArtId);
+        const { coverArtId } = req.params;
         const size = req.query.size as string | undefined;
 
         if (!coverArtId.startsWith("native:")) {

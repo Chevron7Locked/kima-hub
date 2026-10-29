@@ -14,10 +14,8 @@ import { config, USER_AGENT } from "../config";
 const ARTIST_IMAGES_DIR = "artists";
 const ALBUM_IMAGES_DIR = "albums";
 
-/**
- * Get the base covers directory path
- */
-function getCoversBasePath(): string {
+/** The folder stored covers live in, beside the transcode cache. */
+export function coversBasePath(): string {
     return path.join(config.music.transcodeCachePath, "../covers");
 }
 
@@ -25,7 +23,7 @@ function getCoversBasePath(): string {
  * Ensure the covers directory exists
  */
 function ensureCoversDir(subdir: string): string {
-    const dirPath = path.join(getCoversBasePath(), subdir);
+    const dirPath = path.join(coversBasePath(), subdir);
     if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
         logger.debug(`[ImageStorage] Created directory: ${dirPath}`);
@@ -34,8 +32,8 @@ function ensureCoversDir(subdir: string): string {
 }
 
 /** The path under the covers directory, or null when it escapes that directory. */
-function resolveInCoversDir(relativePath: string): string | null {
-    const basePath = getCoversBasePath();
+export function resolveInCoversDir(relativePath: string): string | null {
+    const basePath = coversBasePath();
     const resolvedBase = path.resolve(basePath);
     const fullPath = path.resolve(basePath, relativePath);
     if (!fullPath.startsWith(resolvedBase + path.sep) && fullPath !== resolvedBase) {

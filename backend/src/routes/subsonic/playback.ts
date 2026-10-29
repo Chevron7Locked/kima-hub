@@ -12,6 +12,7 @@ import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
+import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
 
@@ -279,11 +280,8 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
             return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
         }
 
-        const coversBase = path.resolve(config.music.transcodeCachePath, "../covers");
-        const resolvedPath = path.resolve(coversBase, nativePath);
-
-        // Security: ensure resolved path stays within the covers directory
-        if (!resolvedPath.startsWith(coversBase + path.sep)) {
+        const resolvedPath = resolveInCoversDir(nativePath);
+        if (!resolvedPath) {
             return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
         }
 

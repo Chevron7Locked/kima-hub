@@ -320,3 +320,17 @@ describe('DELETE /share/:token -- revoke share link', () => {
         );
     });
 });
+
+describe('GET /share/:token/cover-art/:coverArtId', () => {
+    let app: express.Application;
+
+    beforeAll(() => { app = makeApp(); });
+    beforeEach(() => { jest.clearAllMocks(); });
+
+    it('answers a cover id holding a lone percent sign with 404, not a server error', async () => {
+        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
+
+        const res = await request(app).get(`/share/valid-token-abc/cover-art/${encodeURIComponent('50%off')}`);
+        expect(res.status).toBe(404);
+    });
+});
