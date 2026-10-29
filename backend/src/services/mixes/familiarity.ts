@@ -1,24 +1,10 @@
 /**
- * "More like what this listener already plays", for the recipes that carry a familiarity share (recipes.json:
- * Road Trip, Main Character, Feel-good, Midnight Drive). The listener's most-heard songs of the last
- * FAMILIAR_LOOKBACK_DAYS are the seeds, weighted by how often each was heard, and the songs closest to those seeds by
- * the vibe similarity every similar-song feature uses (services/matching) get a boost from 1 (closest) down to just
- * above 0 (the last of the closest FAMILIAR_SHARE of the library, at most FAMILIAR_MATCHES; the seeds are not counted
- * in that share, they take 1 themselves). The recipe adds it after its own scores are standardised
- * (recipes.ts recipeRankingSql), so it only lifts songs, never removes one, and a listener with no plays, or a library
- * with no similarity data yet, gets exactly the recipe's own ranking.
- *
- * Finding the closest songs is one exact scan of the library's sound vectors, so the result is kept in Redis for
- * FAMILIAR_CACHE_SECONDS, under a `mixes:` key so the enrichment re-run that clears the mixes cache clears it too. A
- * kept result is used while the set of seed songs is the one it was built from; how often each was heard moves every
- * listen, so it is not part of that check, and a kept result's weights can be up to FAMILIAR_CACHE_SECONDS old. The
- * set is stable for a listener with a stable top FAMILIAR_SEEDS. A listener with fewer repeated songs than that (the
- * rest of the seeds are songs heard once, the latest first) changes it with each new song they hear, and the next
- * Home build scans again.
- * Callers that ask at once (the mixes of one Home load run side by side) share one scan: in this process through one
- * shared promise per listener, across processes through a short Redis lock the others wait on. A boost is an extra, so
- * a scan that fails (or finds no similarity data yet) gives no boost, is kept only FAMILIAR_EMPTY_CACHE_SECONDS, and
- * never fails the mix that asked.
+ * "More like what this listener already plays", for recipes with a familiarity share. The listener's most-heard
+ * recent songs are the seeds; the songs the matching engine finds closest to them get a boost from 1 down to just
+ * above 0, added after the recipe standardises its scores, so it only lifts songs and no plays means no change. The
+ * scan is kept in Redis under a `mixes:` key (an enrichment re-run clears it) while the seed set is unchanged;
+ * overlapping callers share one scan, in-process by a shared promise, across processes by a short lock. A boost is
+ * an extra: a failed scan gives none and never fails the mix.
  */
 import crypto from "crypto";
 import { prisma } from "../../utils/db";
@@ -27,7 +13,7 @@ import { redisClient } from "../../utils/redis";
 import { matchingContext, topScores } from "../matching/rank";
 
 /** Only plays this recent count: a taste is read from the recent past, and the bound lets the (user, play time) index serve the scan. */
-export const FAMILIAR_LOOKBACK_DAYS = 365;
+const FAMILIAR_LOOKBACK_DAYS = 365;
 /**
  * The most seeds used. The vibe scan's sound term is a weighted sum of the seeds' vectors, so seeds beyond the most
  * heard few hundred add almost nothing to it, while each one is loaded and held in memory for the scan.
@@ -38,11 +24,11 @@ export const FAMILIAR_SEEDS = 200;
  * closest FAMILIAR_SHARE (so a small library's boost stays selective), and never more than this many (so a very large
  * one still scans and ships a bounded list).
  */
-export const FAMILIAR_MATCHES = 1000;
-export const FAMILIAR_SHARE = 0.1;
-export const FAMILIAR_CACHE_SECONDS = 3 * 3600;
+const FAMILIAR_MATCHES = 1000;
+const FAMILIAR_SHARE = 0.1;
+const FAMILIAR_CACHE_SECONDS = 3 * 3600;
 /** How long "no boost" is kept: a library whose similarity data is not built yet, or a scan that failed. Short, so the boost starts once it can. */
-export const FAMILIAR_EMPTY_CACHE_SECONDS = 60;
+const FAMILIAR_EMPTY_CACHE_SECONDS = 60;
 /**
  * The scan lock: it expires after `lockSeconds` (so a process that died holding it blocks nobody for longer), a caller
  * that finds it held looks for the holder's result every `pollMs` for up to `waitMs`, then scans itself. An object so
@@ -59,7 +45,7 @@ export interface FamiliarBoost {
 export const familiarCacheKey = (userId: string) => `mixes:familiar:${userId}`;
 const familiarLockKey = (userId: string) => `mixes:familiar-lock:${userId}`;
 
-export interface SeedRow {
+interface SeedRow {
     id: string;
     plays: number;
 }
@@ -175,7 +161,9 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
         try {
             boost = await closestToSeeds(seeds);
         } catch (error) {
-            logger.debug(`[Mixes] familiarity boost failed: ${error instanceof Error ? error.message : error}`);
+            // writeKept then keeps "no boost" for FAMILIAR_EMPTY_CACHE_SECONDS (or answers with a boost another caller
+            // kept for these seeds meanwhile), so the next mix does not scan again at once.
+            logger.debug(`[Mixes] familiarity scan failed: ${error instanceof Error ? error.message : error}`);
         }
         return await writeKept(userId, { signature, boost });
     } finally {
@@ -196,7 +184,9 @@ export function familiarBoost(userId: string, now = new Date()): Promise<Familia
     if (running) return running;
     const run: Promise<FamiliarBoost | null> = resolveBoost(userId, now)
         .catch((error) => {
-            logger.debug(`[Mixes] familiarity boost failed: ${error instanceof Error ? error.message : error}`);
+            // The listener's seeds could not be read (the cache and lock steps catch their own errors): no boost this
+            // time, nothing kept.
+            logger.debug(`[Mixes] familiarity boost lookup failed: ${error instanceof Error ? error.message : error}`);
             return null;
         })
         .finally(() => {
