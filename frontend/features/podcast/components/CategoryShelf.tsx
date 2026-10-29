@@ -3,7 +3,7 @@
 import { useInView } from "@/hooks/useInView";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { usePodcastChartQuery } from "@/hooks/useQueries";
-import { PodcastShelf } from "./PodcastShelf";
+import { PodcastShelf, PodcastShelfPlaceholder } from "./PodcastShelf";
 import type { CategoryRef } from "../types";
 
 const ROW = 12;
@@ -21,7 +21,11 @@ export function CategoryShelf({ category, enabled }: { category: CategoryRef; en
     if (shows && shows.length === 0) return null;
     return (
         // A TV remote moves only between sections holding cards, so a row joins them once its shows are in.
-        <section ref={ref} className="min-h-[260px]" data-tv-section={shows ? `category-${category.id}` : undefined}>
+        <section
+            ref={ref}
+            aria-busy={!shows && !isError ? true : undefined}
+            data-tv-section={shows ? `category-${category.id}` : undefined}
+        >
             <SectionHeader type="podcast" title={category.name} showAllHref={`/podcasts/category/${category.id}`} />
             {isError && !shows ? (
                 <p className="text-sm text-[var(--text-muted)]">
@@ -30,8 +34,11 @@ export function CategoryShelf({ category, enabled }: { category: CategoryRef; en
                         try again
                     </button>
                 </p>
+            ) : shows ? (
+                <PodcastShelf podcasts={shows} />
             ) : (
-                shows && <PodcastShelf podcasts={shows} />
+                // Apple is asked one chart every 3 s, so a row can wait a while: it holds its height meanwhile.
+                <PodcastShelfPlaceholder />
             )}
         </section>
     );

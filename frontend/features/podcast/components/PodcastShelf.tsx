@@ -20,6 +20,33 @@ export function PodcastShelf({ podcasts, ranked = false }: { podcasts: Discovery
     );
 }
 
+/**
+ * A row's stand-in while its shows are on their way: cards the size of a show card, so the row already has its full
+ * height and nothing below it moves when the shows arrive.
+ */
+export function PodcastShelfPlaceholder({ count = 8 }: { count?: number }) {
+    return (
+        <HorizontalCarousel>
+            {Array.from({ length: count }, (_, i) => (
+                <CarouselItem key={i}>
+                    <div data-placeholder-card className="mx-1">
+                        <div className="aspect-square w-full rounded-lg bg-[#181818] ring-1 ring-white/10 animate-pulse" />
+                        <div className="h-0.5 mt-1" />
+                        <div className="pt-1.5 px-0.5">
+                            <div className="h-5 py-1">
+                                <div className="h-full w-3/4 rounded bg-white/[0.06]" />
+                            </div>
+                            <div className="mt-0.5 h-4 py-0.5">
+                                <div className="h-full w-1/2 rounded bg-white/[0.04]" />
+                            </div>
+                        </div>
+                    </div>
+                </CarouselItem>
+            ))}
+        </HorizontalCarousel>
+    );
+}
+
 /** One show from Apple's catalog, opening its page; `ranked` shows its chart position. */
 export function PodcastCard({
     podcast,
