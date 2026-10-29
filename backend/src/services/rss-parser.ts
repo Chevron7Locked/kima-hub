@@ -68,15 +68,12 @@ class RSSParserService {
                     ["itunes:author", "itunesAuthor"] as any,
                     ["itunes:image", "itunesImage"] as any,
                     ["itunes:explicit", "itunesExplicit"] as any,
-                    ["itunes:type", "itunesType"] as any,
                 ],
                 item: [
-                    ["itunes:author", "itunesAuthor"] as any,
                     ["itunes:duration", "itunesDuration"] as any,
                     ["itunes:image", "itunesImage"] as any,
                     ["itunes:episode", "itunesEpisode"] as any,
                     ["itunes:season", "itunesSeason"] as any,
-                    ["itunes:explicit", "itunesExplicit"] as any,
                 ],
             },
         });
@@ -123,10 +120,8 @@ class RSSParserService {
                 return { notModified: true };
             }
 
-            const xml = typeof response.data === "string" ? response.data : String(response.data);
-            const feed = await this.parser.parseString(xml);
+            const feed = await this.parser.parseString(response.data as string);
 
-            // Extract podcast metadata
             const podcast: RSSPodcast = {
                 title: feed.title || "Unknown Podcast",
                 author: (feed as any).itunesAuthor || feed.author || undefined,
@@ -142,15 +137,13 @@ class RSSParserService {
             logger.debug(`   Author: ${podcast.author || "Unknown"}`);
             logger.debug(`   Episodes found: ${feed.items?.length || 0}`);
 
-            // Extract episodes
             const episodes: RSSEpisode[] = (feed.items || [])
                 .map((item) => {
                     try {
-                        // Find audio enclosure
                         const audioEnclosure = this.findAudioEnclosure(item);
                         if (!audioEnclosure) {
                             logger.warn(
-                                ` Skipping episode "${item.title}" - no audio found`
+                                `Skipping episode "${item.title}" - no audio found`
                             );
                             return null;
                         }
@@ -216,11 +209,8 @@ class RSSParserService {
         }
     }
 
-    /**
-     * Extract image URL from feed/item
-     */
+    /** The feed's or episode's picture: its itunes:image, else its standard image. */
     private extractImageUrl(data: any): string | undefined {
-        // Try iTunes image first
         if (data.itunesImage) {
             if (typeof data.itunesImage === "string") {
                 return data.itunesImage;
@@ -233,7 +223,6 @@ class RSSParserService {
             }
         }
 
-        // Try standard image field
         if (data.image) {
             if (typeof data.image === "string") {
                 return data.image;
@@ -246,9 +235,7 @@ class RSSParserService {
         return undefined;
     }
 
-    /**
-     * Find audio enclosure in episode
-     */
+    /** The episode's first enclosure that is audio. */
     private findAudioEnclosure(
         item: any
     ): { url: string; type?: string; length?: string } | null {
@@ -269,9 +256,6 @@ class RSSParserService {
         return null;
     }
 
-    /**
-     * Check if MIME type is audio
-     */
     private isAudioMimeType(mimeType?: string): boolean {
         if (!mimeType) return false;
         return (
@@ -282,46 +266,30 @@ class RSSParserService {
         );
     }
 
-    /**
-     * Parse iTunes duration format
-     * Supports: "HH:MM:SS", "MM:SS", or just seconds
-     */
+    /** An itunes:duration in seconds: "HH:MM:SS", "MM:SS" or plain seconds; 0 when unreadable. */
     private parseDuration(duration?: string): number {
         if (!duration) return 0;
 
-        // If it's already a number (seconds)
         const asNumber = parseInt(duration);
         if (!isNaN(asNumber) && asNumber.toString() === duration) {
             return asNumber;
         }
 
-        // Parse time format (HH:MM:SS or MM:SS)
         const parts = duration.split(":").map((p) => parseInt(p));
-        if (parts.length === 3) {
-            // HH:MM:SS
-            return parts[0] * 3600 + parts[1] * 60 + parts[2];
-        } else if (parts.length === 2) {
-            // MM:SS
-            return parts[0] * 60 + parts[1];
-        }
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
 
         return 0;
     }
 
-    /**
-     * Parse explicit flag
-     */
     private parseExplicit(explicit?: string): boolean {
         if (!explicit) return false;
         const lower = explicit.toLowerCase();
         return lower === "yes" || lower === "true" || lower === "explicit";
     }
 
-    /**
-     * Extract iTunes ID from feed
-     */
+    /** The show's Apple id, from its link (…/podcast/name/id123456789) or its image address. */
     private extractItunesId(feed: any): string | undefined {
-        // Try to extract from feed link (e.g., https://podcasts.apple.com/us/podcast/podcast-name/id123456789)
         if (feed.link) {
             const match = feed.link.match(/\/id(\d+)/);
             if (match) {
@@ -329,7 +297,6 @@ class RSSParserService {
             }
         }
 
-        // Try from feed image URL
         if (feed.image?.url) {
             const match = feed.image.url.match(/\/id(\d+)/);
             if (match) {
