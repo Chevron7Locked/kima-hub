@@ -4,6 +4,7 @@
  */
 
 import path from "path";
+import { pathInMusicFolder } from "../utils/musicFolderPath";
 import { readdir, copyFile, unlink, mkdir, rmdir, writeFile, stat, rename } from "fs/promises";
 import { sessionLog } from "../utils/playlistLogger";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -49,7 +50,6 @@ async function moveFile(src: string, dest: string): Promise<void> {
  */
 async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
     const soulseekDir = path.join(musicPath, "Soulseek");
-    const singlesDir = path.join(musicPath, "Singles");
     const migrationMarker = path.join(musicPath, ".soulseek-migrated");
 
     // Check if already migrated
@@ -136,13 +136,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                 }
             }
 
-            // Sanitize for filesystem
-            const sanitize = (name: string) => name.replace(/[<>:"/\\|?*]/g, "_").trim();
-            artist = sanitize(artist);
-            album = sanitize(album);
-
-            // Destination path
-            const destDir = path.join(singlesDir, artist, album);
+            const destDir = pathInMusicFolder(musicPath, "Singles", artist, album);
             const destFile = path.join(destDir, filename);
 
             // Skip if destination already exists

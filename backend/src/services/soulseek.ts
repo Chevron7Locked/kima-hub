@@ -4,6 +4,7 @@
  */
 
 import path from "path";
+import { pathInMusicFolder } from "../utils/musicFolderPath";
 import fs from "fs";
 import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
@@ -51,16 +52,8 @@ interface SearchTrackResult {
     allMatches: TrackMatch[];
 }
 
-const sanitizePathPart = (name: string) => name.replace(/[<>:"/\\|?*]/g, "_").trim();
-
 function singlesPath(musicPath: string, artistName: string, albumName: string, fileName: string): string {
-    return path.join(
-        musicPath,
-        "Singles",
-        sanitizePathPart(artistName),
-        sanitizePathPart(albumName),
-        sanitizePathPart(fileName)
-    );
+    return pathInMusicFolder(musicPath, "Singles", artistName, albumName, fileName);
 }
 
 interface RateLimiterWaiter {

@@ -1,8 +1,7 @@
-import { logger } from "../utils/logger";
-import { safeError } from "../utils/errors";
-
 /** Soulseek routes: UI searches and track downloads over the vendored soulseek-ts connection. */
 
+import { logger } from "../utils/logger";
+import { safeError } from "../utils/errors";
 import { Router } from "express";
 import { requireAuth, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
@@ -11,7 +10,7 @@ import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
 import { prisma } from "../utils/db";
 import fs from "fs";
-import path from "path";
+import { pathInMusicFolder } from "../utils/musicFolderPath";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
 
@@ -28,16 +27,22 @@ const searchSessions = new Map<string, SearchSession>();
 const SEARCH_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_SEARCH_SESSIONS = 50;
 
+/** The last part of a peer's path, which may use either slash; empty when the path ends in one. */
+const leafName = (peerPath: string) => peerPath.split(/[/\\]/).pop() ?? "";
+
+/** A song title from a file name: no extension, no leading track number. */
+const titleFromFileName = (fileName: string) =>
+    fileName.replace(/\.[^.]+$/, "").replace(/^\d+[\s.\-_]*/, "").replace(/^\s*-\s*/, "").trim();
+
 function formatSearchResult(response: FileSearchResponse) {
     return response.files.map((file) => {
         const fullPath = file.filename;
-        const filename = fullPath.split(/[/\\]/).pop() || fullPath;
+        const filename = leafName(fullPath) || fullPath;
         const format = filename.toLowerCase().endsWith(".flac") ? "flac" : "mp3";
         const pathParts = fullPath.split(/[/\\]/);
         const parsedArtist = pathParts.length > 2 ? pathParts[pathParts.length - 3] : undefined;
         const parsedAlbum = pathParts.length > 1 ? pathParts[pathParts.length - 2] : undefined;
-        const nameWithoutExt = filename.replace(/\.[^.]+$/, "");
-        const parsedTitle = nameWithoutExt.replace(/^\d+[\s.\-_]*/, "").replace(/^\s*-\s*/, "").trim() || undefined;
+        const parsedTitle = titleFromFileName(filename) || undefined;
 
         return {
             username: response.username,
@@ -203,7 +208,7 @@ router.post(
                         r.format === "flac" || r.bitrate === 0 || r.bitrate >= 128
                     );
 
-                    if (highQuality.length > 0 && userId) {
+                    if (highQuality.length > 0) {
                         const toSend = highQuality.slice(0, MAX_STREAMED_RESULTS - streamedCount);
                         streamedCount += toSend.length;
 
@@ -222,13 +227,11 @@ router.post(
                 })
                 .then((result) => {
                     try {
-                        if (userId) {
-                            eventBus.emit({
-                                type: "search:complete",
-                                userId,
-                                payload: { searchId, found: result.found, matchCount: result.allMatches.length },
-                            });
-                        }
+                        eventBus.emit({
+                            type: "search:complete",
+                            userId,
+                            payload: { searchId, found: result.found, matchCount: result.allMatches.length },
+                        });
                         logger.debug(
                             `[Soulseek] Search ${searchId} completed: ${result.allMatches.length} matches`,
                         );
@@ -238,13 +241,11 @@ router.post(
                 })
                 .catch((err) => {
                     try {
-                        if (userId) {
-                            eventBus.emit({
-                                type: "search:complete",
-                                userId,
-                                payload: { searchId, found: false, matchCount: 0, error: err.message },
-                            });
-                        }
+                        eventBus.emit({
+                            type: "search:complete",
+                            userId,
+                            payload: { searchId, found: false, matchCount: 0, error: err.message },
+                        });
                         logger.error(
                             `[Soulseek] Search ${searchId} failed:`,
                             err.message,
@@ -311,16 +312,14 @@ router.post(
                 });
             }
 
-            // Derive artist/title from filename if not provided
+            const fileName = filename || leafName(filepath) || "track.mp3";
+
+            // Without an artist or title, the file name stands in.
             let resolvedArtist = artist;
             let resolvedTitle = title;
 
             if (!resolvedArtist || !resolvedTitle) {
-                // Try to extract from filename (strip extension and track number)
-                const name = (filename || filepath.split(/[/\\]/).pop() || "")
-                    .replace(/\.[^.]+$/, "")
-                    .replace(/^\d+[\s.\-_]*/, "")
-                    .trim();
+                const name = titleFromFileName(filename || leafName(filepath));
 
                 if (!resolvedTitle) resolvedTitle = name || "Unknown";
                 if (!resolvedArtist) resolvedArtist = "Unknown";
@@ -336,24 +335,14 @@ router.post(
                 });
             }
 
-            // Build destination path: musicPath/artist/album/filename
-            const sanitize = (str: string) =>
-                str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-                   .replace(/\.\./g, "_")  // Block parent directory traversal
-                   .replace(/^\.+/, "");    // Block hidden files
-            const destPath = path.join(
-                musicPath,
-                sanitize(resolvedArtist),
-                sanitize(album || "Unknown Album"),
-                sanitize(filename || filepath.split(/[/\\]/).pop() || "track.mp3"),
-            );
+            const destPath = pathInMusicFolder(musicPath, resolvedArtist, album || "Unknown Album", fileName);
 
             logger.debug(`[Soulseek] Downloading from ${username}: ${filepath} -> ${destPath}`);
 
             const match = {
                 username,
                 fullPath: filepath,
-                filename: filename || filepath.split(/[/\\]/).pop() || "track.mp3",
+                filename: fileName,
                 size: 0,
                 quality: "unknown",
                 score: 0,
@@ -443,8 +432,6 @@ router.post(
         }
     },
 );
-
-
 
 /**
  * POST /soulseek/disconnect
