@@ -1,8 +1,4 @@
-
-/**
- * Utility functions for normalizing artist and album names
- * to handle case-sensitivity and other variations
- */
+/** Artist and album name helpers: Various Artists, tag cleaning, edition markers, names from folder paths. */
 
 /** Canonical name for compilation/various artists. */
 export const VARIOUS_ARTISTS_CANONICAL = "Various Artists";
@@ -18,7 +14,6 @@ export const UNKNOWN_ARTIST = "Unknown Artist";
  * Covers: VA, V.A., V/A, V.A, Various, Various Artist(s), <Various Artists>, etc.
  */
 export function canonicalizeVariousArtists(name: string): string {
-    // Strip angle brackets and trim
     const cleaned = name.trim().replace(/^<|>$/g, '');
 
     // Case-insensitive regex patterns for Various Artists variations
@@ -43,8 +38,6 @@ export function sanitizeTagString(value: string | null | undefined): string {
     if (value == null) return "";
     return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
 }
-
-
 
 // Words that mark another edition of the same album, matched as whole words.
 const EDITION_WORD =
@@ -84,7 +77,6 @@ export function stripAlbumEdition(title: string): string {
         .replace(/\s+/g, " ")
         .trim();
 }
-
 
 /**
  * Artist name from a folder name: "Artist - Album (Year) FLAC" -> "Artist",
@@ -127,26 +119,28 @@ export function parseArtistFromPath(folderName: string): string | null {
     return null;
 }
 
+/** A relative path's folders and file name, either separator; null for a file at the root. */
+function pathParts(relativePath: string): string[] | null {
+    if (!relativePath) return null;
+    const parts = relativePath.replace(/\\/g, "/").split("/");
+    return parts.length < 2 ? null : parts;
+}
+
 /**
  * Artist from a relative path (either separator): the album folder name, then
  * the grandparent folder, then "Artist - Album - Track - Title" filenames.
  */
 export function extractArtistFromRelativePath(relativePath: string): string | null {
-    if (!relativePath) return null;
-
-    // Normalize path separators to forward slashes for cross-platform compatibility
-    const normalizedPath = relativePath.replace(/\\/g, '/');
-    const parts = normalizedPath.split('/');
-    if (parts.length < 2) return null;
+    const parts = pathParts(relativePath);
+    if (!parts) return null;
 
     const albumFolder = parts[parts.length - 2];
     const fileName = parts[parts.length - 1];
 
-    // Strategy 1: Parse "Artist - Album" from album folder name
+    // "Artist - Album" in the album folder's name; the grandparent folder; "Artist - Album - Track - Title" files.
     const fromAlbumFolder = parseArtistFromPath(albumFolder);
     if (fromAlbumFolder) return fromAlbumFolder;
 
-    // Strategy 2: Grandparent folder = artist (standard Artist/Album/Track layout)
     if (parts.length >= 3) {
         const grandparent = parts[parts.length - 3];
         const genericFolders = ['music', 'songs', 'audio', 'media', 'downloads', 'library'];
@@ -155,7 +149,6 @@ export function extractArtistFromRelativePath(relativePath: string): string | nu
         }
     }
 
-    // Strategy 3: Parse "Artist - Album - Track - Title.ext" from filename
     const baseName = fileName.replace(/\.[^.]+$/, '');
     const dashSegments = baseName.split(/\s+-\s+/);
     if (dashSegments.length >= 3) {
@@ -170,13 +163,6 @@ export function extractArtistFromRelativePath(relativePath: string): string | nu
 
 /** Album title from a relative path (either separator): the parent folder, or null at the root. */
 export function extractAlbumFromRelativePath(relativePath: string): string | null {
-    if (!relativePath) return null;
-
-    // Normalize path separators to forward slashes for cross-platform compatibility
-    const normalizedPath = relativePath.replace(/\\/g, '/');
-    const parts = normalizedPath.split('/');
-    if (parts.length < 2) return null;
-
-    const albumFolder = parts[parts.length - 2];
-    return albumFolder || null;
+    const parts = pathParts(relativePath);
+    return parts?.[parts.length - 2] || null;
 }
