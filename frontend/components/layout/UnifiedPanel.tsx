@@ -87,7 +87,12 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const settingsActive = showSettings && !!settingsContent;
 
     return (
-        <div className="shrink-0 h-full relative z-(--z-raised)" style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}>
+        // The frame's width moves with the panel's slide, on the same curve, so the page beside it is pushed the way the
+        // left library panel pushes it, instead of jumping to its new width while the panel slides over it.
+        <div
+            className="shrink-0 h-full relative z-(--z-raised) transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+            style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
+        >
             <aside
                 id="activity-panel"
                 aria-label="listening and activity"
