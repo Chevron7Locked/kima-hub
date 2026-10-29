@@ -3,13 +3,9 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
+import { QUEUE_LENGTH } from "../utils/systemSettings";
 
 const router = express.Router();
-
-/** Fallback when there is no settings row yet, and the ceiling on any setting. */
-const QUEUE_LIMIT_DEFAULT = 10000;
-const QUEUE_LIMIT_MIN = 100;
-const QUEUE_LIMIT_MAX = 100000;
 
 /** Cached for a minute: this is read on every queue write. */
 let cachedLimit: { value: number; at: number } | null = null;
@@ -17,7 +13,7 @@ let cachedLimit: { value: number; at: number } | null = null;
 /** The operator's queue length limit, clamped on read in case the stored value was edited by hand. */
 async function queueLimit(): Promise<number> {
     if (cachedLimit && Date.now() - cachedLimit.at < 60_000) return cachedLimit.value;
-    let value = QUEUE_LIMIT_DEFAULT;
+    let value: number = QUEUE_LENGTH.default;
     try {
         const settings = await prisma.systemSettings.findUnique({
             where: { id: "default" },
@@ -27,7 +23,7 @@ async function queueLimit(): Promise<number> {
     } catch {
         // A settings read that fails must not stop somebody's queue saving.
     }
-    value = Math.min(QUEUE_LIMIT_MAX, Math.max(QUEUE_LIMIT_MIN, Math.floor(value)));
+    value = Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
     cachedLimit = { value, at: Date.now() };
     return value;
 }
@@ -42,15 +38,7 @@ router.get("/", requireAuth, async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const playbackState = await prisma.playbackState.findUnique({
-            where: { userId },
-        });
-
-        if (!playbackState) {
-            return res.json(null);
-        }
-
-        res.json(playbackState);
+        res.json(await prisma.playbackState.findUnique({ where: { userId } }));
     } catch (error) {
         logger.error("Get playback state error:", error);
         res.status(500).json({ error: "Failed to get playback state" });
@@ -71,14 +59,8 @@ router.post("/", requireAuth, async (req, res) => {
             isShuffle,
         } = req.body;
 
-        if (!playbackType) {
-            return res.status(400).json({ error: "playbackType is required" });
-        }
-
-        const validPlaybackTypes = ["track", "audiobook", "podcast"];
-        if (!validPlaybackTypes.includes(playbackType)) {
-            logger.warn(`[PlaybackState] Invalid playbackType: ${playbackType}`);
-            return res.status(400).json({ error: "Invalid playbackType" });
+        if (!["track", "audiobook", "podcast"].includes(playbackType)) {
+            return res.status(400).json({ error: "playbackType must be track, audiobook or podcast" });
         }
 
         let safeQueue: any[] | null = null;
@@ -87,7 +69,7 @@ router.post("/", requireAuth, async (req, res) => {
                 .slice(0, await queueLimit())
                 .filter((item: any) => item && item.id)
                 .map((item: any) => ({
-                    id: String(item.id || ""),
+                    id: String(item.id),
                     title: String(item.title || "Unknown").substring(0, 500),
                     // The title as edited in Kima, so every device shows the edit.
                     displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : null,

@@ -60,7 +60,7 @@ async function readLocalCover(ref: string): Promise<CoverBytes | null> {
 // Only covers Kima stores itself are served. A stored cover whose file has gone
 // missing is looked up again through the artwork service.
 async function resolveCoverBytes(trackId: string): Promise<CoverBytes | null> {
-    const row = await prisma.track.findFirst({
+    const row = await prisma.track.findUnique({
         where: { id: trackId },
         select: {
             album: {
@@ -135,6 +135,8 @@ router.get(
 router.get(
     "/live",
     asyncHandler(async (_req: Request, res: Response) => {
+        // The first call finds the public account and reads its "share live listening" choice, which the live state
+        // reads (a later change arrives through setLiveHidden).
         await publicUserId();
         res.header("Cache-Control", "no-store");
         res.json(getLiveState());
@@ -145,6 +147,7 @@ router.get(
 router.get(
     "/live/events",
     asyncHandler(async (req: Request, res: Response) => {
+        // As above: the first call reads the public account's sharing choice.
         await publicUserId();
         if (liveListenerCount() >= LIVE_STREAM_CAP) {
             res.status(429).json({ error: "Live stream at capacity" });

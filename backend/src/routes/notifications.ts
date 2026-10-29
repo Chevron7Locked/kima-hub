@@ -16,6 +16,9 @@ import {
 
 const router = Router();
 
+/** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
+const NO_ALBUM_ID = "retry_";
+
 /**
  * GET /notifications
  * Get all uncleared notifications for the current user
@@ -387,8 +390,8 @@ router.post(
                     });
                 }
 
-                // Dedup: check for existing active download job (skip for synthetic retry_ MBIDs)
-                if (failedJob.targetMbid && !failedJob.targetMbid.startsWith('retry_')) {
+                // Dedup: check for an existing active download job (not for a placeholder id)
+                if (failedJob.targetMbid && !failedJob.targetMbid.startsWith(NO_ALBUM_ID)) {
                     const existingActiveJob = await prisma.downloadJob.findFirst({
                         where: {
                             userId: req.user!.id,
@@ -417,7 +420,7 @@ router.post(
                         userId: req.user!.id,
                         type: "album",
                         targetMbid:
-                            failedJob.targetMbid || `retry_${Date.now()}`,
+                            failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
                         artistMbid: failedJob.artistMbid,
                         subject: `${artistName} - ${albumTitle}`,
                         status: "processing",
@@ -511,7 +514,7 @@ router.post(
 
                             if (
                                 failedJob.targetMbid &&
-                                !failedJob.targetMbid.startsWith("retry_")
+                                !failedJob.targetMbid.startsWith(NO_ALBUM_ID)
                             ) {
                                 const { simpleDownloadManager } = await import(
                                     "../services/simpleDownloadManager"

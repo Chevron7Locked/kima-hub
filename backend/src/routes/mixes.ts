@@ -19,10 +19,6 @@ const router = Router();
 
 router.use(requireAuthOrToken);
 
-const getRequestUserId = (req: any): string | null => {
-    return req.user?.id || req.session?.userId || null;
-};
-
 /**
  * The listener's IANA time zone from `?tz=`, as GET /stats takes it: the night mixes (Late Night, Midnight Drive) read
  * "after dark" in it. Absent, the server's own zone is used (nightPlays.nightZone).
@@ -47,10 +43,8 @@ interface CachedZone {
 }
 
 /**
- * What the cache holds under `mixes:<userId>`: one list of mixes per time zone, since the night mixes depend on it, so
- * a listener whose clients send different zones (or none) is served from each zone's own list instead of every request
- * rebuilding the other's. An entry that cannot be read (corrupt JSON, a shape from before the lists were kept per zone,
- * which also carries no build time) is a miss, and so is a Redis error: the mixes are built instead.
+ * The cache under `mixes:<userId>`: one list of mixes per time zone (the night mixes depend on it), so clients sending
+ * different zones each get their own. An entry that cannot be read, or has no `zones`, is a miss, as is a Redis error.
  */
 async function readZones(userId: string): Promise<Record<string, CachedZone>> {
     try {
@@ -65,12 +59,9 @@ async function readZones(userId: string): Promise<Record<string, CachedZone>> {
 }
 
 /**
- * Stores `mixes` as this zone's list, beside the other zones' that are still fresh. This reads the entry and writes it
- * back, so two requests for different zones that build at the same moment can each write back without the other's
- * list, and the lost one is built again by its next request. That costs one rebuild and never serves a wrong list
- * (each zone's list is read only for its own zone), so it is accepted rather than locked or split over hash fields,
- * which would need the old string entries and every clear of `mixes:<userId>` to change with it. A cache that cannot
- * be written does not fail the request.
+ * Stores `mixes` as this zone's list beside the other zones' still-fresh ones. Two zones built at the same moment can
+ * drop each other's list; that costs one rebuild and never serves a wrong list, so no lock is taken. A failed write
+ * does not fail the request.
  */
 async function cacheMixes(userId: string, zone: string, mixes: any[]): Promise<void> {
     const kept = await readZones(userId);
@@ -113,17 +104,13 @@ async function loadTracksInMixOrder(trackIds: string[]): Promise<any[]> {
             },
         },
     });
-    return trackIds
-        .map((id) => tracks.find((t) => t.id === id))
-        .filter((t: any) => t !== undefined);
+    const byId = new Map(tracks.map((t) => [t.id, t]));
+    return trackIds.flatMap((id) => byId.get(id) ?? []);
 }
 
 router.get("/", async (req, res) => {
     try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
+        const userId = req.user!.id;
 
         res.json(await getMixesForUser(userId, requestedZone(req)));
     } catch (error) {
@@ -155,10 +142,8 @@ router.get("/mood/buckets/:mood", async (req, res) => {
 
         // Skip what this user was already served, then remember the ids this
         // mix actually went out with, so the next one doesn't repeat them.
-        const userId = getRequestUserId(req);
-        const remembered = userId
-            ? await moodBucketService.getRememberedTrackIds(userId, mood)
-            : [];
+        const userId = req.user!.id;
+        const remembered = await moodBucketService.getRememberedTrackIds(userId, mood);
 
         const mix = await moodBucketService.getMoodMix(
             mood,
@@ -173,9 +158,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
             });
         }
 
-        if (userId) {
-            await moodBucketService.recordServedTracks(userId, mood, mix.trackIds);
-        }
+        await moodBucketService.recordServedTracks(userId, mood, mix.trackIds);
 
         const orderedTracks = await loadTracksInMixOrder(mix.trackIds);
 
@@ -191,10 +174,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
 
 router.post("/mood/buckets/:mood/save", async (req, res) => {
     try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
+        const userId = req.user!.id;
 
         const mood = req.params.mood as MoodType;
 
@@ -205,7 +185,7 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
             });
         }
 
-        // Validate optional trackIds from request body (pure helper — see tests).
+        // The listener's own picks, if sent.
         const validation = validateSaveTrackIds(req.body.trackIds, MOOD_MIX_LIMIT);
         if ("error" in validation) {
             return res.status(400).json({ error: validation.error });
@@ -250,10 +230,7 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
 
 router.post("/refresh", async (req, res) => {
     try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
+        const userId = req.user!.id;
 
         // Regenerate with random selection (not date-based) and replace this zone's list in the cache
         const zone = await nightZone(requestedZone(req));
@@ -274,10 +251,7 @@ router.post("/refresh", async (req, res) => {
 
 router.post("/:id/save", async (req, res) => {
     try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
+        const userId = req.user!.id;
         const mixId = req.params.id;
         const customName = req.body.name;
 
@@ -357,10 +331,7 @@ router.post("/:id/save", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
     try {
-        const userId = getRequestUserId(req);
-        if (!userId) {
-            return res.status(401).json({ error: "Not authenticated" });
-        }
+        const userId = req.user!.id;
         const mixId = req.params.id;
 
         const mixes = await getMixesForUser(userId, requestedZone(req));

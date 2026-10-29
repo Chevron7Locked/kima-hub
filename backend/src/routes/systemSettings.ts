@@ -6,7 +6,7 @@ import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
-import { invalidateSystemSettingsCache } from "../utils/systemSettings";
+import { invalidateSystemSettingsCache, QUEUE_LENGTH } from "../utils/systemSettings";
 import {
     decryptOrNull,
     encryptSettings,
@@ -96,7 +96,7 @@ const systemSettingsSchema = z.object({
 
   // Advanced Settings
   transcodeCacheMaxGb: z.number().optional(),
-  maxQueueLength: z.number().int().min(100).max(100000).optional(),
+  maxQueueLength: z.number().int().min(QUEUE_LENGTH.min).max(QUEUE_LENGTH.max).optional(),
   soulseekConcurrentDownloads: z.number().min(1).max(10).optional(),
 
   // Download Preferences

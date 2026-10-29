@@ -19,6 +19,9 @@ export function invalidateSystemSettingsCache() {
     cacheExpiry = 0;
 }
 
+/** The queue length limit an operator may set (the schema's default is 10000). */
+export const QUEUE_LENGTH = { min: 100, max: 100000, default: 10000 } as const;
+
 export async function getSystemSettings(forceRefresh = false) {
     const now = Date.now();
     if (!forceRefresh && cachedSettings && cacheExpiry > now) {

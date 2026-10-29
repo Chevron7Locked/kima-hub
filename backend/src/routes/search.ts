@@ -109,8 +109,7 @@ router.get("/", async (req, res) => {
 
 /**
  * GET /search/discover?q=query&type=music|podcasts
- * Search for NEW content to discover (not in your library).
- * Cache TTL: 15 min -- external data changes infrequently.
+ * Artists from MusicBrainz, songs from the library and podcasts from Apple, cached for 15 minutes.
  */
 router.get("/discover", async (req, res) => {
     try {
@@ -124,7 +123,6 @@ router.get("/discover", async (req, res) => {
             return res.json({ results: [], aliasInfo: null });
         }
 
-        // Cache TTL: 15 min (900s) -- external API data rarely changes
         const cacheKey = `search:discover:${type}:${normalizeCacheQuery(query)}:${searchLimit}`;
         try {
             const cached = await redisClient.get(cacheKey);
@@ -289,8 +287,7 @@ router.get("/discover", async (req, res) => {
 /**
  * GET /search/discover/similar?artist=name&mbid=xxx
  * Fetch musically similar artists (ListenBrainz, then Deezer).
- * Separate from discover so main search results return immediately.
- * Cache TTL: 1 hour -- similar artists change very rarely.
+ * Separate from discover so main search results return immediately; cached for an hour.
  */
 router.get("/discover/similar", async (req, res) => {
     try {
@@ -313,10 +310,8 @@ router.get("/discover/similar", async (req, res) => {
             logger.warn("[SEARCH SIMILAR] Redis read error:", err);
         }
 
-        let similar: SimilarArtist[] = [];
-
         // artistSimilarity never throws; empty means "no data anywhere".
-        similar = await getSimilarArtists(artistMbid, artistName, 10);
+        const similar = await getSimilarArtists(artistMbid, artistName, 10);
 
         const similarArtists =
             similar.length > 0
@@ -327,7 +322,6 @@ router.get("/discover/similar", async (req, res) => {
 
         if (similar.length > 0) {
             try {
-                // Cache TTL: 1 hour (3600s) -- similar artists rarely change
                 await redisClient.setex(cacheKey, 3600, JSON.stringify(payload));
             } catch (err) {
                 logger.warn("[SEARCH SIMILAR] Redis write error:", err);

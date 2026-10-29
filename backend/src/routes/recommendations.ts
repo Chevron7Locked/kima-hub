@@ -95,10 +95,6 @@ router.get("/for-you", async (req, res) => {
         });
         const ownedArtistIds = new Set(ownedArtists.map((a) => a.artistId));
 
-        logger.debug(
-            `Filtering recommendations: ${ownedArtistIds.size} owned artists to exclude`
-        );
-
         const newArtists = recommendedArtists.filter(
             (artist) => !ownedArtistIds.has(artist.id)
         );
@@ -116,9 +112,7 @@ router.get("/for-you", async (req, res) => {
             albumCounts.map((ac) => [ac.artistId, ac._count.rgMbid])
         );
 
-        // Only use cached data (DB heroUrl or Redis cache) - no API calls during page loads.
-        // Background enrichment worker will populate cache over time.
-        // Get all cached images in a single Redis call for efficiency
+        // Pictures come from what is stored (the artist row, then the Redis cache), never a lookup during a page load.
         const artistsToCheck = newArtists.slice(0, limitNum);
         const cacheKeys = artistsToCheck
             .filter(a => !a.heroUrl)
@@ -133,7 +127,6 @@ router.get("/for-you", async (req, res) => {
             }
         }
 
-        // Build a map from cache results
         const cachedImageMap = new Map<string, string>();
         let cacheIndex = 0;
         for (const artist of artistsToCheck) {
@@ -147,7 +140,6 @@ router.get("/for-you", async (req, res) => {
         }
 
         const artistsWithMetadata = artistsToCheck.map((artist) => {
-            // Use DB heroUrl first, then Redis cache, otherwise null
             const coverArt = artist.heroUrl || cachedImageMap.get(artist.id) || null;
 
             return {
@@ -155,17 +147,6 @@ router.get("/for-you", async (req, res) => {
                 coverArt,
                 albumCount: albumCountMap.get(artist.id) || 0,
             };
-        });
-
-        logger.debug(
-            `Recommendations: Found ${artistsWithMetadata.length} new artists`
-        );
-        artistsWithMetadata.forEach((a) => {
-            logger.debug(
-                `  ${a.name}: coverArt=${a.coverArt ? "YES" : "NO"}, albums=${
-                    a.albumCount
-                }`
-            );
         });
 
         res.json({ artists: artistsWithMetadata });

@@ -15,7 +15,7 @@ jest.mock("../../config", () => ({
     config: { publicVibe: { token: "s".repeat(40), username: "listener" } },
 }));
 jest.mock("../../utils/db", () => ({
-    prisma: { track: { findFirst: jest.fn() }, user: { findUnique: jest.fn() } },
+    prisma: { track: { findUnique: jest.fn() }, user: { findUnique: jest.fn() } },
 }));
 jest.mock("../../services/publicLibraryExport", () => ({ latestLibraryExport: jest.fn() }));
 jest.mock("../../services/textEmbeddingBridge", () => ({ searchTracksByText: jest.fn() }));
@@ -208,7 +208,7 @@ describe("GET /cover/:trackId", () => {
     });
 
     it("serves the stored cover with an ETag, then 304 for it", async () => {
-        (prisma.track.findFirst as jest.Mock).mockResolvedValue({
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
             album: { coverUrl: "native:al.jpg", rgMbid: null, title: "Al", artist: { name: "Ar" } },
         });
         (getLocalImagePath as jest.Mock).mockReturnValue(file);
@@ -220,7 +220,7 @@ describe("GET /cover/:trackId", () => {
     });
 
     it("answers 404 for a track with no stored cover", async () => {
-        (prisma.track.findFirst as jest.Mock).mockResolvedValue({
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
             album: { coverUrl: null, rgMbid: null, title: "Al", artist: { name: "Ar" } },
         });
         const res = await request(app).get(`/api/public/vibe/cover/${TRACK}`).set(auth);

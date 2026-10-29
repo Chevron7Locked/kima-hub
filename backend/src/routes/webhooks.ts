@@ -50,9 +50,7 @@ router.post("/lidarr", async (req, res) => {
     try {
         const settings = await getSystemSettings();
         if (!isLidarrConfigured(settings)) {
-            logger.debug(
-                `[WEBHOOK] Lidarr webhook received but Lidarr is disabled. Ignoring.`
-            );
+            logger.debug("[WEBHOOK] Lidarr webhook received but Lidarr is disabled. Ignoring.");
             return res.status(202).json({
                 success: true,
                 ignored: true,
@@ -62,7 +60,7 @@ router.post("/lidarr", async (req, res) => {
 
         if (settings.lidarrWebhookSecret) {
             if (!res.locals.webhookVerified) {
-                logger.debug(`[WEBHOOK] Lidarr webhook received with invalid or missing secret`);
+                logger.debug("[WEBHOOK] Lidarr webhook received with invalid or missing secret");
                 return res.status(401).json({
                     error: "Unauthorized - Invalid webhook secret",
                 });
@@ -76,10 +74,6 @@ router.post("/lidarr", async (req, res) => {
 
         const eventType = req.body.eventType;
         logger.debug(`[WEBHOOK] Lidarr event: ${eventType}`);
-
-        if (process.env.DEBUG_WEBHOOKS === "true") {
-            logger.debug(`   Payload:`, JSON.stringify(req.body, null, 2));
-        }
 
         const { event, created } = await webhookEventStore.storeEvent("lidarr", eventType, req.body);
         res.json({ success: true, eventId: event.id });
