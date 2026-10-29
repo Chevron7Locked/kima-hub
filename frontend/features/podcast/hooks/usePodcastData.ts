@@ -85,7 +85,7 @@ export function usePodcastData() {
 
   const rawCoverUrl = podcast?.coverUrl || previewData?.coverUrl;
   const heroImage = rawCoverUrl ? api.getCoverArtUrl(rawCoverUrl, 1200) : null;
-  // Separate URL with token for color extraction (CORS access for canvas)
+  // The token lets a canvas read the cover's pixels for its colours.
   const colorExtractionImage = rawCoverUrl ? api.getCoverArtUrl(rawCoverUrl, 300, true) : null;
 
   // A show's neighbours come from its categories' charts, worked out by the server for a followed show and a
@@ -102,15 +102,14 @@ export function usePodcastData() {
           ? await api.getSimilarPodcasts(podcastId)
           : await api.getPreviewSimilarPodcasts(previewItunesId!);
         if (!cancelled) setSimilarPodcasts(similar);
-      } catch (error) {
-        if (!cancelled) console.error("Failed to load similar podcasts:", error);
+      } catch {
+        // The shelf is extra: without it the page just shows no "more like this".
       }
     }
 
     loadSimilarPodcasts();
     return () => { cancelled = true; };
   }, [podcast?.id, isAuthenticated, podcastId, previewItunesId]);
-  const similarTitle = "more like this";
 
   // An unsubscribed podcast is shown from its directory preview instead.
   useEffect(() => {
@@ -131,7 +130,6 @@ export function usePodcastData() {
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("Failed to load preview:", err);
           setPreviewLoadState('error');
           setPreviewError(err instanceof Error ? err.message : "Could not load podcast");
         }
@@ -169,8 +167,8 @@ export function usePodcastData() {
       )
     : [];
 
-  // The server pages from the end that was asked for; render in the order it arrived.
-  const sortedEpisodes = podcast ? [...podcast.episodes] : [];
+  // The server pages from the end that was asked for, so the episodes are already in the chosen order.
+  const episodes: Episode[] = podcast?.episodes ?? [];
 
   const needsPreviewLoad = !podcast && previewLoadState === 'idle';
   const isLoadingPreview = previewLoadState === 'loading';
@@ -187,11 +185,10 @@ export function usePodcastData() {
     heroImage,
     colorExtractionImage,
     similarPodcasts,
-    similarTitle,
     sortOrder,
     setSortOrder,
     inProgressEpisodes,
-    sortedEpisodes,
+    episodes,
     episodesUpdating,
     hasMore,
     loadMore,

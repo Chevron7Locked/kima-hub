@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from "react";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { hourLabel } from "../format";
 import type { Signature } from "../types";
 
@@ -27,7 +27,7 @@ function smooth(points: Array<[number, number]>): string {
 }
 
 export function EnergyCurve({ hourly }: { hourly: Signature["hourly"] }) {
-    const { ref, shown } = useReveal<HTMLElement>({ threshold: 0.35 });
+    const { ref, shown } = useInView<HTMLElement>({ threshold: 0.35 });
 
     const { line, band, peak, trough } = useMemo(() => {
         const byHour = new Map(hourly.map((h) => [h.hour, h]));

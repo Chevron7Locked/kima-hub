@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { hourLabel, whenLabel } from "../format";
 import type { ListeningStats } from "../types";
 
@@ -36,7 +36,7 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
     const openKey = open ? `${open.dow}:${open.hour}:${period ?? ""}` : null;
     const detail = result && result.key === openKey ? result.detail : null;
     const loading = openKey !== null && result?.key !== openKey;
-    const { ref, shown: revealed } = useReveal<HTMLElement>({ threshold: 0.2 });
+    const { ref, shown: revealed } = useInView<HTMLElement>({ threshold: 0.2 });
     // One cell holds the tab stop and the arrows move between cells; with all 168 in the tab
     // order, passing the grid would take 168 presses.
     const [cursor, setCursor] = useState<{ dow: number; hour: number }>({ dow: 1, hour: 12 });

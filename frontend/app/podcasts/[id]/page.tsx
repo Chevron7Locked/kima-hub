@@ -33,11 +33,10 @@ export default function PodcastDetailPage() {
         heroImage,
         colorExtractionImage,
         similarPodcasts,
-        similarTitle,
         sortOrder,
         setSortOrder,
         inProgressEpisodes,
-        sortedEpisodes,
+        episodes,
         episodesUpdating,
         hasMore,
         loadMore,
@@ -98,7 +97,7 @@ export default function PodcastDetailPage() {
         if (!podcast) return;
         try {
             const newest: Episode[] =
-                sortOrder === "newest" ? sortedEpisodes : (await api.getPodcast(podcast.id, { order: "newest", limit: 20 })).episodes;
+                sortOrder === "newest" ? episodes : (await api.getPodcast(podcast.id, { order: "newest", limit: 20 })).episodes;
             const pick = newest.find((ep) => !ep.progress?.isFinished) ?? newest[0];
             if (pick) handlePlayEpisode(pick, podcast);
         } catch (error) {
@@ -106,7 +105,7 @@ export default function PodcastDetailPage() {
         }
     };
 
-    const isPlayingPodcast = sortedEpisodes.some((ep) => isEpisodePlaying(ep.id)) && isPlaying;
+    const isPlayingPodcast = episodes.some((ep) => isEpisodePlaying(ep.id)) && isPlaying;
 
     return (
         <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#0a0a0a] to-black">
@@ -152,7 +151,7 @@ export default function PodcastDetailPage() {
                         <div>
                             <ContinueListening
                                 inProgressEpisodes={inProgressEpisodes}
-                                sortedEpisodes={sortedEpisodes}
+                                episodes={episodes}
                                 isEpisodePlaying={isEpisodePlaying}
                                 isPlaying={isPlaying}
                                 onPlayEpisode={(episode) => handlePlayEpisode(episode, podcast)}
@@ -176,14 +175,14 @@ export default function PodcastDetailPage() {
                     {podcast && (
                         <div>
                             <EpisodeList
-                                episodes={sortedEpisodes}
+                                episodes={episodes}
                                 sortOrder={sortOrder}
                                 onSortOrderChange={setSortOrder}
                                 isEpisodePlaying={isEpisodePlaying}
                                 isPlaying={isPlaying}
                                 onPlayPause={(episode) => handlePlayPauseEpisode(episode, podcast)}
                                 onMarkComplete={handleMarkEpisodeComplete}
-                                fallbackCoverUrl={podcast?.coverUrl}
+                                fallbackCoverUrl={podcast.coverUrl}
                                 total={episodeCount}
                                 updating={episodesUpdating}
                                 onLoadMore={hasMore ? () => loadMore() : undefined}
@@ -194,7 +193,7 @@ export default function PodcastDetailPage() {
 
                     {similarPodcasts.length > 0 && (
                         <section>
-                            <SectionHeader title={similarTitle} type="podcast" />
+                            <SectionHeader title="more like this" type="podcast" />
                             <PodcastShelf podcasts={similarPodcasts} />
                         </section>
                     )}

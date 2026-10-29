@@ -5,7 +5,7 @@
  * the files are yours.
  */
 
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { KeyWheel } from "./KeyWheel";
 import { EnergyCurve } from "./EnergyCurve";
 import type { Signature as Sig } from "../types";
@@ -25,7 +25,7 @@ export function SignatureSound({ signature: s, period }: { signature: Sig; perio
 
 /** Shelf (grey) and listening (amber) marked on one shared track, so the gap is seen. */
 export function OwnedAgainstPlayed({ signature: s }: { signature: Sig }) {
-    const { ref, shown } = useReveal<HTMLDivElement>({ threshold: 0.2 });
+    const { ref, shown } = useInView<HTMLDivElement>({ threshold: 0.2 });
     if (s.ownedVsPlayed.length === 0) return null;
 
     // How far played energy sits above the library's.

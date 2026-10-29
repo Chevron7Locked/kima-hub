@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { monthLabel, monthLong } from "../format";
 import type { ListeningStats } from "../types";
 
@@ -46,7 +46,7 @@ const plays = (n: number) => `${n.toLocaleString()} ${n === 1 ? "play" : "plays"
 export function ShapePlot({ listening, period }: { listening: ListeningStats; period?: string }) {
     const { shape, drift } = listening;
     const [at, setAt] = useState<number | null>(null);
-    const { ref, shown } = useReveal<HTMLElement>({ threshold: 0.25 });
+    const { ref, shown } = useInView<HTMLElement>({ threshold: 0.25 });
 
     /* Pointing at the cloud asks the server what is there. Debounced, and
      * ticketed so an answer for a point already left never lands. */

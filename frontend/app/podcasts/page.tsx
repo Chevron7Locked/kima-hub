@@ -25,8 +25,6 @@ import { NewEpisodes } from "@/features/podcast/components/NewEpisodes";
 import { CategoryShelf } from "@/features/podcast/components/CategoryShelf";
 import { sortShows, type ShowSort } from "@/features/podcast/utils";
 
-type SortOption = ShowSort;
-
 export default function PodcastsPage() {
     const { isAuthenticated } = useAuth();
     const router = useRouter();
@@ -49,7 +47,7 @@ export default function PodcastsPage() {
     const [isSubscribingRss, setIsSubscribingRss] = useState(false);
     const [rssError, setRssError] = useState<string | null>(null);
     const [isRefreshingAll, setIsRefreshingAll] = useState(false);
-    const [sortBy, setSortBy] = useState<SortOption>("title");
+    const [sortBy, setSortBy] = useState<ShowSort>("title");
     const [itemsPerPage, setItemsPerPage] = useState(50);
     const [currentPage, setCurrentPage] = useState(1);
 
@@ -202,7 +200,7 @@ export default function PodcastsPage() {
                                     <select
                                         value={sortBy}
                                         onChange={(e) => {
-                                            setSortBy(e.target.value as SortOption);
+                                            setSortBy(e.target.value as ShowSort);
                                             setCurrentPage(1);
                                         }}
                                         aria-label="sort your shows"

@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { usePlaySlice } from "../usePlaySlice";
 import type { Signature } from "../types";
 
@@ -43,7 +43,7 @@ function sector(from: number, to: number, rInner: number, rOuter: number): strin
 }
 
 export function KeyWheel({ keys, period }: { keys: NonNullable<Signature["key"]>; period?: string }) {
-    const { ref, shown } = useReveal<HTMLElement>({ threshold: 0.3 });
+    const { ref, shown } = useInView<HTMLElement>({ threshold: 0.3 });
     const { play, busy } = usePlaySlice();
     const [hover, setHover] = useState<{ name: string; plays: number } | null>(null);
 

@@ -6,10 +6,10 @@
  */
 
 import type { ShelfStats } from "../types";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 
 export function Decades({ decades }: { decades: ShelfStats["decades"] }) {
-    const { ref, shown } = useReveal<HTMLElement>({ threshold: 0.35 });
+    const { ref, shown } = useInView<HTMLElement>({ threshold: 0.35 });
     if (decades.length < 2) return null;
 
     const max = decades.reduce((m, d) => Math.max(m, d.albums), 0);

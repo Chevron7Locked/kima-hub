@@ -8,7 +8,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 
 interface ContinueListeningProps {
     inProgressEpisodes: Episode[];
-    sortedEpisodes: Episode[];
+    episodes: Episode[];
     isEpisodePlaying: (episodeId: string) => boolean;
     isPlaying: boolean;
     onPlayEpisode: (episode: Episode) => void;
@@ -17,7 +17,7 @@ interface ContinueListeningProps {
 
 export function ContinueListening({
     inProgressEpisodes,
-    sortedEpisodes,
+    episodes,
     isEpisodePlaying,
     isPlaying,
     onPlayEpisode,
@@ -33,14 +33,14 @@ export function ContinueListening({
         return currentDate > prevDate ? current : prev;
     });
 
-    const currentIndex = sortedEpisodes.findIndex(
+    const currentIndex = episodes.findIndex(
         (ep) => ep.id === recentEpisode.id
     );
     const previousEpisode =
-        currentIndex > 0 ? sortedEpisodes[currentIndex - 1] : null;
+        currentIndex > 0 ? episodes[currentIndex - 1] : null;
     const nextEpisode =
-        currentIndex < sortedEpisodes.length - 1
-            ? sortedEpisodes[currentIndex + 1]
+        currentIndex < episodes.length - 1
+            ? episodes[currentIndex + 1]
             : null;
 
     const isCurrentPlaying = isEpisodePlaying(recentEpisode.id);

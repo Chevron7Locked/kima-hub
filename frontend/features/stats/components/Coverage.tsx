@@ -6,7 +6,7 @@
  */
 
 import { percent } from "../format";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { usePlaySlice } from "../usePlaySlice";
 import { Shuffle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -20,7 +20,7 @@ interface Row {
 }
 
 export function Coverage({ shelf }: { shelf: ShelfStats }) {
-    const { ref, shown } = useReveal<HTMLDivElement>({ threshold: 0.3 });
+    const { ref, shown } = useInView<HTMLDivElement>({ threshold: 0.3 });
     const { play, busy } = usePlaySlice();
     const rows: Row[] = [
         { label: "tracks played", part: shelf.tracks.heard, whole: shelf.tracks.total, unit: "tracks" },

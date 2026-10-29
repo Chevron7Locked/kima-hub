@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useReveal } from "../useReveal";
+import { useInView } from "@/hooks/useInView";
 import { FitPanel } from "./FitPanel";
 import { Shortcuts } from "./Shortcuts";
 import { tabListKeyDown } from "@/lib/tabListKeys";
@@ -161,7 +161,7 @@ export function Chapters({ chapters, aside }: { chapters: Chapter[]; aside?: Rea
 }
 
 function Panel({ chapter, open }: { chapter: Chapter; open: boolean }) {
-    const { ref, shown } = useReveal<HTMLElement>({ threshold: 0.5, rootMargin: "0px" });
+    const { ref, shown } = useInView<HTMLElement>({ threshold: 0.5, rootMargin: "0px" });
     return (
         <section
             ref={ref}
