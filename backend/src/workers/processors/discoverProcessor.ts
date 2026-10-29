@@ -29,43 +29,17 @@ export async function processDiscoverWeekly(
         return { success: false, downloadsQueued: 0, error: user ? ACQUIRE_REFUSED : "No such user" };
     }
 
-    logger.debug(
-        `[DiscoverJob ${job.id}] Generating Discover Weekly for user ${userId}`
-    );
-
+    logger.debug(`[DiscoverJob ${job.id}] Generating Discover Weekly for user ${userId}`);
     await job.updateProgress(10);
-
     try {
-        // generatePlaylist has no progress callback; progress is reported at key stages.
-        await job.updateProgress(20);
-
-        logger.debug(
-            `[DiscoverJob ${job.id}] Calling discoverWeeklyService.generatePlaylist...`
-        );
+        // generatePlaylist answers success or throws; the batch's progress reaches the page from checkBatchCompletion.
         const result = await discoverWeeklyService.generatePlaylist(userId);
-
-        // The batch's progress reaches the page from checkBatchCompletion, which generation runs before it returns.
-        logger.debug(`[DiscoverJob ${job.id}] Result:`, result);
-
-        await job.updateProgress(100); // Complete
-
-        logger.debug(
-            `[DiscoverJob ${job.id}] Generation complete: SUCCESS`
-        );
-
-        return {
-            success: result.success,
-            downloadsQueued: result.downloadsQueued,
-            batchId: result.batchId,
-        };
+        await job.updateProgress(100);
+        logger.debug(`[DiscoverJob ${job.id}] ${result.downloadsQueued} album downloads queued (batch ${result.batchId})`);
+        return { success: result.success, downloadsQueued: result.downloadsQueued, batchId: result.batchId };
     } catch (error: any) {
-        logger.error(
-            `[DiscoverJob ${job.id}] Generation failed with exception:`,
-            error
-        );
-        logger.error(`[DiscoverJob ${job.id}] Stack trace:`, error.stack);
-
-        // Re-throw so BullMQ can track the failure and trigger retries
+        // Thrown on so BullMQ records the failure and retries.
+        logger.error(`[DiscoverJob ${job.id}] Generation failed:`, error);
         throw error;
     }
 }
