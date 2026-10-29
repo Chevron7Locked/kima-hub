@@ -354,8 +354,7 @@ describe("the weekly regeneration's cleanup", () => {
     it("deletes a Soulseek album's files as well as its rows", async () => {
         const soul = await addAlbum({ key: "wsoul", rg: `${P}_rg_wsoul`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_wsoul`, "Album wsoul");
-        const result = await discoveryAlbumLifecycle.processBeforeGeneration(USER);
-        expect(result.deleted).toBe(1);
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect(fs.existsSync(soul.file)).toBe(false);
         expect(fs.existsSync(soul.dir)).toBe(false);
         expect(await prisma.album.count({ where: { id: soul.albumId } })).toBe(0);
@@ -363,9 +362,7 @@ describe("the weekly regeneration's cleanup", () => {
 
     it("keeps a Lidarr-held album that Lidarr did not delete, and tells the listener in the tray", async () => {
         const held = await addAlbum({ key: "wheld", rg: `${P}_rg_wheld`, suggestion: { lidarrAlbumId: 903 } });
-        const result = await discoveryAlbumLifecycle.processBeforeGeneration(USER);
-        expect(result.deleted).toBe(0);
-        expect(result.lidarrFailed).toHaveLength(1);
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect(fs.existsSync(held.file)).toBe(true);
         expect(await prisma.album.count({ where: { id: held.albumId } })).toBe(1);
         expect((await prisma.discoveryAlbum.findUnique({ where: { id: held.suggestionId! } }))?.status).toBe("ACTIVE");
@@ -383,8 +380,7 @@ describe("the weekly regeneration's cleanup", () => {
         });
         const twin = await addAlbum({ key: "wtwin", rg: `${P}_rg_wtwin`, title: "Low Tide Hum", location: "LIBRARY" });
 
-        const result = await discoveryAlbumLifecycle.processBeforeGeneration(USER);
-        expect(result.moved).toBe(1);
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect((await prisma.album.findUnique({ where: { id: liked.albumId } }))?.location).toBe("LIBRARY");
         expect(await prisma.ownedAlbum.count({ where: { rgMbid: `${P}_rg_wlike_scanned`, source: "discovery_liked" } })).toBe(1);
         expect(await prisma.ownedAlbum.count({ where: { rgMbid: `${P}_rg_wtwin` } })).toBe(0);
@@ -508,8 +504,7 @@ describe("which albums Kima deletes files of", () => {
 
     it("the weekly regeneration also keeps an album with no download record and reports it", async () => {
         const album = await addAlbum({ key: "wnojob", rg: `${P}_rg_wnojob`, suggestion: {} });
-        const result = await discoveryAlbumLifecycle.processBeforeGeneration(USER);
-        expect(result.deleted).toBe(0);
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         await expectKept(album);
         expect((await trayRow())!.message).toContain(UNKNOWN);
     });
@@ -575,8 +570,7 @@ describe("an error while clearing one album", () => {
 
     it("also reaches the tray from the weekly regeneration", async () => {
         await boomAlbum("wboom");
-        const result = await discoveryAlbumLifecycle.processBeforeGeneration(USER);
-        expect(result.lidarrFailed).toHaveLength(1);
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect((await trayRow())!.message).toContain("Kima hit an error clearing this album");
     });
 });

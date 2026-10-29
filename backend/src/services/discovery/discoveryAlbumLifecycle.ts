@@ -132,11 +132,10 @@ class DiscoveryAlbumLifecycle {
     }
 
     /** Before a new generation, Discover is cleared (clearDiscover); what Lidarr kept is reported in the tray. */
-    async processBeforeGeneration(userId: string): Promise<{ moved: number; deleted: number; lidarrFailed: ClearFailure[] }> {
-        const result = await this.clearDiscover(userId);
+    async processBeforeGeneration(userId: string): Promise<void> {
+        const { lidarrFailed } = await this.clearDiscover(userId);
         // A regeneration only retries the suggestions' albums, so it can add to the tray row but not clear it.
-        await reportLidarrFailures(userId, result.lidarrFailed, { complete: false });
-        return { moved: result.moved, deleted: result.deleted, lidarrFailed: result.lidarrFailed };
+        await reportLidarrFailures(userId, lidarrFailed, { complete: false });
     }
 }
 
