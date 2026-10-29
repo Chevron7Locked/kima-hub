@@ -1,5 +1,6 @@
 import type { MapTrack } from "@/features/vibe/types";
 import type { DiscoveryPodcast, ForYouRow, ListeningRow, PodcastCategory } from "@/features/podcast/types";
+import type { Mix } from "@/features/home/types";
 import { backendUrl } from "@/lib/backend-url";
 
 const AUTH_TOKEN_KEY = "auth_token";
@@ -1629,7 +1630,7 @@ class ApiClient {
 
     // Programmatic Mixes
     async getMixes() {
-        return this.request<ApiData[]>(`/mixes?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
+        return this.request<Mix[]>(`/mixes?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
     }
 
     async getMix(id: string) {

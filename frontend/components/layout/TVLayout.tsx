@@ -13,26 +13,20 @@ import { RefreshCw, SkipBack, SkipForward, Shuffle, Repeat } from "lucide-react"
 import { CachedImage } from "@/components/ui/CachedImage";
 import { KimaMark } from "@/components/ui/KimaMark";
 import { shownTitle } from "@/lib/track-title";
+import { useLibrarySync } from "@/hooks/useLibrarySync";
+import { NAV, isCurrentNav } from "./navItems";
 
-const tvNavigation = [
-    { name: "Home", href: "/" },
-    { name: "Search", href: "/search" },
-    { name: "Collection", href: "/collection" },
-    { name: "Audiobooks", href: "/audiobooks" },
-    { name: "Podcasts", href: "/podcasts" },
-    { name: "Discovery", href: "/discover" },
-    { name: "Playlists", href: "/playlists" },
-];
+const tvNavigation = [NAV.home, NAV.search, NAV.collection, NAV.audiobooks, NAV.podcasts, NAV.discover, NAV.playlists];
 
 const FIRE_TV_BACK = 4;
 
 export function TVLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
-    // Start with nav focused and first tab selected for immediate D-pad usability
+    // The remote starts on the first tab, so the D-pad works at once.
     const [focusedTabIndex, setFocusedTabIndex] = useState(0);
     const [isNavFocused, setIsNavFocused] = useState(true);
-    const [isSyncing, setIsSyncing] = useState(false);
+    const { sync: handleSync, syncing: isSyncing } = useLibrarySync();
     const navRef = useRef<HTMLDivElement>(null);
 
     const {
@@ -114,19 +108,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
 
     const clampedCurrentTime = clampTime(currentTime, duration);
 
-    const handleSync = async () => {
-        setIsSyncing(true);
-        try {
-            await api.scanLibrary();
-        } catch (error) {
-            console.error("Sync failed:", error);
-        } finally {
-            setIsSyncing(false);
-        }
-    };
-
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        // Media keys work globally regardless of focus state
         if (hasMedia) {
             switch (e.key) {
                 case DPAD_KEYS.PLAY_PAUSE:
@@ -173,7 +155,6 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             } else if (e.key === DPAD_KEYS.DOWN) {
                 e.preventDefault();
                 setIsNavFocused(false);
-                // Use the navigation hook to focus first card
                 focusFirstCard();
             } else if (e.key === DPAD_KEYS.CENTER) {
                 e.preventDefault();
@@ -202,7 +183,6 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         return () => window.removeEventListener("keydown", backToEscape, true);
     }, []);
 
-    // Focus correct nav tab when isNavFocused changes or focusedTabIndex changes
     useEffect(() => {
         if (isNavFocused && navRef.current) {
             const tabs = navRef.current.querySelectorAll<HTMLAnchorElement>('[data-tv-tab]');
@@ -232,8 +212,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
 
                 <nav ref={navRef} className="tv-nav-links">
                     {tvNavigation.map((item, index) => {
-                        const isActive = pathname === item.href ||
-                            (item.href !== "/" && pathname.startsWith(item.href));
+                        const isActive = isCurrentNav(item, pathname);
                         const isFocused = isNavFocused && focusedTabIndex === index;
 
                         return (

@@ -2,16 +2,26 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { Settings, RefreshCw, LogOut, Compass, X, Radio, ChartNoAxesColumn, CalendarClock } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { Settings, RefreshCw, LogOut, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { notify } from "@/lib/notify";
 import { KimaMark } from "@/components/ui/KimaMark";
 import { APP_VERSION } from "@/lib/version";
 import { openWhatsNewOrChangelog } from "@/components/whats-new/WhatsNewGate";
 import { useVersionChip } from "@/components/whats-new/useVersionChip";
+import { useLibrarySync } from "@/hooks/useLibrarySync";
+import { NAV, isCurrentNav } from "./navItems";
+
+/** What the phone menu adds to the tab bar's destinations. */
+const QUICK_LINKS = [NAV.discover, NAV.radio, NAV.releases, NAV.stats];
+
+const linkClass = (current: boolean) =>
+    cn(
+        "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
+        current ? "bg-white/10 text-white" : "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
+    );
 
 interface MobileSidebarProps {
     isOpen: boolean;
@@ -23,9 +33,8 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const router = useRouter();
     const { logout, user } = useAuth();
     const chip = useVersionChip();
-    const [isSyncing, setIsSyncing] = useState(false);
+    const { sync, syncing: isSyncing } = useLibrarySync();
     const isFirstRender = useRef(true);
-    const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Close on route change (skip initial mount)
     useEffect(() => {
@@ -36,24 +45,8 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
         onClose();
     }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    useEffect(() => {
-        return () => {
-            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-        };
-    }, []);
-
     const handleSync = async () => {
-        if (isSyncing) return;
-
-        try {
-            setIsSyncing(true);
-            await api.scanLibrary();
-            onClose();
-        } catch {
-            notify.error("couldn't start the library scan");
-        } finally {
-            syncTimeoutRef.current = setTimeout(() => setIsSyncing(false), 2000);
-        }
+        if (await sync()) onClose();
     };
 
     const handleLogout = async () => {
@@ -94,7 +87,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                     </Link>
                     <button
                         onClick={onClose}
-                className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors duration-200 rounded-full hover:bg-white/10"
+                        className="w-9 h-9 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-colors duration-200 rounded-full hover:bg-white/10"
                         aria-label="close menu"
                     >
                         <X className="w-5 h-5" />
@@ -111,77 +104,20 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             quick links
                         </div>
 
-                        <Link
-                            href="/discover"
-                            aria-current={
-                                pathname === "/discover" ? "page" : undefined
-                            }
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
-                                pathname === "/discover" ?
-                                    "bg-white/10 text-white"
-                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
-                            )}
-                        >
-                            <Compass className="w-5 h-5" />
-                            <span className="text-sm font-medium">
-                                discovery
-                            </span>
-                        </Link>
-
-                        <Link
-                            href="/radio"
-                            aria-current={
-                                pathname === "/radio" ? "page" : undefined
-                            }
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
-                                pathname === "/radio" ?
-                                    "bg-white/10 text-white"
-                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
-                            )}
-                        >
-                            <Radio className="w-5 h-5" />
-                            <span className="text-sm font-medium">
-                                radio
-                            </span>
-                        </Link>
-
-                        <Link
-                            href="/releases"
-                            aria-current={
-                                pathname === "/releases" ? "page" : undefined
-                            }
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
-                                pathname === "/releases" ?
-                                    "bg-white/10 text-white"
-                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
-                            )}
-                        >
-                            <CalendarClock className="w-5 h-5" />
-                            <span className="text-sm font-medium">
-                                releases
-                            </span>
-                        </Link>
-
-                        <Link
-                            href="/stats"
-                            aria-current={
-                                pathname === "/stats" ? "page" : undefined
-                            }
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
-                                pathname === "/stats" ?
-                                    "bg-white/10 text-white"
-                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
-                            )}
-                        >
-                            <ChartNoAxesColumn className="w-5 h-5" />
-                            <span className="text-sm font-medium">
-                                stats
-                            </span>
-                        </Link>
+                        {QUICK_LINKS.map((item) => {
+                            const current = isCurrentNav(item, pathname);
+                            return (
+                                <Link
+                                    key={item.href}
+                                    href={item.href}
+                                    aria-current={current ? "page" : undefined}
+                                    className={linkClass(current)}
+                                >
+                                    <item.icon className="w-5 h-5" />
+                                    <span className="text-sm font-medium">{item.name}</span>
+                                </Link>
+                            );
+                        })}
                     </div>
 
                     <div className="px-3">
@@ -212,15 +148,8 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
                         <Link
                             href="/settings"
-                            aria-current={
-                                pathname === "/settings" ? "page" : undefined
-                            }
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors duration-200",
-                                pathname === "/settings" ?
-                                    "bg-white/10 text-white"
-                                :   "text-[var(--text-secondary)] hover:text-white hover:bg-white/5",
-                            )}
+                            aria-current={pathname === "/settings" ? "page" : undefined}
+                            className={linkClass(pathname === "/settings")}
                         >
                             <Settings className="w-5 h-5" />
                             <span className="text-sm font-medium">

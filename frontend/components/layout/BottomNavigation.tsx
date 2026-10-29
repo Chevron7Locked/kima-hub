@@ -2,42 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Library, Sparkles, BookOpen, Mic, ListMusic } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { NAV, isCurrentNav } from "./navItems";
 
-const navigationItems = [
-    {
-        name: "Collection",
-        href: "/collection",
-        icon: Library,
-        matchPattern: "/collection"
-    },
-    {
-        name: "Vibe",
-        href: "/vibe",
-        icon: Sparkles,
-        matchPattern: "/vibe"
-    },
-    {
-        name: "Audiobooks",
-        href: "/audiobooks",
-        icon: BookOpen,
-        matchPattern: "/audiobooks"
-    },
-    {
-        name: "Podcasts",
-        href: "/podcasts",
-        icon: Mic,
-        matchPattern: "/podcasts"
-    },
-    {
-        name: "Playlists",
-        href: "/playlists",
-        icon: ListMusic,
-        matchPattern: "/playlist" // Matches both /playlists and /playlist/[id]
-    },
-];
+const navigationItems = [NAV.collection, NAV.vibe, NAV.audiobooks, NAV.podcasts, NAV.playlists];
 
 export function BottomNavigation() {
     const pathname = usePathname();
@@ -58,7 +27,7 @@ export function BottomNavigation() {
         >
             <div className="flex items-center justify-around" style={{ height: "var(--nav-h)" }}>
                 {navigationItems.map((item) => {
-                    const isActive = pathname.startsWith(item.matchPattern);
+                    const isActive = isCurrentNav(item, pathname);
                     const Icon = item.icon;
 
                     return (

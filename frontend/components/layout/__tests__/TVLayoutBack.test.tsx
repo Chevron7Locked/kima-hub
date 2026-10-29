@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("next/link", () => ({
@@ -57,12 +58,14 @@ beforeEach(async () => {
     root = createRoot(host);
     await act(async () =>
         root.render(
-            <TVLayout>
-                <section data-tv-section="true">
-                    <a href="#album" data-tv-card="true">album</a>
-                </section>
-                <SleepTimer />
-            </TVLayout>,
+            <QueryClientProvider client={new QueryClient()}>
+                <TVLayout>
+                    <section data-tv-section="true">
+                        <a href="#album" data-tv-card="true">album</a>
+                    </section>
+                    <SleepTimer />
+                </TVLayout>
+            </QueryClientProvider>,
         ),
     );
     // Down from the tab row into the page, as the remote does; then the focus falls off (a card opened a page).

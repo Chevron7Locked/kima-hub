@@ -4,22 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
-    BookAudio,
-    CalendarClock,
-    ChartNoAxesColumn,
     ChevronLeft,
     ChevronRight,
-    Compass,
-    LayoutGrid,
-    Library,
     ListMusic,
     Music,
-    Orbit,
     Plus,
-    Podcast,
-    Radio,
     RefreshCw,
-    type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -39,51 +29,11 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { SideTooltip } from "@/components/ui/SideTooltip";
 import { CoverArt } from "@/components/cards/MediaCard";
 import { MobileSidebar } from "./MobileSidebar";
+import { NAV, isCurrentNav, type NavItem } from "./navItems";
+import type { Mix } from "@/features/home/types";
 
-interface NavItem {
-    name: string;
-    href: string;
-    icon: LucideIcon;
-    /** Routes that belong to this destination, so a detail page keeps its parent lit. */
-    match: string[];
-    feature?: "audiobookshelfEnabled";
-}
-
-const primaryNavigation: NavItem[] = [
-    {
-        name: "collection",
-        href: "/collection",
-        icon: Library,
-        match: ["/collection", "/library", "/album", "/artist", "/mix"],
-    },
-    { name: "radio", href: "/radio", icon: Radio, match: ["/radio"] },
-    { name: "discovery", href: "/discover", icon: Compass, match: ["/discover"] },
-    { name: "releases", href: "/releases", icon: CalendarClock, match: ["/releases"] },
-    { name: "vibe", href: "/vibe", icon: Orbit, match: ["/vibe"] },
-];
-
-const secondaryNavigation: NavItem[] = [
-    {
-        name: "audiobooks",
-        href: "/audiobooks",
-        icon: BookAudio,
-        match: ["/audiobooks"],
-        feature: "audiobookshelfEnabled",
-    },
-    { name: "podcasts", href: "/podcasts", icon: Podcast, match: ["/podcasts"] },
-    {
-        name: "browse",
-        href: "/browse/playlists",
-        icon: LayoutGrid,
-        match: ["/browse", "/playlists"],
-    },
-    {
-        name: "stats",
-        href: "/stats",
-        icon: ChartNoAxesColumn,
-        match: ["/stats"],
-    },
-];
+const primaryNavigation: NavItem[] = [NAV.collection, NAV.radio, NAV.discover, NAV.releases, NAV.vibe];
+const secondaryNavigation: NavItem[] = [NAV.audiobooks, NAV.podcasts, NAV.browse, NAV.stats];
 
 interface Playlist {
     id: string;
@@ -95,14 +45,6 @@ interface Playlist {
     items?: {
         track?: { album?: { coverUrl?: string } };
     }[];
-}
-
-interface Mix {
-    id: string;
-    name: string;
-    description?: string;
-    trackCount?: number;
-    coverUrls?: string[];
 }
 
 const COLLAPSE_KEY = "kima:library-collapsed";
@@ -187,7 +129,6 @@ export function Sidebar() {
     const visiblePlaylists = playlists.filter((p) => !p.isHidden);
     const ownPlaylists = visiblePlaylists.filter((p) => p.isOwner !== false);
     const sharedPlaylists = visiblePlaylists.filter((p) => p.isOwner === false);
-    const dailyMixes = mixes as unknown as Mix[];
 
     const query = filter.trim().toLowerCase();
     const matches = (name: string) =>
@@ -195,17 +136,14 @@ export function Sidebar() {
 
     const shownOwn = ownPlaylists.filter((p) => matches(p.name));
     const shownShared = sharedPlaylists.filter((p) => matches(p.name));
-    const shownMixes = dailyMixes.filter((m) => matches(m.name));
+    const shownMixes = mixes.filter((m) => matches(m.name));
     const nothingMatches =
         query.length > 0 &&
         shownOwn.length === 0 &&
         shownShared.length === 0 &&
         shownMixes.length === 0;
 
-    const isCurrent = (item: NavItem) =>
-        item.match.some(
-            (path) => pathname === path || pathname.startsWith(`${path}/`)
-        );
+    const isCurrent = (item: NavItem) => isCurrentNav(item, pathname);
 
     const secondaryItems = secondaryNavigation.filter(
         (item) =>
@@ -424,25 +362,25 @@ export function Sidebar() {
         const Icon = item.icon;
         return (
             <SideTooltip key={item.href} label={item.name}>
-            <Link
-                href={item.href}
-                prefetch={false}
-                aria-current={isActive ? "page" : undefined}
-                aria-label={item.name}
-                className={cn(
-                    "group flex h-10 w-10 items-center justify-center rounded-xl outline-none transition-[background-color,color,box-shadow] duration-150",
-                    "focus-visible:ring-2 focus-visible:ring-brand/60",
-                    isActive
-                        ? "bg-[linear-gradient(100deg,rgba(252,162,0,0.16),rgba(252,162,0,0.04))] text-brand shadow-[inset_0_0_0_1px_rgba(252,162,0,0.2)]"
-                        : "text-[var(--text-muted)] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
-                )}
-            >
-                <Icon
-                    aria-hidden="true"
-                    strokeWidth={isActive ? 2 : 1.6}
-                    className="h-5 w-5 transition-transform duration-150 group-hover:scale-[1.06]"
-                />
-            </Link>
+                <Link
+                    href={item.href}
+                    prefetch={false}
+                    aria-current={isActive ? "page" : undefined}
+                    aria-label={item.name}
+                    className={cn(
+                        "group flex h-10 w-10 items-center justify-center rounded-xl outline-none transition-[background-color,color,box-shadow] duration-150",
+                        "focus-visible:ring-2 focus-visible:ring-brand/60",
+                        isActive
+                            ? "bg-[linear-gradient(100deg,rgba(252,162,0,0.16),rgba(252,162,0,0.04))] text-brand shadow-[inset_0_0_0_1px_rgba(252,162,0,0.2)]"
+                            : "text-[var(--text-muted)] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
+                    )}
+                >
+                    <Icon
+                        aria-hidden="true"
+                        strokeWidth={isActive ? 2 : 1.6}
+                        className="h-5 w-5 transition-transform duration-150 group-hover:scale-[1.06]"
+                    />
+                </Link>
             </SideTooltip>
         );
     };
@@ -582,41 +520,41 @@ export function Sidebar() {
                     ) : (
                         <>
                             {(query.length === 0 || shownOwn.length > 0 || isErrorPlaylists) && (
-                            <section>
-                                {sectionLabel("playlists", shownOwn.length)}
-                                {isErrorPlaylists ? (
-                                    <div className="px-2 py-3">
-                                        <p className="text-xs text-[var(--text-muted)]">
-                                            couldn&apos;t load playlists
-                                        </p>
-                                        <button
-                                            type="button"
-                                            onClick={() => refetchPlaylists()}
-                                            className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
-                                        >
-                                            try again
-                                        </button>
-                                    </div>
-                                ) : shownOwn.length > 0 ? (
-                                    shownOwn.map(playlistRow)
-                                ) : query.length === 0 ? (
-                                    <div className="px-2 py-2">
-                                        <p className="text-xs text-[var(--text-muted)]">
-                                            none of your own yet
-                                        </p>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setShowCreatePlaylist(true);
-                                                setNewPlaylistName("");
-                                            }}
-                                            className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
-                                        >
-                                            make the first one
-                                        </button>
-                                    </div>
-                                ) : null}
-                            </section>
+                                <section>
+                                    {sectionLabel("playlists", shownOwn.length)}
+                                    {isErrorPlaylists ? (
+                                        <div className="px-2 py-3">
+                                            <p className="text-xs text-[var(--text-muted)]">
+                                                couldn&apos;t load playlists
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => refetchPlaylists()}
+                                                className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                            >
+                                                try again
+                                            </button>
+                                        </div>
+                                    ) : shownOwn.length > 0 ? (
+                                        shownOwn.map(playlistRow)
+                                    ) : query.length === 0 ? (
+                                        <div className="px-2 py-2">
+                                            <p className="text-xs text-[var(--text-muted)]">
+                                                none of your own yet
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setShowCreatePlaylist(true);
+                                                    setNewPlaylistName("");
+                                                }}
+                                                className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                            >
+                                                make the first one
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </section>
                             )}
 
                             {(shownShared.length > 0 ||
@@ -641,7 +579,7 @@ export function Sidebar() {
                                 (query.length === 0 &&
                                     (isLoadingMixes ||
                                         isErrorMixes ||
-                                        dailyMixes.length === 0))) && (
+                                        mixes.length === 0))) && (
                                 <section>
                                     {sectionLabel(
                                         "daily mixes",

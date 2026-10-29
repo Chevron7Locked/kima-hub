@@ -94,33 +94,30 @@ export function ActivityPanel({
     );
 }
 
+/** The top bar's activity button, with a dot while there are unread alerts or running downloads. */
 export function ActivityPanelToggle() {
     const { any: hasActivity } = useActivityCounts();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isPanelOpen = useActivityPanelOpen();
-
-    if (isMobile || isTablet) {
-        return null;
-    }
+    const overlay = isMobile || isTablet;
 
     return (
         <button
-            onClick={() =>
-                window.dispatchEvent(new CustomEvent("toggle-activity-panel"))
-            }
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("toggle-activity-panel"))}
             aria-expanded={isPanelOpen}
-            aria-controls="activity-panel"
+            aria-controls={overlay ? "activity-panel-mobile" : "activity-panel"}
             className={cn(
-                "relative p-2 rounded-full transition-all",
-                "text-[var(--text-secondary)] hover:text-white"
+                "relative flex shrink-0 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors duration-200 hover:text-white",
+                overlay ? "ml-2 h-11 w-11" : "p-2",
             )}
-            title="toggle activity panel"
+            title="activity"
             aria-label="Toggle activity panel"
         >
             <Bell className="w-5 h-5" />
             {hasActivity && (
-                <span className="absolute top-1.5 right-2 w-1 h-1 rounded-full bg-brand" />
+                <span aria-hidden="true" className={cn("absolute w-1 h-1 rounded-full bg-brand", overlay ? "top-2.5 right-3" : "top-1.5 right-2")} />
             )}
         </button>
     );
