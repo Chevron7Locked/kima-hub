@@ -66,9 +66,7 @@ export function isGenericAlbumTitle(title: string | null | undefined): boolean {
     const normalised = pgTrim(
         pgCollapseSpace(pgLower(foldIdentityText(pgTrim(String(title)))))
     );
-    // Emptiness is judged on the identity key, not on this spacing-preserving
-    // form: "( )" is non-empty here but collapses to "" as a key, and a title
-    // with no identity is exactly the case that must not match across artists.
+    // "( )" is not empty here but has no identity key, and a title with none must not match across artists.
     return (
         normalised === "" ||
         albumIdentityKey(title) === "" ||
@@ -205,15 +203,13 @@ export async function resolveAlbum(
 }
 
 /**
- * Whether two album titles name the same record: exact, punctuation-insensitive,
- * then without edition markers. Checks candidates only; it never renames, so
- * "Playing the Angel (Deluxe)" stays distinct locally.
+ * Whether two titles (of albums or of songs) name the same thing: exact, then by nameKey, then without edition
+ * markers. It only compares, never renames, so "Playing the Angel (Deluxe)" stays its own album locally.
  */
 export function titlesAgree(a: string, b: string): boolean {
     const bare = (t: string) => nameKey(musicBrainzService.normalizeForSearch(t));
     if (!a || !b) return false;
-    // Identical text is the same title even when nothing survives the fold
-    // (an album called "!!!"); the empty-fold guard below is for DIFFERENT text.
+    // Identical text agrees even when nothing survives the fold ("!!!"); an empty fold never matches different text.
     const exact = (t: string) => t.normalize("NFKC").toLowerCase().trim();
     if (exact(a) !== "" && exact(a) === exact(b)) return true;
     const same = (x: string, y: string) => x !== "" && x === y;
