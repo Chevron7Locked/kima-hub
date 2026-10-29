@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Exports both towers of the music CLAP checkpoint (music_audioset_epoch_15_esc_90.14.pt, the one
-v1.10.0 ran through laion_clap) to ONNX. Needs torch and laion_clap (requirements-export.txt); the
+Exports both towers of the music CLAP checkpoint (music_audioset_epoch_15_esc_90.14.pt, as laion_clap
+runs it) to ONNX. Needs torch and laion_clap (requirements-export.txt); the
 image's export stage runs it, and the analyzer never imports it.
 
   music_audio.onnx  input  mel [batch, 1, 1001, 64] (music_clap_mel.MusicClapMel)
@@ -46,7 +46,7 @@ def _window_reverse(windows, window_size, H, W):
 
 
 def load_music_clap(ckpt):
-    """The model exactly as v1.10.0 analyzer.py:111-115 built and loaded it."""
+    """The model as laion_clap builds and loads this checkpoint: HTSAT-base, no fusion, on the CPU."""
     import laion_clap
     model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base', device='cpu')
     model.load_ckpt(ckpt, verbose=False)

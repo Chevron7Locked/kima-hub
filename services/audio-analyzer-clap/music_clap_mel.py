@@ -2,7 +2,7 @@
 The music CLAP checkpoint's audio front end (music_audioset_epoch_15_esc_90.14.pt) in numpy, no
 PyTorch. It turns a 48 kHz mono clip into the [1001, 64] log-mel the ONNX audio tower takes.
 
-Every step copies laion_clap 1.1.7 / torchlibrosa 0.1.0, which v1.10.0 ran:
+Every step copies laion_clap 1.1.7 / torchlibrosa 0.1.0, the reference implementation:
   1. int16 round trip: laion_clap/hook.py:177 calls training/data.py:93-99
      (clip to [-1, 1], * 32767, cast to int16, / 32767).
   2. 10 s fit, non-fusion: training/data.py:416-501. Longer clips are cut to 480000 samples at a
