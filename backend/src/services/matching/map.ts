@@ -153,6 +153,27 @@ async function writeWhileStateStands(write: (tx: Prisma.TransactionClient) => Pr
     );
 }
 
+/** A new layout replaces the stored map whole: every row laid out, and the version and frame it was made with. */
+function replaceMap(
+    rows: TrackRow[],
+    positions: Float64Array,
+    colour: Float64Array,
+    frame: StoredFrame | null,
+): Promise<boolean> {
+    return writeWhileStateStands(async (tx) => {
+        await tx.$executeRaw`DELETE FROM matching_map`;
+        await writeRows(tx, rows, positions, colour, true);
+        await tx.matchingState.update({
+            where: { id: "default" },
+            data: {
+                mapVersion: MAP_VERSION,
+                mapFrame: frame === null ? Prisma.DbNull : (frame as unknown as Prisma.InputJsonValue),
+                mapUpdatedAt: new Date(),
+            },
+        });
+    });
+}
+
 async function update(inputsSettled: boolean): Promise<MapUpdate> {
     const state = await loadMatchingState();
     if (!state) return { laidOut: 0, placed: 0 };
@@ -181,14 +202,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
     if (!meta) return { laidOut: 0, placed: 0 };
     if (rows.length === 1) {
         if (!inputsSettled || (rows[0].x !== null && meta.mapVersion === MAP_VERSION)) return { laidOut: 0, placed: 0 };
-        const written = await writeWhileStateStands(async (tx) => {
-            await tx.$executeRaw`DELETE FROM matching_map`;
-            await writeRows(tx, rows, new Float64Array(3), Float64Array.of(0.5), true);
-            await tx.matchingState.update({
-                where: { id: "default" },
-                data: { mapVersion: MAP_VERSION, mapFrame: Prisma.DbNull, mapUpdatedAt: new Date() },
-            });
-        });
+        const written = await replaceMap(rows, new Float64Array(3), Float64Array.of(0.5), null);
         return { laidOut: written ? 1 : 0, placed: 0 };
     }
     const unplaced = rows.filter((r) => r.x === null);
@@ -204,19 +218,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
             state.genres,
             state.genreWeight,
         ]);
-        const frame: StoredFrame = { colour: map.frame, maxScore: map.maxScore };
-        const written = await writeWhileStateStands(async (tx) => {
-            await tx.$executeRaw`DELETE FROM matching_map`;
-            await writeRows(tx, rows, map.positions, map.colour, true);
-            await tx.matchingState.update({
-                where: { id: "default" },
-                data: {
-                    mapVersion: MAP_VERSION,
-                    mapFrame: frame as unknown as Prisma.InputJsonValue,
-                    mapUpdatedAt: new Date(),
-                },
-            });
-        });
+        const written = await replaceMap(rows, map.positions, map.colour, { colour: map.frame, maxScore: map.maxScore });
         return { laidOut: written ? rows.length : 0, placed: 0 };
     }
 
