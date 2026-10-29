@@ -14,13 +14,13 @@ class DiscoveryLogger {
             : path.join(process.cwd(), "data", "logs", "discovery");
     }
 
-    start(userId: string, jobId?: number): string {
+    start(userId: string): string {
         if (!fs.existsSync(this.logDir)) {
             fs.mkdirSync(this.logDir, { recursive: true });
         }
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const filename = `discovery-${timestamp}-job${jobId || "manual"}.log`;
+        const filename = `discovery-${timestamp}.log`;
         this.currentLogFile = path.join(this.logDir, filename);
 
         this.currentStream = fs.createWriteStream(this.currentLogFile, { flags: "a" });
@@ -29,7 +29,6 @@ class DiscoveryLogger {
         this.write(`DISCOVERY WEEKLY GENERATION LOG`);
         this.write(`Started: ${new Date().toISOString()}`);
         this.write(`User ID: ${userId}`);
-        this.write(`Job ID: ${jobId || "manual"}`);
         this.write("═".repeat(60));
         this.write("");
 
