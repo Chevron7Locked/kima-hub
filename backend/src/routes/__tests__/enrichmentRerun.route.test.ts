@@ -11,6 +11,7 @@ const mockRerun = jest.fn();
 jest.mock("../../services/enrichmentRestart", () => ({
     wipeEnrichment: jest.fn(),
     rerunEnrichment: mockRerun,
+    RERUN_STEPS: jest.requireActual("../../services/enrichmentRestart").RERUN_STEPS,
 }));
 
 const mockStartEnrichmentNow = jest.fn();
@@ -70,6 +71,21 @@ describe("POST /enrichment/rerun", () => {
         expect(res.body).toMatchObject({ message: "Re-running from moods" });
         expect(mockRerun).toHaveBeenCalledWith("moods");
         expect(mockStartEnrichmentNow).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["analysis", "Re-running from audio analysis"],
+        ["vectors", "Re-running from sound vectors"],
+        ["identification", "Re-running from identification"],
+    ])("names the %s step in its reply", async (step, message) => {
+        const res = await rerun(step);
+        expect(res.status).toBe(200);
+        expect(res.body.message).toBe(message);
+    });
+
+    it("names the six steps when refusing one", async () => {
+        const res = await rerun("everything");
+        expect(res.body.error).toBe("step must be one of: identification, artists, analysis, vectors, moods, similarity");
     });
 
     it.each(["everything", "", null, 5, "toString", "constructor"])("rejects an unknown step %p", async (step) => {

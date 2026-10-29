@@ -10,7 +10,7 @@ import {
   redecideEverything,
   startEnrichmentNow,
 } from "../workers/unifiedEnrichment";
-import { wipeEnrichment, rerunEnrichment, type RerunStep } from "../services/enrichmentRestart";
+import { wipeEnrichment, rerunEnrichment, RERUN_STEPS, type RerunStep } from "../services/enrichmentRestart";
 import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import {
@@ -90,7 +90,7 @@ router.get("/status", requireAuth, async (_req, res) => {
     const hung =
       base.status === "running" &&
       (await enrichmentStateService.detectHang());
-    res.json({ ...base, hung: hung === true });
+    res.json({ ...base, hung });
   } catch (error) {
     logger.error("Get enrichment status error:", error);
     res.status(500).json({ error: "Failed to get status" });
@@ -189,13 +189,10 @@ router.post("/re-decide-everything", requireAuth, requireAdmin, async (_req, res
   }
 });
 
-const RERUN_STEPS: Record<RerunStep, string> = {
-    identification: "identification",
-    artists: "artists",
-    analysis: "audio analysis",
-    vectors: "sound vectors",
-    moods: "moods",
-    similarity: "similarity",
+// The steps whose name in a reply is not their id.
+const STEP_NAMES: Partial<Record<RerunStep, string>> = {
+  analysis: "audio analysis",
+  vectors: "sound vectors",
 };
 
 /**
@@ -208,16 +205,16 @@ const RERUN_STEPS: Record<RerunStep, string> = {
 router.post("/rerun", requireAuth, requireAdmin, async (req, res) => {
   try {
     const step = req.body?.step;
-    if (!Object.prototype.hasOwnProperty.call(RERUN_STEPS, step)) {
-      res.status(400).json({ error: `step must be one of: ${Object.keys(RERUN_STEPS).join(", ")}` });
+    if (!RERUN_STEPS.includes(step)) {
+      res.status(400).json({ error: `step must be one of: ${RERUN_STEPS.join(", ")}` });
       return;
     }
-    const wiped = await rerunEnrichment(step as RerunStep);
+    const wiped = await rerunEnrichment(step);
     invalidateEnrichmentProgress();
     void startEnrichmentNow();
     res.json({
       ...wiped,
-      message: `Re-running from ${RERUN_STEPS[step as RerunStep]}`,
+      message: `Re-running from ${STEP_NAMES[step as RerunStep] ?? step}`,
     });
   } catch (error) {
     logger.error("Rerun enrichment error:", error);

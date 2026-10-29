@@ -48,6 +48,8 @@ const STEP_CLEARS: Record<RerunStep, {
     similarity: { similarity: true, moods: false, recording: false, artists: false, analysis: false, vectors: false },
 };
 
+export const RERUN_STEPS = Object.keys(STEP_CLEARS) as RerunStep[];
+
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 async function resetArtists(tx: Tx): Promise<number> {
