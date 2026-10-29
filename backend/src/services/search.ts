@@ -54,7 +54,7 @@ export async function forgetSearchesOf(userId: string): Promise<void> {
     if (keys.length > 0) await redisClient.del(...keys);
 }
 
-export interface ArtistSearchResult {
+interface ArtistSearchResult {
     id: string;
     name: string;
     /** null when MusicBrainz has not resolved this artist yet. */
@@ -64,7 +64,7 @@ export interface ArtistSearchResult {
     rank: number;
 }
 
-export interface AlbumSearchResult {
+interface AlbumSearchResult {
     id: string;
     title: string;
     artistId: string;
@@ -74,7 +74,7 @@ export interface AlbumSearchResult {
     rank: number;
 }
 
-export interface TrackSearchResult {
+interface TrackSearchResult {
     id: string;
     title: string;
     /** The title as edited in Kima, if it was. */
@@ -87,7 +87,7 @@ export interface TrackSearchResult {
     rank: number;
 }
 
-export interface PodcastSearchResult {
+interface PodcastSearchResult {
     id: string;
     title: string;
     author: string | null;
@@ -97,7 +97,7 @@ export interface PodcastSearchResult {
     rank?: number;
 }
 
-export interface EpisodeSearchResult {
+interface EpisodeSearchResult {
     id: string;
     title: string;
     description: string | null;
@@ -109,7 +109,7 @@ export interface EpisodeSearchResult {
     rank: number;
 }
 
-export interface AudiobookSearchResult {
+interface AudiobookSearchResult {
     id: string;
     title: string;
     author: string | null;
@@ -121,7 +121,7 @@ export interface AudiobookSearchResult {
     rank: number;
 }
 
-export interface SearchByTypeOptions {
+interface SearchByTypeOptions {
     query: string;
     type: string;
     limit?: number;
@@ -140,6 +140,29 @@ export interface SearchResults {
 }
 
 export class SearchService {
+    /**
+     * Full-text search first; the LIKE search when the query has no searchable words, when full-text search fails,
+     * and when it finds nothing (unless `fallbackOnEmpty` is false). An empty query finds nothing.
+     */
+    private async ftsOrFallback<T>(
+        query: string,
+        label: string,
+        fts: (tsquery: string) => Promise<T[]>,
+        fallback: () => Promise<T[]>,
+        fallbackOnEmpty: boolean,
+    ): Promise<T[]> {
+        if (!query || query.trim().length === 0) return [];
+        const tsquery = this.queryToTsquery(query);
+        if (!tsquery) return fallback();
+        try {
+            const results = await fts(tsquery);
+            return results.length > 0 || !fallbackOnEmpty ? results : fallback();
+        } catch (error) {
+            logger.error(`${label} search error:`, error);
+            return fallback();
+        }
+    }
+
     /**
      * Convert user query to PostgreSQL tsquery format
      * Splits on whitespace and adds prefix matching (:*)
@@ -196,37 +219,30 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchArtistsFallback({ query, limit, offset });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<ArtistSearchResult[]>`
-        SELECT
-          a.id,
-          a.name,
-          a.mbid,
-          a."heroUrl",
-          a.summary,
-          ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Artist" a
-        WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id AND alb.location = 'LIBRARY')
-        ORDER BY rank DESC, a.name ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            return results.length > 0 ? results : this.searchArtistsFallback({ query, limit, offset });
-        } catch (error) {
-            logger.error("Artist search error:", error);
-            return this.searchArtistsFallback({ query, limit, offset });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Artist",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<ArtistSearchResult[]>`
+            SELECT
+              a.id,
+              a.name,
+              a.mbid,
+              a."heroUrl",
+              a.summary,
+              ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Artist" a
+            WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+              AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id AND alb.location = 'LIBRARY')
+            ORDER BY rank DESC, a.name ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results;
+            },
+            () => this.searchArtistsFallback({ query, limit, offset }),
+            true,
+        );
     }
 
     private async searchAlbumsFallback({
@@ -275,60 +291,53 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchAlbumsFallback({ query, limit, offset });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<AlbumSearchResult[]>`
-        SELECT * FROM (
-          SELECT DISTINCT ON (id) id, title, "artistId", "artistName", year, "coverUrl", rank
-          FROM (
-            SELECT
-              a.id,
-              a.title,
-              a."artistId",
-              ar.name as "artistName",
-              a.year,
-              a."coverUrl",
-              ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
-            FROM "Album" a
-            LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-              AND a.location = 'LIBRARY'
-
-            UNION ALL
-
-            SELECT
-              a.id,
-              a.title,
-              a."artistId",
-              ar.name as "artistName",
-              a.year,
-              a."coverUrl",
-              ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) AS rank
-            FROM "Album" a
-            INNER JOIN "Artist" ar ON a."artistId" = ar.id
-            WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
-              AND a.location = 'LIBRARY'
-          ) combined
-          ORDER BY id, rank DESC
-        ) deduped
-        ORDER BY rank DESC, title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            return results.length > 0 ? results : this.searchAlbumsFallback({ query, limit, offset });
-        } catch (error) {
-            logger.error("Album search error:", error);
-            return this.searchAlbumsFallback({ query, limit, offset });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Album",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<AlbumSearchResult[]>`
+            SELECT * FROM (
+              SELECT DISTINCT ON (id) id, title, "artistId", "artistName", year, "coverUrl", rank
+              FROM (
+                SELECT
+                  a.id,
+                  a.title,
+                  a."artistId",
+                  ar.name as "artistName",
+                  a.year,
+                  a."coverUrl",
+                  ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
+                FROM "Album" a
+                LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+                WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
+                  AND a.location = 'LIBRARY'
+    
+                UNION ALL
+    
+                SELECT
+                  a.id,
+                  a.title,
+                  a."artistId",
+                  ar.name as "artistName",
+                  a.year,
+                  a."coverUrl",
+                  ts_rank(ar."searchVector", to_tsquery('english', ${tsquery})) AS rank
+                FROM "Album" a
+                INNER JOIN "Artist" ar ON a."artistId" = ar.id
+                WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
+                  AND a.location = 'LIBRARY'
+              ) combined
+              ORDER BY id, rank DESC
+            ) deduped
+            ORDER BY rank DESC, title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results;
+            },
+            () => this.searchAlbumsFallback({ query, limit, offset }),
+            true,
+        );
     }
 
     private async searchTracksFallback({
@@ -373,44 +382,37 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<TrackSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchTracksFallback({ query, limit, offset });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<TrackSearchResult[]>`
-        SELECT
-          t.id,
-          t.title,
-          t."displayTitle",
-          t."albumId",
-          t.duration,
-          a.title as "albumTitle",
-          a."artistId",
-          ar.name as "artistName",
-          ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Track" t
-        LEFT JOIN "Album" a ON t."albumId" = a.id
-        LEFT JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
-        AND t."missingSince" IS NULL
-        AND t.corrupt = false
-        AND a.location = 'LIBRARY'
-        ORDER BY rank DESC, t.title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            return results.length > 0 ? results : this.searchTracksFallback({ query, limit, offset });
-        } catch (error) {
-            logger.error("Track search error:", error);
-            return this.searchTracksFallback({ query, limit, offset });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Track",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<TrackSearchResult[]>`
+            SELECT
+              t.id,
+              t.title,
+              t."displayTitle",
+              t."albumId",
+              t.duration,
+              a.title as "albumTitle",
+              a."artistId",
+              ar.name as "artistName",
+              ts_rank(t."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Track" t
+            LEFT JOIN "Album" a ON t."albumId" = a.id
+            LEFT JOIN "Artist" ar ON a."artistId" = ar.id
+            WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
+            AND t."missingSince" IS NULL
+            AND t.corrupt = false
+            AND a.location = 'LIBRARY'
+            ORDER BY rank DESC, t.title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results;
+            },
+            () => this.searchTracksFallback({ query, limit, offset }),
+            true,
+        );
     }
 
     /**
@@ -422,39 +424,31 @@ export class SearchService {
         offset = 0,
         userId,
     }: FollowedSearchOptions): Promise<PodcastSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchPodcasts({ query, limit, offset, userId });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<PodcastSearchResult[]>`
-        SELECT
-          p.id,
-          p.title,
-          p.author,
-          p.description,
-          p."imageUrl",
-          p."episodeCount",
-          ts_rank(p."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Podcast" p
-        JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
-        WHERE p."searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, p.title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            return results;
-        } catch (error) {
-            logger.error("Podcast FTS search error:", error);
-            // Fallback to LIKE search
-            return this.searchPodcasts({ query, limit, offset, userId });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Podcast FTS",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<PodcastSearchResult[]>`
+            SELECT
+              p.id,
+              p.title,
+              p.author,
+              p.description,
+              p."imageUrl",
+              p."episodeCount",
+              ts_rank(p."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Podcast" p
+            JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
+            WHERE p."searchVector" @@ to_tsquery('english', ${tsquery})
+            ORDER BY rank DESC, p.title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results;
+            },
+            () => this.searchPodcasts({ query, limit, offset, userId }),
+            false,
+        );
     }
 
     private async searchEpisodesFallback({
@@ -508,41 +502,34 @@ export class SearchService {
         offset = 0,
         userId,
     }: FollowedSearchOptions): Promise<EpisodeSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchEpisodesFallback({ query, limit, offset, userId });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<EpisodeSearchResult[]>`
-        SELECT
-          e.id,
-          e.title,
-          e.description,
-          e."podcastId",
-          e."publishedAt",
-          e.duration,
-          e."audioUrl",
-          p.title as "podcastTitle",
-          ts_rank(e."searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "PodcastEpisode" e
-        JOIN "Podcast" p ON e."podcastId" = p.id
-        JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
-        WHERE e."searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, e."publishedAt" DESC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            return results;
-        } catch (error) {
-            logger.error("Episode search error:", error);
-            return this.searchEpisodesFallback({ query, limit, offset, userId });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Episode",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<EpisodeSearchResult[]>`
+            SELECT
+              e.id,
+              e.title,
+              e.description,
+              e."podcastId",
+              e."publishedAt",
+              e.duration,
+              e."audioUrl",
+              p.title as "podcastTitle",
+              ts_rank(e."searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "PodcastEpisode" e
+            JOIN "Podcast" p ON e."podcastId" = p.id
+            JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
+            WHERE e."searchVector" @@ to_tsquery('english', ${tsquery})
+            ORDER BY rank DESC, e."publishedAt" DESC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results;
+            },
+            () => this.searchEpisodesFallback({ query, limit, offset, userId }),
+            false,
+        );
     }
 
     /**
@@ -554,46 +541,32 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AudiobookSearchResult[]> {
-        if (!query || query.trim().length === 0) {
-            return [];
-        }
-
-        const tsquery = this.queryToTsquery(query);
-        if (!tsquery) {
-            return this.searchAudiobooksFallback({ query, limit, offset });
-        }
-
-        try {
-            const results = await prisma.$queryRaw<AudiobookSearchResult[]>`
-        SELECT
-          id,
-          title,
-          author,
-          narrator,
-          series,
-          description,
-          "coverUrl",
-          duration,
-          ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
-        FROM "Audiobook"
-        WHERE "searchVector" @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC, title ASC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `;
-
-            if (results.length > 0) {
-                return results.map((r) => ({
-                    ...r,
-                    coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null,
-                }));
-            }
-
-            return this.searchAudiobooksFallback({ query, limit, offset });
-        } catch (error) {
-            logger.error("Audiobook FTS search error:", error);
-            return this.searchAudiobooksFallback({ query, limit, offset });
-        }
+        return this.ftsOrFallback(
+            query,
+            "Audiobook FTS",
+            async (tsquery) => {
+                const results = await prisma.$queryRaw<AudiobookSearchResult[]>`
+            SELECT
+              id,
+              title,
+              author,
+              narrator,
+              series,
+              description,
+              "coverUrl",
+              duration,
+              ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
+            FROM "Audiobook"
+            WHERE "searchVector" @@ to_tsquery('english', ${tsquery})
+            ORDER BY rank DESC, title ASC
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `;
+                return results.map((r) => ({ ...r, coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null }));
+            },
+            () => this.searchAudiobooksFallback({ query, limit, offset }),
+            true,
+        );
     }
 
     private async searchAudiobooksFallback({
@@ -635,7 +608,8 @@ export class SearchService {
     }
 
     /**
-     * LIKE-based podcast search, the fallback when full-text search finds nothing
+     * LIKE search of the shows a listener follows; used when the query has no searchable words or full-text search
+     * fails
      */
     async searchPodcasts({
         query,
@@ -705,19 +679,8 @@ export class SearchService {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
                 logger.debug(`[SEARCH] Cache HIT for query: "${query}"`);
-                const parsed = JSON.parse(cached);
-                // Transform cached audiobook coverUrls to ensure consistency
-                if (parsed.audiobooks && Array.isArray(parsed.audiobooks)) {
-                    parsed.audiobooks = parsed.audiobooks.map(
-                        (book: AudiobookSearchResult) => ({
-                            ...book,
-                            coverUrl: book.coverUrl
-                                ? `/audiobooks/${book.id}/cover`
-                                : null,
-                        })
-                    );
-                }
-                return parsed;
+                // Cached as answered, audiobook cover links already rewritten.
+                return JSON.parse(cached);
             }
         } catch (err) {
             logger.warn("[SEARCH] Redis cache read error:", err);
