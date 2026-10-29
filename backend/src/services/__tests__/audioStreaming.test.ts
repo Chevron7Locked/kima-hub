@@ -23,6 +23,9 @@ jest.mock("../../utils/db", () => ({
 
 jest.mock("music-metadata");
 
+const mockSettings = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({ getSystemSettings: async () => mockSettings() }));
+
 // fluent-ffmpeg mock factory -- each test replaces this to control behavior
 let ffmpegCommandFactory: (() => FakeCommand) | null = null;
 
@@ -698,5 +701,41 @@ describe("a file's bitrate read", () => {
         expect(await svc.servesOriginal(src, "medium", { keepUnderKbps: 128 })).toBe(true);
         expect(await svc.servesOriginal(src, "medium", { keepUnderKbps: 128 })).toBe(true);
         expect(parseFile).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("transcode cache limit", () => {
+    let dir: string;
+    let service: AudioStreamingService;
+
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-cache-limit-"));
+        service = new AudioStreamingService(dir, 10);
+        service.getCacheSize = jest.fn().mockResolvedValue(0.95);
+        service.evictCache = jest.fn().mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        service.destroy();
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("follows the size saved in settings, without a restart", async () => {
+        mockSettings.mockResolvedValue({ transcodeCacheMaxGb: 1 });
+        await service.trimCacheIfNearFull();
+        expect(service.evictCache).toHaveBeenCalledWith(0.8);
+    });
+
+    it("leaves a cache under 90% of the saved size alone", async () => {
+        mockSettings.mockResolvedValue({ transcodeCacheMaxGb: 10 });
+        await service.trimCacheIfNearFull();
+        expect(service.evictCache).not.toHaveBeenCalled();
+    });
+
+    it("uses the size it started with when the settings cannot be read", async () => {
+        mockSettings.mockRejectedValue(new Error("db down"));
+        (service.getCacheSize as jest.Mock).mockResolvedValue(9.5);
+        await service.trimCacheIfNearFull();
+        expect(service.evictCache).toHaveBeenCalledWith(8);
     });
 });

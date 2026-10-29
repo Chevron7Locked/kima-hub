@@ -58,3 +58,34 @@ it("a partial save writes no file, and startup loads the saved cache size", asyn
         process.env.MUSIC_PATH = previous;
     }
 });
+
+const app = () => express().use(express.json()).use("/system-settings", systemSettingsRoutes);
+const asAdmin = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
+
+it("a save answers only that it saved", async () => {
+    const res = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ transcodeCacheMaxGb: 8 });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+});
+
+it("a server with no settings yet starts from the schema's defaults", async () => {
+    await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+    invalidateSystemSettingsCache();
+
+    const res = await request(app()).get("/system-settings").set("Authorization", asAdmin());
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+        lidarrEnabled: true,
+        lidarrUrl: "http://localhost:8686",
+        fanartEnabled: false,
+        audiobookshelfEnabled: false,
+        audiobookshelfUrl: "http://localhost:13378",
+        musicPath: "/music",
+        downloadPath: "/downloads",
+        autoSync: true,
+        transcodeCacheMaxGb: 10,
+        maxQueueLength: 10000,
+        soulseekConcurrentDownloads: 4,
+    });
+});

@@ -117,24 +117,9 @@ router.get("/", async (_req, res) => {
       where: { id: "default" },
     });
 
-    // Create default settings if they don't exist
+    // A new server's row takes the schema's defaults.
     if (!settings) {
-      settings = await prisma.systemSettings.create({
-        data: {
-          id: "default",
-          lidarrEnabled: true,
-          lidarrUrl: "http://localhost:8686",
-          fanartEnabled: false,
-          audiobookshelfEnabled: false,
-          audiobookshelfUrl: "http://localhost:13378",
-          musicPath: "/music",
-          downloadPath: "/downloads",
-          autoSync: true,
-          transcodeCacheMaxGb: 10,
-          maxQueueLength: 10000,
-          soulseekConcurrentDownloads: 4,
-        },
-      });
+      settings = await prisma.systemSettings.create({ data: { id: "default" } });
     }
 
     // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
@@ -151,12 +136,6 @@ router.get("/", async (_req, res) => {
 router.post("/", async (req, res) => {
   try {
     const data = systemSettingsSchema.parse(req.body);
-
-    logger.debug("[SYSTEM SETTINGS] Saving settings...");
-    logger.debug(
-      "[SYSTEM SETTINGS] transcodeCacheMaxGb:",
-      data.transcodeCacheMaxGb,
-    );
 
     // Encrypt every supplied field from ENCRYPTED_FIELDS; fields the
     // payload omits stay untouched by the upsert.
@@ -245,19 +224,13 @@ router.post("/", async (req, res) => {
       logger.warn("[SYSTEM SETTINGS] Could not reinitialize Fanart service:", err);
     }
 
-    // If Audiobookshelf was disabled, clear all audiobook-related data
+    // Audiobookshelf turned off: its listening progress goes with it. A failure here does not fail the save.
     if (data.audiobookshelfEnabled === false) {
-      logger.debug(
-        "[CLEANUP] Audiobookshelf disabled - clearing all audiobook data from database",
-      );
       try {
         const deletedProgress = await prisma.audiobookProgress.deleteMany({});
-        logger.debug(
-          `   Deleted ${deletedProgress.count} audiobook progress entries`,
-        );
+        logger.debug(`[SYSTEM SETTINGS] Audiobookshelf off: deleted ${deletedProgress.count} progress entries`);
       } catch (clearError) {
-        logger.error("Failed to clear audiobook data:", clearError);
-        // Don't fail the request
+        logger.error("Failed to clear audiobook progress:", clearError);
       }
     }
 
@@ -272,12 +245,7 @@ router.post("/", async (req, res) => {
       }
     }
 
-    res.json({
-      success: true,
-      message:
-        "Settings saved successfully. Restart Docker containers to apply changes.",
-      requiresRestart: true,
-    });
+    res.json({ success: true });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res

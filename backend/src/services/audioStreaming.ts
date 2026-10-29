@@ -11,6 +11,7 @@ import PQueue from "p-queue";
 import { AppError, ErrorCode, ErrorCategory } from "../utils/errors";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { parseFile } from "music-metadata";
+import { getSystemSettings } from "../utils/systemSettings";
 
 // Set FFmpeg path to bundled binary
 ffmpeg.setFfmpegPath(ffmpegPath.path);
@@ -66,10 +67,28 @@ export class AudioStreamingService {
 
         // Start cache eviction timer (every 6 hours)
         this.evictionInterval = setInterval(() => {
-            this.evictCache(this.transcodeCacheMaxGb).catch((err) => {
-                logger.error("Cache eviction failed:", err);
-            });
+            this.cacheLimitGb()
+                .then((limit) => this.evictCache(limit))
+                .catch((err) => {
+                    logger.error("Cache eviction failed:", err);
+                });
         }, 6 * 60 * 60 * 1000);
+    }
+
+    /** The cache size saved in settings now, so a change applies without a restart; the startup size if unreadable. */
+    private async cacheLimitGb(): Promise<number> {
+        const saved = (await getSystemSettings().catch(() => null))?.transcodeCacheMaxGb;
+        return saved && saved >= 1 ? saved : this.transcodeCacheMaxGb;
+    }
+
+    /** Past 90% of the cache size, evicts down to 80% of it. */
+    async trimCacheIfNearFull(): Promise<void> {
+        const limit = await this.cacheLimitGb();
+        const currentSize = await this.getCacheSize();
+        if (currentSize > limit * 0.9) {
+            logger.debug(`[STREAM] Cache near full (${currentSize.toFixed(2)}GB), evicting to 80%...`);
+            await this.evictCache(limit * 0.8);
+        }
     }
 
     /** Bitrates already read, by path, kept while the file's modification time is unchanged; the oldest go first. */
@@ -168,16 +187,7 @@ export class AudioStreamingService {
         // The web player's tiers: a source already within the tier is not upsampled.
         if (!planned && (await this.servesOriginal(sourceAbsolutePath, target))) return original();
 
-        // Need to transcode - check cache size first
-        const currentSize = await this.getCacheSize();
-        if (currentSize > this.transcodeCacheMaxGb * 0.9) {
-            logger.debug(
-                `[STREAM] Cache near full (${currentSize.toFixed(
-                    2
-                )}GB), evicting to 80%...`
-            );
-            await this.evictCache(this.transcodeCacheMaxGb * 0.8);
-        }
+        await this.trimCacheIfNearFull();
 
         // Transcode to cache (deduplicated for concurrent requests).
         // inFlightTranscodes dedup lives OUTSIDE the queue so waiting callers
