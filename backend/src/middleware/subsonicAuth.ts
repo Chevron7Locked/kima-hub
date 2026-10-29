@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
+import { NO_ACCOUNT_PASSWORD_HASH } from "../services/users/credentials";
 import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
@@ -89,16 +90,9 @@ export async function subsonicAuth(
                 select: { id: true, username: true, role: true, passwordHash: true, twoFactorEnabled: true },
             });
 
-            // Timing-safe: always run bcrypt.compare to prevent username enumeration
-            const dummyHash = "$2b$10$invalidhashfortimingsafety.00000000000000000000";
-            let valid = false;
-            if (user) {
-                valid = await bcrypt.compare(plainPassword, user.passwordHash);
-            } else {
-                await bcrypt.compare(plainPassword, dummyHash);
-            }
+            const valid = await bcrypt.compare(plainPassword, user?.passwordHash ?? NO_ACCOUNT_PASSWORD_HASH);
 
-            if (!valid || !user) {
+            if (!user || !valid) {
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }

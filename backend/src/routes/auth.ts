@@ -8,6 +8,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
 import {
     requireAuth,
     requireAdmin,
@@ -31,20 +32,16 @@ const loginSchema = z.object({
 // POST /auth/login
 router.post("/login", async (req, res) => {
     try {
-        logger.debug(`[AUTH] Login attempt for user: ${req.body?.username}`);
         const { username, password } = loginSchema.parse(req.body);
-        const { token } = req.body; // 2FA token if provided
+        // The two-factor code, if sent; a client may send it as a number.
+        const token = req.body.token == null || req.body.token === "" ? undefined : String(req.body.token);
 
         const user = await prisma.user.findUnique({ where: { username } });
 
-        // Timing-safe: always run bcrypt to prevent username enumeration
-        const dummyHash = "$2b$10$invalidhashfortimingsafety.00000000000000000000";
-        const valid = await bcrypt.compare(password, user?.passwordHash ?? dummyHash);
+        const valid = await bcrypt.compare(password, user?.passwordHash ?? NO_ACCOUNT_PASSWORD_HASH);
         if (!user || !valid) {
-            logger.debug(`[AUTH] Invalid credentials for: ${username}`);
             return res.status(401).json({ error: "Invalid credentials" });
         }
-        logger.debug(`[AUTH] Password verified for user: ${username}`);
 
         // Check if 2FA is enabled
         if (user.twoFactorEnabled && user.twoFactorSecret) {
@@ -85,16 +82,7 @@ router.post("/login", async (req, res) => {
                     },
                 });
             } else {
-                // Verify TOTP token
-                const secret = decrypt(user.twoFactorSecret);
-                const verified = speakeasy.totp.verify({
-                    secret,
-                    encoding: "base32",
-                    token,
-                    window: 2,
-                });
-
-                if (!verified) {
+                if (!totpMatches(decrypt(user.twoFactorSecret), token)) {
                     return res.status(401).json({ error: "Invalid 2FA token" });
                 }
             }
@@ -132,10 +120,8 @@ router.post("/login", async (req, res) => {
     }
 });
 
-// POST /auth/logout - JWT is stateless, logout is handled client-side
+// POST /auth/logout: tokens are stateless, so signing out is the client dropping its token.
 router.post("/logout", (_req, res) => {
-    // With JWT, logout is handled by client removing the token
-    // No server-side session to destroy
     res.json({ message: "Logged out" });
 });
 
@@ -427,15 +413,7 @@ router.post("/2fa/enable", requireAuth, authLimiter, async (req, res) => {
                 .json({ error: "Secret and token are required" });
         }
 
-        // Verify the token with the secret
-        const verified = speakeasy.totp.verify({
-            secret,
-            encoding: "base32",
-            token,
-            window: 2,
-        });
-
-        if (!verified) {
+        if (!totpMatches(secret, token)) {
             return res
                 .status(400)
                 .json({ error: "Invalid token. Please try again." });
@@ -446,10 +424,9 @@ router.post("/2fa/enable", requireAuth, authLimiter, async (req, res) => {
         const hashedRecoveryCodes: string[] = [];
 
         for (let i = 0; i < 10; i++) {
-            // Generate 8-character alphanumeric code
+            // Eight hex characters, stored only as a hash.
             const code = crypto.randomBytes(4).toString("hex").toUpperCase();
             recoveryCodes.push(code);
-            // Hash the code before storing
             hashedRecoveryCodes.push(
                 crypto.createHash("sha256").update(code).digest("hex")
             );
@@ -508,17 +485,8 @@ router.post("/2fa/disable", requireAuth, authLimiter, async (req, res) => {
             return res.status(400).json({ error: "Invalid password" });
         }
 
-        // Verify 2FA token
         if (user.twoFactorSecret) {
-            const secret = decrypt(user.twoFactorSecret);
-            const verified = speakeasy.totp.verify({
-                secret,
-                encoding: "base32",
-                token,
-                window: 2,
-            });
-
-            if (!verified) {
+            if (!totpMatches(decrypt(user.twoFactorSecret), token)) {
                 return res.status(400).json({ error: "Invalid 2FA token" });
             }
         }
