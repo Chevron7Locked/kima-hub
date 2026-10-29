@@ -106,6 +106,9 @@ ANALYSIS_WINDOW_SECONDS = 90
 
 # How long to block waiting for work, in seconds (at least 5).
 BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', '5')))
+# A reply may take the whole wait, so the client waits longer than that before it calls the connection dead
+# (redis-py 8 otherwise gives up after 5 s, which is exactly the wait).
+REDIS_SOCKET_TIMEOUT = BRPOP_TIMEOUT + 10
 
 # Seconds idle before the models are unloaded; the next job loads them again.
 MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
@@ -703,7 +706,7 @@ class AnalysisWorker:
     """Takes audio analysis jobs from a Redis queue and runs them on a pool of worker processes."""
 
     def __init__(self):
-        self.redis = redis.from_url(REDIS_URL)
+        self.redis = redis.from_url(REDIS_URL, socket_timeout=REDIS_SOCKET_TIMEOUT)
         self.db = DatabaseConnection(DATABASE_URL)
         self.running = False
         self.executor = None
