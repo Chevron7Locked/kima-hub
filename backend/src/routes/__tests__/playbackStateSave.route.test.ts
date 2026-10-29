@@ -85,3 +85,18 @@ describe("POST /api/playback-state", () => {
         );
     });
 });
+
+describe("GET /api/playback-state/limit", () => {
+    it("answers a newly saved limit at once, not one the server read earlier", async () => {
+        const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
+        try {
+            await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: 10000 }, update: { maxQueueLength: 10000 } });
+            expect((await request(app).get("/api/playback-state/limit").set("x-user", "anyone")).body.maxQueueLength).toBe(10000);
+
+            await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: 2500 } });
+            expect((await request(app).get("/api/playback-state/limit").set("x-user", "anyone")).body.maxQueueLength).toBe(2500);
+        } finally {
+            await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
+        }
+    });
+});

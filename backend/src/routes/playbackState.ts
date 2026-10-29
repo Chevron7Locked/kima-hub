@@ -7,12 +7,11 @@ import { QUEUE_LENGTH } from "../utils/systemSettings";
 
 const router = express.Router();
 
-/** Cached for a minute: this is read on every queue write. */
-let cachedLimit: { value: number; at: number } | null = null;
-
-/** The operator's queue length limit, clamped on read in case the stored value was edited by hand. */
+/**
+ * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read on every queue
+ * write (one row by primary key), so a saved limit applies at once.
+ */
 async function queueLimit(): Promise<number> {
-    if (cachedLimit && Date.now() - cachedLimit.at < 60_000) return cachedLimit.value;
     let value: number = QUEUE_LENGTH.default;
     try {
         const settings = await prisma.systemSettings.findUnique({
@@ -23,9 +22,7 @@ async function queueLimit(): Promise<number> {
     } catch {
         // A settings read that fails must not stop somebody's queue saving.
     }
-    value = Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
-    cachedLimit = { value, at: Date.now() };
-    return value;
+    return Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
 }
 
 /** The limit, for the client, so it does not have to guess. */
