@@ -27,7 +27,6 @@ const STRUCTURAL_SPLIT = /[\0;]+/;
 const FEATURED_MARKER =
     /\s+(?:feat\.?|ft\.?|featuring|w\/)\s+/i;
 
-
 /**
  * Text folding shared by every identity key: Postgres `unaccent()` exactly
  * (from pgTextRules), because the same keys are also computed in SQL backfills
@@ -91,7 +90,6 @@ export function isMbid(value: unknown): value is string {
     return typeof value === "string" && MBID_FORMAT.test(value);
 }
 
-
 export interface ParsedCredit {
     /** The performing artist, never truncated. */
     primary: string;
@@ -120,25 +118,12 @@ export function parseCredit(
         return { primary: "", featured: [] };
     }
 
-    const featured: string[] = [];
-
-    // Peel featured credits off the FIRST value only; later values are already
-    // separate artists.
+    // The first value is the primary artist with any featured credits after it; every later value is its own artist,
+    // credits included.
     const [head, ...tail] = values;
-    const parts = head.split(FEATURED_MARKER);
-    const primaryRaw = parts[0].trim();
-    for (const extra of parts.slice(1)) {
-        const cleaned = extra.trim();
-        if (cleaned) featured.push(cleaned);
-    }
-
-    for (const value of tail) {
-        const sub = value.split(FEATURED_MARKER);
-        for (const piece of sub) {
-            const cleaned = piece.trim();
-            if (cleaned) featured.push(cleaned);
-        }
-    }
+    const [primaryRaw, ...headCredits] = head.split(FEATURED_MARKER).map((p) => p.trim());
+    const credits = (value: string) => value.split(FEATURED_MARKER).map((p) => p.trim()).filter(Boolean);
+    const featured = [...headCredits.filter(Boolean), ...tail.flatMap(credits)];
 
     return {
         primary: canonicalizeVariousArtists(primaryRaw),
