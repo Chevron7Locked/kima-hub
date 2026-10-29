@@ -235,6 +235,11 @@ async function authenticateRequest(
     return null;
 }
 
+/** The signed-in user, by the same rules as requireAuth, or null; for routes that answer everyone. */
+export function signedInUser(req: Request): Promise<AuthUser | null> {
+    return authenticateRequest(req, false);
+}
+
 export async function requireAuth(
     req: Request,
     res: Response,

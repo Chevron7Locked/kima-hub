@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import bcrypt from "bcrypt";
@@ -6,32 +6,89 @@ import { z } from "zod";
 import axios from "axios";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { encryptField } from "../utils/encryption";
-import { generateToken, requireAuth, requireAdmin } from "../middleware/auth";
+import { generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { createLidarrClient } from "../services/lidarrClient";
 
 const router = Router();
 
-// Validation schemas
 const registerSchema = z.object({
     username: z.string().min(3).max(50),
     password: z.string().min(6),
 });
 
 const serviceConfigSchema = z.object({
-    url: z.string().optional().or(z.literal("")),
-    apiKey: z.string().optional().or(z.literal("")),
+    url: z.string().optional(),
+    apiKey: z.string().optional(),
     enabled: z.boolean(),
 }).refine(
-    (data) => !data.enabled || !data.url || data.url === "" || z.string().url().safeParse(data.url).success,
+    (data) => !data.enabled || !data.url || z.string().url().safeParse(data.url).success,
     { message: "Invalid url", path: ["url"] },
 );
 
 const soulseekConfigSchema = z.object({
-    username: z.string().optional().or(z.literal("")),
-    password: z.string().optional().or(z.literal("")),
+    username: z.string().optional(),
+    password: z.string().optional(),
     enabled: z.boolean(),
 });
+
+/** Whether someone may create an account now that the first one exists. */
+async function registrationOpen(): Promise<boolean> {
+    const settings = await prisma.systemSettings.findUnique({
+        where: { id: "default" },
+        select: { registrationOpen: true },
+    });
+    return settings?.registrationOpen ?? false;
+}
+
+type ServiceFields = { enabled: string; url: string; apiKey: string };
+
+/**
+ * A setup step that saves one service's address and key, admin only. A failed connection test still saves, with a
+ * warning; turning the service off saves that alone.
+ */
+function serviceStep(name: string, fields: ServiceFields, connects: (url: string, apiKey: string) => Promise<boolean>) {
+    return async (req: Request, res: Response) => {
+        try {
+            const config = serviceConfigSchema.parse(req.body);
+            const data = config.enabled
+                ? {
+                      [fields.enabled]: true,
+                      [fields.url]: config.url || null,
+                      [fields.apiKey]: encryptField(config.apiKey),
+                  }
+                : { [fields.enabled]: false };
+            const tested = config.enabled && !!config.url && !!config.apiKey
+                ? await connects(config.url!, config.apiKey!).catch((error) => {
+                      logger.warn(`[ONBOARDING] ${name} connection test failed (saved anyway): ${error.message}`);
+                      return false;
+                  })
+                : false;
+
+            await prisma.systemSettings.upsert({
+                where: { id: "default" },
+                create: { id: "default", ...data },
+                update: data,
+            });
+            invalidateSystemSettingsCache();
+
+            if (!config.enabled) return res.json({ success: true, tested: false });
+            res.json({
+                success: true,
+                tested,
+                warning: tested ? null : SAVED_UNTESTED,
+            });
+        } catch (err: any) {
+            if (err instanceof z.ZodError) {
+                return res.status(400).json({ error: "Invalid request", details: err.issues });
+            }
+            logger.error(`${name} config error:`, err);
+            res.status(500).json({ error: "Failed to save configuration" });
+        }
+    };
+}
+
+const SAVED_UNTESTED = "Connection test failed but settings saved. You can test again in Settings.";
 
 /**
  * POST /onboarding/register
@@ -49,13 +106,8 @@ router.post("/register", async (req, res) => {
         const userCount = await prisma.user.count();
         const isFirstUser = userCount === 0;
 
-        // After initial setup, only allow registration if admin has enabled it
-        if (!isFirstUser) {
-            const rows = await prisma.$queryRaw<Array<{ registrationOpen: boolean }>>`
-                SELECT "registrationOpen" FROM "SystemSettings" LIMIT 1`;
-            if (!rows[0]?.registrationOpen) {
-                return res.status(403).json({ error: "Registration is closed" });
-            }
+        if (!isFirstUser && !(await registrationOpen())) {
+            return res.status(403).json({ error: "Registration is closed" });
         }
 
         // Check if username is taken
@@ -114,160 +166,28 @@ router.post("/register", async (req, res) => {
     }
 });
 
-/**
- * POST /onboarding/lidarr
- * Step 2a: Configure Lidarr integration
- */
-router.post("/lidarr", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const config = serviceConfigSchema.parse(req.body);
+/** POST /onboarding/lidarr: step 2a, Lidarr. */
+router.post(
+    "/lidarr",
+    requireAuth,
+    requireAdmin,
+    serviceStep("Lidarr", { enabled: "lidarrEnabled", url: "lidarrUrl", apiKey: "lidarrApiKey" }, async (url, apiKey) =>
+        (await createLidarrClient(url, apiKey, 5000).get("/api/v1/system/status")).status === 200
+    )
+);
 
-        // If not enabled, just save as disabled
-        if (!config.enabled) {
-            const settings = await prisma.systemSettings.findFirst();
-            if (settings) {
-                await prisma.systemSettings.update({
-                    where: { id: settings.id },
-                    data: { lidarrEnabled: false },
-                });
-                invalidateSystemSettingsCache();
-            }
-            return res.json({ success: true, tested: false });
-        }
-
-        // Test connection if enabled (non-blocking - save anyway)
-        let connectionTested = false;
-        if (config.url && config.apiKey) {
-            try {
-                const response = await createLidarrClient(config.url, config.apiKey, 5000).get(
-                    "/api/v1/system/status"
-                );
-
-                if (response.status === 200) {
-                    connectionTested = true;
-                    logger.debug("Lidarr connection test successful");
-                }
-            } catch (error: any) {
-                logger.warn(
-                    "  Lidarr connection test failed (saved anyway):",
-                    error.message
-                );
-                // Don't block - just log the warning
-            }
-        }
-
-        // Save to system settings (even if connection test failed)
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: {
-                id: "default",
-                lidarrEnabled: config.enabled,
-                lidarrUrl: config.url || null,
-                lidarrApiKey: encryptField(config.apiKey),
-            },
-            update: {
-                lidarrEnabled: config.enabled,
-                lidarrUrl: config.url || null,
-                lidarrApiKey: encryptField(config.apiKey),
-            },
-        });
-        invalidateSystemSettingsCache();
-
-        res.json({
-            success: true,
-            tested: connectionTested,
-            warning: connectionTested
-                ? null
-                : "Connection test failed but settings saved. You can test again in Settings.",
-        });
-    } catch (err: any) {
-        if (err instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
-        }
-        logger.error("Lidarr config error:", err);
-        res.status(500).json({ error: "Failed to save configuration" });
-    }
-});
-
-/**
- * POST /onboarding/audiobookshelf
- * Step 2b: Configure Audiobookshelf integration
- */
-router.post("/audiobookshelf", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const config = serviceConfigSchema.parse(req.body);
-
-        // If not enabled, just save as disabled
-        if (!config.enabled) {
-            const settings = await prisma.systemSettings.findFirst();
-            if (settings) {
-                await prisma.systemSettings.update({
-                    where: { id: settings.id },
-                    data: { audiobookshelfEnabled: false },
-                });
-                invalidateSystemSettingsCache();
-            }
-            return res.json({ success: true, tested: false });
-        }
-
-        // Test connection if enabled (non-blocking - save anyway)
-        let connectionTested = false;
-        if (config.url && config.apiKey) {
-            try {
-                const response = await axios.get(`${config.url}/api/me`, {
-                    headers: { Authorization: `Bearer ${config.apiKey}` },
-                    timeout: 5000,
-                });
-
-                if (response.status === 200) {
-                    connectionTested = true;
-                    logger.debug("Audiobookshelf connection test successful");
-                }
-            } catch (error: any) {
-                logger.warn(
-                    "  Audiobookshelf connection test failed (saved anyway):",
-                    error.message
-                );
-                // Don't block - just log the warning
-            }
-        }
-
-        // Save to system settings (even if connection test failed)
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: {
-                id: "default",
-                audiobookshelfEnabled: config.enabled,
-                audiobookshelfUrl: config.url || null,
-                audiobookshelfApiKey: encryptField(config.apiKey),
-            },
-            update: {
-                audiobookshelfEnabled: config.enabled,
-                audiobookshelfUrl: config.url || null,
-                audiobookshelfApiKey: encryptField(config.apiKey),
-            },
-        });
-        invalidateSystemSettingsCache();
-
-        res.json({
-            success: true,
-            tested: connectionTested,
-            warning: connectionTested
-                ? null
-                : "Connection test failed but settings saved. You can test again in Settings.",
-        });
-    } catch (err: any) {
-        if (err instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
-        }
-        logger.error("Audiobookshelf config error:", err);
-        res.status(500).json({ error: "Failed to save configuration" });
-    }
-});
+/** POST /onboarding/audiobookshelf: step 2b, Audiobookshelf. */
+router.post(
+    "/audiobookshelf",
+    requireAuth,
+    requireAdmin,
+    serviceStep(
+        "Audiobookshelf",
+        { enabled: "audiobookshelfEnabled", url: "audiobookshelfUrl", apiKey: "audiobookshelfApiKey" },
+        async (url, apiKey) =>
+            (await axios.get(`${url}/api/me`, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 5000 })).status === 200
+    )
+);
 
 /**
  * POST /onboarding/soulseek
@@ -277,7 +197,6 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
     try {
         const config = soulseekConfigSchema.parse(req.body);
 
-        // If not enabled, clear credentials
         if (!config.enabled) {
             await prisma.systemSettings.upsert({
                 where: { id: "default" },
@@ -295,14 +214,12 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
             return res.json({ success: true, tested: false });
         }
 
-        // If enabled, require credentials
         if (!config.username || !config.password) {
             return res.status(400).json({
                 error: "Soulseek username and password are required",
             });
         }
 
-        // Save to system settings
         await prisma.systemSettings.upsert({
             where: { id: "default" },
             create: {
@@ -317,7 +234,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
         });
         invalidateSystemSettingsCache();
 
-        // Test connection by resetting and reconnecting
+        // Reconnecting with the saved account is the connection test.
         let connectionTested = false;
         try {
             const { soulseekService } = await import("../services/soulseek");
@@ -325,19 +242,13 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
             connectionTested = true;
             logger.debug("[ONBOARDING] Soulseek connection test successful");
         } catch (error: any) {
-            logger.warn(
-                "  Soulseek connection test failed (saved anyway):",
-                error.message
-            );
-            // Don't block - just log the warning
+            logger.warn(`[ONBOARDING] Soulseek connection test failed (saved anyway): ${error.message}`);
         }
 
         res.json({
             success: true,
             tested: connectionTested,
-            warning: connectionTested
-                ? null
-                : "Connection test failed but settings saved. You can test again in Settings.",
+            warning: connectionTested ? null : SAVED_UNTESTED,
         });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
@@ -408,58 +319,22 @@ router.post("/complete", requireAuth, async (req, res) => {
  */
 router.get("/status", async (req, res) => {
     try {
-        // Check if any users exist in the system
         const userCount = await prisma.user.count();
         const hasAccount = userCount > 0;
 
-        // Check if registration is open (always open for first user)
-        let registrationOpen = !hasAccount;
-        if (hasAccount) {
-            const rows = await prisma.$queryRaw<Array<{ registrationOpen: boolean }>>`
-                SELECT "registrationOpen" FROM "SystemSettings" LIMIT 1`;
-            registrationOpen = rows[0]?.registrationOpen ?? false;
-        }
+        // Open for the first account; then the admin's setting.
+        const open = hasAccount ? await registrationOpen() : true;
+        const basic = { needsOnboarding: !hasAccount, hasAccount, registrationOpen: open };
 
-        // Check for JWT token in Authorization header
-        const authHeader = req.headers.authorization;
-        const token = authHeader?.startsWith("Bearer ")
-            ? authHeader.substring(7)
-            : null;
+        // A token counts only as far as sign-in trusts it (not a refresh token, stream ticket or revoked token).
+        const user = await signedInUser(req);
+        if (!user) return res.json(basic);
 
-        // If no token, return whether any users exist
-        if (!token) {
-            return res.json({
-                needsOnboarding: !hasAccount,
-                hasAccount,
-                registrationOpen,
-            });
-        }
-
-        // Try to verify token and check onboarding status
-        try {
-            const jwt = require("jsonwebtoken");
-            const JWT_SECRET =
-                process.env.JWT_SECRET || process.env.SESSION_SECRET!;
-            const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { onboardingComplete: true },
-            });
-
-            res.json({
-                needsOnboarding: !user?.onboardingComplete,
-                hasAccount: true,
-                registrationOpen,
-            });
-        } catch {
-            // Invalid token - return basic status
-            res.json({
-                needsOnboarding: !hasAccount,
-                hasAccount,
-                registrationOpen,
-            });
-        }
+        const account = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { onboardingComplete: true },
+        });
+        res.json(account ? { ...basic, needsOnboarding: !account.onboardingComplete } : basic);
     } catch (err: any) {
         logger.error("Onboarding status error:", err);
         res.status(500).json({ error: "Failed to check status" });
