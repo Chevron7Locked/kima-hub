@@ -4,8 +4,7 @@ import * as path from 'path';
 
 /**
  * Log files for Spotify import and playlist work, under ./logs/playlists or
- * PLAYLIST_LOG_DIR: import_<jobId>_<timestamp>.log per job, and session.log,
- * cleared on each start.
+ * PLAYLIST_LOG_DIR: import_<jobId>_<timestamp>.log per job, and session.log, cleared by the process's first write to it.
  */
 
 const LOGS_DIR = process.env.PLAYLIST_LOG_DIR
@@ -13,10 +12,8 @@ const LOGS_DIR = process.env.PLAYLIST_LOG_DIR
     : path.join(process.cwd(), 'logs', 'playlists');
 const SESSION_LOG = path.join(LOGS_DIR, 'session.log');
 
-// Clear session log on module load (fresh start)
 let sessionInitialized = false;
 
-// Ensure logs directory exists
 function ensureLogsDir(): void {
     try {
         fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -28,7 +25,7 @@ function ensureLogsDir(): void {
     }
 }
 
-// Initialize session log (clear previous session)
+/** Starts session.log over, once per process. */
 function initSessionLog(): void {
     if (sessionInitialized) return;
     sessionInitialized = true;
@@ -46,25 +43,19 @@ function initSessionLog(): void {
     });
 }
 
-// Write to session log (unified log for all components)
 function writeToSessionLog(component: string, level: string, message: string): void {
     initSessionLog();
     const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
     const line = `[${timestamp}] [${component}] [${level}] ${message}\n`;
 
-    fs.promises.appendFile(SESSION_LOG, line).catch(() => {
-        // Silently fail - don't spam console
-    });
+    // A log line that cannot be written is dropped quietly, so a full disk does not flood the console.
+    fs.promises.appendFile(SESSION_LOG, line).catch(() => {});
 }
 
-/**
- * Log a message from any component to the unified session log
- * Use this for Soulseek, organize, etc.
- */
+/** A line in session.log from any component (Soulseek, organizing), echoed to the console log. */
 export function sessionLog(component: string, message: string, level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG' = 'INFO'): void {
     writeToSessionLog(component, level, message);
 
-    // Also log to console with component prefix
     const prefix = `[${component}]`;
     if (level === 'ERROR') {
         logger.error(prefix, message);
@@ -86,19 +77,13 @@ class PlaylistLogger {
 
     constructor(jobId: string) {
         ensureLogsDir();
-        
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         this.logFile = path.join(LOGS_DIR, `import_${jobId}_${timestamp}.log`);
-        
-        // Write header
         this.write('INFO', `=== SPOTIFY IMPORT JOB: ${jobId} ===`);
     }
 
     private write(level: string, message: string): void {
-        // Write to unified session log
         writeToSessionLog('IMPORT', level, message);
-
-        // Also log to console
         if (level === 'ERROR') {
             logger.error(`[Playlist Logger] ${message}`);
         } else {
@@ -126,11 +111,6 @@ class PlaylistLogger {
         this.write('DEBUG', message);
     }
 
-    log(message: string): void {
-        this.write('INFO', message);
-    }
-
-    // Structured logging methods
     logJobStart(playlistName: string, trackCount: number, userId: string): void {
         this.info(`Playlist: "${playlistName}" (${trackCount} tracks)`);
         this.info(`User: ${userId}`);

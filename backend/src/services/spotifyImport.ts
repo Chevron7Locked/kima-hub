@@ -1768,7 +1768,7 @@ class SpotifyImportService {
       const strippedTitle = stripTrackSuffix(pendingTrack.title);
       const cleanedTitle = normalizeTrackTitle(pendingTrack.title);
 
-      jobLogger?.log(`   Matching: "${pendingTrack.title}" by ${pendingTrack.artist}`);
+      jobLogger?.info(`   Matching: "${pendingTrack.title}" by ${pendingTrack.artist}`);
 
       const candidates = tracksByArtistWord.get(artistFirstWord.toLowerCase()) || [];
 
@@ -1796,7 +1796,7 @@ class SpotifyImportService {
 
     // Title alone, any artist, for what is left: one search for all of them.
     if (unmatchedForTitleOnly.length > 0) {
-      jobLogger?.log(`   Title-only search for ${unmatchedForTitleOnly.length} remaining tracks`);
+      jobLogger?.info(`   Title-only search for ${unmatchedForTitleOnly.length} remaining tracks`);
       const titleSearchTerms = unmatchedForTitleOnly.map(
         (u) => u.strippedTitle.split(" ").slice(0, 4).join(" "),
       );
@@ -1815,7 +1815,7 @@ class SpotifyImportService {
         if (match) {
           matchedTrackIds.push(match.candidate.id);
           if (!matchedPositions.has(match.candidate.id)) matchedPositions.set(match.candidate.id, tIdx);
-          jobLogger?.log(
+          jobLogger?.info(
             `      Found via title-only match (${match.confidence}%): "${match.candidate.title}" by ${match.candidate.artistName}`,
           );
           jobLogger?.logTrackMatch(tIdx, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, match.candidate.id);
