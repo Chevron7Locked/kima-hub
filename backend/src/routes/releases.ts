@@ -180,39 +180,6 @@ router.get("/radar", async (req, res) => {
 });
 
 /**
- * GET /releases/upcoming
- * 
- * Get only upcoming releases (next X days)
- */
-router.get("/upcoming", async (req, res) => {
-    try {
-        const daysAhead = parseInt(req.query.days as string) || 90;
-        
-        const now = new Date();
-        const endDate = new Date(now);
-        endDate.setDate(endDate.getDate() + daysAhead);
-
-        const releases = await lidarrService.getCalendar(now, endDate);
-
-        // Sort by release date (soonest first)
-        const sorted = releases.sort((a, b) => 
-            new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime()
-        );
-
-        const checked = await withReleaseArtwork(sorted);
-
-        res.json({
-            releases: checked,
-            count: sorted.length,
-            daysAhead,
-        });
-    } catch (error: any) {
-        logger.error("[Releases] Upcoming error:", error.message);
-        res.status(500).json({ error: "Failed to fetch upcoming releases" });
-    }
-});
-
-/**
  * POST /releases/download/:albumMbid
  * 
  * Download a release from the radar

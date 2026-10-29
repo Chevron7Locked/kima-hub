@@ -1,6 +1,6 @@
 /**
- * All three Release Radar endpoints resolve artwork through the providers and
- * prefer it over Lidarr's unchecked Cover Art Archive address. Failure path first.
+ * The Release Radar resolves artwork through the providers and
+ * prefers it over Lidarr's unchecked Cover Art Archive address. Failure path first.
  */
 
 // All mocks before imports.
@@ -168,19 +168,7 @@ describe('the Release Radar and the artwork it promises', () => {
         });
     });
 
-    describe('GET /releases/upcoming', () => {
-        it('goes through the providers here too', async () => {
-            mockGetAlbumCover.mockResolvedValue(FROM_DEEZER);
-            mockGetCalendar.mockResolvedValue([calendarEntry()]);
-
-            const res = await request(makeApp()).get('/releases/upcoming');
-
-            expect(res.status).toBe(200);
-            expect(res.body.releases[0].coverUrl).toBe(FROM_DEEZER);
-        });
-    });
-
-    it('no response from any release endpoint carries a hand-built archive address', async () => {
+    it('the radar never carries a hand-built archive address', async () => {
         // A guessed coverartarchive.org/.../front-500 address must never leave
         // this server.
         mockGetCalendar.mockResolvedValue([
@@ -188,10 +176,7 @@ describe('the Release Radar and the artwork it promises', () => {
             calendarEntry({ id: 2, releaseDate: new Date(Date.now() - 864e5).toISOString() }),
         ]);
 
-        const app = makeApp();
-        for (const path of ['/releases/radar', '/releases/upcoming']) {
-            const res = await request(app).get(path);
-            expect(JSON.stringify(res.body)).not.toContain('front-500');
-        }
+        const res = await request(makeApp()).get('/releases/radar');
+        expect(JSON.stringify(res.body)).not.toContain('front-500');
     });
 });

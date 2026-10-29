@@ -515,69 +515,6 @@ router.delete("/failed/:id", async (req, res) => {
     }
 });
 
-router.get("/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const userId = req.user!.id;
-
-        const job = await prisma.downloadJob.findFirst({
-            where: {
-                id,
-                userId,
-            },
-        });
-
-        if (!job) {
-            return res.status(404).json({ error: "Download job not found" });
-        }
-
-        res.json(job);
-    } catch (error) {
-        logger.error("Get download job error:", error);
-        res.status(500).json({ error: "Failed to get download job" });
-    }
-});
-
-router.patch("/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const userId = req.user!.id;
-        const { status } = req.body;
-
-        const VALID_STATUSES = ["pending", "processing", "completed", "failed", "exhausted"];
-        if (status && !VALID_STATUSES.includes(status)) {
-            return res.status(400).json({ error: "Invalid status", validStatuses: VALID_STATUSES });
-        }
-        if (!status) {
-            return res.status(400).json({ error: "status field is required" });
-        }
-
-        const job = await prisma.downloadJob.findFirst({
-            where: {
-                id,
-                userId,
-            },
-        });
-
-        if (!job) {
-            return res.status(404).json({ error: "Download job not found" });
-        }
-
-        const updated = await prisma.downloadJob.update({
-            where: { id },
-            data: {
-                status: status || "completed",
-                completedAt: status === "completed" ? new Date() : undefined,
-            },
-        });
-
-        res.json(updated);
-    } catch (error) {
-        logger.error("Update download job error:", error);
-        res.status(500).json({ error: "Failed to update download job" });
-    }
-});
-
 router.delete("/:id", async (req, res) => {
     try {
         const { id } = req.params;

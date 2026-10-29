@@ -62,7 +62,7 @@ export interface SystemStats {
     corruptTracks: number;
     enrichmentFailures: number;
     library: { tracks: number; albums: number; artists: number; bytes: number };
-    cache: { downloadedMb: number; transcodedMb: number };
+    cache: { transcodedMb: number };
 }
 
 export interface Signature {

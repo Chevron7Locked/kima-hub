@@ -920,7 +920,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
         session.setJourney("10. audio features and removed endpoints");
         const asked: string[] = [];
         const featureObjects: Array<{ url: string; keys: string[] }> = [];
-        const onRequest = (r: { url(): string }) => asked.push(r.url());
+        const onRequest = (r: { method(): string; url(): string }) => asked.push(`${r.method()} ${r.url()}`);
         const onResponse = async (r: import("@playwright/test").Response) => {
             if (!r.url().includes("/api/") || !(r.headers()["content-type"] ?? "").includes("json")) return;
             const body = await r.json().catch(() => null);
@@ -966,14 +966,42 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             });
 
             await session.step("the removed endpoints answer 404", async () => {
-                for (const path of ["/api/vibe/status", "/api/recommendations/tracks?seedTrackId=x", "/api/releases/recent"]) {
+                for (const path of [
+                    "/api/vibe/status",
+                    "/api/recommendations/tracks?seedTrackId=x",
+                    "/api/recommendations?seedArtistId=x",
+                    "/api/recommendations/albums?seedAlbumId=x",
+                    "/api/releases/recent",
+                    "/api/releases/upcoming",
+                    "/api/offline/stats",
+                    "/api/plays",
+                    "/api/artists/preview/x/y",
+                    "/api/downloads/x",
+                    "/api/discover/generate/status/x",
+                    "/api/discover/exclusions",
+                    "/api/library/cover-art-colors?url=x",
+                    "/api/analysis/track/x",
+                ]) {
                     const res = await api.get(path, { headers: bearer(token) });
                     expect(res.status(), `GET ${path}`).toBe(404);
+                }
+                for (const [method, path] of [
+                    ["POST", "/api/spotify/parse"],
+                    ["POST", "/api/offline/albums/x/download"],
+                    ["POST", "/api/offline/tracks/x/complete"],
+                    ["DELETE", "/api/offline/albums/x"],
+                    ["PATCH", "/api/downloads/x"],
+                    ["DELETE", "/api/discover/exclusions"],
+                    ["DELETE", "/api/discover/exclusions/x"],
+                ]) {
+                    const res = await api.fetch(path, { method, headers: bearer(token), data: {} });
+                    expect(res.status(), `${method} ${path}`).toBe(404);
                 }
             });
 
             await session.step("the pages opened here never asked for a removed endpoint", async () => {
-                const removed = asked.filter((u) => /\/api\/(vibe\/status|recommendations\/tracks|releases\/recent)(\?|$)/.test(u));
+                // Plays and downloads keep their POST and DELETE; only the GET forms were removed.
+                const removed = asked.filter((u) => /^GET \S*\/api\/(vibe\/status|recommendations(\/tracks|\/albums)?|releases\/(recent|upcoming)|offline\/|plays|downloads\/(?!failed)[^/?]+|artists\/preview\/[^/]+\/[^/?]+|discover\/(generate\/status|exclusions)|library\/cover-art-colors|analysis\/track\/[^/?]+)(\?|$)/.test(u) || /\/api\/offline\//.test(u));
                 expect(removed).toEqual([]);
             });
 

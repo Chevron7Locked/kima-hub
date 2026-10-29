@@ -5,8 +5,6 @@ import type { Prisma } from "@prisma/client";
 const DEFAULT_USER_SETTINGS = {
     playbackQuality: "original",
     wifiOnly: false,
-    offlineEnabled: false,
-    maxCacheSizeMb: 10240, // 10 GB
     shareLiveListening: true,
 };
 

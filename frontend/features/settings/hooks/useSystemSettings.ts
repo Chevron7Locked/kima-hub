@@ -23,7 +23,6 @@ const defaultSystemSettings: SystemSettings = {
     downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,
     maxQueueLength: 10000,
-    maxCacheSizeMb: 10240,
     autoSync: true,
     soulseekConcurrentDownloads: 4,
     lidarrQualityProfileId: null,
@@ -59,8 +58,8 @@ export function useSystemSettings() {
     const fetchSystemSettings = useCallback(() => {
         const askedFor = adminId;
         const current = () => currentAdminRef.current === askedFor;
-        return Promise.all([api.getSystemSettings(), api.getSettings()])
-            .then(([sysData, userData]) => {
+        return api.getSystemSettings()
+            .then((sysData) => {
                 // Null strings become empty strings for controlled inputs.
                 const sanitizeSettings = (settings: Record<string, unknown>): SystemSettings => {
                     const sanitized: Record<string, unknown> = {};
@@ -75,12 +74,7 @@ export function useSystemSettings() {
                     return sanitized as unknown as SystemSettings;
                 };
 
-                const combinedSettings = {
-                    ...sanitizeSettings(sysData),
-                    maxCacheSizeMb: userData.maxCacheSizeMb,
-                };
-
-                if (current()) setSystemSettings(combinedSettings);
+                if (current()) setSystemSettings(sanitizeSettings(sysData));
             })
             .catch((error) => {
                 if (current()) setLoadError(error instanceof Error ? error.message : "Failed to load settings");
@@ -112,7 +106,6 @@ export function useSystemSettings() {
 
     const saveSystemSettings = async (settingsToSave: SystemSettings) => {
         await api.updateSystemSettings(settingsToSave);
-        await api.updateSettings({ maxCacheSizeMb: settingsToSave.maxCacheSizeMb });
     };
 
     const updateSystemSettings = (updates: Partial<SystemSettings>) => {

@@ -1,10 +1,8 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
-import { prisma } from "../utils/db";
 import { z } from "zod";
 import { recordPlay } from "../services/playRecording";
-import { parseLimit } from "./library/paging";
 
 const router = Router();
 
@@ -41,42 +39,6 @@ router.post("/", async (req, res) => {
         }
         logger.error("Create play error:", error);
         res.status(500).json({ error: "Failed to log play" });
-    }
-});
-
-// GET /plays (recent plays for user)
-router.get("/", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const { limit = "50" } = req.query;
-
-        const plays = await prisma.play.findMany({
-            where: { userId },
-            orderBy: { playedAt: "desc" },
-            take: parseLimit(limit, 50, 200),
-            include: {
-                track: {
-                    include: {
-                        album: {
-                            include: {
-                                artist: {
-                                    select: {
-                                        id: true,
-                                        name: true,
-                                        mbid: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        });
-
-        res.json(plays);
-    } catch (error) {
-        logger.error("Get plays error:", error);
-        res.status(500).json({ error: "Failed to get plays" });
     }
 });
 

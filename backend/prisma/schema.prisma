@@ -163,23 +163,6 @@ model AudiobookProgress {
   @@index([userId, lastPlayedAt])
 }
 
-model CachedTrack {
-  id             String   @id @default(cuid())
-  userId         String
-  trackId        String
-  localPath      String
-  quality        String
-  fileSizeMb     Float
-  cachedAt       DateTime @default(now())
-  lastAccessedAt DateTime @default(now())
-  track          Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, trackId, quality])
-  @@index([lastAccessedAt])
-  @@index([userId])
-}
-
 model DeviceLinkCode {
   id         String    @id @default(cuid())
   code       String    @unique
@@ -756,7 +739,6 @@ model Track {
   scanStartedAt     DateTime?
   discNumber        Int?
   discSubtitle      String?
-  cachedBy          CachedTrack[]
   likedBy           LikedTrack[]
   plays             Play[]
   playlistItems     PlaylistItem[]
@@ -853,7 +835,6 @@ model User {
   createdAt              DateTime                 @default(now())
   apiKeys                ApiKey[]
   audiobookProgress      AudiobookProgress[]
-  cachedTracks           CachedTrack[]
   deviceLinkCodes        DeviceLinkCode[]
   discoverExclusions     DiscoverExclusion[]
   discoveryAlbums        DiscoveryAlbum[]
@@ -911,8 +892,6 @@ model UserSettings {
   userId             String  @id
   playbackQuality    String  @default("original")
   wifiOnly           Boolean @default(false)
-  offlineEnabled     Boolean @default(false)
-  maxCacheSizeMb     Int     @default(10240)
   // Write-only per-user scrobble credential (encrypted, `xc1.` prefix);
   // never returned in full — see routes/settings.ts.
   listenbrainzToken  String?

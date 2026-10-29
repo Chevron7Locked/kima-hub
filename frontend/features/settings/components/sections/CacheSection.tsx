@@ -1101,31 +1101,6 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 ) : null}
 
                 <SettingsRow
-                    label="User cache size"
-                    description="Maximum storage for offline content"
-                >
-                    <div className="flex items-center gap-3">
-                        <input
-                            type="range"
-                            min={512}
-                            max={20480}
-                            step={512}
-                            aria-label="User cache size"
-                            value={settings.maxCacheSizeMb}
-                            onChange={(e) =>
-                                onUpdate({
-                                    maxCacheSizeMb: parseInt(e.target.value),
-                                })
-                            }
-                            className={sliderClass}
-                        />
-                        <span className="text-xs tabular-nums text-[var(--text-secondary)] w-16 text-right">
-                            {(settings.maxCacheSizeMb / 1024).toFixed(1)} GB
-                        </span>
-                    </div>
-                </SettingsRow>
-
-                <SettingsRow
                     label="Transcode cache size"
                     description="Server restart required for changes"
                 >

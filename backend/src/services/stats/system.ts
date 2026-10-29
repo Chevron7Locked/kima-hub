@@ -19,7 +19,7 @@ export interface SystemStats {
     missingTracks: number;
     enrichmentFailures: number;
     library: { tracks: number; albums: number; artists: number; bytes: number };
-    cache: { downloadedMb: number; transcodedMb: number };
+    cache: { transcodedMb: number };
 }
 
 /** Time a probe, and report a failure as null rather than throwing the page away. */
@@ -34,7 +34,7 @@ async function timed(probe: () => Promise<unknown>): Promise<number | null> {
 }
 
 export async function systemStats(version: string): Promise<SystemStats> {
-    const [db, redis, jobs, corrupt, missing, failures, library, cached, transcoded] = await Promise.all([
+    const [db, redis, jobs, corrupt, missing, failures, library, transcoded] = await Promise.all([
         timed(() => prisma.$queryRaw`SELECT 1`),
         timed(() => redisClient.ping()),
 
@@ -58,9 +58,6 @@ export async function systemStats(version: string): Promise<SystemStats> {
         WHERE al.location = 'LIBRARY'`,
 
         prisma.$queryRaw<Array<{ mb: number }>>`
-        SELECT coalesce(sum("fileSizeMb"), 0)::float8 AS mb FROM "CachedTrack"`,
-
-        prisma.$queryRaw<Array<{ mb: number }>>`
         SELECT (coalesce(sum("cacheSize"), 0) / 1048576.0)::float8 AS mb FROM "TranscodedFile"`,
     ]);
 
@@ -81,7 +78,6 @@ export async function systemStats(version: string): Promise<SystemStats> {
             bytes: Number(library[0]?.bytes ?? 0),
         },
         cache: {
-            downloadedMb: cached[0]?.mb ?? 0,
             transcodedMb: transcoded[0]?.mb ?? 0,
         },
     };

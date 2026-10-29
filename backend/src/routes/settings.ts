@@ -15,8 +15,6 @@ router.use(requireAuth);
 const settingsSchema = z.object({
     playbackQuality: z.enum(["original", "high", "medium", "low"]).optional(),
     wifiOnly: z.boolean().optional(),
-    offlineEnabled: z.boolean().optional(),
-    maxCacheSizeMb: z.number().int().min(0).optional(),
     // Write-only scrobble credential: accepted on save (null clears),
     // never echoed back on GET.
     listenbrainzToken: z.string().min(1).nullable().optional(),

@@ -31,7 +31,6 @@ app.use("/library", libraryCoverArtRoutes);
 
 const COVER = "https://covers.example.org/a.jpg";
 const cover = () => request(app).get(`/library/cover-art?url=${encodeURIComponent(COVER)}`);
-const colors = () => request(app).get(`/library/cover-art-colors?url=${encodeURIComponent(COVER)}`);
 /** What Node's fetch throws when the host drops the connection. */
 const reset = () => Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
 
@@ -61,14 +60,5 @@ describe("GET /library/cover-art?url=", () => {
     it("answers 404 when the host has no such picture", async () => {
         mockFetchChecked.mockResolvedValueOnce(new Response("nope", { status: 404, statusText: "Not Found" }));
         expect((await cover()).status).toBe(404);
-    });
-});
-
-describe("GET /library/cover-art-colors?url=", () => {
-    it("answers 502 for a host that cannot be reached and 400 for a refused address", async () => {
-        mockFetchChecked.mockRejectedValueOnce(reset()).mockRejectedValueOnce(reset());
-        expect((await colors()).status).toBe(502);
-        mockFetchChecked.mockRejectedValueOnce(new BlockedAddressError("Blocked: internal address"));
-        expect((await colors()).status).toBe(400);
     });
 });

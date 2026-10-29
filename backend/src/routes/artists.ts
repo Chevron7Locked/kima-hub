@@ -27,30 +27,6 @@ const DISCOVERY_CACHE_TTL = 24 * 60 * 60; // 24 hours
 const MBID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// GET /artists/preview/:artistName/:trackTitle - Get Deezer preview URL for a track
-router.get("/preview/:artistName/:trackTitle", async (req, res) => {
-    try {
-        const { artistName, trackTitle } = req.params;
-
-        logger.debug(
-            `Getting preview for "${trackTitle}" by ${artistName}`
-        );
-
-        const previewUrl = await deezerService.getTrackPreview(
-            artistName,
-            trackTitle
-        );
-
-        if (previewUrl) {
-            res.json({ previewUrl });
-        } else {
-            res.status(404).json({ error: "Preview not found" });
-        }
-    } catch (error) {
-        safeError(res, "Track preview fetch", error);
-    }
-});
-
 // GET /artists/preview/:artistName/:trackTitle/stream - Proxy Deezer preview audio as same-origin media
 router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
     try {

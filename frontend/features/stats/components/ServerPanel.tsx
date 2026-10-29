@@ -27,7 +27,7 @@ export function ServerPanel({ system }: { system: SystemStats }) {
                 <Reading label="library size" value={bytes(system.library.bytes)} />
                 <Reading
                     label="cache size"
-                    value={bytes((system.cache.downloadedMb + system.cache.transcodedMb) * 1048576)}
+                    value={bytes(system.cache.transcodedMb * 1048576)}
                 />
                 <Reading
                     label="failed tracks"

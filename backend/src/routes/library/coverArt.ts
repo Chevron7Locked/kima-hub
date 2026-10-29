@@ -10,10 +10,6 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../utils/ssrf";
 import { upstreamFailure } from "../../utils/upstream";
 import {
-  extractColorsFromImage,
-  FALLBACK_PALETTE,
-} from "../../utils/colorExtractor";
-import {
   resizeImageBuffer,
   getResizedImagePath,
 } from "../../services/imageStorage";
@@ -467,86 +463,6 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
   } catch (error) {
     logger.error("Get album cover error:", error);
     res.status(500).json({ error: "Failed to fetch cover art" });
-  }
-});
-
-router.get("/cover-art-colors", imageLimiter, async (req, res) => {
-  try {
-    const { url } = req.query;
-
-    if (!url) {
-      return res.status(400).json({ error: "URL parameter required" });
-    }
-
-    const imageUrl = decodeURIComponent(url as string);
-
-    if (
-      imageUrl.includes("placeholder") ||
-      imageUrl.startsWith("/placeholder")
-    ) {
-      logger.debug(
-        `[COLORS] Placeholder image detected, returning fallback colors`,
-      );
-      return res.json(FALLBACK_PALETTE);
-    }
-
-    const cacheKey = `colors:${crypto
-      .createHash("md5")
-      .update(imageUrl)
-      .digest("hex")}`;
-
-    try {
-      const cached = await redisClient.get(cacheKey);
-      if (cached) {
-        logger.debug(`[COLORS] Cache HIT for ${imageUrl.substring(0, 60)}...`);
-        return res.json(JSON.parse(cached));
-      } else {
-        logger.debug(
-          `[COLORS] ✗ Cache MISS for ${imageUrl.substring(0, 60)}...`,
-        );
-      }
-    } catch (cacheError) {
-      logger.warn("[COLORS] Redis cache read error:", cacheError);
-    }
-
-    logger.debug(`[COLORS] Fetching image: ${imageUrl.substring(0, 100)}...`);
-    let imageResponse: FetchedImage;
-    try {
-      imageResponse = await fetchImage(imageUrl);
-    } catch (err) {
-      if (answerImageFetchFailure(res, err, "COLORS", imageUrl, { invalid: "Invalid image URL", missing: "Image not found" })) return;
-      throw err;
-    }
-
-    if (!imageResponse.ok) {
-      logger.error(
-        `[COLORS] Failed to fetch image: ${imageUrl} (${imageResponse.status})`,
-      );
-      return res.status(404).json({ error: "Image not found" });
-    }
-
-    const buffer = await imageResponse.arrayBuffer();
-    const imageBuffer = Buffer.from(buffer);
-
-    const colors = await extractColorsFromImage(imageBuffer);
-
-    logger.debug(`[COLORS] Extracted colors:`, colors);
-
-    try {
-      await redisClient.setex(
-        cacheKey,
-        30 * 24 * 60 * 60,
-        JSON.stringify(colors),
-      );
-      logger.debug(`[COLORS] Cached colors for 30 days`);
-    } catch (cacheError) {
-      logger.warn("[COLORS] Redis cache write error:", cacheError);
-    }
-
-    res.json(colors);
-  } catch (error) {
-    logger.error("Extract colors error:", error);
-    res.status(500).json({ error: "Failed to extract colors" });
   }
 });
 

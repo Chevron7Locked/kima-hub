@@ -6,8 +6,6 @@ import { UserSettings } from "../types";
 const defaultSettings: UserSettings = {
     playbackQuality: "original",
     wifiOnly: false,
-    offlineEnabled: false,
-    maxCacheSizeMb: 5120,
 };
 
 export function useSettingsData() {

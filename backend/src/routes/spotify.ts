@@ -8,7 +8,6 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
-import { spotifyService } from "../services/spotify";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
 import { deezerService } from "../services/deezer";
 import { parseM3U } from "../services/m3uParser";
@@ -63,41 +62,6 @@ const PLAYLIST_URL_PREFIXES: Array<[string, string]> = [
     ["bandcamp.com", "/"],
     ["mixcloud.com", "/"],
 ];
-
-/**
- * POST /api/spotify/parse
- * Parse a Spotify URL and return basic info
- */
-router.post("/parse", async (req, res) => {
-    try {
-        const { url } = parseUrlSchema.parse(req.body);
-
-        const parsed = spotifyService.parseUrl(url);
-        if (!parsed) {
-            return res.status(400).json({
-                error: "Invalid Spotify URL. Please provide a valid playlist URL.",
-            });
-        }
-
-        // Only playlists can be imported
-        if (parsed.type !== "playlist") {
-            return res.status(400).json({
-                error: `Only playlist imports are supported. Got: ${parsed.type}`,
-            });
-        }
-
-        res.json({
-            type: parsed.type,
-            id: parsed.id,
-            url: `https://open.spotify.com/playlist/${parsed.id}`,
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request body" });
-        }
-        safeError(res, "Spotify parse", error);
-    }
-});
 
 /**
  * POST /api/spotify/preview/start

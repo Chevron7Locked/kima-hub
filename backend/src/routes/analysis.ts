@@ -144,53 +144,6 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
 });
 
 
-/**
- * GET /api/analysis/track/:trackId
- * Get analysis data for a specific track
- */
-router.get("/track/:trackId", requireAuth, async (req, res) => {
-    try {
-        const { trackId } = req.params;
-
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
-            select: {
-                id: true,
-                title: true,
-                analysisStatus: true,
-                analysisError: true,
-                analyzedAt: true,
-                analysisVersion: true,
-                analysisMode: true,
-                bpm: true,
-                beatsCount: true,
-                key: true,
-                keyScale: true,
-                keyStrength: true,
-                energy: true,
-                loudness: true,
-                dynamicRange: true,
-                danceability: true,
-                valence: true,
-                arousal: true,
-                instrumentalness: true,
-                acousticness: true,
-                moodTags: true,
-                essentiaGenres: true,
-            },
-        });
-
-        if (!track) {
-            return res.status(404).json({ error: "Track not found" });
-        }
-
-        res.json(track);
-    } catch (error: any) {
-        logger.error("Get track analysis error:", error);
-        res.status(500).json({ error: "Failed to get track analysis" });
-    }
-});
-
 
 /**
  * GET /api/analysis/workers

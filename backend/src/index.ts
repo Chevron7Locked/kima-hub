@@ -17,7 +17,6 @@ import statsRoutes from "./routes/stats";
 import settingsRoutes from "./routes/settings";
 import systemSettingsRoutes from "./routes/systemSettings";
 import playbackStateRoutes from "./routes/playbackState";
-import offlineRoutes from "./routes/offline";
 import playlistsRoutes from "./routes/playlists";
 import searchRoutes from "./routes/search";
 import recommendationsRoutes from "./routes/recommendations";
@@ -157,7 +156,6 @@ app.use("/api/stats", apiLimiter, statsRoutes);
 app.use("/api/settings", apiLimiter, settingsRoutes);
 app.use("/api/system-settings", apiLimiter, systemSettingsRoutes);
 app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
-app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 app.use("/api/recommendations", apiLimiter, recommendationsRoutes);

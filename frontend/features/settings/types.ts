@@ -1,8 +1,6 @@
 export interface UserSettings {
     playbackQuality: "original" | "high" | "medium" | "low";
     wifiOnly: boolean;
-    offlineEnabled: boolean;
-    maxCacheSizeMb: number;
     /** True when the user saved an LB scrobble token; the value itself is never returned. */
     hasListenbrainzToken?: boolean;
     /** Whether the public live feed shows what this user is playing. */
@@ -43,7 +41,6 @@ export interface SystemSettings {
     transcodeCacheMaxGb: number;
     /** How many tracks the play queue may hold, per user. */
     maxQueueLength: number;
-    maxCacheSizeMb: number;
     autoSync: boolean;
     soulseekConcurrentDownloads: number;
     // Download Preferences

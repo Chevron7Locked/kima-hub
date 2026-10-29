@@ -78,7 +78,7 @@ afterEach(() => {
 
 async function render() {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const settings = { maxCacheSizeMb: 1024, transcodeCacheMaxGb: 5 } as SystemSettings;
+    const settings = { transcodeCacheMaxGb: 5 } as SystemSettings;
     await act(async () => {
         root.render(<QueryClientProvider client={client}><CacheSection settings={settings} onUpdate={() => {}} /></QueryClientProvider>);
     });

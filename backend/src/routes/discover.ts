@@ -303,29 +303,6 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
     }
 });
 
-router.get("/generate/status/:jobId", async (req, res) => {
-    try {
-        const job = await discoverQueue.getJob(req.params.jobId);
-
-        if (!job) {
-            return res.status(404).json({ error: "Job not found" });
-        }
-
-        const state = await job.getState();
-        const progress = job.progress;
-        const result = job.returnvalue;
-
-        res.json({
-            status: state,
-            progress,
-            result,
-        });
-    } catch (error) {
-        logger.error("Get generation status error:", error);
-        res.status(500).json({ error: "Failed to get job status" });
-    }
-});
-
 router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -1317,91 +1294,6 @@ router.delete("/clear", async (req, res) => {
             error: "Failed to clear discovery playlist",
             details: error?.message || "Unknown error",
         });
-    }
-});
-
-router.get("/exclusions", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-
-        const exclusions = await prisma.discoverExclusion.findMany({
-            where: {
-                userId,
-                expiresAt: { gt: new Date() }, // Only active exclusions
-            },
-            orderBy: { lastSuggestedAt: "desc" },
-        });
-
-        const mapped = exclusions.map((exc) => ({
-            id: exc.id,
-            albumMbid: exc.albumMbid,
-            artistName: exc.artistName || "Unknown Artist",
-            albumTitle: exc.albumTitle || exc.albumMbid.slice(0, 8) + "...",
-            lastSuggestedAt: exc.lastSuggestedAt,
-            expiresAt: exc.expiresAt,
-        }));
-
-        res.json({
-            exclusions: mapped,
-            count: exclusions.length,
-        });
-    } catch (error: any) {
-        logger.error("Get exclusions error:", error?.message || error);
-        logger.error("Stack:", error?.stack);
-        res.status(500).json({
-            error: "Failed to get exclusions",
-            details: error?.message,
-        });
-    }
-});
-
-router.delete("/exclusions", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-
-        const result = await prisma.discoverExclusion.deleteMany({
-            where: { userId },
-        });
-
-        logger.debug(
-            `[Discovery] Cleared ${result.count} exclusions for user ${userId}`
-        );
-
-        res.json({
-            success: true,
-            message: `Cleared ${result.count} exclusions`,
-            clearedCount: result.count,
-        });
-    } catch (error) {
-        logger.error("Clear exclusions error:", error);
-        res.status(500).json({ error: "Failed to clear exclusions" });
-    }
-});
-
-router.delete("/exclusions/:id", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const { id } = req.params;
-
-        const exclusion = await prisma.discoverExclusion.findFirst({
-            where: { id, userId },
-        });
-
-        if (!exclusion) {
-            return res.status(404).json({ error: "Exclusion not found" });
-        }
-
-        await prisma.discoverExclusion.delete({
-            where: { id },
-        });
-
-        res.json({
-            success: true,
-            message: "Exclusion removed",
-        });
-    } catch (error) {
-        logger.error("Remove exclusion error:", error);
-        res.status(500).json({ error: "Failed to remove exclusion" });
     }
 });
 

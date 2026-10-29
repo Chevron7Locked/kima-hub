@@ -34,10 +34,6 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({}),
 }));
 
-jest.mock("../../utils/colorExtractor", () => ({
-    extractColorsFromImage: jest.fn().mockResolvedValue(null),
-}));
-
 jest.mock("../../config", () => ({
     config: { music: { transcodeCachePath: "/tmp/kima-test-cache/transcodes" } },
     USER_AGENT: "Kima/test",
