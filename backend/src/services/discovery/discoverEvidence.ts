@@ -80,8 +80,8 @@ export async function loadDiscoverRecords(): Promise<DiscoverRecords> {
 /**
  * What the records say about an album: "liked" (a listener kept it: the library's), "requested" (a listener asked
  * for it themselves: the library's), "downloaded" (a Discover download asked for it), or null (nothing says it came
- * from Discover). A suggestion alone is no evidence: before 1.12 the Discover playlist mixed in library songs and
- * recorded their albums as suggestions, so listeners' own albums carry suggestion records.
+ * from Discover). A suggestion alone is no evidence: listeners' own albums carry suggestion records from the old
+ * playlist, which mixed in library songs.
  */
 export type DiscoverEvidence = "liked" | "requested" | "downloaded" | null;
 
@@ -122,9 +122,9 @@ export async function albumHasPlaylistTrack(albumId: string): Promise<boolean> {
 }
 
 /**
- * Library albums Discover's records name (a Discover download or suggestion) that nothing marks as a listener's (no
- * ownership record of any source, the scanner's included) and no playlist holds, moved to DISCOVER: filed as LIBRARY
- * by an older scanner or by hand. With `dryRun`, only listed. Run daily by the integrity check and on demand by an
+ * Library albums a Discover download asked for (discoverEvidence) that nothing marks as a listener's (no ownership
+ * record of any source, the scanner's included) and no playlist holds, moved to DISCOVER: filed as LIBRARY by an
+ * older scanner or by hand. With `dryRun`, only listed. Run daily by the integrity check and on demand by an
  * admin (POST /discover/fix-tagging).
  */
 export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Promise<{ artist: string; title: string }[]> {
