@@ -41,12 +41,9 @@ export function useDiscoverData() {
     ])
       .then(([playlistData, configData]) => {
         setPlaylist(playlistData);
-        setConfig(configData as DiscoverConfig | null);
+        setConfig(configData);
       })
-      .catch((error) => {
-        console.error('Failed to load discover data:', error);
-        setLoadError(true);
-      });
+      .catch(() => setLoadError(true));
   }, []);
 
   const reloadData = useCallback(() => {
@@ -61,13 +58,7 @@ export function useDiscoverData() {
   }, [refetchBatchStatus]);
 
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await loadData();
-      setTimeout(() => { setLoading(false); }, 100);
-    };
-
-    init();
+    loadData().then(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
   }, []);
 

@@ -1,6 +1,7 @@
 import type { MapTrack } from "@/features/vibe/types";
 import type { DiscoveryPodcast, ForYouRow, ListeningRow, PodcastCategory } from "@/features/podcast/types";
 import type { Mix } from "@/features/home/types";
+import type { DiscoverConfig } from "@/features/discover/types";
 import { backendUrl } from "@/lib/backend-url";
 
 const AUTH_TOKEN_KEY = "auth_token";
@@ -1224,26 +1225,11 @@ class ApiClient {
     }
 
     async getDiscoverConfig() {
-        return this.request<{
-            id: string;
-            userId: string;
-            playlistSize: number;
-            enabled: boolean;
-            lastGeneratedAt: string | null;
-        }>("/discover/config");
+        return this.request<DiscoverConfig>("/discover/config");
     }
 
-    async updateDiscoverConfig(config: {
-        playlistSize?: number;
-        enabled?: boolean;
-    }) {
-        return this.request<{
-            id: string;
-            userId: string;
-            playlistSize: number;
-            enabled: boolean;
-            lastGeneratedAt: string | null;
-        }>("/discover/config", {
+    async updateDiscoverConfig(config: Partial<Pick<DiscoverConfig, "playlistSize" | "exclusionMonths" | "downloadRatio" | "enabled">>) {
+        return this.request<DiscoverConfig>("/discover/config", {
             method: "PATCH",
             body: JSON.stringify(config),
         });
