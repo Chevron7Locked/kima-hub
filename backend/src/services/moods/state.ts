@@ -1,9 +1,8 @@
 /**
- * The mood enrichment step.
- * Per track it stores the 22 learned mood scores for the sound vector they were computed from; per library it
- * stores the mean and spread of each mood and of each reading the mixes blend with them, rebuilt whenever the
- * eligible tracks, their sound vectors, their readings or the weights change. The song tags are written from both
- * (tags.ts).
+ * The mood enrichment step. Per track it stores the 22 learned mood scores (21 in use; RETIRED_MOODS are still
+ * scored) for the sound vector they were computed from; per library it stores the mean and spread of each mood and of
+ * each reading the mixes blend with them, rebuilt whenever the eligible tracks, their sound vectors, their readings or
+ * the weights change. The song tags are written from both (tags.ts).
  */
 import crypto from "crypto";
 import { Prisma, type MoodState as MoodStateRow } from "@prisma/client";

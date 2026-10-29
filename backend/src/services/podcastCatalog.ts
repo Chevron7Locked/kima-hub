@@ -188,8 +188,8 @@ const SEARCH_DEADLINE_MS = 5000;
 /**
  * Apple's podcast search for a term, as Apple answers it (the caller shapes and caches the shows). It queues with
  * Kima's other Apple requests, ahead of background work, so a search counts against Apple's limit like the rest.
- * The whole search, queue wait included, gets 5 s as it always had; past that it gives up and is never sent, and a
- * rate-limited search fails at once rather than waiting out a backoff.
+ * The whole search, queue wait included, gets 5 s; past that it gives up and is never sent, and a rate-limited
+ * search fails at once rather than waiting out a backoff.
  */
 export async function searchShows(term: string, limit: number): Promise<any[]> {
     const deadline = new AbortController();
@@ -205,6 +205,9 @@ export async function searchShows(term: string, limit: number): Promise<any[]> {
         clearTimeout(timer);
     }
 }
+
+const LOOKUP_BATCH = 200;
+const lookupKey = (id: string) => `podcasts:lookup:v3:${id}`;
 
 /** Apple's record for each show id: its feed and categories. Ids Apple does not know are left out. */
 export async function lookupShows(itunesIds: string[], priority: ApplePriority = "interactive"): Promise<Map<string, LookupShow>> {
@@ -258,9 +261,6 @@ export async function lookupShows(itunesIds: string[], priority: ApplePriority =
     return out;
 }
 
-const LOOKUP_BATCH = 200;
-const lookupKey = (id: string) => `podcasts:lookup:v3:${id}`;
-
 /** A feed's own `itunes:category` names, mapped onto Apple's ids; names Apple does not use are dropped. */
 export async function categoryIdsForNames(names: string[]): Promise<number[]> {
     if (names.length === 0) return [];
@@ -293,7 +293,7 @@ export async function assignCategories(
     }
 }
 
-/** Shows stored before categories were kept: fill the ones Apple can name. */
+/** Shows with an Apple id and no categories: filled with the ones Apple names. */
 export async function assignMissingCategories(): Promise<number> {
     const shows = await prisma.podcast.findMany({
         where: { categoryIds: { isEmpty: true }, itunesId: { not: null } },
