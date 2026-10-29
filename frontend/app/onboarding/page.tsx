@@ -8,6 +8,7 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/Button";
 import { KimaMark } from "@/components/ui/KimaMark";
+import { AuthShell } from "@/components/layout/AuthShell";
 
 type IntegrationKey = "lidarr" | "audiobookshelf" | "soulseek";
 type IntegrationResult = { ok: boolean; message: string };
@@ -204,355 +205,347 @@ export default function OnboardingPage() {
     };
 
     return (
-        <div className="min-h-screen relative overflow-hidden">
-            <div className="absolute inset-0 bg-[#000]">
-                <div className="absolute inset-0 bg-gradient-to-br from-brand/5 via-transparent to-transparent" />
-            </div>
-
+        <AuthShell className="p-6">
             {initialLoading ?
-                <div className="relative z-(--z-raised) min-h-screen flex items-center justify-center">
-                    <div className="text-center">
-                        <GradientSpinner size="lg" />
-                        <p className="text-[var(--text-secondary)] mt-4">Loading...</p>
-                    </div>
+                <div className="text-center">
+                    <GradientSpinner size="lg" />
+                    <p className="text-[var(--text-secondary)] mt-4">Loading...</p>
                 </div>
-            :   <div className="relative z-(--z-raised) min-h-screen flex items-center justify-center p-6">
-                    <div className="w-full max-w-4xl">
-                        <div className="text-center mb-8">
-                            <div className="inline-flex items-center gap-4 mb-4">
-                                <div className="relative">
-                                    <div className="absolute inset-0 bg-white/10 blur-xl rounded-full" />
-                                    <KimaMark size={48} className="relative z-(--z-raised)" />
-                                </div>
-                                <h1 className="text-4xl font-bold text-white">
-                                    Kima Hub
-                                </h1>
+            :   <div className="w-full max-w-4xl">
+                    <div className="text-center mb-8">
+                        <div className="inline-flex items-center gap-4 mb-4">
+                            <div className="relative">
+                                <div className="absolute inset-0 bg-white/10 blur-xl rounded-full" />
+                                <KimaMark size={48} className="relative z-(--z-raised)" />
                             </div>
-                            <p className="text-[var(--text-secondary)] text-lg">
-                                Welcome to your personal music streaming
-                                platform
-                            </p>
+                            <h1 className="text-4xl font-bold text-white">
+                                Kima Hub
+                            </h1>
                         </div>
+                        <p className="text-[var(--text-secondary)] text-lg">
+                            Welcome to your personal music streaming
+                            platform
+                        </p>
+                    </div>
 
-                        <div className="flex items-center justify-center gap-3 mb-8">
-                            {[
-                                { num: 1, label: "Account" },
-                                { num: 2, label: "Integrations" },
-                            ].map((s, idx) => (
-                                <div key={s.num} className="flex items-center">
-                                    <div className="flex flex-col items-center">
-                                        <div
-                                            className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm transition-all ${
-                                                s.num === step ?
-                                                "bg-brand text-black scale-110"
-                                                : s.num < step ?
-                                                "bg-white/5 text-[var(--text-primary)] border border-white/10"
-                                                : "bg-white/5 text-[var(--text-muted)] border border-white/10"
-                                            }`}
-                                        >
-                                            {s.num}
-                                        </div>
-                                        <span
-                                            className={`text-xs mt-2 transition-all ${
-                                                s.num === step ?
-                                                "text-brand font-medium"
-                                                : "text-[var(--text-muted)]"
-                                            }`}
-                                        >
-                                            {s.label}
-                                        </span>
+                    <div className="flex items-center justify-center gap-3 mb-8">
+                        {[
+                            { num: 1, label: "Account" },
+                            { num: 2, label: "Integrations" },
+                        ].map((s, idx) => (
+                            <div key={s.num} className="flex items-center">
+                                <div className="flex flex-col items-center">
+                                    <div
+                                        className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm transition-all ${
+                                            s.num === step ?
+                                            "bg-brand text-black scale-110"
+                                            : s.num < step ?
+                                            "bg-white/5 text-[var(--text-primary)] border border-white/10"
+                                            : "bg-white/5 text-[var(--text-muted)] border border-white/10"
+                                        }`}
+                                    >
+                                        {s.num}
                                     </div>
-                                    {idx < 1 && (
-                                        <div
-                                            className={`w-16 h-0.5 mx-4 mb-6 transition-all ${
-                                                s.num < step ?
-                                                "bg-brand/25"
-                                                : "bg-white/10"
-                                            }`}
-                                        />
-                                    )}
+                                    <span
+                                        className={`text-xs mt-2 transition-all ${
+                                            s.num === step ?
+                                            "text-brand font-medium"
+                                            : "text-[var(--text-muted)]"
+                                        }`}
+                                    >
+                                        {s.label}
+                                    </span>
                                 </div>
-                            ))}
-                        </div>
-
-                        <div className="bg-[#111]/90 rounded-lg border border-white/10 overflow-hidden">
-                            <div className="p-6 md:p-8">
-                                {step === 1 && (
-                                    <div className="space-y-6">
-                                        <div>
-                                            <h2 className="text-2xl font-bold text-white mb-1">
-                                                Create Your Admin Account
-                                            </h2>
-                                            <p className="text-[var(--text-secondary)]">
-                                                This is the owner account for your Kima server. You&apos;ll manage users, integrations, and settings from here.
-                                            </p>
-                                        </div>
-
-                                        <form
-                                            onSubmit={handleRegister}
-                                            className="space-y-4 mt-8"
-                                        >
-                                            <div>
-                                                <label
-                                                    htmlFor="username"
-                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
-                                                >
-                                                    Username
-                                                </label>
-                                                <input
-                                                    id="username"
-                                                    type="text"
-                                                    value={username}
-                                                    onChange={(e) =>
-                                                        setUsername(
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
-                                                    placeholder="Choose a username"
-                                                    required
-                                                    minLength={3}
-                                                />
-                                            </div>
-
-                                            <div>
-                                                <label
-                                                    htmlFor="password"
-                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
-                                                >
-                                                    Password
-                                                </label>
-                                                <input
-                                                    id="password"
-                                                    type="password"
-                                                    value={password}
-                                                    onChange={(e) =>
-                                                        setPassword(
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
-                                                        showPasswordTooShort ?
-                                                        "border-danger/50"
-                                                        : "border-white/10"
-                                                    }`}
-                                                    placeholder="At least 6 characters"
-                                                    required
-                                                    minLength={6}
-                                                />
-                                            </div>
-
-                                            <div>
-                                                <label
-                                                    htmlFor="confirmPassword"
-                                                    className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
-                                                >
-                                                    Confirm Password
-                                                </label>
-                                                <input
-                                                    id="confirmPassword"
-                                                    type="password"
-                                                    value={confirmPassword}
-                                                    onChange={(e) =>
-                                                        setConfirmPassword(
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
-                                                        showPasswordMismatch ?
-                                                        "border-danger/50"
-                                                        : "border-white/10"
-                                                    }`}
-                                                    placeholder="Confirm your password"
-                                                    required
-                                                />
-                                            </div>
-
-                                            {error && (
-                                                <div className="bg-danger/10 border border-danger/30 rounded-lg p-4 text-sm text-danger-light">
-                                                    {error}
-                                                </div>
-                                            )}
-
-                                            <Button
-                                                variant="primary"
-                                                size="lg"
-                                                type="submit"
-                                                isLoading={submitting}
-                                                className="w-full mt-8"
-                                            >
-                                                {submitting ? "Creating Account..." : "Continue"}
-                                            </Button>
-                                        </form>
-                                    </div>
+                                {idx < 1 && (
+                                    <div
+                                        className={`w-16 h-0.5 mx-4 mb-6 transition-all ${
+                                            s.num < step ?
+                                            "bg-brand/25"
+                                            : "bg-white/10"
+                                        }`}
+                                    />
                                 )}
+                            </div>
+                        ))}
+                    </div>
 
-                                {step === 2 && (
-                                    <div className="space-y-6">
+                    <div className="bg-[#111]/90 rounded-lg border border-white/10 overflow-hidden">
+                        <div className="p-6 md:p-8">
+                            {step === 1 && (
+                                <div className="space-y-6">
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-white mb-1">
+                                            Create Your Admin Account
+                                        </h2>
+                                        <p className="text-[var(--text-secondary)]">
+                                            This is the owner account for your Kima server. You&apos;ll manage users, integrations, and settings from here.
+                                        </p>
+                                    </div>
+
+                                    <form
+                                        onSubmit={handleRegister}
+                                        className="space-y-4 mt-8"
+                                    >
                                         <div>
-                                            <h2 className="text-2xl font-bold text-white mb-1">
-                                                Connect Your Services
-                                            </h2>
-                                            <p className="text-[var(--text-secondary)]">
-                                                All integrations are optional -- you can enable or change them later in Settings.
-                                            </p>
-                                        </div>
-
-                                        <div className="space-y-4 mt-8">
-                                            <IntegrationCard
-                                                title="Lidarr"
-                                                description="Automatically find and download albums missing from your library."
-                                                localPort="localhost:8686"
-                                                icon={<Music className="w-6 h-6" />}
-                                                enabled={lidarr.enabled}
-                                                onToggle={() =>
-                                                    setLidarr({
-                                                        ...lidarr,
-                                                        enabled:
-                                                            !lidarr.enabled,
-                                                    })
-                                                }
-                                                url={lidarr.url}
-                                                apiKey={lidarr.apiKey}
-                                                onUrlChange={(url) =>
-                                                    setLidarr({
-                                                        ...lidarr,
-                                                        url,
-                                                    })
-                                                }
-                                                onApiKeyChange={(apiKey) =>
-                                                    setLidarr({
-                                                        ...lidarr,
-                                                        apiKey,
-                                                    })
-                                                }
-                                                onTest={() =>
-                                                    testConnection("lidarr")
-                                                }
-                                                testing={testingIntegration === "lidarr"}
-                                                result={integrationResults["lidarr"]}
-                                            />
-
-                                            <IntegrationCard
-                                                title="Audiobookshelf"
-                                                description="Browse and stream your audiobook collection alongside your music."
-                                                localPort="localhost:13378"
-                                                icon={<BookOpen className="w-6 h-6" />}
-                                                enabled={audiobookshelf.enabled}
-                                                onToggle={() =>
-                                                    setAudiobookshelf({
-                                                        ...audiobookshelf,
-                                                        enabled:
-                                                            !audiobookshelf.enabled,
-                                                    })
-                                                }
-                                                url={audiobookshelf.url}
-                                                apiKey={audiobookshelf.apiKey}
-                                                onUrlChange={(url) =>
-                                                    setAudiobookshelf({
-                                                        ...audiobookshelf,
-                                                        url,
-                                                    })
-                                                }
-                                                onApiKeyChange={(apiKey) =>
-                                                    setAudiobookshelf({
-                                                        ...audiobookshelf,
-                                                        apiKey,
-                                                    })
-                                                }
-                                                onTest={() =>
-                                                    testConnection(
-                                                        "audiobookshelf",
+                                            <label
+                                                htmlFor="username"
+                                                className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
+                                            >
+                                                Username
+                                            </label>
+                                            <input
+                                                id="username"
+                                                type="text"
+                                                value={username}
+                                                onChange={(e) =>
+                                                    setUsername(
+                                                        e.target.value,
                                                     )
                                                 }
-                                                testing={testingIntegration === "audiobookshelf"}
-                                                result={integrationResults["audiobookshelf"]}
+                                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all"
+                                                placeholder="Choose a username"
+                                                required
+                                                minLength={3}
                                             />
+                                        </div>
 
-                                            <SoulseekCard
-                                                enabled={soulseek.enabled}
-                                                onToggle={() =>
-                                                    setSoulseek({
-                                                        ...soulseek,
-                                                        enabled:
-                                                            !soulseek.enabled,
-                                                    })
+                                        <div>
+                                            <label
+                                                htmlFor="password"
+                                                className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
+                                            >
+                                                Password
+                                            </label>
+                                            <input
+                                                id="password"
+                                                type="password"
+                                                value={password}
+                                                onChange={(e) =>
+                                                    setPassword(
+                                                        e.target.value,
+                                                    )
                                                 }
-                                                username={soulseek.username}
-                                                password={soulseek.password}
-                                                onUsernameChange={(u) =>
-                                                    setSoulseek({
-                                                        ...soulseek,
-                                                        username: u,
-                                                    })
+                                                className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
+                                                    showPasswordTooShort ?
+                                                    "border-danger/50"
+                                                    : "border-white/10"
+                                                }`}
+                                                placeholder="At least 6 characters"
+                                                required
+                                                minLength={6}
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label
+                                                htmlFor="confirmPassword"
+                                                className="block text-sm font-medium text-[var(--text-primary)] mb-1.5"
+                                            >
+                                                Confirm Password
+                                            </label>
+                                            <input
+                                                id="confirmPassword"
+                                                type="password"
+                                                value={confirmPassword}
+                                                onChange={(e) =>
+                                                    setConfirmPassword(
+                                                        e.target.value,
+                                                    )
                                                 }
-                                                onPasswordChange={(p) =>
-                                                    setSoulseek({
-                                                        ...soulseek,
-                                                        password: p,
-                                                    })
-                                                }
-                                                onTest={() =>
-                                                    testConnection("soulseek")
-                                                }
-                                                testing={testingIntegration === "soulseek"}
-                                                result={integrationResults["soulseek"]}
+                                                className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
+                                                    showPasswordMismatch ?
+                                                    "border-danger/50"
+                                                    : "border-white/10"
+                                                }`}
+                                                placeholder="Confirm your password"
+                                                required
                                             />
                                         </div>
 
                                         {error && (
-                                            <div className="flex items-center gap-2 p-4 rounded-lg bg-danger/10 border border-danger/20">
-                                                <p className="text-sm text-danger">
-                                                    {error}
-                                                </p>
+                                            <div className="bg-danger/10 border border-danger/30 rounded-lg p-4 text-sm text-danger-light">
+                                                {error}
                                             </div>
                                         )}
 
-                                        <p className="text-sm text-[var(--text-muted)] border-t border-white/10 pt-4">
-                                            After finishing, Kima will scan your music library and start enrichment in the background. This may take a few minutes for large collections.
+                                        <Button
+                                            variant="primary"
+                                            size="lg"
+                                            type="submit"
+                                            isLoading={submitting}
+                                            className="w-full mt-8"
+                                        >
+                                            {submitting ? "Creating Account..." : "Continue"}
+                                        </Button>
+                                    </form>
+                                </div>
+                            )}
+
+                            {step === 2 && (
+                                <div className="space-y-6">
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-white mb-1">
+                                            Connect Your Services
+                                        </h2>
+                                        <p className="text-[var(--text-secondary)]">
+                                            All integrations are optional -- you can enable or change them later in Settings.
                                         </p>
-
-                                        <div className="flex gap-3">
-                                            <Button
-                                                variant="secondary"
-                                                size="lg"
-                                                onClick={async () => {
-                                                    setSubmitting(true);
-                                                    try {
-                                                        await api.post("/onboarding/complete");
-                                                        router.push("/sync");
-                                                    } catch {
-                                                        setError("Failed to complete setup");
-                                                        setSubmitting(false);
-                                                    }
-                                                }}
-                                                disabled={submitting}
-                                                className="flex-1"
-                                            >
-                                                Finish without integrations
-                                            </Button>
-                                            <Button
-                                                variant="primary"
-                                                size="lg"
-                                                onClick={handleNextStep}
-                                                isLoading={submitting}
-                                                className="flex-1"
-                                            >
-                                                {submitting ? "Saving..." : "Save & Finish"}
-                                            </Button>
-                                        </div>
                                     </div>
-                                )}
-                            </div>
-                        </div>
 
-                        <p className="text-center text-[var(--text-muted)] text-sm mt-6" suppressHydrationWarning>
-                            &copy; {new Date().getFullYear()} Kima. Your music, your way.
-                        </p>
+                                    <div className="space-y-4 mt-8">
+                                        <IntegrationCard
+                                            title="Lidarr"
+                                            description="Automatically find and download albums missing from your library."
+                                            localPort="localhost:8686"
+                                            icon={<Music className="w-6 h-6" />}
+                                            enabled={lidarr.enabled}
+                                            onToggle={() =>
+                                                setLidarr({
+                                                    ...lidarr,
+                                                    enabled:
+                                                        !lidarr.enabled,
+                                                })
+                                            }
+                                            url={lidarr.url}
+                                            apiKey={lidarr.apiKey}
+                                            onUrlChange={(url) =>
+                                                setLidarr({
+                                                    ...lidarr,
+                                                    url,
+                                                })
+                                            }
+                                            onApiKeyChange={(apiKey) =>
+                                                setLidarr({
+                                                    ...lidarr,
+                                                    apiKey,
+                                                })
+                                            }
+                                            onTest={() =>
+                                                testConnection("lidarr")
+                                            }
+                                            testing={testingIntegration === "lidarr"}
+                                            result={integrationResults["lidarr"]}
+                                        />
+
+                                        <IntegrationCard
+                                            title="Audiobookshelf"
+                                            description="Browse and stream your audiobook collection alongside your music."
+                                            localPort="localhost:13378"
+                                            icon={<BookOpen className="w-6 h-6" />}
+                                            enabled={audiobookshelf.enabled}
+                                            onToggle={() =>
+                                                setAudiobookshelf({
+                                                    ...audiobookshelf,
+                                                    enabled:
+                                                        !audiobookshelf.enabled,
+                                                })
+                                            }
+                                            url={audiobookshelf.url}
+                                            apiKey={audiobookshelf.apiKey}
+                                            onUrlChange={(url) =>
+                                                setAudiobookshelf({
+                                                    ...audiobookshelf,
+                                                    url,
+                                                })
+                                            }
+                                            onApiKeyChange={(apiKey) =>
+                                                setAudiobookshelf({
+                                                    ...audiobookshelf,
+                                                    apiKey,
+                                                })
+                                            }
+                                            onTest={() =>
+                                                testConnection(
+                                                    "audiobookshelf",
+                                                )
+                                            }
+                                            testing={testingIntegration === "audiobookshelf"}
+                                            result={integrationResults["audiobookshelf"]}
+                                        />
+
+                                        <SoulseekCard
+                                            enabled={soulseek.enabled}
+                                            onToggle={() =>
+                                                setSoulseek({
+                                                    ...soulseek,
+                                                    enabled:
+                                                        !soulseek.enabled,
+                                                })
+                                            }
+                                            username={soulseek.username}
+                                            password={soulseek.password}
+                                            onUsernameChange={(u) =>
+                                                setSoulseek({
+                                                    ...soulseek,
+                                                    username: u,
+                                                })
+                                            }
+                                            onPasswordChange={(p) =>
+                                                setSoulseek({
+                                                    ...soulseek,
+                                                    password: p,
+                                                })
+                                            }
+                                            onTest={() =>
+                                                testConnection("soulseek")
+                                            }
+                                            testing={testingIntegration === "soulseek"}
+                                            result={integrationResults["soulseek"]}
+                                        />
+                                    </div>
+
+                                    {error && (
+                                        <div className="flex items-center gap-2 p-4 rounded-lg bg-danger/10 border border-danger/20">
+                                            <p className="text-sm text-danger">
+                                                {error}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <p className="text-sm text-[var(--text-muted)] border-t border-white/10 pt-4">
+                                        After finishing, Kima will scan your music library and start enrichment in the background. This may take a few minutes for large collections.
+                                    </p>
+
+                                    <div className="flex gap-3">
+                                        <Button
+                                            variant="secondary"
+                                            size="lg"
+                                            onClick={async () => {
+                                                setSubmitting(true);
+                                                try {
+                                                    await api.post("/onboarding/complete");
+                                                    router.push("/sync");
+                                                } catch {
+                                                    setError("Failed to complete setup");
+                                                    setSubmitting(false);
+                                                }
+                                            }}
+                                            disabled={submitting}
+                                            className="flex-1"
+                                        >
+                                            Finish without integrations
+                                        </Button>
+                                        <Button
+                                            variant="primary"
+                                            size="lg"
+                                            onClick={handleNextStep}
+                                            isLoading={submitting}
+                                            className="flex-1"
+                                        >
+                                            {submitting ? "Saving..." : "Save & Finish"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
+
+                    <p className="text-center text-[var(--text-muted)] text-sm mt-6" suppressHydrationWarning>
+                        &copy; {new Date().getFullYear()} Kima. Your music, your way.
+                    </p>
                 </div>
             }
-        </div>
+        </AuthShell>
     );
 }
 
