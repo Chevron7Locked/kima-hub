@@ -7,27 +7,21 @@
  * Parts: a mood (never a defined one), `head:<mood>` for a mood's raw head score (how a definition keeps its own
  * head as a part), a reading (arousal, instrumental, acoustic), or `pace`.
  *
- * Why the two shipped definitions weigh as they do (weights add to 1; each part is a library z-score):
- * - focus = instrumental 0.5, calm 0.3, the focus head 0.2. On Music4All the focus head alone failed (lift 0.64) while
- *   the instrumental-led recipe without the energy cut passed (1.32), and lyrics are the one consistent harm for
- *   concentration (Vasilev 2018), so how instrumental a song is leads; calm is the next most reliable companion and
- *   the head is a small part, kept because it still separates sound that is steady and unobtrusive from sound that is
- *   merely wordless.
- * - driving = arousal 0.35, low:instrumental 0.25, pace 0.25, the driving head 0.15. Not low energy (arousal) and
- *   vocals welcome (low:instrumental: singable) carry the most, a steady beat at a middle pace is the third leg
- *   (Navarro 2023, 92 drivers' own picks, middle half 94-130 BPM), and the head, which learned "driving" from sound
- *   alone, is the smallest part. Pace is a soft part; a hard tempo limit would be a recipe filter instead.
+ * The shipped weights add to 1 and each part is a library z-score. Focus: instrumental 0.5 (lyrics are the one
+ * consistent harm to concentration), calm 0.3, the focus head 0.2 (the head alone failed on Music4All). Driving:
+ * arousal 0.35, low:instrumental 0.25 (singable), pace 0.25 (a steady middle tempo, PACE_BAND), the driving head
+ * 0.15. Pace is a soft part; a hard tempo limit would be a recipe filter instead.
  */
 import { LIVE_MOODS, type Mood } from "../moods/heads";
 import definitionFile from "./moodDefinitions.json";
 
-/** Navarro 2023: the middle half of 92 drivers' own picks. A tempo counts double or half, on a steady beat only. */
+/** The middle half of drivers' own picks (Navarro 2023). A tempo counts double or half, on a steady beat only. */
 export const PACE_BAND: readonly [number, number] = [94, 130];
 /** A song with no tempo, or no steady beat to trust one from, has no pace to judge: it scores in the middle. */
 export const NEUTRAL_PACE = 0.5;
 
-export const DEFINITION_READINGS = ["arousal", "instrumental", "acoustic"] as const;
-export type DefinitionReading = (typeof DEFINITION_READINGS)[number];
+const DEFINITION_READINGS = ["arousal", "instrumental", "acoustic"] as const;
+type DefinitionReading = (typeof DEFINITION_READINGS)[number];
 
 export type DefinitionPart =
     | { kind: "mood"; mood: Mood; weight: number }
