@@ -28,10 +28,9 @@ export interface ViewWeek {
 }
 
 /**
- * A stored week start is midnight starting a week in whatever zone the server
- * ran in when it made the batch (UTC while the image forced it), at most 26
- * hours (UTC+14 to UTC-12) from the same midnight here. Weeks are 168 hours
- * apart, so half a week forward always lands inside the batch's own week.
+ * A stored week start is midnight starting a week in whatever zone the server ran in when it made the batch, at most
+ * 26 hours (UTC+14 to UTC-12) from the same midnight here. Weeks are 168 hours apart, so half a week forward always
+ * lands inside the batch's own week.
  */
 const HALF_WEEK_HOURS = 84;
 

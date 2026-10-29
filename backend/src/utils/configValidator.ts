@@ -35,7 +35,6 @@ export function parseReconcileMode(env: Record<string, string | undefined>): Mus
  * Validate and load the music paths (the reconcile mode is read once, by parseReconcileMode, when the config loads).
  */
 export async function validateMusicConfig(): Promise<Omit<MusicConfig, "reconcileMode">> {
-    // Get system settings to use configured paths
     const settings = await getSystemSettings();
 
     // Priority: Environment variable > Database setting > Default
@@ -57,7 +56,7 @@ export async function validateMusicConfig(): Promise<Omit<MusicConfig, "reconcil
 
     if (!fs.existsSync(musicPath)) {
         const showDockerGuidance =
-            fs.existsSync('/.dockerenv') || process.env.NODE_ENV === 'production';
+            isDocker || process.env.NODE_ENV === 'production';
         const guidance = showDockerGuidance
             ? `Docker users: Ensure your volume mount is correct in docker-compose.yml:
    volumes:

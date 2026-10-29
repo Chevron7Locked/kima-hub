@@ -97,7 +97,7 @@ class QueueCleanerService {
                         logger.debug(`    Scan skipped: ${result.reason}`);
                     }
 
-                    // Touch updatedAt to prevent re-queuing every 30s
+                    // Touch updatedAt so the next check does not queue it again.
                     await prisma.spotifyImportJob.update({
                         where: { id: job.id },
                         data: { progress: job.progress },

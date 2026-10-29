@@ -25,10 +25,8 @@ export function transcodeArtifactPath(cachePath: string): string {
 }
 
 /**
- * Above this fraction of the library absent at once, the sweep stands down — but only
- * past an absolute floor: in a ten-track library one deleted album is 10% of everything
- * and a perfectly ordinary Tuesday. Mass disappearance means both a big slice AND a
- * big count; a handful of confirmed-gone tracks retires even in a small library.
+ * The sweep stands down when more than this fraction of the library AND at least the floor are gone at once (a
+ * missing drive), so a few confirmed-gone tracks still retire in a small library.
  */
 const MASS_MISSING_ABORT = 0.10;
 const MASS_MISSING_FLOOR = 10;
@@ -109,9 +107,7 @@ export async function reconcileDeletedTracks(
 
     await tx.track.deleteMany({ where: { id: { in: ids } } });
 
-    // Empty-genre cleanup is library-wide, not sweep-scoped: any Genre row with no tracks
-    // after the cascade is removed (a pre-existing empty genre goes too). Rows are
-    // enrichment-derived and invisible to readers while empty; runs only when tracks were swept.
+    // Then every genre left with no songs goes, library-wide (only when songs were retired).
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);

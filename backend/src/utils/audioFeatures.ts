@@ -1,11 +1,7 @@
 /**
- * Shared DTO formatter for per-track audio features.
- *
- * Returns the exact 8-field shape used by the iOS vibe %-badge.
- * For an un-analyzed track (null feature columns), returns an object
- * with all values set to null.
+ * The 8 per-track feature columns the audio-features reply carries (the shape the apps read), all null until
+ * analysis runs.
  */
-/** The 8 per-track feature columns the DTO carries, all nullable until analysis runs. */
 export interface AudioFeatures {
   bpm: number | null;
   energy: number | null;
@@ -17,6 +13,7 @@ export interface AudioFeatures {
   analysisMode: string | null;
 }
 
+/** The reply's audio features for a track; every field null for a track not analysed yet. */
 export function toAudioFeaturesDTO(track: AudioFeatures): AudioFeatures {
   return {
     bpm: track.bpm ?? null,

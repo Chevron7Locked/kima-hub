@@ -23,7 +23,7 @@ export async function findSimilarTracks(
         return findSimilarByFormula(trackId, limit);
     }
 
-    logger.warn("[HYBRID-SIMILARITY] No CLAP analyzer: similar tracks need the matching formula");
+    logger.warn("[SIMILAR] No CLAP analyzer: similar tracks need the matching formula");
     return [];
 }
 

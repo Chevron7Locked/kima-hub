@@ -1,12 +1,12 @@
-/**
- * Reject with a labelled Error when the promise outlives the budget. Callers
- * that tolerate a timeout catch it explicitly.
- */
 /** A wait that ran out; the message says what was being waited for. */
 export class TimeoutError extends Error {
     name = "TimeoutError";
 }
 
+/**
+ * Reject with a labelled Error when the promise outlives the budget. Callers
+ * that tolerate a timeout catch it explicitly.
+ */
 export async function withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,

@@ -17,9 +17,6 @@ interface ArtistCounts {
   totalTrackCount: number;
 }
 
-/**
- * Calculate counts for a single artist
- */
 async function calculateArtistCounts(
   artistId: string
 ): Promise<ArtistCounts> {
@@ -52,9 +49,6 @@ async function calculateArtistCounts(
   };
 }
 
-/**
- * Update counts for a single artist
- */
 export async function updateArtistCounts(artistId: string): Promise<void> {
   try {
     const counts = await calculateArtistCounts(artistId);
@@ -76,17 +70,11 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
 let isBackfillRunning = false;
 let backfillProgress = { processed: 0, total: 0, errors: 0 };
 
-/**
- * Check if backfill is currently running
- */
 export function isBackfillInProgress(): boolean {
   return isBackfillRunning;
 }
 
-/**
- * Backfill counts for all artists in batches
- * Safe to run on live systems - processes in small batches with delays
- */
+/** Recounts every artist in small batches with pauses, so it is safe on a running server. */
 export async function backfillAllArtistCounts(
   onProgress?: (processed: number, total: number) => void
 ): Promise<{ processed: number; errors: number }> {
@@ -161,9 +149,7 @@ export async function backfillAllArtistCounts(
   }
 }
 
-/**
- * Check if backfill is needed (any artist has null countsLastUpdated)
- */
+/** Whether any artist has never been counted (countsLastUpdated null). */
 export async function isBackfillNeeded(): Promise<boolean> {
   const unprocessed = await prisma.artist.count({
     where: { countsLastUpdated: null },
@@ -171,9 +157,6 @@ export async function isBackfillNeeded(): Promise<boolean> {
   return unprocessed > 0;
 }
 
-/**
- * Get backfill progress
- */
 export async function getBackfillProgress(): Promise<{
   processed: number;
   total: number;
