@@ -1,6 +1,6 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
@@ -10,60 +10,63 @@ import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
 import { reopenable } from "../services/missingFileStages";
 import { ASKED_AGAIN_SQL } from "../services/stageReopen";
+import { featureDetection } from "../services/featureDetection";
 
 /**
- * Whether an analyzer is running, from the heartbeat timestamp it writes to
- * Redis every 30 s (the same keys featureDetection reads). Ten missed beats
- * count as offline, since CLAP inference can slow the loop.
+ * Whether the slider shows the analyzer as running. Redis being unreachable is not evidence it is up, so an error reads
+ * as not running here; the scheduler's own checks let the error stop the cycle instead.
  */
-const ANALYZER_HEARTBEAT_TTL_MS = 300_000; // 5 minutes
-
-async function analyzerIsOnline(heartbeatKey: string): Promise<boolean> {
+async function shownRunning(running: () => Promise<boolean>): Promise<boolean> {
     try {
-        const beat = await redisClient.get(heartbeatKey);
-        if (!beat) return false;
-        const at = parseInt(beat, 10);
-        return !isNaN(at) && Date.now() - at < ANALYZER_HEARTBEAT_TTL_MS;
+        return await running();
     } catch {
-        // Redis being unreachable is not evidence the analyzer is up.
         return false;
     }
 }
 
-/** The line under the worker slider, stating whether the change reached an analyzer. */
-function describeWorkers(
-    workers: number,
-    cpuCores: number,
-    online: boolean,
-    delivered: number,
-): string {
-    if (delivered > 0) {
-        return `Using ${workers} of ${cpuCores} available CPU cores`;
-    }
-    if (online) {
+/** Where a worker-count change stands: in use, saved but not acknowledged by a running analyzer, or no analyzer running. */
+type WorkerCountState = "applied" | "unacknowledged" | "offline";
+
+/** The line under the worker slider. */
+function describeWorkers(workers: number, cpuCores: number, state: WorkerCountState): string {
+    if (state === "applied") return `Using ${workers} of ${cpuCores} available CPU cores`;
+    if (state === "unacknowledged") {
         return `Saved. The analyzer is running but did not acknowledge the change; it will use ${workers} core(s) after its next restart.`;
     }
     return `Saved, but no analyzer is running. It will use ${workers} of ${cpuCores} core(s) when it starts.`;
 }
 
-/** Publish a worker-count change and return how many analyzers received it,
- * the only delivery evidence Redis gives. */
+/** Publish a worker-count change and return how many analyzers received it, the only delivery evidence Redis gives. */
 async function dispatchWorkerCount(
     channel: string,
-    heartbeatKey: string,
+    running: () => Promise<boolean>,
     workers: number,
 ): Promise<{ online: boolean; delivered: number }> {
     const delivered = await redisClient.publish(
         channel,
         JSON.stringify({ command: "set_workers", count: workers }),
     );
-    const online = await analyzerIsOnline(heartbeatKey);
+    const online = await running();
     if (delivered === 0) {
         logger.warn(
             `[Analysis] set_workers=${workers} published to ${channel} but no analyzer received it`,
         );
     }
     return { online, delivered };
+}
+
+/** The analyzers' report body: the internal secret checked (403 without it) and the track named (400 without one). */
+async function analyzerReport(req: Request, res: Response): Promise<{ trackId: string; jobId?: string } | null> {
+    if (!(await isInternalSecret(req.headers["x-internal-secret"]))) {
+        res.status(403).json({ error: "Forbidden" });
+        return null;
+    }
+    const { trackId, jobId } = req.body;
+    if (!trackId) {
+        res.status(400).json({ error: "trackId is required" });
+        return null;
+    }
+    return { trackId, jobId: typeof jobId === "string" ? jobId : undefined };
 }
 
 const router = Router();
@@ -143,7 +146,6 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
     }
 });
 
-
 /**
  * GET and PUT for one analyzer's worker-count slider: the saved count, the machine's cores, a recommendation and
  * whether the change reached a running analyzer. The audio analyzer and CLAP each have one.
@@ -153,7 +155,7 @@ function workerSlider(
     slider: {
         field: "audioAnalyzerWorkers" | "clapWorkers";
         channel: string;
-        heartbeat: string;
+        running: () => Promise<boolean>;
         minRecommended: number;
         name: string;
     },
@@ -165,14 +167,14 @@ function workerSlider(
             const settings = await getSystemSettings();
             const cpuCores = os.cpus().length;
             const currentWorkers = settings?.[slider.field] || 2;
-            const online = await analyzerIsOnline(slider.heartbeat);
+            const online = await slider.running();
 
             res.json({
                 workers: currentWorkers,
                 cpuCores,
                 recommended: recommendedFor(cpuCores),
                 analyzerOnline: online,
-                description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
+                description: describeWorkers(currentWorkers, cpuCores, online ? "applied" : "offline"),
             });
         } catch (error: any) {
             logger.error(`Get ${slider.name} config error:`, error);
@@ -199,7 +201,7 @@ function workerSlider(
             });
             invalidateSystemSettingsCache();
 
-            const { online, delivered } = await dispatchWorkerCount(slider.channel, slider.heartbeat, workers);
+            const { online, delivered } = await dispatchWorkerCount(slider.channel, slider.running, workers);
 
             logger.info(`[Analysis] ${slider.field} set to ${workers} (delivered to ${delivered} listener(s))`);
 
@@ -209,7 +211,7 @@ function workerSlider(
                 recommended: recommendedFor(cpuCores),
                 analyzerOnline: online,
                 delivered,
-                description: describeWorkers(workers, cpuCores, online, delivered),
+                description: describeWorkers(workers, cpuCores, delivered > 0 ? "applied" : online ? "unacknowledged" : "offline"),
             });
         } catch (error: any) {
             logger.error(`Update ${slider.name} config error:`, error);
@@ -221,7 +223,7 @@ function workerSlider(
 workerSlider("/workers", {
     field: "audioAnalyzerWorkers",
     channel: "audio:analysis:control",
-    heartbeat: "audio:worker:heartbeat",
+    running: () => shownRunning(() => featureDetection.analyzerRunning()),
     minRecommended: 2,
     name: "worker",
 });
@@ -229,7 +231,7 @@ workerSlider("/workers", {
 workerSlider("/clap-workers", {
     field: "clapWorkers",
     channel: "audio:clap:control",
-    heartbeat: "clap:worker:heartbeat",
+    running: () => shownRunning(() => featureDetection.clapRunning()),
     minRecommended: 1,
     name: "CLAP worker",
 });
@@ -240,28 +242,21 @@ workerSlider("/clap-workers", {
  */
 router.post("/vibe/failure", async (req, res) => {
     try {
-        // Internal endpoint: only the analyzers know this server's secret.
-        if (!(await isInternalSecret(req.headers["x-internal-secret"]))) {
-            return res.status(403).json({ error: "Forbidden" });
-        }
-
-        const { trackId, trackName, errorMessage, errorCode, jobId } = req.body;
-
-        if (!trackId) {
-            return res.status(400).json({ error: "trackId is required" });
-        }
+        const report = await analyzerReport(req, res);
+        if (!report) return;
+        const { trackName, errorMessage, errorCode } = req.body;
 
         // The stage record is the only record of this failure: the failures API
         // reads TrackStage for track stages, so no EnrichmentFailure row is written.
         // Record the CLAP worker's failure on its retry ladder, so it closes when
         // the ladder runs out.
         await recordStageFailure(
-            trackId,
+            report.trackId,
             "embedding",
             "clap",
             new Error(errorMessage || "Vibe embedding generation failed"),
             { reportedCode: errorCode, trackName },
-            typeof jobId === "string" ? jobId : undefined,
+            report.jobId,
         );
 
         res.json({ message: "Failure recorded" });
@@ -272,6 +267,9 @@ router.post("/vibe/failure", async (req, res) => {
     }
 });
 
+/** Without force, how many missing embeddings one POST /vibe/start reopens. */
+const VIBE_START_BATCH = 500;
+
 /**
  * POST /api/analysis/vibe/start
  * Queue tracks for vibe embedding generation (admin only)
@@ -280,7 +278,7 @@ router.post("/vibe/failure", async (req, res) => {
  */
 router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { limit = 500, force = false } = req.body;
+        const { force = false } = req.body;
 
         if (force) {
             // Force reopens every embedding question without deleting anything: the old
@@ -308,39 +306,29 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
                     AND ts.status <> 'pending'
                     AND ${reopenable("ts")}
                     AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")
-                    ${limit ? `AND ts.ctid IN (
+                    AND ts.ctid IN (
                         SELECT ts2.ctid FROM "TrackStage" ts2
                         JOIN "TrackStage" a2 ON a2."trackId" = ts2."trackId" AND a2.stage = 'analysis' AND a2.status = 'done'
                         WHERE ts2.stage = 'embedding'
                           AND ts2.status <> 'pending'
                           AND ${reopenable("ts2")}
                           AND NOT EXISTS (SELECT 1 FROM track_embeddings te2 WHERE te2.track_id = ts2."trackId")
-                        LIMIT ${Math.min(Math.max(1, Number(limit) || 500), 10000)})` : ""}`,
+                        LIMIT ${VIBE_START_BATCH})`,
             );
         }
 
         // Owed work: analysed library songs whose embedding question is open (Discover songs are never enriched). After a force,
         // the old rows still exist, so the "row missing" filter does not apply.
-        const owedRows = force
-            ? await prisma.$queryRaw<Array<{ count: bigint }>>`
-                  SELECT count(*) FROM "TrackStage" ts
-                  JOIN "TrackStage" a ON a."trackId" = ts."trackId" AND a.stage = 'analysis' AND a.status = 'done'
-                  WHERE ts.stage = 'embedding'
-                    AND ts.status IN ('pending', 'failed', 'working')
-                    AND ts.retryable = true
-                    AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
-                    AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
-              `
-            : await prisma.$queryRaw<Array<{ count: bigint }>>`
-                  SELECT count(*) FROM "TrackStage" ts
-                  JOIN "TrackStage" a ON a."trackId" = ts."trackId" AND a.stage = 'analysis' AND a.status = 'done'
-                  WHERE ts.stage = 'embedding'
-                    AND ts.status IN ('pending', 'failed', 'working')
-                    AND ts.retryable = true
-                    AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
-                    AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
-                    AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")
-              `;
+        const owedRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+            SELECT count(*) FROM "TrackStage" ts
+            JOIN "TrackStage" a ON a."trackId" = ts."trackId" AND a.stage = 'analysis' AND a.status = 'done'
+            WHERE ts.stage = 'embedding'
+              AND ts.status IN ('pending', 'failed', 'working')
+              AND ts.retryable = true
+              AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
+              AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
+              ${force ? Prisma.empty : Prisma.sql`AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")`}
+        `;
         const queued = Number(owedRows[0]?.count ?? 0);
 
         if (queued === 0) {
@@ -365,33 +353,18 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
-
 /**
  * POST /api/analysis/vibe/success
  * Resolve failure records when a vibe embedding succeeds (called by CLAP analyzer)
  */
 router.post("/vibe/success", async (req, res) => {
     try {
-        // Internal endpoint: only the analyzers know this server's secret.
-        if (!(await isInternalSecret(req.headers["x-internal-secret"]))) {
-            return res.status(403).json({ error: "Forbidden" });
-        }
-
-        const { trackId, jobId } = req.body;
-
-        if (!trackId) {
-            return res.status(400).json({ error: "trackId is required" });
-        }
+        const report = await analyzerReport(req, res);
+        if (!report) return;
 
         // The embedding stage record is the failure record, so answering it here also
         // clears it from the failures list.
-        await recordStageSuccess(
-            trackId,
-            "embedding",
-            "clap",
-            { outcome: "embedded" },
-            typeof jobId === "string" ? jobId : undefined,
-        );
+        await recordStageSuccess(report.trackId, "embedding", "clap", { outcome: "embedded" }, report.jobId);
 
         res.json({ message: "Stale failures resolved" });
         eventBus.emit({ type: "enrichment:progress", userId: "*", payload: { phase: "vibe" } });

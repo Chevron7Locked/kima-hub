@@ -165,4 +165,13 @@ describe("vibe report endpoints", () => {
         expect(track?.vibeAnalysisStatus).toBe("processing");
         await unseed("guard");
     });
+
+    it("both reports refuse a missing song id, and a wrong secret first", async () => {
+        for (const path of ["/api/analysis/vibe/failure", "/api/analysis/vibe/success"]) {
+            const noId = await request(app).post(path).set("x-internal-secret", secret).send({ errorMessage: "x" });
+            expect([path, noId.status, noId.body.error]).toEqual([path, 400, "trackId is required"]);
+            const wrong = await request(app).post(path).set("x-internal-secret", "wrong").send({});
+            expect([path, wrong.status]).toEqual([path, 403]);
+        }
+    });
 });
