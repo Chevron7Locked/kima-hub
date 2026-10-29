@@ -81,11 +81,15 @@ it("a server with no settings yet starts from the schema's defaults", async () =
         fanartEnabled: false,
         audiobookshelfEnabled: false,
         audiobookshelfUrl: "http://localhost:13378",
-        downloadPath: "/downloads",
         autoSync: true,
         transcodeCacheMaxGb: 10,
         maxQueueLength: 10000,
         soulseekConcurrentDownloads: 4,
     });
     expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).musicPath).toBe("/music");
+});
+
+it("has no download folder setting: downloads go to the music folder", async () => {
+    const res = await request(app()).get("/system-settings").set("Authorization", asAdmin());
+    expect(res.body).not.toHaveProperty("downloadPath");
 });

@@ -92,7 +92,6 @@ const systemSettingsSchema = z.object({
 
   // Storage Paths
   musicPath: z.string().optional(),
-  downloadPath: z.string().optional(),
 
   // Feature Flags
   autoSync: z.boolean().optional(),

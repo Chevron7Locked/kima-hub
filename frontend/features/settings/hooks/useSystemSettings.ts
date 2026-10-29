@@ -20,7 +20,6 @@ const defaultSystemSettings: SystemSettings = {
     slskdUrl: "",
     slskdApiKey: "",
     musicPath: "/music",
-    downloadPath: "/downloads",
     transcodeCacheMaxGb: 10,
     maxQueueLength: 10000,
     autoSync: true,
@@ -33,6 +32,7 @@ const defaultSystemSettings: SystemSettings = {
     primaryFailureFallback: "none",
     // Server
     publicUrl: "",
+    registrationOpen: false,
     updateChecksEnabled: true,
     podcastChartCountry: "us",
 };

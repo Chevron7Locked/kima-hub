@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Trash2 } from "lucide-react";
-import { SettingsSection, SettingsInput, SettingsSelect } from "../ui";
+import { SettingsSection, SettingsInput, SettingsSelect, SettingsRow, SettingsToggle } from "../ui";
+import { SystemSettings } from "../../types";
 import { Modal } from "@/components/ui/Modal";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
@@ -16,7 +17,12 @@ interface User {
     createdAt: string;
 }
 
-export function UserManagementSection() {
+interface UserManagementSectionProps {
+    settings: SystemSettings;
+    onUpdate: (updates: Partial<SystemSettings>) => void;
+}
+
+export function UserManagementSection({ settings, onUpdate }: UserManagementSectionProps) {
     const { user: currentUser } = useAuth();
     const [users, setUsers] = useState<User[]>([]);
     const [newUsername, setNewUsername] = useState("");
@@ -115,6 +121,17 @@ export function UserManagementSection() {
                 description="Manage users who can access this instance"
                 showSeparator={false}
             >
+                <SettingsRow
+                    label="Let people sign up"
+                    description="Anyone who can reach this server may create their own account from the sign-in page. Off, only an admin adds people, below."
+                >
+                    <SettingsToggle
+                        id="registration-open"
+                        checked={settings.registrationOpen}
+                        onChange={(checked) => onUpdate({ registrationOpen: checked })}
+                    />
+                </SettingsRow>
+
                 <div className="py-4 px-4 bg-white/5 rounded-lg border border-white/10 mb-4">
                     <h3 className="text-xs text-[var(--text-secondary)] mb-3">Create New User</h3>
                     <div className="space-y-3">

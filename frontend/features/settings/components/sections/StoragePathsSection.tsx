@@ -55,17 +55,6 @@ export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionP
                 />
             </SettingsRow>
 
-            <SettingsRow
-                label="Download path"
-                description="Path for new downloads"
-            >
-                <SettingsInput
-                    value={settings.downloadPath}
-                    onChange={(v) => onUpdate({ downloadPath: v })}
-                    placeholder="/downloads"
-                    className="w-64"
-                />
-            </SettingsRow>
         </SettingsSection>
     );
 }

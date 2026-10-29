@@ -59,7 +59,6 @@ const baseRow: Record<string, unknown> = {
     audiobookshelfEnabled: false,
     audiobookshelfUrl: "http://localhost:13378",
     musicPath: config.music.musicPath,
-    downloadPath: "/downloads",
     autoSync: true,
     transcodeCacheMaxGb: 10,
     maxQueueLength: 10000,

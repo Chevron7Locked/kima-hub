@@ -621,7 +621,6 @@ model SystemSettings {
   soulseekUsername            String?
   soulseekPassword            String?
   musicPath                   String?   @default("/music")
-  downloadPath                String?   @default("/downloads")
   autoSync                    Boolean   @default(true)
   maxConcurrentDownloads      Int       @default(3)
   transcodeCacheMaxGb         Int       @default(10)

@@ -38,7 +38,6 @@ export interface SystemSettings {
     musicPath: string;
     /** The server's MUSIC_PATH fixes the music folder, so it cannot be changed here. */
     musicPathFixedByEnv?: boolean;
-    downloadPath: string;
     // Advanced
     transcodeCacheMaxGb: number;
     /** How many tracks the play queue may hold, per user. */
@@ -50,6 +49,8 @@ export interface SystemSettings {
     primaryFailureFallback: "none" | "lidarr" | "soulseek";
     // Server
     publicUrl: string;
+    /** Whether people may create their own account (the first account can always be made). */
+    registrationOpen: boolean;
     updateChecksEnabled: boolean;
     podcastChartCountry: string;
 }

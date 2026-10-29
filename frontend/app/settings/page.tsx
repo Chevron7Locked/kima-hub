@@ -277,7 +277,10 @@ export default function SettingsPage() {
 
                         <CorruptTracksSection />
 
-                        <UserManagementSection />
+                        <UserManagementSection
+                            settings={systemSettings}
+                            onUpdate={updateSystemSettings}
+                        />
                     </>
                 )}
             </div>
