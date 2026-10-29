@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Verifies the CLAP ONNX stack offline (HF_HUB_OFFLINE=1): the fixtures must embed at
-cosine >= 0.999 to expected_music_embeddings.npy (laion_clap with torch on the music
-checkpoint; music_onnx_parity.py fixture) with no torch fallback, the clips embedded together
+cosine >= 0.999 to expected_music_embeddings.npy (the reference model's answers; music_onnx_parity.py
+fixture) on ONNX Runtime alone, the clips embedded together
 in one call (as tracks are) must match each clip embedded alone, and two text prompts must
 embed distinguishably.
 Usage: python3 verify_runtime.py <fixtures_dir>; exit 0 = pass.

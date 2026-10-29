@@ -34,8 +34,8 @@ ABANDONED = 'install child abandoned (analyzer restarted mid-install)'
 
 CUDA_DRIVER_MIN = 12040
 
-# The set checked on an RTX 4060 Ti (cosine 1.0 against the CPU over 25 tracks). Transitive closure
-# pinned with --no-deps so nothing here shadows the image's numpy/protobuf/flatbuffers.
+# The CUDA runtime set, checked against the CPU's answers. Its whole dependency closure is pinned and installed with
+# --no-deps, so nothing here shadows the image's numpy/protobuf/flatbuffers.
 PINS = [
     ('onnxruntime-gpu', '1.22.0'),
     ('nvidia-cuda-runtime-cu12', '12.9.79'),
