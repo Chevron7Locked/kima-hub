@@ -6,6 +6,7 @@ import { listenBrainzService } from "../services/listenBrainz";
 import { musicBrainzService } from "../services/musicbrainz";
 import { resolveArtistMbid } from "../services/artistCorrection";
 import { deezerService } from "../services/deezer";
+import { wikidataService } from "../services/wikidata";
 import { redisClient } from "../utils/redis";
 import { requireAuthOrToken } from "../middleware/auth";
 import {
@@ -31,11 +32,6 @@ const MBID_PATTERN =
 router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
     try {
         const { artistName, trackTitle } = req.params;
-
-        logger.debug(
-            `Streaming preview for "${trackTitle}" by ${artistName}`
-        );
-
         const previewUrl = await deezerService.getFreshTrackPreview(
             artistName,
             trackTitle
@@ -57,7 +53,6 @@ router.get("/preview/:artistName/:trackTitle/stream", async (req, res) => {
 
 // GET /artists/discover/:nameOrMbid - Get artist details for discovery (not in library yet)
 router.get("/discover/:nameOrMbid", async (req, res) => {
-    const start = Date.now();
     try {
         const { nameOrMbid } = req.params;
 
@@ -124,21 +119,15 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             return res.status(404).json({ error: "Artist not found" });
         }
 
-        let albums: any[] = [];
-
         // Bio: Wikidata first, Wikipedia abstract via the MB sitelink
         // second — both live inside wikidataService.getArtistInfo.
         const wdInfo = mbid
             ? await withTimeout(
-                  (await import("../services/wikidata")).wikidataService.getArtistInfo(
-                      artistName,
-                      mbid,
-                      { interactive: true }
-                  ),
+                  wikidataService.getArtistInfo(artistName, mbid, { interactive: true }),
                   8000,
                   "Wikidata getArtistInfo timed out"
               ).catch(() => null)
-            : { summary: null, heroUrl: null };
+            : null;
         const bio = wdInfo?.summary || null;
 
         // Artist artwork (parallel)
@@ -233,14 +222,11 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             return [];
         })();
 
-        const [image, discAlbums] = await Promise.all([
+        // Every album here is one the listener does not own.
+        const [image, albums] = await Promise.all([
             artworkPromise,
             discographyPromise,
         ]);
-
-        if (discAlbums.length > 0) {
-            albums = discAlbums;
-        }
 
         // Similar artists: ListenBrainz, then Deezer, nudged by the library's matching;
         // images through the artwork cascade (Fanart, Deezer).
@@ -295,57 +281,55 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         // but with no owned library to join against, every row is unowned and
         // previewable.
         let topTracks: any[] = [];
-        {
-            if (mbid) {
-                try {
-                    topTracks = (
-                        await listenBrainzService.getTopRecordingsForArtist(mbid, req.user!.id, 10)
-                    ).map((r) => ({
-                        id: r.recordingMbid,
+        if (mbid) {
+            try {
+                topTracks = (
+                    await listenBrainzService.getTopRecordingsForArtist(mbid, req.user!.id, 10)
+                ).map((r) => ({
+                    id: r.recordingMbid,
+                    title: r.title,
+                    duration: Math.round(r.lengthMs / 1000) || 0,
+                    playCount: r.playCount,
+                    listeners: r.listeners,
+                    userPlayCount: 0,
+                    popularitySource: "listenbrainz",
+                    album: {
+                        id: null,
+                        title: r.releaseName || "Unknown Album",
+                    },
+                }));
+            } catch (lbError) {
+                logger.debug(
+                    `[Discovery] LB top recordings failed for ${artistName}:`,
+                    lbError
+                );
+            }
+        }
+        if (topTracks.length === 0) {
+            try {
+                topTracks = (await deezerService.getArtistTopTracks(artistName, 10)).map(
+                    (r) => ({
+                        id: `dz:${r.title.toLowerCase()}`,
                         title: r.title,
-                        duration: Math.round(r.lengthMs / 1000) || 0,
-                        playCount: r.playCount,
-                        listeners: r.listeners,
+                        duration: Math.round(r.durationMs / 1000) || 0,
+                        playCount: r.rank,
+                        listeners: 0,
                         userPlayCount: 0,
-                        popularitySource: "listenbrainz",
+                        popularitySource: "deezer",
+                        previewUrl: r.previewUrl,
                         album: {
                             id: null,
-                            title: r.releaseName || "Unknown Album",
+                            title: r.album || "Unknown Album",
+                            coverUrl: r.coverUrl,
+                            coverArt: r.coverUrl,
                         },
-                    }));
-                } catch (lbError) {
-                    logger.debug(
-                        `[Discovery] LB top recordings failed for ${artistName}:`,
-                        lbError
-                    );
-                }
-            }
-            if (topTracks.length === 0) {
-                try {
-                    topTracks = (await deezerService.getArtistTopTracks(artistName, 10)).map(
-                        (r) => ({
-                            id: `dz:${r.title.toLowerCase()}`,
-                            title: r.title,
-                            duration: Math.round(r.durationMs / 1000) || 0,
-                            playCount: r.rank,
-                            listeners: 0,
-                            userPlayCount: 0,
-                            popularitySource: "deezer",
-                            previewUrl: r.previewUrl,
-                            album: {
-                                id: null,
-                                title: r.album || "Unknown Album",
-                                coverUrl: r.coverUrl,
-                                coverArt: r.coverUrl,
-                            },
-                        })
-                    );
-                } catch (dzError) {
-                    logger.debug(
-                        `[Discovery] Deezer top tracks failed for ${artistName}:`,
-                        dzError
-                    );
-                }
+                    })
+                );
+            } catch (dzError) {
+                logger.debug(
+                    `[Discovery] Deezer top tracks failed for ${artistName}:`,
+                    dzError
+                );
             }
         }
 
@@ -360,7 +344,7 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
             listeners: 0,
             playcount: 0,
             url: mbid ? `https://musicbrainz.org/artist/${mbid}` : null,
-            albums: albums.map((album: any) => ({ ...album, owned: false })), // Mark all as not owned
+            albums,
             // Global popularity tiers above (LB sitewide, then Deezer); empty
             // only when both clouds were unavailable.
             topTracks,
@@ -384,9 +368,6 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         res.json(response);
     } catch (error) {
         safeError(res, "Artist discovery", error);
-    } finally {
-        const elapsed = Date.now() - start;
-        logger.info(`GET /artists/discover completed in ${elapsed}ms`);
     }
 });
 
@@ -450,23 +431,19 @@ router.get("/album/:mbid", async (req, res) => {
             }
             releaseGroupId = release["release-group"]?.id || mbid;
 
-            // Now get the release group to get the type and first-release-date
-            if (releaseGroupId) {
-                const rg2 = await musicBrainzService.getReleaseGroup(
-                    releaseGroupId
+            // The release group carries the type and first-release date.
+            const rg2 = await musicBrainzService.getReleaseGroup(releaseGroupId);
+            if (rg2.kind === "answered") {
+                releaseGroup = rg2.value;
+            } else {
+                if (rg2.kind !== "absent") complete = false;
+                logger.debug(
+                    `Failed to get release-group ${releaseGroupId}: ${
+                        rg2.kind === "absent"
+                            ? "no such release-group"
+                            : failureCause(rg2)
+                    }`
                 );
-                if (rg2.kind === "answered") {
-                    releaseGroup = rg2.value;
-                } else {
-                    if (rg2.kind !== "absent") complete = false;
-                    logger.debug(
-                        `Failed to get release-group ${releaseGroupId}: ${
-                            rg2.kind === "absent"
-                                ? "no such release-group"
-                                : failureCause(rg2)
-                        }`
-                    );
-                }
             }
         } else {
             // Neither answer nor "not there" — the lookup itself failed;
@@ -515,7 +492,7 @@ router.get("/album/:mbid", async (req, res) => {
         const coverUrl =
             (
                 await findAlbumArtwork({
-                    rgMbid: releaseGroupId || mbid,
+                    rgMbid: releaseGroupId,
                     artistName,
                     albumTitle,
                 })
@@ -543,11 +520,8 @@ router.get("/album/:mbid", async (req, res) => {
             type: releaseGroup?.["primary-type"] || "Album",
             coverUrl,
             coverArt: coverUrl, // Alias for compatibility
-            bio:
-                (releaseGroup as any)?.annotation ||
-                (release as any)?.annotation ||
-                null,
-            tags: ((releaseGroup as any)?.tags || [])
+            bio: releaseGroup?.annotation || release?.annotation || null,
+            tags: (releaseGroup?.tags || [])
                 .map((t: any) => t?.name)
                 .filter(Boolean)
                 .slice(0, 5),

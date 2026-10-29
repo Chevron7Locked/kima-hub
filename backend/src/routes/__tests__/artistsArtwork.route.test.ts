@@ -261,4 +261,81 @@ describe("the discovery routes and the pictures they promise", () => {
             expect(res.body.coverUrl).toBe(COVER);
         });
     });
+
+    describe("whole replies", () => {
+        it("an artist page lists every album as not owned, with the bio and genres twice for older clients", async () => {
+            const { wikidataService } = require("../../services/wikidata");
+            wikidataService.getArtistInfo.mockResolvedValue({ summary: "A synthwave artist.", heroUrl: "h" });
+            mockGetArtist.mockImplementation(async (_id: string, includes?: string[]) =>
+                answeredWith(includes ? { name: "Perturbator", genres: [{ name: "synthwave", count: 3 }, { name: "darksynth", count: 5 }] } : { name: "Perturbator" }),
+            );
+            mockGetReleaseGroups.mockResolvedValue(answeredWith([
+                { id: "rg-1", title: "Dangerous Days", "primary-type": "Album", "first-release-date": "2014-06-17" },
+                { id: "rg-2", title: "Live", "primary-type": "Album", "secondary-types": ["Live"] },
+            ]));
+
+            const res = await request(makeApp()).get(`/artists/discover/${MBID}`);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({
+                mbid: MBID,
+                name: "Perturbator",
+                image: null,
+                bio: "A synthwave artist.",
+                summary: "A synthwave artist.",
+                tags: ["darksynth", "synthwave"],
+                genres: ["darksynth", "synthwave"],
+                listeners: 0,
+                playcount: 0,
+                url: `https://musicbrainz.org/artist/${MBID}`,
+                albums: [{
+                    id: "rg-1", rgMbid: "rg-1", mbid: "rg-1", title: "Dangerous Days", type: "Album",
+                    year: 2014, releaseDate: "2014-06-17", coverUrl: null, owned: false,
+                }],
+                topTracks: [],
+                similarArtists: [],
+            });
+        });
+
+        it("an album asked for by a release id is answered under its release group", async () => {
+            const RELEASE = "99999999-8888-7777-6666-555555555555";
+            const { musicBrainzService } = require("../../services/musicbrainz");
+            musicBrainzService.getRelease.mockResolvedValueOnce(answeredWith({
+                id: RELEASE,
+                title: "Dangerous Days (Deluxe)",
+                date: "2014-06-17",
+                "release-group": { id: MBID },
+                "artist-credit": [{ name: "Perturbator", artist: { id: "art-1" } }],
+                media: [{ tracks: [{ id: "t1", title: "Welcome Back", position: 1, length: 61000 }] }],
+            }));
+            mockGetReleaseGroup.mockImplementation(async (id: string) =>
+                id === MBID ? answeredWith({ id: MBID, title: "Dangerous Days", "primary-type": "Album", "first-release-date": "2014-06-17" }) : noData,
+            );
+
+            const res = await request(makeApp()).get(`/artists/album/${RELEASE}`);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({
+                id: MBID,
+                rgMbid: MBID,
+                mbid: RELEASE,
+                releaseMbid: RELEASE,
+                title: "Dangerous Days",
+                artist: { name: "Perturbator", id: "art-1", mbid: "art-1" },
+                year: 2014,
+                type: "Album",
+                coverUrl: null,
+                coverArt: null,
+                bio: null,
+                tags: [],
+                tracks: [{
+                    id: `mb-${MBID}-t1`, title: "Welcome Back", trackNo: 1, discNumber: null, discSubtitle: null,
+                    duration: 61, artist: { name: "Perturbator" },
+                }],
+                owned: false,
+                source: "discovery",
+            });
+            expect(mockFindAlbumArtwork).toHaveBeenCalledWith(expect.objectContaining({ rgMbid: MBID }));
+        });
+    });
 });
