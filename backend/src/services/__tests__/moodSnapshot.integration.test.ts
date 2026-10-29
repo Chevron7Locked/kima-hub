@@ -41,7 +41,8 @@ import { syncMoodSnapshot } from "../../workers/moodSnapshotWorker";
 import { getVibeMap } from "../vibeMap";
 import { MOODS as LEARNED_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
 import { buildMoodState, loadMoodState } from "../moods/state";
-import { MIN_MIX_TRACKS, RECIPE_LINE, pickRecipeStation } from "../mixes/recipes";
+import { MIN_MIX_TRACKS, RECIPE_LINE } from "../mixes/recipes";
+import { pickRecipeStation } from "../../__tests__/helpers/stationPicks";
 
 jest.setTimeout(60_000);
 

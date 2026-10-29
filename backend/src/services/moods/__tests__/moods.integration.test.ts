@@ -7,7 +7,8 @@
 import { prisma } from "../../../utils/db";
 import { logger } from "../../../utils/logger";
 import { parseEmbedding } from "../../../utils/embedding";
-import { RECIPES, UnrankableLibraryError, getRecipe, pickStationTracks } from "../../mixes/recipes";
+import { RECIPES, UnrankableLibraryError, getRecipe } from "../../mixes/recipes";
+import { pickStationTracks } from "../../../__tests__/helpers/stationPicks";
 import { refreshMoodSnapshot } from "../../moodBucketService";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { READINGS, buildMoodState, buildMoods, loadMoodState, moodProgress, updateMoods, type Reading } from "../state";

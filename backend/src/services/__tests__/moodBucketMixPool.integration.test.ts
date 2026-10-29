@@ -26,7 +26,7 @@ jest.mock("../../utils/redis", () => ({
 import { prisma } from "../../utils/db";
 import { moodBucketService, MoodType } from "../moodBucketService";
 import { buildMoodState } from "../moods/state";
-import { pickRecipeStation } from "../mixes/recipes";
+import { pickRecipeStation } from "../../__tests__/helpers/stationPicks";
 import {
     removeSyntheticLibrary,
     seedSyntheticLibrary,

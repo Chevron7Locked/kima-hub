@@ -9,7 +9,7 @@ jest.mock("../../utils/db", () => ({
     prisma: { track: { findMany: (...args: unknown[]) => mockFindMany(...args) } },
 }));
 
-import { drawIds, drawWeighted, sampleTrackIds, sampleTracks, seededKey, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
+import { drawIds, drawWeighted, sampleTrackIds, seededKey, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
 
 const TOTAL = 1000;
 const ALL_IDS = Array.from({ length: TOTAL }, (_, i) => `t${String(i).padStart(4, "0")}`);
@@ -26,46 +26,6 @@ function fakeTable() {
 beforeEach(() => {
     mockFindMany.mockReset();
     fakeTable();
-});
-
-describe("sampleTracks", () => {
-    it("reads every matching id (no take, id order) and full rows only for the draw", async () => {
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 50 });
-
-        const [idRead, rowRead] = mockFindMany.mock.calls.map((c) => c[0]);
-        expect(idRead.select).toEqual({ id: true });
-        expect(idRead.take).toBeUndefined();
-        expect(idRead.orderBy).toEqual({ id: "asc" });
-        expect(rowRead.where.id.in).toHaveLength(50);
-        expect(rows).toHaveLength(50);
-    });
-
-    it("draws from beyond the first rows, across the whole match", async () => {
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 50 });
-        const indexes = rows.map((r: any) => ALL_IDS.indexOf(r.id));
-        expect(Math.max(...indexes)).toBeGreaterThan(500);
-        expect(indexes.filter((i) => i >= 50).length).toBeGreaterThan(25);
-    });
-
-    it("returns rows in the order drawn, whatever order the database returns them", async () => {
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 20 });
-        const [, rowRead] = mockFindMany.mock.calls.map((c) => c[0]);
-        expect(rows.map((r: any) => r.id)).toEqual(rowRead.where.id.in);
-    });
-
-    it("returns every match when fewer than take match", async () => {
-        mockFindMany.mockImplementation(async (args: any) =>
-            args.select ? [{ id: "a" }, { id: "b" }] : args.where.id.in.map((id: string) => ({ id }))
-        );
-        const rows = await sampleTracks({ where: {}, include: { album: true }, take: 50 });
-        expect(rows).toHaveLength(2);
-    });
-
-    it("skips the row read when nothing matches", async () => {
-        mockFindMany.mockResolvedValue([]);
-        expect(await sampleTracks({ where: {}, include: { album: true }, take: 50 })).toEqual([]);
-        expect(mockFindMany).toHaveBeenCalledTimes(1);
-    });
 });
 
 describe("sampleTrackIds", () => {
@@ -85,6 +45,11 @@ describe("sampleTrackIds", () => {
         const seen = new Set<string>();
         for (let i = 0; i < 10; i++) for (const id of await sampleTrackIds({ where: {}, take: 100 })) seen.add(id);
         expect(seen.size).toBeGreaterThan(500);
+    });
+
+    it("returns every match when fewer than take match", async () => {
+        mockFindMany.mockResolvedValue([{ id: "a" }, { id: "b" }]);
+        expect((await sampleTrackIds({ where: {}, take: 50 })).sort()).toEqual(["a", "b"]);
     });
 });
 

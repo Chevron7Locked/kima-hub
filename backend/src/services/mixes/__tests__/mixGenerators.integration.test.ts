@@ -43,7 +43,8 @@ import {
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { buildMoodState } from "../../moods/state";
 import { getMixColor, type ProgrammaticMix } from "../helpers";
-import { pickRecipeTracks, pickRecipeStation } from "../recipes";
+import { pickRecipeTracks } from "../recipes";
+import { pickRecipeStation } from "../../../__tests__/helpers/stationPicks";
 import { programmaticPlaylistService } from "../index";
 import * as mood from "../moodMixes";
 import * as genre from "../genreMixes";

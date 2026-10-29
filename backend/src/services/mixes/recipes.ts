@@ -611,11 +611,6 @@ export async function pickStationPage(recipe: Recipe, request: StationRequest): 
     return stationPage(`recipe:${recipe.id}`, () => recipeMembers(recipe, request.listener), request);
 }
 
-/** pickStationPage's songs. */
-export async function pickStationTracks(recipe: Recipe, request: StationRequest): Promise<string[]> {
-    return (await pickStationPage(recipe, request)).trackIds;
-}
-
 /**
  * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
  * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
@@ -639,16 +634,6 @@ export async function pickWildcardPage(request: StationRequest): Promise<Station
         `;
         return rows.map((r) => ({ id: r.id, artistId: r.artist_key }));
     }, request);
-}
-
-/** pickWildcardPage's songs. */
-export async function pickWildcardStation(request: StationRequest): Promise<string[]> {
-    return (await pickWildcardPage(request)).trackIds;
-}
-
-/** pickStationTracks for the shipped recipe with this id. */
-export async function pickRecipeStation(recipeId: string, options: StationRequest): Promise<string[]> {
-    return pickStationTracks(getRecipe(recipeId), options);
 }
 
 /** pickStationPage for the shipped recipe with this id. */

@@ -40,7 +40,7 @@ import {
 } from "../../../__tests__/fixtures/syntheticLibrary";
 import { buildMoodState } from "../../../services/moods/state";
 import { writeMoodTags } from "../../../services/moods/tags";
-import { pickRecipeStation } from "../../../services/mixes/recipes";
+import { pickRecipeStation } from "../../../__tests__/helpers/stationPicks";
 import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { MOOD_HEADS } from "../../../services/moods/heads";
 import router from "../tracks";

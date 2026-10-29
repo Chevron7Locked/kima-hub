@@ -34,7 +34,7 @@ import request from "supertest";
 import mixRoutes from "../mixes";
 import { prisma } from "../../utils/db";
 import { buildMoodState } from "../../services/moods/state";
-import { pickRecipeStation } from "../../services/mixes/recipes";
+import { pickRecipeStation } from "../../__tests__/helpers/stationPicks";
 import {
     removeSyntheticLibrary,
     seedSyntheticLibrary,

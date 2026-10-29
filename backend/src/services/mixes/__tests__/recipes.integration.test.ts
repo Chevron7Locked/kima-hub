@@ -27,15 +27,13 @@ import {
     parseRecipes,
     pickMixTracks,
     pickPageTracks,
-    pickRecipeStation,
     pickRecipeTracks,
     pickStationPage,
-    pickStationTracks,
-    pickWildcardStation,
     songArtistKey,
     type Recipe,
     type Signal,
 } from "../recipes";
+import { pickRecipeStation, pickStationTracks, pickWildcardStation } from "../../../__tests__/helpers/stationPicks";
 import {
     TRACK_COUNT,
     removeSyntheticLibrary,

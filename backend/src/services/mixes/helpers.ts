@@ -16,10 +16,9 @@ export interface ProgrammaticMix {
     color: string;
 }
 
-// Research-based color psychology for mix vibes
-// Using actual CSS rgba values for inline styles (Tailwind classes get purged at build time)
+/** Each mix type's background, as inline CSS. */
 const MIX_COLORS: Record<string, string> = {
-    // Night/Introspection - Deep blues and purples for calm, night sky, solitude
+    // Night
     "late-night":
         "linear-gradient(to bottom, rgba(30, 27, 75, 0.7), rgba(30, 58, 138, 0.5), rgba(15, 23, 42, 0.4))",
     "3am-thoughts":
@@ -27,29 +26,27 @@ const MIX_COLORS: Record<string, string> = {
     "night-drive":
         "linear-gradient(to bottom, rgba(15, 23, 42, 0.7), rgba(49, 46, 129, 0.5), rgba(88, 28, 135, 0.4))",
 
-    // Calm/Relaxation - Teal and seafoam for spa-like tranquility
+    // Calm
     chill: "linear-gradient(to bottom, rgba(17, 94, 89, 0.6), rgba(22, 78, 99, 0.5), rgba(15, 23, 42, 0.4))",
     "coffee-shop":
         "linear-gradient(to bottom, rgba(120, 53, 15, 0.6), rgba(68, 64, 60, 0.5), rgba(38, 38, 38, 0.4))",
-    "rainy-day":
-        "linear-gradient(to bottom, rgba(51, 65, 85, 0.6), rgba(31, 41, 55, 0.5), rgba(39, 39, 42, 0.4))",
     "sunday-morning":
         "linear-gradient(to bottom, rgba(253, 186, 116, 0.4), rgba(252, 211, 77, 0.3), rgba(68, 64, 60, 0.4))",
 
-    // Energy/Workout - Red and orange to increase heart rate
+    // Energy
     workout:
         "linear-gradient(to bottom, rgba(153, 27, 27, 0.6), rgba(124, 45, 18, 0.5), rgba(68, 64, 60, 0.4))",
     "confidence-boost":
         "linear-gradient(to bottom, rgba(194, 65, 12, 0.6), rgba(146, 64, 14, 0.5), rgba(68, 64, 60, 0.4))",
 
-    // Happy/Uplifting - Yellow and warm amber for optimism
+    // Happy
     happy: "linear-gradient(to bottom, rgba(217, 119, 6, 0.5), rgba(161, 98, 7, 0.4), rgba(68, 64, 60, 0.4))",
     "summer-vibes":
         "linear-gradient(to bottom, rgba(8, 145, 178, 0.5), rgba(15, 118, 110, 0.4), rgba(30, 58, 138, 0.4))",
     "golden-hour":
         "linear-gradient(to bottom, rgba(245, 158, 11, 0.5), rgba(234, 88, 12, 0.4), rgba(136, 19, 55, 0.4))",
 
-    // Sad/Melancholy - Cool blue-grays for "feeling blue"
+    // Sad
     melancholy:
         "linear-gradient(to bottom, rgba(51, 65, 85, 0.6), rgba(30, 58, 138, 0.5), rgba(17, 24, 39, 0.4))",
     "sad-girl-sundays":
@@ -57,37 +54,35 @@ const MIX_COLORS: Record<string, string> = {
     "heartbreak-hotel":
         "linear-gradient(to bottom, rgba(30, 58, 138, 0.6), rgba(88, 28, 135, 0.5), rgba(15, 23, 42, 0.4))",
 
-    // Party/Dance - Hot pink and magenta for club energy
+    // Dance
     "dance-floor":
         "linear-gradient(to bottom, rgba(162, 28, 175, 0.6), rgba(131, 24, 67, 0.5), rgba(59, 7, 100, 0.4))",
 
-    // Acoustic/Organic - Warm browns like wood instruments
+    // Acoustic
     acoustic:
         "linear-gradient(to bottom, rgba(146, 64, 14, 0.6), rgba(124, 45, 18, 0.5), rgba(68, 64, 60, 0.4))",
-    unplugged:
-        "linear-gradient(to bottom, rgba(68, 64, 60, 0.6), rgba(120, 53, 15, 0.5), rgba(38, 38, 38, 0.4))",
 
-    // Focus/Instrumental - Purple for creativity and concentration
+    // Focus
     instrumental:
         "linear-gradient(to bottom, rgba(91, 33, 182, 0.6), rgba(88, 28, 135, 0.5), rgba(15, 23, 42, 0.4))",
     "focus-flow":
         "linear-gradient(to bottom, rgba(30, 58, 138, 0.6), rgba(30, 41, 59, 0.5), rgba(17, 24, 39, 0.4))",
 
-    // Adventure/Road Trip - Sunset oranges for freedom
+    // Road trip
     "road-trip":
         "linear-gradient(to bottom, rgba(194, 65, 12, 0.6), rgba(146, 64, 14, 0.5), rgba(14, 165, 233, 0.4))",
 
-    // Character/Mood Archetypes
+    // Character
     "main-character":
         "linear-gradient(to bottom, rgba(245, 158, 11, 0.5), rgba(202, 138, 4, 0.4), rgba(124, 45, 18, 0.4))",
     "villain-era":
         "linear-gradient(to bottom, rgba(69, 10, 10, 0.7), rgba(17, 24, 39, 0.6), rgba(0, 0, 0, 0.5))",
 
-    // Nostalgia - Sepia and vintage tones
+    // Nostalgia
     throwback:
         "linear-gradient(to bottom, rgba(146, 64, 14, 0.5), rgba(124, 45, 18, 0.4), rgba(68, 64, 60, 0.4))",
 
-    // Genre/Era based - More neutral but themed
+    // Genre, era and the listener's own plays
     era: "linear-gradient(to bottom, rgba(68, 64, 60, 0.5), rgba(38, 38, 38, 0.4), rgba(39, 39, 42, 0.4))",
     genre: "linear-gradient(to bottom, rgba(63, 63, 70, 0.5), rgba(30, 41, 59, 0.4), rgba(17, 24, 39, 0.4))",
     "top-tracks":
@@ -99,24 +94,18 @@ const MIX_COLORS: Record<string, string> = {
     discovery:
         "linear-gradient(to bottom, rgba(2, 132, 199, 0.5), rgba(30, 58, 138, 0.4), rgba(15, 23, 42, 0.4))",
 
-    // Mood-on-demand default
-    mood: "linear-gradient(to bottom, rgba(162, 28, 175, 0.5), rgba(107, 33, 168, 0.4), rgba(15, 23, 42, 0.4))",
     // The mood pages' mixes (moodBucketService MOODS ids); happy and chill share the colours above.
     sad: "linear-gradient(to bottom, rgba(30, 58, 138, 0.6), rgba(88, 28, 135, 0.5), rgba(15, 23, 42, 0.4))",
     party: "linear-gradient(to bottom, rgba(162, 28, 175, 0.6), rgba(131, 24, 67, 0.5), rgba(59, 7, 100, 0.4))",
     aggressive: "linear-gradient(to bottom, rgba(69, 10, 10, 0.7), rgba(17, 24, 39, 0.6), rgba(0, 0, 0, 0.5))",
 
-    // Default fallback
+    // Any other type
     default:
         "linear-gradient(to bottom, rgba(88, 28, 135, 0.4), rgba(26, 26, 26, 1), transparent)",
 };
 
 export function getMixColor(type: string): string {
     return MIX_COLORS[type] || MIX_COLORS["default"];
-}
-
-export function randomSample<T>(array: T[], count: number): T[] {
-    return shuffleArray(array).slice(0, count);
 }
 
 /** Tracks in a finished generated mix. */
@@ -138,7 +127,6 @@ export function getSeededRandom(seed: string): number {
     }
     return Math.abs(hash);
 }
-
 
 /**
  * The key a seeded draw ranks an id by: the MD5 of the seed and the id, as hex. Uniform is all a draw needs, and MD5 is
@@ -376,19 +364,6 @@ export async function unplayedTrackIds(
         ORDER BY t.id
     `;
     return rows.map((r) => r.id);
-}
-
-/**
- * Up to `take` tracks drawn uniformly at random from every track matching
- * `where`. Only ids are read for the whole match; full rows are read for the
- * draw.
- */
-export async function sampleTracks<I extends Prisma.TrackInclude>(args: {
-    where: Prisma.TrackWhereInput;
-    include: I;
-    take: number;
-}): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
-    return tracksByIds(await sampleTrackIds(args), args.include);
 }
 
 /**
