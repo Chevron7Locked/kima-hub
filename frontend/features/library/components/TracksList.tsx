@@ -2,9 +2,8 @@
 
 import { useState, memo, useCallback } from "react";
 import { Track } from "../types";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
-import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { LibraryListStatus } from "./LibraryGrid";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { AudioLines, ListPlus, Plus, Trash2, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -22,7 +21,6 @@ interface TracksListProps {
     onAddToPlaylist: (playlistId: string, trackId: string) => void;
     onDelete?: (trackId: string, trackTitle: string) => void;
     isLoading?: boolean;
-    gridKey?: number;
 }
 
 interface TrackRowProps {
@@ -58,7 +56,6 @@ const TrackRow = memo(
                 : String(displayTrackNumber);
         return (
             <div
-                key={track.id}
                 {...doubleTapProps}
                 data-tv-card
                 data-tv-card-index={index}
@@ -153,16 +150,16 @@ const TrackRow = memo(
                         <Plus className="w-4 h-4" />
                     </button>
                     {onDelete && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(track.id, shownTitle(track));
-                        }}
-                        className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all duration-150 border border-transparent hover:border-danger/30 touch-reveal"
-                        title="delete track"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(track.id, shownTitle(track));
+                            }}
+                            className="w-10 h-10 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all duration-150 border border-transparent hover:border-danger/30 touch-reveal"
+                            title="delete track"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
                     )}
                     <span className="text-sm tabular-nums font-bold text-[var(--text-muted)] w-12 text-right">
                         {formatTime(track.duration)}
@@ -187,7 +184,6 @@ export function TracksList({
     onAddToPlaylist,
     onDelete,
     isLoading = false,
-    gridKey,
 }: TracksListProps) {
     const { currentTrack } = useAudioState();
     const currentTrackId = currentTrack?.id;
@@ -200,6 +196,7 @@ export function TracksList({
     }, []);
 
     const handleAddToPlaylist = useCallback(
+        // async: the playlist picker waits on what it is handed.
         async (playlistId: string) => {
             if (!selectedTrackId) return;
             onAddToPlaylist(playlistId, selectedTrackId);
@@ -209,22 +206,8 @@ export function TracksList({
         [selectedTrackId, onAddToPlaylist],
     );
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-[400px]">
-                <GradientSpinner size="md" />
-            </div>
-        );
-    }
-
-    if (tracks.length === 0) {
-        return (
-            <EmptyState
-                icon={<AudioLines className="w-12 h-12" />}
-                title="No songs yet"
-                description="Your library is empty. Sync your music to get started."
-            />
-        );
+    if (isLoading || tracks.length === 0) {
+        return <LibraryListStatus isLoading={isLoading} icon={<AudioLines className="w-12 h-12" />} emptyTitle="No songs yet" />;
     }
 
     return (
@@ -236,7 +219,7 @@ export function TracksList({
                 <div className="w-[140px] text-right pr-2 text-xs font-semibold text-[var(--text-muted)]">Duration</div>
             </div>
 
-            <div key={gridKey} data-tv-section="library-tracks" className="space-y-1" style={cascadeStyle(tracks.length)}>
+            <div data-tv-section="library-tracks" className="space-y-1" style={cascadeStyle(tracks.length)}>
                 {tracks.map((track, index) => {
                     const isCurrentlyPlaying = currentTrackId === track.id;
                     return (

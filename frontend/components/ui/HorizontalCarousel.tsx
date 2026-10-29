@@ -8,16 +8,12 @@ import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 interface HorizontalCarouselProps {
     children: ReactNode;
     className?: string;
-    showArrows?: boolean;
-    gap?: "sm" | "md" | "lg";
     style?: CSSProperties;
 }
 
 export function HorizontalCarousel({
     children,
     className,
-    showArrows = true,
-    gap = "md",
     style,
 }: HorizontalCarouselProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -26,12 +22,6 @@ export function HorizontalCarousel({
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
-
-    const gapClass = {
-        sm: "gap-2",
-        md: "gap-3",
-        lg: "gap-4",
-    }[gap];
 
     const checkScroll = () => {
         const el = scrollRef.current;
@@ -71,7 +61,7 @@ export function HorizontalCarousel({
     return (
         <div className={cn("relative group/carousel", className)}>
             {/* Left arrow */}
-            {showArrows && !isMobileOrTablet && canScrollLeft && (
+            {!isMobileOrTablet && canScrollLeft && (
                 <button
                     onClick={() => scroll("left")}
                     className={cn(
@@ -96,7 +86,7 @@ export function HorizontalCarousel({
                 className={cn(
                     "flex overflow-x-auto scrollbar-hide scroll-smooth",
                     "snap-x snap-mandatory",
-                    gapClass,
+                    "gap-3",
                     "px-1"
                 )}
             >
@@ -104,7 +94,7 @@ export function HorizontalCarousel({
             </div>
 
             {/* Right arrow */}
-            {showArrows && !isMobileOrTablet && canScrollRight && (
+            {!isMobileOrTablet && canScrollRight && (
                 <button
                     onClick={() => scroll("right")}
                     className={cn(

@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { createPortal } from "react-dom";
 import { SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -68,9 +69,8 @@ type Placement = { top: number; left: number; maxHeight: number; sheet: boolean 
  * Where the panel sits above a phone-width screen: under its button, kept inside the page's scrolling area (which
  * ends above the desktop player bar, and above the bottom navigation where there is one; on a tablet the floating
  * mini player sits inside that area, and the panel is drawn over it) and scrolling inside itself when that area is
- * shorter. When
- * the page scrolls the button out of that area, `onLost` is called (the panel would otherwise follow it under the
- * top bar). On a phone the panel is a sheet placed by CSS, so nothing is measured.
+ * shorter. When the page scrolls the button out of that area, `onLost` is called (the panel would otherwise follow it
+ * under the top bar). On a phone the panel is a sheet placed by CSS, so nothing is measured.
  */
 function usePanelPlacement(
     open: boolean,
@@ -340,14 +340,9 @@ export function RefinePanel({
                     ) : (
                         <span />
                     )}
-                    <button
-                        type="button"
-                        aria-label="Close refine panel"
-                        onClick={() => close(true)}
-                        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-white/5 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand transition-colors"
-                    >
+                    <Button variant="icon" aria-label="Close refine panel" onClick={() => close(true)}>
                         <X className="h-4 w-4" />
-                    </button>
+                    </Button>
                 </div>
 
                 <div className="flex flex-col gap-4">
@@ -394,8 +389,6 @@ export function RefinePanel({
                 }
                 onClick={() => setOpen((prev) => !prev)}
                 className={cn(
-                    // Matches the segmented control beside it: sentence case,
-                    // medium weight, a hairline border.
                     "relative flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors min-h-[44px] select-none",
                     open
                         ? "border-[var(--color-brand)] bg-[var(--color-brand)]/10 text-[var(--color-brand)]"

@@ -1,6 +1,7 @@
 "use client";
 
 import { Shuffle } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { LibraryFilter, SortOption } from "@/hooks/useQueries";
 import { Tab } from "../types";
 import { RefinePanel } from "./RefinePanel";
@@ -41,15 +42,15 @@ export function LibraryToolbar({
                 onReset={onReset}
             />
 
-            {/* Shuffle button -- stays primary, always visible */}
-            <button
-                type="button"
+            <Button
+                variant="primary"
+                size="sm"
                 onClick={onShuffleLibrary}
                 aria-label="Shuffle entire library"
-                className="ml-auto p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-[var(--color-brand)] hover:bg-[var(--color-brand-hover)] text-black transition-all hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]"
+                className="ml-auto min-w-[44px] px-2.5"
             >
                 <Shuffle className="w-4 h-4" />
-            </button>
+            </Button>
         </div>
     );
 }
