@@ -71,14 +71,15 @@ class ProgrammaticPlaylistService {
             `[MIXES] Generating mixes for user ${userId}, forceRandom: ${forceRandom}, seed: ${dateSeed}`
         );
 
-        const seedSuffix = forceRandom ? `-${Date.now()}` : "";
+        // A forced refresh draws the day's mixes anew.
+        const day = today + (forceRandom ? `-${Date.now()}` : "");
         const mixGenerators = [
             {
-                fn: () => generateEraMix(userId, today + seedSuffix),
+                fn: () => generateEraMix(userId, day),
                 name: "Era Mix",
             },
             {
-                fn: () => generateGenreMix(userId, today + seedSuffix),
+                fn: () => generateGenreMix(userId, day),
                 name: "Genre Mix",
             },
             {
@@ -86,7 +87,7 @@ class ProgrammaticPlaylistService {
                 name: "Top Tracks Mix",
             },
             {
-                fn: () => generateRediscoverMix(userId, today + seedSuffix),
+                fn: () => generateRediscoverMix(userId, day),
                 name: "Rediscover Mix",
             },
             {
@@ -95,153 +96,153 @@ class ProgrammaticPlaylistService {
             },
             {
                 fn: () =>
-                    generateRandomDiscoveryMix(userId, today + seedSuffix),
+                    generateRandomDiscoveryMix(userId, day),
                 name: "Random Discovery Mix",
             },
             {
-                fn: () => generatePartyMix(userId, today + seedSuffix),
+                fn: () => generatePartyMix(userId, day),
                 name: "Party Mix",
             },
             {
-                fn: () => generateChillMix(userId, today + seedSuffix),
+                fn: () => generateChillMix(userId, day),
                 name: "Chill Mix",
             },
             {
-                fn: () => generateWorkoutMix(userId, today + seedSuffix),
+                fn: () => generateWorkoutMix(userId, day),
                 name: "Workout Mix",
             },
             {
-                fn: () => generateFocusMix(userId, today + seedSuffix),
+                fn: () => generateFocusMix(userId, day),
                 name: "Focus Mix",
             },
             {
-                fn: () => generateHighEnergyMix(userId, today + seedSuffix),
+                fn: () => generateHighEnergyMix(userId, day),
                 name: "High Energy Mix",
             },
             {
-                fn: () => generateLateNightMix(userId, today + seedSuffix, timeZone),
+                fn: () => generateLateNightMix(userId, day, timeZone),
                 name: "Late Night Mix",
             },
             {
-                fn: () => generateHappyMix(userId, today + seedSuffix),
+                fn: () => generateHappyMix(userId, day),
                 name: "Happy Vibes Mix",
             },
             {
-                fn: () => generateMelancholyMix(userId, today + seedSuffix),
+                fn: () => generateMelancholyMix(userId, day),
                 name: "Melancholy Mix",
             },
             {
-                fn: () => generateDanceFloorMix(userId, today + seedSuffix),
+                fn: () => generateDanceFloorMix(userId, day),
                 name: "Dance Floor Mix",
             },
             {
-                fn: () => generateAcousticMix(userId, today + seedSuffix),
+                fn: () => generateAcousticMix(userId, day),
                 name: "Acoustic Mix",
             },
             {
-                fn: () => generateInstrumentalMix(userId, today + seedSuffix),
+                fn: () => generateInstrumentalMix(userId, day),
                 name: "Instrumental Mix",
             },
             {
-                fn: () => generateRoadTripMix(userId, today + seedSuffix),
+                fn: () => generateRoadTripMix(userId, day),
                 name: "Road Trip Mix",
             },
             {
-                fn: () => generateDayMix(userId, today + seedSuffix),
+                fn: () => generateDayMix(userId, day),
                 name: "Day Mix",
             },
             {
-                fn: () => generateSadGirlSundays(userId, today + seedSuffix),
+                fn: () => generateSadGirlSundays(userId, day),
                 name: "Sad Girl Sundays",
             },
             {
                 fn: () =>
-                    generateMainCharacterEnergy(userId, today + seedSuffix),
+                    generateMainCharacterEnergy(userId, day),
                 name: "Main Character Energy",
             },
             {
-                fn: () => generateVillainEra(userId, today + seedSuffix),
+                fn: () => generateVillainEra(userId, day),
                 name: "Villain Era",
             },
             {
-                fn: () => generateHotGirlWalk(userId, today + seedSuffix),
+                fn: () => generateHotGirlWalk(userId, day),
                 name: "Hot Girl Walk",
             },
             {
-                fn: () => generateRageCleaning(userId, today + seedSuffix),
+                fn: () => generateRageCleaning(userId, day),
                 name: "Rage Cleaning",
             },
             {
-                fn: () => generateGoldenHour(userId, today + seedSuffix),
+                fn: () => generateGoldenHour(userId, day),
                 name: "Golden Hour",
             },
             {
-                fn: () => generateShowerKaraoke(userId, today + seedSuffix),
+                fn: () => generateShowerKaraoke(userId, day),
                 name: "Shower Karaoke",
             },
             {
-                fn: () => generateInMyFeelings(userId, today + seedSuffix),
+                fn: () => generateInMyFeelings(userId, day),
                 name: "In My Feelings",
             },
             {
-                fn: () => generateMidnightDrive(userId, today + seedSuffix, timeZone),
+                fn: () => generateMidnightDrive(userId, day, timeZone),
                 name: "Midnight Drive",
             },
             {
-                fn: () => generateCoffeeShopVibes(userId, today + seedSuffix),
+                fn: () => generateCoffeeShopVibes(userId, day),
                 name: "Coffee Shop Vibes",
             },
             {
                 fn: () =>
-                    generateRomanticizeYourLife(userId, today + seedSuffix),
+                    generateRomanticizeYourLife(userId, day),
                 name: "Romanticize Your Life",
             },
             {
-                fn: () => generateThatGirlEra(userId, today + seedSuffix),
+                fn: () => generateThatGirlEra(userId, day),
                 name: "That Girl Era",
             },
             {
-                fn: () => generateUnhinged(userId, today + seedSuffix),
+                fn: () => generateUnhinged(userId, day),
                 name: "Unhinged",
             },
             {
-                fn: () => generateSleepMix(userId, today + seedSuffix),
+                fn: () => generateSleepMix(userId, day),
                 name: "Sleep",
             },
             {
-                fn: () => generateSummerMix(userId, today + seedSuffix),
+                fn: () => generateSummerMix(userId, day),
                 name: "Summer",
             },
             {
-                fn: () => generateEpicMix(userId, today + seedSuffix),
+                fn: () => generateEpicMix(userId, day),
                 name: "Epic",
             },
             {
-                fn: () => generateDreamyMix(userId, today + seedSuffix),
+                fn: () => generateDreamyMix(userId, day),
                 name: "Dreamy",
             },
             {
-                fn: () => generateNostalgicMix(userId, today + seedSuffix),
+                fn: () => generateNostalgicMix(userId, day),
                 name: "Nostalgic",
             },
             {
-                fn: () => generateDeepCuts(userId, today + seedSuffix),
+                fn: () => generateDeepCuts(userId, day),
                 name: "Deep Cuts",
             },
             {
-                fn: () => generateKeyJourney(userId, today + seedSuffix),
+                fn: () => generateKeyJourney(userId, day),
                 name: "Key Journey",
             },
             {
-                fn: () => generateTempoFlow(userId, today + seedSuffix),
+                fn: () => generateTempoFlow(userId, day),
                 name: "Tempo Flow",
             },
             {
-                fn: () => generateVocalDetox(userId, today + seedSuffix),
+                fn: () => generateVocalDetox(userId, day),
                 name: "Vocal Detox",
             },
             {
-                fn: () => generateMinorKeyMix(userId, today + seedSuffix),
+                fn: () => generateMinorKeyMix(userId, day),
                 name: "Minor Key Mondays",
             },
         ];
@@ -249,24 +250,11 @@ class ProgrammaticPlaylistService {
         const selectedIndices: number[] = [];
         let seed = dateSeed;
 
-        logger.debug(
-            `[MIXES] Selecting ${this.DAILY_MIX_COUNT} mixes from ${mixGenerators.length} types...`
-        );
-
         while (selectedIndices.length < this.DAILY_MIX_COUNT) {
             seed = (seed * 9301 + 49297) % 233280;
             const index = seed % mixGenerators.length;
-            if (!selectedIndices.includes(index)) {
-                selectedIndices.push(index);
-                logger.debug(
-                    `[MIXES] Selected index ${index}: ${mixGenerators[index].name}`
-                );
-            }
+            if (!selectedIndices.includes(index)) selectedIndices.push(index);
         }
-
-        logger.debug(
-            `[MIXES] Final selected indices: [${selectedIndices.join(", ")}]`
-        );
 
         // One mix failing (a recipe refusing a library with no spread on a mood) must not blank the others.
         const generate = async (i: number): Promise<ProgrammaticMix | null> => {
@@ -277,39 +265,11 @@ class ProgrammaticPlaylistService {
                 return null;
             }
         };
-        const mixPromises = selectedIndices.map((i) => {
-            logger.debug(`[MIXES] Generating ${mixGenerators[i].name}...`);
-            return generate(i);
-        });
-        const mixes = await Promise.all(mixPromises);
+        const mixes = await Promise.all(selectedIndices.map(generate));
+        const finalMixes = mixes.filter((mix): mix is ProgrammaticMix => mix !== null);
 
-        logger.debug(`[MIXES] Generated ${mixes.length} mixes before filtering`);
-        mixes.forEach((mix, i) => {
-            if (mix === null) {
-                logger.debug(
-                    `[MIXES] Mix ${i} (${
-                        mixGenerators[selectedIndices[i]].name
-                    }) returned NULL`
-                );
-            } else {
-                logger.debug(
-                    `[MIXES] Mix ${i}: ${mix.name} (${mix.trackCount} tracks)`
-                );
-            }
-        });
-
-        let finalMixes = mixes.filter(
-            (mix): mix is ProgrammaticMix => mix !== null
-        );
-        logger.debug(
-            `[MIXES] Returning ${finalMixes.length} mixes after filtering nulls`
-        );
-
+        // A mix that came back empty is replaced by the next type not yet tried.
         if (finalMixes.length < this.DAILY_MIX_COUNT) {
-            logger.debug(
-                `[MIXES] Only got ${finalMixes.length} mixes, trying to fill gaps...`
-            );
-
             const successfulTypes = new Set(finalMixes.map((m) => m.type));
             const attemptedIndices = new Set(selectedIndices);
 
@@ -320,9 +280,6 @@ class ProgrammaticPlaylistService {
                 i++
             ) {
                 if (!attemptedIndices.has(i)) {
-                    logger.debug(
-                        `[MIXES] Attempting fallback: ${mixGenerators[i].name}`
-                    );
                     const fallbackMix = await generate(i);
                     if (
                         fallbackMix &&
@@ -330,16 +287,9 @@ class ProgrammaticPlaylistService {
                     ) {
                         finalMixes.push(fallbackMix);
                         successfulTypes.add(fallbackMix.type);
-                        logger.debug(
-                            `[MIXES] Fallback succeeded: ${fallbackMix.name}`
-                        );
                     }
                 }
             }
-
-            logger.debug(
-                `[MIXES] After fallbacks: ${finalMixes.length} mixes`
-            );
         }
 
         try {
