@@ -538,7 +538,34 @@ class EnrichmentFailureService {
         );
         return result.count;
     }
-    /** Resolve failure records whose track or artist no longer exists. */
+    /**
+     * Which failures still have their subject: the artist, the track (for track, audio, vibe and scan failures) or the
+     * podcast. One query per kind. An unknown kind counts as existing, so nothing is resolved by mistake.
+     */
+    async subjectsThatExist(
+        failures: Array<{ entityType: string; entityId: string }>,
+    ): Promise<(failure: { entityType: string; entityId: string }) => boolean> {
+        const idsOf = (isKind: (entityType: string) => boolean) => [
+            ...new Set(failures.filter((f) => isKind(f.entityType)).map((f) => f.entityId)),
+        ];
+        const found = async (ids: string[], find: (ids: string[]) => Promise<Array<{ id: string }>>) =>
+            new Set(ids.length > 0 ? (await find(ids)).map((r) => r.id) : []);
+
+        const [artists, tracks, podcasts] = await Promise.all([
+            found(idsOf((t) => t === "artist"), (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: { id: true } })),
+            found(idsOf(isTrackStageEntityType), (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true } })),
+            found(idsOf((t) => t === "podcast"), (ids) => prisma.podcast.findMany({ where: { id: { in: ids } }, select: { id: true } })),
+        ]);
+
+        return (failure) => {
+            if (failure.entityType === "artist") return artists.has(failure.entityId);
+            if (isTrackStageEntityType(failure.entityType)) return tracks.has(failure.entityId);
+            if (failure.entityType === "podcast") return podcasts.has(failure.entityId);
+            return true;
+        };
+    }
+
+    /** Resolve failure records whose track, artist or podcast no longer exists. */
     async cleanupOrphanedFailures(): Promise<{
         cleaned: number;
         checked: number;
@@ -549,79 +576,11 @@ class EnrichmentFailureService {
             select: { id: true, entityType: true, entityId: true },
         });
 
-        // Group ids by entity type so existence can be checked with one findMany per
-        // type instead of a findUnique per failure.
-        const idsByType = new Map<string, Set<string>>();
-        for (const failure of failures) {
-            if (!idsByType.has(failure.entityType)) {
-                idsByType.set(failure.entityType, new Set());
-            }
-            idsByType.get(failure.entityType)!.add(failure.entityId);
-        }
-
-        const existingArtistIds = idsByType.has("artist")
-            ? new Set(
-                  (
-                      await prisma.artist.findMany({
-                          where: { id: { in: [...idsByType.get("artist")!] } },
-                          select: { id: true },
-                      })
-                  ).map((a) => a.id)
-              )
-            : new Set<string>();
-
-        // track/audio/vibe/scan failures all reference a Track id
-        const trackFailureIds = new Set<string>([
-            ...(idsByType.get("track") ?? []),
-            ...(idsByType.get("audio") ?? []),
-            ...(idsByType.get("vibe") ?? []),
-            ...(idsByType.get("scan") ?? []),
-        ]);
-        const existingTrackIds =
-            trackFailureIds.size > 0
-                ? new Set(
-                      (
-                          await prisma.track.findMany({
-                              where: { id: { in: [...trackFailureIds] } },
-                              select: { id: true },
-                          })
-                      ).map((t) => t.id)
-                  )
-                : new Set<string>();
-
-        const existingPodcastIds = idsByType.has("podcast")
-            ? new Set(
-                  (
-                      await prisma.podcast.findMany({
-                          where: { id: { in: [...idsByType.get("podcast")!] } },
-                          select: { id: true },
-                      })
-                  ).map((p) => p.id)
-              )
-            : new Set<string>();
-
+        const exists = await this.subjectsThatExist(failures);
         const toResolve: string[] = [];
 
         for (const failure of failures) {
-            let exists: boolean;
-
-            if (failure.entityType === "artist") {
-                exists = existingArtistIds.has(failure.entityId);
-            } else if (
-                failure.entityType === "track" ||
-                failure.entityType === "audio" ||
-                failure.entityType === "vibe" ||
-                failure.entityType === "scan"
-            ) {
-                exists = existingTrackIds.has(failure.entityId);
-            } else if (failure.entityType === "podcast") {
-                exists = existingPodcastIds.has(failure.entityId);
-            } else {
-                // Unknown entity type — treat as existing to avoid silent deletion
-                exists = true;
-            }
-
-            if (!exists) {
+            if (!exists(failure)) {
                 toResolve.push(failure.id);
             }
         }

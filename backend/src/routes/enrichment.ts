@@ -304,75 +304,35 @@ router.post("/retry", requireAuth, requireAdmin, async (req, res) => {
       ids.map((id) => enrichmentFailureService.getFailure(id)),
     );
 
-    // Group by entity type so existence can be checked with one findMany
-    // per type instead of a findUnique+update per failure.
-    const idsByType = new Map<string, Set<string>>();
-    for (const failure of failures) {
-      if (!failure) continue;
-      if (!idsByType.has(failure.entityType)) {
-        idsByType.set(failure.entityType, new Set());
-      }
-      idsByType.get(failure.entityType)!.add(failure.entityId);
-    }
-
-    const existingArtistIds = idsByType.has("artist")
-      ? new Set(
-          (
-            await prisma.artist.findMany({
-              where: { id: { in: [...idsByType.get("artist")!] } },
-              select: { id: true },
-            })
-          ).map((a) => a.id),
-        )
-      : new Set<string>();
-
-      const trackFailureIds = new Set<string>([
-        ...(idsByType.get("track") ?? []),
-        ...(idsByType.get("audio") ?? []),
-        ...(idsByType.get("vibe") ?? []),
-        ...(idsByType.get("scan") ?? []),
-      ]);
-    const existingTrackIds =
-      trackFailureIds.size > 0
-        ? new Set(
-            (
-              await prisma.track.findMany({
-                where: { id: { in: [...trackFailureIds] } },
-                select: { id: true },
-              })
-            ).map((t) => t.id),
-          )
-        : new Set<string>();
+    const present = failures.filter((f): f is NonNullable<typeof f> => f !== null);
+    const exists = await enrichmentFailureService.subjectsThatExist(present);
 
     let queued = 0;
     let skipped = 0;
     const toResolve: string[] = [];
     const artistIdsToReset: string[] = [];
     const stageReopenIds: string[] = [];
+    const podcastIdsToRefresh: string[] = [];
 
-    for (const failure of failures) {
-      if (!failure) continue;
-
-      if (failure.entityType === "artist") {
-        if (!existingArtistIds.has(failure.entityId)) {
-          toResolve.push(failure.id);
-          skipped++;
-        } else {
-          artistIdsToReset.push(failure.entityId);
-          queued++;
-        }
+    for (const failure of present) {
+      if (!exists(failure)) {
+        // Deleted since the failure was recorded: nothing to retry.
+        toResolve.push(failure.id);
+        skipped++;
+      } else if (failure.entityType === "artist") {
+        artistIdsToReset.push(failure.entityId);
+        queued++;
+      } else if (failure.entityType === "podcast") {
+        // The feed is refreshed on the next cycle; a refresh that works resolves the failure.
+        podcastIdsToRefresh.push(failure.entityId);
+        queued++;
       } else {
         // Track-stage failure (track/audio/vibe/scan): retrying reopens the
         // question on the stage record (pending, fresh attempt, error cleared)
         // and the queue re-asks it. The record is what the engine decides from,
         // so no Track columns are reset.
-        if (!existingTrackIds.has(failure.entityId)) {
-          toResolve.push(failure.id);
-          skipped++;
-        } else {
-          stageReopenIds.push(failure.id);
-          queued++;
-        }
+        stageReopenIds.push(failure.id);
+        queued++;
       }
     }
 
@@ -387,6 +347,17 @@ router.post("/retry", requireAuth, requireAdmin, async (req, res) => {
       }
     } catch (error) {
       logger.error("Failed to reset artist enrichment for retry:", error);
+    }
+
+    try {
+      if (podcastIdsToRefresh.length > 0) {
+        await prisma.podcast.updateMany({
+          where: { id: { in: podcastIdsToRefresh } },
+          data: { lastRefreshed: new Date(0) },
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to make podcasts due for refresh:", error);
     }
 
     try {

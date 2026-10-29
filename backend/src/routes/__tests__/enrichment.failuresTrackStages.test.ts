@@ -1,6 +1,7 @@
 /**
  * The /enrichment/failures routes read track-stage failures from TrackStage,
- * in the response shape the settings UI uses.
+ * in the response shape the settings UI uses; /enrichment/retry retries each
+ * kind of failure and resolves the ones whose subject is gone.
  */
 
 jest.mock("../../middleware/auth", () => ({
@@ -128,6 +129,7 @@ async function wipe(): Promise<void> {
     );
     await prisma.$executeRawUnsafe(`DELETE FROM "TrackStage" WHERE "trackId" LIKE $1`, `${PREFIX}_%`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, `${PREFIX}_%`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Podcast" WHERE id LIKE $1`, `${PREFIX}_%`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = $1`, id("alb"));
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, id("art"));
 }
@@ -183,5 +185,46 @@ describe("GET /enrichment/failures reads track stages from TrackStage", () => {
 
         const list = await request(app).get("/api/enrichment/failures").query({ entityType: "track" });
         expect(list.body.failures.some((f: { entityId: string }) => f.entityId === id("t3"))).toBe(false);
+    });
+});
+
+describe("POST /enrichment/retry", () => {
+    const ledger = (entityType: string, entityId: string) =>
+        prisma.enrichmentFailure.create({ data: { entityType, entityId, entityName: id(entityId), errorMessage: "x" } });
+
+    it("makes a failed podcast's feed due for refresh and keeps its failure open until a refresh succeeds", async () => {
+        await prisma.podcast.create({ data: { id: id("pod"), feedUrl: `https://${PREFIX}.example/feed`, title: "Route Podcast" } });
+        const failure = await ledger("podcast", id("pod"));
+
+        const res = await request(app).post("/api/enrichment/retry").send({ ids: [failure.id] });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ queued: 1, skipped: 0 });
+        expect((await prisma.enrichmentFailure.findUniqueOrThrow({ where: { id: failure.id } })).resolved).toBe(false);
+        const podcast = await prisma.podcast.findUniqueOrThrow({ where: { id: id("pod") } });
+        expect(podcast.lastRefreshed.getTime()).toBeLessThan(Date.now() - 60 * 60 * 1000);
+    });
+
+    it("resolves a failure whose podcast or artist is gone", async () => {
+        const failures = await Promise.all([ledger("podcast", id("gonepod")), ledger("artist", id("goneart"))]);
+
+        const res = await request(app).post("/api/enrichment/retry").send({ ids: failures.map((f) => f.id) });
+
+        expect(res.body).toMatchObject({ queued: 0, skipped: 2 });
+        for (const f of failures) {
+            expect((await prisma.enrichmentFailure.findUniqueOrThrow({ where: { id: f.id } })).resolved).toBe(true);
+        }
+    });
+
+    it("reopens a failed track stage and resets a failed artist", async () => {
+        const stageId = await seedFailedRecording(id("t1"));
+        await prisma.artist.update({ where: { id: id("art") }, data: { enrichmentStatus: "failed", enrichmentFailures: 3 } });
+        const artistFailure = await ledger("artist", id("art"));
+
+        const res = await request(app).post("/api/enrichment/retry").send({ ids: [stageId, artistFailure.id] });
+
+        expect(res.body).toMatchObject({ queued: 2, skipped: 0 });
+        expect((await prisma.trackStage.findUniqueOrThrow({ where: { id: stageId } })).status).toBe("pending");
+        expect(await prisma.artist.findUniqueOrThrow({ where: { id: id("art") } })).toMatchObject({ enrichmentStatus: "pending", enrichmentFailures: 0 });
     });
 });
