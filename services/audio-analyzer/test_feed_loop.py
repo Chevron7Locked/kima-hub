@@ -1,20 +1,13 @@
 """The analysis loop keeps every worker busy and tags each report with the job it answers."""
-import importlib.util
 import json
 import os
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-_ANALYZER_PATH = os.path.join(os.path.dirname(__file__), "analyzer.py")
-_spec = importlib.util.spec_from_file_location("audio_analyzer_feed_loop", _ANALYZER_PATH)
-assert _spec and _spec.loader
-analyzer = importlib.util.module_from_spec(_spec)
-sys.modules["audio_analyzer_feed_loop"] = analyzer
-_spec.loader.exec_module(analyzer)
+import analyzer
 
 
 class FakeRedis:

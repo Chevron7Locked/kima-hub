@@ -4,9 +4,9 @@ decodes. The gate lets every real reading through — including genuinely quiet
 audio — and nulls only what the meter or a decode got wrong; a warning names the
 file either way."""
 
-import numpy as np
 
 import analyzer
+from analyzer_fakes import stubbed_analyzer
 from analyzer import AudioAnalyzer
 
 
@@ -49,16 +49,7 @@ def test_range_beyond_whole_scale_is_nulled():
 def _analyze_with_meter(monkeypatch, integrated, loudness_range):
     """The real analyze(), with every measurement stubbed except the loudness gate and the fields it fills."""
     monkeypatch.setattr(analyzer, "ESSENTIA_AVAILABLE", True)
-    a = object.__new__(AudioAnalyzer)
-    a.enhanced_mode = True
-    t = np.arange(10 * 44100) / 44100
-    a.load_audio = lambda path, max_duration=None: (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)[np.newaxis, :]
-    a.rhythm_extractor = lambda audio: (120.0, [0.5, 1.0], 3.0, None, None)
-    a.key_extractor = lambda audio: ("A", "minor", 0.8)
-    a.rms = lambda frame: 0.1
-    a.loudness_ebu = lambda pair: (None, None, integrated, loudness_range)
-    a.resampler = lambda audio: audio
-    a._extract_ml_features = lambda audio: {"valence": 0.5, "arousal": 0.5}
+    a = stubbed_analyzer(rhythm=lambda audio: (120.0, [0.5, 1.0], 3.0, None, None), loudness=(integrated, loudness_range))
     return a.analyze("/music/test.flac")
 
 
