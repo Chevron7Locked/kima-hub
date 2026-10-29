@@ -1,44 +1,23 @@
 /**
- * A station's play order, handed out a refill at a time. A station plays every song that matches in an order that
- * spreads each artist's songs (spreadByArtist). A listening session (one `seed`) builds that order once from the pool
- * as it is then and keeps it in Redis, so a later refill reads only its own page, and a song joining or leaving the
- * pool mid-session cannot make the session skip or repeat a song. When the order runs out the station starts the pool
- * over as it is by then, in a new order that does not open with the artist just played or with the songs heard last.
+ * A station's play order, handed out a refill at a time: every matching song, spread by artist (spreadByArtist). A
+ * listening session (one `seed`) builds the order once and keeps it in Redis, so refills read only their page and a
+ * song joining or leaving the pool cannot make the session skip or repeat; when it runs out the pool starts over in a
+ * new order that does not open with the artist or the songs heard last. Positions count up through every pass.
  *
- * Positions count up through every pass: a pass holding `length` songs starts at `start`, and the next at
- * start + length. Redis keeps one session per listener and station, the current pass only:
- * `station:<station>:<listener>` (the seed, start, pass, length, the last song's artist) and `...:ids` (the ids in
- * order, CHUNK to a list entry), and per listener `stations:<listener>`, their sessions by last use. A listener
- * starting a station again (a new seed at position 0) replaces its session, and only the STATIONS_KEPT most recently
- * used stations of a listener are kept. So Redis holds at most STATIONS_KEPT pools' ids per listener: measured 1.4 MB
- * for a pool of 50,000 songs (a station on a 500,000-song library: stations hold about the top 10%, Wildcard the
- * untagged 10%), 14 MB for 500,000. The bound is this, not a Redis memory limit: the same Redis holds the job queues,
- * locks, rate limits and the web login sessions (connect-redis, 7 days, index.ts), BullMQ works only with no eviction
- * ("the only setting that guarantees the correct behavior of the queues", docs.bullmq.io, Going to production), and a
- * limit without eviction would fail those writes too. A separate Redis database number would not help: the limit is
- * per server. Every write that replaces or continues a session is one Lua script (SAVE), so two tabs cannot interleave
- * it, and a page's ids are read in one transaction with the session's seed and start, so a page never mixes two
- * sessions.
- *
- * A session Redis does not hold (forgotten, lost) is rebuilt from the pool as it is now: the same order for the same
- * seed while the pool has not changed, later passes included (replayPasses). A refill from an older session of the
- * same listener (another tab, after a newer start), and any refill while Redis fails to answer, is built the same way
- * and served without being kept, so it cannot push out the newer one. Without Redis every refill reads the pool
- * again, as before sessions were kept.
- *
- * Cost of building a pass, measured on this branch's Mac: 44-60 ms for 50,000 songs and 0.5-0.8 s for 500,000,
- * on the request's thread. A worker thread was not used: handing it 500,000 songs costs a copy of the same order of
- * time, and pools that large need a library of about 5 million songs.
+ * Redis keeps one session per listener and station (`station:<station>:<listener>` and its `:ids`, CHUNK ids to an
+ * entry) and at most STATIONS_KEPT stations per listener (`stations:<listener>`): that, not a Redis memory limit,
+ * bounds its size, since the job queues share the server and need no eviction. Writes are one Lua script (SAVE) and a
+ * page is read in one transaction, so two tabs cannot interleave. A session Redis does not hold is rebuilt from the
+ * pool (replayPasses): the same order for the same seed while the pool is unchanged. A refill from an older tab's
+ * session, or any refill while Redis fails, is rebuilt the same way and served without being kept.
  */
 import { redisClient } from "../../utils/redis";
 import { logger } from "../../utils/logger";
 import { randomFromSeed, spreadByArtist } from "../../utils/artistSpread";
 
 /**
- * How long a session is kept after its last refill. A refill comes every 100 songs while a station plays (the web
- * player's page): about 5.6 hours at the 202-second average of 68,493 Jamendo songs (the lab's MTG-Jamendo
- * metadata), 7 hours at the W8 testbed library's 256 seconds. 12 hours covers a refill gap and a pause of 5 to 6
- * hours; a session forgotten after that is rebuilt from the pool (replayPasses).
+ * How long a session is kept after its last refill: a refill comes every 100 songs (about 6 hours of music), so 12
+ * hours covers that and a pause; a session forgotten after it is rebuilt from the pool (replayPasses).
  */
 export const SESSION_TTL_S = 12 * 60 * 60;
 /**
@@ -48,24 +27,16 @@ export const SESSION_TTL_S = 12 * 60 * 60;
 export const STATIONS_KEPT = 3;
 /**
  * When the pool starts over, the songs from the last this many places stay out of as many first places: a refill, and
- * at most a third of the pool. At a half, the artist rule left some of them early in pools of 16 and 100 songs (1.2
- * and 1.5 on average over 500 tries); at a third, none in pools of 45, 100 and 595 and 0.1 in 16.
+ * at most a third of the pool (at a half, the artist rule could not keep them all out).
  */
-export const SEAM_WINDOW = 100;
+const SEAM_WINDOW = 100;
 const seamWindow = (songs: number) => Math.min(SEAM_WINDOW, Math.floor(songs / 3));
-/**
- * Ids per Redis list entry, as a JSON array. One id per entry took 0.58 s to write for 500,000 songs; a page (at
- * most 100 songs, the route's cap) reads one or two entries.
- */
+/** Ids per Redis list entry, as a JSON array; a page (at most 100 songs) reads one or two entries. */
 const CHUNK = 1000;
 /**
  * How deep replayPasses goes to rebuild a later pass: at most REPLAY_PASSES passes after the first and REPLAY_SONGS
- * songs ordered in all. Any request can name an offset, and a seed Redis has never seen looks like a lost session,
- * so these bound the work one request can cause: 200,000 songs is the first page of a 200,000-song pool (about
- * 0.1 s measured), and 1,000 passes of a one-song pool cost a few milliseconds. A real session gets that deep only
- * after 200,000 songs (about 15 months of continuous play at the 202-second average) or 1,000 full passes (70 days
- * for a 30-song pool, longer for any larger one); past either, the pass is rebuilt alone, without the seam rules, and
- * can differ from the one it had.
+ * songs in all. Any request can name an offset and an unknown seed looks like a lost session, so these bound one
+ * request's work; past either, the pass is rebuilt alone, without the seam rules, and can differ from the one it had.
  */
 export const REPLAY_PASSES = 1000;
 export const REPLAY_SONGS = 200_000;
@@ -97,7 +68,7 @@ export interface StationPage {
     next?: number;
 }
 
-export function checkStationRequest({ limit, seed, offset = 0 }: StationRequest): void {
+function checkStationRequest({ limit, seed, offset = 0 }: StationRequest): void {
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
     if (!Number.isInteger(offset) || offset < 0) throw new RangeError(`offset must be a whole number, got ${offset}`);
     if (seed === undefined && offset > 0) throw new RangeError("an offset needs the seed of the order it counts into");
