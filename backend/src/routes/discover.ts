@@ -4,7 +4,7 @@ import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../m
 import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
-import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey, weekBoundaryIso } from "../lib/discoveryWeek";
+import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey, weekBoundaryIso, WEEK_STARTS_ON } from "../lib/discoveryWeek";
 import { isLidarrConfigured } from "../services/lidarrClient";
 
 import { discoverQueue } from "../workers/queues";
@@ -25,11 +25,6 @@ import {
   type ClearFailure,
 } from "../services/discovery/discoverClearing";
 import { relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
-import {
-  UserFacingError,
-  IntegrationError,
-  ConfigurationError,
-} from '../utils/errors';
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -98,7 +93,7 @@ router.get("/batch-status", async (req, res) => {
             total: totalJobs,
         };
 
-        logger.info(`[Batch Status] User ${userId}: ACTIVE batch found - ${activeBatch.id}, status: ${activeBatch.status}, progress: ${progress}%`);
+        logger.debug(`[Batch Status] User ${userId}: batch ${activeBatch.id} ${activeBatch.status}, ${progress}%`);
 
         res.json(response);
     } catch (error) {
@@ -111,8 +106,6 @@ router.delete("/batch", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        logger.info(`[Discover Cancel] Starting cancellation for user ${userId}`);
-
         const activeBatches = await prisma.discoveryBatch.findMany({
             where: {
                 userId,
@@ -123,8 +116,6 @@ router.delete("/batch", async (req, res) => {
             },
             orderBy: { createdAt: "desc" },
         });
-
-        logger.info(`[Discover Cancel] Found ${activeBatches.length} active batches`);
 
         if (activeBatches.length === 0) {
             return res.json({
@@ -139,7 +130,7 @@ router.delete("/batch", async (req, res) => {
         let downloadJobsCancelled = 0;
 
         for (const batch of activeBatches) {
-            logger.info(`[Discover Cancel] Processing batch ${batch.id}, status: ${batch.status}`);
+            logger.debug(`[Discover Cancel] Processing batch ${batch.id}, status: ${batch.status}`);
 
             const downloadJobsUpdated = await prisma.downloadJob.updateMany({
                 where: {
@@ -152,7 +143,7 @@ router.delete("/batch", async (req, res) => {
                 },
             });
             downloadJobsCancelled += downloadJobsUpdated.count;
-            logger.info(`[Discover Cancel] Cancelled ${downloadJobsUpdated.count} download jobs for batch ${batch.id}`);
+            logger.debug(`[Discover Cancel] Cancelled ${downloadJobsUpdated.count} download jobs for batch ${batch.id}`);
 
             // A cancelled batch produced no playlist -- it must not read as a
             // successful empty week to the /current fallback.
@@ -165,7 +156,7 @@ router.delete("/batch", async (req, res) => {
                 },
             });
             batchesCancelled++;
-            logger.info(`[Discover Cancel] Marked batch ${batch.id} as failed`);
+            logger.debug(`[Discover Cancel] Marked batch ${batch.id} as failed`);
         }
 
         const activeJobs = await discoverQueue.getActive();
@@ -174,7 +165,7 @@ router.delete("/batch", async (req, res) => {
                 try {
                     await job.moveToFailed(new Error("Cancelled by user"), "");
                     jobsCancelled++;
-                    logger.info(`[Discover Cancel] Cancelled Bull job ${job.id}`);
+                    logger.debug(`[Discover Cancel] Cancelled Bull job ${job.id}`);
                 } catch (jobError) {
                     logger.warn(`[Discover Cancel] Failed to cancel job ${job.id}:`, jobError);
                 }
@@ -187,7 +178,7 @@ router.delete("/batch", async (req, res) => {
                 try {
                     await job.remove();
                     jobsCancelled++;
-                    logger.info(`[Discover Cancel] Removed waiting job ${job.id}`);
+                    logger.debug(`[Discover Cancel] Removed waiting job ${job.id}`);
                 } catch (jobError) {
                     logger.warn(`[Discover Cancel] Failed to remove job ${job.id}:`, jobError);
                 }
@@ -234,9 +225,9 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
                     };
                 }
 
-                logger.debug(`\nQueuing Discover Weekly generation for user ${userId}`);
+                logger.debug(`[Discover] Queuing generation for user ${userId}`);
 
-                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
+                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date()));
                 const jobId = `discover-weekly-${userId}-${weekKey}`;
                 const existing = await discoverQueue.getJob(jobId);
                 if (existing) {
@@ -272,29 +263,6 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
             });
         }
 
-        if (error instanceof UserFacingError) {
-            return res.status(error.statusCode).json({
-                error: error.message,
-                code: error.code,
-            });
-        }
-
-        if (error instanceof ConfigurationError) {
-            return res.status(400).json({
-                error: error.message,
-                code: 'CONFIGURATION_ERROR',
-            });
-        }
-
-
-        if (error instanceof IntegrationError) {
-            logger.error(`Integration error (${error.integration}):`, error);
-            return res.status(503).json({
-                error: `${error.integration} is currently unavailable. Please try again later.`,
-                code: 'INTEGRATION_ERROR',
-            });
-        }
-
         logger.error('Unexpected error in discovery generation:', error);
         return res.status(500).json({
             error: 'An unexpected error occurred',
@@ -303,11 +271,77 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
     }
 });
 
+type UnavailableRow = Awaited<ReturnType<typeof prisma.unavailableAlbum.findMany>>[number];
+
+/**
+ * Splits a week's unavailable albums into those still missing and those that turned up since: a suggestion of the
+ * week downloaded the release, an album with its release id exists, or an album by that artist carries its title
+ * (a bracketed part of the title ignored).
+ */
+async function unavailableStillMissing(
+    userId: string,
+    weekStart: Date,
+    albums: UnavailableRow[],
+): Promise<{ missing: UnavailableRow[]; turnedUp: UnavailableRow[] }> {
+    if (albums.length === 0) return { missing: [], turnedUp: [] };
+    const mbids = albums.map((a) => a.albumMbid).filter(Boolean);
+    const [suggested, withMbid, everyAlbum] = await Promise.all([
+        prisma.discoveryAlbum.findMany({
+            where: { userId, weekStartDate: weekStart, status: { in: ["ACTIVE", "LIKED"] } },
+            select: { rgMbid: true },
+        }),
+        prisma.album.findMany({ where: { rgMbid: { in: mbids } }, select: { rgMbid: true } }),
+        prisma.album.findMany({ select: { title: true, artist: { select: { name: true } } } }),
+    ]);
+    const suggestedMbids = new Set(suggested.map((a) => a.rgMbid));
+    const existingMbids = new Set(withMbid.map((a) => a.rgMbid));
+    const index = everyAlbum.map((a) => ({
+        title: a.title.toLowerCase().trim(),
+        artist: a.artist.name.toLowerCase().trim(),
+    }));
+
+    const missing: UnavailableRow[] = [];
+    const turnedUp: UnavailableRow[] = [];
+    for (const album of albums) {
+        const artist = album.artistName.toLowerCase().trim();
+        const title = album.albumTitle.toLowerCase().replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").trim();
+        const found =
+            suggestedMbids.has(album.albumMbid) ||
+            existingMbids.has(album.albumMbid) ||
+            index.some((lib) => lib.title.includes(title) && lib.artist.includes(artist));
+        (found ? turnedUp : missing).push(album);
+    }
+    return { missing, turnedUp };
+}
+
+type SuggestionRow = Awaited<ReturnType<typeof prisma.discoveryAlbum.findMany>>[number];
+
+/** One song of a week's suggestion as GET /current lists it. */
+function suggestionSong(
+    suggestion: SuggestionRow,
+    song: { id: string; title: string; duration: number; coverUrl: string | null },
+) {
+    return {
+        id: song.id,
+        title: song.title,
+        artist: suggestion.artistName,
+        album: suggestion.albumTitle,
+        albumId: suggestion.rgMbid,
+        isLiked: suggestion.status === "LIKED",
+        likedAt: suggestion.likedAt,
+        similarity: suggestion.similarity,
+        tier: suggestion.tier,
+        coverUrl: song.coverUrl,
+        available: true,
+        duration: song.duration,
+    };
+}
+
 router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
         const latestBatch = await prisma.discoveryBatch.findFirst({
             where: { userId, status: "completed" },
             orderBy: { createdAt: "desc" },
@@ -315,7 +349,7 @@ router.get("/current", async (req, res) => {
         });
         const view = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null);
         const weekStart = view.weekStart;
-        const weekEnd = endOfWeek(view.weekOf, { weekStartsOn: 1 });
+        const weekEnd = endOfWeek(view.weekOf, { weekStartsOn: WEEK_STARTS_ON });
 
         const discoveryAlbums = await prisma.discoveryAlbum.findMany({
             where: {
@@ -363,20 +397,7 @@ router.get("/current", async (req, res) => {
                             ? trackMap.get(dt.trackId)
                             : null;
                         if (track) {
-                            tracks.push({
-                                id: track.id,
-                                title: track.title,
-                                artist: discoveryAlbum.artistName,
-                                album: discoveryAlbum.albumTitle,
-                                albumId: discoveryAlbum.rgMbid,
-                                isLiked: discoveryAlbum.status === "LIKED",
-                                likedAt: discoveryAlbum.likedAt,
-                                similarity: discoveryAlbum.similarity,
-                                tier: discoveryAlbum.tier,
-                                coverUrl: track.album?.coverUrl,
-                                available: true,
-                                duration: track.duration,
-                            });
+                            tracks.push(suggestionSong(discoveryAlbum, { ...track, coverUrl: track.album?.coverUrl ?? null }));
                         }
                     }
                 }
@@ -402,99 +423,24 @@ router.get("/current", async (req, res) => {
                 });
 
                 if (album && album.tracks.length > 0) {
-                    const track = album.tracks[0];
-                    tracks.push({
-                        id: track.id,
-                        title: track.title,
-                        artist: discoveryAlbum.artistName,
-                        album: discoveryAlbum.albumTitle,
-                        albumId: discoveryAlbum.rgMbid,
-                        isLiked: discoveryAlbum.status === "LIKED",
-                        likedAt: discoveryAlbum.likedAt,
-                        similarity: discoveryAlbum.similarity,
-                        tier: discoveryAlbum.tier,
-                        coverUrl: album.coverUrl,
-                        available: true,
-                        duration: track.duration,
-                    });
+                    tracks.push(suggestionSong(discoveryAlbum, { ...album.tracks[0], coverUrl: album.coverUrl }));
                 } else {
                     // Album not in library yet (downloading/pending)
                     tracks.push({
-                        id: `pending-${discoveryAlbum.id}`,
-                        title: `${discoveryAlbum.albumTitle} (pending import)`,
-                        artist: discoveryAlbum.artistName,
-                        album: discoveryAlbum.albumTitle,
-                        albumId: discoveryAlbum.rgMbid,
-                        isLiked: discoveryAlbum.status === "LIKED",
-                        likedAt: discoveryAlbum.likedAt,
-                        similarity: discoveryAlbum.similarity,
-                        tier: discoveryAlbum.tier,
-                        coverUrl: null,
+                        ...suggestionSong(discoveryAlbum, {
+                            id: `pending-${discoveryAlbum.id}`,
+                            title: `${discoveryAlbum.albumTitle} (pending import)`,
+                            duration: 0,
+                            coverUrl: null,
+                        }),
                         available: false,
                         isPending: true,
-                        duration: 0,
                     });
                 }
             }
         }
 
-        const successfulMbids = new Set(discoveryAlbums.map((da) => da.rgMbid));
-
-        // Filter unavailable albums:
-        // 1. Remove albums that successfully downloaded (have DiscoveryAlbum record)
-        // 2. Remove albums that the user now owns (in Album table)
-
-        const allUnavailableMbids = unavailableAlbums
-            .map((a) => a.albumMbid)
-            .filter(Boolean);
-        const existingByMbid = new Set(
-            (await prisma.album.findMany({
-                where: { rgMbid: { in: allUnavailableMbids } },
-                select: { rgMbid: true },
-            })).map((a) => a.rgMbid)
-        );
-
-        // Batch fetch: all library albums with their artist names for fuzzy matching
-        const libraryAlbumsForMatch = await prisma.album.findMany({
-            select: {
-                title: true,
-                artist: { select: { name: true } },
-            },
-        });
-        const libraryAlbumIndex = libraryAlbumsForMatch.map((a) => ({
-            title: a.title.toLowerCase().trim(),
-            artist: a.artist.name.toLowerCase().trim(),
-        }));
-
-        const filteredUnavailable: typeof unavailableAlbums = [];
-        for (const album of unavailableAlbums) {
-            if (successfulMbids.has(album.albumMbid)) {
-                continue;
-            }
-
-            if (existingByMbid.has(album.albumMbid)) {
-                continue;
-            }
-
-            const normalizedArtist = album.artistName.toLowerCase().trim();
-            const normalizedAlbum = album.albumTitle
-                .toLowerCase()
-                .replace(/\(.*?\)/g, "")
-                .replace(/\[.*?\]/g, "")
-                .trim();
-
-            const existsInLibrary = libraryAlbumIndex.some(
-                (lib) =>
-                    lib.title.includes(normalizedAlbum) &&
-                    lib.artist.includes(normalizedArtist)
-            );
-
-            if (existsInLibrary) {
-                continue;
-            }
-
-            filteredUnavailable.push(album);
-        }
+        const { missing: filteredUnavailable } = await unavailableStillMissing(userId, weekStart, unavailableAlbums);
 
         const unavailable = filteredUnavailable.map((album) => ({
             id: `unavailable-${album.id}`,
@@ -512,26 +458,7 @@ router.get("/current", async (req, res) => {
             available: false,
         }));
 
-        try {
-            logger.debug(`\nDiscover Weekly API Response:`);
-            logger.debug(`  Total tracks: ${tracks.length}`);
-            logger.debug(`  Unavailable albums: ${unavailable.length}`);
-            if (unavailable.length > 0 && unavailable.length <= 20) {
-                logger.debug(`  Unavailable albums with previews:`);
-                unavailable.slice(0, 5).forEach((album, i) => {
-                    logger.debug(
-                        `    ${i + 1}. ${album.artist} - ${album.album} [${
-                            album.previewUrl ? "HAS PREVIEW" : "NO PREVIEW"
-                        }]`
-                    );
-                });
-                if (unavailable.length > 5) {
-                    logger.debug(`    ... and ${unavailable.length - 5} more`);
-                }
-            }
-        } catch (err) {
-            logger.error("Error logging discover response:", err);
-        }
+        logger.debug(`[Discover] ${tracks.length} songs, ${unavailable.length} unavailable albums`);
 
         res.json({
             weekStart: weekBoundaryIso(view.weekOf),
@@ -549,6 +476,22 @@ router.get("/current", async (req, res) => {
         });
     }
 });
+
+/**
+ * A like keeps the suggestion and an unlike gives it back, so the listener's plays of its songs are relabelled: a
+ * kept suggestion's plays count as DISCOVERY_KEPT, a returned one's as DISCOVERY.
+ */
+async function relabelSuggestionPlays(
+    userId: string,
+    discoveryAlbumId: string,
+    from: "DISCOVERY" | "DISCOVERY_KEPT",
+    to: "DISCOVERY" | "DISCOVERY_KEPT",
+): Promise<void> {
+    const songs = await prisma.discoveryTrack.findMany({ where: { discoveryAlbumId }, select: { trackId: true } });
+    const trackIds = songs.map((t) => t.trackId).filter((id): id is string => id !== null);
+    if (trackIds.length === 0) return;
+    await prisma.play.updateMany({ where: { userId, trackId: { in: trackIds }, source: from }, data: { source: to } });
+}
 
 // Likes a track, which marks its whole album to keep.
 router.post("/like", async (req, res) => {
@@ -647,28 +590,7 @@ router.post("/like", async (req, res) => {
             );
         }
 
-        // Retroactively mark all plays from this album as DISCOVERY_KEPT
-        const tracks = await prisma.discoveryTrack.findMany({
-            where: { discoveryAlbumId: discoveryAlbum.id },
-            select: { trackId: true },
-        });
-
-        const trackIds = tracks
-            .map((t) => t.trackId)
-            .filter((id): id is string => id !== null);
-
-        if (trackIds.length > 0) {
-            await prisma.play.updateMany({
-                where: {
-                    userId,
-                    trackId: { in: trackIds },
-                    source: "DISCOVERY",
-                },
-                data: {
-                    source: "DISCOVERY_KEPT",
-                },
-            });
-        }
+        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY", "DISCOVERY_KEPT");
 
         res.json({ success: true });
     } catch (error) {
@@ -710,27 +632,7 @@ router.delete("/unlike", async (req, res) => {
         const dbAlbum = await findScannedAlbum(discoveryAlbum, "LIBRARY");
         if (dbAlbum) await returnToDiscover(dbAlbum, albumId);
 
-        const tracks = await prisma.discoveryTrack.findMany({
-            where: { discoveryAlbumId: discoveryAlbum.id },
-            select: { trackId: true },
-        });
-
-        const trackIds = tracks
-            .map((t) => t.trackId)
-            .filter((id): id is string => id !== null);
-
-        if (trackIds.length > 0) {
-            await prisma.play.updateMany({
-                where: {
-                    userId,
-                    trackId: { in: trackIds },
-                    source: "DISCOVERY_KEPT",
-                },
-                data: {
-                    source: "DISCOVERY",
-                },
-            });
-        }
+        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY_KEPT", "DISCOVERY");
 
         res.json({ success: true });
     } catch (error) {
@@ -743,7 +645,7 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
     try {
         const userId = req.user!.id;
 
-        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
         const latestBatch = await prisma.discoveryBatch.findFirst({
             where: { userId, status: "completed" },
             orderBy: { createdAt: "desc" },
@@ -776,75 +678,21 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
             return res.json({ success: true, queued: 0, message: "No unavailable albums to retry" });
         }
 
-        // Apply the same filtering used by GET /current to exclude albums that are
-        // already in the library. Without this, the retry would re-download albums
-        // the user already has, importing duplicate tracks.
-
-        // Filter 1: albums with a successful DiscoveryAlbum record this week
-        const successfulDiscovery = await prisma.discoveryAlbum.findMany({
-            where: {
-                userId,
-                weekStartDate: weekStart,
-                status: { in: ["ACTIVE", "LIKED"] },
-            },
-            select: { rgMbid: true },
-        });
-        const successfulMbids = new Set(successfulDiscovery.map((da) => da.rgMbid));
-
-        // Filter 2: albums already present in the library by MBID
-        const allMbids = unavailableAlbums.map((a) => a.albumMbid).filter(Boolean);
-        const existingByMbid = new Set(
-            (await prisma.album.findMany({
-                where: { rgMbid: { in: allMbids } },
-                select: { rgMbid: true },
-            })).map((a) => a.rgMbid)
-        );
-
-        // Filter 3: fuzzy title+artist match against the full library
-        const libraryAlbums = await prisma.album.findMany({
-            select: { title: true, artist: { select: { name: true } } },
-        });
-        const libraryIndex = libraryAlbums.map((a) => ({
-            title: a.title.toLowerCase().trim(),
-            artist: a.artist.name.toLowerCase().trim(),
-        }));
-
-        // Filter 4: albums a download is already working on, from any batch
+        // Albums that turned up since are deleted, not downloaded again (a duplicate import); one a download is
+        // already working on, from any batch, is left alone.
         const inFlight = new Set(
             (await prisma.downloadJob.findMany({
-                where: { targetMbid: { in: allMbids }, status: { in: ["pending", "processing"] } },
+                where: { targetMbid: { in: unavailableAlbums.map((a) => a.albumMbid) }, status: { in: ["pending", "processing"] } },
                 select: { targetMbid: true },
             })).map((j) => j.targetMbid)
         );
-
-        const staleIds: string[] = [];
-        const retriableAlbums = unavailableAlbums.filter((album) => {
-            if (inFlight.has(album.albumMbid)) return false;
-            if (successfulMbids.has(album.albumMbid)) {
-                staleIds.push(album.id);
-                return false;
-            }
-            if (existingByMbid.has(album.albumMbid)) {
-                staleIds.push(album.id);
-                return false;
-            }
-            const normalizedArtist = album.artistName.toLowerCase().trim();
-            const normalizedTitle = album.albumTitle
-                .toLowerCase()
-                .replace(/\(.*?\)/g, "")
-                .replace(/\[.*?\]/g, "")
-                .trim();
-            const existsInLibrary = libraryIndex.some(
-                (lib) =>
-                    lib.title.includes(normalizedTitle) &&
-                    lib.artist.includes(normalizedArtist)
-            );
-            if (existsInLibrary) {
-                staleIds.push(album.id);
-                return false;
-            }
-            return true;
-        });
+        const { missing, turnedUp } = await unavailableStillMissing(
+            userId,
+            weekStart,
+            unavailableAlbums.filter((album) => !inFlight.has(album.albumMbid)),
+        );
+        const retriableAlbums = missing;
+        const staleIds = turnedUp.map((album) => album.id);
 
         // Delete stale UnavailableAlbum records so they don't reappear next retry
         if (staleIds.length > 0) {
@@ -1108,7 +956,7 @@ router.delete("/clear", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        logger.debug(`\nClearing Discover Weekly playlist for user ${userId}`);
+        logger.debug(`[Discover Clear] Clearing the playlist of user ${userId}`);
 
         const settings = await getSystemSettings();
         if (!settings) {
@@ -1233,10 +1081,6 @@ router.delete("/clear", async (req, res) => {
         // Remove Discover-tagged artists; lidarrRemoval decides whether files go
         let lidarrArtistsRemoved = 0;
         if (isLidarrConfigured(settings)) {
-            logger.debug(
-                `\n[LIDARR CLEANUP] Tag-based cleanup (lidify-discovery tag)...`
-            );
-
             try {
                 const discoveryArtists =
                     await lidarrService.getDiscoveryArtists();
@@ -1255,20 +1099,18 @@ router.delete("/clear", async (req, res) => {
                     `   Tag-based cleanup complete: ${lidarrArtistsRemoved} artists removed`
                 );
             } catch (lidarrError: any) {
-                logger.debug(`   Lidarr cleanup failed: ${lidarrError.message}`);
+                logger.warn(`[Discover Clear] Lidarr cleanup failed: ${lidarrError.message}`);
             }
         }
 
-        logger.debug(`\n[SCAN] Triggering library scan to sync database...`);
         try {
             await requestScan({ userId, source: "discover-cleanup" });
-            logger.debug(`   Library scan queued successfully`);
         } catch (scanError: any) {
-            logger.debug(`   Library scan queue failed: ${scanError.message}`);
+            logger.warn(`[Discover Clear] Library scan could not be queued: ${scanError.message}`);
         }
 
         logger.debug(
-            `\nClear complete: ${likedMoved} moved to library, ${activeDeleted} deleted, ${orphanedAlbumsDeleted} orphans cleaned, ${lidarrArtistsRemoved} Lidarr artists removed`
+            `[Discover Clear] Done: ${likedMoved} moved to library, ${activeDeleted} deleted, ${orphanedAlbumsDeleted} orphans cleaned, ${lidarrArtistsRemoved} Lidarr artists removed`
         );
 
         // This clear tried every Lidarr album Discover holds, so it writes the listener's
@@ -1285,15 +1127,8 @@ router.delete("/clear", async (req, res) => {
             lidarrFailed: [...lidarrFailed, ...unnamedFailed],
         });
     } catch (error: any) {
-        logger.error(
-            "Clear discovery playlist error:",
-            error?.message || error
-        );
-        logger.error("Stack:", error?.stack);
-        res.status(500).json({
-            error: "Failed to clear discovery playlist",
-            details: error?.message || "Unknown error",
-        });
+        logger.error(`Clear discovery playlist error: ${error?.message ?? String(error)}`);
+        res.status(500).json({ error: "Failed to clear discovery playlist" });
     }
 });
 
@@ -1344,10 +1179,7 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
             }
         }
 
-        logger.debug(`\n[CLEANUP] Complete:`);
-        logger.debug(`   - Removed: ${artistsRemoved.length}`);
-        logger.debug(`   - Kept: ${artistsKept.length}`);
-        logger.debug(`   - Errors: ${errors.length}`);
+        logger.debug(`[CLEANUP] ${artistsRemoved.length} removed, ${artistsKept.length} kept, ${errors.length} errors`);
 
         res.json({
             success: true,
@@ -1363,14 +1195,8 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
             },
         });
     } catch (error: any) {
-        logger.error(
-            "[CLEANUP] Lidarr cleanup error:",
-            error?.message || error
-        );
-        res.status(500).json({
-            error: "Failed to cleanup Lidarr",
-            details: error?.message || "Unknown error",
-        });
+        logger.error(`[CLEANUP] Lidarr cleanup error: ${error?.message ?? String(error)}`);
+        res.status(500).json({ error: "Failed to cleanup Lidarr" });
     }
 });
 
@@ -1399,11 +1225,8 @@ router.post("/fix-tagging", requireAdmin, async (req, res) => {
             fixedArtists,
         });
     } catch (error: any) {
-        logger.error("[FIX-TAGGING] Error:", error?.message || error);
-        res.status(500).json({
-            error: "Failed to fix album tagging",
-            details: error?.message || "Unknown error",
-        });
+        logger.error(`[FIX-TAGGING] Error: ${error?.message ?? String(error)}`);
+        res.status(500).json({ error: "Failed to fix album tagging" });
     }
 });
 

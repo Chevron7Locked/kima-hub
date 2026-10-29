@@ -10,7 +10,7 @@ import { LIBRARY_LOCATION } from '../libraryFilters';
 import { clearSuggestion, errorReason, findDiscoverAlbum, reportLidarrFailures, type ClearFailure } from './discoverClearing';
 import { albumHasPlaylistTrack, discoverEvidence, loadDiscoverRecords } from './discoverEvidence';
 
-export interface DiscoveryAlbumInfo {
+interface DiscoveryAlbumInfo {
     id: string;
     rgMbid: string;
     artistName: string;
@@ -18,7 +18,7 @@ export interface DiscoveryAlbumInfo {
     lidarrAlbumId?: number | null;
 }
 
-export class DiscoveryAlbumLifecycle {
+class DiscoveryAlbumLifecycle {
     /**
      * Moves a LIKED suggestion's DISCOVER album to the LIBRARY (takeIntoLibrary) and marks the suggestion MOVED. The album is
      * found the way a clear finds it, so a listener's own copy of the same name is never the one moved. Returns whether

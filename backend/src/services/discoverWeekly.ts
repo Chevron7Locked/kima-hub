@@ -100,7 +100,7 @@ class DiscoverWeeklyService {
             discoveryLogger.section("CONFIGURATION CHECK");
             const settings = await getSystemSettings();
 
-            const weekStart = resolveGenerationWeekStart(new Date(), 1);
+            const weekStart = resolveGenerationWeekStart(new Date());
 
             const config = await prisma.userDiscoverConfig.findUnique({
                 where: { userId },

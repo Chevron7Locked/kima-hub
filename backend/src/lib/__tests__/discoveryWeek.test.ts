@@ -14,7 +14,7 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
     // must roll forward.
     it("rolls forward to the UPCOMING Monday when run on the week's last day (Sunday 20:00, Monday-start)", () => {
         const sundayEvening = new Date("2026-05-24T20:00:00.000Z");
-        const result = resolveGenerationWeekStart(sundayEvening, 1);
+        const result = resolveGenerationWeekStart(sundayEvening);
         // Bare startOfWeek would yield 2026-05-18, the week that is ending.
         expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
     });
@@ -25,7 +25,7 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
         // using strict inequality, or an isAfter check, would miss this and
         // tag the ending week. Must still roll forward.
         const lastInstant = new Date("2026-05-24T23:59:59.999Z");
-        const result = resolveGenerationWeekStart(lastInstant, 1);
+        const result = resolveGenerationWeekStart(lastInstant);
         expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
     });
 
@@ -34,30 +34,11 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
         // end. A buggy `isSameDay(now, startOfWeek)`-based or always-add-1
         // implementation would push this to 2026-06-01. Must stay on 2026-05-25.
         const firstInstant = new Date("2026-05-25T00:00:00.000Z");
-        const result = resolveGenerationWeekStart(firstInstant, 1);
+        const result = resolveGenerationWeekStart(firstInstant);
         expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
-    });
-
-    it("honors a configurable week-start day -- Saturday under Sunday-start (weekStartsOn=0) rolls forward", () => {
-        // The weekStartsOn seam. With Sunday-start, Saturday
-        // is the last day, so it must roll forward to the next Sunday. A
-        // hard-coded `{weekStartsOn: 1}` would compute the Monday-based week and
-        // return 2026-05-25 (Monday) instead of 2026-05-31 (Sunday).
-        const saturday = new Date("2026-05-30T20:00:00.000Z");
-        const result = resolveGenerationWeekStart(saturday, 0);
-        expect(result.toISOString().slice(0, 10)).toBe("2026-05-31");
     });
 
     it("does not roll forward mid-week (Wednesday, Monday-start) -- tags the current week", () => {
-        const wednesday = new Date("2026-05-27T12:00:00.000Z");
-        const result = resolveGenerationWeekStart(wednesday, 1);
-        expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
-    });
-
-    it("defaults to Monday-start (weekStartsOn omitted) -- proves the default arg, not an undefined->NaN week", () => {
-        // If the default parameter is missing, date-fns receives
-        // {weekStartsOn: undefined} -> defaults to Sunday-start, shifting the
-        // boundary. Calling with no second arg must behave exactly like `, 1`.
         const wednesday = new Date("2026-05-27T12:00:00.000Z");
         const result = resolveGenerationWeekStart(wednesday);
         expect(result.toISOString().slice(0, 10)).toBe("2026-05-25");
@@ -67,7 +48,7 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
     // time of day, since it is stored and compared against midnight values.
     it("returns the week-start normalized to 00:00:00.000 UTC -- not the run's time-of-day (mid-week branch)", () => {
         const wednesdayNoon = new Date("2026-05-27T12:00:00.000Z");
-        const result = resolveGenerationWeekStart(wednesdayNoon, 1);
+        const result = resolveGenerationWeekStart(wednesdayNoon);
         expect(result.toISOString()).toBe("2026-05-25T00:00:00.000Z");
     });
 
@@ -77,7 +58,7 @@ describe("resolveGenerationWeekStart -- boundary roll-forward", () => {
         // 20:00 forward and produce "2026-05-25T20:00:00.000Z", passing the slice
         // tests above but storing a corrupt weekStart.
         const sundayEvening = new Date("2026-05-24T20:00:00.000Z");
-        const result = resolveGenerationWeekStart(sundayEvening, 1);
+        const result = resolveGenerationWeekStart(sundayEvening);
         expect(result.toISOString()).toBe("2026-05-25T00:00:00.000Z");
     });
 });
@@ -157,7 +138,7 @@ describe("weekStartKey -- stable jobId key", () => {
     // Sunday-evening run keys the upcoming week.
     it("a Sunday-evening generation run produces the UPCOMING week's key (helper composition)", () => {
         const sundayEvening = new Date("2026-05-24T20:00:00.000Z");
-        const tagged = resolveGenerationWeekStart(sundayEvening, 1);
+        const tagged = resolveGenerationWeekStart(sundayEvening);
         expect(weekStartKey(tagged)).toBe("2026-05-25");
     });
 
@@ -168,8 +149,8 @@ describe("weekStartKey -- stable jobId key", () => {
         // keys would diverge and the dedup would silently fail.
         const monday = new Date("2026-05-25T05:00:00.000Z");
         const wednesday = new Date("2026-05-27T12:00:00.000Z");
-        const kMon = weekStartKey(resolveGenerationWeekStart(monday, 1));
-        const kWed = weekStartKey(resolveGenerationWeekStart(wednesday, 1));
+        const kMon = weekStartKey(resolveGenerationWeekStart(monday));
+        const kWed = weekStartKey(resolveGenerationWeekStart(wednesday));
         expect(kMon).toBe("2026-05-25");
         expect(kWed).toBe("2026-05-25");
         expect(kMon).toBe(kWed);
@@ -220,7 +201,7 @@ function inTimeZone(tz: string, wallTimes: number[][]): RunSeen[] {
     return runInTimeZone(tz, `
         seen = ${JSON.stringify(wallTimes)}.map(([y, mo, d, h, mi]) => {
             const now = new Date(y, mo - 1, d, h, mi);
-            const start = week.resolveGenerationWeekStart(now, 1);
+            const start = week.resolveGenerationWeekStart(now);
             return {
                 zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 key: week.weekStartKey(start),

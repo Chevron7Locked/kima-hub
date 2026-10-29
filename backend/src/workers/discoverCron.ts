@@ -43,7 +43,7 @@ export function startDiscoverWeeklyCron() {
             for (const config of configs) {
                 logger.debug(`   Queueing job for user ${config.userId}...`);
 
-                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date(), 1));
+                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date()));
                 const jobId = `discover-weekly-${config.userId}-${weekKey}`;
                 await distributedLock.withLock(
                     `discover:generate:${config.userId}`,

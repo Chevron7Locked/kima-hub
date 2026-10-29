@@ -1,7 +1,7 @@
 import { startOfWeek, endOfWeek, addWeeks, addHours, isSameDay, isBefore, format } from "date-fns";
 
-/** date-fns weekStartsOn: 0=Sun..6=Sat. Discovery defaults to 1 (Monday). */
-export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+/** Discover's weeks start on Monday (date-fns weekStartsOn). */
+export const WEEK_STARTS_ON = 1 as const;
 
 /**
  * The week a generation run belongs to: the one the user is about to enter.
@@ -9,9 +9,9 @@ export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
  * GET /current looks for next morning. Weeks start at midnight in the
  * server's time zone (TZ).
  */
-export function resolveGenerationWeekStart(now: Date, weekStartsOn: WeekStartsOn = 1): Date {
-  const currentWeekStart = startOfWeek(now, { weekStartsOn });
-  const currentWeekEnd = endOfWeek(now, { weekStartsOn });
+export function resolveGenerationWeekStart(now: Date): Date {
+  const currentWeekStart = startOfWeek(now, { weekStartsOn: WEEK_STARTS_ON });
+  const currentWeekEnd = endOfWeek(now, { weekStartsOn: WEEK_STARTS_ON });
   if (isSameDay(now, currentWeekEnd)) {
     return addWeeks(currentWeekStart, 1);
   }
@@ -36,8 +36,8 @@ export interface ViewWeek {
 const HALF_WEEK_HOURS = 84;
 
 /** The local week a stored week start belongs to, whichever zone made it. */
-export function localWeekOf(storedWeekStart: Date, weekStartsOn: WeekStartsOn = 1): Date {
-  return startOfWeek(addHours(storedWeekStart, HALF_WEEK_HOURS), { weekStartsOn });
+export function localWeekOf(storedWeekStart: Date): Date {
+  return startOfWeek(addHours(storedWeekStart, HALF_WEEK_HOURS), { weekStartsOn: WEEK_STARTS_ON });
 }
 
 /**
