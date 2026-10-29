@@ -101,7 +101,7 @@ function AlbumGrid({
     source,
     onDownloadAlbum,
     isPendingDownload,
-}: Omit<AvailableAlbumsProps, "artistName">) {
+}: AvailableAlbumsProps) {
     return (
         <div className="grid-media">
             {albums.map((album, index) => (
@@ -144,7 +144,7 @@ export function AvailableAlbums({
                         <AlbumGrid
                             albums={studioAlbums}
                             source={source}
-                                    onDownloadAlbum={onDownloadAlbum}
+                            onDownloadAlbum={onDownloadAlbum}
                             isPendingDownload={isPendingDownload}
                         />
                     </div>
@@ -158,7 +158,7 @@ export function AvailableAlbums({
                         <AlbumGrid
                             albums={epsAndSingles}
                             source={source}
-                                    onDownloadAlbum={onDownloadAlbum}
+                            onDownloadAlbum={onDownloadAlbum}
                             isPendingDownload={isPendingDownload}
                         />
                     </div>

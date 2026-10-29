@@ -10,6 +10,7 @@ import { cascadeStyle } from "@/lib/motion";
 import { useLibraryGenresQuery, useLibraryDecadesQuery, useMoodStationsQuery } from "@/hooks/useQueries";
 import { useFeatures } from "@/lib/features-context";
 import {
+    DEFAULT_STYLE,
     RadioStation,
     STATIC_STATIONS,
     buildMoodStations,
@@ -24,12 +25,6 @@ type RowItem = { kind: "station"; station: RadioStation } | { kind: "placeholder
 
 /** Tiles the mood stations hold while their list loads. */
 const MOOD_PLACEHOLDERS = 4;
-
-const RETRY_STYLE = {
-    color: "from-[#6b7280]/15 to-[#4b5563]/10",
-    hoverBorder: "hover:border-[#6b7280]/40",
-    accentGradient: "from-[#6b7280] to-[#4b5563]",
-};
 
 export function LibraryRadioStations() {
     const { loadingStation, startRadio } = useRadioPlayer();
@@ -106,7 +101,9 @@ export function LibraryRadioStations() {
         };
     }, [stationPages, isMobileOrTablet, updatePage]);
 
-    const renderCard = (station: RadioStation, compact: boolean, globalIdx: number, delayIdx = globalIdx) => (
+    const tileSize = (compact: boolean) => (compact ? "flex-shrink-0 snap-start w-[180px] h-[80px]" : "w-full aspect-[5/3]");
+
+    const renderCard = (station: RadioStation, compact: boolean, delayIdx: number) => (
         <TileCard
             key={station.id}
             title={station.name}
@@ -126,14 +123,12 @@ export function LibraryRadioStations() {
             busy={loadingStation === station.id}
             disabled={loadingStation !== null}
             index={delayIdx}
-            className={compact ? "flex-shrink-0 snap-start w-[180px] h-[80px]" : "w-full aspect-[5/3]"}
+            className={tileSize(compact)}
         />
     );
 
-    const tileSize = (compact: boolean) => (compact ? "flex-shrink-0 snap-start w-[180px] h-[80px]" : "w-full aspect-[5/3]");
-
-    const renderItem = (item: RowItem, compact: boolean, globalIdx: number, delayIdx = globalIdx) => {
-        if (item.kind === "station") return renderCard(item.station, compact, globalIdx, delayIdx);
+    const renderItem = (item: RowItem, compact: boolean, delayIdx: number) => {
+        if (item.kind === "station") return renderCard(item.station, compact, delayIdx);
         if (item.kind === "placeholder") {
             return (
                 <div
@@ -148,9 +143,9 @@ export function LibraryRadioStations() {
                 title="Mood stations"
                 subtitle="Didn't load. Try again"
                 wrapSubtitle={!compact}
-                tint={RETRY_STYLE.color}
-                hoverBorder={RETRY_STYLE.hoverBorder}
-                accent={RETRY_STYLE.accentGradient}
+                tint={DEFAULT_STYLE.color}
+                hoverBorder={DEFAULT_STYLE.hoverBorder}
+                accent={DEFAULT_STYLE.accentGradient}
                 onClick={() => void refetchMoods()}
                 busy={moodFetching}
                 index={delayIdx}
@@ -184,7 +179,7 @@ export function LibraryRadioStations() {
                         className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
                         style={cascadeStyle(page.length)}
                     >
-                        {page.map((item, i) => renderItem(item, false, pageIndex * 6 + i, i))}
+                        {page.map((item, i) => renderItem(item, false, i))}
                         {page.length < 6 &&
                             Array.from({ length: 6 - page.length }).map((_, i) => (
                                 <div key={`empty-${i}`} className="aspect-[5/3]" />

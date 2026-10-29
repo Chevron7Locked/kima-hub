@@ -290,7 +290,7 @@ function ImportPlaylistPageContent() {
         }
     }
 
-    // Fetch preview (async — returns job ID, completion arrives via SSE)
+    // The preview answers with a job id; the finished preview arrives over the event stream.
     const handleFetchPreview = async () => {
         if (!url.trim()) return;
 
@@ -311,7 +311,6 @@ function ImportPlaylistPageContent() {
         }
     };
 
-    // Quick import (skip preview, import everything in background)
     const handleQuickImport = async () => {
         if (!url.trim()) return;
 
@@ -840,8 +839,6 @@ function ImportPlaylistPageContent() {
                                 : importJob.status === "creating_playlist" ||
                                   importJob.status === "matching_tracks"
                                 ? "Creating Playlist"
-                                : importJob.status === "pending"
-                                ? "Starting Import"
                                 : "Starting Import"}
                         </h2>
                         <p className="text-sm text-[var(--text-secondary)] mb-6">

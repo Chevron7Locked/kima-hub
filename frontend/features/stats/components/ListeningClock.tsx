@@ -1,11 +1,5 @@
 "use client";
 
-/**
- * The listening week as a 7x24 grid, Monday first so the weekend rows sit
- * together, bucketed server-side in the viewer's timezone. Hover rewrites the
- * caption locally; click asks the server what was playing in that hour.
- */
-
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useInView } from "@/hooks/useInView";
@@ -26,6 +20,11 @@ interface HourDetail {
     lastAt: string | null;
 }
 
+/**
+ * The listening week as a 7x24 grid, Monday first so the weekend rows sit
+ * together, bucketed server-side in the viewer's timezone. Hover rewrites the
+ * caption locally; click asks the server what was playing in that hour.
+ */
 export function ListeningClock({ listening, period }: { listening: ListeningStats; period?: string }) {
     const { clock, peak, plays } = listening;
     const [at, setAt] = useState<{ dow: number; hour: number } | null>(null);
@@ -82,7 +81,6 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
         return <p className="t-body max-w-[46ch]">no plays yet</p>;
     }
 
-    // The three loudest cells, which is what a finger actually wants to reach.
     const busiest = clock
         .flatMap((row, dow) => row.map((n, hour) => ({ dow, hour, n })))
         .filter((c) => c.n > 0)
@@ -218,7 +216,6 @@ export function ListeningClock({ listening, period }: { listening: ListeningStat
                             key={`${dow}-${hour}`}
                             type="button"
                             onClick={() => toggle(dow, hour)}
-                            aria-disabled={n === 0}
                             aria-pressed={opened}
                             className={[
                                 "h-11 px-3 -mx-3 rounded-lg flex items-baseline justify-between gap-4",

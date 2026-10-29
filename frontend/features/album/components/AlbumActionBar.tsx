@@ -33,19 +33,11 @@ export function AlbumActionBar({
     const showDownload = !isOwned && (album.mbid || album.rgMbid) && onDownloadAlbum;
     const showPause = isPlaying && isPlayingThisAlbum;
 
-    const handlePlayPauseClick = () => {
-        if (showPause) {
-            onPause();
-        } else {
-            onPlayAll();
-        }
-    };
-
     return (
         <MediaActionBar
             showPlay={isOwned}
             showPause={showPause}
-            onPlayPause={handlePlayPauseClick}
+            onPlayPause={showPause ? onPause : onPlayAll}
             onShuffle={onShuffle}
             secondaryShape="square"
         >

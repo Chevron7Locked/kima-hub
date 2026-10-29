@@ -124,7 +124,6 @@ export default function ArtistPage() {
             const response = await api.getRadioTracks("artist", artist.id);
 
             if (response.tracks && response.tracks.length > 0) {
-                // Backend already returns properly formatted tracks - just pass them through
                 playStation(response.tracks, async () => {
                     const more = await api.getRadioTracks("artist", artist.id);
                     return more.tracks ?? [];

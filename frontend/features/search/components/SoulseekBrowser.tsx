@@ -5,7 +5,7 @@ import { CASCADE_WINDOW_MS } from "@/lib/motion";
 import { Download, CheckCircle, Music, ChevronDown, ChevronRight, List, Users } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { formatFileSize, getQualityBadge, parseFilename } from "./soulseekHelpers";
+import { describeResult, formatFileSize, getQualityBadge, qualityScore, resultKey } from "./soulseekHelpers";
 import type {
     SoulseekResult,
     SoulseekSortField,
@@ -45,14 +45,6 @@ const SORT_OPTIONS: { label: string; value: SoulseekSortField }[] = [
 const RESULT_GRID =
     "grid grid-cols-[32px_1fr_minmax(80px,120px)_80px_80px_80px_44px] gap-2 px-3 py-2";
 
-function getResultKey(r: SoulseekResult): string {
-    return `${r.username}:${r.path}`;
-}
-
-function qualityScore(r: SoulseekResult): number {
-    return r.format === "flac" ? 10000 : r.bitrate;
-}
-
 export function SoulseekBrowser({
     results,
     isSearching,
@@ -62,9 +54,8 @@ export function SoulseekBrowser({
     onDownload,
     onBulkDownload,
 }: SoulseekBrowserProps) {
-    const { canAcquire, settled } = usePublicConfig();
     // Disabled until the server answers; the operator-only message only once it has said no.
-    const locked = settled && !canAcquire;
+    const { canAcquire, locked } = usePublicConfig();
     const [formatFilters, setFormatFilters] = useState<Set<SoulseekFormatFilter>>(new Set(["all"]));
     const [sortField, setSortField] = useState<SoulseekSortField>("quality");
     const [viewMode, setViewMode] = useState<SoulseekViewMode>("flat");
@@ -110,8 +101,6 @@ export function SoulseekBrowser({
                 return copy.sort((a, b) => b.size - a.size);
             case "filename":
                 return copy.sort((a, b) => a.filename.localeCompare(b.filename));
-            default:
-                return copy;
         }
     }, [filtered, sortField]);
 
@@ -184,7 +173,7 @@ export function SoulseekBrowser({
     }, []);
 
     const toggleSelectAll = useCallback(() => {
-        const visibleKeys = displayResults.map(getResultKey);
+        const visibleKeys = displayResults.map(resultKey);
         setSelectedKeys((prev) => {
             const allSelected = visibleKeys.every((k) => prev.has(k));
             if (allSelected) return new Set();
@@ -193,7 +182,7 @@ export function SoulseekBrowser({
     }, [displayResults]);
 
     const selectedResults = useMemo(
-        () => sorted.filter((r) => selectedKeys.has(getResultKey(r))),
+        () => sorted.filter((r) => selectedKeys.has(resultKey(r))),
         [sorted, selectedKeys],
     );
 
@@ -347,7 +336,7 @@ function FlatView({
     onToggleSelectAll,
     onDownload,
 }: FlatViewProps) {
-    const allSelected = results.length > 0 && results.every((r) => selectedKeys.has(getResultKey(r)));
+    const allSelected = results.length > 0 && results.every((r) => selectedKeys.has(resultKey(r)));
 
     return (
         <div>
@@ -372,8 +361,8 @@ function FlatView({
                 <ResultRow
                     key={`${result.username}-${result.path}-${index}`}
                     result={result}
-                    isSelected={selectedKeys.has(getResultKey(result))}
-                    isDownloading={downloadingFiles.has(getResultKey(result))}
+                    isSelected={selectedKeys.has(resultKey(result))}
+                    isDownloading={downloadingFiles.has(resultKey(result))}
                     onToggleSelect={onToggleSelect}
                     onDownload={onDownload}
                     animationDelay={index * Math.round(CASCADE_WINDOW_MS / Math.max(results.length, 1))}
@@ -403,13 +392,10 @@ function ResultRow({
     onDownload,
     animationDelay,
 }: ResultRowProps) {
-    const { canAcquire, settled } = usePublicConfig();
     // Disabled until the server answers; the operator-only message only once it has said no.
-    const locked = settled && !canAcquire;
-    const key = getResultKey(result);
-    const parsed = result.parsedTitle
-        ? { artist: result.parsedArtist || "Unknown", title: result.parsedTitle }
-        : parseFilename(result.filename);
+    const { canAcquire, locked } = usePublicConfig();
+    const key = resultKey(result);
+    const parsed = describeResult(result);
 
     return (
         <div
@@ -517,8 +503,8 @@ function GroupedView({
                                     <ResultRow
                                         key={`${result.path}-${index}`}
                                         result={result}
-                                        isSelected={selectedKeys.has(getResultKey(result))}
-                                        isDownloading={downloadingFiles.has(getResultKey(result))}
+                                        isSelected={selectedKeys.has(resultKey(result))}
+                                        isDownloading={downloadingFiles.has(resultKey(result))}
                                         onToggleSelect={onToggleSelect}
                                         onDownload={onDownload}
                                     />

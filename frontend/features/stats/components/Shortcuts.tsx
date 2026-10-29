@@ -50,47 +50,47 @@ export function Shortcuts({
 
     return (
         <>
-        {hint}
-        <div
-            role="dialog"
-            aria-label="keyboard shortcuts"
-            className="hidden sm:flex fixed bottom-24 right-6 z-(--z-dropdown) w-[19rem] flex-col gap-4 rounded-xl border border-white/10 bg-[var(--bg-secondary)] p-5 animate-rise"
-        >
-            <div className="flex items-baseline justify-between gap-4">
-                <h2 className="t-label text-[var(--text-secondary)]">keyboard shortcuts</h2>
-                <button
-                    onClick={() => setOpen(false)}
-                    aria-label="close"
-                    className="-mr-1 -mt-1 w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                >
-                    <X className="w-4 h-4" />
-                </button>
-            </div>
+            {hint}
+            <div
+                role="dialog"
+                aria-label="keyboard shortcuts"
+                className="hidden sm:flex fixed bottom-24 right-6 z-(--z-dropdown) w-[19rem] flex-col gap-4 rounded-xl border border-white/10 bg-[var(--bg-secondary)] p-5 animate-rise"
+            >
+                <div className="flex items-baseline justify-between gap-4">
+                    <h2 className="t-label text-[var(--text-secondary)]">keyboard shortcuts</h2>
+                    <button
+                        onClick={() => setOpen(false)}
+                        aria-label="close"
+                        className="-mr-1 -mt-1 w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
 
-            <dl className="flex flex-col gap-2">
-                {chapters.map((c, i) => (
-                    <div key={c.id} className="flex items-baseline justify-between gap-4">
-                        <dt className="t-meta text-[var(--text-secondary)]">{c.label}</dt>
-                        <dd><Key>{i + 1}</Key></dd>
+                <dl className="flex flex-col gap-2">
+                    {chapters.map((c, i) => (
+                        <div key={c.id} className="flex items-baseline justify-between gap-4">
+                            <dt className="t-meta text-[var(--text-secondary)]">{c.label}</dt>
+                            <dd><Key>{i + 1}</Key></dd>
+                        </div>
+                    ))}
+                </dl>
+
+                <div className="flex flex-col gap-2 border-t border-white/[0.08] pt-4">
+                    <div className="flex items-baseline justify-between gap-4">
+                        <span className="t-meta text-[var(--text-secondary)]">move in the hour grid</span>
+                        <span className="flex gap-1"><Key>←</Key><Key>→</Key><Key>↑</Key><Key>↓</Key></span>
                     </div>
-                ))}
-            </dl>
-
-            <div className="flex flex-col gap-2 border-t border-white/[0.08] pt-4">
-                <div className="flex items-baseline justify-between gap-4">
-                    <span className="t-meta text-[var(--text-secondary)]">move in the hour grid</span>
-                    <span className="flex gap-1"><Key>←</Key><Key>→</Key><Key>↑</Key><Key>↓</Key></span>
-                </div>
-                <div className="flex items-baseline justify-between gap-4">
-                    <span className="t-meta text-[var(--text-secondary)]">open an hour</span>
-                    <Key>enter</Key>
-                </div>
-                <div className="flex items-baseline justify-between gap-4">
-                    <span className="t-meta text-[var(--text-secondary)]">close</span>
-                    <Key>esc</Key>
+                    <div className="flex items-baseline justify-between gap-4">
+                        <span className="t-meta text-[var(--text-secondary)]">open an hour</span>
+                        <Key>enter</Key>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-4">
+                        <span className="t-meta text-[var(--text-secondary)]">close</span>
+                        <Key>esc</Key>
+                    </div>
                 </div>
             </div>
-        </div>
         </>
     );
 }

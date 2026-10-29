@@ -1,7 +1,8 @@
 "use client";
 
 import { usePublicConfig } from "@/hooks/useQueries";
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Calendar, Clock, Download, Disc, ArrowRight, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -19,11 +20,9 @@ interface ReleaseItem {
     id: number | string;
     title: string;
     artistName: string;
-    artistMbid?: string;
     albumMbid: string;
     releaseDate: string;
     coverUrl: string | null;
-    source: 'lidarr';
     status: 'upcoming' | 'released' | 'available';
     inLibrary: boolean;
     canDownload: boolean;
@@ -36,36 +35,23 @@ interface ReleaseRadarData {
 }
 
 export default function ReleasesPage() {
-    const [data, setData] = useState<ReleaseRadarData | null>(null);
-    const [loading, setLoading] = useState(true);
     const [downloadingId, setDownloadingId] = useState<string | number | null>(null);
     const { canAcquire } = usePublicConfig();
-    const [error, setError] = useState<string | null>(null);
-
-    const loadReleases = () => {
-        return api
-            .get<ReleaseRadarData>("/releases/radar?daysBack=30&daysAhead=90")
-            .then(setData)
-            .catch((err: unknown) => {
-                setError(err instanceof Error ? err.message : "couldn't load releases");
-            })
-            .finally(() => setLoading(false));
-    };
-
-    const fetchReleases = () => {
-        setLoading(true);
-        return loadReleases();
-    };
-
-    useEffect(() => {
-        loadReleases();
-    }, []);
+    const { data, isLoading, isFetching, error: loadError, refetch } = useQuery({
+        queryKey: ["release-radar"],
+        queryFn: () => api.get<ReleaseRadarData>("/releases/radar?daysBack=30&daysAhead=90"),
+        // Read again on every visit: a release can land in the library between two.
+        staleTime: 0,
+    });
+    // "Try again" after a failure shows the spinner while it asks.
+    const loading = isLoading || (isFetching && !!loadError);
+    const error = loadError ? loadError.message || "couldn't load releases" : null;
 
     const handleDownload = async (albumMbid: string, releaseId: string | number) => {
         try {
             setDownloadingId(releaseId);
             await api.post(`/releases/download/${albumMbid}`);
-            await fetchReleases();
+            await refetch();
         } catch (err) {
             notify.error("Couldn't start the download", { message: err instanceof Error ? err.message : undefined });
         } finally {
@@ -103,7 +89,7 @@ export default function ReleasesPage() {
             <PageMessage
                 title="Couldn't load releases"
                 description={error}
-                action={{ label: "Try again", onClick: () => { setError(null); fetchReleases(); } }}
+                action={{ label: "Try again", onClick: () => void refetch() }}
             />
         );
     }

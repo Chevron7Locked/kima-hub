@@ -16,12 +16,11 @@ export default function OnboardingPage() {
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();
     const [step, setStep] = useState(1);
-    // Separate submitting state: account creation + complete/skip
     const [submitting, setSubmitting] = useState(false);
-    // Per-integration test loading: which integration is mid-test (null = none)
+    // Which integration is being tested, if any.
     const [testingIntegration, setTestingIntegration] =
         useState<IntegrationKey | null>(null);
-    // Per-integration results: each key holds its own ok/message, not clobbered
+    // Each integration's own test result, so testing one does not clear another's.
     const [integrationResults, setIntegrationResults] = useState<
         Partial<Record<IntegrationKey, IntegrationResult>>
     >({});
@@ -31,7 +30,6 @@ export default function OnboardingPage() {
     const showPasswordTooShort =
         error === "Password must be at least 6 characters";
 
-    // Step 1: Account creation
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
@@ -89,7 +87,6 @@ export default function OnboardingPage() {
                 token: string;
                 user: { id: string; username: string };
             }>("/onboarding/register", { username, password });
-            // Store the JWT token for subsequent API calls
             if (response.token) {
                 api.setToken(response.token);
             }

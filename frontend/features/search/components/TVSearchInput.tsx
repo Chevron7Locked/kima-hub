@@ -26,15 +26,13 @@ export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProp
         e.preventDefault();
         if (query.trim()) {
             onSearch(query.trim());
-            // Blur the input after search to return to D-pad navigation
+            // Hand the remote back to the D-pad.
             inputRef.current?.blur();
         }
     };
 
+    // Enter submits the form.
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter") {
-            handleSubmit(e);
-        }
         if (e.key === "Escape") {
             // First Back leaves the field; the next one reaches the tab row.
             e.preventDefault();

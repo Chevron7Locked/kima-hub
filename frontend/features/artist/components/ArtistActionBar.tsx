@@ -36,18 +36,10 @@ export function ArtistActionBar({
     const showPause = isPlaying && isPlayingThisArtist;
     const showRadio = source === "library";
 
-    const handlePlayPauseClick = () => {
-        if (showPause) {
-            onPause();
-        } else {
-            onPlayAll();
-        }
-    };
-
     return (
         <MediaActionBar
             showPause={showPause}
-            onPlayPause={handlePlayPauseClick}
+            onPlayPause={showPause ? onPause : onPlayAll}
             onShuffle={onShuffle}
             secondaryShape="square"
         >

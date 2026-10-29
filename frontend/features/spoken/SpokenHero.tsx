@@ -9,23 +9,17 @@ import { HeroBackdrop } from "@/components/ui/HeroBackdrop";
 import { HeroCover } from "@/components/ui/MediaHero";
 import { cn } from "@/lib/cn";
 
+const AUDIOBOOKS = {
+    backHref: "/audiobooks",
+    backLabel: "Audiobooks",
+    dot: "bg-type-audiobook",
+    Icon: Book,
+    fallback: ["#2a1e0a", "#1a140a"] as [string, string],
+};
+
 const KINDS = {
-    audiobook: {
-        backHref: "/audiobooks",
-        backLabel: "Audiobooks",
-        label: "Audiobook",
-        dot: "bg-type-audiobook",
-        Icon: Book,
-        fallback: ["#2a1e0a", "#1a140a"] as [string, string],
-    },
-    series: {
-        backHref: "/audiobooks",
-        backLabel: "Audiobooks",
-        label: "Series",
-        dot: "bg-type-audiobook",
-        Icon: Book,
-        fallback: ["#2a1e0a", "#1a140a"] as [string, string],
-    },
+    audiobook: { ...AUDIOBOOKS, label: "Audiobook" },
+    series: { ...AUDIOBOOKS, label: "Series" },
     podcast: {
         backHref: "/podcasts",
         backLabel: "Podcasts",

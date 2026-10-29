@@ -5,7 +5,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
-import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { playlistTrackToAudio } from "@/lib/playlist-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatTime, plural } from "@/lib/format";
@@ -72,17 +73,6 @@ interface Track {
     };
 }
 
-/** A playlist track as the player takes it. */
-function toAudioTrack(track: Track): AudioTrack {
-    return {
-        id: track.id,
-        title: track.title,
-        displayTitle: track.displayTitle,
-        artist: { name: track.album.artist.name, id: track.album.artist.id },
-        album: { title: track.album.title, coverArt: track.album.coverArt, id: track.album.id },
-        duration: track.duration,
-    };
-}
 
 interface PlaylistItem {
     id: string;
@@ -148,8 +138,8 @@ export default function PlaylistDetailPage() {
     const scrollContainerRef = useRef<HTMLElement | null>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
 
-    // Capture the actual scroll container (#main-content) and measure the
-    // list's offset within it so the element virtualizer positions rows correctly.
+    // The page scrolls inside #main-content, so that is the virtualizer's scroll element; the list's offset in it is
+    // measured where the virtualizer is set up.
     useLayoutEffect(() => {
         const el = document.getElementById("main-content") as HTMLElement | null;
         scrollContainerRef.current = el;
@@ -397,20 +387,20 @@ export default function PlaylistDetailPage() {
             return;
         }
 
-        const tracks = playlist.items.map((item: PlaylistItem) => toAudioTrack(item.track));
+        const tracks = playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track));
         playTracks(tracks, 0);
     };
 
     const handlePlayTrack = (index: number) => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
-        const tracks = playlist.items.map((item: PlaylistItem) => toAudioTrack(item.track));
+        const tracks = playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track));
         playTracks(tracks, index);
     };
 
     const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);
 
-    const handleAddToQueue = (track: Track) => addToQueue(toAudioTrack(track));
+    const handleAddToQueue = (track: Track) => addToQueue(playlistTrackToAudio(track));
 
     // ── Drag-to-reorder ──────────────────────────────────────────────────────
 
@@ -517,293 +507,293 @@ export default function PlaylistDetailPage() {
     });
 
     const renderRow = (item: PlaylistItem | PendingTrack, index: number) => {
-            if (item.type === "pending") {
-                const pending = (item as PendingTrack).pending;
-                const isPreviewPlaying = preview.previewId === pending.id;
-                const isRetrying = retryingTrackId === pending.id;
-                const isRemoving = removingTrackId === pending.id;
-                const isMissing = pending.missingFromDisk === true;
-
-                return (
-                    <div
-                        key={`pending-${pending.id}`}
-                        className={cn("grid grid-cols-[40px_minmax(0,1fr)_96px]", TRACK_GRID_MD, "gap-2 md:gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity")}
-                    >
-                        <div className="flex items-center justify-center">
-                            {isMissing ? (
-                                <FileX className="w-4 h-4 text-warning" />
-                            ) : (
-                                <AlertCircle className="w-4 h-4 text-danger-light" />
-                            )}
-                        </div>
-
-                        <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 bg-[var(--bg-primary)] border border-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center">
-                                <button
-                                    onClick={() => handlePlayPreview(pending.id)}
-                                    className="w-full h-full flex items-center justify-center hover:bg-white/5 transition-colors"
-                                    aria-label="Play a 30-second preview"
-                                    title="play a 30-second preview"
-                                >
-                                    {isPreviewPlaying ? (
-                                        <Volume2 className="w-5 h-5 text-brand animate-pulse" />
-                                    ) : (
-                                        <Play className="w-5 h-5 text-[var(--text-muted)] hover:text-white/60" />
-                                    )}
-                                </button>
-                            </div>
-                            <div className="min-w-0">
-                                <p className="text-sm font-medium truncate text-[var(--text-muted)]">
-                                    {pending.title}
-                                </p>
-                                <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
-                                    {pending.artist}
-                                </p>
-                            </div>
-                        </div>
-
-                        <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
-                            {pending.album}
-                        </p>
-
-                        <span aria-hidden="true" className="hidden md:block" />
-
-                        <div className="flex items-center justify-end gap-1">
-                            <span className={cn(
-                                "text-xs tabular-nums mr-2 hidden sm:inline",
-                                isMissing ? "text-warning" : "text-danger-light"
-                            )}>
-                                {isMissing ? "Missing from disk" : "Failed"}
-                            </span>
-                            {!isMissing && canAcquire && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRetryPendingTrack(pending.id);
-                                    }}
-                                    disabled={isRetrying}
-                                    className={cn(
-                                        "w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 transition-all",
-                                        isRetrying
-                                            ? "text-brand"
-                                            : "text-[var(--text-muted)] hover:text-white/60"
-                                    )}
-                                    aria-label="Retry download"
-                                    title="retry download"
-                                >
-                                    {isRetrying ? (
-                                        <GradientSpinner size="sm" />
-                                    ) : (
-                                        <RefreshCw className="w-4 h-4" />
-                                    )}
-                                </button>
-                            )}
-                            {playlist?.isOwner && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRemovePendingTrack(pending.id);
-                                    }}
-                                    disabled={isRemoving}
-                                    className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
-                                    aria-label="Remove from playlist"
-                                    title="remove from playlist"
-                                >
-                                    {isRemoving ? (
-                                        <GradientSpinner size="sm" />
-                                    ) : (
-                                        <X className="w-4 h-4" />
-                                    )}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                );
-            }
-
-            const playlistItem = item as PlaylistItem;
-            const isCurrentlyPlaying = currentTrack?.id === playlistItem.track.id;
-            const trackIndex = playlist?.items?.findIndex(
-                (i: PlaylistItem) => i.id === playlistItem.id
-            ) ?? index;
+        if (item.type === "pending") {
+            const pending = (item as PendingTrack).pending;
+            const isPreviewPlaying = preview.previewId === pending.id;
+            const isRetrying = retryingTrackId === pending.id;
+            const isRemoving = removingTrackId === pending.id;
+            const isMissing = pending.missingFromDisk === true;
 
             return (
                 <div
-                    key={playlistItem.id}
-                    data-track-index={trackIndex}
-                    draggable={!!playlist?.isOwner}
-                    onDragStart={(e) => {
-                        e.dataTransfer.setData("text/plain", playlistItem.id);
-                        e.dataTransfer.effectAllowed = "move";
-                        handleDragStart(playlistItem.id);
-                    }}
-                    onDragOver={(e) => handleDragOver(e, playlistItem.id)}
-                    onDragEnd={handleDragEnd}
-                    onDrop={(e) => {
-                        e.preventDefault();
-                        handleDrop(playlistItem.id);
-                    }}
-                    onDoubleClick={() => handlePlayTrack(trackIndex)}
-                    onTouchEnd={handleRowTouchEnd}
-                    className={cn(
-                        "grid grid-cols-[40px_minmax(0,1fr)_96px]",
-                        TRACK_GRID_MD,
-                        "gap-2 md:gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
-                        draggedItemId === playlistItem.id && "opacity-50",
-                        dragOverItemId === playlistItem.id && "border-brand/40 bg-brand/5",
-                        isCurrentlyPlaying && "bg-white/5 border-brand/30"
-                    )}
+                    key={`pending-${pending.id}`}
+                    className={cn("grid grid-cols-[40px_minmax(0,1fr)_96px]", TRACK_GRID_MD, "gap-2 md:gap-4 px-4 py-2 rounded-lg opacity-60 hover:opacity-80 group transition-opacity")}
                 >
-                    <div className="flex items-center justify-center gap-1">
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handlePlayTrack(trackIndex);
-                            }}
-                            className="w-8 h-8 flex items-center justify-center"
-                            aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
-                        >
-                            <span
-                                className={cn(
-                                    "text-xs group-hover:hidden",
-                                    isCurrentlyPlaying
-                                        ? "text-brand font-bold"
-                                        : "text-[var(--text-muted)]"
-                                )}
-                            >
-                                {isCurrentlyPlaying && isPlaying ? (
-                                    <Music className="w-4 h-4 text-brand animate-pulse" />
-                                ) : (
-                                    trackIndex + 1
-                                )}
-                            </span>
-                            <Play className="w-4 h-4 text-white hidden group-hover:block" />
-                        </button>
-                        {playlist?.isOwner && (
-                            <button
-                                draggable={false}
-                                onDragStart={(e) => {
-                                    e.stopPropagation();
-                                    e.dataTransfer.setData("text/plain", playlistItem.id);
-                                    e.dataTransfer.effectAllowed = "move";
-                                    handleDragStart(playlistItem.id);
-                                }}
-                                onDragEnd={handleDragEnd}
-                                aria-label="Drag to reorder"
-                                className="touch-reveal w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-60 hover:opacity-100 focus-visible:opacity-100 transition-all cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-white"
-                            >
-                                <GripVertical className="w-4 h-4" />
-                            </button>
+                    <div className="flex items-center justify-center">
+                        {isMissing ? (
+                            <FileX className="w-4 h-4 text-warning" />
+                        ) : (
+                            <AlertCircle className="w-4 h-4 text-danger-light" />
                         )}
                     </div>
 
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative w-10 h-10 bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden border border-white/10">
-                            {playlistItem.track.album?.coverArt ? (
-                                <CachedImage
-                                    src={api.getCoverArtUrl(
-                                        playlistItem.track.album.coverArt,
-                                        100
-                                    )}
-                                    alt={shownTitle(playlistItem.track)}
-                                    fill
-                                    sizes="40px"
-                                    className="object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <Music className="w-5 h-5 text-white/10" />
-                                </div>
-                            )}
+                        <div className="w-10 h-10 bg-[var(--bg-primary)] border border-white/10 rounded-lg shrink-0 overflow-hidden flex items-center justify-center">
+                            <button
+                                onClick={() => handlePlayPreview(pending.id)}
+                                className="w-full h-full flex items-center justify-center hover:bg-white/5 transition-colors"
+                                aria-label="Play a 30-second preview"
+                                title="play a 30-second preview"
+                            >
+                                {isPreviewPlaying ? (
+                                    <Volume2 className="w-5 h-5 text-brand animate-pulse" />
+                                ) : (
+                                    <Play className="w-5 h-5 text-[var(--text-muted)] hover:text-white/60" />
+                                )}
+                            </button>
                         </div>
                         <div className="min-w-0">
-                            <p
-                                className={cn(
-                                    "text-sm font-bold truncate tracking-tight",
-                                    isCurrentlyPlaying
-                                        ? "text-brand"
-                                        : "text-white"
-                                )}
-                            >
-                                {formatTrackDisplay(
-                                    {
-                                        title: shownTitle(playlistItem.track),
-                                        artist: playlistItem.track.album.artist.name,
-                                        album: playlistItem.track.album.title,
-                                    },
-                                    trackFormat,
-                                )}
+                            <p className="text-sm font-medium truncate text-[var(--text-muted)]">
+                                {pending.title}
                             </p>
                             <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
-                                {playlistItem.track.album.artist.name}
-                                <span className="md:hidden">
-                                    {" · "}
-                                    {formatTime(playlistItem.track.duration)}
-                                </span>
+                                {pending.artist}
                             </p>
                         </div>
                     </div>
 
                     <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
-                        {playlistItem.track.album.title}
+                        {pending.album}
                     </p>
 
-                    <span className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] text-right">
-                        {formatTime(playlistItem.track.duration)}
-                    </span>
+                    <span aria-hidden="true" className="hidden md:block" />
 
                     <div className="flex items-center justify-end gap-1">
-                        <button
-                            className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleAddToQueue(playlistItem.track);
-                            }}
-                            aria-label="Add to queue"
-                            title="add to queue"
-                        >
-                            <ListPlus className="w-4 h-4" />
-                        </button>
+                        <span className={cn(
+                            "text-xs tabular-nums mr-2 hidden sm:inline",
+                            isMissing ? "text-warning" : "text-danger-light"
+                        )}>
+                            {isMissing ? "Missing from disk" : "Failed"}
+                        </span>
+                        {!isMissing && canAcquire && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRetryPendingTrack(pending.id);
+                                }}
+                                disabled={isRetrying}
+                                className={cn(
+                                    "w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 transition-all",
+                                    isRetrying
+                                        ? "text-brand"
+                                        : "text-[var(--text-muted)] hover:text-white/60"
+                                )}
+                                aria-label="Retry download"
+                                title="retry download"
+                            >
+                                {isRetrying ? (
+                                    <GradientSpinner size="sm" />
+                                ) : (
+                                    <RefreshCw className="w-4 h-4" />
+                                )}
+                            </button>
+                        )}
                         {playlist?.isOwner && (
-                            <>
-                                <button
-                                    aria-label="Move up"
-                                    className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTrackUp(playlistItem.id);
-                                    }}
-                                    title="move up"
-                                >
-                                    <ChevronUp className="w-4 h-4" />
-                                </button>
-                                <button
-                                    aria-label="Move down"
-                                    className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTrackDown(playlistItem.id);
-                                    }}
-                                    title="move down"
-                                >
-                                    <ChevronDown className="w-4 h-4" />
-                                </button>
-                                <button
-                                    className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRemoveTrack(playlistItem.track.id);
-                                    }}
-                                    aria-label="Remove from playlist"
-                                    title="remove from playlist"
-                                >
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemovePendingTrack(pending.id);
+                                }}
+                                disabled={isRemoving}
+                                className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
+                                aria-label="Remove from playlist"
+                                title="remove from playlist"
+                            >
+                                {isRemoving ? (
+                                    <GradientSpinner size="sm" />
+                                ) : (
                                     <X className="w-4 h-4" />
-                                </button>
-                            </>
+                                )}
+                            </button>
                         )}
                     </div>
                 </div>
             );
+        }
+
+        const playlistItem = item as PlaylistItem;
+        const isCurrentlyPlaying = currentTrack?.id === playlistItem.track.id;
+        const trackIndex = playlist?.items?.findIndex(
+            (i: PlaylistItem) => i.id === playlistItem.id
+        ) ?? index;
+
+        return (
+            <div
+                key={playlistItem.id}
+                data-track-index={trackIndex}
+                draggable={!!playlist?.isOwner}
+                onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", playlistItem.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    handleDragStart(playlistItem.id);
+                }}
+                onDragOver={(e) => handleDragOver(e, playlistItem.id)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => {
+                    e.preventDefault();
+                    handleDrop(playlistItem.id);
+                }}
+                onDoubleClick={() => handlePlayTrack(trackIndex)}
+                onTouchEnd={handleRowTouchEnd}
+                className={cn(
+                    "grid grid-cols-[40px_minmax(0,1fr)_96px]",
+                    TRACK_GRID_MD,
+                    "gap-2 md:gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                    draggedItemId === playlistItem.id && "opacity-50",
+                    dragOverItemId === playlistItem.id && "border-brand/40 bg-brand/5",
+                    isCurrentlyPlaying && "bg-white/5 border-brand/30"
+                )}
+            >
+                <div className="flex items-center justify-center gap-1">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handlePlayTrack(trackIndex);
+                        }}
+                        className="w-8 h-8 flex items-center justify-center"
+                        aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
+                    >
+                        <span
+                            className={cn(
+                                "text-xs group-hover:hidden",
+                                isCurrentlyPlaying
+                                    ? "text-brand font-bold"
+                                    : "text-[var(--text-muted)]"
+                            )}
+                        >
+                            {isCurrentlyPlaying && isPlaying ? (
+                                <Music className="w-4 h-4 text-brand animate-pulse" />
+                            ) : (
+                                trackIndex + 1
+                            )}
+                        </span>
+                        <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                    </button>
+                    {playlist?.isOwner && (
+                        <button
+                            draggable={false}
+                            onDragStart={(e) => {
+                                e.stopPropagation();
+                                e.dataTransfer.setData("text/plain", playlistItem.id);
+                                e.dataTransfer.effectAllowed = "move";
+                                handleDragStart(playlistItem.id);
+                            }}
+                            onDragEnd={handleDragEnd}
+                            aria-label="Drag to reorder"
+                            className="touch-reveal w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-60 hover:opacity-100 focus-visible:opacity-100 transition-all cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-white"
+                        >
+                            <GripVertical className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="relative w-10 h-10 bg-[var(--bg-primary)] rounded-lg shrink-0 overflow-hidden border border-white/10">
+                        {playlistItem.track.album?.coverArt ? (
+                            <CachedImage
+                                src={api.getCoverArtUrl(
+                                    playlistItem.track.album.coverArt,
+                                    100
+                                )}
+                                alt={shownTitle(playlistItem.track)}
+                                fill
+                                sizes="40px"
+                                className="object-cover"
+                            />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <Music className="w-5 h-5 text-white/10" />
+                            </div>
+                        )}
+                    </div>
+                    <div className="min-w-0">
+                        <p
+                            className={cn(
+                                "text-sm font-bold truncate tracking-tight",
+                                isCurrentlyPlaying
+                                    ? "text-brand"
+                                    : "text-white"
+                            )}
+                        >
+                            {formatTrackDisplay(
+                                {
+                                    title: shownTitle(playlistItem.track),
+                                    artist: playlistItem.track.album.artist.name,
+                                    album: playlistItem.track.album.title,
+                                },
+                                trackFormat,
+                            )}
+                        </p>
+                        <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
+                            {playlistItem.track.album.artist.name}
+                            <span className="md:hidden">
+                                {" · "}
+                                {formatTime(playlistItem.track.duration)}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+
+                <p className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] truncate">
+                    {playlistItem.track.album.title}
+                </p>
+
+                <span className="hidden md:block self-center text-xs tabular-nums text-[var(--text-muted)] text-right">
+                    {formatTime(playlistItem.track.duration)}
+                </span>
+
+                <div className="flex items-center justify-end gap-1">
+                    <button
+                        className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddToQueue(playlistItem.track);
+                        }}
+                        aria-label="Add to queue"
+                        title="add to queue"
+                    >
+                        <ListPlus className="w-4 h-4" />
+                    </button>
+                    {playlist?.isOwner && (
+                        <>
+                            <button
+                                aria-label="Move up"
+                                className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveTrackUp(playlistItem.id);
+                                }}
+                                title="move up"
+                            >
+                                <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button
+                                aria-label="Move down"
+                                className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveTrackDown(playlistItem.id);
+                                }}
+                                title="move down"
+                            >
+                                <ChevronDown className="w-4 h-4" />
+                            </button>
+                            <button
+                                className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveTrack(playlistItem.track.id);
+                                }}
+                                aria-label="Remove from playlist"
+                                title="remove from playlist"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
     };
 
     if (isLoading) {
@@ -973,7 +963,7 @@ export default function PlaylistDetailPage() {
 
                     {playlist.items && playlist.items.length > 1 && (
                         <button
-                            onClick={() => playTracks(shuffleArray(playlist.items.map((item: PlaylistItem) => toAudioTrack(item.track))), 0)}
+                            onClick={() => playTracks(shuffleArray(playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track))), 0)}
                             className="h-8 w-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-all"
                             title="shuffle play"
                         >
@@ -1150,14 +1140,14 @@ export default function PlaylistDetailPage() {
                                 </span>
                             </div>
                             {canAcquire && (
-                            <button
-                                onClick={handleRetryAllPending}
-                                disabled={retryingAll}
-                                className="flex items-center gap-1.5 px-3 py-1 text-xs tabular-nums text-danger-light hover:brightness-125 hover:bg-danger/20 rounded transition-colors disabled:opacity-50"
-                            >
-                                <RefreshCw className={cn("w-3 h-3", retryingAll && "animate-spin")} />
-                                Retry All
-                            </button>
+                                <button
+                                    onClick={handleRetryAllPending}
+                                    disabled={retryingAll}
+                                    className="flex items-center gap-1.5 px-3 py-1 text-xs tabular-nums text-danger-light hover:brightness-125 hover:bg-danger/20 rounded transition-colors disabled:opacity-50"
+                                >
+                                    <RefreshCw className={cn("w-3 h-3", retryingAll && "animate-spin")} />
+                                    Retry All
+                                </button>
                             )}
                         </div>
                     )}

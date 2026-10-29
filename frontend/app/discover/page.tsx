@@ -33,7 +33,6 @@ export default function DiscoverWeeklyPage() {
     const queryClient = useQueryClient();
     const { canAcquire } = usePublicConfig();
 
-    // Custom hooks - single source of truth for batch status from useDiscoverData
     const { playlist, config, setConfig, loading, loadError, reloadData, batchStatus, refreshBatchStatus, setPendingGeneration, markGenerationStart, updateTrackLiked, isGenerating } = useDiscoverData();
     const {
         handleGenerate,
@@ -72,7 +71,7 @@ export default function DiscoverWeeklyPage() {
         (t) => t.id === currentTrack?.id
     );
 
-    // Build discover settings element (stable across renders via the effect dep array)
+    // The settings element handed to the side panel; the refs keep it stable across renders.
     const discoverSettingsRef = useRef<React.ReactNode>(null);
     const settingsOwnerRef = useRef(settingsOwner);
     useLayoutEffect(() => {

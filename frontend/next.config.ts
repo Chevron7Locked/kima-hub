@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
     turbopack: {
         root: __dirname,
     },
-    
+
     // Dev-server origins. Add your own (e.g. a LAN/tailnet address you browse
     // from) via KIMA_DEV_ORIGINS="host1,http://host2:3030" — never hard-coded here.
     allowedDevOrigins: [
@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
         "localhost",
         ...(process.env.KIMA_DEV_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     ],
-    
+
     images: {
         remotePatterns: [
             {

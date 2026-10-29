@@ -170,9 +170,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const handlePlaylistSelected = async (playlistId: string) => {
         if (!pendingTrackIds.length) return;
 
-        // Errors propagate to the selector, which reports them and stays
-        // open. Swallowing here closed the dialog and made a rejected add
-        // look like success.
+        // Errors propagate to the selector, which reports them and stays open.
         await addToPlaylist.mutateAsync({ playlistId, trackIds: pendingTrackIds });
         setPendingTrackIds([]);
         setShowPlaylistSelector(false);

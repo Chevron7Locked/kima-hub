@@ -381,8 +381,11 @@ export function usePublicConfig() {
         queryFn: () => api.getPublicConfig(),
         staleTime: 5 * 60 * 1000,
     });
-    // Settled: answered, or failed (and nothing cached to fall back on).
-    return { publicUrl: data?.publicUrl ?? "", canAcquire: data?.canAcquire === true, settled: data !== undefined || isError };
+    // Settled: answered, or failed (and nothing cached to fall back on). Locked: the server has said this listener
+    // may not start downloads, so the operator-only message shows (a control is disabled until then either way).
+    const canAcquire = data?.canAcquire === true;
+    const settled = data !== undefined || isError;
+    return { publicUrl: data?.publicUrl ?? "", canAcquire, settled, locked: settled && !canAcquire };
 }
 
 /** Apple's chart for a category, or the overall chart for null. */

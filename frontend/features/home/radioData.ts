@@ -17,7 +17,7 @@ export interface RadioStation {
         type: "genre" | "decade" | "discovery" | "favorites" | "all" | "workout" | "mood";
         value?: string;
     };
-    minTracks?: number;
+    minTracks: number;
     /** Plays from the learned moods, which are scored from sound vectors: nothing to play without the vibe analyzer. */
     needsMoods?: boolean;
 }
@@ -143,7 +143,7 @@ const GENRE_STYLES: Record<string, { color: string; hoverBorder: string; accentG
     reggae: { color: "from-[#4ade80]/15 to-[#eab308]/10", hoverBorder: "hover:border-[#4ade80]/40", accentGradient: "from-[#4ade80] to-[#eab308]" },
 };
 
-const DEFAULT_STYLE = { color: "from-[#6b7280]/15 to-[#4b5563]/10", hoverBorder: "hover:border-[#6b7280]/40", accentGradient: "from-[#6b7280] to-[#4b5563]" };
+export const DEFAULT_STYLE = { color: "from-[#6b7280]/15 to-[#4b5563]/10", hoverBorder: "hover:border-[#6b7280]/40", accentGradient: "from-[#6b7280] to-[#4b5563]" };
 
 const DECADE_ACCENT_COLORS: Record<number, { color: string; hoverBorder: string; accentGradient: string }> = {
     1700: { color: "from-[#92400e]/15 to-[#78350f]/10", hoverBorder: "hover:border-[#92400e]/40", accentGradient: "from-[#92400e] to-[#78350f]" },
@@ -182,10 +182,9 @@ function getDecadeStyle(decade: number) {
     return DEFAULT_STYLE;
 }
 
+/** The twentieth century's decades by two digits ("80s"), every other by four ("1850s", "2010s"). */
 function getDecadeName(decade: number): string {
-    if (decade < 1900) return `${decade}s`;
-    if (decade < 2000) return `${decade.toString().slice(2)}s`;
-    return `${decade}s`;
+    return decade >= 1900 && decade < 2000 ? `${decade.toString().slice(2)}s` : `${decade}s`;
 }
 
 export function useRadioPlayer() {
@@ -213,9 +212,9 @@ export function useRadioPlayer() {
                 notify.error("No tracks for this radio station", { message: station.name });
                 return;
             }
-            if (response.tracks.length < (station.minTracks || 10)) {
+            if (response.tracks.length < station.minTracks) {
                 notify.error("Not enough tracks for this radio station", {
-                    message: `${station.name}: found ${response.tracks.length}, needs ${station.minTracks || 10}`,
+                    message: `${station.name}: found ${response.tracks.length}, needs ${station.minTracks}`,
                 });
                 return;
             }

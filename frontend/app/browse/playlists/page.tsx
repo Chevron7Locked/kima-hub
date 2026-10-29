@@ -34,7 +34,6 @@ interface Genre {
 type BrowseTab = "playlists" | "genres";
 
 export default function BrowsePlaylistsPage() {
-
     const [activeTab, setActiveTab] = useState<BrowseTab>("playlists");
     const [searchQuery, setSearchQuery] = useState("");
     const [isLoading, setIsLoading] = useState(true);
@@ -351,7 +350,6 @@ export default function BrowsePlaylistsPage() {
                             <>
                                 {activeTab === "playlists" && (
                                     <div
-
                                         style={{
                                             animationDelay: `${sectionIndex++ * 0.1}s`,
                                         }}
@@ -381,7 +379,6 @@ export default function BrowsePlaylistsPage() {
 
                                 {activeTab === "genres" && (
                                     <div
-
                                         style={{
                                             animationDelay: `${sectionIndex++ * 0.1}s`,
                                         }}

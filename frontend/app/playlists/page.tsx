@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { playlistTrackToAudio, type PlaylistTrack } from "@/lib/playlist-track";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { usePlaylistsQuery } from "@/hooks/useQueries";
@@ -34,7 +35,6 @@ import { mosaicCovers } from "@/features/playlist/coverMosaic";
 type ActionPanel = "create" | "importUrl" | "importFile" | null;
 
 interface PlaylistItem {
-    id: string;
     track: {
         album?: {
             coverUrl?: string;
@@ -581,21 +581,7 @@ export default function PlaylistsPage() {
         try {
             const playlist = await api.getPlaylist(playlistId);
             if (playlist?.items && playlist.items.length > 0) {
-                const tracks = playlist.items.map((item: { track: { id: string; title: string; displayTitle?: string | null; duration: number; album?: { id?: string; title?: string; coverArt?: string; artist?: { id?: string; name?: string } } } }) => ({
-                    id: item.track.id,
-                    title: item.track.title,
-                    displayTitle: item.track.displayTitle,
-                    artist: {
-                        name: item.track.album?.artist?.name || "Unknown",
-                        id: item.track.album?.artist?.id,
-                    },
-                    album: {
-                        title: item.track.album?.title || "Unknown",
-                        coverArt: item.track.album?.coverArt,
-                        id: item.track.album?.id,
-                    },
-                    duration: item.track.duration,
-                }));
+                const tracks = playlist.items.map((item: { track: PlaylistTrack }) => playlistTrackToAudio(item.track));
                 playTracks(tracks, 0);
             }
         } catch (error) {

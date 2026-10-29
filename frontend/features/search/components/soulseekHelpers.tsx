@@ -52,3 +52,22 @@ export const parseFilename = (
     }
     return { artist: "Unknown", title: filename };
 };
+
+/** A result's identity for downloads and selection: the peer and the file's path on it. */
+export const resultKey = (result: SoulseekResult) => `${result.username}:${result.path}`;
+
+/** Lossless first, then by bitrate. */
+export const qualityScore = (result: SoulseekResult) => (result.format === "flac" ? 10000 : result.bitrate);
+
+/**
+ * A result's artist and title: the server's parse where it has one; with only the artist parsed, the title is what
+ * follows the first " - " in the file name; with neither, both are read from the file name.
+ */
+export function describeResult(result: SoulseekResult): { artist: string; title: string } {
+    if (result.parsedTitle) return { artist: result.parsedArtist || "Unknown", title: result.parsedTitle };
+    if (result.parsedArtist) {
+        const title = result.filename.split("\\").pop()?.split(" - ").slice(1).join(" - ");
+        return { artist: result.parsedArtist, title: title || result.filename };
+    }
+    return parseFilename(result.filename);
+}
