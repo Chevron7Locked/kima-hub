@@ -7,13 +7,12 @@
 import { prisma } from "../utils/db";
 import {
     closeOrphanedDependents,
-    computeStageRetryWaitMs,
     getNextWork,
     recordStageAbsent,
     recordStageFailure,
     recordStageSuccess,
-    STAGE_RETRY_CAP,
 } from "../workers/unifiedEnrichment";
+import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../workers/stageRetry";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
 const PREFIX = "retrycap";

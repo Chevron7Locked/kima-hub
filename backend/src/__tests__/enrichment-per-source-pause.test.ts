@@ -174,6 +174,16 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         expect(await sourcePauseController.listPaused()).toEqual(["musicbrainz"]);
     });
 
+    it("the waiting record names the source that was limited, not the one it was last asked of", async () => {
+        await putStage(id("a"), "recording", "working", { attempt: 1, source: "acoustid" });
+
+        const err = Object.assign(new Error("HTTP 429 Too Many Requests"), { response: { status: 429 } });
+        await recordStageFailure(id("a"), "recording", "musicbrainz", err);
+
+        // The dispatch checks the stored source's pause, so it must be the paused one.
+        expect((await getRecord(id("a"), "recording")).source).toBe("musicbrainz");
+    });
+
     it("the record waits instead of failing: attempt unchanged, back to pending", async () => {
         await putStage(id("a"), "recording", "working", { attempt: 1 });
 

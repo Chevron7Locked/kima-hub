@@ -153,9 +153,7 @@ export interface StageWork {
     jobId: string;
 }
 
-/** A record is due when the answer is missing, a retry's backoff elapsed, or
- * a claim's lease ran out (a `working` record whose `nextRetryAt` came round
- * is an attempt that died without answering). */
+/** The statuses a record can be due in by its `nextRetryAt`; a `working` record whose lease ran out is due as well. */
 const DUE_STATUSES = ["pending", "failed"] as const;
 
 /** How long a claim holds a record before the attempt is presumed dead. */
@@ -474,8 +472,6 @@ async function drainCap(stage: "recording" | "analysis" | "embedding"): Promise<
     return Math.min(ceiling, Math.max(2 * workers, drainable));
 }
 
-export { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "./stageRetry";
-
 /** Answer a track's stage `done` by `source`, with evidence; idempotent. */
 export async function recordStageSuccess(
     trackId: string,
@@ -640,6 +636,53 @@ async function failureMaySettle(
 }
 
 /**
+ * Parks a stage on its source's rate limit until `until`: pending, no attempt used, the evidence kept. A sound-vector
+ * stage's mirror on the track says pending too. `writeGuard` keeps a newer answer from being overwritten.
+ */
+async function parkOnRateLimit(
+    trackId: string,
+    stage: StageName,
+    source: string,
+    until: Date,
+    message: string,
+    evidence: unknown,
+    writeGuard: string,
+): Promise<void> {
+    const parked = await prisma.$executeRawUnsafe(
+        `INSERT INTO "TrackStage"
+            (id, "trackId", stage, status, source, attempt, retryable,
+             "nextRetryAt", "lastErrorCode", "lastErrorMessage", evidence)
+         VALUES ($1, $2, $3, 'pending', $4, 0, true, $5, 'RATE_LIMITED', $6, $7::jsonb)
+         ON CONFLICT ("trackId", stage) DO UPDATE
+            SET status = 'pending',
+                source = EXCLUDED.source,
+                "nextRetryAt" = EXCLUDED."nextRetryAt",
+                "lastErrorCode" = 'RATE_LIMITED',
+                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
+                evidence = EXCLUDED.evidence
+          WHERE ${writeGuard}`,
+        `${trackId}__${stage}`,
+        trackId,
+        stage,
+        source,
+        until,
+        message,
+        JSON.stringify(evidence),
+    );
+    if (parked > 0 && stage === "embedding") {
+        await prisma.$executeRawUnsafe(
+            `UPDATE "Track"
+                SET "vibeAnalysisStatus" = 'pending',
+                    "vibeAnalysisError" = $2,
+                    "vibeAnalysisStatusUpdatedAt" = now()
+              WHERE id = $1`,
+            trackId,
+            message,
+        );
+    }
+}
+
+/**
  * Record a failed attempt. A rate limit pauses only that source and parks the
  * record `pending` without consuming an attempt. Any other error writes `failed`
  * with its class and a retry time, and closes the record at STAGE_RETRY_CAP.
@@ -695,38 +738,7 @@ export async function recordStageFailure(
                 .catch(() => undefined);
         }
 
-        const parked = await prisma.$executeRawUnsafe(
-            `INSERT INTO "TrackStage"
-                (id, "trackId", stage, status, source, attempt, retryable,
-                 "nextRetryAt", "lastErrorCode", "lastErrorMessage", evidence)
-             VALUES ($1, $2, $3, 'pending', $4, 0, true, $5, 'RATE_LIMITED', $6, $7::jsonb)
-             ON CONFLICT ("trackId", stage) DO UPDATE
-                SET status = 'pending',
-                    "nextRetryAt" = EXCLUDED."nextRetryAt",
-                    "lastErrorCode" = 'RATE_LIMITED',
-                    "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                    evidence = EXCLUDED.evidence
-              WHERE ${writeGuard}`,
-            `${trackId}__${stage}`,
-            trackId,
-            stage,
-            source,
-            until,
-            message,
-            JSON.stringify(waitEvidence),
-        );
-        if (parked > 0 && stage === "embedding") {
-            // Parked on a rate limit, not failed: the mirror says pending.
-            await prisma.$executeRawUnsafe(
-                `UPDATE "Track"
-                    SET "vibeAnalysisStatus" = 'pending',
-                        "vibeAnalysisError" = $2,
-                        "vibeAnalysisStatusUpdatedAt" = now()
-                  WHERE id = $1`,
-                trackId,
-                message,
-            );
-        }
+        await parkOnRateLimit(trackId, stage, source, until, message, waitEvidence, writeGuard);
         return;
     }
 
@@ -894,26 +906,14 @@ async function recordOutcomeFailure(
     if (!open) return;
     const { current, writeGuard } = open;
     if (outcome.kind === "rateLimited") {
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO "TrackStage"
-                (id, "trackId", stage, status, source, attempt, retryable,
-                 "nextRetryAt", "lastErrorCode", "lastErrorMessage", evidence)
-             VALUES ($1, $2, $3, 'pending', $4, 0, true, $5, 'RATE_LIMITED', $6, $7::jsonb)
-             ON CONFLICT ("trackId", stage) DO UPDATE
-                SET status = 'pending',
-                    source = EXCLUDED.source,
-                    "nextRetryAt" = EXCLUDED."nextRetryAt",
-                    "lastErrorCode" = 'RATE_LIMITED',
-                    "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                    evidence = EXCLUDED.evidence
-              WHERE ${writeGuard}`,
-            `${trackId}__${stage}`,
+        await parkOnRateLimit(
             trackId,
             stage,
             source,
             outcome.retryAfter,
             `source '${source}' is paused until ${outcome.retryAfter.toISOString()}`,
-            JSON.stringify(outcome.evidence),
+            outcome.evidence,
+            writeGuard,
         );
         return;
     }
@@ -1028,9 +1028,7 @@ async function setupControlChannel() {
     }
 }
 
-/**
- * Start the unified enrichment worker (incremental mode)
- */
+/** Starts the enrichment cycle: control channel, one cycle now, then each cycle schedules the next. */
 export async function startUnifiedEnrichmentWorker() {
     // Clear the stop latch, or a restart within the same process arms one cycle and then
     // never reschedules.
@@ -1039,32 +1037,32 @@ export async function startUnifiedEnrichmentWorker() {
         `[Enrichment] Starting worker: artist batch ${ARTIST_BATCH_SIZE}, track batch ${TRACK_BATCH_SIZE}, interval ${ENRICHMENT_INTERVAL_MS / 1000}s`
     );
 
-     // No startup sweep is needed: a job that died mid-flight is a `working` record
-     // whose lease comes due on its own.
+    // No startup sweep is needed: a job that died mid-flight is a `working` record
+    // whose lease comes due on its own.
 
-     // A stored `paused` is an operator instruction and survives a restart. Any
-     // other leftover state (`running`, `stopping`) is crash residue and starts fresh.
-     const existingState = await enrichmentStateService.getState();
-     const honoringPause = existingState?.status === "paused";
+    // A stored `paused` is an operator instruction and survives a restart. Any
+    // other leftover state (`running`, `stopping`) is crash residue and starts fresh.
+    const existingState = await enrichmentStateService.getState();
+    const honoringPause = existingState?.status === "paused";
 
-     if (honoringPause) {
-         isPaused = true;
-         userStopped = false;
-         isStopping = false;
-         logger.warn(
-             "[Enrichment] Honouring the persisted pause — " +
-                 "use Resume on the Enrichment page to lift it",
-         );
-     } else {
-         isPaused = false;
-         isStopping = false;
-         userStopped = false;
-         if (existingState && existingState.status !== "idle") {
-             await enrichmentStateService.clear();
-         }
-         // Initialize state
-         await enrichmentStateService.initializeState();
-     }
+    if (honoringPause) {
+        isPaused = true;
+        userStopped = false;
+        isStopping = false;
+        logger.warn(
+            "[Enrichment] Honouring the persisted pause — " +
+                "use Resume on the Enrichment page to lift it",
+        );
+    } else {
+        isPaused = false;
+        isStopping = false;
+        userStopped = false;
+        if (existingState && existingState.status !== "idle") {
+            await enrichmentStateService.clear();
+        }
+        // Initialize state
+        await enrichmentStateService.initializeState();
+    }
 
     // Start BullMQ Workers (artist, track, podcast)
     activeEnrichmentWorkers = await Promise.all([
@@ -1091,13 +1089,8 @@ export async function startUnifiedEnrichmentWorker() {
     // Start audio completion subscriber (Essentia → vibe queue bridge)
     startAudioCompletionSubscriber();
 
-    // Setup control channel subscription
     await setupControlChannel();
-
-    // Run immediately
     await runEnrichmentCycle(false);
-
-    // Self-rescheduling: schedule next cycle after current one completes
     scheduleNextEnrichmentCycle();
 }
 
@@ -1171,9 +1164,6 @@ function bumpScheduleToFastInterval(): void {
     scheduleNextEnrichmentCycle(ENRICHMENT_INTERVAL_MS);
 }
 
-/**
- * Stop the enrichment worker
- */
 export async function stopUnifiedEnrichmentWorker() {
     enrichmentStopped = true;
     if (enrichmentInterval) {
@@ -1860,7 +1850,6 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     };
 }
 
-
 /**
  * True when the fingerprint stage closed as a permanent failure: the question
  * is settled as "never", so identification skips AcoustID and records the skip.
@@ -1934,14 +1923,9 @@ export async function enrichSingleTrack(
         throw entityGoneError("Track", trackId);
     }
 
-    // Identification ladder: the file's own recording id; AcoustID, by the sound (a reply
-    // saved when the dispatch asked for a batch of songs, else asked here); the album's
-    // tracklist, which names the recording when nothing has yet and otherwise gives the
-    // ISRCs and genres of an answer that is on it; the file's ISRC; the name search. Every
-    // MusicBrainz candidate must be this track (`recordingAgrees`) before it is accepted.
-    // A MusicBrainz failure stops the ladder: the record defers with the real cause.
-    // AcoustID failing or paused does not stop MusicBrainz from answering; the record waits
-    // for AcoustID only when MusicBrainz has no answer either.
+    // Identification in order: the file's recording id, AcoustID, the album's tracklist, the ISRC, the name search;
+    // every candidate must agree with this track (`recordingAgrees`). A MusicBrainz failure defers the record with its
+    // cause; AcoustID failing only matters when MusicBrainz has no answer either.
     const timeoutMs = getStageTimeoutMs("recording");
     const trackRef = {
         id: track.id,
@@ -2282,7 +2266,6 @@ async function replaceRecordingIsrc(trackId: string, isrc: string | null): Promi
         data: code ? { isrc: code, isrcSource: "musicbrainz" } : { isrc: null, isrcSource: null },
     });
 }
-
 
 /**
  * Check if enrichment should stop and handle state cleanup if stopping.
@@ -2715,7 +2698,6 @@ export async function executeAudioPhase(): Promise<number> {
     const work = await getNextWork(await drainCap("analysis"), "analysis");
     return dispatchStageWork("analysis", work, STAGE_PRODUCERS.analysis);
 }
-
 
 /**
  * The `embedding` question (CLAP), offered only for tracks whose own analysis
@@ -3155,5 +3137,4 @@ export async function triggerEnrichmentNow(): Promise<{
 
     return runEnrichmentCycle(false);
 }
-
 
