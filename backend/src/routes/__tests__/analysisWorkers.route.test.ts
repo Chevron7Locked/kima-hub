@@ -32,6 +32,8 @@ import express from 'express';
 import os from 'os';
 import request from 'supertest';
 import analysisRoutes from '../analysis';
+import { prisma } from '../../utils/db';
+import { redisClient } from '../../utils/redis';
 
 describe('analysis worker sliders', () => {
     let app: express.Application;
@@ -72,5 +74,54 @@ describe('analysis worker sliders', () => {
             const res = await request(app).put(path).send({ workers: 17 });
             expect(res.status).toBe(400);
         }
+    });
+
+    // The two sliders share one handler; each keeps its own setting, channel, heartbeat, floor and wording.
+    it('keeps each slider on its own setting, channel and heartbeat', async () => {
+        for (const [path, field, channel, heartbeat] of [
+            ['/analysis/workers', 'audioAnalyzerWorkers', 'audio:analysis:control', 'audio:worker:heartbeat'],
+            ['/analysis/clap-workers', 'clapWorkers', 'audio:clap:control', 'clap:worker:heartbeat'],
+        ]) {
+            jest.clearAllMocks();
+            const res = await request(app).put(path).send({ workers: 3 });
+            expect(res.status).toBe(200);
+            expect(prisma.systemSettings.upsert).toHaveBeenCalledWith({
+                where: { id: 'default' },
+                create: { id: 'default', [field]: 3 },
+                update: { [field]: 3 },
+            });
+            expect(redisClient.publish).toHaveBeenCalledWith(channel, JSON.stringify({ command: 'set_workers', count: 3 }));
+            expect(redisClient.get).toHaveBeenCalledWith(heartbeat);
+            expect(res.body).toEqual({
+                workers: 3,
+                cpuCores: 16,
+                recommended: 8,
+                analyzerOnline: false,
+                delivered: 0,
+                description: 'Saved, but no analyzer is running. It will use 3 of 16 core(s) when it starts.',
+            });
+        }
+    });
+
+    it('recommends at least 2 analysis workers and at least 1 CLAP worker on a small machine', async () => {
+        cpusSpy.mockReturnValue([{ model: 'x', speed: 1, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }] as os.CpuInfo[]);
+        expect((await request(app).get('/analysis/workers')).body.recommended).toBe(2);
+        expect((await request(app).get('/analysis/clap-workers')).body.recommended).toBe(1);
+    });
+
+    it('reads each slider from its own setting and heartbeat', async () => {
+        (redisClient.get as jest.Mock).mockClear();
+        const { getSystemSettings } = jest.requireMock('../../utils/systemSettings');
+        getSystemSettings.mockResolvedValueOnce({ audioAnalyzerWorkers: 5, clapWorkers: 2 });
+        expect((await request(app).get('/analysis/workers')).body.workers).toBe(5);
+        expect(redisClient.get).toHaveBeenLastCalledWith('audio:worker:heartbeat');
+        getSystemSettings.mockResolvedValueOnce({ audioAnalyzerWorkers: 2, clapWorkers: 7 });
+        expect((await request(app).get('/analysis/clap-workers')).body.workers).toBe(7);
+        expect(redisClient.get).toHaveBeenLastCalledWith('clap:worker:heartbeat');
+    });
+
+    it('names the slider in its refusal', async () => {
+        expect((await request(app).put('/analysis/workers').send({ workers: 0 })).body.error).toBe('Workers must be a number between 1 and 16');
+        expect((await request(app).put('/analysis/clap-workers').send({ workers: 0 })).body.error).toBe('CLAP workers must be a number between 1 and 16');
     });
 });

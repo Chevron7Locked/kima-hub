@@ -144,155 +144,94 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
 });
 
 
-
 /**
- * GET /api/analysis/workers
- * Get current audio analyzer worker configuration
+ * GET and PUT for one analyzer's worker-count slider: the saved count, the machine's cores, a recommendation and
+ * whether the change reached a running analyzer. The audio analyzer and CLAP each have one.
  */
-router.get("/workers", requireAuth, requireAdmin, async (_req, res) => {
-    try {
-        const settings = await getSystemSettings();
-        const cpuCores = os.cpus().length;
-        const currentWorkers = settings?.audioAnalyzerWorkers || 2;
-        const online = await analyzerIsOnline("audio:worker:heartbeat");
+function workerSlider(
+    path: string,
+    slider: {
+        field: "audioAnalyzerWorkers" | "clapWorkers";
+        channel: string;
+        heartbeat: string;
+        minRecommended: number;
+        name: string;
+    },
+) {
+    const recommendedFor = (cpuCores: number) => Math.max(slider.minRecommended, Math.floor(cpuCores / 2));
 
-        const recommended = Math.max(2, Math.floor(cpuCores / 2));
+    router.get(path, requireAuth, requireAdmin, async (_req, res) => {
+        try {
+            const settings = await getSystemSettings();
+            const cpuCores = os.cpus().length;
+            const currentWorkers = settings?.[slider.field] || 2;
+            const online = await analyzerIsOnline(slider.heartbeat);
 
-        res.json({
-            workers: currentWorkers,
-            cpuCores,
-            recommended,
-            analyzerOnline: online,
-            description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
-        });
-    } catch (error: any) {
-        logger.error("Get workers config error:", error);
-        res.status(500).json({ error: "Failed to get worker configuration" });
-    }
-});
-
-/**
- * PUT /api/analysis/workers
- * Update audio analyzer worker count
- */
-router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const { workers } = req.body;
-        const cpuCores = os.cpus().length;
-        
-        if (typeof workers !== 'number' || workers < 1 || workers > cpuCores) {
-            return res.status(400).json({
-                error: `Workers must be a number between 1 and ${cpuCores}`
+            res.json({
+                workers: currentWorkers,
+                cpuCores,
+                recommended: recommendedFor(cpuCores),
+                analyzerOnline: online,
+                description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
             });
+        } catch (error: any) {
+            logger.error(`Get ${slider.name} config error:`, error);
+            res.status(500).json({ error: `Failed to get ${slider.name} configuration` });
         }
-        
-        // upsert: SystemSettings has no row on a fresh install.
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: { id: "default", audioAnalyzerWorkers: workers },
-            update: { audioAnalyzerWorkers: workers },
-        });
-        invalidateSystemSettingsCache();
+    });
 
-        const { online, delivered } = await dispatchWorkerCount(
-            "audio:analysis:control",
-            "audio:worker:heartbeat",
-            workers,
-        );
+    router.put(path, requireAuth, requireAdmin, async (req, res) => {
+        try {
+            const { workers } = req.body;
+            const cpuCores = os.cpus().length;
 
-        const recommended = Math.max(2, Math.floor(cpuCores / 2));
+            if (typeof workers !== "number" || workers < 1 || workers > cpuCores) {
+                return res.status(400).json({
+                    error: `${slider.name[0].toUpperCase()}${slider.name.slice(1)}s must be a number between 1 and ${cpuCores}`,
+                });
+            }
 
-        logger.info(
-            `Audio analyzer workers set to ${workers} (delivered to ${delivered} listener(s))`,
-        );
-
-        res.json({
-            workers,
-            cpuCores,
-            recommended,
-            analyzerOnline: online,
-            delivered,
-            description: describeWorkers(workers, cpuCores, online, delivered),
-        });
-    } catch (error: any) {
-        logger.error("Update workers config error:", error);
-        res.status(500).json({ error: "Failed to update worker configuration" });
-    }
-});
-
-/**
- * GET /api/analysis/clap-workers
- * Get current CLAP analyzer worker configuration
- */
-router.get("/clap-workers", requireAuth, requireAdmin, async (_req, res) => {
-    try {
-        const settings = await getSystemSettings();
-        const cpuCores = os.cpus().length;
-        const currentWorkers = settings?.clapWorkers || 2;
-        const online = await analyzerIsOnline("clap:worker:heartbeat");
-
-        const recommended = Math.max(1, Math.floor(cpuCores / 2));
-
-        res.json({
-            workers: currentWorkers,
-            cpuCores,
-            recommended,
-            analyzerOnline: online,
-            description: describeWorkers(currentWorkers, cpuCores, online, online ? 1 : 0),
-        });
-    } catch (error: any) {
-        logger.error("Get CLAP workers config error:", error);
-        res.status(500).json({ error: "Failed to get CLAP worker configuration" });
-    }
-});
-
-/**
- * PUT /api/analysis/clap-workers
- * Update CLAP analyzer worker count
- */
-router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
-    try {
-        const { workers } = req.body;
-        const cpuCores = os.cpus().length;
-
-        if (typeof workers !== 'number' || workers < 1 || workers > cpuCores) {
-            return res.status(400).json({
-                error: `CLAP workers must be a number between 1 and ${cpuCores}`
+            // upsert: SystemSettings has no row on a fresh install.
+            await prisma.systemSettings.upsert({
+                where: { id: "default" },
+                create: { id: "default", [slider.field]: workers },
+                update: { [slider.field]: workers },
             });
+            invalidateSystemSettingsCache();
+
+            const { online, delivered } = await dispatchWorkerCount(slider.channel, slider.heartbeat, workers);
+
+            logger.info(`[Analysis] ${slider.field} set to ${workers} (delivered to ${delivered} listener(s))`);
+
+            res.json({
+                workers,
+                cpuCores,
+                recommended: recommendedFor(cpuCores),
+                analyzerOnline: online,
+                delivered,
+                description: describeWorkers(workers, cpuCores, online, delivered),
+            });
+        } catch (error: any) {
+            logger.error(`Update ${slider.name} config error:`, error);
+            res.status(500).json({ error: `Failed to update ${slider.name} configuration` });
         }
+    });
+}
 
-        // upsert: SystemSettings has no row on a fresh install.
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: { id: "default", clapWorkers: workers },
-            update: { clapWorkers: workers },
-        });
-        invalidateSystemSettingsCache();
+workerSlider("/workers", {
+    field: "audioAnalyzerWorkers",
+    channel: "audio:analysis:control",
+    heartbeat: "audio:worker:heartbeat",
+    minRecommended: 2,
+    name: "worker",
+});
 
-        const { online, delivered } = await dispatchWorkerCount(
-            "audio:clap:control",
-            "clap:worker:heartbeat",
-            workers,
-        );
-
-        const recommended = Math.max(1, Math.floor(cpuCores / 2));
-
-        logger.info(
-            `CLAP analyzer workers set to ${workers} (delivered to ${delivered} listener(s))`,
-        );
-
-        res.json({
-            workers,
-            cpuCores,
-            recommended,
-            analyzerOnline: online,
-            delivered,
-            description: describeWorkers(workers, cpuCores, online, delivered),
-        });
-    } catch (error: any) {
-        logger.error("Update CLAP workers config error:", error);
-        res.status(500).json({ error: "Failed to update CLAP worker configuration" });
-    }
+workerSlider("/clap-workers", {
+    field: "clapWorkers",
+    channel: "audio:clap:control",
+    heartbeat: "clap:worker:heartbeat",
+    minRecommended: 1,
+    name: "CLAP worker",
 });
 
 /**
