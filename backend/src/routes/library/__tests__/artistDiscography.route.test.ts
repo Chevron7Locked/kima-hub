@@ -12,8 +12,9 @@ jest.mock("../../../utils/redis", () => ({
 }));
 // These tests are about the artist page, not Deezer: its popular-songs fallback answers "no top list" here rather
 // than reaching the real service.
+const mockTopTracks = jest.fn().mockResolvedValue([]);
 jest.mock("../../../services/deezer", () => ({
-    deezerService: { getArtistTopTracks: jest.fn().mockResolvedValue([]) },
+    deezerService: { getArtistTopTracks: (...a: unknown[]) => mockTopTracks(...a) },
 }));
 
 const mockGetReleaseGroups = jest.fn();
@@ -98,4 +99,23 @@ it("offers only albums the library has in no edition", async () => {
         "Our Love to Admire|database",
         "Turn on the Bright Lights|musicbrainz",
     ]);
+});
+
+it("joins a popular song to the owned one whatever its apostrophes and accents", async () => {
+    mockGetReleaseGroups.mockResolvedValue([]);
+    await prisma.track.create({
+        data: {
+            id: "disco_t_evil", albumId: "disco_antics", title: "Evil\u2019s Twin", trackNo: 1, duration: 200,
+            filePath: "/tmp/disco_evil.flac", fileModified: new Date(), fileSize: 1,
+        },
+    });
+    mockTopTracks.mockResolvedValueOnce([
+        { title: "Evil's Twin", artist: "Interpol", album: "Antics", coverUrl: null, previewUrl: "https://x.invalid/p.mp3", durationMs: 200000, rank: 1 },
+    ]);
+    try {
+        const res = await request(makeApp()).get(`/artists/${ARTIST}`).expect(200);
+        expect(res.body.topTracks[0].id).toBe("disco_t_evil");
+    } finally {
+        await prisma.track.deleteMany({ where: { id: "disco_t_evil" } });
+    }
 });

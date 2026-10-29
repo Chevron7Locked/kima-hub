@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { nameKey } from "../../services/nameFold";
 import fs from "fs";
 import path from "path";
 import { artistNamed, isMbid, normalizeArtistName } from "../../services/artistIdentity";
@@ -421,9 +422,13 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
   }
 });
 
-/** A song title without what follows a dash or bracket ("Song - Radio Edit", "Song (Live)"), lowercased. */
+/**
+ * A song title without what follows a dash or bracket ("Song - Radio Edit", "Song (Live)"), folded by nameKey; a title
+ * with no letters or digits keys on its lowercased text.
+ */
 function bareTitle(title: string): string {
-  return title.replace(/\s*[-–(].*$/, "").trim().toLowerCase();
+  const bare = title.replace(/\s*[-–(].*$/, "");
+  return nameKey(bare) || bare.trim().toLowerCase();
 }
 
 /** A library song listed among an artist's top songs when nobody's plays rank it. */
@@ -608,7 +613,7 @@ router.get("/artists/:id", async (req, res) => {
       for (const r of rows) {
         const owned =
           ownedByMbid.get(r.key) ||
-          ownedByTitle.get(r.title.toLowerCase()) ||
+          ownedByTitle.get(nameKey(r.title) || r.title.trim().toLowerCase()) ||
           ownedByTitle.get(bareTitle(r.title));
         // Two global rows can join to the same owned track (the Radio Edit
         // and the album cut of one song): keep the first, higher-ranked one.
