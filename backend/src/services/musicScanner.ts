@@ -129,7 +129,8 @@ export class MusicScannerService {
     }
 
     /**
-     * Scan the music directory and update the database
+     * Scans the music folder: adds and updates songs, flags missing files, retires confirmed-gone ones (in delete
+     * mode) and prunes empty albums and artists.
      */
     async scanLibrary(musicPath: string): Promise<ScanResult> {
         const startTime = Date.now();
@@ -145,11 +146,9 @@ export class MusicScannerService {
 
         logger.debug(`Starting library scan: ${musicPath}`);
 
-        // Step 1: Find all audio files
         const audioFiles = await this.findAudioFiles(musicPath);
         logger.debug(`Found ${audioFiles.length} audio files`);
 
-        // Step 2: Get existing tracks from database
         const existingTracks = await prisma.track.findMany({
             select: {
                 id: true,
@@ -172,8 +171,6 @@ export class MusicScannerService {
             throw new Error(message);
         }
 
-        // Step 3: Process each audio file
-        let filesScanned = 0;
         const progress: ScanProgress = {
             filesScanned: 0,
             filesTotal: audioFiles.length,
@@ -189,25 +186,13 @@ export class MusicScannerService {
                     this.progressCallback?.(progress);
 
                     const stats = await fs.promises.stat(audioFile);
-                    const fileModified = stats.mtime;
-
-                    // Skip 0-byte files (incomplete downloads, stubs)
+                    // An empty file is an unfinished download or a stub.
                     if (stats.size === 0) return;
 
                     const existingTrack = tracksByPath.get(relativePath);
-
-                    // Check if file needs updating
                     if (existingTrack) {
-                        if (
-                            existingTrack.fileModified &&
-                            existingTrack.fileModified >= fileModified
-                        ) {
-                            // File hasn't changed, skip
-                            return;
-                        }
-                        // File changed: every recorded answer was computed
-                        // from the old content, so reopen the whole stage
-                        // set before re-processing the row.
+                        if (existingTrack.fileModified && existingTrack.fileModified >= stats.mtime) return;
+                        // Every recorded answer came from the old content, so every stage is asked again.
                         await reopenStagesForChangedFile(existingTrack.id);
                     }
 
@@ -238,8 +223,7 @@ export class MusicScannerService {
                         logger.debug(`Marked track as corrupt: ${relativePath}`);
                     }
                 } finally {
-                    filesScanned++;
-                    progress.filesScanned = filesScanned;
+                    progress.filesScanned++;
                     this.progressCallback?.(progress);
                 }
             });
@@ -247,10 +231,6 @@ export class MusicScannerService {
 
         await this.scanQueue.onIdle();
 
-        // Missing files are flagged first, never deleted on sight: deleting the row cascades away its plays, likes,
-        // stage records and embedding, and the flag is cleared by the scan that finds the file again. In `delete`
-        // mode (default), Step 4b retires tracks confirmed gone — flagged by the previous scan, still absent now —
-        // and RemovalLog records what was removed. `flag` mode only flags.
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f))
         );
@@ -296,12 +276,11 @@ export class MusicScannerService {
             );
         }
 
+        // A missing file is flagged, never deleted on sight: deleting the row would take its plays, likes, stage
+        // records and embedding with it, and the scan that finds the file again clears the flag.
         if (pathCandidates.length > 0) {
-            const beforeCount = pathCandidates.length;
-            const vanished = existChecks
-                .filter((c) => !c.exists)
-                .map((c) => c.track);
-            const pathMismatches = beforeCount - vanished.length;
+            const vanished = existChecks.filter((c) => !c.exists).map((c) => c.track);
+            const pathMismatches = pathCandidates.length - vanished.length;
             if (pathMismatches > 0) {
                 logger.debug(
                     `${pathMismatches} track(s) had path mismatches but files exist on disk (skipped missing flag)`
@@ -336,13 +315,12 @@ export class MusicScannerService {
             });
         }
 
-        // Step 4b: Reconcile. Retires tracks confirmed gone by consecutive
-        // scans; inert in `flag` mode. Runs BEFORE Steps 5-6 so their orphan cleanup
-        // cascades the newly-emptied albums and artists for free.
+        // Retires tracks flagged by the previous scan and still gone (RemovalLog records them; the `flag` mode only
+        // flags). Before the album and artist pruning below, so what it empties goes too.
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
 
-        // Step 5: Clean up orphaned albums (albums with no tracks)
+        // Albums with no songs, then artists with no albums, go.
         const orphanedAlbums = await prisma.album.findMany({
             where: {
                 tracks: { none: {} },
@@ -359,7 +337,6 @@ export class MusicScannerService {
             });
         }
 
-        // Step 6: Clean up orphaned artists (artists with no albums)
         const orphanedArtists = await prisma.artist.findMany({
             where: {
                 albums: { none: {} },
@@ -387,8 +364,7 @@ export class MusicScannerService {
             `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} removed:${result.tracksRemoved} (${result.duration}ms)`
         );
 
-        // Update artist counts in background (non-blocking)
-        // This ensures denormalized counts are accurate after scan
+        // The artists' stored counts, recomputed in the background.
         backfillAllArtistCounts().catch((err) => {
             logger.error("[Scan] Artist counts update failed:", err);
         });
@@ -498,10 +474,7 @@ export class MusicScannerService {
             path.basename(relativePath, path.extname(relativePath));
         const trackNo = metadata.common.track.no || 0;
         const discNumber = metadata.common.disk.no || null;
-        // music-metadata's runtime usually returns `discsubtitle` as a single string,
-        // but the type declarations leave the shape ambiguous and some tag formats
-        // (e.g., Vorbis with multiple DISCSUBTITLE frames) can produce an array.
-        // Guard explicitly so a future shape change doesn't silently write bad data.
+        // Usually a string; some tag formats (several Vorbis DISCSUBTITLE frames) give an array.
         const rawDiscSubtitle = metadata.common.discsubtitle as unknown;
         const discSubtitleInput = Array.isArray(rawDiscSubtitle)
             ? (rawDiscSubtitle[0] as string | null | undefined)
@@ -520,7 +493,7 @@ export class MusicScannerService {
         let rawArtistName = albumArtistTag || trackArtistTag;
         let nameTag: "albumartist" | "artist" | null = albumArtistTag ? "albumartist" : trackArtistTag ? "artist" : null;
 
-        // Folder/filename fallback: If metadata is empty, try to parse from path structure
+        // No artist tag: the folder names it, else "Unknown Artist".
         if (!rawArtistName || rawArtistName.trim() === "") {
             const parsedArtist = extractArtistFromRelativePath(relativePath);
 
@@ -539,9 +512,7 @@ export class MusicScannerService {
             }
         }
 
-        // Singles directory override: If metadata says "Various Artists" but the file
-        // is in the Singles/ directory (Soulseek downloads), prefer the folder-derived
-        // artist name. Soulseek files often have compilation metadata tags.
+        // Soulseek downloads under Singles/ often carry compilation tags: the folder's artist beats "Various Artists".
         if (
             canonicalizeVariousArtists(rawArtistName) === "Various Artists" &&
             relativePath.startsWith("Singles/")
@@ -609,12 +580,9 @@ export class MusicScannerService {
             }
         }
 
-        // Resolve the album through resolveAlbum, which checks rgMbid before the
-        // normalised title so a release-group id always wins, and retries on a unique
-        // violation.
-        // Album identity comes from the file's own release-group tag; an untagged album keeps
-        // a placeholder until identification's album step names it from its songs' AcoustID
-        // answers (services/albumIdentification.ts). A tag later replaces that id, never the reverse.
+        // The file's release-group tag names the album; an untagged album keeps a placeholder id until identification
+        // names it (albumIdentification.ts), and a tag later replaces that id, never the reverse. resolveAlbum matches
+        // by id before title and retries on a unique violation.
         const taggedRgMbid = metadata.common.musicbrainz_releasegroupid?.trim();
 
         const album = await resolveAlbum(prisma, {
@@ -623,30 +591,19 @@ export class MusicScannerService {
             rgMbid: isMbid(taggedRgMbid) ? taggedRgMbid : null,
             year,
             isCompilation: Boolean(metadata.common.compilation),
-            // Runs only when a row is actually created: these checks cost several
-            // queries and are pointless on a lookup hit.
+            // Only for a new row: the checks cost several queries. Discover's records say whether it is Discover's (it
+            // has no folder of its own); read fresh, as Discover writes its download record before the download starts.
             createData: async () => {
-                // A Discover album is what Discover's records say (discoverEvidence); Discover has no folder of its own.
                 const evidence = discoverEvidence(
                     { artistName, title: albumTitle, rgMbid: isMbid(taggedRgMbid) ? taggedRgMbid : null },
-                    // Read fresh for each album: Discover writes its download record before the
-                    // download starts, so a record written during a long scan still counts.
                     await loadDiscoverRecords(),
                 );
-                const isDiscoveryAlbum = isDiscoverEvidence(evidence);
-
-                return {
-                    primaryType: "Album",
-                    location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
-                };
+                return { primaryType: "Album", location: isDiscoverEvidence(evidence) ? "DISCOVER" : "LIBRARY" };
             },
         });
 
-        // Only track ownership for library albums; discovery albums are
-        // provisional and must not appear as owned. Decided by the album's own
-        // location, which also holds on every later scan of its files. Keyed on
-        // the album's OWN rgMbid rather than a locally recomputed one, so a row
-        // that resolveAlbum matched by identity is credited correctly.
+        // A library album is the listener's, a Discover one no one's, by the album row's own location (so every later
+        // scan agrees). Keyed on the row's own rgMbid, so an album resolveAlbum matched by identity is credited right.
         if (album.location === "LIBRARY") {
             await prisma.ownedAlbum.upsert({
                 where: {
