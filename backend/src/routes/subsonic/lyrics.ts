@@ -30,7 +30,7 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
     }
 
     const displayArtist = track.album.artist.displayName || track.album.artist.name;
-    const displayTitle = track.title;
+    const displayTitle = track.displayTitle || track.title;
 
     const structuredLyrics: Array<Record<string, unknown>> = [];
 

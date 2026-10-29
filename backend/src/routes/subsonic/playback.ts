@@ -459,7 +459,7 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
     const result: Record<string, unknown> = {
         // Prefer the user-facing name, matching every other Subsonic mapper.
         "@_artist": track.album.artist.displayName || track.album.artist.name,
-        "@_title": track.title,
+        "@_title": track.displayTitle || track.title,
     };
     if (lyricsText) {
         result["#text"] = lyricsText;

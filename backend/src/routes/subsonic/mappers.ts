@@ -27,6 +27,8 @@ export type AlbumRow = {
 export type TrackRow = {
     id: string;
     title: string;
+    /** The title as edited in Kima, shown in place of the file's title. */
+    displayTitle: string | null;
     trackNo: number | null;
     discNumber: number | null;
     duration: number | null;
@@ -69,7 +71,7 @@ export function mapSong(
     return {
         "@_id": track.id,
         "@_parent": album.id,
-        "@_title": track.title,
+        "@_title": track.displayTitle || track.title,
         "@_album": album.displayTitle || album.title,
         "@_artist": artistName,
         "@_isDir": false,

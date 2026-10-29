@@ -8,6 +8,8 @@ export const queueRouter = Router();
 type QueueTrack = {
     id: string;
     title?: string;
+    /** The title as edited in Kima; the web player reads it too. */
+    displayTitle?: string | null;
     duration?: number;
     artist?: { id?: string; name?: string } | null;
     album?: { id?: string; title?: string; coverArt?: string | null } | null;
@@ -23,7 +25,7 @@ function getQueueFromPlaybackState(queue: unknown): QueueTrack[] {
 function mapQueueEntry(item: QueueTrack) {
     return {
         "@_id": item.id,
-        "@_title": item.title || "Unknown",
+        "@_title": item.displayTitle || item.title || "Unknown",
         "@_isDir": false,
         "@_isVideo": false,
         "@_type": "music",
@@ -48,6 +50,7 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
         select: {
             id: true,
             title: true,
+            displayTitle: true,
             duration: true,
             album: {
                 select: {
@@ -67,6 +70,7 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
         .map((t) => ({
             id: t.id,
             title: t.title,
+            displayTitle: t.displayTitle,
             duration: t.duration ?? undefined,
             artist: t.album?.artist
                 ? {

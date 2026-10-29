@@ -89,6 +89,8 @@ router.post("/", requireAuth, async (req, res) => {
                 .map((item: any) => ({
                     id: String(item.id || ""),
                     title: String(item.title || "Unknown").substring(0, 500),
+                    // The title as edited in Kima, so every device shows the edit.
+                    displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : null,
                     duration: Number(item.duration) || 0,
                     artist: item.artist ? {
                         id: String(item.artist.id || ""),

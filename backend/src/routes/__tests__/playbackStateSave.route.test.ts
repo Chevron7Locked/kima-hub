@@ -53,6 +53,24 @@ describe("POST /api/playback-state", () => {
         expect(saved?.playbackType).toBe("track");
     });
 
+    it("keeps a queued song's edited title, so another device shows the edit too", async () => {
+        const user = await prisma.user.create({
+            data: { username: `${PREFIX}-title`, passwordHash: "x", role: "user" },
+        });
+        const queue = [
+            { id: "t1", title: "file title", displayTitle: "edited title", duration: 200 },
+            { id: "t2", title: "no edit", duration: 100 },
+        ];
+
+        await request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", queue }).expect(200);
+
+        const saved = await prisma.playbackState.findUnique({ where: { userId: user.id } });
+        expect((saved?.queue as Array<{ title: string; displayTitle: string | null }>).map((q) => [q.title, q.displayTitle])).toEqual([
+            ["file title", "edited title"],
+            ["no edit", null],
+        ]);
+    });
+
     it("answers 500 with only the generic message when the database refuses the save", async () => {
         const res = await request(app)
             .post("/api/playback-state")
