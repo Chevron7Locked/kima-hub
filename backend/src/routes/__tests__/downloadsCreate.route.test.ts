@@ -14,7 +14,8 @@ jest.mock("../../utils/db", () => ({
                 $queryRaw: (...a: unknown[]) => mockQueryRaw(...a),
                 downloadJob: { create: (...a: unknown[]) => mockJobCreate(...a) },
             }),
-        downloadJob: { findUnique: jest.fn().mockResolvedValue(null) },
+        downloadJob: { findUnique: jest.fn().mockResolvedValue({ id: "job-1" }) },
+        album: { findFirst: jest.fn().mockResolvedValue(null) },
     },
 }));
 jest.mock("../../utils/logger", () => ({
@@ -41,14 +42,17 @@ jest.mock("../../services/lidarr", () => ({
 }));
 const mockGetReleaseGroup = jest.fn();
 const mockGetArtist = jest.fn();
+const mockGetReleaseGroups = jest.fn();
 jest.mock("../../services/musicbrainz", () => ({
     musicBrainzService: {
         getReleaseGroup: (...a: unknown[]) => mockGetReleaseGroup(...a),
         getArtist: (...a: unknown[]) => mockGetArtist(...a),
+        getReleaseGroups: (...a: unknown[]) => mockGetReleaseGroups(...a),
     },
 }));
+const mockStartDownload = jest.fn();
 jest.mock("../../services/simpleDownloadManager", () => ({
-    simpleDownloadManager: { startDownload: jest.fn().mockResolvedValue({ success: true }) },
+    simpleDownloadManager: { startDownload: (...a: unknown[]) => mockStartDownload(...a) },
 }));
 jest.mock("../../services/lidarrFailures", () => ({ sweepFailedDownloads: jest.fn() }));
 
@@ -81,7 +85,13 @@ beforeEach(() => {
     mockGetReleaseGroup.mockReset();
     mockGetArtist.mockReset();
     mockAddArtist.mockReset();
+    mockStartDownload.mockReset().mockResolvedValue({ success: true });
 });
+
+const startedWith = async () => {
+    await new Promise((r) => setImmediate(r));
+    return mockStartDownload.mock.calls[0];
+};
 
 describe("POST /downloads", () => {
     it.each(["temp-abc", "clx0abcd0000abcd", ""])("refuses %p as an id", async (mbid) => {
@@ -138,6 +148,33 @@ describe("POST /downloads", () => {
         expect(mockJobCreate.mock.calls[0][0].data.metadata.artistName).toBe("Low");
     });
 
+    it("starts the album with the names it was given", async () => {
+        mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
+
+        await post(RG).expect(200);
+
+        expect(await startedWith()).toEqual(["job-1", "low", "Things We Lost in the Fire", RG]);
+    });
+
+    it("reads the names from the subject when they are not given", async () => {
+        mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
+
+        await request(app).post("/downloads").send({ type: "album", mbid: RG, subject: "low - Things - We Lost" }).expect(200);
+
+        expect(await startedWith()).toEqual(["job-1", "low", "Things - We Lost", RG]);
+    });
+
+    it("answers a second request for the same album with the job already queued", async () => {
+        mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
+        mockQueryRaw.mockResolvedValue([{ id: "job-0", status: "processing" }]);
+
+        const res = await post(RG).expect(200);
+
+        expect(res.body).toMatchObject({ id: "job-0", status: "processing", duplicate: true });
+        expect(mockJobCreate).not.toHaveBeenCalled();
+        expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
     describe("artist", () => {
         const postArtist = () =>
             request(app).post("/downloads").send({ type: "artist", mbid: RG, subject: "low" });
@@ -163,5 +200,27 @@ describe("POST /downloads", () => {
             expect(res.body.error).toMatch(/has no default profiles/);
             expect(mockAddArtist).toHaveBeenCalledWith(RG, "Low", "/music");
         });
+
+        it("queues one job per album, each in one batch", async () => {
+            const ALBUM = "4b1b2c3d-1111-2222-3333-444455556666";
+            mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Low" } });
+            mockAddArtist.mockResolvedValue({ id: 7 });
+            mockGetReleaseGroups.mockResolvedValue({ kind: "answered", value: [{ id: ALBUM, title: "Ones and Sixes" }] });
+
+            const res = await postArtist().expect(200);
+
+            expect(res.body).toMatchObject({ albumCount: 1, jobs: [{ id: "job-1", subject: "Low - Ones and Sixes" }] });
+            const { metadata } = mockJobCreate.mock.calls[0][0].data;
+            expect(Object.keys(metadata).sort()).toEqual(
+                ["albumTitle", "artistMbid", "artistName", "batchId", "downloadType", "rootFolderPath"],
+            );
+            expect(await startedWith()).toEqual(["job-1", "Low", "Ones and Sixes", ALBUM]);
+        });
+    });
+});
+
+describe("GET /downloads", () => {
+    it("is gone: the web and the app read active downloads from the notifications", async () => {
+        await request(app).get("/downloads").expect(404);
     });
 });

@@ -976,6 +976,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                     "/api/offline/stats",
                     "/api/plays",
                     "/api/artists/preview/x/y",
+                    "/api/downloads",
                     "/api/downloads/x",
                     "/api/discover/generate/status/x",
                     "/api/discover/exclusions",
@@ -1003,7 +1004,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
             await session.step("the pages opened here never asked for a removed endpoint", async () => {
                 // Plays and downloads keep their POST and DELETE; only the GET forms were removed.
-                const removed = asked.filter((u) => /^GET \S*\/api\/(vibe\/status|recommendations(\/tracks|\/albums)?|releases\/(recent|upcoming)|offline\/|plays|downloads\/(?!failed)[^/?]+|artists\/preview\/[^/]+\/[^/?]+|discover\/(generate\/status|exclusions)|library\/cover-art-colors|browse\/playlists\/featured|analysis\/track\/[^/?]+)(\?|$)/.test(u) || /\/api\/offline\//.test(u));
+                const removed = asked.filter((u) => /^GET \S*\/api\/(vibe\/status|recommendations(\/tracks|\/albums)?|releases\/(recent|upcoming)|offline\/|plays|downloads(\/(?!failed)[^/?]+)?|artists\/preview\/[^/]+\/[^/?]+|discover\/(generate\/status|exclusions)|library\/cover-art-colors|browse\/playlists\/featured|analysis\/track\/[^/?]+)(\?|$)/.test(u) || /\/api\/offline\//.test(u));
                 expect(removed).toEqual([]);
             });
 

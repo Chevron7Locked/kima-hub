@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
@@ -12,9 +13,22 @@ import crypto from "crypto";
 import { safeError, UserFacingError } from "../utils/errors";
 import { failureCause } from "../utils/outcome";
 import { isMbid } from "../services/artistIdentity";
-import { parseLimit } from "./library/paging";
 
 const router = Router();
+
+/** The caller's own pending or running job for this album, locked for the transaction, if there is one. */
+async function activeJobFor(tx: Prisma.TransactionClient, userId: string, mbid: string) {
+    const [job] = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+        SELECT id, status
+        FROM "DownloadJob"
+        WHERE "targetMbid" = ${mbid}
+        AND "userId" = ${userId}
+        AND "discoveryBatchId" IS NULL
+        AND status IN ('pending', 'processing')
+        FOR UPDATE SKIP LOCKED
+    `;
+    return job;
+}
 
 router.use(requireAuthOrToken);
 
@@ -91,28 +105,8 @@ router.post("/", requireAcquirePermission, async (req, res) => {
 
         // One active job per user per album: concurrent requests lock and re-check inside the transaction.
         const jobResult = await prisma.$transaction(async (tx) => {
-            const existingJobs = await tx.$queryRaw<
-                Array<{
-                    id: string;
-                    status: string;
-                    subject: string;
-                    createdAt: Date;
-                }>
-            >`
-                SELECT id, status, subject, "createdAt"
-                FROM "DownloadJob"
-                WHERE "targetMbid" = ${mbid}
-                AND "userId" = ${userId}
-                AND "discoveryBatchId" IS NULL
-                AND status IN ('pending', 'processing')
-                FOR UPDATE SKIP LOCKED
-            `;
-
-            if (existingJobs.length > 0) {
-                const existingJob = existingJobs[0];
-                logger.debug(
-                    `[DOWNLOAD] Job already exists for ${mbid}: ${existingJob.id} (${existingJob.status})`
-                );
+            const existingJob = await activeJobFor(tx, userId, mbid);
+            if (existingJob) {
                 return { duplicate: true, job: existingJob };
             }
 
@@ -154,7 +148,6 @@ router.post("/", requireAcquirePermission, async (req, res) => {
 
         processDownload(
             job.id,
-            type,
             mbid,
             subject,
             verifiedArtistName,
@@ -212,11 +205,8 @@ async function processArtistDownload(
     artistName: string,
     rootFolderPath: string
 ): Promise<{ id: string; subject: string }[]> {
-    logger.debug(`\nProcessing artist download: ${artistName}`);
-    logger.debug(`   Artist MBID: ${artistMbid}`);
-
     const batchId = crypto.randomUUID();
-    logger.debug(`   Batch ID: ${batchId}`);
+    logger.debug(`Artist download ${artistName} (${artistMbid}), batch ${batchId}`);
 
     const mbArtist = await musicBrainzService.getArtist(artistMbid);
     if (mbArtist.kind === "absent" || mbArtist.kind === "permanent") {
@@ -228,215 +218,152 @@ async function processArtistDownload(
         logger.warn(`   MusicBrainz lookup for ${artistMbid}: ${failureCause(mbArtist)}`);
     }
 
-    try {
-        const lidarrArtist = await lidarrService.addArtist(
-            artistMbid,
-            artistName,
-            rootFolderPath
-        );
+    const lidarrArtist = await lidarrService.addArtist(
+        artistMbid,
+        artistName,
+        rootFolderPath
+    );
 
-        if (!lidarrArtist) {
-            logger.debug(`   Failed to add artist to Lidarr`);
-            throw new Error("Failed to add artist to Lidarr");
-        }
-
-        logger.debug(`   Artist added to Lidarr (ID: ${lidarrArtist.id})`);
-
-        const discography = await musicBrainzService.getReleaseGroups(
-            artistMbid,
-            ["album", "ep"],
-            100
-        );
-        if (discography.kind === "absent") {
-            logger.debug(`   MusicBrainz has no albums for this artist`);
-            return [];
-        }
-        if (discography.kind !== "answered") {
-            // A failed question is not "no albums": rethrow so the job
-            // fails with the real cause instead of silently queuing zero.
-            throw new Error(
-                `Discography lookup ${discography.kind}: ${failureCause(discography)}`
-            );
-        }
-        const releaseGroups = discography.value;
-
-        logger.debug(
-            `   Found ${releaseGroups.length} albums/EPs from MusicBrainz`
-        );
-
-        if (releaseGroups.length === 0) {
-            logger.debug(`   No albums found for artist`);
-            return [];
-        }
-
-        const jobs: { id: string; subject: string }[] = [];
-
-        for (const rg of releaseGroups) {
-            const albumMbid = rg.id;
-            const albumTitle = rg.title;
-            const albumSubject = `${artistName} - ${albumTitle}`;
-
-            const existingAlbum = await prisma.album.findFirst({
-                where: { rgMbid: albumMbid },
-            });
-
-            if (existingAlbum) {
-                logger.debug(`   Skipping "${albumTitle}" - already in library`);
-                continue;
-            }
-
-            const jobResult = await prisma.$transaction(async (tx) => {
-                const existingJobs = await tx.$queryRaw<
-                    Array<{
-                        id: string;
-                        status: string;
-                        subject: string;
-                        createdAt: Date;
-                    }>
-                >`
-                    SELECT id, status, subject, "createdAt"
-                    FROM "DownloadJob"
-                    WHERE "targetMbid" = ${albumMbid}
-                    AND "userId" = ${userId}
-                    AND "discoveryBatchId" IS NULL
-                    AND status IN ('pending', 'processing')
-                    FOR UPDATE SKIP LOCKED
-                `;
-
-                if (existingJobs.length > 0) {
-                    return {
-                        skipped: true,
-                        job: existingJobs[0],
-                        reason: "already_queued",
-                    };
-                }
-
-                // A job that failed in the last 30 seconds is not retried yet.
-                const recentFailed = await tx.$queryRaw<
-                    Array<{
-                        id: string;
-                        status: string;
-                        completedAt: Date;
-                    }>
-                >`
-                    SELECT id, status, "completedAt"
-                    FROM "DownloadJob"
-                    WHERE "targetMbid" = ${albumMbid}
-                    AND "userId" = ${userId}
-                    AND status = 'failed'
-                    AND "completedAt" >= ${new Date(Date.now() - 30000)}
-                    FOR UPDATE SKIP LOCKED
-                `;
-
-                if (recentFailed.length > 0) {
-                    return {
-                        skipped: true,
-                        job: recentFailed[0],
-                        reason: "recently_failed",
-                    };
-                }
-
-                const now = new Date();
-                const job = await tx.downloadJob.create({
-                    data: {
-                        userId,
-                        subject: albumSubject,
-                        type: "album",
-                        targetMbid: albumMbid,
-                        artistMbid,
-                        status: "pending",
-                        metadata: {
-                            downloadType: "library",
-                            rootFolderPath,
-                            artistName,
-                            artistMbid,
-                            albumTitle,
-                            batchId, // Link all albums in this artist download
-                            batchArtist: artistName,
-                            createdAt: now.toISOString(), // Track when job was created for timeout
-                        },
-                    },
-                });
-
-                return { skipped: false, job };
-            });
-
-            if (jobResult.skipped) {
-                logger.debug(
-                    `   Skipping "${albumTitle}" - ${
-                        jobResult.reason === "recently_failed"
-                            ? "recently failed"
-                            : "already in download queue"
-                    }`
-                );
-                continue;
-            }
-
-            const job = jobResult.job;
-            jobs.push({ id: job.id, subject: albumSubject });
-            logger.debug(`   [JOB] Created job for: ${albumSubject}`);
-
-            processDownload(
-                job.id,
-                "album",
-                albumMbid,
-                albumSubject,
-                artistName,
-                albumTitle
-            ).catch((error) => {
-                logger.error(`Download failed for ${albumSubject}:`, error);
-            });
-        }
-
-        logger.debug(`   Created ${jobs.length} album download jobs`);
-        return jobs;
-    } catch (error: any) {
-        logger.error(`   Failed to process artist download:`, error.message);
-        throw error;
+    if (!lidarrArtist) {
+        throw new Error("Failed to add artist to Lidarr");
     }
+
+    logger.debug(`   Artist added to Lidarr (ID: ${lidarrArtist.id})`);
+
+    const discography = await musicBrainzService.getReleaseGroups(
+        artistMbid,
+        ["album", "ep"],
+        100
+    );
+    if (discography.kind === "absent") {
+        logger.debug(`   MusicBrainz has no albums for this artist`);
+        return [];
+    }
+    if (discography.kind !== "answered") {
+        // A failed question is not "no albums": rethrow so the job
+        // fails with the real cause instead of silently queuing zero.
+        throw new Error(
+            `Discography lookup ${discography.kind}: ${failureCause(discography)}`
+        );
+    }
+    const releaseGroups = discography.value;
+
+    logger.debug(
+        `   Found ${releaseGroups.length} albums/EPs from MusicBrainz`
+    );
+
+    if (releaseGroups.length === 0) {
+        logger.debug(`   No albums found for artist`);
+        return [];
+    }
+
+    const jobs: { id: string; subject: string }[] = [];
+
+    for (const rg of releaseGroups) {
+        const albumMbid = rg.id;
+        const albumTitle = rg.title;
+        const albumSubject = `${artistName} - ${albumTitle}`;
+
+        const existingAlbum = await prisma.album.findFirst({
+            where: { rgMbid: albumMbid },
+        });
+
+        if (existingAlbum) {
+            logger.debug(`   Skipping "${albumTitle}" - already in library`);
+            continue;
+        }
+
+        const jobResult = await prisma.$transaction(async (tx) => {
+            if (await activeJobFor(tx, userId, albumMbid)) {
+                return { skipped: true as const, reason: "already_queued" };
+            }
+
+            // A job that failed in the last 30 seconds is not retried yet.
+            const recentFailed = await tx.$queryRaw<Array<{ id: string }>>`
+                SELECT id
+                FROM "DownloadJob"
+                WHERE "targetMbid" = ${albumMbid}
+                AND "userId" = ${userId}
+                AND status = 'failed'
+                AND "completedAt" >= ${new Date(Date.now() - 30000)}
+                FOR UPDATE SKIP LOCKED
+            `;
+
+            if (recentFailed.length > 0) {
+                return { skipped: true as const, reason: "recently_failed" };
+            }
+
+            const job = await tx.downloadJob.create({
+                data: {
+                    userId,
+                    subject: albumSubject,
+                    type: "album",
+                    targetMbid: albumMbid,
+                    artistMbid,
+                    status: "pending",
+                    metadata: {
+                        downloadType: "library",
+                        rootFolderPath,
+                        artistName,
+                        artistMbid,
+                        albumTitle,
+                        batchId,
+                    },
+                },
+            });
+
+            return { skipped: false as const, job };
+        });
+
+        if (jobResult.skipped) {
+            logger.debug(
+                `   Skipping "${albumTitle}" - ${
+                    jobResult.reason === "recently_failed"
+                        ? "recently failed"
+                        : "already in download queue"
+                }`
+            );
+            continue;
+        }
+
+        const { job } = jobResult;
+        jobs.push({ id: job.id, subject: albumSubject });
+        logger.debug(`   [JOB] Created job for: ${albumSubject}`);
+
+        processDownload(
+            job.id,
+            albumMbid,
+            albumSubject,
+            artistName,
+            albumTitle
+        ).catch((error) => {
+            logger.error(`Download failed for ${albumSubject}:`, error);
+        });
+    }
+
+    logger.debug(`   Created ${jobs.length} album download jobs`);
+    return jobs;
 }
 
+/** Hands an album job to the download manager; the names come from the subject ("artist - album") when not given. */
 async function processDownload(
     jobId: string,
-    type: string,
     mbid: string,
     subject: string,
     artistName?: string,
     albumTitle?: string
 ) {
-    const job = await prisma.downloadJob.findUnique({ where: { id: jobId } });
-    if (!job) {
-        logger.error(`Job ${jobId} not found`);
-        return;
+    let artist = artistName;
+    let album = albumTitle;
+    if (!artist || !album) {
+        const parts = subject.split(" - ");
+        artist = parts.length >= 2 ? parts[0].trim() : subject;
+        album = parts.length >= 2 ? parts.slice(1).join(" - ").trim() : subject;
     }
 
-    if (type === "album") {
-        let parsedArtist = artistName;
-        let parsedAlbum = albumTitle;
-
-        if (!parsedArtist || !parsedAlbum) {
-            const parts = subject.split(" - ");
-            if (parts.length >= 2) {
-                parsedArtist = parts[0].trim();
-                parsedAlbum = parts.slice(1).join(" - ").trim();
-            } else {
-                parsedArtist = subject;
-                parsedAlbum = subject;
-            }
-        }
-
-        logger.debug(`Parsed: Artist="${parsedArtist}", Album="${parsedAlbum}"`);
-
-        const result = await simpleDownloadManager.startDownload(
-            jobId,
-            parsedArtist,
-            parsedAlbum,
-            mbid
-        );
-
-        if (!result.success) {
-            logger.error(`Failed to start download: ${result.error}`);
-        }
+    const result = await simpleDownloadManager.startDownload(jobId, artist, album, mbid);
+    if (!result.success) {
+        logger.error(`Failed to start download: ${result.error}`);
     }
 }
 
@@ -532,46 +459,6 @@ router.delete("/:id", async (req, res) => {
         res.json({ success: true, deleted: result.count > 0 });
     } catch (error) {
         safeError(res, "Delete download job", error);
-    }
-});
-
-router.get("/", async (req, res) => {
-    try {
-        const userId = req.user!.id;
-        const {
-            status,
-            limit = "50",
-            includeDiscovery = "false",
-            includeCleared = "false",
-        } = req.query;
-
-        const where: any = { userId };
-        if (status) {
-            where.status = status as string;
-        }
-        if (includeCleared !== "true") {
-            where.cleared = false;
-        }
-
-        const jobs = await prisma.downloadJob.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            take: parseLimit(limit, 50, 500),
-        });
-
-        // Discover's automated downloads are hidden unless asked for.
-        const filteredJobs =
-            includeDiscovery === "true"
-                ? jobs
-                : jobs.filter((job) => {
-                      const metadata = job.metadata as any;
-                      return metadata?.downloadType !== "discovery";
-                  });
-
-        res.json(filteredJobs);
-    } catch (error) {
-        logger.error("List download jobs error:", error);
-        res.status(500).json({ error: "Failed to list download jobs" });
     }
 });
 
