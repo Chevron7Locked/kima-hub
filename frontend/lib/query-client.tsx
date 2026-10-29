@@ -11,18 +11,8 @@ function makeQueryClient() {
             queries: {
                 staleTime: 5 * 60 * 1000,
                 gcTime: 10 * 60 * 1000,
-
                 refetchOnWindowFocus: false, // a refetch on focus would interrupt playback
-                refetchOnMount: true,
-                refetchOnReconnect: true,
-
                 retry: 1,
-                retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-
-                throwOnError: false,
-            },
-            mutations: {
-                retry: false,
             },
         },
     });
@@ -40,10 +30,7 @@ function getQueryClient() {
     }
 }
 
-/**
- * QueryProvider component to wrap the app with React Query
- * Includes devtools in development mode
- */
+/** The app's query cache, with React Query's devtools in development. */
 export function QueryProvider({ children }: { children: React.ReactNode }) {
     const queryClient = getQueryClient();
 

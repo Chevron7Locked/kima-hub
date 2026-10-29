@@ -134,11 +134,8 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
 
                 await api.saveMoodBucketMix(mood, tracks.map((t) => t.id));
 
-                // Force immediate refetch of mixes on home page
-                // Using refetchQueries instead of invalidateQueries for immediate update
+                // Refetched now, not just marked stale, so the home page shows the new mix at once.
                 await queryClient.refetchQueries({ queryKey: ["mixes"] });
-
-                window.dispatchEvent(new CustomEvent("mix-generated"));
                 window.dispatchEvent(new CustomEvent("mixes-updated"));
 
                 onClose();

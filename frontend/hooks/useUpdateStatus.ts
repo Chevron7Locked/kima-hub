@@ -5,12 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 
-/**
- * Whether a newer server release is out, for the amber dot on the version
- * chip. The server checks GitHub once a day; this only reads that answer.
- * The tray ping fires once per release per browser.
- */
-
 const NOTIFIED_FOR_KEY = "kima-update-notified-for";
 
 // Two mounted chips must not both fire the notification.
@@ -32,6 +26,11 @@ function markNotifiedFor(version: string) {
     }
 }
 
+/**
+ * Whether a newer server release is out, for the amber dot on the version
+ * chip. The server checks GitHub once a day; this only reads that answer.
+ * The tray ping fires once per release per browser.
+ */
 export function useUpdateStatus() {
     const query = useQuery({
         queryKey: ["update-status"],

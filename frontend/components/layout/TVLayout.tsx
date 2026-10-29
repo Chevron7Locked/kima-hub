@@ -112,8 +112,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         if (hasMedia) {
             switch (e.key) {
                 case DPAD_KEYS.PLAY_PAUSE:
-                case "MediaPlayPause":
-                case " ": // Space bar as play/pause
+                case " ":
                     // Only use space when not in an input field
                     if (e.key === " ") {
                         const target = e.target as HTMLElement;
@@ -133,12 +132,10 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                     previous();
                     return;
                 case DPAD_KEYS.FAST_FORWARD:
-                case "MediaFastForward":
                     e.preventDefault();
                     seek(Math.min(currentTimeRef.current + 10, durationRef.current));
                     return;
                 case DPAD_KEYS.REWIND:
-                case "MediaRewind":
                     e.preventDefault();
                     seek(Math.max(currentTimeRef.current - 10, 0));
                     return;

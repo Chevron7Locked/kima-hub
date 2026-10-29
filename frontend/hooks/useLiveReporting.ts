@@ -1,12 +1,5 @@
 "use client";
 
-/**
- * Reports the web player's play, pause, seek, track and up-next changes for the
- * public live trip. It runs only when the server says this user's listening is the
- * public one (`liveReporting` from /system/features); everywhere else it sends nothing.
- * A 404 from the server still silences it for the session.
- */
-
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import type { EngineStatus } from "@/lib/audio-engine-policy";
@@ -90,6 +83,12 @@ interface Sent {
 
 const queueKeyOf = (queue: LiveQueueEntry[]) => queue.map((e) => e.trackId).join(",");
 
+/**
+ * Reports the web player's play, pause, seek, track and up-next changes for the
+ * public live trip. It runs only when the server says this user's listening is the
+ * public one (`liveReporting` from /system/features); everywhere else it sends nothing.
+ * A 404 from the server still silences it for the session.
+ */
 export function useLiveReporting(
     controller: LiveController | null,
     track: LiveTrack | null,

@@ -1,13 +1,10 @@
-/**
- * TanStack Query hooks for the most-used endpoints. Stale times follow how
- * often the data changes: artists/albums 10m, search/mixes 5m, library and
- * home 2m, playlists 1m.
- */
+/** TanStack Query hooks for the most-used endpoints; each hook's stale time follows how often its data changes. */
 
 import { useMemo } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { PlaylistPreview } from "@/features/home/types";
+import type { DecadeCount, GenreCount } from "@/features/home/radioData";
 
 export const queryKeys = {
     artist: (id: string) => ["artist", id] as const,
@@ -76,7 +73,7 @@ export function useRecentlyListenedQuery(limit: number = 10) {
     return useQuery({
         queryKey: queryKeys.recentlyListened(limit),
         queryFn: () => api.getRecentlyListened(limit),
-        staleTime: 2 * 60 * 1000, // 2 minutes
+        staleTime: 2 * 60 * 1000,
     });
 }
 
@@ -84,7 +81,7 @@ export function useRecentlyAddedQuery(limit: number = 10) {
     return useQuery({
         queryKey: queryKeys.recentlyAdded(limit),
         queryFn: () => api.getRecentlyAdded(limit),
-        staleTime: 2 * 60 * 1000, // 2 minutes
+        staleTime: 2 * 60 * 1000,
     });
 }
 
@@ -117,16 +114,9 @@ export function useLibraryArtistsQuery({
     return useQuery({
         queryKey: queryKeys.libraryArtists({ filter, sortBy, limit, offset }),
         queryFn: () => api.getArtists({ limit, offset, filter, sortBy }),
-        select: (response) => ({
-            artists: response.artists,
-            total: response.total,
-            offset: response.offset,
-            limit: response.limit,
-        }),
         staleTime: 2 * 60 * 1000,
         enabled,
-        structuralSharing: true,
-        placeholderData: (previousData) => previousData,
+        placeholderData: keepPreviousData,
     });
 }
 
@@ -141,16 +131,10 @@ export function useLibraryAlbumsQuery({
     return useQuery({
         queryKey: queryKeys.libraryAlbums({ filter, sortBy, limit, offset }),
         queryFn: () => api.getAlbums({ limit, offset, filter, sortBy }),
-        select: (response) => ({
-            albums: response.albums,
-            total: response.total,
-            offset: response.offset,
-            limit: response.limit,
-        }),
         staleTime: 2 * 60 * 1000,
         enabled,
-        // Use placeholder data for better perceived performance (keeps pagination buttons enabled during fetches)
-        placeholderData: (previousData) => previousData,
+        // The last page stays shown while the next loads, so the pager stays usable.
+        placeholderData: keepPreviousData,
     });
 }
 
@@ -164,16 +148,10 @@ export function useLibraryTracksQuery({
     return useQuery({
         queryKey: queryKeys.libraryTracks({ sortBy, limit, offset }),
         queryFn: () => api.getTracks({ limit, offset, sortBy }),
-        select: (response) => ({
-            tracks: response.tracks,
-            total: response.total,
-            offset: response.offset,
-            limit: response.limit,
-        }),
         staleTime: 2 * 60 * 1000,
         enabled,
-        // Use placeholder data for better perceived performance (keeps pagination buttons enabled during fetches)
-        placeholderData: (previousData) => previousData,
+        // The last page stays shown while the next loads, so the pager stays usable.
+        placeholderData: keepPreviousData,
     });
 }
 
@@ -181,7 +159,7 @@ export function useRecommendationsQuery(limit: number = 10) {
     return useQuery({
         queryKey: queryKeys.recommendations(limit),
         queryFn: () => api.getRecommendationsForYou(limit),
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -213,7 +191,7 @@ export function useSearchQuery(
         queryFn: ({ signal }) => api.search(query, type, limit, signal),
         placeholderData: keepPrevious ? keepPreviousData : undefined,
         enabled: query.length >= 2, // Only search if query is at least 2 characters
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -229,7 +207,7 @@ export function useDiscoverSearchQuery(
         queryFn: ({ signal }) => api.discoverSearch(query, type, limit, signal),
         placeholderData: keepPrevious ? keepPreviousData : undefined,
         enabled: query.length >= 2,
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -238,7 +216,7 @@ export function useDiscoverSimilarArtistsQuery(artistName: string, mbid: string 
         queryKey: queryKeys.discoverSimilar(artistName, mbid),
         queryFn: ({ signal }) => api.discoverSimilarArtists(artistName, mbid, signal),
         enabled: artistName.length > 0,
-        staleTime: 30 * 60 * 1000, // 30 minutes -- similar artists rarely change
+        staleTime: 30 * 60 * 1000, // similar artists rarely change
     });
 }
 
@@ -246,7 +224,7 @@ export function usePlaylistsQuery() {
     return useQuery({
         queryKey: queryKeys.playlists(),
         queryFn: () => api.getPlaylists(),
-        staleTime: 1 * 60 * 1000, // 1 minute
+        staleTime: 1 * 60 * 1000,
     });
 }
 
@@ -258,7 +236,7 @@ export function usePlaylistQuery(id: string | undefined) {
             return await api.getPlaylist(id);
         },
         enabled: !!id,
-        staleTime: 1 * 60 * 1000, // 1 minute
+        staleTime: 1 * 60 * 1000,
     });
 }
 
@@ -266,7 +244,7 @@ export function useMixesQuery() {
     return useQuery({
         queryKey: queryKeys.mixes(),
         queryFn: () => api.getMixes(),
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -278,7 +256,7 @@ export function useMixQuery(id: string | undefined) {
             return await api.getMix(id);
         },
         enabled: !!id,
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -286,7 +264,7 @@ export function usePopularArtistsQuery(limit: number = 20) {
     return useQuery({
         queryKey: queryKeys.popularArtists(limit),
         queryFn: () => api.getPopularArtists(limit),
-        staleTime: 10 * 60 * 1000, // 10 minutes
+        staleTime: 10 * 60 * 1000,
     });
 }
 
@@ -294,7 +272,7 @@ export function useAudiobooksQuery() {
     return useQuery({
         queryKey: queryKeys.audiobooks(),
         queryFn: () => api.getAudiobooks(),
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -306,7 +284,7 @@ export function useAudiobookQuery(id: string | undefined) {
             return await api.getAudiobook(id);
         },
         enabled: !!id,
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -314,7 +292,7 @@ export function usePodcastsQuery() {
     return useQuery({
         queryKey: queryKeys.podcasts(),
         queryFn: () => api.getPodcasts(),
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
     });
 }
 
@@ -362,7 +340,7 @@ export function usePodcastQuery(
             return last && loaded < (last.episodeTotal ?? 0) ? loaded : undefined;
         },
         enabled: !!id,
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 5 * 60 * 1000,
         retry: false, // Don't retry 404 errors
         // The other order of the same podcast keeps its page on screen meanwhile;
         // another podcast does not show this one's.
@@ -713,7 +691,7 @@ export function useBrowseAllQuery() {
         queryFn: async (): Promise<BrowseAllResponse> => {
             return api.get<BrowseAllResponse>("/browse/all");
         },
-        staleTime: 10 * 60 * 1000, // 10 minutes - playlists don't change often
+        staleTime: 10 * 60 * 1000, // playlists rarely change
     });
 }
 
@@ -721,7 +699,7 @@ export function useLibraryGenresQuery() {
     return useQuery({
         queryKey: queryKeys.libraryGenres(),
         queryFn: async () => {
-            return api.get<{ genres: Array<{ genre: string; count: number }> }>("/library/genres");
+            return api.get<{ genres: GenreCount[] }>("/library/genres");
         },
         staleTime: 10 * 60 * 1000,
     });
@@ -744,7 +722,7 @@ export function useLibraryDecadesQuery() {
     return useQuery({
         queryKey: queryKeys.libraryDecades(),
         queryFn: async () => {
-            return api.get<{ decades: Array<{ decade: number; count: number }> }>("/library/decades");
+            return api.get<{ decades: DecadeCount[] }>("/library/decades");
         },
         staleTime: 10 * 60 * 1000,
     });

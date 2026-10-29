@@ -7,12 +7,6 @@ import { searchResultStore } from "@/lib/search-result-store";
 import { api, getApiBaseUrl } from "@/lib/api";
 import { playlistEditsInFlight } from "@/hooks/useQueries";
 
-/** In proxy mode this is "", so events go through the streaming route in app/api/events. */
-function getSSEBaseUrl(): string {
-    if (typeof window === "undefined") return "";
-    return getApiBaseUrl();
-}
-
 /**
  * Every cache an event below keeps fresh. Events sent while the stream is down are not replayed, so a reconnect
  * refreshes them all. Job-status caches (scan, import, preview) are not here: their pages poll while a job runs.
@@ -41,19 +35,25 @@ export function useEventSource() {
 
         let mounted = true;
 
+        // Waits 1 s, then twice as long after each failure in a row, up to 30 s.
+        const reconnectLater = () => {
+            const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000);
+            reconnectAttemptsRef.current++;
+            reconnectTimeoutRef.current = setTimeout(() => { connect().catch(() => {}); }, delay);
+        };
+
         const connect = async () => {
             if (!mounted) return;
 
             const ticket = await api.getSSETicket();
             if (!mounted) return;
             if (!ticket) {
-                const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-                reconnectAttemptsRef.current++;
-                reconnectTimeoutRef.current = setTimeout(() => { connect().catch(() => {}); }, delay);
+                reconnectLater();
                 return;
             }
 
-            const es = new EventSource(`${getSSEBaseUrl()}/api/events?ticket=${ticket}`);
+            // In proxy mode the base is "", so events go through the streaming route in app/api/events.
+            const es = new EventSource(`${getApiBaseUrl()}/api/events?ticket=${ticket}`);
             eventSourceRef.current = es;
 
             es.onmessage = (event) => {
@@ -172,30 +172,25 @@ export function useEventSource() {
                                 }
                             }
                             reconnectAttemptsRef.current = 0;
-                            // Sync batch status after reconnect to clear stale cache
+                            // A Discover batch may have finished while the stream was down.
                             api.getDiscoverBatchStatus()
                                 .then(status => {
                                     queryClient.setQueryData(["discover-batch-status"], status);
                                 })
                                 .catch(() => {
-                                    // On error, assume no active batch
                                     queryClient.setQueryData(["discover-batch-status"], { active: false, status: null, batchId: null });
                                 });
                             break;
                     }
                 } catch {
-                    // Ignore parse errors (heartbeat comments, etc.)
+                    // A message that is not JSON, or a handler that threw, must not close the stream.
                 }
             };
 
             es.onerror = () => {
                 es.close();
                 eventSourceRef.current = null;
-                if (mounted) {
-                    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-                    reconnectAttemptsRef.current++;
-                    reconnectTimeoutRef.current = setTimeout(() => { connect().catch(() => {}); }, delay);
-                }
+                if (mounted) reconnectLater();
             };
         };
 

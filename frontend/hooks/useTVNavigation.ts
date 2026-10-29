@@ -134,15 +134,15 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
             const currentIdx = Array.from(focusables).findIndex(el => el === document.activeElement);
             if (currentIdx === -1) return;
 
-            if (e.key === DPAD_KEYS.RIGHT || e.key === 'ArrowRight') {
+            if (e.key === DPAD_KEYS.RIGHT) {
                 e.preventDefault();
                 const next = focusables[Math.min(currentIdx + 1, focusables.length - 1)];
                 next?.focus();
-            } else if (e.key === DPAD_KEYS.LEFT || e.key === 'ArrowLeft') {
+            } else if (e.key === DPAD_KEYS.LEFT) {
                 e.preventDefault();
                 const prev = focusables[Math.max(currentIdx - 1, 0)];
                 prev?.focus();
-            } else if (e.key === DPAD_KEYS.UP || e.key === 'ArrowUp') {
+            } else if (e.key === DPAD_KEYS.UP) {
                 e.preventDefault();
                 onBackRef.current?.();
                 setIsContentFocused(false);
@@ -168,8 +168,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
         const column = Math.max(cardIndex, 0);
 
         switch (e.key) {
-            case DPAD_KEYS.RIGHT:
-            case 'ArrowRight': {
+            case DPAD_KEYS.RIGHT: {
                 e.preventDefault();
                 const nextIndex = Math.min(cardIndex + 1, cards.length - 1);
                 if (nextIndex !== cardIndex) {
@@ -180,8 +179,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                 break;
             }
 
-            case DPAD_KEYS.LEFT:
-            case 'ArrowLeft': {
+            case DPAD_KEYS.LEFT: {
                 e.preventDefault();
                 const prevIndex = Math.max(cardIndex - 1, 0);
                 if (prevIndex !== cardIndex) {
@@ -192,8 +190,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                 break;
             }
 
-            case DPAD_KEYS.DOWN:
-            case 'ArrowDown': {
+            case DPAD_KEYS.DOWN: {
                 e.preventDefault();
                 if (sectionIndex < sections.length - 1) {
                     focusMemory.current.set(nameOf(currentSection), column);
@@ -217,8 +214,7 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                 break;
             }
 
-            case DPAD_KEYS.UP:
-            case 'ArrowUp': {
+            case DPAD_KEYS.UP: {
                 e.preventDefault();
                 if (sectionIndex > 0) {
                     focusMemory.current.set(nameOf(currentSection), column);

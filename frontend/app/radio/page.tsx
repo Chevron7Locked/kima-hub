@@ -1,12 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { useLibraryDecadesQuery, useLibraryGenresQuery } from "@/hooks/useQueries";
 import { TileCard } from "@/components/cards/TileCard";
 import {
-    GenreCount,
-    DecadeCount,
     RadioStation,
     STATIC_STATIONS,
     buildMoodStations,
@@ -107,19 +104,8 @@ export default function RadioPage() {
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const rebuild = useSoundRebuild();
 
-    const { data: genresData, isLoading: genresLoading, isError: genresError, refetch: refetchGenres } = useQuery({
-        queryKey: ["library", "genres"],
-        queryFn: () => api.get<{ genres: GenreCount[] }>("/library/genres"),
-        staleTime: 5 * 60 * 1000,
-        select: (data) => (data.genres || []).filter((g) => g.count >= 15),
-    });
-
-    const { data: decadesData, isLoading: decadesLoading, isError: decadesError, refetch: refetchDecades } = useQuery({
-        queryKey: ["library", "decades"],
-        queryFn: () => api.get<{ decades: DecadeCount[] }>("/library/decades"),
-        staleTime: 5 * 60 * 1000,
-        select: (data) => data.decades || [],
-    });
+    const { data: genresReply, isLoading: genresLoading, isError: genresError, refetch: refetchGenres } = useLibraryGenresQuery();
+    const { data: decadesReply, isLoading: decadesLoading, isError: decadesError, refetch: refetchDecades } = useLibraryDecadesQuery();
 
     const isLoading = genresLoading || decadesLoading;
 
@@ -135,8 +121,11 @@ export default function RadioPage() {
         [moodData, vibeEmbeddings],
     );
 
-    const genreStations = useMemo(() => buildGenreStations(genresData ?? []), [genresData]);
-    const decadeStations = useMemo(() => buildDecadeStations(decadesData ?? []), [decadesData]);
+    const genreStations = useMemo(
+        () => buildGenreStations((genresReply?.genres ?? []).filter((g) => g.count >= 15)),
+        [genresReply]
+    );
+    const decadeStations = useMemo(() => buildDecadeStations(decadesReply?.decades ?? []), [decadesReply]);
 
     return (
         <div className="min-h-screen">
