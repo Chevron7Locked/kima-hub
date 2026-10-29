@@ -4,7 +4,7 @@
  */
 import { it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@/lib/api", () => ({
@@ -23,7 +23,10 @@ let host: HTMLDivElement;
 let seen: ReturnType<typeof useDiscoverData> | null = null;
 
 function Probe() {
-    seen = useDiscoverData();
+    const data = useDiscoverData();
+    useEffect(() => {
+        seen = data;
+    });
     return null;
 }
 
