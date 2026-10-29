@@ -7,6 +7,8 @@ import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { gpuSupported } from "./gpuPlatform";
 import { featureDetection } from "./featureDetection";
 
+export { gpuSupported } from "./gpuPlatform";
+
 // GPU toggles: sound vectors (`gpuOnnxEnabled`) and audio analysis
 // (`gpuAnalysisEnabled`) share one downloaded runtime. The DB columns are the truth;
 // enabled.json projects them for the analyzers, which must not read the DB at start-up.
@@ -23,8 +25,6 @@ interface GpuToggles {
     soundVectors: boolean;
     analysis: boolean;
 }
-
-export { gpuSupported } from "./gpuPlatform";
 
 interface GpuState {
     status?: string;
@@ -159,34 +159,23 @@ export async function setGpuToggles(change: Partial<GpuToggles>) {
     return getGpuStatus();
 }
 
-// While the GPU runtime installs, embedding offers are held so the first pass
-// does not run on CPU; every other stage keeps running. The hold is bounded so
-// a failed or hung download cannot freeze the pipeline. The decision is a pure
-// function; `embeddingsDeferredForGpu` wraps its IO.
-
 export const GPU_INSTALL_HOLD_MS = 10 * 60 * 1000;
 
+/**
+ * Whether sound-vector work waits for the GPU runtime, so the first pass does not run on the CPU; every other stage
+ * keeps running. It waits while the runtime installs, or before the analyzer has written any install state, but only
+ * for GPU_INSTALL_HOLD_MS after the switch was turned on, so a stuck download cannot freeze the pipeline. Installed,
+ * failed or any other state: no wait. `embeddingsDeferredForGpu` reads the inputs.
+ */
 export function gpuDeferDecision(params: {
     enabled: boolean;
     status: string | null | undefined;
     enabledAtMs: number | null;
     nowMs: number;
-    holdMs?: number;
 }): boolean {
     if (!params.enabled) return false;
-    const hold = params.holdMs ?? GPU_INSTALL_HOLD_MS;
-    if (params.status === "installing") {
-        // Installing is only worth waiting for inside the window; a download
-        // still "installing" long after the toggle is a stuck one — CPU wins.
-        return params.enabledAtMs !== null && params.nowMs - params.enabledAtMs <= hold;
-    }
-    // Between the toggle landing and the analyzer picking it up there is a gap
-    // with no install state yet. Bridge it, but only inside the window.
-    if (!params.status) {
-        return params.enabledAtMs !== null && params.nowMs - params.enabledAtMs <= hold;
-    }
-    // installed / failed / any terminal status: no hold, never.
-    return false;
+    if (params.status && params.status !== "installing") return false;
+    return params.enabledAtMs !== null && params.nowMs - params.enabledAtMs <= GPU_INSTALL_HOLD_MS;
 }
 
 let deferCache: { atMs: number; deferred: boolean } | null = null;
