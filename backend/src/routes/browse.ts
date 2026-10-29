@@ -116,7 +116,7 @@ router.get("/genres/:id/playlists", async (req, res) => {
             return res.status(404).json({ error: "Genre not found" });
         }
 
-        const playlists = await deezerService.getGenrePlaylists(genre.name, limit);
+        const playlists = await deezerService.searchPlaylists(genre.name, limit);
 
         res.json({
             playlists: playlists.map(deezerPlaylistToUnified),

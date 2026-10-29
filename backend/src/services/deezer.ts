@@ -1,3 +1,4 @@
+/** Fetches images, previews and public playlist data from Deezer's unauthenticated API. */
 import { AxiosRequestConfig } from "axios";
 import { logger } from "../utils/logger";
 import { CacheWrapper } from "../utils/cacheWrapper";
@@ -5,8 +6,6 @@ import { rateLimitedGet } from "./httpClient";
 import { nameWords } from "./nameFold";
 import { UpstreamReplyError } from "../utils/upstream";
 import type { SimilarArtist } from "./listenBrainz";
-
-/** Fetches images, previews and public playlist data from Deezer's unauthenticated API. */
 
 const DEEZER_API = "https://api.deezer.com";
 
@@ -37,9 +36,8 @@ const DEEZER_NO_DATA = 800;
 const DEEZER_QUOTA = 4;
 
 /**
- * Deezer's quota was hit: a rate limit, shaped as a 429 so the limiter backs off and retries it. The quota is a
- * 5-second window (measured: lifted 4.3 and 5.1 s after a burst), so the limiter is told to wait that out
- * rather than retry inside it.
+ * Deezer's quota was hit: a rate limit, shaped as a 429 so the limiter backs off and retries it, told to wait out the
+ * quota's 5-second window rather than retry inside it.
  */
 class DeezerQuotaError extends UpstreamReplyError {
     name = "DeezerQuotaError";
@@ -171,6 +169,19 @@ class DeezerService {
     }
 
     /**
+     * `run`'s answer; a failure is logged and thrown on, as a failed request is not "nothing found" and the caller
+     * must not remember it as one.
+     */
+    private async loggedFailure<T>(run: () => Promise<T>, what: string): Promise<T> {
+        try {
+            return await run();
+        } catch (error: any) {
+            logger.warn(`Deezer ${what} failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
      * Rate-limited Deezer GET through the global limiter (service key "deezer"). Deezer answers its errors as a
      * 200 with an `error` object: "no data" is an answer; a quota hit is a rate limit the limiter backs off from and
      * retries; any other error is a failed request, so it throws instead of being read (and cached) as an empty
@@ -187,9 +198,8 @@ class DeezerService {
     }
 
     /**
-     * The Deezer artist a name means. Deezer's rank puts namesakes first (an obscure exact "Adele" outranks the
-     * Adele, who sits at position 6) and shared names normalize alike (Emine'm == Eminem), so search wide and let
-     * fan count decide among the names that agree. Null when no name agrees.
+     * The Deezer artist a name means: Deezer's rank can put an obscure namesake first, and names that fold alike can
+     * be different artists, so of 25 hits whose names agree the one with the most fans. Null when no name agrees.
      */
     private async findArtist(artistName: string): Promise<{ id: number; name: string; picture_xl?: string; picture_big?: string; picture_medium?: string } | null> {
         const search = await this.deezerGet<any>("/search/artist", {
@@ -206,23 +216,18 @@ class DeezerService {
 
     async getArtistImage(artistName: string): Promise<string | null> {
         const cacheKey = `artist:${artistName.toLowerCase()}`;
-
-        try {
-            return await this.cachedRequest(cacheKey, async () => {
-                const artist = await this.findArtist(artistName);
-                if (!artist) {
-                    logger.debug(
-                        `[DEEZER] No verified artist image for "${artistName}"`
-                    );
-                    return null;
-                }
-                return artist?.picture_xl || artist?.picture_big || artist?.picture_medium || null;
-            });
-        } catch (error: any) {
-            // A failed request is not "no image": the caller must not remember it as one.
-            logger.warn(`Deezer artist image error for ${artistName}:`, error.message);
-            throw error;
-        }
+        return this.loggedFailure(
+            () =>
+                this.cachedRequest(cacheKey, async () => {
+                    const artist = await this.findArtist(artistName);
+                    if (!artist) {
+                        logger.debug(`[DEEZER] No verified artist image for "${artistName}"`);
+                        return null;
+                    }
+                    return artist.picture_xl || artist.picture_big || artist.picture_medium || null;
+                }),
+            `artist image for ${artistName}`,
+        );
     }
 
     /**
@@ -232,9 +237,8 @@ class DeezerService {
      */
     async getRelatedArtists(artistName: string, limit = 30): Promise<SimilarArtist[]> {
         const cacheKey = `related:${artistName.toLowerCase()}:${limit}`;
-
-        try {
-            return await this.cachedRequest(cacheKey, async () => {
+        return this.loggedFailure(() =>
+            this.cachedRequest(cacheKey, async () => {
                 // Only the artist asked about: another artist's neighbours are not this one's.
                 const seed = await this.findArtist(artistName);
                 if (!seed) {
@@ -263,12 +267,9 @@ class DeezerService {
                     });
                 });
                 return results;
-            });
-        } catch (error: any) {
-            // An error is not "no related artists": the caller decides what a failed source means.
-            logger.warn(`Deezer related artists error for ${artistName}: ${error.message}`);
-            throw error;
-        }
+            }),
+            `related artists for ${artistName}`,
+        );
     }
 
     /**
@@ -295,7 +296,7 @@ class DeezerService {
      * [] when unresolved or the artist has no top list; throws on a transport error so the caller can decide.
      */
     async getArtistTopTracks(artistName: string, limit = 10): Promise<DeezerTopTrack[]> {
-        try {
+        return this.loggedFailure(async () => {
             const list = await this.fetchArtistTop(artistName);
             return list
                 .filter((t: any) => t?.title)
@@ -309,19 +310,14 @@ class DeezerService {
                     durationMs: (Number(t.duration) || 0) * 1000,
                     rank: Number(t.rank) || 0,
                 }));
-        } catch (error: any) {
-            logger.warn(`Deezer artist top tracks error for ${artistName}:`, error.message);
-            throw error;
-        }
+        }, `artist top tracks for ${artistName}`);
     }
 
     async getAlbumCover(artistName: string, albumName: string): Promise<string | null> {
         const cacheKey = `album:${artistName.toLowerCase()}:${albumName.toLowerCase()}`;
-
-        try {
-            return await this.cachedRequest(cacheKey, async () => {
-                // Try structured query first, fall back to unstructured if no results.
-                // Deezer's structured syntax (artist:"..." album:"...") fails for some albums.
+        return this.loggedFailure(() =>
+            this.cachedRequest(cacheKey, async () => {
+                // The structured search (artist:"…" album:"…") misses some albums; then a plain one.
                 let albums: any[] = [];
 
                 const structured = await this.deezerGet<any>("/search/album", {
@@ -351,12 +347,9 @@ class DeezerService {
                 }
 
                 return match.cover_xl || match.cover_big || match.cover_medium || null;
-            });
-        } catch (error: any) {
-            // A failed request is not "no cover": the caller must not remember it as one.
-            logger.warn(`Deezer album cover error for ${artistName} - ${albumName}:`, error.message);
-            throw error;
-        }
+            }),
+            `album cover for ${artistName} - ${albumName}`,
+        );
     }
 
     /**
@@ -440,10 +433,7 @@ class DeezerService {
                     timeout: 5000,
                 });
 
-                // Take a track only if it is by the queried artist and its
-                // title is the queried title (either spelling). No
-                // first-result fallback — that was some other record's
-                // album.
+                // Only a track by the artist with the title (either spelling): another hit is another record's album.
                 const tracks = body?.data || [];
                 const match = tracks.find(
                     (t: any) =>
@@ -679,9 +669,6 @@ class DeezerService {
         }
     }
 
-    async getGenrePlaylists(genreName: string, limit: number = 20): Promise<DeezerPlaylistPreview[]> {
-        return this.searchPlaylists(genreName, limit);
-    }
 }
 
 export const deezerService = new DeezerService();
