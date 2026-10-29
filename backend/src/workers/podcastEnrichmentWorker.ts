@@ -9,9 +9,12 @@ interface PodcastJobData {
     podcastTitle: string;
 }
 
+/** A job's data; a job hash stripped by Redis arrives without any. */
+const jobData = (job: Job<PodcastJobData>): Partial<PodcastJobData> => job.data ?? {};
+
 /** Refreshes one podcast's feed. A podcast unsubscribed since its job was queued is skipped. */
 export async function processPodcastJob(job: Job<PodcastJobData>): Promise<void> {
-    const { podcastId, podcastTitle } = job.data ?? ({} as PodcastJobData);
+    const { podcastId, podcastTitle } = jobData(job);
     // A job hash stripped by Redis arrives without data.
     if (!podcastId) {
         throw new Error("[PodcastWorker] Job has no podcastId -- corrupt job data");
@@ -37,7 +40,7 @@ export function startPodcastEnrichmentWorker(): Worker {
 
     worker.on("failed", async (job, err) => {
         if (!job) return;
-        const { podcastId, podcastTitle } = job.data ?? ({} as PodcastJobData);
+        const { podcastId, podcastTitle } = jobData(job);
         logger.error(`[PodcastWorker] Podcast ${podcastId ?? "<unknown>"} failed (attempt ${job.attemptsMade}): ${err.message}`);
         // A corrupt/data-less job has nothing to record against -- the cleaned
         // jobId lets the next cycle re-queue it with real data.
