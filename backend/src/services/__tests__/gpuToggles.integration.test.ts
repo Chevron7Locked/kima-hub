@@ -112,6 +112,9 @@ describe("the two GPU switches", () => {
     it("calls the downloader up only while the vibe embeddings analyzer's heartbeat is fresh", async () => {
         mockGet.mockResolvedValueOnce(String(Date.now() - 10_000));
         expect((await gpu.getGpuStatus()).installerUp).toBe(true);
+        // Three missed 30 s beats: down for the downloader, though the 5-minute feature check still counts it.
+        mockGet.mockResolvedValueOnce(String(Date.now() - 2 * 60_000));
+        expect((await gpu.getGpuStatus()).installerUp).toBe(false);
         mockGet.mockResolvedValueOnce(String(Date.now() - 10 * 60_000));
         expect((await gpu.getGpuStatus()).installerUp).toBe(false);
         mockGet.mockResolvedValueOnce(null);

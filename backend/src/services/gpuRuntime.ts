@@ -5,6 +5,7 @@ import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { gpuSupported } from "./gpuPlatform";
+import { featureDetection } from "./featureDetection";
 
 // GPU toggles: sound vectors (`gpuOnnxEnabled`) and audio analysis
 // (`gpuAnalysisEnabled`) share one downloaded runtime. The DB columns are the truth;
@@ -78,13 +79,12 @@ export async function initGpuRuntimeProjection(): Promise<void> {
     }
 }
 
-// The vibe embeddings analyzer downloads the runtime for both switches; it writes this every 30 s while running.
-const INSTALLER_HEARTBEAT_KEY = "clap:worker:heartbeat";
+// The vibe embeddings analyzer downloads the runtime for both switches. Its heartbeat comes every 30 s; three missed
+// beats and the download is not offered.
 const INSTALLER_HEARTBEAT_MS = 90_000;
 
-async function installerUp(): Promise<boolean> {
-    const beat = Number(await redisClient.get(INSTALLER_HEARTBEAT_KEY));
-    return Number.isFinite(beat) && Date.now() - beat < INSTALLER_HEARTBEAT_MS;
+function installerUp(): Promise<boolean> {
+    return featureDetection.clapRunning(INSTALLER_HEARTBEAT_MS);
 }
 
 export async function getGpuStatus() {

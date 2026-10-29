@@ -443,41 +443,13 @@ async function main() {
         latestLibraryExport();
     }
 
-    // AcoustID fingerprinting is on only when the fpcalc binary exists; log
-    // either way. Without it identification uses MusicBrainz alone.
+    // AcoustID fingerprinting is on only when fpcalc runs (fpcalcService warns when it does not).
     {
-        const { execFile } = await import("child_process");
-        const { promisify } = await import("util");
-        const exec = promisify(execFile);
-        try {
-            await exec("fpcalc", ["-h"], { timeout: 5000 });
+        const { fpcalcService } = await import("./services/fpcalc");
+        if (await fpcalcService.isAvailable()) {
             logger.info("[AcoustID] fpcalc found — fingerprint identification ENABLED");
-        } catch (err: unknown) {
-            const code = (err as { code?: string })?.code;
-            if (code === "ENOENT") {
-                logger.warn(
-                    "[AcoustID] fpcalc NOT installed — fingerprint identification DISABLED; " +
-                        "identification falls back to the MusicBrainz search path",
-                );
-            } else {
-                // Binary exists but errored on -h (fpcalc prints usage + non-zero exit);
-                // probe with a nonexistent file to confirm it is actually runnable.
-                try {
-                    await exec("fpcalc", ["/nonexistent"], { timeout: 5000 });
-                    logger.info("[AcoustID] fpcalc found — fingerprint identification ENABLED");
-                } catch (err2: unknown) {
-                    const code2 = (err2 as { code?: string })?.code;
-                    if (code2 === "ENOENT") {
-                        logger.warn(
-                            "[AcoustID] fpcalc NOT installed — fingerprint identification DISABLED",
-                        );
-                    } else {
-                        logger.info(
-                            "[AcoustID] fpcalc present (exited non-zero on probe) — fingerprint identification ENABLED",
-                        );
-                    }
-                }
-            }
+        } else if (process.env.ACOUSTID_DISABLED === "true") {
+            logger.info("[AcoustID] fingerprint identification turned off by ACOUSTID_DISABLED");
         }
     }
 

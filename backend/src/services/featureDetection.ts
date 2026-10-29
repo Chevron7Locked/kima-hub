@@ -2,7 +2,7 @@ import { existsSync } from "fs";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { fpcalcPresent } from "./fpcalc";
+import { fpcalcService } from "./fpcalc";
 
 // Analyzer script paths in the Docker image
 const ESSENTIA_ANALYZER_PATH = "/app/audio-analyzer/analyzer.py";
@@ -16,8 +16,9 @@ interface AvailableFeatures {
     fpcalc: boolean;
 }
 
-const HEARTBEAT_TTL = 300000; // 5 minutes
-const CACHE_TTL = 60000; // 60 seconds
+/** An analyzer whose heartbeat is older than this is not running. */
+const HEARTBEAT_TTL = 300000;
+const CACHE_TTL = 60000;
 
 class FeatureDetectionService {
     private cache: AvailableFeatures | null = null;
@@ -47,11 +48,11 @@ class FeatureDetectionService {
         return this.cache;
     }
 
-    private async workerAlive(heartbeatKey: string): Promise<boolean> {
+    private async workerAlive(heartbeatKey: string, withinMs = HEARTBEAT_TTL): Promise<boolean> {
         const heartbeat = await redisClient.get(heartbeatKey);
         if (!heartbeat) return false;
         const timestamp = parseInt(heartbeat, 10);
-        return !isNaN(timestamp) && Date.now() - timestamp < HEARTBEAT_TTL;
+        return !isNaN(timestamp) && Date.now() - timestamp < withinMs;
     }
 
     /** The Essentia analyzer process is running now (its heartbeat is fresh), not merely installed. */
@@ -59,14 +60,14 @@ class FeatureDetectionService {
         return this.workerAlive("audio:worker:heartbeat");
     }
 
-    /** The CLAP analyzer process is running now (its heartbeat is fresh), not merely installed. */
-    async clapRunning(): Promise<boolean> {
-        return this.workerAlive("clap:worker:heartbeat");
+    /** The CLAP analyzer process is running now (its heartbeat is younger than `withinMs`), not merely installed. */
+    async clapRunning(withinMs = HEARTBEAT_TTL): Promise<boolean> {
+        return this.workerAlive("clap:worker:heartbeat", withinMs);
     }
 
     private async checkMusicCNN(): Promise<boolean> {
         try {
-            // Analyzer script bundled in image = feature is available
+            // The image ships the analyzer.
             if (existsSync(ESSENTIA_ANALYZER_PATH)) {
                 return true;
             }
@@ -86,7 +87,6 @@ class FeatureDetectionService {
 
     private async checkCLAP(): Promise<boolean> {
         try {
-            // If explicitly disabled via env var, CLAP is not available
             const disabled = process.env.DISABLE_CLAP;
             if (disabled === "true" || disabled === "1") {
                 return false;
@@ -119,17 +119,9 @@ class FeatureDetectionService {
         }
     }
 
-    /**
-     * fpcalc gates the AcoustID fingerprint path; ACOUSTID_DISABLED=true turns it
-     * off even when the binary exists. Probed once per process.
-     */
-    private checkFpcalc(): boolean {
-        return fpcalcPresent();
-    }
-
-    invalidateCache(): void {
-        this.cache = null;
-        this.lastCheck = 0;
+    /** fpcalc gates AcoustID fingerprinting; ACOUSTID_DISABLED=true counts as absent. Probed once per process. */
+    private checkFpcalc(): Promise<boolean> {
+        return fpcalcService.isAvailable();
     }
 }
 
