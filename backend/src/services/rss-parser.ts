@@ -17,7 +17,7 @@ interface RSSPodcast {
     categoryNames: string[];
 }
 
-interface RSSEpisode {
+export interface RSSEpisode {
     guid: string;
     title: string;
     description?: string;

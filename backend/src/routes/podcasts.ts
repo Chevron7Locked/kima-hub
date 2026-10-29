@@ -6,7 +6,7 @@ import { upstreamFailure, upstreamUnreachable } from "../utils/upstream";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { prisma, Prisma } from "../utils/db";
-import { FeedReadError, rssParserService } from "../services/rss-parser";
+import { FeedReadError, rssParserService, type RSSEpisode as FeedEpisode } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { safeError } from "../utils/errors";
 import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
@@ -138,6 +138,7 @@ router.get("/", requireAuth, async (req, res) => {
                 description: podcast.description,
                 coverUrl: podcast.imageUrl,
                 episodeCount: podcast.episodeCount,
+                // Kima has no episode auto-download; the iOS app still requires the field.
                 autoDownloadEpisodes: false,
                 // The episodes come newest first: the first one's date is when the show last published.
                 latestEpisodeAt: podcast.episodes[0]?.publishedAt ?? null,
@@ -320,6 +321,13 @@ router.get("/discover/genre/:genreId", (req, res) =>
     answerChart(res, Number(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
 );
 
+// Apple (iTunes) ids are numbers. Anything else (Kima's own podcast id, which the podcast page falls back to) is not
+// a show Apple has, so it is a 404 before any request to Apple.
+router.param("itunesId", (_req, res, next, itunesId: string) => {
+    if (!/^\d+$/.test(itunesId)) return res.status(404).json({ error: "Podcast not found" });
+    next();
+});
+
 /**
  * GET /podcasts/preview/:itunesId
  * Preview a podcast by its Apple (iTunes) id, before following it
@@ -327,13 +335,6 @@ router.get("/discover/genre/:genreId", (req, res) =>
 router.get("/preview/:itunesId", requireAuth, async (req, res) => {
     try {
         const { itunesId } = req.params;
-
-        // iTunes ids are numeric; anything else (our own record id, which the podcast page falls
-        // back to, or a Deezer id an older client kept) is a 404, not an upstream error.
-        if (!/^\d+$/.test(itunesId)) {
-            return res.status(404).json({ error: "Podcast not found" });
-        }
-
         const show = (await lookupShows([itunesId])).get(itunesId);
         if (!show) {
             return res.status(404).json({ error: "Podcast not found" });
@@ -343,11 +344,7 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             where: { OR: [{ itunesId }, ...(show.feedUrl ? [{ feedUrl: show.feedUrl }] : [])] },
             select: { id: true },
         });
-        const isSubscribed = existingPodcast
-            ? !!(await prisma.podcastSubscription.findUnique({
-                  where: { userId_podcastId: { userId: req.user!.id, podcastId: existingPodcast.id } },
-              }))
-            : false;
+        const subscribed = existingPodcast ? await isSubscribed(req.user!.id, existingPodcast.id) : false;
 
         let description = "";
         let previewEpisodes: Array<{ title: string; publishedAt: Date; duration: number; description: string }> = [];
@@ -389,8 +386,8 @@ router.get("/preview/:itunesId", requireAuth, async (req, res) => {
             episodeCount: show.episodeCount,
             previewEpisodes,
             snippet: snippet ? { ...snippet, audioUrl: undefined } : null,
-            isSubscribed,
-            subscribedPodcastId: isSubscribed ? existingPodcast!.id : null,
+            isSubscribed: subscribed,
+            subscribedPodcastId: subscribed ? existingPodcast!.id : null,
         });
     } catch (error) {
         appleFailure(res, "Error previewing podcast", error);
@@ -413,9 +410,6 @@ function snippetFrom(episodes: Array<{ title: string; publishedAt: Date; duratio
  */
 router.get("/preview/:itunesId/snippet", async (req, res) => {
     const { itunesId } = req.params;
-    if (!/^\d+$/.test(itunesId)) {
-        return res.status(404).json({ error: "Podcast not found" });
-    }
     try {
         const snippet = await snippetFor(itunesId, async (feedUrl) => {
             const feed = await withTimeout(rssParserService.parseFeed(feedUrl), PREVIEW_RSS_TIMEOUT_MS, "RSS snippet timed out");
@@ -441,9 +435,6 @@ router.get("/preview/:itunesId/snippet", async (req, res) => {
 /** GET /podcasts/preview/:itunesId/similar — a show not followed yet: shows on its categories' charts, as /:id/similar. */
 router.get("/preview/:itunesId/similar", requireAuth, async (req, res) => {
     const { itunesId } = req.params;
-    if (!/^\d+$/.test(itunesId)) {
-        return res.status(404).json({ error: "Podcast not found" });
-    }
     try {
         const show = (await lookupShows([itunesId])).get(itunesId);
         if (!show) {
@@ -530,6 +521,44 @@ function parseEpisodeOrder(query: Record<string, unknown>): "asc" | "desc" {
     return query.order === "oldest" ? "asc" : "desc";
 }
 
+async function isSubscribed(userId: string, podcastId: string): Promise<boolean> {
+    return (await prisma.podcastSubscription.count({ where: { userId, podcastId } })) > 0;
+}
+
+/** A page of one show's episodes with this listener's progress and downloads, and how many episodes the show has. */
+async function episodePage(
+    userId: string,
+    podcastId: string,
+    page: { limit: number; offset: number; order: "asc" | "desc" },
+) {
+    const [rows, total] = await Promise.all([
+        prisma.podcastEpisode.findMany({
+            where: { podcastId },
+            orderBy: { publishedAt: page.order },
+            take: page.limit,
+            skip: page.offset,
+            include: {
+                progress: { where: { userId } },
+                downloads: { where: { userId } },
+            },
+        }),
+        prisma.podcastEpisode.count({ where: { podcastId } }),
+    ]);
+    const episodes = rows.map((episode) => ({
+        id: episode.id,
+        title: episode.title,
+        description: episode.description,
+        duration: episode.duration,
+        publishedAt: episode.publishedAt,
+        episodeNumber: episode.episodeNumber,
+        season: episode.season,
+        imageUrl: episode.imageUrl,
+        isDownloaded: episode.downloads.length > 0,
+        progress: progressOf(episode.progress[0]),
+    }));
+    return { episodes, total };
+}
+
 /** GET /podcasts/:id: a podcast the user subscribes to, with one page of episodes. */
 router.get("/:id", requireAuth, async (req, res) => {
     try {
@@ -537,60 +566,17 @@ router.get("/:id", requireAuth, async (req, res) => {
         const { limit, offset } = parseEpisodePage(req.query);
         const order = parseEpisodeOrder(req.query);
 
-        const subscription = await prisma.podcastSubscription.findUnique({
-            where: {
-                userId_podcastId: {
-                    userId: req.user!.id,
-                    podcastId: id,
-                },
-            },
-        });
-
-        if (!subscription) {
+        if (!(await isSubscribed(req.user!.id, id))) {
             return res
                 .status(404)
                 .json({ error: "Podcast not found or not subscribed" });
         }
 
-        const podcast = await prisma.podcast.findUnique({
-            where: { id },
-            include: {
-                episodes: {
-                    orderBy: { publishedAt: order },
-                    take: limit,
-                    skip: offset,
-                    include: {
-                        progress: {
-                            where: { userId: req.user!.id },
-                        },
-                        downloads: {
-                            where: { userId: req.user!.id },
-                        },
-                    },
-                },
-            },
-        });
-
+        const podcast = await prisma.podcast.findUnique({ where: { id } });
         if (!podcast) {
             return res.status(404).json({ error: "Podcast not found" });
         }
-
-        const episodeTotal = await prisma.podcastEpisode.count({
-            where: { podcastId: id },
-        });
-
-        const episodesWithProgress = podcast.episodes.map((episode) => ({
-            id: episode.id,
-            title: episode.title,
-            description: episode.description,
-            duration: episode.duration,
-            publishedAt: episode.publishedAt,
-            episodeNumber: episode.episodeNumber,
-            season: episode.season,
-            imageUrl: episode.imageUrl,
-            isDownloaded: episode.downloads.length > 0,
-            progress: progressOf(episode.progress[0]),
-        }));
+        const { episodes: episodesWithProgress, total: episodeTotal } = await episodePage(req.user!.id, id, { limit, offset, order });
 
         const categories = await namedCategories(podcast.categoryIds);
         res.json({
@@ -603,11 +589,10 @@ router.get("/:id", requireAuth, async (req, res) => {
             genres: categories.map((c) => c.name),
             categories,
             itunesId: podcast.itunesId,
+            // Kima has no episode auto-download; the iOS app still requires the field.
             autoDownloadEpisodes: false,
-            // `episodes` keeps its name and stays newest-first, so a client
-            // that predates paging still renders -- it sees the first page
-            // instead of a decade of back catalogue. episodeTotal is what tells
-            // it there is more, and GET /:id/episodes is how it asks.
+            // The first page of episodes, newest first unless ?order=oldest. episodeTotal says how many there are;
+            // GET /:id/episodes serves the rest.
             episodes: episodesWithProgress,
             episodeTotal,
             episodeOffset: offset,
@@ -631,49 +616,14 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
         const { limit, offset } = parseEpisodePage(req.query);
         const order = parseEpisodeOrder(req.query);
 
-        const subscription = await prisma.podcastSubscription.findUnique({
-            where: {
-                userId_podcastId: { userId: req.user!.id, podcastId: id },
-            },
-        });
-
-        if (!subscription) {
+        if (!(await isSubscribed(req.user!.id, id))) {
             return res
                 .status(404)
                 .json({ error: "Podcast not found or not subscribed" });
         }
 
-        const [episodes, total] = await Promise.all([
-            prisma.podcastEpisode.findMany({
-                where: { podcastId: id },
-                orderBy: { publishedAt: order },
-                take: limit,
-                skip: offset,
-                include: {
-                    progress: { where: { userId: req.user!.id } },
-                    downloads: { where: { userId: req.user!.id } },
-                },
-            }),
-            prisma.podcastEpisode.count({ where: { podcastId: id } }),
-        ]);
-
-        res.json({
-            episodes: episodes.map((episode) => ({
-                id: episode.id,
-                title: episode.title,
-                description: episode.description,
-                duration: episode.duration,
-                publishedAt: episode.publishedAt,
-                episodeNumber: episode.episodeNumber,
-                season: episode.season,
-                imageUrl: episode.imageUrl,
-                isDownloaded: episode.downloads.length > 0,
-                progress: progressOf(episode.progress[0]),
-            })),
-            total,
-            offset,
-            limit,
-        });
+        const { episodes, total } = await episodePage(req.user!.id, id, { limit, offset, order });
+        res.json({ episodes, total, offset, limit });
     } catch (error) {
         safeError(res, "Error fetching podcast episodes", error);
     }
@@ -850,20 +800,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
 
         // Save episodes
         await prisma.podcastEpisode.createMany({
-            data: episodes.map((ep) => ({
-                podcastId: podcast!.id,
-                guid: ep.guid,
-                title: ep.title,
-                description: ep.description,
-                audioUrl: ep.audioUrl,
-                duration: ep.duration,
-                publishedAt: ep.publishedAt,
-                episodeNumber: ep.episodeNumber,
-                season: ep.season,
-                imageUrl: ep.imageUrl,
-                fileSize: ep.fileSize,
-                mimeType: ep.mimeType,
-            })),
+            data: episodes.map((ep) => episodeRow(podcast!.id, ep)),
             skipDuplicates: true,
         });
 
@@ -896,9 +833,7 @@ router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
-        logger.debug(`\n[PODCAST] Unsubscribe request`);
-        logger.debug(`   User: ${req.user!.username}`);
-        logger.debug(`   Podcast ID: ${id}`);
+        logger.debug(`[PODCAST] ${req.user!.username} unsubscribes from ${id}`);
 
         // Delete subscription
         const deleted = await prisma.podcastSubscription.deleteMany({
@@ -940,7 +875,6 @@ router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
             where: { userId: req.user!.id, playbackType: "podcast", podcastId: { startsWith: `${id}:` } },
         });
 
-        logger.debug(`   Unsubscribed successfully`);
         await forgetSearches(req.user!.id);
 
         res.json({
@@ -983,17 +917,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
     try {
         const { podcastId, episodeId } = req.params;
         const userId = req.user?.id;
-        const podcastDebug = process.env.PODCAST_DEBUG === "1";
         // Resolved against the allowed origins, never just reflected (see resolveCorsOrigin in ./audiobooks).
         const corsOrigin = resolveCorsOrigin(req.headers.origin);
 
-        logger.debug(`\n [PODCAST STREAM] Request:`);
-        logger.debug(`   Podcast ID: ${podcastId}`);
-        logger.debug(`   Episode ID: ${episodeId}`);
-        if (podcastDebug) {
-            logger.debug(`   Range: ${req.headers.range || "none"}`);
-            logger.debug(`   UA: ${req.headers["user-agent"] || "unknown"}`);
-        }
+        logger.debug(`[PODCAST STREAM] ${podcastId}/${episodeId}, range ${req.headers.range || "none"}`);
 
         const episode = await prisma.podcastEpisode.findUnique({
             where: { id: episodeId },
@@ -1001,17 +928,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
 
         if (!episode) {
             return res.status(404).json({ error: "Episode not found" });
-        }
-
-        if (podcastDebug) {
-            logger.debug(`   Episode DB: title="${episode.title}"`);
-            logger.debug(`   Episode DB: guid="${episode.guid}"`);
-            logger.debug(`   Episode DB: audioUrl="${episode.audioUrl}"`);
-            logger.debug(
-                `   Episode DB: mimeType="${
-                    episode.mimeType || "unknown"
-                }" fileSize=${episode.fileSize || 0}`
-            );
         }
 
         const range = req.headers.range;
@@ -1029,13 +945,10 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         };
 
         if (cachedPath) {
-            logger.debug(`   Streaming from cache: ${cachedPath}`);
+            logger.debug(`[PODCAST STREAM] From cache: ${cachedPath}`);
             try {
                 const stats = await fs.promises.stat(cachedPath);
                 const fileSize = stats.size;
-                if (podcastDebug) {
-                    logger.debug(`   Cache file size: ${fileSize}`);
-                }
 
                 if (fileSize === 0) {
                     throw new Error("Cached file is empty");
@@ -1047,7 +960,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     if (!parsed.ok) {
                         if (parsed.reason === "multi") {
                             // RFC 9110: ignore multi-range, serve full file as 200
-                            logger.debug(`    Multi-range ignored, serving full file`);
+                            logger.debug(`[PODCAST STREAM] Multi-range ignored, serving the full file`);
                             pipeCachedFile(res, cachedPath, 200, {
                                 ...baseHeaders,
                                 "Content-Length": fileSize,
@@ -1081,7 +994,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
                     return;
                 }
 
-                logger.debug(`    Serving full file: ${fileSize} bytes`);
+                logger.debug(`[PODCAST STREAM] Full file, ${fileSize} bytes`);
                 pipeCachedFile(res, cachedPath, 200, {
                     ...baseHeaders,
                     "Content-Length": fileSize,
@@ -1097,7 +1010,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
 
         // Not cached yet - trigger background download while streaming from RSS
         if (userId && !isDownloading(episodeId)) {
-            logger.debug(`   Triggering background download for caching`);
+            logger.debug(`[PODCAST STREAM] Caching the episode in the background`);
             downloadInBackground(episodeId, episode.audioUrl, userId);
         }
 
@@ -1112,7 +1025,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
         // length can belong to another file, and the browser derives the episode's length from the size. Asked as
         // Kima, like the background download, because hosts that stitch ads in send each identity its own copy, so
         // the copy played is the copy cached and measured.
-        logger.debug(`   Streaming from RSS: ${episode.audioUrl}`);
+        logger.debug(`[PODCAST STREAM] From the feed: ${episode.audioUrl}`);
 
         const controller = new AbortController();
         res.on("close", () => {
@@ -1141,7 +1054,7 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
             }
             if (!singleRange) throw error;
             // Some podcast CDNs refuse range requests outright; the whole file still plays.
-            logger.debug(`    Range request failed (${error.response?.status || error.message}), streaming the whole file`);
+            logger.debug(`[PODCAST STREAM] Range request failed (${error.response?.status || error.message}), streaming the whole file`);
             response = await fetchUpstream();
         }
 
@@ -1241,9 +1154,7 @@ router.delete("/:podcastId/episodes/:episodeId/progress", requireAuth, async (re
     try {
         const { episodeId } = req.params;
 
-        logger.debug(`\n[PODCAST PROGRESS] Delete:`);
-        logger.debug(`   User: ${req.user!.username}`);
-        logger.debug(`   Episode ID: ${episodeId}`);
+        logger.debug(`[PODCAST PROGRESS] ${req.user!.username} clears progress on ${episodeId}`);
 
         await prisma.podcastProgress.deleteMany({
             where: {
@@ -1251,8 +1162,6 @@ router.delete("/:podcastId/episodes/:episodeId/progress", requireAuth, async (re
                 episodeId: episodeId,
             },
         });
-
-        logger.debug(`   Progress removed`);
 
         res.json({
             success: true,
@@ -1340,26 +1249,31 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         // (podcastId, guid) unique key. An existing episode is left untouched.
         await prisma.podcastEpisode.upsert({
             where: { podcastId_guid: { podcastId, guid: ep.guid } },
-            create: {
-                podcastId,
-                guid: ep.guid,
-                title: ep.title,
-                description: ep.description,
-                audioUrl: ep.audioUrl,
-                duration: ep.duration,
-                publishedAt: ep.publishedAt,
-                episodeNumber: ep.episodeNumber,
-                season: ep.season,
-                imageUrl: ep.imageUrl,
-                fileSize: ep.fileSize,
-                mimeType: ep.mimeType,
-            },
+            create: episodeRow(podcastId, ep),
             update: {},
         });
         newEpisodesCount++;
     }
 
     return { newEpisodesCount, totalEpisodes: result.episodes.length };
+}
+
+/** A feed episode as the row that stores it. */
+function episodeRow(podcastId: string, ep: FeedEpisode): Prisma.PodcastEpisodeUncheckedCreateInput {
+    return {
+        podcastId,
+        guid: ep.guid,
+        title: ep.title,
+        description: ep.description,
+        audioUrl: ep.audioUrl,
+        duration: ep.duration,
+        publishedAt: ep.publishedAt,
+        episodeNumber: ep.episodeNumber,
+        season: ep.season,
+        imageUrl: ep.imageUrl,
+        fileSize: ep.fileSize,
+        mimeType: ep.mimeType,
+    };
 }
 
 /**

@@ -135,6 +135,9 @@ it("finds similar shows for a show not followed yet, by its Apple id, as for a f
     expect(res.body).toEqual(await catalog.similarShows(show));
 });
 
-it("answers 404 for similar shows of an Apple id that is not a number", async () => {
-    expect((await request(app).get("/podcasts/preview/pod_disc_dnd/similar")).status).toBe(404);
+it("answers 404 for a preview, its snippet or its similar shows when the Apple id is not a number", async () => {
+    for (const path of ["/podcasts/preview/pod_disc_dnd", "/podcasts/preview/pod_disc_dnd/snippet", "/podcasts/preview/pod_disc_dnd/similar"]) {
+        const res = await request(app).get(path);
+        expect([path, res.status, res.body.error]).toEqual([path, 404, "Podcast not found"]);
+    }
 });

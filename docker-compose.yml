@@ -43,8 +43,6 @@ services:
             # Lidarr webhook callback URL - how Lidarr can reach Kima
             # Use backend:3006 for same-network communication, or external IP:3030 for external Lidarr
             KIMA_CALLBACK_URL: ${KIMA_CALLBACK_URL:-http://backend:3006}
-            # Debug: enable extra podcast stream/cache logging
-            PODCAST_DEBUG: ${PODCAST_DEBUG:-0}
         volumes:
             - ${MUSIC_PATH:-./music}:/music
             - backend_cache:/app/cache
