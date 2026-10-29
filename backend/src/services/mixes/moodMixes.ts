@@ -1,5 +1,3 @@
-// Vocal Detox's instrumental cut-off is its launch value; the record is
-// music-switch-2026-10-17 cutoffs.json, in the lab archive.
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { nightMixGenerator } from "./nightPlays";
@@ -19,8 +17,7 @@ import { spellingsOf } from "../stats/playable";
 
 const WEEKLY_TRACK_LIMIT = 20;
 
-// MOOD MIXES: each draws from its recipe in recipes.json
-
+// Each draws from its recipe in recipes.json.
 export const generateChillMix = recipeMixGenerator({
     recipe: "chill", id: "chill", type: "chill", name: "Chill Mix",
     description: "Relax and unwind with mellow vibes", colorType: "chill",
@@ -158,8 +155,6 @@ export const generateNostalgicMix = recipeMixGenerator({
     description: "Tracks that take you back", colorType: "throwback",
 });
 
-// WEEKLY CURATED MIXES (20 tracks)
-
 export async function generateDeepCuts(
     _userId: string,
     today: string
@@ -214,8 +209,8 @@ export async function generateKeyJourney(
 
     const byKey = new Map<string, typeof tracks>();
     for (const track of tracks) {
-        // Essentia writes C# where keyOrder says Db; group by the table's spelling.
-        const key = spellingsOf(track.key || "C").find((s) => keyOrder.includes(s)) ?? track.key ?? "C";
+        // Essentia writes C# where keyOrder says Db; group by the table's spelling. The query asks for a key.
+        const key = spellingsOf(track.key!).find((s) => keyOrder.includes(s)) ?? track.key!;
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key)!.push(track);
     }
@@ -270,11 +265,12 @@ export async function generateTempoFlow(
     // Each band in an order fixed by the day: the flow takes from the front of each, so the same day gives the same
     // songs and every song in a band has the same chance.
     const band = (keep: (bpm: number) => boolean) =>
-        seededOrder(tracks.filter((t) => keep(t.bpm || 0)), seed, (t) => t.id);
+        seededOrder(tracks.filter((t) => keep(t.bpm!)), seed, (t) => t.id);
     const slow = band((bpm) => bpm < 100);
     const medium = band((bpm) => bpm >= 100 && bpm < 130);
     const fast = band((bpm) => bpm >= 130);
 
+    // 4 + 5 + 6 + 3 + 2: at most WEEKLY_TRACK_LIMIT songs.
     const flow: typeof tracks = [
         ...slow.slice(0, 4),
         ...medium.slice(0, 5),
@@ -292,9 +288,9 @@ export async function generateTempoFlow(
         type: "tempo-flow",
         name: "Tempo Flow",
         description: "An energy journey through BPM",
-        trackIds: flow.slice(0, WEEKLY_TRACK_LIMIT).map((t) => t.id),
+        trackIds: flow.map((t) => t.id),
         coverUrls,
-        trackCount: Math.min(flow.length, WEEKLY_TRACK_LIMIT),
+        trackCount: flow.length,
         color: getMixColor("workout"),
     };
 }
@@ -312,6 +308,7 @@ export async function generateVocalDetox(
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
         seed: getSeededRandom(`vocal-detox-${today}`),
+        // The instrumental cut-off it launched with.
         where: Prisma.sql`t."analysisStatus" = 'completed' AND t.instrumentalness >= 0.75`,
     });
 }
