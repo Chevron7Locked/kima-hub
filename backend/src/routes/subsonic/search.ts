@@ -11,6 +11,64 @@ import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 
 export const searchRouter = Router();
 
+/** What every song list here reads: the song, its album and its artist. */
+const SONG_COLUMNS = Prisma.sql`
+    t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+    al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
+    ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
+    ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"`;
+const SONG_FROM = Prisma.sql`"Track" t JOIN "Album" al ON t."albumId" = al.id JOIN "Artist" ar ON al."artistId" = ar.id`;
+/** Songs a client can play: on a library album, with a file that is present and readable. */
+const PLAYABLE_SONG = Prisma.sql`al.location = 'LIBRARY' AND t.corrupt = false AND t."missingSince" IS NULL`;
+
+type SongRow = {
+    id: string;
+    title: string;
+    trackNo: number | null;
+    discNumber: number | null;
+    duration: number | null;
+    mime: string | null;
+    fileSize: number | null;
+    albumId: string;
+    albumTitle: string;
+    albumDisplayTitle: string | null;
+    albumYear: number | null;
+    artistId: string;
+    artistName: string;
+    artistDisplayName: string | null;
+    artistGenres: unknown;
+    artistUserGenres: unknown;
+};
+
+function songOf(row: SongRow) {
+    return mapSong(
+        {
+            id: row.id,
+            title: row.title,
+            trackNo: row.trackNo,
+            discNumber: row.discNumber,
+            duration: row.duration,
+            filePath: null,
+            mime: row.mime,
+            fileSize: row.fileSize,
+        },
+        { id: row.albumId, title: row.albumTitle, displayTitle: row.albumDisplayTitle, year: row.albumYear },
+        row.artistDisplayName || row.artistName,
+        row.artistId,
+        firstArtistGenre(row.artistGenres, row.artistUserGenres),
+    );
+}
+
+/** The playable songs among `ids`, in the order given. */
+async function playableSongsInOrder(ids: string[]): Promise<SongRow[]> {
+    if (ids.length === 0) return [];
+    const rows = await prisma.$queryRaw<SongRow[]>`
+        SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
+        WHERE t.id = ANY(${ids}::text[]) AND ${PLAYABLE_SONG}`;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
@@ -38,7 +96,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
 
     let artists: { id: string; name: string }[];
     let rawAlbums: { id: string; title: string; artistId: string; artistName: string; year: number | null }[];
-    let tracks: { id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[];
+    let tracks: SongRow[];
 
     if (enumerateLibrary) {
         [artists, rawAlbums, tracks] = await Promise.all([
@@ -58,13 +116,9 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                 : Promise.resolve([]),
             songCount > 0
-                ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; albumId: string; albumTitle: string; duration: number | null }[]>`
-                      SELECT t.id, t.title, al."artistId", ar.name AS "artistName",
-                             t."albumId", al.title AS "albumTitle", t.duration
-                      FROM "Track" t
-                      JOIN "Album" al ON t."albumId" = al.id
-                      JOIN "Artist" ar ON al."artistId" = ar.id
-                      WHERE al.location = 'LIBRARY' AND t.corrupt = false AND t."missingSince" IS NULL
+                ? prisma.$queryRaw<SongRow[]>`
+                      SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
+                      WHERE ${PLAYABLE_SONG}
                       ORDER BY LOWER(t.title) ASC, t.id ASC
                       LIMIT ${songCount} OFFSET ${songOffset}`
                 : Promise.resolve([]),
@@ -92,17 +146,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
             songCount > 0
                 ? searchService
                       .searchTracks({ query, limit: songCount, offset: songOffset })
-                      .then((rows) =>
-                          rows.map((t) => ({
-                              id: t.id,
-                              title: t.title,
-                              artistId: t.artistId,
-                              artistName: t.artistName,
-                              albumId: t.albumId,
-                              albumTitle: t.albumTitle,
-                              duration: t.duration ?? null,
-                          }))
-                      )
+                      .then((rows) => playableSongsInOrder(rows.map((t) => t.id)))
                 : Promise.resolve([]),
         ]);
     }
@@ -120,11 +164,8 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
         albums = rawAlbums.filter((a) => libraryIds.has(a.id));
     }
 
-    // Batch-fetch artist genres for all results in one query
-    const artistIds = new Set([
-        ...albums.map((al) => al.artistId),
-        ...tracks.map((t) => t.artistId),
-    ]);
+    // The albums' artist genres in one query; songs carry their own.
+    const artistIds = new Set(albums.map((al) => al.artistId));
     const artistGenreRows = artistIds.size > 0
         ? await prisma.artist.findMany({
               where: { id: { in: [...artistIds] } },
@@ -156,18 +197,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     }
 
     if (tracks.length > 0) {
-        result.song = tracks.map((t) => ({
-            "@_id": t.id,
-            "@_title": t.title,
-            "@_album": t.albumTitle,
-            "@_artist": t.artistName,
-            "@_artistId": t.artistId,
-            "@_albumId": t.albumId,
-            "@_coverArt": t.albumId,
-            "@_duration": t.duration ? Math.round(t.duration) : 0,
-            "@_type": "music",
-            "@_genre": genreMap.get(t.artistId) || undefined,
-        }));
+        result.song = tracks.map(songOf);
     }
 
     return subsonicOk(req, res, { [responseKey]: result });
@@ -185,10 +215,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         ? parseInt(req.query.toYear as string, 10)
         : undefined;
 
-    const whereConditions: Prisma.Sql[] = [
-        Prisma.sql`t."filePath" IS NOT NULL`,
-        Prisma.sql`al.location = 'LIBRARY'`,
-    ];
+    const whereConditions: Prisma.Sql[] = [PLAYABLE_SONG];
 
     if (fromYear !== undefined && !isNaN(fromYear) && toYear !== undefined && !isNaN(toYear)) {
         const lo = Math.min(fromYear, toYear);
@@ -212,51 +239,13 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
 
     const whereClause = Prisma.join(whereConditions, " AND ");
 
-    const rows = await prisma.$queryRaw<{
-        id: string;
-        title: string;
-        trackNo: number | null;
-        discNumber: number | null;
-        duration: number | null;
-        mime: string | null;
-        fileSize: number | null;
-        albumId: string;
-        albumTitle: string;
-        albumYear: number | null;
-        artistId: string;
-        artistName: string;
-        artistGenres: unknown;
-        artistUserGenres: unknown;
-    }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
-               al.id AS "albumId", al.title AS "albumTitle", al.year AS "albumYear",
-               ar.id AS "artistId", ar.name AS "artistName",
-               ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
-        FROM "Track" t
-        JOIN "Album" al ON t."albumId" = al.id
-        JOIN "Artist" ar ON al."artistId" = ar.id
+    const rows = await prisma.$queryRaw<SongRow[]>`
+        SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
         WHERE ${whereClause}
         ORDER BY RANDOM()
         LIMIT ${size}
     `;
-
-    const songs = rows.map((r) => ({
-        "@_id": r.id,
-        "@_title": r.title,
-        "@_album": r.albumTitle,
-        "@_artist": r.artistName,
-        "@_artistId": r.artistId,
-        "@_albumId": r.albumId,
-        "@_coverArt": r.albumId,
-        "@_duration": r.duration ? Math.round(r.duration) : 0,
-        "@_track": r.trackNo || undefined,
-        "@_discNumber": r.discNumber ?? undefined,
-        "@_year": r.albumYear || undefined,
-        "@_contentType": r.mime || "audio/mpeg",
-        "@_size": r.fileSize ?? undefined,
-        "@_type": "music",
-        "@_genre": firstArtistGenre(r.artistGenres, r.artistUserGenres) || undefined,
-    }));
+    const songs = rows.map(songOf);
 
     return subsonicOk(req, res, {
         randomSongs: songs.length > 0 ? { song: songs } : {},
@@ -278,65 +267,15 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
     // a genre nothing carries has no songs.
     const genreArtistIds = await libraryArtistIdsForGenre(genre);
 
-    const rows = await prisma.$queryRaw<{
-        id: string;
-        title: string;
-        trackNo: number | null;
-        discNumber: number | null;
-        duration: number | null;
-        mime: string | null;
-        fileSize: number | null;
-        albumId: string;
-        albumTitle: string;
-        albumDisplayTitle: string | null;
-        albumYear: number | null;
-        artistId: string;
-        artistName: string;
-        artistDisplayName: string | null;
-        artistGenres: unknown;
-        artistUserGenres: unknown;
-    }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
-               al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
-               ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
-               ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
-        FROM "Track" t
-        JOIN "Album" al ON t."albumId" = al.id
-        JOIN "Artist" ar ON al."artistId" = ar.id
-        WHERE t.corrupt = false
-          AND t."missingSince" IS NULL
-          AND al.location = 'LIBRARY'
+    const rows = await prisma.$queryRaw<SongRow[]>`
+        SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
+        WHERE ${PLAYABLE_SONG}
           AND ${genreArtistIds.length > 0 ? Prisma.sql`al."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
         ORDER BY LOWER(t.title) ASC, t.title ASC
         OFFSET ${offset}
         LIMIT ${count}
     `;
-
-    const songs = rows.map((row) => {
-        const artistName = row.artistDisplayName || row.artistName;
-        const songGenre = firstArtistGenre(row.artistGenres, row.artistUserGenres);
-        return mapSong(
-            {
-                id: row.id,
-                title: row.title,
-                trackNo: row.trackNo,
-                discNumber: row.discNumber,
-                duration: row.duration,
-                filePath: null,
-                mime: row.mime,
-                fileSize: row.fileSize,
-            },
-            {
-                id: row.albumId,
-                title: row.albumTitle,
-                displayTitle: row.albumDisplayTitle,
-                year: row.albumYear,
-            },
-            artistName,
-            row.artistId,
-            songGenre
-        );
-    });
+    const songs = rows.map(songOf);
 
     return subsonicOk(req, res, {
         songsByGenre: songs.length > 0 ? { song: songs } : {},
@@ -379,7 +318,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
     const artist = chosenId
         ? await prisma.artist.findUnique({
               where: { id: chosenId },
-              select: { id: true, name: true, displayName: true, genres: true, userGenres: true },
+              select: { id: true },
           })
         : null;
 
@@ -387,60 +326,16 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         return subsonicOk(req, res, { topSongs: {} });
     }
 
-    const rows = await prisma.$queryRaw<{
-        id: string;
-        title: string;
-        trackNo: number | null;
-        discNumber: number | null;
-        duration: number | null;
-        mime: string | null;
-        fileSize: number | null;
-        albumId: string;
-        albumTitle: string;
-        albumDisplayTitle: string | null;
-        albumYear: number | null;
-        playCount: number;
-    }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
-               al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
-               COUNT(p.id)::int AS "playCount"
-        FROM "Track" t
-        JOIN "Album" al ON t."albumId" = al.id
-        LEFT JOIN "Play" p ON p."trackId" = t.id
-        WHERE al.location = 'LIBRARY'
+    const rows = await prisma.$queryRaw<SongRow[]>`
+        SELECT ${SONG_COLUMNS}
+        FROM ${SONG_FROM}
+        CROSS JOIN LATERAL (SELECT COUNT(*)::int AS plays FROM "Play" pl WHERE pl."trackId" = t.id) p
+        WHERE ${PLAYABLE_SONG}
           AND al."artistId" = ${artist.id}
-        GROUP BY t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
-                 al.id, al.title, al."displayTitle", al.year
-        ORDER BY "playCount" DESC, LOWER(t.title) ASC, t.title ASC
+        ORDER BY p.plays DESC, LOWER(t.title) ASC, t.title ASC
         LIMIT ${count}
     `;
-
-    const artistName = artist.displayName || artist.name;
-    const genre = firstArtistGenre(artist.genres, artist.userGenres);
-
-    const songs = rows.map((row) =>
-        mapSong(
-            {
-                id: row.id,
-                title: row.title,
-                trackNo: row.trackNo,
-                discNumber: row.discNumber,
-                duration: row.duration,
-                filePath: null,
-                mime: row.mime,
-                fileSize: row.fileSize,
-            },
-            {
-                id: row.albumId,
-                title: row.albumTitle,
-                displayTitle: row.albumDisplayTitle,
-                year: row.albumYear,
-            },
-            artistName,
-            artist.id,
-            genre
-        )
-    );
+    const songs = rows.map(songOf);
 
     return subsonicOk(req, res, {
         topSongs: songs.length > 0 ? { song: songs } : {},
@@ -502,62 +397,14 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
 
     const artistIdList = artistIds.map((artistId) => Prisma.sql`${artistId}`);
 
-    const rows = await prisma.$queryRaw<{
-        id: string;
-        title: string;
-        trackNo: number | null;
-        discNumber: number | null;
-        duration: number | null;
-        mime: string | null;
-        fileSize: number | null;
-        albumId: string;
-        albumTitle: string;
-        albumDisplayTitle: string | null;
-        albumYear: number | null;
-        artistId: string;
-        artistName: string;
-        artistDisplayName: string | null;
-        artistGenres: unknown;
-        artistUserGenres: unknown;
-    }[]>`
-        SELECT t.id, t.title, t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
-               al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
-               ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
-               ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
-        FROM "Track" t
-        JOIN "Album" al ON t."albumId" = al.id
-        JOIN "Artist" ar ON al."artistId" = ar.id
-        WHERE al.location = 'LIBRARY'
+    const rows = await prisma.$queryRaw<SongRow[]>`
+        SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
+        WHERE ${PLAYABLE_SONG}
           AND al."artistId" IN (${Prisma.join(artistIdList, ", ")})
         ORDER BY RANDOM()
         LIMIT ${count}
     `;
-
-    const songs = rows.map((row) => {
-        const artistName = row.artistDisplayName || row.artistName;
-        const songGenre = firstArtistGenre(row.artistGenres, row.artistUserGenres);
-        return mapSong(
-            {
-                id: row.id,
-                title: row.title,
-                trackNo: row.trackNo,
-                discNumber: row.discNumber,
-                duration: row.duration,
-                filePath: null,
-                mime: row.mime,
-                fileSize: row.fileSize,
-            },
-            {
-                id: row.albumId,
-                title: row.albumTitle,
-                displayTitle: row.albumDisplayTitle,
-                year: row.albumYear,
-            },
-            artistName,
-            row.artistId,
-            songGenre
-        );
-    });
+    const songs = rows.map(songOf);
 
     const responseKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
     return subsonicOk(req, res, {

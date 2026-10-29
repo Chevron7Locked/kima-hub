@@ -1,7 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { IN_LIBRARY, NOT_MISSING } from "../utils/libraryEligibility";
+import { IN_LIBRARY, PLAYABLE } from "../utils/libraryEligibility";
 import { artistTaggedWithGenre, genreKey } from "../utils/genreSql";
 import { searchRows } from "./textMatch";
 
@@ -340,7 +340,7 @@ export class SearchService {
             offset,
             ({ skip, take }) =>
                 prisma.track.findMany({
-                    where: { title: { contains: query, mode: "insensitive" }, ...NOT_MISSING, ...IN_LIBRARY },
+                    where: { title: { contains: query, mode: "insensitive" }, ...PLAYABLE, ...IN_LIBRARY },
                     select: TRACK_FIELDS,
                     take,
                     skip,
@@ -348,7 +348,7 @@ export class SearchService {
                 }),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
-                 WHERE t.title ~ ${pattern} AND t."missingSince" IS NULL AND al.location = 'LIBRARY'
+                 WHERE t.title ~ ${pattern} AND t."missingSince" IS NULL AND t.corrupt = false AND al.location = 'LIBRARY'
                  ORDER BY t.title ASC, t.id ASC LIMIT ${take} OFFSET ${skip}`,
             (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }),
         );
@@ -395,6 +395,7 @@ export class SearchService {
         LEFT JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
         AND t."missingSince" IS NULL
+        AND t.corrupt = false
         AND a.location = 'LIBRARY'
         ORDER BY rank DESC, t.title ASC
         LIMIT ${limit}
