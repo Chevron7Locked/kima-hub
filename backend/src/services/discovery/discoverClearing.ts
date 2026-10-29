@@ -21,7 +21,7 @@ import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
-import { lookupKey, sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, lookupKey, sameName } from "./discoverEvidence";
 import { nameKey } from "../nameFold";
 
 /** A suggestion row's names, for comparing with a record's. */
@@ -341,7 +341,6 @@ async function hasSuggestion(userId: string, ref: AlbumRef): Promise<boolean> {
 }
 
 type JobMetadata = { artistName?: string; albumTitle?: string } | null;
-const ACTIVE_BATCH = ["downloading", "scanning"];
 
 /**
  * Lidarr albums a completed Discover download fetched that no suggestion of this listener names, unless the artist has a
@@ -357,7 +356,7 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
                 status: "completed",
                 lidarrAlbumId: { not: null },
                 targetMbid: { not: null },
-                discoveryBatch: { status: { notIn: ACTIVE_BATCH } },
+                discoveryBatch: { status: { notIn: RUNNING_BATCH } },
             },
         }),
         prisma.discoveryAlbum.findMany({ where: { userId, status: { in: ["LIKED", "MOVED"] } }, select: { artistName: true } }),
@@ -401,7 +400,7 @@ async function discoverAlbumIsCovered(
 /** The albums of Discover downloads whose batch is still running, which no suggestion names yet. */
 async function albumsInRunningBatches() {
     const jobs = await prisma.downloadJob.findMany({
-        where: { discoveryBatch: { status: { in: ACTIVE_BATCH } } },
+        where: { discoveryBatch: { status: { in: RUNNING_BATCH } } },
         select: { targetMbid: true, metadata: true },
     });
     const ids = new Set<string>();

@@ -45,6 +45,7 @@ import { config } from "../../config";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { discoveryAlbumLifecycle } from "../../services/discovery/discoveryAlbumLifecycle";
+import { discoverWeeklyService } from "../../services/discoverWeekly";
 import discoverRoutes from "../discover";
 
 jest.setTimeout(120_000);
@@ -240,6 +241,14 @@ describe("clear with no suggestions", () => {
     });
 });
 
+describe("what a clear leaves alone", () => {
+    it("leaves other artists with no albums to the daily integrity check", async () => {
+        await prisma.artist.create({ data: { id: `${P}_bare`, name: "Bare Artist", identityKey: `${P}_bare` } });
+        await request(app()).delete("/discover/clear").expect(200);
+        expect(await prisma.artist.count({ where: { id: `${P}_bare` } })).toBe(1);
+    });
+});
+
 describe("DISCOVER albums no suggestion covers", () => {
     it("deletes a Soulseek album's files, folders and rows", async () => {
         const orphan = await addAlbum({ key: "orph", rg: `${P}_rg_orph` });
@@ -298,6 +307,41 @@ describe("DISCOVER albums no suggestion covers", () => {
 });
 
 describe("the weekly regeneration's cleanup", () => {
+    // Each week starts clean: everything not liked goes, not only last week's suggestions.
+    it("also clears Discover albums no suggestion names, and the failed downloads", async () => {
+        const orphan = await addAlbum({ key: "worph", rg: `${P}_rg_worph` });
+        await addSoulseekJob(`${P}_rg_worph`, "Album worph");
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: `${ARTIST} - gone`, type: "album", status: "failed", discoveryBatchId: batch.id },
+        });
+
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+
+        expect(fs.existsSync(orphan.file)).toBe(false);
+        expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(0);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, status: "failed" } })).toBe(0);
+    });
+
+    it("does not bring last week's albums back when the scan after it reconciles downloads", async () => {
+        const last = await addAlbum({ key: "wlast", rg: `${P}_rg_wlast`, suggestion: {} });
+        await addSoulseekJob(`${P}_rg_wlast`, "Album wlast", { batchStatus: "completed" });
+        await prisma.discoveryBatch.updateMany({ where: { userId: USER }, data: { completedAt: new Date() } });
+
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await discoverWeeklyService.reconcileDiscoveryTracks();
+
+        expect(await prisma.discoveryAlbum.count({ where: { userId: USER, status: "ACTIVE" } })).toBe(0);
+        expect(await prisma.album.count({ where: { id: last.albumId } })).toBe(0);
+    });
+
+    it("keeps a liked album", async () => {
+        const liked = await addAlbum({ key: "wliked", rg: `${P}_rg_wliked`, suggestion: { status: "LIKED" } });
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        expect(fs.existsSync(liked.file)).toBe(true);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: liked.albumId } })).location).toBe("LIBRARY");
+    });
+
     it("deletes a Soulseek album's files as well as its rows", async () => {
         const soul = await addAlbum({ key: "wsoul", rg: `${P}_rg_wsoul`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_wsoul`, "Album wsoul");

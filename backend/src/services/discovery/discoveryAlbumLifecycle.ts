@@ -7,7 +7,20 @@ import { prisma } from '../../utils/db';
 import { logger } from '../../utils/logger';
 import { updateArtistCounts } from '../artistCountsService';
 import { LIBRARY_LOCATION } from '../libraryFilters';
-import { clearSuggestion, errorReason, findDiscoverAlbum, reportLidarrFailures, type ClearFailure } from './discoverClearing';
+import {
+    clearOrphanedDiscoverAlbums,
+    clearSuggestion,
+    clearUnsuggestedDownloads,
+    errorReason,
+    findDiscoverAlbum,
+    reportLidarrFailures,
+    reportOrphanFailures,
+    type ClearFailure,
+} from './discoverClearing';
+import { removeDiscoveryArtist } from './lidarrRemoval';
+import { isLidarrConfigured } from '../lidarrClient';
+import { lidarrService } from '../lidarr';
+import { getSystemSettings } from '../../utils/systemSettings';
 import { albumHasPlaylistTrack, discoverEvidence, loadDiscoverRecords } from './discoverEvidence';
 
 interface DiscoveryAlbumInfo {
@@ -39,63 +52,91 @@ class DiscoveryAlbumLifecycle {
     }
 
     /**
-     * Before a new generation: liked albums move to the library, active ones are cleared (clearSuggestion), and the user's
-     * unavailable albums are cleared. An album Lidarr did not delete stays in Discover and is reported in the tray.
+     * Clears this listener's Discover down to what they liked, so each week starts clean: liked albums move to the
+     * library, every other suggestion is cleared (clearSuggestion), then the Discover downloads no suggestion names, the
+     * Discover albums nothing covers, the unavailable list, failed Discover downloads, suggestion records past their 30
+     * days, and the artists Lidarr holds under the Discover tag that nothing keeps. An album Lidarr did not delete stays
+     * and is reported; `lidarrFailed` holds this listener's, `unnamedFailed` the orphans no record names.
      */
-    async processBeforeGeneration(userId: string): Promise<{ moved: number; deleted: number; lidarrFailed: ClearFailure[] }> {
-        logger.debug(`[DiscoveryLifecycle] Processing previous discovery albums...`);
-
-        const discoveryAlbums = await prisma.discoveryAlbum.findMany({
-            where: {
-                userId,
-                status: { in: ['ACTIVE', 'LIKED'] },
-            },
+    async clearDiscover(userId: string): Promise<{
+        moved: number;
+        deleted: number;
+        orphansCleared: number;
+        lidarrArtistsRemoved: number;
+        lidarrFailed: ClearFailure[];
+        unnamedFailed: ClearFailure[];
+    }> {
+        const suggestions = await prisma.discoveryAlbum.findMany({
+            where: { userId, status: { in: ['ACTIVE', 'LIKED'] } },
         });
 
-        const likedAlbums = discoveryAlbums.filter((a) => a.status === 'LIKED');
-        const activeAlbums = discoveryAlbums.filter((a) => a.status === 'ACTIVE');
-
         let moved = 0;
-        let deleted = 0;
-        const lidarrFailed: ClearFailure[] = [];
-
-        for (const album of likedAlbums) {
+        for (const album of suggestions.filter((a) => a.status === 'LIKED')) {
             try {
                 if (await this.moveLikedAlbumToLibrary(album)) moved++;
             } catch (error: any) {
-                logger.error(
-                    `[DiscoveryLifecycle] Failed to move ${album.albumTitle}: ${error.message}`
-                );
+                logger.error(`[DiscoveryLifecycle] Failed to move ${album.albumTitle}: ${error.message}`);
             }
         }
 
         // Each clear can be a Lidarr call with a 10 s timeout, so run a few at a time.
         const CLEAR_CONCURRENCY = 5;
-        for (let i = 0; i < activeAlbums.length; i += CLEAR_CONCURRENCY) {
-            const chunk = activeAlbums.slice(i, i + CLEAR_CONCURRENCY);
+        const active = suggestions.filter((a) => a.status === 'ACTIVE');
+        let deleted = 0;
+        const lidarrFailed: ClearFailure[] = [];
+        for (let i = 0; i < active.length; i += CLEAR_CONCURRENCY) {
             await Promise.all(
-                chunk.map(async (album) => {
+                active.slice(i, i + CLEAR_CONCURRENCY).map(async (album) => {
                     try {
                         const result = await clearSuggestion(album);
                         if (result.outcome === 'cleared') deleted++;
                         if (result.outcome === 'kept') lidarrFailed.push(result.failure);
                     } catch (error: any) {
-                        logger.error(
-                            `[DiscoveryLifecycle] Failed to delete ${album.albumTitle}: ${error.message}`
-                        );
+                        logger.error(`[DiscoveryLifecycle] Failed to delete ${album.albumTitle}: ${error.message}`);
                         lidarrFailed.push({ artistName: album.artistName, albumTitle: album.albumTitle, reason: errorReason(error) });
                     }
-                })
+                }),
             );
         }
 
+        // Albums Lidarr fetched that no suggestion names (they missed the final playlist).
+        lidarrFailed.push(...(await clearUnsuggestedDownloads(userId)));
         await prisma.unavailableAlbum.deleteMany({ where: { userId } });
+        await prisma.downloadJob.deleteMany({ where: { userId, discoveryBatchId: { not: null }, status: 'failed' } });
+
+        // DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build.
+        const orphans = await clearOrphanedDiscoverAlbums();
+        const strip = ({ userIds: _named, ...f }: (typeof orphans.failures)[number]): ClearFailure => f;
+        lidarrFailed.push(...orphans.failures.filter((f) => f.userIds.includes(userId)).map(strip));
+        const unnamedFailed = orphans.failures.filter((f) => f.userIds.length === 0).map(strip);
+        await reportOrphanFailures(userId, orphans.failures);
+
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        await prisma.discoveryAlbum.deleteMany({
+            where: { userId, status: { in: ['DELETED', 'MOVED'] }, downloadedAt: { lt: thirtyDaysAgo } },
+        });
+
+        // Discover-tagged artists in Lidarr; lidarrRemoval decides whether their files go.
+        let lidarrArtistsRemoved = 0;
+        if (isLidarrConfigured(await getSystemSettings())) {
+            try {
+                for (const lidarrArtist of await lidarrService.getDiscoveryArtists()) {
+                    if (await removeDiscoveryArtist(lidarrArtist)) lidarrArtistsRemoved++;
+                }
+            } catch (error: any) {
+                logger.warn(`[DiscoveryLifecycle] Lidarr cleanup failed: ${error.message}`);
+            }
+        }
+
+        return { moved, deleted, orphansCleared: orphans.cleared, lidarrArtistsRemoved, lidarrFailed, unnamedFailed };
+    }
+
+    /** Before a new generation, Discover is cleared (clearDiscover); what Lidarr kept is reported in the tray. */
+    async processBeforeGeneration(userId: string): Promise<{ moved: number; deleted: number; lidarrFailed: ClearFailure[] }> {
+        const result = await this.clearDiscover(userId);
         // A regeneration only retries the suggestions' albums, so it can add to the tray row but not clear it.
-        await reportLidarrFailures(userId, lidarrFailed, { complete: false });
-
-        logger.debug(`[DiscoveryLifecycle] Previous discovery cleanup complete`);
-
-        return { moved, deleted, lidarrFailed };
+        await reportLidarrFailures(userId, result.lidarrFailed, { complete: false });
+        return { moved: result.moved, deleted: result.deleted, lidarrFailed: result.lidarrFailed };
     }
 }
 

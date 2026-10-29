@@ -9,7 +9,7 @@ import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { artistNamed } from "../artistIdentity";
-import { sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, sameName } from "./discoverEvidence";
 import type { LidarrArtist } from "../../types/lidarr";
 
 /** What names the album being removed, beyond the id Lidarr was asked about. */
@@ -111,10 +111,11 @@ export async function removeDiscoveryAlbum(
 }
 
 /**
- * "delete" only for a Discover-tagged artist whose every album with files was
- * fetched by Discover, with nothing in the library and nothing liked.
+ * "delete" only for a Discover-tagged artist whose every album with files was fetched by Discover, with nothing in the
+ * library and nothing liked. "in use" while any listener's current week suggests one of its albums or a Discover batch
+ * is still downloading one: the artist and its tag stay for a later clear to decide.
  */
-export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"delete" | "keep"> {
+export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"delete" | "keep" | "in use"> {
     const tagId = await lidarrService.getOrCreateDiscoveryTag();
     const mbid = artist.foreignArtistId;
     if (tagId === null || !artist.tags?.includes(tagId) || !mbid) return "keep";
@@ -134,6 +135,27 @@ export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"del
     const withFiles = (await lidarrService.getAlbumsByArtistId(artist.id))
         .filter((a) => (a.statistics?.trackFileCount ?? 0) > 0)
         .map((a) => a.foreignAlbumId);
+    // By artist id, by album, or by name: a suggestion's artist id can be missing or a placeholder, and an album still
+    // downloading has no files in Lidarr yet.
+    const [current, running] = await Promise.all([
+        prisma.discoveryAlbum.findMany({
+            where: { status: "ACTIVE" },
+            select: { artistMbid: true, rgMbid: true, artistName: true },
+        }),
+        prisma.downloadJob.findMany({
+            where: { discoveryBatch: { status: { in: RUNNING_BATCH } } },
+            select: { artistMbid: true, targetMbid: true, metadata: true },
+        }),
+    ]);
+    const names = (artistMbid: string | null, album: string | null, name: unknown) =>
+        artistMbid === mbid || (album !== null && withFiles.includes(album)) || (typeof name === "string" && sameName(name, artist.artistName));
+    if (
+        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName)) ||
+        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName))
+    ) {
+        return "in use";
+    }
+
     if (withFiles.length === 0) return "delete";
     const fetched = await fetchedByDiscover(withFiles);
     return withFiles.every((m) => fetched.has(m)) ? "delete" : "keep";
@@ -145,7 +167,12 @@ export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"del
  */
 export async function removeDiscoveryArtist(artist: LidarrArtist): Promise<boolean> {
     try {
-        if ((await discoveryArtistVerdict(artist)) === "keep") {
+        const verdict = await discoveryArtistVerdict(artist);
+        if (verdict === "in use") {
+            logger.debug(`[Discover] ${artist.artistName} is in a current Discover week; left for a later clear`);
+            return false;
+        }
+        if (verdict === "keep") {
             if (artist.foreignArtistId) await lidarrService.removeDiscoveryTagByMbid(artist.foreignArtistId);
             logger.debug(`[Discover] Keeping ${artist.artistName} in Lidarr`);
             return false;

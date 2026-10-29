@@ -28,6 +28,9 @@ export interface DiscoverRecords {
     byName: Map<string, Mark>;
 }
 
+/** A Discover batch in these states is still fetching its albums. */
+export const RUNNING_BATCH = ["downloading", "scanning"];
+
 /** Whether two names are one name by `nameKey`; a name with no letters or digits matches only itself, exactly. */
 export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
     const key = nameKey(a);
