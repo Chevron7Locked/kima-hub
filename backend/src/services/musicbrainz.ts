@@ -65,12 +65,6 @@ function toCandidate(rec: any): CandidateRecording {
     };
 }
 
-/**
- * MusicBrainz Web Service v2 client. Every method returns an `Outcome`, so a
- * failed or rate-limited call is never mistaken for "the source has nothing".
- * `answered` is cached 30 days and `absent` 7; failures are never cached.
- */
-
 const ANSWERED_TTL = 30 * 24 * 3600;
 const ABSENT_TTL = 7 * 24 * 3600;
 
@@ -99,8 +93,11 @@ interface CacheEnvelope {
     savedAt?: string;
 }
 
-type StrategyError = { code: string; message: string };
-
+/**
+ * MusicBrainz Web Service v2 client. Every method returns an `Outcome`, so a
+ * failed or rate-limited call is never mistaken for "the source has nothing".
+ * `answered` is cached 30 days and `absent` 7; failures are never cached.
+ */
 class MusicBrainzService {
     private client: AxiosInstance;
     /** Album tracklist fetches under way, so songs of one album asked at once share one fetch. */
@@ -118,7 +115,7 @@ class MusicBrainzService {
 
     /**
      * Every HTTP call goes through the rate limiter so that methods making
-     * several calls (searchRecording, searchAlbum) cannot exceed the
+     * several calls (searchRecording, identifyRecording) cannot exceed the
      * 1 req/s limit.
      */
     private async rateLimitedGet(
@@ -213,8 +210,7 @@ class MusicBrainzService {
                 } catch {
                     // unparseable cache value
                 }
-                // Legacy entry (raw pre-Outcome value) or garbage: drop it
-                // and ask the source again.
+                // Not an Outcome envelope: drop it and ask the source again.
                 await redisClient.del(cacheKey);
             }
         } catch (err) {
@@ -548,9 +544,6 @@ class MusicBrainzService {
         });
     }
 
-    /**
-     * MusicBrainz Lucene requires escaping: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
-     */
     /** The exact then fuzzy name queries for a recording; none when the title is all brackets. */
     private recordingQueries(expected: ExpectedRecording): string[] {
         const title = this.escapeLucene(this.normalizeForSearch(expected.title));
@@ -559,6 +552,7 @@ class MusicBrainzService {
         return [`recording:"${title}" AND artist:"${name}"`, `${title} AND artist:${name}`];
     }
 
+    /** MusicBrainz's Lucene syntax needs these escaped: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ / */
     private escapeLucene(str: string): string {
         return str.replace(/([+\-&|!(){}[\]^"~*?:\\/])/g, "\\$1");
     }
@@ -583,133 +577,32 @@ class MusicBrainzService {
     }
 
     /**
-     * Search for a release group by title and artist, trying three strategies in
-     * order. If none found anything and any of them errored, the answer is
-     * `transient`, not `absent`.
+     * Runs the queries in turn, handing each reply's recordings to `pick` until it answers. A query MusicBrainz refuses
+     * (400) is no answer about the track, so the next is asked; a rate limit stops at once; any other failure is the
+     * answer when no query found one. Null when every query was asked and none picked.
      */
-    async searchAlbum(
-        albumTitle: string,
-        artistName: string
-    ): Promise<Outcome<{ id: string; title: string }>> {
-        const cacheKey = `mb:search:album:${artistName}:${albumTitle}`;
-
-        return this.cachedOutcome(cacheKey, async () => {
-            let firstError: StrategyError | undefined;
-
-            const recordError = async (err: any): Promise<Outcome<never> | undefined> => {
-                const classified = await this.classifyError(err, false);
+    private async firstRecordingAnswer<T>(
+        queries: string[],
+        inc: string | undefined,
+        notFoundMeansAbsent: boolean,
+        pick: (recordings: any[], query: string) => Outcome<T> | null,
+    ): Promise<Outcome<T> | null> {
+        let failure: Outcome<never> | undefined;
+        for (const query of queries) {
+            try {
+                const response = await this.rateLimitedGet("/recording", {
+                    params: inc ? { query, limit: 50, fmt: "json", inc } : { query, limit: 50, fmt: "json" },
+                });
+                const answer = pick(response.data.recordings || [], query);
+                if (answer) return answer;
+            } catch (err: any) {
+                if (err?.response?.status === 400) continue;
+                const classified = await this.classifyError(err, notFoundMeansAbsent);
                 if (classified.kind === "rateLimited") return classified;
-                if (!firstError) {
-                    firstError = {
-                        code:
-                            classified.kind === "transient"
-                                ? classified.error.code
-                                : "ERROR",
-                        message:
-                            classified.kind === "transient"
-                                ? classified.error.message
-                                : "unclassified",
-                    };
-                }
-                return undefined;
-            };
-
-            // Strategy 1: exact match with escaped special characters
-            {
-                const query = `releasegroup:"${this.escapeLucene(
-                    albumTitle
-                )}" AND artist:"${this.escapeLucene(artistName)}"`;
-                try {
-                    const response = await this.rateLimitedGet("/release-group", {
-                        params: { query, limit: 5, fmt: "json" },
-                    });
-                    const groups = response.data["release-groups"] || [];
-                    if (groups.length > 0) {
-                        return answered(
-                            { id: groups[0].id, title: groups[0].title },
-                            { query, strategy: "exact" }
-                        );
-                    }
-                } catch (err: any) {
-                    const bail = await recordError(err);
-                    if (bail) return bail;
-                }
+                failure ??= classified;
             }
-
-            // Strategy 2: normalized/cleaned title search
-            const normalizedTitle = this.normalizeForSearch(albumTitle);
-            const normalizedArtist = this.normalizeForSearch(artistName);
-            if (
-                normalizedTitle !== albumTitle ||
-                normalizedArtist !== artistName
-            ) {
-                const query = `releasegroup:"${this.escapeLucene(
-                    normalizedTitle
-                )}" AND artist:"${this.escapeLucene(normalizedArtist)}"`;
-                try {
-                    const response = await this.rateLimitedGet("/release-group", {
-                        params: { query, limit: 5, fmt: "json" },
-                    });
-                    const groups = response.data["release-groups"] || [];
-                    if (groups.length > 0) {
-                        return answered(
-                            { id: groups[0].id, title: groups[0].title },
-                            { query, strategy: "normalized" }
-                        );
-                    }
-                } catch (err: any) {
-                    const bail = await recordError(err);
-                    if (bail) return bail;
-                }
-            }
-
-            // Strategy 3: fuzzy search on first words, verified against
-            // the artist name (last resort)
-            {
-                const simpleTitle = normalizedTitle
-                    .split(" ")
-                    .slice(0, 3)
-                    .join(" ");
-                const simpleArtist = normalizedArtist.split(" ")[0];
-                const query = `${this.escapeLucene(
-                    simpleTitle
-                )} AND artist:${this.escapeLucene(simpleArtist)}`;
-                try {
-                    const response = await this.rateLimitedGet("/release-group", {
-                        params: { query, limit: 10, fmt: "json" },
-                    });
-                    for (const rg of response.data["release-groups"] || []) {
-                        const rgArtist =
-                            rg["artist-credit"]?.[0]?.name ||
-                            rg["artist-credit"]?.[0]?.artist?.name ||
-                            "";
-                        if (
-                            rgArtist
-                                .toLowerCase()
-                                .includes(simpleArtist.toLowerCase())
-                        ) {
-                            return answered(
-                                { id: rg.id, title: rg.title },
-                                { query, strategy: "fuzzy" }
-                            );
-                        }
-                    }
-                } catch (err: any) {
-                    const bail = await recordError(err);
-                    if (bail) return bail;
-                }
-            }
-
-            if (firstError) {
-                return { kind: "transient", error: firstError };
-            }
-            return absent({
-                albumTitle,
-                artistName,
-                strategiesTried: ["exact", "normalized", "fuzzy"],
-                reason: "no strategy returned a matching release group",
-            });
-        });
+        }
+        return failure ?? null;
     }
 
     /**
@@ -730,31 +623,19 @@ class MusicBrainzService {
         return this.cachedOutcome(cacheKey, async () => {
             const queries = this.recordingQueries(expected);
             if (queries.length === 0) return absent({ title: expected.title, artist, reason: "nothing to search by" });
-            let failure: Outcome<never> | undefined;
-            for (const query of queries) {
-                try {
-                    const response = await this.rateLimitedGet("/recording", {
-                        params: { query, limit: 50, fmt: "json", inc: "releases+release-groups+artists" },
-                    });
-                    const recordings = (response.data.recordings || []).filter(
-                        (rec: any) =>
-                            recordingAgrees(toCandidate(rec), expected) && !isOtherVersion(rec.disambiguation),
-                    );
-                    for (const allowSingles of [false, true]) {
-                        for (const rec of recordings) {
-                            const album = this.extractAlbumFromRecording(rec, allowSingles);
-                            if (album) return answered(album, { query, allowSingles });
-                        }
+            const found = await this.firstRecordingAnswer(queries, "releases+release-groups+artists", false, (hits, query) => {
+                const recordings = hits.filter(
+                    (rec: any) => recordingAgrees(toCandidate(rec), expected) && !isOtherVersion(rec.disambiguation),
+                );
+                for (const allowSingles of [false, true]) {
+                    for (const rec of recordings) {
+                        const album = this.extractAlbumFromRecording(rec, allowSingles);
+                        if (album) return answered(album, { query, allowSingles });
                     }
-                } catch (err: any) {
-                    if (err?.response?.status === 400) continue;
-                    const classified = await this.classifyError(err, false);
-                    if (classified.kind === "rateLimited") return classified;
-                    failure ??= classified;
                 }
-            }
-            if (failure) return failure;
-            return absent({ title: expected.title, artist, reason: "no recording that is this track is on an album" });
+                return null;
+            });
+            return found ?? absent({ title: expected.title, artist, reason: "no recording that is this track is on an album" });
         });
     }
 
@@ -883,28 +764,14 @@ class MusicBrainzService {
         return this.cachedOutcome(cacheKey, async () => {
             const queries = this.recordingQueries(expected);
             if (queries.length === 0) return absent({ title: expected.title, artist, reason: "nothing to search by" });
-            let failure: Outcome<never> | undefined;
             let offered = 0;
-            for (const query of queries) {
-                try {
-                    const response = await this.rateLimitedGet("/recording", {
-                        params: { query, limit: 50, fmt: "json" },
-                    });
-                    const candidates = (response.data.recordings || []).map(toCandidate);
-                    offered += candidates.length;
-                    const pick = pickRecording(candidates, expected);
-                    if (pick) return answered(pick, { query, offered: candidates.length });
-                } catch (err: any) {
-                    // MusicBrainz refusing this track's query is no answer about the track: the
-                    // other query, then the next source, is asked.
-                    if (err?.response?.status === 400) continue;
-                    const classified = await this.classifyError(err, true);
-                    if (classified.kind === "rateLimited") return classified;
-                    failure ??= classified;
-                }
-            }
-            if (failure) return failure;
-            return absent({ title: expected.title, artist, offered, reason: "no candidate is this track" });
+            const found = await this.firstRecordingAnswer(queries, undefined, true, (hits, query) => {
+                const candidates = hits.map(toCandidate);
+                offered += candidates.length;
+                const pick = pickRecording(candidates, expected);
+                return pick ? answered(pick, { query, offered: candidates.length }) : null;
+            });
+            return found ?? absent({ title: expected.title, artist, offered, reason: "no candidate is this track" });
         });
     }
 

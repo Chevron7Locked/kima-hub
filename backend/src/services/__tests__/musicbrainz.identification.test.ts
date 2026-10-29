@@ -186,3 +186,45 @@ describe("a recording's ISRC and genres", () => {
         expect(both.isrc).toMatchObject({ kind: "answered", value: "GBAYE0601498" });
     });
 });
+
+describe("a name search that fails", () => {
+    const failing = (status?: number) =>
+        Object.assign(new Error(status ? String(status) : "socket hang up"), status ? { response: { status } } : { code: "ECONNRESET" });
+
+    it("stops at a rate limit without asking the second query", async () => {
+        mockGet.mockRejectedValue(failing(503));
+        mockHandleRateLimit.mockResolvedValueOnce(true);
+        expect((await musicBrainzService.identifyRecording(expected)).kind).toBe("rateLimited");
+        expect(mockGet).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers with the failure, not 'nothing found', when no query answered", async () => {
+        mockGet.mockRejectedValueOnce(failing()).mockResolvedValueOnce({ data: { recordings: [] } });
+        expect((await musicBrainzService.identifyRecording(expected)).kind).toBe("transient");
+        expect(mockGet).toHaveBeenCalledTimes(2);
+    });
+
+    it("a later query that finds the track wins over an earlier failure", async () => {
+        mockGet
+            .mockRejectedValueOnce(failing())
+            .mockResolvedValueOnce({ data: { recordings: [recording("studio", "Daydreaming", 270600, "Paramore", 90)] } });
+        const out = await musicBrainzService.identifyRecording(expected);
+        expect(out.kind === "answered" && out.value.id).toBe("studio");
+    });
+
+    it("reads a 404 as nothing found when identifying a song, and as a failure when finding its album", async () => {
+        mockGet.mockRejectedValue(failing(404));
+        expect((await musicBrainzService.identifyRecording(expected)).kind).toBe("absent");
+        redisStore = {};
+        expect((await musicBrainzService.searchRecording(expected)).kind).toBe("permanent");
+    });
+});
+
+it("asks for releases only when finding a song's album", async () => {
+    mockGet.mockResolvedValue({ data: { recordings: [] } });
+    await musicBrainzService.identifyRecording(expected);
+    await musicBrainzService.searchRecording(expected);
+    const params = mockGet.mock.calls.map((c) => (c[1] as { params: Record<string, unknown> }).params);
+    expect(params.slice(0, 2).every((p) => !("inc" in p))).toBe(true);
+    expect(params.slice(2).map((p) => p.inc)).toEqual(["releases+release-groups+artists", "releases+release-groups+artists"]);
+});
