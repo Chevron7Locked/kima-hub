@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../../utils/db";
+import { PLAYABLE } from "../../utils/libraryEligibility";
+import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, firstArtistGenre, wrap, parseRepeatedQueryParam } from "./mappers";
@@ -8,8 +10,9 @@ export const starredRouter = Router();
 
 starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, res) => {
     const userId = req.user!.id;
+    // Only songs that can play, from the library.
     const liked = await prisma.likedTrack.findMany({
-        where: { userId },
+        where: { userId, track: { ...PLAYABLE, album: { location: LIBRARY_LOCATION } } },
         include: {
             track: {
                 include: {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
+import { PLAYABLE } from "../../utils/libraryEligibility";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
@@ -114,6 +115,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                       SELECT al.id, al.title, al."artistId", ar.name AS "artistName", al.year
                       FROM "Album" al JOIN "Artist" ar ON al."artistId" = ar.id
                       WHERE al.location = 'LIBRARY'
+                        AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND t.corrupt = false AND t."missingSince" IS NULL)
                       ORDER BY LOWER(al.title) ASC, al.id ASC
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                 : Promise.resolve([]),
@@ -153,13 +155,12 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
         ]);
     }
 
-    // Exclude DISCOVER albums — only library content is visible via Subsonic.
-    // The enumeration path already filters to LIBRARY at the query.
+    // Only library albums with a song that plays; the enumeration path filters this in its query.
     let albums = rawAlbums;
     if (!enumerateLibrary && rawAlbums.length > 0) {
         const libraryIds = new Set(
             (await prisma.album.findMany({
-                where: { id: { in: rawAlbums.map((a) => a.id) }, location: LIBRARY_LOCATION },
+                where: { id: { in: rawAlbums.map((a) => a.id) }, location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
                 select: { id: true },
             })).map((a) => a.id)
         );
