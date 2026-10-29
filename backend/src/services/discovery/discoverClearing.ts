@@ -340,7 +340,7 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
         }),
         prisma.discoveryAlbum.findMany({ where: { userId, status: { in: ["LIKED", "MOVED"] } }, select: { artistName: true } }),
     ]);
-    const likedArtists = new Set(liked.map((a) => a.artistName.toLowerCase()));
+    const likedArtist = (name: string) => liked.some((a) => sameName(a.artistName, name));
 
     const failures: ClearFailure[] = [];
     for (const job of jobs) {
@@ -350,7 +350,7 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
             artistName: metadata?.artistName ?? "",
             albumTitle: metadata?.albumTitle || job.subject,
         };
-        if (ref.artistName && likedArtists.has(ref.artistName.toLowerCase())) continue;
+        if (ref.artistName && likedArtist(ref.artistName)) continue;
         if (await hasSuggestion(userId, ref)) continue;
         if (await findDiscoverAlbum(ref)) continue;
 

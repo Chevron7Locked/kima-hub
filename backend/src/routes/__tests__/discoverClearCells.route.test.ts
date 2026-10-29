@@ -233,6 +233,15 @@ describe("clear with no suggestions", () => {
         expect(await trayRow()).toBeNull();
     });
 
+    it("leaves a download alone whose artist the listener liked, however the name is punctuated", async () => {
+        await addExtraJob(RG_ORPHAN, "Loose Fetch");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}_rg_liked_other`, artistName: "Pellam-Voss", albumTitle: "Another", weekStartDate: WEEK, status: "LIKED" },
+        });
+        const res = await request(app()).delete("/discover/clear");
+        expect(res.body.lidarrFailed).toEqual([]);
+    });
+
     it("leaves the download of a batch that is still running alone", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch", "downloading");
         const res = await request(app()).delete("/discover/clear");
