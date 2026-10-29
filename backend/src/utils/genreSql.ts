@@ -18,8 +18,7 @@ const GENRE_KEY_STRIP = /[\s\u00a0\u202f\u00ad\u200b\ufeff_/.\u00b7'\u2018\u2019
  * A genre name as one genre: in one Unicode form (an accent typed as its own mark reads as the accented letter, a
  * full-width hyphen as a hyphen), lower-cased, without the characters above, so "Hip Hop", "hip-hop" and "HipHop"
  * read as one (#235). Letters of every script are kept, so different words stay apart; a name made only of the
- * characters above has the key ''. Computed here, not in SQL: a database in the SQL_ASCII encoding can neither
- * normalize nor lower-case beyond ASCII.
+ * characters above has the key ''.
  */
 export function genreKey(name: string | null | undefined): string {
     return (name ?? "").normalize("NFKC").toLowerCase().replace(GENRE_KEY_STRIP, "");
@@ -27,12 +26,10 @@ export function genreKey(name: string | null | undefined): string {
 
 /**
  * Whether one genre name answers to a wanted genre key: every spelling of that genre, and genres
- * that contain it ("hip hop" answers "alternative hip-hop"). Names are compared as genreKeys here,
- * never in SQL: a database in the SQL_ASCII encoding can neither normalize nor lower-case beyond
- * ASCII. An empty key (a request made only of spaces and punctuation) is no genre and answers to
- * nothing.
+ * that contain it ("hip hop" answers "alternative hip-hop"). An empty key (a request made only of spaces and
+ * punctuation) is no genre and answers to nothing.
  */
-export function genreMatchesWanted(name: string, wantedKey: string): boolean {
+function genreMatchesWanted(name: string, wantedKey: string): boolean {
     return wantedKey !== "" && genreKey(name).includes(wantedKey);
 }
 
