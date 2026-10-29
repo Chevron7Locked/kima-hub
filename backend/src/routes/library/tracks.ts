@@ -332,8 +332,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     const { limit: limitParam = "100" } = req.query;
     const limit = parseLimit(limitParam, 100);
 
-    const playable = LIBRARY_PLAYABLE;
-    const totalTracks = await prisma.track.count({ where: playable });
+    const totalTracks = await prisma.track.count({ where: LIBRARY_PLAYABLE });
 
     if (totalTracks === 0) {
       return res.json({ tracks: [], total: 0 });
@@ -342,7 +341,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     let tracksData;
     if (totalTracks <= limit) {
       tracksData = await prisma.track.findMany({
-        where: playable,
+        where: LIBRARY_PLAYABLE,
         include: {
           album: {
             include: {
@@ -445,8 +444,8 @@ router.get("/tracks/:id/lyrics", async (req, res) => {
       return res.status(404).json({ error: "Track not found" });
     }
 
-    const artistName = track.album?.artist?.name || "";
-    const albumName = track.album?.title || "";
+    const artistName = track.album.artist.name;
+    const albumName = track.album.title;
     const durationSecs = track.duration || 0;
 
     try {
@@ -546,13 +545,13 @@ router.get("/tracks/:id", async (req, res) => {
       id: track.id,
       title: track.title,
       artist: {
-        name: track.album?.artist?.name || "Unknown Artist",
-        id: track.album?.artist?.id,
+        name: track.album.artist.name || "Unknown Artist",
+        id: track.album.artist.id,
       },
       album: {
-        title: track.album?.title || "Unknown Album",
-        coverArt: track.album?.coverUrl,
-        id: track.album?.id,
+        title: track.album.title || "Unknown Album",
+        coverArt: track.album.coverUrl,
+        id: track.album.id,
       },
       duration: track.duration,
       audioFeatures: toAudioFeaturesDTO(track),
@@ -569,13 +568,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
   try {
     const track = await prisma.track.findUnique({
       where: { id: req.params.id },
-      include: {
-        album: {
-          include: {
-            artist: true,
-          },
-        },
-      },
+      select: { id: true, title: true, filePath: true },
     });
 
     if (!track) {
@@ -618,14 +611,8 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
 router.get("/genres", async (_req, res) => {
   try {
     const minTracks = 15;
-    // Only library songs feed the tallies (Discover albums are Discover's). One rule for every
-    // surface: the shared list (computeGenreTotals) merges each artist's genres through
-    // getMergedGenres (a person's tags replace the enriched ones when they set any), treats
-    // spellings of one genre as one genre (genreKey), counts each artist once per genre, names each
-    // genre by the spelling
-    // most of its songs carry, and drops an artist's tag of its own name (a band named "Jazz"
-    // adds its songs to nothing; nobody else's jazz is hidden by it). The web's own choices on
-    // top of the shared list: lowercase spelling, a 15-song minimum, twenty genres at most.
+    // Library songs only, tallied by the shared rule (computeGenreTotals). The web's own choices on top: lowercase
+    // spelling, a 15-song minimum, twenty genres at most.
     const artists = await prisma.$queryRaw<
       { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; n: bigint }[]
     >`
@@ -745,7 +732,7 @@ router.get("/radio", async (req, res) => {
     let next: number | undefined;
 
     switch (type) {
-      case "discovery":
+      case "discovery": {
         const unplayed = drawIds(
           await unplayedTrackIds({ excludeMissing: true, excludeCorrupt: true }),
           limitNum * 2,
@@ -773,8 +760,9 @@ router.get("/radio", async (req, res) => {
             .slice(0, limitNum * 2);
         }
         break;
+      }
 
-      case "favorites":
+      case "favorites": {
         const mostPlayedTracks = await prisma.$queryRaw<
           { id: string; play_count: bigint }[]
         >`
@@ -801,8 +789,9 @@ router.get("/radio", async (req, res) => {
           });
         }
         break;
+      }
 
-      case "decade":
+      case "decade": {
         const decadeStart = parseInt(value as string) || 2000;
 
         trackIds = await sampleTrackIds({
@@ -812,8 +801,9 @@ router.get("/radio", async (req, res) => {
           take: limitNum * 3,
         });
         break;
+      }
 
-      case "genre":
+      case "genre": {
         const genreValue = (value as string) || "";
         // Every spelling of the genre plays, and genres that contain it ("hip hop" plays "alternative hip-hop").
         // A name made only of spaces and punctuation ("-", "") is no genre and plays nothing. The names are compared
@@ -833,6 +823,7 @@ router.get("/radio", async (req, res) => {
           `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from Artist.genres and userGenres`,
         );
         break;
+      }
 
       case "mood": {
         let moodValue = ((value as string) || "").toLowerCase();
@@ -870,7 +861,7 @@ router.get("/radio", async (req, res) => {
         break;
       }
 
-      case "artist":
+      case "artist": {
         const artistId = value as string;
         if (!artistId) {
           return res
@@ -922,15 +913,10 @@ router.get("/radio", async (req, res) => {
             : null;
         logger.debug(`[Radio:artist] Artist vibe:`, avgVibe);
 
-        const ownedArtists = await prisma.ownedAlbum.findMany({
+        const otherOwnedArtist = await prisma.ownedAlbum.findFirst({
+          where: { NOT: { artistId } },
           select: { artistId: true },
-          distinct: ["artistId"],
         });
-        const libraryArtistIds = new Set(ownedArtists.map((o) => o.artistId));
-        libraryArtistIds.delete(artistId);
-        logger.debug(
-          `[Radio:artist] Library has ${libraryArtistIds.size} other artists`,
-        );
 
         const similarInLibrary = await prisma.similarArtist.findMany({
           where: {
@@ -946,7 +932,7 @@ router.get("/radio", async (req, res) => {
           `[Radio:artist] Found ${similarArtistIds.length} similar artists in library`,
         );
 
-        if (similarArtistIds.length < 5 && libraryArtistIds.size > 0) {
+        if (similarArtistIds.length < 5 && otherOwnedArtist) {
           const artist = await prisma.artist.findUnique({
             where: { id: artistId },
             select: { genres: true, userGenres: true },
@@ -1124,6 +1110,7 @@ router.get("/radio", async (req, res) => {
           `[Radio:artist] Final mix: ${selectedOriginal.length} original + ${selectedSimilar.length} similar = ${trackIds.length} tracks`,
         );
         break;
+      }
 
       case "all":
       default:
