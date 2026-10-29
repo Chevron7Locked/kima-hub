@@ -19,6 +19,7 @@
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
+import { consecutiveDates, datesOn } from "./helpers/dates";
 import type { ProgrammaticMix } from "../helpers";
 import * as mood from "../moodMixes";
 import radioRouter from "../../../routes/library/tracks";
@@ -27,12 +28,8 @@ jest.setTimeout(600_000);
 
 const PREFIX = "cut_";
 const CALLS = 60;
-const dates = Array.from({ length: CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10));
+const dates = consecutiveDates(CALLS);
 
-/** `n` dates a week apart that fall on `day` (0 = Sunday): a weekday mix exists on the day it is drawn for. */
-const datesOn = (day: number, n: number) =>
-    // 2026-01-04 is a Sunday.
-    Array.from({ length: n }, (_, k) => new Date(Date.UTC(2026, 0, 4 + day + 7 * k)).toISOString().slice(0, 10));
 
 type Fields = Record<string, number | string | string[] | null>;
 

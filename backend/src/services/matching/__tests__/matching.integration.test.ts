@@ -4,6 +4,7 @@
  * library state, the vibe map's arithmetic, and every vibe feature's scores against
  * `pairScore`.
  */
+import type { Prisma } from "@prisma/client";
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
@@ -27,7 +28,10 @@ import { MATCHING_MODEL, buildMatching, loadMatchingState, matchingGenres, match
 import { findSimilarTracks } from "../../hybridSimilarity";
 import { generateSongPath } from "../../songPath";
 import { getVibeMap } from "../../vibeMap";
+import { seededRandom } from "../mapLayout";
+import { gaussian as sharedGaussian } from "../../../__tests__/fixtures/gaussian";
 import { parseEmbedding } from "../../../utils/embedding";
+import { insertEmbeddings, vectorLiteral } from "../../../__tests__/helpers/embeddingFixtures";
 
 // The real worker, with a hook a test can run first: what happens while a layout is being computed.
 const mockBeforeWorker: { run: null | (() => Promise<void>) } = { run: null };
@@ -90,17 +94,8 @@ const GONE = "cmatchgone00000000000";
 
 const trackId = (a: number, b: number, t: number) => `cmatcht${a}${b}${t}${"0".repeat(14)}`;
 
-function random(seed: number): () => number {
-    let s = seed >>> 0;
-    return () => {
-        s = (s + 0x6d2b79f5) >>> 0;
-        let x = Math.imul(s ^ (s >>> 15), 1 | s);
-        x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-    };
-}
-const rand = random(20261007);
-const gaussian = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+const rand = seededRandom(20261007);
+const gaussian = () => sharedGaussian(rand);
 
 const vectors = new Map<string, number[]>();
 const LIBRARY = Object.keys(ARTISTS).length * ALBUMS_PER_ARTIST * TRACKS_PER_ALBUM;
@@ -123,14 +118,7 @@ async function insertTrack(id: string, albumId: string, n: number, extra: Record
 
 async function insertVector(id: string, vector: number[], model = MATCHING_MODEL) {
     vectors.set(id, vector);
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, $3, now())
-         ON CONFLICT (track_id) DO UPDATE SET embedding = EXCLUDED.embedding, analyzed_at = EXCLUDED.analyzed_at`,
-        id,
-        `[${vector.join(",")}]`,
-        model,
-    );
+    await insertEmbeddings([{ trackId: id, vector: vectorLiteral(vector) }], { model, replace: true });
 }
 
 async function seed() {
@@ -239,7 +227,6 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-
 /** Waits (up to a minute) until n sessions of this database are waiting on a row lock. */
 async function waitingOnLocks(n: number): Promise<void> {
     for (let i = 0; i < 1200; i++) {
@@ -250,6 +237,23 @@ async function waitingOnLocks(n: number): Promise<void> {
     }
     throw new Error(`${n} sessions never waited on a lock`);
 }
+
+/** Runs `hold` in a transaction that stays open until `release()`, so other writers queue behind its locks. */
+function holdLocks(hold: (tx: Prisma.TransactionClient) => Promise<unknown>) {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const done = prisma.$transaction(
+        async (tx) => {
+            await hold(tx);
+            await held;
+        },
+        { timeout: 120_000 },
+    );
+    return { release, done };
+}
+
+const lockStateRow = (tx: Prisma.TransactionClient) =>
+    tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
 
 describe("the similarity step", () => {
     it("computes feel for every sound vector of the probe's model and builds the state", async () => {
@@ -587,15 +591,7 @@ describe("a re-run while the map is being laid out", () => {
         const { rerunEnrichment } = await import("../../enrichmentRestart");
         // Hold the state row, as a map write already under way does, so the layout and the re-run both queue on it
         // and reach it in the order they were started: the layout first.
-        let release = () => {};
-        const held = new Promise<void>((resolve) => (release = resolve));
-        const blocker = prisma.$transaction(
-            async (tx) => {
-                await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
-                await held;
-            },
-            { timeout: 120_000 },
-        );
+        const { release, done: blocker } = holdLocks(lockStateRow);
         const layout = updateMap(true);
         let rerun: Promise<unknown> = Promise.resolve();
         try {
@@ -621,15 +617,7 @@ describe("a re-run while the map is being laid out", () => {
         await prisma.$executeRaw`DELETE FROM matching_map`;
         await updateMap(true);
         const { rerunEnrichment } = await import("../../enrichmentRestart");
-        let release = () => {};
-        const held = new Promise<void>((resolve) => (release = resolve));
-        const blocker = prisma.$transaction(
-            async (tx) => {
-                await tx.$queryRaw`SELECT id FROM matching_state WHERE id = 'default' FOR UPDATE`;
-                await held;
-            },
-            { timeout: 120_000 },
-        );
+        const { release, done: blocker } = holdLocks(lockStateRow);
         // A placement write (the map is laid out; a new vector waits for a place) queues on the state row.
         await prisma.$executeRaw`DELETE FROM matching_map WHERE track_id = ${trackId(0, 0, 0)}`;
         const placement = updateMap(true);
@@ -651,17 +639,9 @@ describe("a re-run while the map is being laid out", () => {
     it("lets a build that waited behind a re-run write nothing, instead of a state from the data the re-run cleared", async () => {
         await cleanup();
         await seed();
-        let release = () => {};
-        const held = new Promise<void>((resolve) => (release = resolve));
         // A re-run in flight: it has taken the state row and deleted it, and has not committed yet.
         await buildMatching();
-        const rerun = prisma.$transaction(
-            async (tx) => {
-                await tx.$executeRaw`DELETE FROM matching_state`;
-                await held;
-            },
-            { timeout: 120_000 },
-        );
+        const { release, done: rerun } = holdLocks((tx) => tx.$executeRaw`DELETE FROM matching_state`);
         await prisma.$executeRaw`UPDATE track_embeddings SET analyzed_at = analyzed_at + interval '1 second'`;
         const build = buildMatching();
         try {

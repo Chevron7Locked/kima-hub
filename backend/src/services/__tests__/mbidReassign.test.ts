@@ -8,29 +8,16 @@ import { DuplicateMbidError, reassignArtistMbid } from "../mbidReassign";
 
 jest.mock("../../utils/db", () => ({
     prisma: {
-        album: {
-            findUnique: jest.fn(),
-            update: jest.fn(),
-        },
         artist: {
             update: jest.fn(),
         },
-        ownedAlbum: {
-            delete: jest.fn(),
-            upsert: jest.fn(),
-        },
-        discoveryAlbum: {
-            findMany: jest.fn().mockResolvedValue([]),
-            updateMany: jest.fn(),
-        },
-        $transaction: jest.fn(async (cb: any) => cb(prisma)),
     },
 }));
 
 const mockArtistUpdate = prisma.artist.update as jest.Mock;
 
 const ARTIST_ID = "artist-456";
-const NEW_RGMUBID = "new-rgmbid-uuid";
+const NEW_RGMBID = "new-rgmbid-uuid";
 const ARTIST_MBID = "artist-mbid-uuid";
 
 describe("DuplicateMbidError", () => {
@@ -46,9 +33,9 @@ describe("DuplicateMbidError", () => {
     });
 
     it("should work for album entity type", () => {
-        const err = new DuplicateMbidError("album", NEW_RGMUBID);
+        const err = new DuplicateMbidError("album", NEW_RGMBID);
         expect(err.message).toBe(
-            `MBID ${NEW_RGMUBID} is already in use by another album`
+            `MBID ${NEW_RGMBID} is already in use by another album`
         );
         expect(err.entityType).toBe("album");
     });

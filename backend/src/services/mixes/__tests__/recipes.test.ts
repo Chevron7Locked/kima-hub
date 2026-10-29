@@ -8,12 +8,12 @@ import { TAG_LINE_Z } from "../../moods/tags";
 const one = (entry: Record<string, unknown>) => () => parseRecipes({ test: { name: "Test", ...entry } });
 
 describe("the shipped recipes", () => {
-    it("put the line 1.25 SD above the library's mean, the mood buckets and song tags too (Kevin 10-24)", () => {
+    it("put the line 1.25 SD above the library's mean, the mood buckets and song tags too", () => {
         expect(RECIPE_LINE).toBe(1.25);
         expect(TAG_LINE_Z).toBe(RECIPE_LINE);
     });
 
-    it("has one recipe for every mood mix, rotating mix and mood page in W5's plan, and every station of 10-24", () => {
+    it("has one recipe for every mood mix, rotating mix, mood page and station", () => {
         expect([...RECIPES.keys()].sort()).toEqual([
             "acoustic", "calm", "calm-station", "chill", "coffee-shop", "dance-floor", "dreamy",
             "energetic", "energy-station", "epic", "feel-good-station", "focus", "focus-calm-station",
@@ -25,8 +25,7 @@ describe("the shipped recipes", () => {
         ]);
     });
 
-    it("gives the stations of 10-24 the approved blends", () => {
-        // Two of the approved station blends.
+    it("gives the stations their blends", () => {
         expect(getRecipe("feel-good-station").components).toHaveLength(15);
         expect(getRecipe("focus-calm-station")).toMatchObject({
             components: [{ signal: "focus", weight: 0.75 }, { signal: "calm", weight: 0.25 }],

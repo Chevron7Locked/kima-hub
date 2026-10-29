@@ -2,22 +2,19 @@
  * GET /podcasts/:podcastId/episodes/:episodeId/next: after an episode, the show's next one by release date that
  * this user has not finished, whatever order a page lists them in; none at the show's end. Real router and database.
  */
-jest.mock("../../middleware/auth", () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podnext", username: "t" }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podnext", username: "t" }; next(); },
-}));
+jest.mock("../../middleware/auth", () => require("./helpers/podcastRoute").podcastAuthMock("u_podnext"));
 
 import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
+import { episodeOnDay } from "./helpers/podcastRoute";
 
 const USER = "u_podnext";
 const SHOW = "pod_next_show";
 const OTHER = "pod_next_other";
 const app = express();
 app.use("/podcasts", podcastRoutes);
-const ep = (id: string, day: number) => ({ id, guid: id, title: id, audioUrl: `https://a.invalid/${id}.mp3`, duration: 600, publishedAt: new Date(Date.UTC(2026, 9, day)) });
 const next = (episodeId: string, show = SHOW) => request(app).get(`/podcasts/${show}/episodes/${episodeId}/next`);
 
 beforeAll(async () => {
@@ -26,10 +23,10 @@ beforeAll(async () => {
     await prisma.podcast.create({
         data: {
             id: SHOW, feedUrl: "https://f.invalid/next", title: "Next Show",
-            episodes: { create: [ep("nx_14", 1), ep("nx_15", 8), ep("nx_16", 15), ep("nx_17", 22), ep("nx_18", 29)] },
+            episodes: { create: [episodeOnDay("nx_14", 1), episodeOnDay("nx_15", 8), episodeOnDay("nx_16", 15), episodeOnDay("nx_17", 22), episodeOnDay("nx_18", 29)] },
         },
     });
-    await prisma.podcast.create({ data: { id: OTHER, feedUrl: "https://f.invalid/other", title: "Other", episodes: { create: [ep("nx_other", 9)] } } });
+    await prisma.podcast.create({ data: { id: OTHER, feedUrl: "https://f.invalid/other", title: "Other", episodes: { create: [episodeOnDay("nx_other", 9)] } } });
     await prisma.podcastProgress.createMany({
         data: [
             { userId: USER, episodeId: "nx_16", currentTime: 600, duration: 600, isFinished: true },

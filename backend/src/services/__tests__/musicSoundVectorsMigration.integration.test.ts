@@ -1,11 +1,12 @@
 /**
- * Migration 20261017120000: vectors under any label but the music model's ONNX one (1.11's general model, 1.10's
- * single-slice music vectors) are removed with their feel and map rows, and their tracks asked again; a track whose
- * file is gone is closed as missing; vectors under the new label stay.
+ * Migration 20261017120000: vectors under any label but the music model's ONNX one (the general model's, the
+ * single-slice music model's) are removed with their feel and map rows, and their tracks asked again; a track whose
+ * file is gone is closed as missing; vectors under the ONNX label stay.
  */
 import fs from "fs";
 import path from "path";
 import { prisma } from "../../utils/db";
+import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 import { MATCHING_MODEL } from "../matching/state";
 
 const P = "msv";
@@ -13,7 +14,6 @@ const SQL = fs.readFileSync(
     path.join(__dirname, "../../../prisma/migrations/20261017120000_music_sound_vectors/migration.sql"),
     "utf8",
 );
-const unit = `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`;
 
 async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
@@ -30,10 +30,7 @@ async function track(id: string, label: string, missing = false) {
         },
     });
     await prisma.trackStage.create({ data: { id: `${id}__embedding`, trackId: id, stage: "embedding", status: "done", attempt: 1, retryable: false } });
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, now())`,
-        id, unit, label,
-    );
+    await insertEmbeddings([{ trackId: id, vector: AXIS_ZERO }], { model: label });
     await prisma.$executeRawUnsafe(
         `INSERT INTO matching_feel (track_id, embedded_at, probe, valence, arousal)
          SELECT track_id, analyzed_at, 'old-probe', 0.5, 0.5 FROM track_embeddings WHERE track_id = $1`,

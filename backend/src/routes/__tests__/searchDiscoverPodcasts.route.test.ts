@@ -58,7 +58,7 @@ it("answers an empty podcast section, and caches nothing, when Apple fails", asy
     expect(await redisClient.keys("search:discover:*")).toEqual([]);
 });
 
-it("still answers within its old 5 s when Kima's Apple queue is holding requests back", async () => {
+it("answers within 5 s when Kima's Apple queue is holding requests back", async () => {
     // Apple has been refusing requests, so the queue is waiting out its circuit breaker (up to a minute).
     const circuit = (rateLimiter as any).circuitBreakers.get("itunes");
     Object.assign(circuit, { isOpen: true, openedAt: Date.now(), resetAfterMs: 60_000 });

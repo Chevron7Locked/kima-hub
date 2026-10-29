@@ -1,30 +1,11 @@
 /**
- * GET /library/radio, every branch, against a real Postgres holding the 3,000
- * track synthetic library (src/__tests__/fixtures/syntheticLibrary.ts; ids are
- * handed out in energy order, so a "first N rows" draw shows up as ids bunched
- * at the front). The library router is mounted on a real express app and
- * called over HTTP with supertest. No auth is mounted: the route reads the
- * signed-in user only to keep a station session for them (req.user.id), and a
- * one-line middleware sets a fixed listener in its place. Nothing is mocked.
- *
- * For each branch, over 10 consecutive calls:
- *   1. size   - each call returns exactly `limit` tracks, no repeats;
- *   2. clause - every track satisfies the branch's clause (written out here
- *               against the stored row) and is playable (file present, not
- *               corrupt);
- *   3. spread - together the calls return more than 3x `limit` distinct
- *               tracks and reach the first and the last third of the ids that
- *               match (the branch has well over 10x `limit` matches).
- *
- * The mood and workout stations draw from their recipes (recipes.json): their
- * clause is membership of the recipe, as the recipe engine computes it on the
- * library's learned moods (recipes.integration.test.ts checks the engine). The
- * Wildcard station plays the scored songs without a mood tag, as the tag writer
- * stored them.
- *
- * The describe blocks at the end change the library (deleting plays, clearing
- * the mood statistics) to reach the fallback stages; they run last and the
- * library is deleted afterwards.
+ * GET /library/radio, every branch, over HTTP against a real Postgres holding the 3,000-track
+ * synthetic library (ids follow energy order, so a "first N rows" draw shows as ids bunched at the front).
+ * Nothing is mocked; a one-line middleware stands in for auth and sets the listener.
+ * Each branch is called 10 times: exactly `limit` tracks with no repeats, every track playable and
+ * satisfying the branch's clause, and enough spread to reach the first and last third of the matching ids.
+ * Mood and workout clauses are membership of the station's recipe. The describe blocks at the end
+ * change the library to reach the fallback stages, so they run last.
  */
 import express from "express";
 import request from "supertest";
@@ -65,7 +46,7 @@ app.use((req, _res, next) => {
 });
 app.use("/", router);
 
-/** The recipe behind each station value, as the product names them (Kevin 10-24); Wildcard has its own tests. */
+/** The recipe behind each station value, as the product names them; Wildcard has its own tests. */
 const STATIONS: [query: Record<string, string>, recipe: string][] = [
     [{ type: "mood", value: "calm" }, "calm-station"],
     [{ type: "mood", value: "energy" }, "energy-station"],
@@ -97,7 +78,6 @@ beforeAll(async () => {
 afterAll(async () => {
     await removeSyntheticLibrary(PREFIX);
     await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-    await prisma.$disconnect();
 });
 
 // ---- clause vocabulary -----------------------------------------------------
@@ -127,10 +107,7 @@ interface RadioTrack {
     album: { id: string; title: string };
 }
 
-async function radio(query: Record<string, string | number>) {
-    const res = await request(app).get("/radio").query(query);
-    return res;
-}
+const radio = (query: Record<string, string | number>) => request(app).get("/radio").query(query);
 
 async function calls(query: Record<string, string | number>, n = CALLS): Promise<RadioTrack[][]> {
     const out: RadioTrack[][] = [];
@@ -505,7 +482,7 @@ describe("radio: artist weighting", () => {
         const meanReturned = returned.reduce((sum, id) => sum + scoreOf.get(id)!, 0) / returned.length;
         expect(meanReturned).toBeGreaterThan(meanCandidates);
 
-        // The old draw used only the 24 closest tracks; the weighted draw goes well past them.
+        // The weighted draw goes well past the 24 closest tracks.
         const closest = new Set(
             [...scoreOf.entries()].sort((a, b) => b[1] - a[1]).slice(0, 24).map(([id]) => id),
         );
@@ -523,17 +500,17 @@ describe("radio: bad requests", () => {
         expect((await radio({ type: "mood", value: "constructor" })).status).toBe(400);
         expect((await radio({ type: "mood" })).status).toBe(400);
     });
-    it("400 for the mood values the 10-24 stations replaced", async () => {
+    it("400 for mood values that are not stations", async () => {
         for (const value of ["chill", "dance", "high-energy", "acoustic", "instrumental"]) {
             expect((await radio({ type: "mood", value })).status).toBe(400);
         }
     });
-    it("answers an older app's request for Focus with Focus: Calm, and the stations that no longer exist with an empty list", async () => {
-        const old = await radio({ type: "mood", value: "focus", limit: LIMIT, seed: "same" });
+    it("answers a request for Focus with Focus: Calm, and retired station names with an empty list", async () => {
+        const plainFocus = await radio({ type: "mood", value: "focus", limit: LIMIT, seed: "same" });
         const calm = await radio({ type: "mood", value: "focus-calm", limit: LIMIT, seed: "same" });
-        expect(old.status).toBe(200);
-        expect(old.body.tracks.length).toBeGreaterThan(0);
-        expect(old.body.tracks.map((t: any) => t.id)).toEqual(calm.body.tracks.map((t: any) => t.id));
+        expect(plainFocus.status).toBe(200);
+        expect(plainFocus.body.tracks.length).toBeGreaterThan(0);
+        expect(plainFocus.body.tracks.map((t: any) => t.id)).toEqual(calm.body.tracks.map((t: any) => t.id));
         for (const value of ["summer", "3am-thoughts", "friday-night"]) {
             const res = await radio({ type: "mood", value });
             expect(res.status).toBe(200);

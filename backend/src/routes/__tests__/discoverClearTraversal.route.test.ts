@@ -1,35 +1,8 @@
 /**
- * DELETE /discover/clear with the real test database and real files in a
- * temporary music root (config is pointed at a folder under os.tmpdir(), the
- * way the audiobook-cover route test does). A Discover album's files are where
- * its DISCOVER album row's tracks say, relative to the music root:
- *   (a) a Soulseek-style album under Singles/ (no lidarrAlbumId): after clear
- *       its files are gone and its now-empty album and artist folders with
- *       them, while a sibling single keeps the artist folder alive;
- *   (b) a LIBRARY album with the same title and artist name, files beside it:
- *       untouched, because its row is not DISCOVER;
- *   (c) a track whose filePath contains "../" reaching outside the music root:
- *       refused, and nothing outside the music root is deleted;
- *   (e) a suggestion recorded under another release-group id and another
- *       letter case than the scanned album's tags: found the way like and
- *       unlike find it, and its files and rows go too;
- *   (f) a LIKED suggestion recorded under another id and letter case, with a
- *       same-named LIBRARY twin: the clear finds the DISCOVER album by name
- *       (case-insensitive) and moves that one to the library, never the twin;
- *   (d) a suggestion with a lidarrAlbumId: Kima deletes no files itself — the
- *       files are Lidarr's to delete. When Lidarr did not delete the album
- *       (it is turned off, or it answered with an error), the album's files,
- *       rows and suggestion all stay, the reply names the album with the reason,
- *       and the listener's notification tray carries one row saying so; a later
- *       clear where Lidarr does delete it clears the rows and the tray row.
- * Every test rebuilds the fixture (rows and real files) and sends its own
- * DELETE, so each one causes what it asserts. The listener is injected by a
- * mocked auth middleware; the scan clear queues at the end is stubbed (a real
- * scan would rebuild the rows under test). Lidarr answers only through recorded
- * scenarios (fixtures/lidarr "complete", served by the replay helper) or a real
- * connection failure: no test asks Lidarr to delete an album, because no
- * recording of a Lidarr album delete exists yet — it will be recorded later on
- * the test rig.
+ * DELETE /discover/clear against the real test database and real files in a temporary music root: a Discover
+ * album's files and folders go, a library twin and anything outside the root stay, a Lidarr-held album stays in
+ * Discover and is reported in lidarrFailed, and a liked album moves to the library. Lidarr is off or a port
+ * nothing listens on; no test asks Lidarr to delete an album.
  */
 
 jest.mock("../../utils/logger", () => ({
@@ -78,17 +51,15 @@ jest.mock("../../workers/unifiedEnrichment", () => ({
     triggerEnrichmentNow: jest.fn().mockResolvedValue(undefined),
 }));
 
-import express from "express";
 import request from "supertest";
 import fs from "fs";
-import net from "node:net";
 import path from "path";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { config } from "../../config";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
-import discoverRoutes from "../discover";
+import { deadPort, discoverApp } from "./helpers/discoverClear";
 
 jest.setTimeout(120_000);
 
@@ -186,13 +157,6 @@ const ARTISTS = [
     // (f) The LIKED album's artist and its same-named LIBRARY twin's.
     { id: `${P}_art_c`, name: LIKED_ARTIST },
 ];
-
-function app() {
-    const a = express();
-    a.use(express.json());
-    a.use("/discover", discoverRoutes);
-    return a;
-}
 
 async function cleanup() {
     await prisma.discoveryTrack.deleteMany({ where: { discoveryAlbum: { userId: USER } } });
@@ -303,24 +267,19 @@ afterAll(async () => {
     fs.rmSync(OUTSIDE, { recursive: true, force: true });
     await cleanup();
     await closeEngineConnections();
-    await prisma.$disconnect();
 });
 
 beforeEach(async () => {
     await cleanup();
     await buildFixture();
-    // Every test starts with Lidarr turned off; a test that needs to talk to
-    // it points Kima at its own endpoint in the test body.
+    // Lidarr is off, so the Lidarr-held album stays in Discover and is reported in lidarrFailed;
+    // a test that needs Lidarr to answer points Kima at its own endpoint.
     await useLidarr("", { lidarrEnabled: false });
 });
 
 describe("DELETE /discover/clear -- files, folders and traversal", () => {
     it("deletes the Soulseek album's files, then its empty folders, and the rows", async () => {
-        // Lidarr is off (as afterAll leaves it): with no recording of a Lidarr
-        // album delete, the Lidarr-held album intentionally stays in Discover, reported in lidarrFailed.
-        await useLidarr("", { lidarrEnabled: false });
-
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         // Six ACTIVE suggestions (the LIKED one is not among them). The five
         // without a lidarrAlbumId are cleared by Kima itself; the Lidarr-held
@@ -352,11 +311,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("finds an album whose suggestion carries another id and letter case, and clears it", async () => {
-        // Lidarr off: the Lidarr-held album intentionally stays in Discover
-        // (lidarrFailed) until a recording of a Lidarr album delete exists.
-        await useLidarr("", { lidarrEnabled: false });
-
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.activeDeleted).toBe(5);
         expect(res.body.lidarrFailed).toEqual([
@@ -372,7 +327,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("moves a LIKED album the suggestion recorded under another id and letter case, never the library twin", async () => {
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.likedMoved).toBe(1);
 
@@ -395,11 +350,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("leaves the LIBRARY album with the same title and artist name untouched", async () => {
-        // Lidarr off: the Lidarr-held album intentionally stays in Discover
-        // (lidarrFailed) until a recording of a Lidarr album delete exists.
-        await useLidarr("", { lidarrEnabled: false });
-
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([
             { artistName: ARTIST_NAME, albumTitle: LIDARR_TITLE, reason: "Lidarr is turned off" },
         ]);
@@ -415,11 +366,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("refuses a filePath that climbs out of the music root and deletes nothing outside", async () => {
-        // Lidarr off: the Lidarr-held album intentionally stays in Discover
-        // (lidarrFailed) until a recording of a Lidarr album delete exists.
-        await useLidarr("", { lidarrEnabled: false });
-
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([
             { artistName: ARTIST_NAME, albumTitle: LIDARR_TITLE, reason: "Lidarr is turned off" },
         ]);
@@ -455,9 +402,7 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     }
 
     it("with Lidarr turned off: the album keeps its files and rows, the reply names it, the tray says so", async () => {
-        await useLidarr("", { lidarrEnabled: false });
-
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         // The five suggestions without a lidarrAlbumId went; the Lidarr-held
         // one stayed in Discover.
@@ -480,20 +425,11 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     });
 
     it("when Lidarr answers with an error: the album keeps its files and rows, the reason carries the error", async () => {
-        // A real failure, not a replayed status: open a server on an ephemeral
-        // port, read the port it was given, close it, and point Kima's Lidarr
-        // at it, so every request meets a port nothing listens on.
-        const port = await new Promise<number>((resolve, reject) => {
-            const probe = net.createServer();
-            probe.on("error", reject);
-            probe.listen(0, "127.0.0.1", () => {
-                const assigned = (probe.address() as net.AddressInfo).port;
-                probe.close(() => resolve(assigned));
-            });
-        });
+        // A real failure: Kima's Lidarr points at a port nothing listens on.
+        const port = await deadPort();
         await useLidarr(`http://127.0.0.1:${port}`);
 
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         // Five of the six ACTIVE suggestions went; the Lidarr-held one stayed.
         expect(res.body.activeDeleted).toBe(5);
@@ -516,20 +452,12 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     });
 
     it("a later clear in which the listener likes the album: the rows go and the tray row is cleared", async () => {
-        // First clear, against a port nothing listens on (open a server on an
-        // ephemeral port, read its port, close it): Lidarr cannot be reached,
+        // First clear, against a port nothing listens on: Lidarr cannot be reached,
         // so the album stays and the tray row appears.
-        const port = await new Promise<number>((resolve, reject) => {
-            const probe = net.createServer();
-            probe.on("error", reject);
-            probe.listen(0, "127.0.0.1", () => {
-                const assigned = (probe.address() as net.AddressInfo).port;
-                probe.close(() => resolve(assigned));
-            });
-        });
+        const port = await deadPort();
         await useLidarr(`http://127.0.0.1:${port}`);
 
-        const first = await request(app()).delete("/discover/clear");
+        const first = await request(discoverApp()).delete("/discover/clear");
         expect(first.status).toBe(200);
         expect(first.body.activeDeleted).toBe(5);
         expect(first.body.lidarrFailed).toHaveLength(1);
@@ -541,7 +469,7 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
         // The listener likes the Lidarr-held album the way the like route does
         // (its suggestion's release-group id): the ACTIVE suggestion becomes
         // LIKED, so no clear has to ask Lidarr to delete it any more.
-        const like = await request(app()).post("/discover/like").send({ albumId: LIDARR_RG });
+        const like = await request(discoverApp()).post("/discover/like").send({ albumId: LIDARR_RG });
         expect(like.status).toBe(200);
         expect(like.body.success).toBe(true);
         expect(
@@ -552,7 +480,7 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
         // Second clear: the like route already moved the album to the library,
         // so the clear finds nothing left to move, delete, or fail — and the
         // tray row goes.
-        const second = await request(app()).delete("/discover/clear");
+        const second = await request(discoverApp()).delete("/discover/clear");
         expect(second.status).toBe(200);
         // The other five suggestions went in the first clear; the sixth is the
         // liked one, already LIBRARY from the like route's takeIntoLibrary.

@@ -123,8 +123,7 @@ describe("grep gate: no embedding query without the eligibility fragments (prese
     // Seed lookups: the query reads exactly the tracks the request names (by
     // id), which streaming refuses if they are gone.
     const SEED_LOOKUP = /WHERE (te\.|t\.)?(track_id|id) = (ANY\()?\$\{/;
-    // Status counters: plain COUNT over the whole table — the counted-and-
-    // shown exception of invariant 3, not a consumer of results.
+    // Status counters: a plain COUNT over the whole table is allowed; it counts and shows, and returns no results.
     const STATUS_COUNT = /^\s*SELECT\s+COUNT\(/i;
 
     it.each(CONSUMERS)("every library query in %s is filtered", (file) => {

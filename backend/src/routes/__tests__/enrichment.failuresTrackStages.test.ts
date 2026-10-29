@@ -144,7 +144,7 @@ afterAll(async () => {
 });
 
 describe("GET /enrichment/failures reads track stages from TrackStage", () => {
-    it("lists a failed recording with the familiar EnrichmentFailure shape", async () => {
+    it("lists a failed recording in the EnrichmentFailure shape", async () => {
         const trackId = id("t1");
         const stageId = await seedFailedRecording(trackId);
 

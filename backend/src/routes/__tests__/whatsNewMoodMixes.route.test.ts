@@ -414,7 +414,7 @@ describe("POST /whats-new/:version/choice — only what the window asked", () =>
         expect(await prisma.releaseChoice.count({ where: { userId } })).toBe(0);
     });
 
-    it("still answers 404 for an unknown version", async () => {
+    it("answers 404 for an unknown version", async () => {
         const { userId } = await fixture();
         const res = await choice(userId, "0.0.0", "stats.page", true);
         expect(res.status).toBe(404);

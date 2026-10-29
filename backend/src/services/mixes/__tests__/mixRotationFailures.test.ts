@@ -7,17 +7,9 @@
 jest.mock("../moodMixes");
 jest.mock("../genreMixes");
 jest.mock("../timeMixes");
-// Spelled out: generating its automock loads the similar-artist lookup, whose client keeps Jest from exiting.
-jest.mock("../discoveryMixes", () => ({
-    generateTopTracksMix: jest.fn(),
-    generateRediscoverMix: jest.fn(),
-    generateArtistSimilarMix: jest.fn(),
-    generateRandomDiscoveryMix: jest.fn(),
-}));
-jest.mock("../../moodBucketService", () => ({ moodBucketService: { getUserMoodMix: jest.fn(async () => null) } }));
-jest.mock("../../../utils/logger", () => ({
-    logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-}));
+jest.mock("../discoveryMixes", () => require("./helpers/rotationMocks").discoveryMixesMock());
+jest.mock("../../moodBucketService", () => require("./helpers/rotationMocks").moodBucketServiceMock());
+jest.mock("../../../utils/logger", () => require("./helpers/rotationMocks").loggerMock());
 
 import * as moodMixes from "../moodMixes";
 import * as genreMixes from "../genreMixes";

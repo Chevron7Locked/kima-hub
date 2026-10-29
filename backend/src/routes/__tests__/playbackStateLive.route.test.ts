@@ -6,22 +6,16 @@ jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 jest.mock("../../utils/db", () => ({ prisma: {}, Prisma: {} }));
-jest.mock("../../config", () => ({
-    config: { publicVibe: { token: "t".repeat(32), username: "listener" } },
-}));
+jest.mock("../../config", () => require("./helpers/publicListener").publicVibeConfigMock());
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => {
         req.user = { id: req.headers["x-user"] ?? "public-user" };
         next();
     },
 }));
-// The public listener is "public-user" while the (mocked) config has the public vibe on; the
-// check itself is tested in liveListening.test.ts.
+// isPublicListener is faked in helpers/publicListener; the real check is tested in liveListening.test.ts.
 jest.mock("../../services/liveListening", () => ({
-    isPublicListener: jest.fn(
-        async (userId: string) =>
-            Boolean(jest.requireMock<{ config: { publicVibe: unknown } }>("../../config").config.publicVibe) && userId === "public-user",
-    ),
+    isPublicListener: jest.fn(require("./helpers/publicListener").fakeIsPublicListener),
     reportLive: jest.fn(),
 }));
 

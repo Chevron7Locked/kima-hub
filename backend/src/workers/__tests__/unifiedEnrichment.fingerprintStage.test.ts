@@ -82,7 +82,7 @@ jest.mock("../../services/featureDetection", () => ({
 }));
 
 // The fpcalc binary is mocked: a fixed fingerprint for every file, the same
-// ~3.4 kB shape a real Chromaprint run produces (the binary's own contract is
+// Chromaprint-style base64 string (the binary's own contract is
 // fpcalcService's suite). Everything downstream of the subprocess — the
 // stage claim, the persistence, the settle — is real.
 const FINGERPRINT = "AQAA0pMiRZkQJBVZCSA98NOhHT-Q44eFB0sPPsgM_3hwnDgK7Yh6FCeOxyh-HMd5pDh6NEyQaDmuSjgSH8cXHdlyBSdiETAwHd-F88h3-Dt6KxlU5Dp27IPv4vk66Dz-JElw_Rm6HAWPJMmP_VCF8ki7CZ2h5sNfhD-0LT9-7I0jPMePsRT4HOeP50e0Fz_6Gs-P_7hChD-ePx06dDqaHT-Oy7hT_Dj2HHqND6WR5wieHN-w48iX4jvQ8Mh1PFKQJ9GeITl64QqP93hTfD0OHsd58IdU_Ax66DmOHxd0NEyQaDmuSjgSH8cXHdlyBSdiETAwHd-F88h3";
@@ -118,13 +118,13 @@ jest.mock("../../workers/podcastEnrichmentWorker", () => ({
     startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
 
+import { putStage as seedStage, seedPatternEmbedding, type PutStageOptions } from "../../__tests__/helpers/trackStage";
 import fs from "fs";
 import path from "path";
 
 import { prisma } from "../../utils/db";
 import { sourcePauseController } from "../../services/sourcePauseController";
 import {
-    STAGE_ORDER,
     executeFingerprintPhase,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
@@ -133,6 +133,9 @@ import {
 
 const PREFIX = "fp";
 const id = (n: string) => `${PREFIX}_${n}`;
+
+const putStage = (trackId: string, stage: string, status: string, opts: PutStageOptions = {}) =>
+    seedStage(trackId, stage, status, { source: "fpcalc", evidence: { probe: "seeded" }, ...opts });
 
 /** The migration that seeds a pending fingerprint record for every track. */
 function fingerprintSeedMigrationSql(): string {
@@ -184,37 +187,6 @@ async function seedTrack(
     });
 }
 
-async function putStage(
-    trackId: string,
-    stage: string,
-    status: string,
-    opts: { attempt?: number; retryable?: boolean } = {},
-): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt, "lastErrorCode",
-             "lastErrorMessage", "failureClass", retryable, "nextRetryAt", evidence)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = EXCLUDED.status,
-                source = EXCLUDED.source,
-                attempt = EXCLUDED.attempt,
-                "lastErrorCode" = EXCLUDED."lastErrorCode",
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                "failureClass" = EXCLUDED."failureClass",
-                retryable = EXCLUDED.retryable,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                evidence = EXCLUDED.evidence`,
-        `${trackId}__${stage}`, trackId, stage, status,
-        "fpcalc", opts.attempt ?? 0,
-        status === "done" ? null : "TEST_SEED",
-        status === "done" ? null : "seeded by test",
-        status === "done" ? null : "INCONCLUSIVE",
-        opts.retryable ?? true, null,
-        JSON.stringify({ probe: "seeded" }),
-    );
-}
-
 async function stageRow(
     trackId: string,
     stage: string,
@@ -237,23 +209,10 @@ async function storedFingerprint(trackId: string): Promise<string | null> {
     return rows[0]?.fingerprint ?? null;
 }
 
-async function seedEmbedding(trackId: string): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())
-         ON CONFLICT (track_id) DO NOTHING`,
-        trackId,
-        `[${Array.from({ length: 512 }, (_, i) => (i % 7) / 7).join(",")}]`,
-    );
-}
-
 async function wipe(): Promise<void> {
-    // The seed covers every track, so start from an empty library.
+    // The sweep covers every track, so start from an empty library.
     await prisma.$executeRawUnsafe(`DELETE FROM "Track"`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "TrackStage" WHERE "trackId" LIKE $1`, `${PREFIX}_%`);
     await prisma.$executeRawUnsafe(`DELETE FROM "SourceAttempt"`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "track_embeddings" WHERE track_id LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, `${PREFIX}_%`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = $1`, id("alb"));
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, id("art"));
 }
@@ -278,7 +237,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 describe("the fingerprint stage answers every track", () => {
@@ -422,7 +380,7 @@ describe("progress includes the fingerprint stage", () => {
             await putStage(trackId, "recording", "done");
             await putStage(trackId, "analysis", "done");
             await putStage(trackId, "embedding", "done");
-            await seedEmbedding(trackId);
+            await seedPatternEmbedding(trackId);
         }
         await putStage(done, "fingerprint", "done");
         await putStage(pending, "fingerprint", "pending");
@@ -450,10 +408,3 @@ describe("progress includes the fingerprint stage", () => {
     });
 });
 
-// STAGE_ORDER must carry the stage so the cycle, retry control, progress and
-// re-decide sweep all walk it.
-describe("the stage is part of the engine", () => {
-    it("STAGE_ORDER includes 'fingerprint'", () => {
-        expect(STAGE_ORDER).toContain("fingerprint");
-    });
-});

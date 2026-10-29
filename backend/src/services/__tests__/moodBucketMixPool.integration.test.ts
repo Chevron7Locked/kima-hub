@@ -4,24 +4,8 @@
  * UserMoodMix so the next mix can skip it. On the 3,000-track synthetic library with learned moods.
  */
 
-const store = new Map<string, string>();
-jest.mock("../../utils/redis", () => ({
-    redisClient: {
-        get: jest.fn(async (k: string) => store.get(k) ?? null),
-        del: jest.fn(async (k: string) => { store.delete(k); return 1; }),
-        multi: jest.fn(() => {
-            const ops: Array<() => void> = [];
-            const chain = {
-                setex: (k: string, _ttl: number, v: string) => { ops.push(() => store.set(k, v)); return chain; },
-                del: (k: string) => { ops.push(() => store.delete(k)); return chain; },
-                sadd: () => chain,
-                expire: () => chain,
-                exec: async () => { ops.forEach((op) => op()); return []; },
-            };
-            return chain;
-        }),
-    },
-}));
+const mockStore = new Map<string, string>();
+jest.mock("../../utils/redis", () => require("./helpers/memoryRedis").memoryRedisMock(mockStore));
 
 import { prisma } from "../../utils/db";
 import { moodBucketService, MoodType } from "../moodBucketService";

@@ -4,133 +4,32 @@
  * phase functions on the test database; queues, Redis and services are mocked.
  */
 
-// ── Queue + Redis mocks: observe what gets offered ───────────────────────
-
-const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job-1" });
-const mockQueueClean = jest.fn().mockResolvedValue([]);
-const mockQueueGetJob = jest.fn().mockResolvedValue(null);
-const mockQueueResume = jest.fn().mockResolvedValue(undefined);
-
-jest.mock("../enrichmentQueues", () => ({
-    QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
-        TRACKS: "enrichment-tracks",
-        VIBE: "enrichment-vibe",
-        PODCASTS: "enrichment-podcasts",
-    },
-    artistQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    trackQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    vibeQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    podcastQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    createWorkerConnection: () => ({ host: "localhost", port: 6379 }),
-    closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
-}));
-
-const mockRedis = {
-    rpush: jest.fn().mockResolvedValue(1),
-    llen: jest.fn().mockResolvedValue(0),
-    del: jest.fn().mockResolvedValue(1),
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn().mockResolvedValue("OK"),
-    publish: jest.fn().mockResolvedValue(1),
-    subscribe: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    quit: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn(),
-    status: "ready",
-};
-
-jest.mock("ioredis", () => jest.fn().mockImplementation(() => mockRedis));
-jest.mock("../../config", () => ({ config: { redisUrl: "redis://localhost:6379" } }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
+jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
+jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
+jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
+jest.mock("../../utils/logger", () => require("../../__tests__/helpers/enrichmentMocks").loggerMock);
+jest.mock("../../services/enrichmentState", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
+jest.mock("../../services/enrichmentFailureService", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
+jest.mock("../../services/featureDetection", () => require("../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
+jest.mock("../../services/trackIdentity", () => require("../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
+jest.mock("../../services/musicbrainz", () => require("../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
+jest.mock("../../services/acoustidIdentification", () => require("../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
+jest.mock("../../workers/audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
+jest.mock("../../workers/artistEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").artistEnrichmentWorkerMock);
+jest.mock("../../workers/trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
+jest.mock("../../workers/podcastEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").podcastEnrichmentWorkerMock);
 
 // NOTE: `../../utils/db` is deliberately NOT mocked — the gating must be
 // proven against the real TrackStage table that the migration creates.
-
-jest.mock("../../services/enrichmentState", () => ({
-    enrichmentStateService: {
-        updateState: jest.fn().mockResolvedValue({}),
-        getState: jest.fn().mockResolvedValue(null),
-        initializeState: jest.fn().mockResolvedValue({}),
-        clear: jest.fn().mockResolvedValue(undefined),
-        detectHang: jest.fn().mockResolvedValue(false),
-        clearGate: jest.fn().mockResolvedValue(undefined),
-        publishToChannel: jest.fn().mockResolvedValue(undefined),
-        markFailed: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../services/enrichmentFailureService", () => ({
-    enrichmentFailureService: {
-        recordFailure: jest.fn().mockResolvedValue({}),
-        cleanupOrphanedFailures: jest.fn().mockResolvedValue({ cleaned: 0, checked: 0 }),
-        cleanupOldResolved: jest.fn().mockResolvedValue(0),
-    },
-}));
-
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: { analyzerRunning: jest.fn().mockResolvedValue(false), clapRunning: jest.fn().mockResolvedValue(false),
-        getFeatures: jest.fn().mockResolvedValue({
-            vibeEmbeddings: true, podcastSupport: false, fpcalc: true,
-        }),
-    },
-}));
-
-jest.mock("../../services/trackIdentity", () => ({
-    trackIdentityService: {
-        populateTrackGenres: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../services/musicbrainz", () => ({
-    musicBrainzService: {
-        searchRecording: jest.fn().mockResolvedValue(null),
-        getRecordingGenres: jest.fn().mockResolvedValue(null),
-    },
-}));
 
 // The album step before dispatch is not what this tests, and must never reach the network.
 jest.mock("../../services/albumIdentification", () => ({
     ...jest.requireActual("../../services/albumIdentification"),
     identifyAlbumsBySound: jest.fn().mockResolvedValue([]),
 }));
-jest.mock("../../services/acoustidIdentification", () => ({
-    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
-    identifyTrackByAcoustid: jest.fn().mockResolvedValue({ kind: "absent", evidence: { mocked: true } }),
-    persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock("../audioCompletionSubscriber", () => ({
-    startAudioCompletionSubscriber: jest.fn(),
-    stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
-    haltVibeQueuing: jest.fn(),
-    resumeVibeQueuing: jest.fn(),
-}));
-
-jest.mock("../artistEnrichmentWorker", () => ({
-    startArtistEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../trackEnrichmentWorker", () => ({
-    startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-
+import { putStage as seedStage, type PutStageOptions, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
+import { mockQueueAdd, mockQueueGetJob, mockRedis } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
 import {
     executeVibePhase,
@@ -143,27 +42,8 @@ import {
 const PREFIX = "gate";
 const id = (n: string) => `${PREFIX}_${n}`;
 
-async function putStage(
-    trackId: string,
-    stage: string,
-    status: string,
-    opts: { attempt?: number; retryable?: boolean; nextRetryAt?: Date | null } = {},
-): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt, retryable, "nextRetryAt", evidence)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = EXCLUDED.status,
-                attempt = EXCLUDED.attempt,
-                retryable = EXCLUDED.retryable,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                evidence = EXCLUDED.evidence`,
-        `${trackId}__${stage}`, trackId, stage, status, "analyzer",
-        opts.attempt ?? 0, opts.retryable ?? true, opts.nextRetryAt ?? null,
-        JSON.stringify({ probe: "ffmpeg -i", rc: 1 }),
-    );
-}
+const putStage = (trackId: string, stage: string, status: string, opts: PutStageOptions = {}) =>
+    seedStage(trackId, stage, status, { seedError: false, ...opts });
 
 /** Full chain: recording done -> analysis `analysisStatus` -> embedding owed. */
 async function seedTrack(
@@ -201,36 +81,18 @@ async function seedTrack(
     await putStage(trackId, "embedding", opts.embeddingStatus ?? "pending");
 }
 
-async function wipe(): Promise<void> {
-    await prisma.$executeRawUnsafe(`DELETE FROM "TrackStage" WHERE "trackId" LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "track_embeddings" WHERE track_id LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = $1`, id("alb"));
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, id("art"));
-}
-
-async function seedFkChain(): Promise<void> {
-    await prisma.artist.create({
-        data: { id: id("art"), name: "Gate Artist", identityKey: id("a") },
-    });
-    await prisma.album.create({
-        data: { id: id("alb"), rgMbid: id("rg"), artistId: id("art"), title: "Gate Album", primaryType: "Album" },
-    });
-}
-
 beforeEach(async () => {
     jest.clearAllMocks();
     jest.mocked(mockQueueAdd).mockResolvedValue({ id: "job-1" } as never);
     jest.mocked(mockQueueGetJob).mockResolvedValue(null as never);
     jest.mocked(mockRedis.llen).mockResolvedValue(0);
     jest.mocked(mockRedis.get).mockResolvedValue(null as never);
-    await wipe();
-    await seedFkChain();
+    await deleteSeededRows(PREFIX);
+    await seedArtistAndAlbum(PREFIX, "Gate");
 });
 
 afterAll(async () => {
-    await wipe();
-    await prisma.$disconnect();
+    await deleteSeededRows(PREFIX);
 });
 
 describe("per-track stage gating", () => {
@@ -297,7 +159,7 @@ describe("per-track stage gating", () => {
         });
     });
 
-    describe("retry-capped tracks", () => {
+    describe("a failed track that is still retryable", () => {
         it("re-offers a failed track that is still retryable instead of condemning it", async () => {
             await seedTrack(id("stuck"), {
                 analysisStatus: "pending",

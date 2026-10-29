@@ -2,19 +2,16 @@
  * Library Albums Route Integration Tests
  *
  * Tests GET /albums (list), GET /albums/:id (detail), and DELETE /albums/:id.
- * None of these routes require authentication (no requireAuth middleware).
- * File-system calls in DELETE are mocked at the 'fs' and 'path' level.
+ * GET routes need no authentication; DELETE requires an admin, which the auth mock injects.
+ * DELETE's file-system calls go through a mocked 'fs'.
  */
-
-// All mocks must be before imports
 
 // p-limit is pure ESM and cannot be required by Jest's CJS runner
 jest.mock('p-limit', () => {
     return () => (fn: (...args: any[]) => any) => fn();
 });
 
-// DELETE /albums/:id requires admin. Inject an admin user so these tests
-// exercise the handler rather than 403 at the guard.
+// An admin user, so DELETE reaches the handler instead of answering 403 at the guard.
 jest.mock('../../middleware/auth', () => ({
     requireAdmin: (req: any, _res: any, next: any) => {
         req.user = { id: 'test-admin', username: 'admin', role: 'admin' };

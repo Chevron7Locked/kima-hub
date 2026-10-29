@@ -5,10 +5,10 @@
  */
 
 import { prisma } from "../../utils/db";
-import { redisClient, waitForRedisReady } from "../../utils/redis";
-import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
+import { redisClient } from "../../utils/redis";
+import type { ReplayServer } from "../../__tests__/helpers/replayServer";
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "../../__tests__/helpers/lidarrReplay";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { clearDownloads, setUpPipeline, tearDownPipeline } from "./helpers/lidarrPipeline";
 
 jest.setTimeout(60_000);
 
@@ -27,16 +27,7 @@ let dispatch: typeof import("../webhookHandlers").dispatchWebhookEvent;
 let useLidarr: typeof import("../../__tests__/helpers/lidarrSettings").useLidarr;
 
 beforeAll(async () => {
-    await waitForRedisReady();
-    mb = await startReplayServer(loadRecording("musicbrainz", "lidarr-pipeline"));
-    // Read when the MusicBrainz service is built, so it goes in before the pipeline is loaded.
-    process.env.MUSICBRAINZ_BASE_URL = mb.url;
-    lidarrModule = await import("../lidarr");
-    ({ simpleDownloadManager: manager } = await import("../simpleDownloadManager"));
-    ({ dispatchWebhookEvent: dispatch } = await import("../webhookHandlers"));
-    ({ useLidarr } = await import("../../__tests__/helpers/lidarrSettings"));
-    await prisma.user.deleteMany({ where: { id: USER } });
-    await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    ({ mb, lidarr: lidarrModule, manager, dispatch, useLidarr } = await setUpPipeline(USER));
 });
 
 beforeEach(async () => {
@@ -47,17 +38,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
     await lidarr.close();
-    await prisma.downloadJob.deleteMany({ where: { userId: USER } });
-    await prisma.notification.deleteMany({ where: { userId: USER } });
-    await prisma.handledDownload.deleteMany({});
+    await clearDownloads(USER);
 });
 
-afterAll(async () => {
-    await prisma.user.deleteMany({ where: { id: USER } });
-    await mb.close();
-    delete process.env.MUSICBRAINZ_BASE_URL;
-    await closeEngineConnections();
-});
+afterAll(() => tearDownPipeline(USER, mb));
 
 async function request() {
     const job = await prisma.downloadJob.create({

@@ -92,7 +92,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
     await closeEngineConnections();
 });
 

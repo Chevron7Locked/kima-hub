@@ -1,11 +1,12 @@
 /**
  * The recording stage's AcoustID step reads the fingerprint stage's stored
  * answer and never runs fpcalc itself. A no-match closes the record `done`; a
- * match sets `Track.recordingMbid`. Identification order: file tags, then the
- * title-checked MusicBrainz search, then AcoustID for the remainder.
+ * match sets `Track.recordingMbid`. Identification order: file tags, AcoustID by
+ * the stored fingerprint, the album tracklist, the ISRC, then the title-checked
+ * MusicBrainz name search (which answers alone when no fingerprint is stored).
  */
 
-// ── Mocks (must be before imports) ─────────────────────────────────────
+// ── Mocks ──────────────────────────────────────────────────────────────
 // Identification services answer with real `Outcome` kinds; the database is
 // real, so stored values land in the migrated schema.
 
@@ -36,7 +37,6 @@ const mockSearchRecording = jest.fn().mockResolvedValue(noData);
 const mockGetRecordingIsrc = jest.fn().mockResolvedValue(noData);
 const mockGetRecordingGenres = jest.fn().mockResolvedValue(noData);
 const mockLookupByIsrc = jest.fn().mockResolvedValue(noData);
-const mockGetAlbumCatalogue = jest.fn().mockResolvedValue(noData);
 jest.mock("../services/musicbrainz", () => ({
     musicBrainzService: {
         identifyRecording: (...args: unknown[]) => mockSearchRecording(...args),
@@ -47,15 +47,14 @@ jest.mock("../services/musicbrainz", () => ({
             genres: await mockGetRecordingGenres(id),
         }),
         lookupRecordingsByIsrc: (...args: unknown[]) => mockLookupByIsrc(...args),
-        getAlbumCatalogue: (...args: unknown[]) => mockGetAlbumCatalogue(...args),
+        getAlbumCatalogue: jest.fn().mockResolvedValue(noData),
         normalizeForSearch: (s: string) => s,
     },
 }));
 
-const mockPopulateTrackGenres = jest.fn().mockResolvedValue(undefined);
 jest.mock("../services/trackIdentity", () => ({
     trackIdentityService: {
-        populateTrackGenres: (...args: unknown[]) => mockPopulateTrackGenres(...args),
+        populateTrackGenres: jest.fn().mockResolvedValue(undefined),
     },
 }));
 
@@ -158,26 +157,10 @@ import { enrichSingleTrack } from "../workers/unifiedEnrichment";
 const PREFIX = "afp";
 const id = (n: string) => `${PREFIX}_${n}`;
 
-/**
- * A realistic stand-in for a real fpcalc output: same shape (base64url of
- * the chromaprint bits, "AQAD" prefix) and same size. ~3.4 kB for a
- * ~3-minute track, what a real fingerprint sweep stores.
- */
-function realisticFingerprint(seed: string, length = 3400): string {
-    const alphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let h = 2166136261;
-    for (const ch of seed) h = (h ^ ch.charCodeAt(0)) * 16777619 >>> 0;
-    let out = "AQAD";
-    for (let i = 4; i < length; i++) {
-        h = ((h * 1103515245 + 12345) >>> 0);
-        out += alphabet[h % alphabet.length];
-    }
-    return out;
-}
-
-const FINGERPRINT = realisticFingerprint("afp-t1");
-const TAGGED_FINGERPRINT = realisticFingerprint("afp-tag");
+// Chromaprint-style strings at a real fingerprint's size (about 3.4 kB for a 3-minute song); the step stores and
+// forwards them without decoding.
+const FINGERPRINT = `AQAD${"afp-t1-".repeat(485)}`;
+const TAGGED_FINGERPRINT = `AQAD${"afp-tag".repeat(485)}`;
 const RECORDING = "1256eae7-b87d-4c53-9def-108ba484a97d";
 const MB_TRACK = "mb-track-afp";
 
@@ -253,7 +236,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 describe("AcoustID: the fingerprint is the fingerprint stage's stored answer", () => {
@@ -411,7 +393,7 @@ describe("AcoustID: the identification order", () => {
         expect(record.source).toBe("file_tag");
     });
 
-    it("runs the title-checked MusicBrainz search before AcoustID when there are no tags", async () => {
+    it("answers from the title-checked MusicBrainz search when there are no tags and no stored fingerprint to ask AcoustID with", async () => {
         mockParseFile.mockResolvedValue({ common: {}, format: { duration: 200 } });
         mockSearchRecording.mockResolvedValue(
             answeredWith({ id: MB_TRACK, title: "Test Track", lengthMs: 200000, artists: ["Test Artist"] }),

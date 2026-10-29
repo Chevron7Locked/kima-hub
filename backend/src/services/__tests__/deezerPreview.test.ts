@@ -10,28 +10,11 @@ import fs from "fs";
 import path from "path";
 
 const mockRateLimitedGet = jest.fn();
-jest.mock("../httpClient", () => ({
-    // Only the network is stood in for: the reply check runs on the body as the real helper runs it.
-    rateLimitedGet: async (...args: unknown[]) => {
-        const body = await mockRateLimitedGet(...args);
-        (args[3] as ((b: unknown) => void) | undefined)?.(body);
-        return body;
-    },
-}));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
+// Only the network is stood in for: the reply check runs on the body as the real helper runs it.
+jest.mock("../httpClient", () => require("./helpers/deezerMocks").httpClientMock(() => mockRateLimitedGet));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 const mockCache = new Map<string, string>();
-jest.mock("../../utils/cacheWrapper", () => ({
-    CacheWrapper: class {
-        async get(key: string) {
-            return mockCache.get(key) ?? null;
-        }
-        async set(key: string, value: string) {
-            mockCache.set(key, value);
-        }
-    },
-}));
+jest.mock("../../utils/cacheWrapper", () => require("./helpers/deezerMocks").memoryCacheMock(mockCache));
 
 import { logger } from "../../utils/logger";
 import { deezerService } from "../deezer";

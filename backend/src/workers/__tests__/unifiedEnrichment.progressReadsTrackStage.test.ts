@@ -4,139 +4,25 @@
  * columns both ways, and progress follows the records.
  */
 
-const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job-1" });
-const mockQueueClean = jest.fn().mockResolvedValue([]);
-const mockQueueGetJob = jest.fn().mockResolvedValue(null);
-const mockQueueResume = jest.fn().mockResolvedValue(undefined);
+jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
+jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
+jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
+jest.mock("../../utils/logger", () => require("../../__tests__/helpers/enrichmentMocks").loggerMock);
+jest.mock("../../services/enrichmentState", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
+jest.mock("../../services/enrichmentFailureService", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
+jest.mock("../../services/featureDetection", () => require("../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
+jest.mock("../../services/trackIdentity", () => require("../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
+jest.mock("../../services/musicbrainz", () => require("../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
+jest.mock("../../services/acoustidIdentification", () => require("../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
+jest.mock("../../services/sourcePauseController", () => require("../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
+jest.mock("../../workers/audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
+jest.mock("../../workers/artistEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").artistEnrichmentWorkerMock);
+jest.mock("../../workers/trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
+jest.mock("../../workers/podcastEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").podcastEnrichmentWorkerMock);
 
-jest.mock("../../workers/enrichmentQueues", () => ({
-    QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
-        TRACKS: "enrichment-tracks",
-        VIBE: "enrichment-vibe",
-        PODCASTS: "enrichment-podcasts",
-    },
-    artistQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    trackQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    vibeQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    podcastQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    createWorkerConnection: () => ({ host: "localhost", port: 6379 }),
-    closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
-}));
-
-const mockRedis = {
-    rpush: jest.fn().mockResolvedValue(1),
-    llen: jest.fn().mockResolvedValue(0),
-    del: jest.fn().mockResolvedValue(1),
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn().mockResolvedValue("OK"),
-    publish: jest.fn().mockResolvedValue(1),
-    subscribe: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    quit: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn(),
-    status: "ready",
-};
-
-jest.mock("ioredis", () => jest.fn().mockImplementation(() => mockRedis));
-jest.mock("../../config", () => ({
-    config: { redisUrl: "redis://localhost:6379", music: { musicPath: "/music" } },
-}));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
-jest.mock("../../services/enrichmentState", () => ({
-    enrichmentStateService: {
-        updateState: jest.fn().mockResolvedValue({}),
-        getState: jest.fn().mockResolvedValue(null),
-        initializeState: jest.fn().mockResolvedValue({}),
-        clear: jest.fn().mockResolvedValue(undefined),
-        detectHang: jest.fn().mockResolvedValue(false),
-        clearGate: jest.fn().mockResolvedValue(undefined),
-        publishToChannel: jest.fn().mockResolvedValue(undefined),
-        markFailed: jest.fn().mockResolvedValue(undefined),
-        waitForStatus: jest.fn().mockResolvedValue(null),
-    },
-}));
-
-jest.mock("../../services/enrichmentFailureService", () => ({
-    enrichmentFailureService: {
-        recordFailure: jest.fn().mockResolvedValue({}),
-        cleanupOrphanedFailures: jest.fn().mockResolvedValue({ cleaned: 0, checked: 0 }),
-        cleanupOldResolved: jest.fn().mockResolvedValue(0),
-        getFailures: jest.fn().mockResolvedValue({ failures: [], total: 0 }),
-        getFailure: jest.fn().mockResolvedValue(null),
-        getFailureCounts: jest.fn().mockResolvedValue({}),
-        resetRetryCount: jest.fn().mockResolvedValue(0),
-    },
-}));
-
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
-        getFeatures: jest.fn().mockResolvedValue({
-            vibeEmbeddings: true, podcastSupport: false, fpcalc: true,
-        }),
-    },
-}));
-
-jest.mock("../../services/trackIdentity", () => ({
-    trackIdentityService: {
-        populateTrackGenres: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../services/musicbrainz", () => ({
-    musicBrainzService: {
-        searchRecording: jest.fn().mockResolvedValue(null),
-        getRecordingGenres: jest.fn().mockResolvedValue(null),
-    },
-}));
-
-jest.mock("../../services/acoustidIdentification", () => ({
-    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
-    identifyTrackByAcoustid: jest.fn().mockResolvedValue({ kind: "absent", evidence: { mocked: true } }),
-    persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock("../../services/sourcePauseController", () => ({
-    sourcePauseController: {
-        isPaused: jest.fn().mockResolvedValue(false),
-        open: jest.fn().mockResolvedValue(undefined),
-        close: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../workers/audioCompletionSubscriber", () => ({
-    startAudioCompletionSubscriber: jest.fn(),
-    stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
-    haltVibeQueuing: jest.fn(),
-    resumeVibeQueuing: jest.fn(),
-}));
-
-jest.mock("../../workers/artistEnrichmentWorker", () => ({
-    startArtistEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../../workers/trackEnrichmentWorker", () => ({
-    startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../../workers/podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-
+import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import { prisma } from "../../utils/db";
+import { seedEmbedding, unitVectorAt } from "../../__tests__/helpers/embeddingFixtures";
 import { PROBE_ID } from "../../services/matching/state";
 import { buildMoods } from "../../services/moods/state";
 import {
@@ -147,46 +33,6 @@ import {
 
 const PREFIX = "prog";
 const id = (n: string) => `${PREFIX}_${n}`;
-
-async function seedLibrary(): Promise<void> {
-    await prisma.artist.create({
-        data: { id: id("art"), name: "Prog Artist", identityKey: id("a") },
-    });
-    await prisma.album.create({
-        data: { id: id("alb"), rgMbid: id("rg"), artistId: id("art"), title: "Prog Album", primaryType: "Album" },
-    });
-}
-
-async function putStage(
-    trackId: string,
-    stage: string,
-    status: string,
-    opts: { retryable?: boolean; failureClass?: string } = {},
-): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt, "lastErrorCode",
-             "lastErrorMessage", "failureClass", retryable, "nextRetryAt", evidence)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = EXCLUDED.status,
-                source = EXCLUDED.source,
-                attempt = EXCLUDED.attempt,
-                "lastErrorCode" = EXCLUDED."lastErrorCode",
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                "failureClass" = EXCLUDED."failureClass",
-                retryable = EXCLUDED.retryable,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                evidence = EXCLUDED.evidence`,
-        `${trackId}__${stage}`, trackId, stage, status,
-        "analyzer", 0,
-        status === "done" ? null : "TEST_SEED",
-        status === "done" ? null : "seeded by test",
-        status === "done" ? null : opts.failureClass ?? "INCONCLUSIVE",
-        opts.retryable ?? true, null,
-        JSON.stringify({ probe: "ffmpeg -i", rc: 1 }),
-    );
-}
 
 async function seedTrack(
     trackId: string,
@@ -216,24 +62,15 @@ async function seedTrack(
     await putStage(trackId, "embedding", data.embedding ?? "pending");
 }
 
-async function wipe(): Promise<void> {
-    await prisma.$executeRawUnsafe(`DELETE FROM "TrackStage" WHERE "trackId" LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "track_embeddings" WHERE track_id LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, `${PREFIX}_%`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = $1`, id("alb"));
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE $1`, `${PREFIX}_%`);
-}
-
 beforeEach(async () => {
     jest.clearAllMocks();
-    await wipe();
-    await seedLibrary();
+    await deleteSeededRows(PREFIX);
+    await seedArtistAndAlbum(PREFIX, "Prog");
     invalidateEnrichmentProgress();
 });
 
 afterAll(async () => {
-    await wipe();
-    await prisma.$disconnect();
+    await deleteSeededRows(PREFIX);
 });
 
 describe("getEnrichmentProgress", () => {
@@ -285,9 +122,8 @@ describe("getEnrichmentProgress", () => {
     it("splits retryable and terminal failures per stage from the records", async () => {
         const before = await getEnrichmentProgress();
 
-        // Mixed states across every stage: one track with a retryable
-        // analysis failure and a terminal recording failure, one with
-        // everything answered.
+        // One track mixes states across the stages: a terminal recording
+        // failure, a retryable analysis failure and a never-asked embedding.
         await seedTrack(id("mixed"), { recording: "failed", analysis: "failed", embedding: "pending" });
         await putStage(id("mixed"), "recording", "failed", { retryable: false });
 
@@ -303,7 +139,8 @@ describe("getEnrichmentProgress", () => {
         expect(after.audioAnalysis.pending - before.audioAnalysis.pending).toBe(0);
         // Embedding is genuinely never asked — pending, not failed.
         expect(after.clapEmbeddings.pending - before.clapEmbeddings.pending).toBe(1);
-        // And the terminal recording failure shows as permanently failed.
+        // The terminal failure is on the recording stage, so analysis's
+        // permanent-failure count does not move.
         expect(after.audioAnalysis.permanentlyFailed).toBe(before.audioAnalysis.permanentlyFailed);
     });
 
@@ -399,11 +236,7 @@ describe("getEnrichmentProgress", () => {
 
     it("holds fully-complete until every sound vector has current mood scores", async () => {
         await settledLibrary(id("moody"));
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            id("moody"), `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-        );
+        await seedEmbedding(id("moody"), unitVectorAt(1, 1));
         // The similarity step is done with it, so only the moods are owed.
         await prisma.$executeRawUnsafe(
             `INSERT INTO matching_feel (track_id, embedded_at, probe, valence, arousal)

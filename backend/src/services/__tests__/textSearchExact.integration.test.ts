@@ -1,9 +1,9 @@
 /**
  * Text search's exact second read, on a real database: when the vector index returns fewer rows than asked, the search
  * reads every searchable track's distance, after the index's transaction has ended, so the answer is full and exact.
- * Here the index is made to stop early, as it does once it reaches its scan cap on a library far larger than this one
- * (utils/knn.ts): the wrapper below turns the keep-going scan off after the product's own settings, so only the first
- * walk of ef_search candidates runs. (On 2,000 vectors a low hnsw.max_scan_tuples did not stop it.)
+ * The index is made to stop early, as it does at its scan cap on a far larger library (utils/knn.ts): the wrapper
+ * below turns the keep-going scan off after the product's own settings, so only the first walk of ef_search
+ * candidates runs.
  */
 import type { Prisma } from "@prisma/client";
 
@@ -62,6 +62,7 @@ jest.mock("../../utils/redis", () => ({
 
 import { prisma } from "../../utils/db";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
+import { insertEmbeddings, vectorLiteral } from "../../__tests__/helpers/embeddingFixtures";
 
 // Every exact read passes through here, on the pool or on a transaction's client: the latter runs this same method
 // with itself as `this`, which is passed on unchanged.
@@ -105,14 +106,7 @@ function bruteForce(ids: string[], limit: number): string[] {
 }
 
 async function writeVectors(ids: string[]) {
-    for (let start = 0; start < ids.length; start += 50) {
-        const chunk = ids.slice(start, start + 50);
-        const values = chunk.map((_, j) => `($${2 * j + 1}, $${2 * j + 2}::vector, 'laion-clap-music-onnx-v1', now())`);
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ${values.join(",")}`,
-            ...chunk.flatMap((id) => [id, `[${VECTORS[ALL.indexOf(id)].join(",")}]`]),
-        );
-    }
+    await insertEmbeddings(ids.map((trackId) => ({ trackId, vector: vectorLiteral(VECTORS[ALL.indexOf(trackId)]) })));
 }
 
 const fellBack = () => mockDebug.mock.calls.some(([message]) => String(message).includes("reading every searchable"));

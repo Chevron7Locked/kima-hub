@@ -34,19 +34,11 @@ const ARTISTS = Math.ceil(ALBUMS / ALBUMS_PER_ARTIST);
 const RADIO_CALLS = 10;
 const MIX_RUNS = 3;
 
-function mulberry32(seed: number) {
-    let a = seed;
-    return () => {
-        a = (a + 0x6d2b79f5) | 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
 async function main() {
     const { prisma } = await import("../src/utils/db");
     const { GENRE_NAMES } = await import("../src/__tests__/fixtures/syntheticLibrary");
+    const { gaussian } = await import("../src/__tests__/fixtures/gaussian");
+    const { seededRandom } = await import("../src/services/matching/mapLayout");
     const { programmaticPlaylistService } = await import("../src/services/mixes");
     const express = (await import("express")).default;
     const request = (await import("supertest")).default;
@@ -60,7 +52,7 @@ async function main() {
     const { generateRediscoverMix } = await import("../src/services/mixes/discoveryMixes");
     const { moodBucketService, VALID_MOODS } = await import("../src/services/moodBucketService");
 
-    const rng = mulberry32(20261021);
+    const rng = seededRandom(20261021);
     const r4 = (x: number) => Math.round(x * 10000) / 10000;
     const inChunks = async <T>(rows: T[], write: (c: T[]) => Promise<unknown>, size = 2000) => {
         for (let i = 0; i < rows.length; i += size) await write(rows.slice(i, i + size));
@@ -191,13 +183,12 @@ async function main() {
             INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
             SELECT id, ${unit}::vector, ${MOOD_HEADS.model}, ${analyzedAt} FROM unnest(${ids}::text[]) AS id
         `;
-        const gaussian = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
         await inChunks(
             ids.map((track_id) => ({
                 track_id,
                 embedded_at: analyzedAt,
                 weights: MOOD_HEADS.version,
-                ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian())])),
+                ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian(rng))])),
             })) as Prisma.TrackMoodCreateManyInput[],
             (data) => prisma.trackMood.createMany({ data })
         );
@@ -257,8 +248,8 @@ async function main() {
             ["mood intense", { type: "mood", value: "intense" }],
             ["mood happy", { type: "mood", value: "happy" }],
             ["mood melancholy", { type: "mood", value: "melancholy" }],
-            ["mood summer", { type: "mood", value: "summer" }],
-            ["mood focus", { type: "mood", value: "focus" }],
+            ["mood focus-calm", { type: "mood", value: "focus-calm" }],
+            ["mood focus-energy", { type: "mood", value: "focus-energy" }],
             ["mood feel-good", { type: "mood", value: "feel-good" }],
             ["mood late-night", { type: "mood", value: "late-night" }],
             ["mood romantic", { type: "mood", value: "romantic" }],

@@ -106,7 +106,7 @@ jest.mock("../services/trackIdentity", () => ({
 
 jest.mock("../services/musicbrainz", () => ({
     musicBrainzService: {
-        searchRecording: jest.fn().mockResolvedValue(null),
+        identifyRecording: jest.fn().mockResolvedValue({ kind: "absent", evidence: { mocked: true } }),
         getRecordingGenres: jest.fn().mockResolvedValue(null),
     },
 }));
@@ -283,6 +283,14 @@ async function wipe(): Promise<void> {
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE $1`, `${PREFIX}_%`);
 }
 
+/** Creates a user (removed by `wipe`) and returns a signed-in token for it. */
+async function makeUser(userId: string, role: "admin" | "user"): Promise<string> {
+    await prisma.user.create({
+        data: { id: userId, username: userId, passwordHash: "x", role, tokenVersion: 0 },
+    });
+    return generateToken({ id: userId, username: userId, role, tokenVersion: 0 });
+}
+
 beforeEach(async () => {
     jest.clearAllMocks();
     jest.mocked(mockQueueAdd).mockResolvedValue({ id: "job-1" } as never);
@@ -296,7 +304,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 // ── (a) getNextWork: only rows whose answer is missing or due ───────────
@@ -444,13 +451,6 @@ describe("redecideEverything", () => {
 describe("POST /enrichment/re-decide-everything", () => {
     let app: express.Express;
 
-    async function makeUser(userId: string, role: "admin" | "user"): Promise<string> {
-        await prisma.user.create({
-            data: { id: userId, username: userId, passwordHash: "x", role, tokenVersion: 0 },
-        });
-        return generateToken({ id: userId, username: userId, role, tokenVersion: 0 });
-    }
-
     beforeEach(() => {
         app = express();
         app.use(express.json());
@@ -524,7 +524,7 @@ describe("DELETE /library/corrupt-tracks", () => {
         await seedTrack(id("corrupt"), { analysis: "failed" });
         await prisma.track.update({ where: { id: id("corrupt") }, data: { corrupt: true } });
 
-        const token = await makeAdmin(app);
+        const token = await makeUser(id("route_admin"), "admin");
         const res = await request(app)
             .delete("/library/corrupt-tracks")
             .set("Authorization", `Bearer ${token}`);
@@ -546,7 +546,7 @@ describe("DELETE /library/corrupt-tracks", () => {
 
         await seedTrack(id("corrupt2"), { analysis: "failed" });
         await prisma.track.update({ where: { id: id("corrupt2") }, data: { corrupt: true } });
-        const token = await makeAdmin(app);
+        const token = await makeUser(id("route_admin"), "admin");
 
         const before = await request(app)
             .get("/library/corrupt-tracks").set("Authorization", `Bearer ${token}`);
@@ -608,15 +608,3 @@ describe("getEnrichmentProgress", () => {
     });
 });
 
-// Helper shared by the route blocks: an admin user + token, created fresh.
-let adminToken: string | null = null;
-async function makeAdmin(_app: express.Express): Promise<string> {
-    if (adminToken) return adminToken;
-    await prisma.user.create({
-        data: { id: id("route_admin"), username: id("route_admin"), passwordHash: "x", role: "admin", tokenVersion: 0 },
-    });
-    adminToken = generateToken({
-        id: id("route_admin"), username: id("route_admin"), role: "admin", tokenVersion: 0,
-    });
-    return adminToken;
-}

@@ -43,7 +43,6 @@ const analysis = (trackId: string, data: Record<string, unknown>) =>
     });
 const offered = async (stage: "analysis" | "embedding") =>
     (await getNextWork(50, stage)).map((w) => w.trackId).filter((id) => id.startsWith(P)).sort();
-const vectorsOffered = async () => (await getNextWork(50, "embedding")).map((w) => w.trackId).filter((id) => id.startsWith(P)).sort();
 
 beforeAll(async () => {
     await prisma.artist.create({ data: { id: `${P}_art`, name: "One Heavy", identityKey: `${P}_ak` } });
@@ -96,32 +95,32 @@ afterAll(async () => {
 });
 
 it("offers no sound vector while another track's analysis is owed or in flight", async () => {
-    expect(await vectorsOffered()).toEqual([]); // B never asked
+    expect(await offered("embedding")).toEqual([]); // B never asked
     await analysis(B, { status: "working" });
-    expect(await vectorsOffered()).toEqual([]);
+    expect(await offered("embedding")).toEqual([]);
     await analysis(B, { status: "failed", retryable: true, nextRetryAt: null });
-    expect(await vectorsOffered()).toEqual([]);
+    expect(await offered("embedding")).toEqual([]);
 });
 
 it("starts the vectors once every analysis is answered", async () => {
     await analysis(B, { status: "done" });
-    expect(await vectorsOffered()).toEqual([A, B]);
+    expect(await offered("embedding")).toEqual([A, B]);
 });
 
 it("does not wait on an analysis that failed for good, waits out a retry delay, or cannot run", async () => {
     await analysis(B, { status: "failed", retryable: false });
-    expect(await vectorsOffered()).toEqual([A]);
+    expect(await offered("embedding")).toEqual([A]);
 
     await analysis(B, { status: "failed", retryable: true, nextRetryAt: new Date(Date.now() + 3_600_000) });
-    expect(await vectorsOffered()).toEqual([A]);
+    expect(await offered("embedding")).toEqual([A]);
 
     await analysis(B, { status: "pending" });
     (sourcePauseController.isPaused as jest.Mock).mockImplementation(async (source: string) => source === "analyzer");
-    expect(await vectorsOffered()).toEqual([A]);
+    expect(await offered("embedding")).toEqual([A]);
 
     (sourcePauseController.isPaused as jest.Mock).mockResolvedValue(false);
     (featureDetection.analyzerRunning as jest.Mock).mockResolvedValue(false);
-    expect(await vectorsOffered()).toEqual([A]);
+    expect(await offered("embedding")).toEqual([A]);
 });
 
 it("holds analysis while CLAP is working on a track, unless CLAP is not running", async () => {
@@ -150,7 +149,7 @@ it("holds analysis while CLAP is working on a track, unless CLAP is not running"
 it("runs both side by side when an admin chose that", async () => {
     await bothAtOnce(true);
     await analysis(B, { status: "pending" });
-    expect(await vectorsOffered()).toEqual([A]);
+    expect(await offered("embedding")).toEqual([A]);
     await prisma.trackStage.create({
         data: { trackId: A, stage: "embedding", status: "working", startedAt: new Date(), nextRetryAt: new Date(Date.now() + 900_000) },
     });

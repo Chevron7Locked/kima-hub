@@ -3,7 +3,8 @@
  * without reading the pool, pages across the stored chunks, the end of a pass, one session per listener and station,
  * pages with nothing playable, and what happens without Redis.
  */
-import { redisClient, waitForRedisReady } from "../../../utils/redis";
+import { redisClient } from "../../../utils/redis";
+import { forgetStationSessions as forget } from "./helpers/stationSessions";
 import * as artistSpread from "../../../utils/artistSpread";
 import {
     REPLAY_PASSES,
@@ -18,12 +19,6 @@ import {
 
 const pool = (n: number, perArtist = 3): StationSong[] =>
     Array.from({ length: n }, (_, i) => ({ id: `s${String(i).padStart(5, "0")}`, artistId: `a${Math.floor(i / perArtist)}` }));
-
-async function forget() {
-    await waitForRedisReady();
-    const keys = await redisClient.keys("station*");
-    if (keys.length > 0) await redisClient.del(...keys);
-}
 
 /** A pool reader that counts its reads. */
 function counted(songs: StationSong[]) {

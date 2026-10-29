@@ -1,28 +1,12 @@
 /**
  * A track carries a mood when its learned mood score sits at least RECIPE_LINE standard deviations above the library's
- * mean, by the mood statistics the mood step keeps; library rank picks the dominant label. The
- * old Essentia head columns play no part. The mood snapshot fills once the mood step has scored a track, rebuilds when
- * the statistics change (a rescore, a re-run, a changed library), and matches the vibe map.
+ * mean, by the mood statistics the mood step keeps; library rank picks the dominant label. The mood snapshot fills
+ * once the mood step has scored a track, rebuilds when the statistics change (a rescore, a re-run, a changed
+ * library), and matches the vibe map.
  */
 
-const store = new Map<string, string>();
-jest.mock("../../utils/redis", () => ({
-    redisClient: {
-        get: jest.fn(async (k: string) => store.get(k) ?? null),
-        del: jest.fn(async (k: string) => { store.delete(k); return 1; }),
-        multi: jest.fn(() => {
-            const ops: Array<() => void> = [];
-            const chain = {
-                setex: (k: string, _ttl: number, v: string) => { ops.push(() => store.set(k, v)); return chain; },
-                del: (k: string) => { ops.push(() => store.delete(k)); return chain; },
-                sadd: () => chain,
-                expire: () => chain,
-                exec: async () => { ops.forEach((op) => op()); return []; },
-            };
-            return chain;
-        }),
-    },
-}));
+const mockStore = new Map<string, string>();
+jest.mock("../../utils/redis", () => require("./helpers/memoryRedis").memoryRedisMock(mockStore));
 
 import { prisma } from "../../utils/db";
 import {
@@ -242,9 +226,9 @@ describe("the mood snapshot (database)", () => {
         expect([...got.keys()].filter((k) => k.endsWith(idOf("flat")))).toEqual([]);
     });
 
-    it("reads the learned moods, not the old head columns", async () => {
+    it("takes every mood from the learned scores", async () => {
         const got = await moodsNow();
-        // Every track's old heads say happy, sad and aggressive yes, calm and party no.
+        // Tracks carry no mood readings of their own, so a mood can only come from a learned score.
         expect(got.has(`happy:${idOf(0)}`)).toBe(false);
         expect(got.has(`party:${idOf(0)}`)).toBe(true);
         const snap = await currentMoodSnapshot();

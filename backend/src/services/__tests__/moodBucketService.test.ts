@@ -52,7 +52,6 @@ const MOCK_REGEN_TRACKS = [
     { id: "regen-track-8", album: { coverUrl: "https://example.com/regen8.jpg" } },
 ];
 
-
 describe("saveUserMoodMix with explicit trackIds", () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -240,7 +239,6 @@ describe("saveUserMoodMix with explicit trackIds", () => {
         expect(result!.trackCount).toBe(1);
     });
 });
-
 
 describe("saveUserMoodMix without explicit trackIds (regenerate path)", () => {
     beforeEach(() => {

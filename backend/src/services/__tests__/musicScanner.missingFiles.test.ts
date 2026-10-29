@@ -5,40 +5,14 @@
  * track. Real scanner, temp directory and test database.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
-        getFeatures: jest.fn().mockResolvedValue({
-            musicCNN: false,
-            vibeEmbeddings: false,
-            audiobookshelfEnabled: false,
-            fpcalc: false,
-        }),
-    },
-}));
-jest.mock("../../services/acoustidService", () => ({
-    acoustidService: { lookup: jest.fn().mockResolvedValue(null) },
-}));
-jest.mock("../../services/fpcalc", () => ({
-    fpcalcService: {
-        isAvailable: jest.fn().mockResolvedValue(false),
-        fingerprintFile: jest.fn().mockResolvedValue(null),
-    },
-}));
-jest.mock("../../services/coverArtExtractor", () => ({
-    CoverArtExtractor: jest.fn().mockImplementation(() => ({})),
-}));
-jest.mock("../../services/artwork", () => ({
-    findAlbumArtwork: jest.fn().mockResolvedValue(null),
-}));
-jest.mock("../../services/artistCountsService", () => ({
-    backfillAllArtistCounts: jest.fn().mockResolvedValue(undefined),
-}));
-jest.mock("../../services/imageStorage", () => ({
-    findLocalArtistImage: jest.fn().mockResolvedValue(null),
-}));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../services/featureDetection", () => require("./helpers/scannerMocks").featureDetectionMock());
+jest.mock("../../services/acoustidService", () => require("./helpers/scannerMocks").acoustidServiceMock());
+jest.mock("../../services/fpcalc", () => require("./helpers/scannerMocks").fpcalcMock());
+jest.mock("../../services/coverArtExtractor", () => require("./helpers/scannerMocks").coverArtExtractorMock());
+jest.mock("../../services/artwork", () => require("./helpers/scannerMocks").artworkMock());
+jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
+jest.mock("../../services/imageStorage", () => require("./helpers/scannerMocks").imageStorageMock());
 
 import fs from "fs";
 import os from "os";
@@ -47,6 +21,7 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { MusicScannerService } from "../musicScanner";
 import { config } from "../../config";
+import { insertEmbeddings, vectorLiteral } from "../../__tests__/helpers/embeddingFixtures";
 
 jest.setTimeout(60_000);
 
@@ -105,12 +80,7 @@ async function seedChildren(trackId: string): Promise<void> {
             evidence: { question: "recording" },
         },
     });
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version)
-         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1')`,
-        trackId,
-        "[" + Array.from({ length: 512 }, () => 0.1).join(",") + "]",
-    );
+    await insertEmbeddings([{ trackId, vector: vectorLiteral(Array(512).fill(0.1)) }]);
 }
 
 async function wipe(): Promise<void> {
@@ -323,8 +293,7 @@ describe("stage records follow the file", () => {
             (await stageRow(trackId, "recording"))?.failureClass
         ).toBe("FILE_MISSING");
 
-        // A human re-decided one closed record; the file returning must
-        // not steamroll that verdict (invariant 11).
+        // A person decided one closed record; the file returning must not overwrite that decision.
         await prisma.trackStage.update({
             where: { id: `${trackId}__embedding` },
             data: { decidedAt: new Date(), decidedBy: "test_human" },
@@ -353,10 +322,8 @@ describe("stage records follow the file", () => {
         expect(fp?.failureClass).toBe("RETRY_EXHAUSTED");
     });
 
-    it("a track flagged missing before the closure rule existed gets closed by the next scan", async () => {
-        // Rows flagged missing on an earlier scan with their questions still
-        // `pending`. No flag flip is involved: the close runs over every
-        // flagged track each scan.
+    it("a flagged track whose question is still pending gets closed by the next scan", async () => {
+        // No flag flip is involved: the close runs over every flagged track each scan.
         const scanner = new MusicScannerService();
         await scanner.scanLibrary(musicDir);
         const trackId = (await findTrack())!.id;
@@ -364,7 +331,7 @@ describe("stage records follow the file", () => {
 
         fs.unlinkSync(trackFile);
         await scanner.scanLibrary(musicDir);
-        // Put the record back to `pending`, as a scan from before the closure rule left it.
+        // Put the record back to `pending`, so the next scan has a flagged track with an open question.
         await prisma.trackStage.update({
             where: { id: `${trackId}__recording` },
             data: {

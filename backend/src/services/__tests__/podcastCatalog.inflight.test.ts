@@ -4,17 +4,13 @@
  * real Redis.
  */
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
-import { redisClient, waitForRedisReady } from "../../utils/redis";
+import { waitForRedisReady } from "../../utils/redis";
+import { clearCatalogCache } from "./helpers/catalogCache";
 import * as catalog from "../podcastCatalog";
 import { INTERACTIVE_PRIORITY, rateLimiter } from "../rateLimiter";
 
 const recording = loadRecording("apple", "catalog");
 let replay: ReplayServer;
-
-async function clearCatalogCache() {
-    const keys = await redisClient.keys("podcasts:*");
-    if (keys.length > 0) await redisClient.del(...keys);
-}
 
 beforeAll(async () => {
     replay = await startReplayServer(recording);
@@ -33,6 +29,7 @@ afterAll(async () => {
     await replay.close();
 });
 
+const chartAsks1507 = () => replay.asked.filter((r) => r.includes("/rss/toppodcasts/") && r.includes("genre=1507"));
 const chartAsks = () => replay.asked.filter((r) => r.includes("/rss/toppodcasts/") && r.includes("genre=1495"));
 
 it("asks Apple once when three ask for the same chart while it is on its way", async () => {
@@ -119,5 +116,3 @@ describe("what a person is waiting on goes to Apple before the category rows", (
         expect(placesOf("genre=1495")).toEqual([INTERACTIVE_PRIORITY]);
     });
 });
-
-const chartAsks1507 = () => replay.asked.filter((r) => r.includes("/rss/toppodcasts/") && r.includes("genre=1507"));

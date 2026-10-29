@@ -40,7 +40,7 @@ function runsOf(order: Song[], artist: string): number[] {
     return runs;
 }
 
-/** A pool like Epic on the W8 testbed: one artist with 347 of 595 songs, 248 by 50 others. */
+/** A pool like the Epic station: one artist with 347 of 595 songs, 248 by 50 others. */
 const EPIC = pool([["big", 347], ...Array.from({ length: 50 }, (_, i): [string, number] => [`o${i}`, i < 8 ? 10 : 4])]);
 /** xoshiro128**'s first three outputs from the SHA-256 of "a", from the reference C code compiled and run. */
 const XOSHIRO_A = [2666612042, 2876307811, 3554085701];
@@ -112,8 +112,7 @@ describe("spreadByArtist", () => {
     });
 
     it("spreads a big artist under half through the whole order, not only apart from itself", () => {
-        // 120 of 600 songs (20%): 4 in every 20 give or take one, in any 20 in a row. (Sorting every artist on one
-        // line, as Spotify's write-up does, gave up to 7.)
+        // 120 of 600 songs (20%): 4 in every 20 give or take one, in any 20 in a row.
         const songs = pool([["big", 120], ...Array.from({ length: 80 }, (_, i): [string, number] => [`o${i}`, 6])]);
         for (let t = 0; t < 100; t++) {
             const order = spread(songs);

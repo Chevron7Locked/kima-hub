@@ -6,7 +6,9 @@
  * the same rules computed in TypeScript.
  */
 import { prisma } from "../../../utils/db";
-import { redisClient, waitForRedisReady } from "../../../utils/redis";
+import { redisClient } from "../../../utils/redis";
+import { forgetStationSessions } from "./helpers/stationSessions";
+import { removeMoodRows } from "../../__tests__/helpers/moodRows";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
 import { artistIdentityKey } from "../../artistIdentity";
 import { MOODS, MOOD_HEADS, type Mood } from "../../moods/heads";
@@ -76,14 +78,7 @@ const names = (ids: Iterable<string>) => new Set([...ids].map((x) => x.slice(P.l
 const or = <T,>(value: T | undefined, fallback: T) => (value === undefined ? fallback : value);
 
 /** The rows a test wrote, and every sound vector, so the library holds only what the next test writes. */
-async function cleanup() {
-    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
-    await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
-}
+const cleanup = () => removeMoodRows(P, { matchingState: true });
 
 /**
  * Writes `songs` as the whole library, with stored mood statistics of mean 0 and SD 1 for every mood and reading
@@ -155,13 +150,6 @@ const CALM = recipe({ calm: 1 });
 const background = (n: number): Song[] => Array.from({ length: n }, (_, i) => ({ name: `bg${i}`, artist: "bg" }));
 /** A song far above the line of the calm recipe in a library of mostly background songs. */
 const member = (name: string, extra: Partial<Song> = {}): Song => ({ name, moods: { calm: 10 }, ...extra });
-
-/** Every station session's order kept in Redis, so a test's seeds start afresh on its own library. */
-async function forgetStationSessions() {
-    await waitForRedisReady();
-    const keys = await redisClient.keys("station*");
-    if (keys.length > 0) await redisClient.del(...keys);
-}
 
 afterAll(async () => {
     await cleanup();
@@ -1167,7 +1155,7 @@ describe("every shipped recipe on the synthetic library", () => {
         return row.keyScale === "minor" ? 1 : row.keyScale === "major" ? 0 : null;
     };
 
-    /** W5's rules written out in TypeScript: members, and songs too close to the line to call either way. */
+    /** The recipes' rules written out in TypeScript: members, and songs too close to the line to call either way. */
     function expected(r: Recipe): { members: Set<string>; close: Set<string> } {
         const minor = meanSd(rows.map((row) => value(row, "minor")).filter((v): v is number => v !== null));
         const stats = (signal: Signal) => {
@@ -1279,7 +1267,7 @@ describe("every shipped recipe on the synthetic library", () => {
         expect(rows.length).toBeLessThan(TRACK_COUNT * 0.95);
     });
 
-    it.each([...RECIPES.keys()])("%s: the members W5's rules give, and a mix drawn from them", async (recipeId) => {
+    it.each([...RECIPES.keys()])("%s: the members the rules give, and a mix drawn from them", async (recipeId) => {
         const r = RECIPES.get(recipeId)!;
         const want = expected(r);
         const got = new Set(await pickRecipeStation(recipeId, { limit: 100_000 }));

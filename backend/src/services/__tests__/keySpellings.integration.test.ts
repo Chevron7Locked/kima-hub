@@ -1,7 +1,7 @@
 /**
  * Essentia writes C# where Kima's key tables spell Db. Migration 20261020120000 gives the Camelot table every sharp
- * spelling at its flat's place, so a C# track is no longer scored as C major in the features-only fallback; Key
- * Journey groups C# with Db instead of leaving it out.
+ * spelling at its flat's place, so a C# track is scored as Db in the features-only fallback, not as C major; Key
+ * Journey groups C# with Db.
  */
 import { prisma } from "../../utils/db";
 import { generateKeyJourney } from "../mixes/moodMixes";

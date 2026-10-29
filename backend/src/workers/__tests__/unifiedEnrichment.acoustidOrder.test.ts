@@ -8,7 +8,7 @@
  * check are tested.
  */
 
-// ── Mocks (must be before imports) ──────────────────────────────────
+// ── Mocks ───────────────────────────────────────────────────────────
 
 const noData = { kind: "absent", evidence: { mocked: true } } as const;
 const answeredWith = (value: unknown) =>
@@ -35,7 +35,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
     },
 }));
 
-// fpcalc gate: on by default; individual tests flip it via the exported mock.
+// fpcalc gate: on by default; individual tests change it through `mockGetFeatures`.
 const mockGetFeatures = jest.fn().mockResolvedValue({ fpcalc: true });
 jest.mock("../../services/featureDetection", () => ({
     featureDetection: {

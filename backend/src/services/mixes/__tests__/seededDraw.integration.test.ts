@@ -1,7 +1,7 @@
 /**
  * The day's seeded draws made in the database (seededTrackIds, seededKeySql) against the same draws made in memory
- * (drawIds, seededOrder) on a real Postgres. Each mix that now draws in the database is checked against the draw its
- * old filter, read through Prisma, gives in memory, so the SQL filters are proven to pick the same songs. The library
+ * (drawIds, seededOrder) on a real Postgres. Each mix that draws in the database is checked against the draw its
+ * filter, read through Prisma, gives in memory, so the SQL filters are proven to pick the same songs. The library
  * has twelve artists; the mixes with the per-artist cap (all but Rediscover) are checked against that draw capped at 2 per
  * artist, worked out here.
  */
@@ -107,7 +107,7 @@ afterAll(async () => {
 });
 
 /**
- * The ids of this file's library songs matching a Prisma filter, as the generators read them before the draw moved.
+ * The ids of this file's library songs matching a Prisma filter.
  * Library songs only: Discover songs live only in Discover.
  */
 async function idsWhere(where: Prisma.TrackWhereInput): Promise<string[]> {
@@ -176,7 +176,7 @@ describe("the database draw and the in-memory draw", () => {
     });
 });
 
-describe("each mix that draws in the database picks what its old filter picks in memory", () => {
+describe("each mix that draws in the database picks what its Prisma filter picks in memory", () => {
     const seedOf = (name: string) => getSeededRandom(name);
 
     it("Rediscover: this listener's songs played two times or fewer, in the library", async () => {
@@ -282,7 +282,7 @@ describe("each mix that draws in the database picks what its old filter picks in
         expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`genre-${genre}-${DAY}`))));
     });
 
-    it("Key Journey and Tempo Flow: every song from the day's draw of their old filters", async () => {
+    it("Key Journey and Tempo Flow: every song from the day's draw of their Prisma filters", async () => {
         const keyed = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", key: { not: null } });
         const keyDraw = new Set(drawIds(keyed, 200, seedOf(`key-journey-${DAY}`)));
         const journey = await generateKeyJourney(USER, DAY);

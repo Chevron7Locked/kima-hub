@@ -1,7 +1,6 @@
 /**
  * POST /discover/generate removes a finished job with the same id before
  * re-adding, since BullMQ silently ignores a re-add. A running job is left alone.
- * Failure and edge paths first.
  */
 
 jest.mock('../../utils/db', () => ({
@@ -28,28 +27,14 @@ jest.mock('../../middleware/auth', () => ({
     },
 }));
 
-jest.mock('../../services/lidarr', () => ({ lidarrService: {} }));
-jest.mock('../../utils/systemSettings', () => ({
-    getSystemSettings: jest.fn().mockResolvedValue({}),
-}));
-jest.mock('../../config', () => ({ config: { music: { musicPath: '/music' } } }));
+jest.mock('../../services/lidarr', () => require('./helpers/discoverMocks').emptyLidarrMock());
+jest.mock('../../utils/systemSettings', () => require('./helpers/discoverMocks').systemSettingsMock());
+jest.mock('../../config', () => require('./helpers/discoverMocks').musicConfigMock());
 
-jest.mock('../../workers/queues', () => ({
-    discoverQueue: {
-        getJob: jest.fn(),
-        add: jest.fn(),
-        getActive: jest.fn().mockResolvedValue([]),
-        getWaiting: jest.fn().mockResolvedValue([]),
-    },
-    scanQueue: { add: jest.fn() },
-}));
+jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').discoverQueuesMock());
 
-// Pass-through lock so the generate handler's body actually runs.
-jest.mock('../../utils/distributedLock', () => ({
-    distributedLock: {
-        withLock: jest.fn(async (_k: string, _t: number, fn: any) => fn()),
-    },
-}));
+// A lock that runs the body, so the generate handler's code actually runs.
+jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks').distributedLockMock());
 
 import express from 'express';
 import request from 'supertest';
@@ -97,26 +82,22 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         (discoverQueue.add as jest.Mock).mockResolvedValue({ id: 'new-job-id' });
     });
 
-    // A completed job is removed before add().
-    it('FAILURE PATH: removes a stale COMPLETED job hash before re-enqueuing', async () => {
+    it('removes a finished job hash before enqueuing again', async () => {
         const stale = fakeJob('completed');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
         const res = await request(app).post('/discover/generate');
 
         expect(res.status).toBe(200);
-        // Discriminator 1: the stale hash was actually removed.
         expect(stale.remove).toHaveBeenCalledTimes(1);
-        // Discriminator 2: a fresh job was enqueued AFTER removal (not skipped).
         expect(discoverQueue.add).toHaveBeenCalledTimes(1);
         const removeOrder = stale.remove.mock.invocationCallOrder[0];
         const addOrder = (discoverQueue.add as jest.Mock).mock.invocationCallOrder[0];
         expect(removeOrder).toBeLessThan(addOrder);
     });
 
-    // FAILURE PATH: a FAILED job hash must also be cleared (a previous run that
-    // errored leaves a failed hash; re-adding the same id would otherwise no-op).
-    it('FAILURE PATH: removes a stale FAILED job hash before re-enqueuing', async () => {
+    // A failed run leaves a failed hash; re-adding the same id would otherwise do nothing.
+    it('removes a failed job hash before enqueuing again', async () => {
         const stale = fakeJob('failed');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
@@ -127,20 +108,16 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         expect(discoverQueue.add).toHaveBeenCalledTimes(1);
     });
 
-    // An active job is a run in flight: not removed, not enqueued again.
-    it('EDGE: does NOT remove a non-terminal (active) job and does NOT double-enqueue over it', async () => {
+    it('leaves an active job in place', async () => {
         const live = fakeJob('active');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(live);
 
         await request(app).post('/discover/generate');
 
-        // The live job is never removed.
         expect(live.remove).not.toHaveBeenCalled();
     });
 
-    // EDGE: a WAITING (queued, not yet started) job is likewise non-terminal --
-    // it must not be removed. Pins the terminal-only contract from the other side.
-    it('EDGE: does NOT remove a non-terminal (waiting) job', async () => {
+    it('leaves a waiting job in place', async () => {
         const queued = fakeJob('waiting');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(queued);
 
@@ -149,8 +126,7 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         expect(queued.remove).not.toHaveBeenCalled();
     });
 
-    // getJob looks up the same id add() enqueues.
-    it('getJob is looked up with the SAME jobId that add() enqueues', async () => {
+    it('looks the job up by the same id it enqueues', async () => {
         const stale = fakeJob('completed');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
@@ -161,13 +137,10 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         const lookedUpId = (discoverQueue.getJob as jest.Mock).mock.calls[0][0];
         const enqueuedId = (discoverQueue.add as jest.Mock).mock.calls[0][2].jobId;
         expect(lookedUpId).toBe(enqueuedId);
-        // And it is the week-keyed id, not some unrelated constant.
         expect(lookedUpId).toMatch(/^discover-weekly-user-123-\d{4}-\d{2}-\d{2}$/);
     });
 
-    // HAPPY PATH (last): no stale hash exists -> nothing to remove, a single job
-    // is enqueued with the resolved week-keyed jobId.
-    it('HAPPY PATH: no existing hash -> enqueues once with a week-keyed jobId', async () => {
+    it('enqueues once with a week-keyed job id when no job exists', async () => {
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(null);
 
         const res = await request(app).post('/discover/generate');
@@ -175,7 +148,6 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         expect(res.status).toBe(200);
         expect(discoverQueue.add).toHaveBeenCalledTimes(1);
         const addArgs = (discoverQueue.add as jest.Mock).mock.calls[0];
-        // jobId is `discover-weekly-<userId>-<YYYY-MM-DD>` (week key from the helper).
         expect(addArgs[2].jobId).toMatch(/^discover-weekly-user-123-\d{4}-\d{2}-\d{2}$/);
     });
 });

@@ -50,7 +50,7 @@ describe("the shipped stations", () => {
         expect(MOOD_STATIONS.get("late-night")?.recipe).toBe("late-night");
     });
 
-    it("are listed at GET /radio/stations: the 13 approved stations then Wildcard, each with its subtitle", async () => {
+    it("are listed at GET /radio/stations: the 13 mood stations then Wildcard, each with its subtitle", async () => {
         const { default: tracksRoutes } = await import("../../../routes/library/tracks");
         const app = express();
         app.use(tracksRoutes);
@@ -58,7 +58,7 @@ describe("the shipped stations", () => {
         expect(res.status).toBe(200);
 
         const stations: Array<Record<string, unknown>> = res.body.stations;
-        // The approved names and order.
+        // Names and order.
         expect(stations.map((s) => [s.value, s.name])).toEqual([
             ["calm", "Calm"], ["energy", "Energy"], ["intense", "Intense"], ["happy", "Happy"],
             ["melancholy", "Melancholy"], ["focus-calm", "Focus: Calm"], ["focus-energy", "Focus: Energy"], ["feel-good", "Feel-good"],
@@ -71,7 +71,7 @@ describe("the shipped stations", () => {
             expect((station.description as string).length).toBeGreaterThan(0);
         }
         expect(stations[13].description).toBe("Songs with no mood tag");
-        // Kevin 10-25: the recipe's parts only, never what it pushes away. Feel-good's recipe is mostly "low:" parts.
+        // The subtitle lists the recipe's parts only, never what it pushes away. Feel-good's recipe is mostly "low:" parts.
         expect(stations[7].description).toBe("Uplifting, happy, epic");
         // Late Night plays the listener's own night plays, so it says that instead of the fallback recipe's parts.
         expect(stations[8].description).toBe("The songs you play after dark, and songs like them");

@@ -219,7 +219,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 describe("the fingerprint stage runs in its own pool", () => {

@@ -1,9 +1,8 @@
 /**
- * The one-time sort of albums the old scanner filed by guesswork, on the real test database, against what a real
- * Lidarr said (fixtures/lidarr/discover-sort.json): on the scratch rig (scripts/record-lidarr.ts), Discover downloaded
- * Brad Sucks' Guess Who’s a Mess through Lidarr 3.1, which tagged the artist as Discover's and holds that album's 11
- * files and no others. The old scanner filed that download as a library album (its files spell the title with a
- * straight apostrophe) and marked it as the listener's.
+ * The one-time sort of albums the scanner filed by guesswork, on the real test database, against what a real Lidarr
+ * said (fixtures/lidarr/discover-sort.json): Discover downloaded Brad Sucks' Guess Who’s a Mess through Lidarr 3.1,
+ * which tagged the artist as Discover's and holds that album's 11 files and no others. The files spell the title with
+ * a straight apostrophe, so the scanner filed the download as a library album and marked it as the listener's.
  */
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
@@ -24,7 +23,7 @@ interface AlbumSpec {
     artist: { name: string; mbid: string | null };
     title: string;
     location: "LIBRARY" | "DISCOVER";
-    /** The old scanner marked every album it filed in the library as the listener's. */
+    /** Filed in the library, the album was marked as the listener's. */
     owned?: boolean;
     edited?: boolean;
 }
@@ -44,7 +43,7 @@ async function albums(specs: Record<string, AlbumSpec>) {
         await prisma.album.create({
             data: {
                 id: `${P}alb_${key}`,
-                // Not yet identified: the old scanner's own placeholder id, which matches nothing Lidarr knows.
+                // Not yet identified: a placeholder id, which matches nothing Lidarr knows.
                 rgMbid: `${P}rg_${key}`,
                 artistId,
                 identityKey: `${P}ik_${key}`,
@@ -88,13 +87,18 @@ async function cleanup() {
     await prisma.user.deleteMany({ where: { id: USER } });
 }
 
-beforeEach(async () => {
+/** An empty library with one listener, and the sort not yet run. */
+async function resetRun() {
     await cleanup();
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x" } });
-    lidarr = await startLidarrReplay(loadScenario("discover-sort"));
-    await useLidarr(lidarr.url);
     await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null } });
     invalidateSystemSettingsCache();
+}
+
+beforeEach(async () => {
+    lidarr = await startLidarrReplay(loadScenario("discover-sort"));
+    await useLidarr(lidarr.url);
+    await resetRun();
 });
 
 afterEach(async () => {
@@ -107,7 +111,7 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-describe("Discover downloads the old scanner put in the library", () => {
+describe("Discover downloads filed in the library", () => {
     it("go back to Discover when nothing says a listener made them theirs, and stop being anyone's", async () => {
         await albums({ gwam: discoverDownload, own: ownRecord });
         const result = await sortDiscoverAlbums();
@@ -174,30 +178,24 @@ describe("Discover downloads the old scanner put in the library", () => {
         await prisma.likedTrack.create({ data: { userId: USER, trackId: songId("gwam", 3) } });
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
 
-        await cleanup();
-        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x" } });
-        await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null } });
-        invalidateSystemSettingsCache();
+        await resetRun();
         await albums({ gwam: discoverDownload });
         await prisma.playlist.create({
             data: { userId: USER, name: "mine", items: { create: { trackId: songId("gwam", 1), sort: 0 } } },
         });
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
 
-        await cleanup();
-        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x" } });
-        await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null } });
-        invalidateSystemSettingsCache();
+        await resetRun();
         await albums({ gwam: { ...discoverDownload, edited: true } });
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
         expect(await location("gwam")).toBe("LIBRARY");
     });
 });
 
-describe("albums the old scanner filed as Discover", () => {
+describe("albums filed as Discover", () => {
     it("stay when Lidarr downloaded them for Discover, and stop being anyone's; the listener's own go to the library", async () => {
         await albums({
-            // The old scanner marked Discover albums as its own too.
+            // Filed as Discover, the album was marked as the listener's too.
             gwam: { ...discoverDownload, location: "DISCOVER", owned: true },
             // Lidarr knows this album but downloaded none of it: the listener got it some other way.
             outOfIt: { artist: BRAD, title: "Out of It", location: "DISCOVER" },
@@ -225,7 +223,7 @@ describe("albums the old scanner filed as Discover", () => {
                 data: { userId: USER, rgMbid: `${P}sugg_${albumTitle}`, artistName, albumTitle, weekStartDate: new Date(Date.UTC(2026, 9, 19)), status },
             });
         }
-        // This week's suggestion was a Discover download; the let-go one was the old playlist's library song.
+        // This week's suggestion was a Discover download; the let-go one was a library song.
         await prisma.downloadJob.create({
             data: {
                 userId: USER,

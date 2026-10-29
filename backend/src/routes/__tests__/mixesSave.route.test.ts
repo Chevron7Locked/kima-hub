@@ -16,12 +16,13 @@ import mixRoutes from "../mixes";
 import { prisma } from "../../utils/db";
 import { nightZone } from "../../services/mixes/nightPlays";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
-import { eventBus, type SSEEvent } from "../../services/eventBus";
+import type { SSEEvent } from "../../services/eventBus";
+import { cleanupMarked, listenTo, playlistAnnouncements, seedSongs } from "./helpers/liveEvents";
 
 const MARK = "zz-mix-save";
 let userId: string;
 let songs: string[];
-const heard: SSEEvent[] = [];
+let heard: SSEEvent[];
 let stopListening: () => void;
 
 const app = express();
@@ -36,36 +37,21 @@ app.use("/mixes", mixRoutes);
 const cacheMixes = async (mixes: Array<{ id: string; name: string; trackIds: string[] }>) =>
     redisClient.setex(`mixes:${userId}`, 3600, JSON.stringify({ zones: { [await nightZone()]: { mixes, at: Date.now() } } }));
 
-const announced = () => heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload);
-
-async function cleanup(): Promise<void> {
-    await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
-    await prisma.track.deleteMany({ where: { title: { startsWith: MARK } } });
-    await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
-    await prisma.artist.deleteMany({ where: { name: { startsWith: MARK } } });
-}
+const announced = () => playlistAnnouncements(heard);
 
 beforeAll(async () => {
     await waitForRedisReady();
-    await cleanup();
+    await cleanupMarked(MARK);
     userId = (await prisma.user.create({ data: { username: `${MARK}-user`, passwordHash: "x" } })).id;
-    const artist = await prisma.artist.create({ data: { name: `${MARK} Artist`, identityKey: `${MARK}-artist` } });
-    const album = await prisma.album.create({
-        data: { rgMbid: `${MARK}-rg`, identityKey: `${MARK}-album`, primaryType: "Album", title: `${MARK} Album`, artistId: artist.id, location: "LIBRARY" },
-    });
-    songs = [];
-    for (let i = 0; i < 5; i += 1) {
-        const track = await prisma.track.create({
-            data: { title: `${MARK} Song ${i}`, albumId: album.id, trackNo: i + 1, duration: 100, filePath: `/${MARK}/${i}.flac`, fileModified: new Date(), fileSize: 1000 },
-        });
-        songs.push(track.id);
-    }
-    stopListening = eventBus.subscribe(userId, { send: (event) => (heard.push(event), true) });
+    songs = await seedSongs(MARK, 5);
+    const listener = listenTo(userId);
+    heard = listener.heard;
+    stopListening = listener.stop;
 });
 
 afterAll(async () => {
     stopListening();
-    await cleanup();
+    await cleanupMarked(MARK);
 });
 
 beforeEach(async () => {

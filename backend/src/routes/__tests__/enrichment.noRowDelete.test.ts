@@ -251,7 +251,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 describe("enrichment controls never delete Track rows", () => {

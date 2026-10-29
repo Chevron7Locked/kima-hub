@@ -3,10 +3,7 @@
  * follows once however often it is asked, and survives two follows of a new show at once. Real router and
  * database and the real address check; a local server plays the feed under a public name.
  */
-jest.mock("../../middleware/auth", () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podsub", username: "t" }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podsub", username: "t" }; next(); },
-}));
+jest.mock("../../middleware/auth", () => require("./helpers/podcastRoute").podcastAuthMock("u_podsub"));
 
 import http from "http";
 import type { AddressInfo } from "net";

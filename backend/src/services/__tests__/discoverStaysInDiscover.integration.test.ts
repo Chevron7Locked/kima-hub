@@ -126,8 +126,7 @@ beforeAll(async () => {
             });
         }
     }
-    // A stale ownership row for a Discover album (left by an old demotion or an unlike): it must not put the album
-    // in the library.
+    // A leftover ownership row for a Discover album must not put the album in the library.
     await prisma.ownedAlbum.create({ data: { artistId: `${P}discart`, rgMbid: `${P}rg_mine`, source: "discovery_liked" } });
     // Plays of Discover songs: they feed nothing outside Discover.
     for (const trackId of DISCOVER_TRACKS) await prisma.play.create({ data: { userId: ME, trackId } });

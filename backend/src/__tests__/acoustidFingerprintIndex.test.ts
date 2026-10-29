@@ -48,7 +48,6 @@ describe("Track.acoustidFingerprint index", () => {
         await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id = $1`, TRACK);
         await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = $1`, ALBUM);
         await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, ARTIST);
-        await prisma.$disconnect();
     });
 
     it("has dropped the oversized btree Track_acoustidFingerprint_idx", async () => {

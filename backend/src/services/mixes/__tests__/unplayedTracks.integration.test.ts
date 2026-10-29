@@ -1,13 +1,7 @@
 /**
- * The "tracks nobody has played" read, against a real Postgres, on a table
- * written in bulk and never analysed (no ANALYZE, so Postgres has no row
- * counts for it, as right after a library scan).
- *
- * 20,000 tracks, 300,000 plays on the first 10,000. The same question written
- * as Prisma's `plays: { none: {} }` (`id NOT IN (SELECT trackId FROM Play)`)
- * is planned as a rescan of Play per track once Play is too big to hash and
- * took about 98 s at 50,000 tracks and 105,000 plays, so a read that finishes
- * in seconds is the check; the ids are checked against what was written.
+ * unplayedTrackIds against a real Postgres, on a table written in bulk and never analysed (no ANALYZE, so Postgres
+ * has no row counts, as right after a library scan): 20,000 tracks, 300,000 plays on the first 10,000. The read must
+ * return the right ids and finish within 5 s, which a per-track rescan of Play (`plays: { none: {} }`) would not.
  */
 import { prisma } from "../../../utils/db";
 import { unplayedTrackIds } from "../helpers";

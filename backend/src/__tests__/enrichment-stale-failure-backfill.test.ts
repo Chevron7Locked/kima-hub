@@ -144,7 +144,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
 });
 
 describe("stale EnrichmentFailure backfill", () => {

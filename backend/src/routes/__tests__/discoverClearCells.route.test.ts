@@ -1,10 +1,7 @@
 /**
  * Every way Discover removes an album, against the real test database and real files in a temporary music root:
- * DELETE /discover/clear (with and without suggestions), the albums no suggestion covers, the albums of completed
- * downloads no suggestion names, the weekly regeneration's cleanup, and unlike. Each test builds its own rows and
- * files and sends its own request, so each one causes what it asserts. Lidarr is off (`useLidarr` with
- * lidarrEnabled false) or a real port nothing listens on; no test asks Lidarr to delete an album, because no
- * recording of that exists.
+ * DELETE /discover/clear, the weekly regeneration's cleanup, and unlike. Each test builds its own rows and files.
+ * Lidarr is off or a port nothing listens on; no test asks Lidarr to delete an album.
  */
 
 jest.mock("../../utils/logger", () => ({
@@ -34,10 +31,8 @@ jest.mock("../../workers/unifiedEnrichment", () => ({
     triggerEnrichmentNow: jest.fn().mockResolvedValue(undefined),
 }));
 
-import express from "express";
 import request from "supertest";
 import fs from "fs";
-import net from "node:net";
 import path from "path";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
@@ -46,7 +41,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { discoveryAlbumLifecycle } from "../../services/discovery/discoveryAlbumLifecycle";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
-import discoverRoutes from "../discover";
+import { deadPort, discoverApp } from "./helpers/discoverClear";
 
 jest.setTimeout(120_000);
 
@@ -59,13 +54,6 @@ const MUSIC = path.resolve(config.music.musicPath);
 const ARTIST = "Pellam Voss";
 // Release-group ids shaped like real ones, so Lidarr is asked about them when it is on.
 const RG_ORPHAN = "11111111-2222-4333-8444-555555555555";
-
-function app() {
-    const a = express();
-    a.use(express.json());
-    a.use("/discover", discoverRoutes);
-    return a;
-}
 
 async function cleanup() {
     await prisma.discoveryTrack.deleteMany({ where: { discoveryAlbum: { userId: USER } } });
@@ -82,17 +70,6 @@ async function cleanup() {
     await prisma.notification.deleteMany({ where: { userId: OWNER } });
     await prisma.downloadJob.deleteMany({ where: { userId: OWNER } });
     await prisma.user.deleteMany({ where: { id: { in: [USER, OWNER] } } });
-}
-
-async function deadPort(): Promise<number> {
-    return new Promise<number>((resolve, reject) => {
-        const probe = net.createServer();
-        probe.on("error", reject);
-        probe.listen(0, "127.0.0.1", () => {
-            const assigned = (probe.address() as net.AddressInfo).port;
-            probe.close(() => resolve(assigned));
-        });
-    });
 }
 
 interface AlbumSpec {
@@ -189,7 +166,6 @@ afterAll(async () => {
     fs.rmSync(MUSIC, { recursive: true, force: true });
     await cleanup();
     await closeEngineConnections();
-    await prisma.$disconnect();
 });
 
 beforeEach(async () => {
@@ -200,23 +176,23 @@ beforeEach(async () => {
 });
 
 describe("clear with no suggestions", () => {
-    it("still looks at the downloads no suggestion names, and keeps the tray row until a clean clear", async () => {
+    it("looks at the downloads no suggestion names, and keeps the tray row until a clean clear", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
 
-        const first = await request(app()).delete("/discover/clear");
+        const first = await request(discoverApp()).delete("/discover/clear");
         expect(first.status).toBe(200);
         expect(first.body.lidarrFailed).toEqual([{ artistName: ARTIST, albumTitle: "Loose Fetch", reason: "Lidarr is turned off" }]);
         expect(await trayRow()).not.toBeNull();
 
-        // Nothing is suggested, so the old early return would have cleared the row here.
-        const second = await request(app()).delete("/discover/clear");
+        // With no suggestions the row must still stay: clearing it is for a clean clear only.
+        const second = await request(discoverApp()).delete("/discover/clear");
         expect(second.body.lidarrFailed).toHaveLength(1);
         expect(await trayRow()).not.toBeNull();
     });
 
     it("words a failure on a download no suggestion names without saying it is in the playlist", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
-        await request(app()).delete("/discover/clear");
+        await request(discoverApp()).delete("/discover/clear");
         const tray = await trayRow();
         expect(tray!.message).toContain("Loose Fetch");
         expect(tray!.message).not.toContain("playlist");
@@ -224,11 +200,11 @@ describe("clear with no suggestions", () => {
 
     it("clears the tray row once nothing fails", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
-        await request(app()).delete("/discover/clear");
+        await request(discoverApp()).delete("/discover/clear");
         expect(await trayRow()).not.toBeNull();
 
         await prisma.downloadJob.deleteMany({ where: { userId: USER } });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([]);
         expect(await trayRow()).toBeNull();
     });
@@ -238,13 +214,13 @@ describe("clear with no suggestions", () => {
         await prisma.discoveryAlbum.create({
             data: { userId: USER, rgMbid: `${P}_rg_liked_other`, artistName: "Pellam-Voss", albumTitle: "Another", weekStartDate: WEEK, status: "LIKED" },
         });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([]);
     });
 
     it("leaves the download of a batch that is still running alone", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch", "downloading");
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([]);
         expect(await trayRow()).toBeNull();
     });
@@ -253,7 +229,7 @@ describe("clear with no suggestions", () => {
 describe("what a clear leaves alone", () => {
     it("leaves other artists with no albums to the daily integrity check", async () => {
         await prisma.artist.create({ data: { id: `${P}_bare`, name: "Bare Artist", identityKey: `${P}_bare` } });
-        await request(app()).delete("/discover/clear").expect(200);
+        await request(discoverApp()).delete("/discover/clear").expect(200);
         expect(await prisma.artist.count({ where: { id: `${P}_bare` } })).toBe(1);
     });
 });
@@ -262,7 +238,7 @@ describe("DISCOVER albums no suggestion covers", () => {
     it("deletes a Soulseek album's files, folders and rows", async () => {
         const orphan = await addAlbum({ key: "orph", rg: `${P}_rg_orph` });
         await addSoulseekJob(`${P}_rg_orph`, "Album orph");
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.orphanedAlbumsDeleted).toBe(1);
         expect(fs.existsSync(orphan.file)).toBe(false);
@@ -275,7 +251,7 @@ describe("DISCOVER albums no suggestion covers", () => {
         const orphan = await addAlbum({ key: "run", rg: `${P}_rg_run` });
         // A completed Soulseek record, so without the running-batch guard this album would be deleted.
         await addSoulseekJob(`${P}_rg_run`, "Album run", { batchStatus: "downloading" });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([]);
         expect(fs.existsSync(orphan.file)).toBe(true);
         expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(1);
@@ -285,7 +261,7 @@ describe("DISCOVER albums no suggestion covers", () => {
         const dots = await addAlbum({ key: "dots", rg: `${P}_rg_dots`, title: "..." });
         await addSoulseekJob(`${P}_rg_dots`, "...");
         await addSoulseekJob(`${P}_rg_bangs`, "!!!", { batchStatus: "downloading" });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.orphanedAlbumsDeleted).toBe(1);
         expect(await prisma.album.count({ where: { id: dots.albumId } })).toBe(0);
     });
@@ -295,7 +271,7 @@ describe("DISCOVER albums no suggestion covers", () => {
         const port = await deadPort();
         await useLidarr(`http://127.0.0.1:${port}`);
 
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.orphanedAlbumsDeleted).toBe(0);
         expect(res.body.lidarrFailed).toHaveLength(1);
@@ -315,7 +291,7 @@ describe("DISCOVER albums no suggestion covers", () => {
             title: "Low Tide Hum",
             suggestion: { rg: `${P}_rg_held_suggested`, title: "low tide hum", lidarrAlbumId: 902 },
         });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([{ artistName: ARTIST, albumTitle: "low tide hum", reason: "Lidarr is turned off" }]);
         expect(res.body.orphanedAlbumsDeleted).toBe(0);
         expect(fs.existsSync(held.file)).toBe(true);
@@ -408,7 +384,7 @@ describe("unlike", () => {
         });
         await prisma.ownedAlbum.create({ data: { artistId: `${P}_art`, rgMbid: `${P}_rg_unl`, source: "discovery_liked" } });
 
-        const res = await request(app()).delete("/discover/unlike").send({ albumId: `${P}_rg_unl` });
+        const res = await request(discoverApp()).delete("/discover/unlike").send({ albumId: `${P}_rg_unl` });
         expect(res.status).toBe(200);
         expect((await prisma.discoveryAlbum.findUnique({ where: { id: liked.suggestionId! } }))?.status).toBe("ACTIVE");
         expect((await prisma.album.findUnique({ where: { id: liked.albumId } }))?.location).toBe("DISCOVER");
@@ -431,7 +407,7 @@ describe("which albums Kima deletes files of", () => {
 
     it("keeps a suggested album with no download record, and reports why", async () => {
         const album = await addAlbum({ key: "nojob", rg: `${P}_rg_nojob`, suggestion: {} });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.activeDeleted).toBe(0);
         expect(res.body.lidarrFailed).toEqual([{ artistName: ARTIST, albumTitle: "Album nojob", reason: UNKNOWN }]);
         await expectKept(album);
@@ -440,7 +416,7 @@ describe("which albums Kima deletes files of", () => {
 
     it("keeps an album no suggestion covers and no download record shows is Soulseek's", async () => {
         const album = await addAlbum({ key: "nojob2", rg: `${P}_rg_nojob2` });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.orphanedAlbumsDeleted).toBe(0);
         expect(res.body.lidarrFailed[0].reason).toBe(UNKNOWN);
         await expectKept(album);
@@ -449,7 +425,7 @@ describe("which albums Kima deletes files of", () => {
     it("keeps an album whose last download attempt was Lidarr's", async () => {
         const album = await addAlbum({ key: "lidsrc", rg: `${P}_rg_lidsrc`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_lidsrc`, "Album lidsrc", { currentSource: "lidarr" });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed[0].reason).toBe(UNKNOWN);
         await expectKept(album);
     });
@@ -459,7 +435,7 @@ describe("which albums Kima deletes files of", () => {
         await prisma.downloadJob.create({
             data: { userId: USER, subject: `${ARTIST} - Album failed`, type: "album", targetMbid: `${P}_rg_failed`, status: "failed", metadata: { currentSource: "soulseek" } },
         });
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed[0].reason).toBe(UNKNOWN);
         await expectKept(album);
     });
@@ -467,7 +443,7 @@ describe("which albums Kima deletes files of", () => {
     it("finds the Soulseek record by artist and title when the id differs", async () => {
         const album = await addAlbum({ key: "byname", rg: `${P}_rg_byname`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_other_id`, "Album byname");
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.activeDeleted).toBe(1);
         expect(fs.existsSync(album.file)).toBe(false);
     });
@@ -484,7 +460,7 @@ describe("which albums Kima deletes files of", () => {
         });
         fs.chmodSync(album.dir, 0o555);
         try {
-            const res = await request(app()).delete("/discover/clear");
+            const res = await request(discoverApp()).delete("/discover/clear");
             expect(res.body.activeDeleted).toBe(0);
             expect(res.body.lidarrFailed).toHaveLength(1);
             expect(res.body.lidarrFailed[0].reason).toContain("Kima isn't allowed to delete these files; check the music folder's permissions");
@@ -504,7 +480,7 @@ describe("which albums Kima deletes files of", () => {
         const album = await addAlbum({ key: "gone", rg: `${P}_rg_gone`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_gone`, "Album gone");
         fs.rmSync(album.file);
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.activeDeleted).toBe(1);
         expect(res.body.lidarrFailed).toEqual([]);
         expect(await prisma.album.count({ where: { id: album.albumId } })).toBe(0);
@@ -532,7 +508,7 @@ describe("an album the listener's library holds", () => {
         // Any request to Lidarr meets a port nothing listens on and would surface as a failure.
         await useLidarr(`http://127.0.0.1:${await deadPort()}`);
 
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.lidarrFailed).toEqual([]);
         expect(fs.existsSync(own.file)).toBe(true);
@@ -565,7 +541,7 @@ describe("an error while clearing one album", () => {
             data: { userId: USER, groupKey: TRAY_KEY, type: "error", title: "1 Discover album not deleted", message: "from an earlier clear" },
         });
 
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.activeDeleted).toBe(0);
         expect(res.body.lidarrFailed).toHaveLength(1);
@@ -591,7 +567,7 @@ describe("an orphan album that was not deleted", () => {
             data: { userId: OWNER, subject: `${ARTIST} - Album theirs`, type: "album", targetMbid: `${P}_rg_theirs`, status: "failed" },
         });
 
-        const res = await request(app()).delete("/discover/clear");
+        const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(fs.existsSync(orphan.file)).toBe(true);
 

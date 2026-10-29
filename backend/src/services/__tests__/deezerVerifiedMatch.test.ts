@@ -4,29 +4,15 @@
  * query. HTTP is mocked at the httpClient boundary; nothing hits Deezer.
  */
 
+import fs from "fs";
+import path from "path";
+
 const mockRateLimitedGet = jest.fn();
 
-jest.mock("../httpClient", () => ({
-    // Only the network is stood in for: the reply check runs on the body as the real helper runs it.
-    rateLimitedGet: async (...args: unknown[]) => {
-        const body = await mockRateLimitedGet(...args);
-        (args[3] as ((b: unknown) => void) | undefined)?.(body);
-        return body;
-    },
-}));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-jest.mock("../../utils/cacheWrapper", () => ({
-    CacheWrapper: class {
-        async get() {
-            return null; // always miss — exercise the request path
-        }
-        async set() {
-            /* no-op */
-        }
-    },
-}));
+// Only the network is stood in for: the reply check runs on the body as the real helper runs it.
+jest.mock("../httpClient", () => require("./helpers/deezerMocks").httpClientMock(() => mockRateLimitedGet));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../utils/cacheWrapper", () => require("./helpers/deezerMocks").missingCacheMock());
 
 import { deezerService } from "../deezer";
 
@@ -132,7 +118,7 @@ describe("deezerService.getArtistImage — verified match only", () => {
 
     it("is the most-followed artist of that name, not the namesake Deezer ranks first (recorded reply)", async () => {
         const recorded = JSON.parse(
-            require("fs").readFileSync(require("path").join(__dirname, "fixtures/deezer/preview-adele-hello.json"), "utf8"),
+            fs.readFileSync(path.join(__dirname, "fixtures/deezer/preview-adele-hello.json"), "utf8"),
         );
         const search = recorded.replies.find((r: { path: string }) => r.path === "/search/artist").reply;
         mockRateLimitedGet.mockResolvedValue(search);

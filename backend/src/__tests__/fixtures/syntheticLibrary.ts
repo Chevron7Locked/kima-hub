@@ -29,22 +29,24 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { MOODS, MOOD_HEADS } from "../../services/moods/heads";
+import { seededRandom } from "../../services/matching/mapLayout";
+import { gaussian } from "./gaussian";
 
 export const TRACK_COUNT = 3000;
 const ALBUM_COUNT = 500;
 const TRACKS_PER_ALBUM = TRACK_COUNT / ALBUM_COUNT;
 const ARTIST_COUNT = 125;
 
-export const PARTY_GENRES = [
+const PARTY_GENRES = [
     "dance", "electronic", "pop", "disco", "house", "techno", "edm", "funk", "electro",
     "dance pop", "club", "eurodance", "trance", "dubstep", "drum and bass", "hip hop",
 ];
-export const WORKOUT_GENRES = [
+const WORKOUT_GENRES = [
     "rock", "metal", "hard rock", "alternative rock", "punk", "hip hop", "rap", "trap", "hardcore",
     "metalcore", "industrial", "drum and bass", "hardstyle", "nu metal", "electronic", "edm", "house",
     "techno", "pop punk", "dubstep",
 ];
-export const FOCUS_GENRES = [
+const FOCUS_GENRES = [
     "classical", "instrumental", "jazz", "piano", "ambient", "post-rock", "math rock", "soundtrack", "score",
     "contemporary classical", "minimal", "modern classical", "neoclassical",
 ];
@@ -64,16 +66,6 @@ const MOOD_TAGS = [
 ];
 const KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-function mulberry32(seed: number) {
-    let a = seed;
-    return () => {
-        a = (a + 0x6d2b79f5) | 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
 async function inChunks<T>(rows: T[], write: (chunk: T[]) => Promise<unknown>, size = 1000) {
     for (let i = 0; i < rows.length; i += size) await write(rows.slice(i, i + size));
 }
@@ -89,7 +81,7 @@ export const trackId = (prefix: string, i: number) => `${prefix}trk_${String(i).
 /** Writes the library under `prefix`. Call `removeSyntheticLibrary(prefix)` when done. */
 export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandle> {
     await removeSyntheticLibrary(prefix);
-    const rng = mulberry32(20261021);
+    const rng = seededRandom(20261021);
     const pick = <T,>(xs: T[]) => xs[Math.floor(rng() * xs.length)];
     const subset = <T,>(xs: T[], min: number, max: number) => {
         const n = min + Math.floor(rng() * (max - min + 1));
@@ -254,8 +246,7 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
  * own so `seedSyntheticLibrary`'s readings stay as they are. The library's mood statistics are left to the caller.
  */
 export async function seedSyntheticMoods(prefix: string): Promise<void> {
-    const rng = mulberry32(20261024);
-    const gaussian = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+    const rng = seededRandom(20261024);
     const r4 = (x: number) => Math.round(x * 10000) / 10000;
     const ids = Array.from({ length: TRACK_COUNT }, (_, i) => trackId(prefix, i));
     const analyzedAt = new Date("2026-10-23T00:00:00Z");
@@ -268,7 +259,7 @@ export async function seedSyntheticMoods(prefix: string): Promise<void> {
         track_id: id,
         embedded_at: analyzedAt,
         weights: MOOD_HEADS.version,
-        ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian())])),
+        ...Object.fromEntries(MOODS.map((mood) => [mood, r4(-1 + 1.5 * gaussian(rng))])),
     })) as Prisma.TrackMoodCreateManyInput[];
     await inChunks(rows, (data) => prisma.trackMood.createMany({ data }));
     const confidence = ids.map(() => (rng() < 0.1 ? null : r4(4 * rng())));

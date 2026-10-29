@@ -17,7 +17,7 @@ const mockGetFeatures = featureDetection.getFeatures as unknown as jest.Mock;
 
 function setMode(mode: "hybrid" | "featuresOnly") {
     mockGetFeatures.mockResolvedValue({
-        musicCNN: mode === "hybrid" || mode === "featuresOnly",
+        musicCNN: true,
         vibeEmbeddings: mode === "hybrid",
         audiobookshelfEnabled: false,
     });
@@ -64,14 +64,6 @@ afterAll(async () => {
 // pgvector computes in float32, so scores carry ~1e-6 noise: assertions use 5-decimal closeness.
 
 describe("hybridSimilarity null handling (DB, shipped functions)", () => {
-    beforeAll(() => {
-        mockGetFeatures.mockResolvedValue({
-            musicCNN: true,
-            vibeEmbeddings: true,
-            audiobookshelfEnabled: false,
-        });
-    });
-
     it("CLAP present: the audio feature columns do not move the ranking", async () => {
         setMode("hybrid");
         const src = {

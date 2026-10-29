@@ -4,42 +4,20 @@
  * corrupt, so reading them first would leave the station short; it must still
  * return `limit` tracks from the playable ones that have plays.
  */
-import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
-import router from "../tracks";
+import { cleanupPlayable, radioApp, seedPlayableLibrary } from "../../__tests__/helpers/radioPlayable";
 
 jest.setTimeout(120_000);
 
 const P = "rfp_";
 const LIMIT = 20;
-const app = express();
-app.use(express.json());
-app.use("/", router);
-
-async function cleanup() {
-    await prisma.play.deleteMany({ where: { userId: { startsWith: P } } });
-    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
-    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
-    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
-    await prisma.user.deleteMany({ where: { id: { startsWith: P } } });
-}
+const app = radioApp();
 
 // Track groups, by number: 0-29 missing file, 10 plays each; 30-39 corrupt, 10 plays each;
 // 40-99 playable, 1 play each; 100-119 playable, never played.
 beforeAll(async () => {
-    await cleanup();
-    await prisma.user.create({ data: { id: `${P}user`, username: `${P}user`, passwordHash: "x" } });
-    await prisma.artist.create({ data: { id: `${P}art`, name: "Fav Artist", normalizedName: "fav artist", identityKey: `${P}ak` } });
-    await prisma.album.create({
-        data: { id: `${P}alb`, rgMbid: `${P}rg`, artistId: `${P}art`, identityKey: `${P}ik`, title: "Fav Album", primaryType: "Album" },
-    });
-    await prisma.$executeRaw`
-        INSERT INTO "Track" (id, "albumId", title, "trackNo", duration, "filePath", "fileModified", "fileSize", "missingSince", corrupt, "updatedAt")
-        SELECT ${P + "trk_"} || lpad(i::text, 3, '0'), ${P + "alb"}, 'Fav Track ' || i, 1, 200,
-               '/tmp/' || ${P} || i || '.flac', now(), 1000,
-               CASE WHEN i < 30 THEN now() END, i BETWEEN 30 AND 39, now()
-        FROM generate_series(0, 119) AS i`;
+    await seedPlayableLibrary(P, { label: "Fav", trackCount: 120, missing: [0, 29], corrupt: [30, 39] });
     await prisma.$executeRaw`
         INSERT INTO "Play" (id, "userId", "trackId")
         SELECT ${P + "play_"} || i || '_' || k, ${P + "user"}, ${P + "trk_"} || lpad(i::text, 3, '0')
@@ -47,8 +25,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    await cleanup();
-    await prisma.$disconnect();
+    await cleanupPlayable(P);
 });
 
 it("returns the limit from playable played tracks when the most played cannot play", async () => {

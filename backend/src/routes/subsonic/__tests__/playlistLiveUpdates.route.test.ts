@@ -7,14 +7,15 @@
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
-import { eventBus, type SSEEvent } from "../../../services/eventBus";
+import type { SSEEvent } from "../../../services/eventBus";
+import { cleanupMarked, listenTo, playlistAnnouncements, seedSongs } from "../../__tests__/helpers/liveEvents";
 import { playlistRouter } from "../playlists";
 
 const PREFIX = "subsonic-playlist-live-test";
 const NOT_FOUND = 70;
 let userId: string;
 let songs: string[];
-const heard: SSEEvent[] = [];
+let heard: SSEEvent[];
 let stopListening: () => void;
 
 const app = express();
@@ -24,36 +25,21 @@ app.use((req, _res, next) => {
 });
 app.use("/rest", playlistRouter);
 
-const announced = () => heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload);
+const announced = () => playlistAnnouncements(heard);
 const reply = (res: request.Response) => res.body["subsonic-response"];
 
-async function cleanup(): Promise<void> {
-    await prisma.user.deleteMany({ where: { username: { startsWith: PREFIX } } });
-    await prisma.track.deleteMany({ where: { title: { startsWith: PREFIX } } });
-    await prisma.album.deleteMany({ where: { title: { startsWith: PREFIX } } });
-    await prisma.artist.deleteMany({ where: { name: { startsWith: PREFIX } } });
-}
-
 beforeAll(async () => {
-    await cleanup();
+    await cleanupMarked(PREFIX);
     userId = (await prisma.user.create({ data: { username: `${PREFIX}-user`, passwordHash: "x", role: "user" } })).id;
-    const artist = await prisma.artist.create({ data: { name: `${PREFIX} Artist`, identityKey: `${PREFIX}-artist` } });
-    const album = await prisma.album.create({
-        data: { rgMbid: `${PREFIX}-rg`, identityKey: `${PREFIX}-album`, primaryType: "Album", title: `${PREFIX} Album`, artistId: artist.id, location: "LIBRARY" },
-    });
-    songs = [];
-    for (let i = 0; i < 3; i += 1) {
-        const track = await prisma.track.create({
-            data: { title: `${PREFIX} Song ${i}`, albumId: album.id, trackNo: i + 1, duration: 100, filePath: `/${PREFIX}/${i}.flac`, fileModified: new Date(), fileSize: 1000 },
-        });
-        songs.push(track.id);
-    }
-    stopListening = eventBus.subscribe(userId, { send: (event) => (heard.push(event), true) });
+    songs = await seedSongs(PREFIX, 3);
+    const listener = listenTo(userId);
+    heard = listener.heard;
+    stopListening = listener.stop;
 });
 
 afterAll(async () => {
     stopListening();
-    await cleanup();
+    await cleanupMarked(PREFIX);
 });
 
 beforeEach(() => {

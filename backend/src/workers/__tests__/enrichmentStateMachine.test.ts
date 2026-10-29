@@ -4,7 +4,7 @@
  * BullMQ and services are mocked; the control flow in unifiedEnrichment.ts is real.
  */
 
-// ── Mocks (must be before imports) ──────────────────────────────────
+// ── Mocks ───────────────────────────────────────────────────────────
 
 const mockUpdateState = jest.fn().mockResolvedValue({});
 const mockGetState = jest.fn().mockResolvedValue(null);
@@ -50,7 +50,6 @@ jest.mock("../../services/featureDetection", () => ({
         }),
     },
 }));
-
 
 const mockRedisPublish = jest.fn().mockResolvedValue(1);
 const mockRedisQuit = jest.fn().mockResolvedValue(undefined);
@@ -203,7 +202,7 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
-// ── Imports (after mocks) ───────────────────────────────────────────
+// ── Imports ─────────────────────────────────────────────────────────
 
 import {
     triggerEnrichmentNow,
@@ -289,7 +288,6 @@ describe("Enrichment State Machine", () => {
     afterEach(() => {
         jest.useRealTimers();
     });
-
 
     describe("stop persistence", () => {
         it("should not auto-restart enrichment after stop via state service", async () => {

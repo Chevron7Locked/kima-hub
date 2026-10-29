@@ -41,14 +41,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
     await prisma.removalLog.deleteMany({});
-    await prisma.$disconnect();
-});
-
-beforeEach(() => {
-    (requireAdmin as jest.Mock).mockImplementation((req: any, _res: any, next: any) => {
-        req.user = { id: 'admin', username: 'admin', role: 'admin' };
-        next();
-    });
 });
 
 it('lists every removal newest first, with the count and what was cleaned up', async () => {

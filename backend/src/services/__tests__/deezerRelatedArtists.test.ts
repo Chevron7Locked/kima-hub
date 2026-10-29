@@ -1,32 +1,15 @@
 /**
  * Unit tests for deezerService.getRelatedArtists — HTTP is mocked at the
- * httpClient boundary (rateLimitedGet), so no live Deezer calls and no
- * Redis (CacheWrapper is stubbed to always miss).
+ * httpClient boundary (rateLimitedGet), so no live Deezer calls, and the
+ * cache is stubbed to always miss so every call takes the request path.
  */
 
 const mockRateLimitedGet = jest.fn();
 
-jest.mock("../httpClient", () => ({
-    // Only the network is stood in for: the reply check runs on the body as the real helper runs it.
-    rateLimitedGet: async (...args: unknown[]) => {
-        const body = await mockRateLimitedGet(...args);
-        (args[3] as ((b: unknown) => void) | undefined)?.(body);
-        return body;
-    },
-}));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-jest.mock("../../utils/cacheWrapper", () => ({
-    CacheWrapper: class {
-        async get() {
-            return null; // always miss — exercise the request path
-        }
-        async set() {
-            /* no-op */
-        }
-    },
-}));
+// Only the network is stood in for: the reply check runs on the body as the real helper runs it.
+jest.mock("../httpClient", () => require("./helpers/deezerMocks").httpClientMock(() => mockRateLimitedGet));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../utils/cacheWrapper", () => require("./helpers/deezerMocks").missingCacheMock());
 
 import { deezerService } from "../deezer";
 

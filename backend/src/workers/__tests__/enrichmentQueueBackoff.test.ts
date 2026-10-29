@@ -124,7 +124,7 @@ describe("enrichment phases -- job keys and backoff", () => {
         });
     });
 
-    describe("artist phase (no per-artist stage record — unchanged)", () => {
+    describe("artist phase (artists have no per-stage record)", () => {
         it("cleans completed (grace 0) and failed (grace > 0) before queuing", async () => {
             await executeArtistsPhase();
 

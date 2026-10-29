@@ -10,6 +10,7 @@ import { redisClient } from "../../utils/redis";
 import { MOODS } from "../moods/heads";
 import { READINGS } from "../moods/state";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 
 const P = "crerun";
 
@@ -29,11 +30,7 @@ async function seedEnrichedTrack(id: string, withVector: boolean) {
         });
     }
     if (withVector) {
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            id, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-        );
+        await insertEmbeddings([{ trackId: id, vector: AXIS_ZERO }]);
     }
 }
 
@@ -212,11 +209,7 @@ describe("a vectors re-run", () => {
     });
 
     it("leaves a sound vector a person set aside as they left it", async () => {
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            `${P}decided`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-        );
+        await insertEmbeddings([{ trackId: `${P}decided`, vector: AXIS_ZERO }]);
         const stage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}decided__embedding` } });
         expect(stage.decidedAt).not.toBeNull();
         await rerunEnrichment("vectors");
@@ -235,11 +228,7 @@ describe("an analysis re-run", () => {
             where: { id: `${P}trk` },
             data: { vibeAnalysisStatus: "completed" },
         });
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-        );
+        await insertEmbeddings([{ trackId: `${P}trk`, vector: AXIS_ZERO }]);
         await seedMoods();
         await rerunEnrichment("analysis");
         expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
@@ -265,11 +254,7 @@ describe("an identification re-run", () => {
             data: { status: "blocked", decidedAt: new Date(), decidedBy: "resolved-via-failures-api" },
         });
 
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-        );
+        await insertEmbeddings([{ trackId: `${P}trk`, vector: AXIS_ZERO }]);
         await seedMoods();
         await rerunEnrichment("identification");
         expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });

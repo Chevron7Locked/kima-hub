@@ -50,7 +50,6 @@ jest.mock('../../services/rss-parser', () => ({
     rssParserService: { parseFeed: jest.fn() },
 }));
 
-
 jest.mock('../../utils/ssrf', () => ({
     validateUrlForFetch: jest.fn().mockResolvedValue(null),
 }));

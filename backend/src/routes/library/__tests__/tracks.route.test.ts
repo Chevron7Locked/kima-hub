@@ -3,8 +3,6 @@
  * unanalysed, 404 for an unknown id, and the list transform's matching shape.
  */
 
-// All mocks must be before imports
-
 jest.mock('../../../utils/db', () => ({
     prisma: {
         track: {
@@ -168,7 +166,7 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
     it('returns the exact 8-field shape for an analyzed track', () => {
         const result = toAudioFeaturesDTO(ANALYZED_TRACK);
 
-        // Verify all 15 fields are present
+        // All 8 fields are present
         const expectedFields = [
             'bpm', 'energy', 'valence', 'arousal', 'danceability',
             'keyScale', 'instrumentalness', 'analysisMode',

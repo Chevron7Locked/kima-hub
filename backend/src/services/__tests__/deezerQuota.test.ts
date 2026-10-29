@@ -8,24 +8,13 @@ import path from "path";
 
 const mockGet = jest.fn();
 jest.mock("axios", () => ({ __esModule: true, default: { get: (...a: unknown[]) => mockGet(...a) } }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 const mockCache = new Map<string, string>();
-jest.mock("../../utils/cacheWrapper", () => ({
-    CacheWrapper: class {
-        async get(key: string) {
-            return mockCache.get(key) ?? null;
-        }
-        async set(key: string, value: string) {
-            mockCache.set(key, value);
-        }
-    },
-}));
+jest.mock("../../utils/cacheWrapper", () => require("./helpers/deezerMocks").memoryCacheMock(mockCache));
 
 import { deezerService } from "../deezer";
 
-const QUOTA = JSON.parse(fs.readFileSync(path.join(__dirname, "../../__tests__/fixtures/deezer/quota.json"), "utf8")).body;
+const QUOTA = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/deezer/quota.json"), "utf8")).body;
 const playlist = (id: number) => ({ id, title: `List ${id}`, picture_medium: "", nb_tracks: 10, user: { name: "Deezer" }, fans: 1 });
 
 beforeEach(() => {

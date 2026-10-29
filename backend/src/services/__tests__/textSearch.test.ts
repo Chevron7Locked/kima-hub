@@ -4,16 +4,9 @@
  */
 import { prisma } from "../../utils/db";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
+import { insertEmbeddings, unitVectorAt, unitVectorValues } from "../../__tests__/helpers/embeddingFixtures";
 
-// Unit 512-dim vector with cosine `cos` to the axis-0 unit vector.
-function unitVectorAt(cos: number, axis: number): number[] {
-    const v = Array(512).fill(0);
-    v[0] = cos;
-    v[axis] = Math.sqrt(1 - cos * cos);
-    return v;
-}
-
-const QUERY = unitVectorAt(1, 1);
+const QUERY = unitVectorValues(1, 1);
 // Every seeded track scores below 0.40; the order must still hold.
 const SEEDS: Array<[string, number]> = [
     ["low", 0.1],
@@ -51,12 +44,7 @@ beforeAll(async () => {
                 fileSize: 1000,
             },
         });
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-            id,
-            `[${unitVectorAt(cos, i + 2).join(",")}]`,
-        );
+        await insertEmbeddings([{ trackId: id, vector: unitVectorAt(cos, i + 2) }]);
     }
 });
 

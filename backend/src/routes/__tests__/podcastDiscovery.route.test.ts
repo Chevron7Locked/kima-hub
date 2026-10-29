@@ -3,10 +3,7 @@
  * the category list, a category's chart, "for you" rows from what the user follows, and similar shows.
  * Real router, database and Redis.
  */
-jest.mock("../../middleware/auth", () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_poddisc", username: "t" }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_poddisc", username: "t" }; next(); },
-}));
+jest.mock("../../middleware/auth", () => require("./helpers/podcastRoute").podcastAuthMock("u_poddisc"));
 
 import express from "express";
 import request from "supertest";
@@ -80,7 +77,7 @@ it("refuses a category that is not an id", async () => {
     expect((await request(app).get("/podcasts/charts?category=comedy")).status).toBe(400);
 });
 
-it("keeps the old discover endpoints answering from the charts", async () => {
+it("answers the discover top and genres endpoints from the charts", async () => {
     const top = await request(app).get("/podcasts/discover/top?limit=3");
     expect(top.status).toBe(200);
     expect(top.body.map((p: any) => p.chartRank)).toEqual([1, 2, 3]);

@@ -9,33 +9,15 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { spotifyImportService } from "../spotifyImport";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { normalizeArtistName } from "../artistIdentity";
+import { artistWithTracks, removeImportRows } from "./helpers/spotifyImportRows";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "sprefresh";
 const JOB = `${P}job`;
 
-async function cleanup() {
-    await prisma.$executeRawUnsafe(`DELETE FROM "Playlist" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
-}
-
-async function artistWithTrack(key: string, name: string, title: string) {
-    await prisma.artist.create({
-        data: { id: `${P}${key}`, name, normalizedName: normalizeArtistName(name), identityKey: `${P}-${key}` },
-    });
-    await prisma.album.create({
-        data: { id: `${P}${key}alb`, artistId: `${P}${key}`, rgMbid: `${P}-rg-${key}`, primaryType: "Album", title: `${name} Album` },
-    });
-    await prisma.track.create({
-        data: {
-            id: `${P}${key}t`, albumId: `${P}${key}alb`, title, trackNo: 1, duration: 300,
-            filePath: `/tmp/${P}-${key}.flac`, fileModified: new Date(), fileSize: 1000,
-        },
-    });
-}
+const cleanup = () => removeImportRows(P);
+const artistWithTrack = (key: string, name: string, title: string) =>
+    artistWithTracks(P, key, name, [title], normalizeArtistName(name));
 
 const pending = (artist: string, title: string, album: string) => ({
     artist, title, album, albumMbid: null, artistMbid: null, preMatchedTrackId: null, isrc: null,

@@ -271,8 +271,7 @@ describe("Midnight Drive", () => {
 
 describe("the tie order between night songs that rank the same", () => {
     // 20 songs by one artist and 15 by others, each played once: every song ranks the same, so the day's seeded order
-    // alone chooses, and the artist cap (2) is applied once to that order. The 18 big-artist songs beyond the cap used to
-    // sit ahead of every other song on every day, so the same two were always picked.
+    // alone chooses, and the artist cap (2) is applied once to that order, so the big artist's picks vary by day.
     let big: string[];
     beforeAll(async () => {
         await prisma.artist.create({ data: { id: `${PREFIX}bigart`, name: "Big Artist", identityKey: `${PREFIX}bigak` } });

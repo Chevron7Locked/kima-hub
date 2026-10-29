@@ -4,7 +4,8 @@
  */
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { prisma } from "../../utils/db";
-import { redisClient, waitForRedisReady } from "../../utils/redis";
+import { waitForRedisReady } from "../../utils/redis";
+import { clearCatalogCache } from "./helpers/catalogCache";
 import * as catalog from "../podcastCatalog";
 
 const recording = loadRecording("apple", "catalog");
@@ -12,11 +13,6 @@ let replay: ReplayServer;
 
 const DND = "1450241676";
 const P = "pod_catalog_dnd";
-
-async function clearCatalogCache() {
-    const keys = await redisClient.keys("podcasts:*");
-    if (keys.length > 0) await redisClient.del(...keys);
-}
 
 beforeAll(async () => {
     replay = await startReplayServer(recording);

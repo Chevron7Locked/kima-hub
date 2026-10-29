@@ -6,143 +6,23 @@
 
 // ── Queues + Redis + network services: observe, never hit the wire ──────
 
-const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job-1" });
-const mockQueueClean = jest.fn().mockResolvedValue([]);
-const mockQueueGetJob = jest.fn().mockResolvedValue(null);
-const mockQueueResume = jest.fn().mockResolvedValue(undefined);
-
-jest.mock("../../workers/enrichmentQueues", () => ({
-    QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
-        TRACKS: "enrichment-tracks",
-        VIBE: "enrichment-vibe",
-        PODCASTS: "enrichment-podcasts",
-    },
-    artistQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    trackQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    vibeQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    podcastQueue: {
-        add: mockQueueAdd, clean: mockQueueClean, getJob: mockQueueGetJob,
-        resume: mockQueueResume, pause: jest.fn().mockResolvedValue(undefined),
-    },
-    createWorkerConnection: () => ({ host: "localhost", port: 6379 }),
-    closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
-}));
-
-const mockRedis = {
-    rpush: jest.fn().mockResolvedValue(1),
-    llen: jest.fn().mockResolvedValue(0),
-    del: jest.fn().mockResolvedValue(1),
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn().mockResolvedValue("OK"),
-    publish: jest.fn().mockResolvedValue(1),
-    subscribe: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    quit: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn(),
-    status: "ready",
-};
-
-jest.mock("ioredis", () => jest.fn().mockImplementation(() => mockRedis));
-jest.mock("../../config", () => ({
-    config: { redisUrl: "redis://localhost:6379", music: { musicPath: "/music" } },
-}));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
+jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
+jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
+jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
+jest.mock("../../utils/logger", () => require("../../__tests__/helpers/enrichmentMocks").loggerMock);
+jest.mock("../../services/enrichmentState", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
+jest.mock("../../services/enrichmentFailureService", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
+jest.mock("../../services/featureDetection", () => require("../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
+jest.mock("../../services/trackIdentity", () => require("../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
+jest.mock("../../services/musicbrainz", () => require("../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
+jest.mock("../../services/acoustidIdentification", () => require("../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
+jest.mock("../../services/sourcePauseController", () => require("../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
+jest.mock("../../workers/audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
+jest.mock("../../workers/artistEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").artistEnrichmentWorkerMock);
+jest.mock("../../workers/trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
+jest.mock("../../workers/podcastEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").podcastEnrichmentWorkerMock);
 
 // The database and requireAdmin are real.
-
-jest.mock("../../services/enrichmentState", () => ({
-    enrichmentStateService: {
-        updateState: jest.fn().mockResolvedValue({}),
-        getState: jest.fn().mockResolvedValue(null),
-        initializeState: jest.fn().mockResolvedValue({}),
-        clear: jest.fn().mockResolvedValue(undefined),
-        detectHang: jest.fn().mockResolvedValue(false),
-        clearGate: jest.fn().mockResolvedValue(undefined),
-        publishToChannel: jest.fn().mockResolvedValue(undefined),
-        markFailed: jest.fn().mockResolvedValue(undefined),
-        waitForStatus: jest.fn().mockResolvedValue(null),
-    },
-}));
-
-jest.mock("../../services/enrichmentFailureService", () => ({
-    enrichmentFailureService: {
-        recordFailure: jest.fn().mockResolvedValue({}),
-        cleanupOrphanedFailures: jest.fn().mockResolvedValue({ cleaned: 0, checked: 0 }),
-        cleanupOldResolved: jest.fn().mockResolvedValue(0),
-        getFailures: jest.fn().mockResolvedValue({ failures: [], total: 0 }),
-        getFailure: jest.fn().mockResolvedValue(null),
-        getFailureCounts: jest.fn().mockResolvedValue({}),
-        resetRetryCount: jest.fn().mockResolvedValue(0),
-    },
-}));
-
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: { analyzerRunning: jest.fn().mockResolvedValue(false), clapRunning: jest.fn().mockResolvedValue(false),
-        getFeatures: jest.fn().mockResolvedValue({
-            vibeEmbeddings: true, podcastSupport: false, fpcalc: true,
-        }),
-    },
-}));
-
-jest.mock("../../services/trackIdentity", () => ({
-    trackIdentityService: {
-        populateTrackGenres: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../services/musicbrainz", () => ({
-    musicBrainzService: {
-        searchRecording: jest.fn().mockResolvedValue(null),
-        getRecordingGenres: jest.fn().mockResolvedValue(null),
-    },
-}));
-
-jest.mock("../../services/acoustidIdentification", () => ({
-    prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
-    identifyTrackByAcoustid: jest.fn().mockResolvedValue({ kind: "absent", evidence: { mocked: true } }),
-    persistAcoustidFingerprint: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock("../../services/sourcePauseController", () => ({
-    sourcePauseController: {
-        isPaused: jest.fn().mockResolvedValue(false),
-        open: jest.fn().mockResolvedValue(undefined),
-        close: jest.fn().mockResolvedValue(undefined),
-        // recordStageFailure consults the pause controller on every failure.
-        handleRateLimit: jest.fn().mockResolvedValue(false),
-        getPause: jest.fn().mockResolvedValue(null),
-        windowMs: 60_000,
-    },
-}));
-
-jest.mock("../../workers/audioCompletionSubscriber", () => ({
-    startAudioCompletionSubscriber: jest.fn(),
-    stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
-    haltVibeQueuing: jest.fn(),
-    resumeVibeQueuing: jest.fn(),
-}));
-
-jest.mock("../../workers/artistEnrichmentWorker", () => ({
-    startArtistEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../../workers/trackEnrichmentWorker", () => ({
-    startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
-jest.mock("../../workers/podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
-}));
 
 // Services the control routes reach through to the network.
 jest.mock("../../services/imageBackfill", () => ({ repairBrokenCovers: jest.fn() }));
@@ -161,6 +41,8 @@ jest.mock("../../utils/redis", () => ({
     redisClient: { get: jest.fn(), setex: jest.fn(), del: jest.fn(), set: jest.fn() },
 }));
 
+import { putStage as seedStage } from "../../__tests__/helpers/trackStage";
+import { mockQueueAdd, mockRedis } from "../../__tests__/helpers/enrichmentMocks";
 import request from "supertest";
 import express from "express";
 
@@ -176,6 +58,13 @@ import enrichmentRouter from "../../routes/enrichment";
 const PREFIX = "redec";
 const id = (n: string) => `${PREFIX}_${n}`;
 
+const putStage = (trackId: string, stage: string, status: string, opts: { attempt?: number } = {}) =>
+    seedStage(trackId, stage, status, {
+        attempt: opts.attempt ?? 3,
+        evidence: { probe: "ffmpeg -i", rc: 0 },
+        decided: true,
+    });
+
 async function seedLibrary(): Promise<void> {
     await prisma.artist.create({
         data: { id: id("art"), name: "Redec Artist", identityKey: id("a") },
@@ -183,42 +72,6 @@ async function seedLibrary(): Promise<void> {
     await prisma.album.create({
         data: { id: id("alb"), rgMbid: id("rg"), artistId: id("art"), title: "Redec Album", primaryType: "Album" },
     });
-}
-
-async function putStage(
-    trackId: string,
-    stage: string,
-    status: string,
-    opts: { attempt?: number } = {},
-): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt, "lastErrorCode",
-             "lastErrorMessage", "failureClass", retryable, "nextRetryAt", evidence,
-             "decidedAt", "decidedBy")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = EXCLUDED.status,
-                source = EXCLUDED.source,
-                attempt = EXCLUDED.attempt,
-                "lastErrorCode" = EXCLUDED."lastErrorCode",
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                "failureClass" = EXCLUDED."failureClass",
-                retryable = EXCLUDED.retryable,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                evidence = EXCLUDED.evidence,
-                "decidedAt" = EXCLUDED."decidedAt",
-                "decidedBy" = EXCLUDED."decidedBy"`,
-        `${trackId}__${stage}`, trackId, stage, status,
-        "analyzer", opts.attempt ?? 3,
-        status === "done" ? null : "TEST_SEED",
-        status === "done" ? null : "seeded by test",
-        status === "done" ? null : "INCONCLUSIVE",
-        true, null,
-        JSON.stringify({ probe: "ffmpeg -i", rc: 0 }),
-        status === "done" ? new Date() : null,
-        status === "done" ? "engine" : null,
-    );
 }
 
 async function seedTrack(
@@ -282,7 +135,6 @@ beforeEach(async () => {
 afterAll(async () => {
     await waitForFingerprintWork();
     await wipe();
-    await prisma.$disconnect();
 });
 
 // ── the function itself ──────────────────────────────────────────────────

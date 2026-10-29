@@ -64,11 +64,9 @@ async function cleanup() {
 
 beforeAll(async () => {
     await cleanup();
-    // Two spellings of one genre on artists of different sizes, one artist tagged with BOTH spellings
-    // (it must be counted once), a band named "Jazz" tagged with its own name (its songs must not
-    // count as the jazz genre), a plain jazz artist beside it, and an artist whose enriched genres
-    // are ["jazz"] while a person tagged it ["rock"] (the person's list REPLACES the enriched one:
-    // the artist is rock, no longer jazz). 15 songs so the web's /genres (15-song minimum) lists it.
+    // Two spellings of one genre, one artist tagged with both, a band named "Jazz" tagged "jazz", a plain
+    // jazz artist, and "split" (enriched ["jazz"], person-set ["rock"]). Its 15 songs meet the web's
+    // /genres minimum.
     await seedArtist("hiphop2", "Quorvex Twin", ["Hip-Hop"], 2);
     await seedArtist("hiphop3", "Quorvex Sound", ["hip hop"], 3);
     await seedArtist("both", "Quorvex Dialect", ["Hip-Hop", "hip hop"], 4);
@@ -107,9 +105,8 @@ async function genreEntries() {
 describe("getGenres lists one genre per genreKey with summed counts", () => {
     it("merges the spellings of one genre into one entry named by its commonest spelling", async () => {
         const genres = await genreEntries();
-        // "Hip-Hop" (2 songs) + "hip hop" (3) + the artist tagged with both (4, counted once):
-        // one entry, 2+3+4 = 9 songs — an artist tagged with both spellings adds its songs ONCE,
-        // not twice. "hip hop" (3+4 = 7 songs) is the spelling carrying the most songs.
+        // 2 + 3 + 4 = 9 songs; the artist tagged with both spellings counts once.
+        // "hip hop" carries 3 + 4 = 7 songs, so it names the entry.
         const hipHop = genres.filter((g) => g.value.toLowerCase().replace(/[^a-z]/g, "").includes("hiphop"));
         expect(hipHop).toEqual([
             { value: "hip hop", songCount: 9, albumCount: 3 },
@@ -117,9 +114,7 @@ describe("getGenres lists one genre per genreKey with summed counts", () => {
     });
 
     it("an artist named like the genre is not counted in it", async () => {
-        // The band "Jazz" (tagged ["jazz"], 3 songs) is not the genre jazz: its self-name tag adds
-        // nothing. The jazz entry counts Quorvex Blue (2 songs) only — the split artist's person-set
-        // ["rock"] replaced its enriched ["jazz"], so it adds its songs to rock, not jazz.
+        // Only Quorvex Blue (2 songs) counts as jazz: the band "Jazz" does not, and "split" is rock.
         const genres = await genreEntries();
         expect(genres.find((g) => g.value === "jazz")).toEqual({ value: "jazz", songCount: 2, albumCount: 1 });
     });
@@ -132,8 +127,6 @@ describe("the web's genre matching and the Subsonic filters answer alike", () =>
         const web = await request(app()).get("/radio").query({ type: "genre", value: "hip hop", limit: 100 });
         expect(web.status).toBe(200);
         const webKeys = artistKeysOf((web.body.tracks as { id: string }[]).map((t) => t.id), "trk_");
-        // The band "Jazz" (artist "named") is not a hip-hop artist: an artist is matched by its
-        // tags, never by its name.
         expect(webKeys).toEqual(["both", "hiphop2", "hiphop3"]);
         expect(subsonicKeys).toEqual(webKeys);
     });
@@ -150,15 +143,13 @@ describe("the web's genre matching and the Subsonic filters answer alike", () =>
     it("the band named 'Jazz' is reached through the genre it is tagged with, like anyone else", async () => {
         const songs = await subsonic("/getSongsByGenre.view", { genre: "jazz", count: 500 });
         const keys = artistKeysOf(list(songs.songsByGenre.song).map((s: { id: string }) => s.id), "trk_");
-        // "split" is not here: its person-set ["rock"] replaced its enriched ["jazz"].
+        // "split" is absent: its person-set genres replace its enriched ones.
         expect(keys).toEqual(["jazz", "named"]);
     });
 
     it("an artist's person-set genres replace its enriched genres, in every surface", async () => {
-        // "Quorvex Split": enriched genres ["jazz"], person-set genres ["rock"] (getMergedGenres:
-        // the person's non-empty list REPLACES the enriched one). Every surface that filters by
-        // genre must find it for rock ONLY — not for jazz, the genre the person removed — and
-        // getGenres and the web's /genres must count it under rock alone.
+        // "split" has enriched genres ["jazz"] and person-set genres ["rock"], so every surface finds it
+        // under rock only, and getGenres and the web's /genres count it under rock alone.
         const jazzSongs = await subsonic("/getSongsByGenre.view", { genre: "jazz", count: 500 });
         expect(artistKeysOf(list(jazzSongs.songsByGenre.song).map((s: { id: string }) => s.id), "trk_")).not.toContain("split");
 
@@ -178,9 +169,7 @@ describe("the web's genre matching and the Subsonic filters answer alike", () =>
         const genres = await genreEntries();
         expect(genres.find((g) => g.value === "rock")).toEqual({ value: "rock", songCount: 15, albumCount: 1 });
 
-        // The web's own list: the split artist's 15 library songs carry the rock genre; its 15 songs
-        // are counted under rock (the web counts songs through the same computeGenreTotals) and
-        // none of its songs under jazz. The web list is capped at 20 genres, so look it up by name.
+        // The web list is capped at 20 genres, so look rock up by name.
         const webGenres = await request(app()).get("/genres");
         expect(webGenres.status).toBe(200);
         const webRock = (webGenres.body.genres as { genre: string; count: number }[]).find((g) => g.genre === "rock");

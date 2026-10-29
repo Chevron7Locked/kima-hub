@@ -1,7 +1,6 @@
 /**
  * populateTrackGenres against the suite's real Postgres: songs of one album finishing at the
- * same moment with the same new genres all get them (a live 59-song run lost 5 songs to a
- * unique-constraint failure on Genre.name), and a later answer replaces the earlier set.
+ * same moment with the same new genres all get them (no unique-constraint failure on Genre.name), and a later answer replaces the earlier set.
  */
 
 import { prisma } from "../../utils/db";

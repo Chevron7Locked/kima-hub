@@ -99,7 +99,6 @@ beforeEach(async () => {
 afterAll(async () => {
     await wipe();
     await prisma.sourceAttempt.deleteMany({ where: { source: "musicbrainz" } });
-    await prisma.$disconnect();
     await closeEngineConnections();
 });
 

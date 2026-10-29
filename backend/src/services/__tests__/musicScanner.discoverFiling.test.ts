@@ -1,37 +1,11 @@
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
-        getFeatures: jest.fn().mockResolvedValue({
-            musicCNN: false,
-            vibeEmbeddings: false,
-            audiobookshelfEnabled: false,
-            fpcalc: false,
-        }),
-    },
-}));
-jest.mock("../../services/acoustidService", () => ({
-    acoustidService: { lookup: jest.fn().mockResolvedValue(null) },
-}));
-jest.mock("../../services/fpcalc", () => ({
-    fpcalcService: {
-        isAvailable: jest.fn().mockResolvedValue(false),
-        fingerprintFile: jest.fn().mockResolvedValue(null),
-    },
-}));
-jest.mock("../../services/coverArtExtractor", () => ({
-    CoverArtExtractor: jest.fn().mockImplementation(() => ({})),
-}));
-jest.mock("../../services/artwork", () => ({
-    findAlbumArtwork: jest.fn().mockResolvedValue(null),
-}));
-jest.mock("../../services/artistCountsService", () => ({
-    backfillAllArtistCounts: jest.fn().mockResolvedValue(undefined),
-}));
-jest.mock("../../services/imageStorage", () => ({
-    findLocalArtistImage: jest.fn().mockResolvedValue(null),
-}));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../services/featureDetection", () => require("./helpers/scannerMocks").featureDetectionMock());
+jest.mock("../../services/acoustidService", () => require("./helpers/scannerMocks").acoustidServiceMock());
+jest.mock("../../services/fpcalc", () => require("./helpers/scannerMocks").fpcalcMock());
+jest.mock("../../services/coverArtExtractor", () => require("./helpers/scannerMocks").coverArtExtractorMock());
+jest.mock("../../services/artwork", () => require("./helpers/scannerMocks").artworkMock());
+jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
+jest.mock("../../services/imageStorage", () => require("./helpers/scannerMocks").imageStorageMock());
 
 import fs from "fs";
 import os from "os";
@@ -65,13 +39,13 @@ interface Album {
 const ALBUMS: Album[] = [
     // A Discover download asked for exactly this album.
     { key: "exact", artist: "Scanfile Dynatron", album: "Scanfile Origins", expect: "DISCOVER" },
-    // The same title by another artist: the listener's own album (it was filed as Discover by title alone).
+    // The same title by another artist: the listener's own album (a title match alone must not file it as Discover).
     { key: "sametitle", artist: "Scanfile Danger", album: "Scanfile Origins", expect: "LIBRARY" },
     // A Discover download asked for it by id; the files carry a different title.
     { key: "byid", artist: "Scanfile Byid", album: "Scanfile Retitled", rg: RG.jobbyid, expect: "DISCOVER" },
     // An artist Discover once suggested (and the listener rejected): their own download of another album.
     { key: "oncesuggested", artist: "Scanfile Artificial", album: "Scanfile The Observer", expect: "LIBRARY" },
-    // A current suggestion with no Discover download: the old playlist recorded listeners' own albums this way.
+    // A current suggestion with no Discover download: a suggestion alone does not make an album Discover's.
     { key: "current", artist: "Scanfile Current", album: "Scanfile This Week", expect: "LIBRARY" },
     // A Discover album the listener liked.
     { key: "liked", artist: "Scanfile Liked", album: "Scanfile Kept", expect: "LIBRARY" },

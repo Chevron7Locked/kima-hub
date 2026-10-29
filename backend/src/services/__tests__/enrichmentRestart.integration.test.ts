@@ -1,5 +1,5 @@
 /**
- * Wiping the enrichment clears what the five enrichment steps worked out and nothing else: the library, which
+ * Wiping the enrichment clears what the six enrichment steps worked out and nothing else: the library, which
  * recording and artist each file is, artist images, user edits, playlists, plays and likes stay.
  */
 import { prisma } from "../../utils/db";
@@ -7,6 +7,7 @@ import { wipeEnrichment } from "../enrichmentRestart";
 import { redisClient } from "../../utils/redis";
 import { trackQueue, vibeQueue } from "../../workers/enrichmentQueues";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 
 const P = "cwipe";
 
@@ -46,11 +47,7 @@ beforeAll(async () => {
             isrc: "GBAYE0601498", isrcSource: "musicbrainz", displayTitle: "My Title", hasUserOverrides: true,
         },
     });
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-        `${P}trk`, `[${Array.from({ length: 512 }, (_, i) => (i === 0 ? 1 : 0)).join(",")}]`,
-    );
+    await insertEmbeddings([{ trackId: `${P}trk`, vector: AXIS_ZERO }]);
     await prisma.$executeRawUnsafe(
         `INSERT INTO matching_feel (track_id, embedded_at, probe, valence, arousal)
          SELECT track_id, analyzed_at, 'p', 0.5, 0.5 FROM track_embeddings WHERE track_id = $1`, `${P}trk`,

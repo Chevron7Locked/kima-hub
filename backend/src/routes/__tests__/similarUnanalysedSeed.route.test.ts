@@ -1,7 +1,7 @@
 /**
  * "Similar tracks" for a seed with no embedding answers 404, not arbitrary
- * tracks, on the vibe route. Real router, service and
- * database; auth, redis, logger and featureDetection are mocked.
+ * tracks, on the vibe route. Real router, service and database; auth, redis,
+ * logger and featureDetection are mocked.
  */
 
 import express from "express";
@@ -120,10 +120,9 @@ afterAll(async () => {
     await prisma.artist.deleteMany({
         where: { id: { in: ALL_TRACK_IDS.map((id) => `cart_${id}`) } },
     });
-    await prisma.$disconnect();
 });
 
-describe("similar tracks for an unanalysed seed (S2)", () => {
+describe("similar tracks for an unanalysed seed", () => {
     it("GET /api/vibe/similar/:trackId answers 404 with the not-analysed body", async () => {
         const res = await request(vibeApp).get(`/api/vibe/similar/${UNANALYSED_ID}`);
         expect(res.status).toBe(404);
@@ -148,8 +147,8 @@ describe("similar tracks for an unanalysed seed (S2)", () => {
         expect(res.body.sourceTrackId).toBe(SEED_ID);
         expect(res.body.tracks).toHaveLength(1);
         expect(res.body.tracks[0].id).toBe(NEIGHBOUR_ID);
-        // Both tracks have the same feel, so feel adds nothing and the identical
-        // neighbour scores its sound alone: 1 of the 1.0625 a track with feel scores.
+        // Both tracks have the same feel, so the identical neighbour scores its sound
+        // alone: 1 out of SELF_SCORE, the most a track can score against itself.
         expect(res.body.tracks[0].similarity).toBeCloseTo(1 / SELF_SCORE, 5);
         expect(res.body.tracks[0].album.title).toBe(`L ${NEIGHBOUR_ID}`);
         expect(res.body.tracks[0].artist.name).toBe(`A ${NEIGHBOUR_ID}`);

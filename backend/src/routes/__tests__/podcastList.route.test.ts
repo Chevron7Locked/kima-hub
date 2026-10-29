@@ -2,10 +2,7 @@
  * GET /podcasts lists the shows a user follows, each with when it last published, so the page can sort by it.
  * Real router and database.
  */
-jest.mock("../../middleware/auth", () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podlist", username: "t" }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podlist", username: "t" }; next(); },
-}));
+jest.mock("../../middleware/auth", () => require("./helpers/podcastRoute").podcastAuthMock("u_podlist"));
 
 import express from "express";
 import request from "supertest";

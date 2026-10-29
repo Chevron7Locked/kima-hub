@@ -10,35 +10,15 @@ jest.mock("../notificationService", () => ({
 import { prisma } from "../../utils/db";
 import { spotifyImportService } from "../spotifyImport";
 import { eventBus, type SSEEvent } from "../eventBus";
+import { artistWithTracks as addArtistWithTracks, removeImportRows } from "./helpers/spotifyImportRows";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const heard: SSEEvent[] = [];
 const P = "sprec";
 
-async function cleanup() {
-    await prisma.$executeRawUnsafe(`DELETE FROM "Playlist" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
-}
-
-async function artistWithTracks(key: string, name: string, titles: string[]) {
-    await prisma.artist.create({
-        data: { id: `${P}${key}`, name, normalizedName: name.toLowerCase(), identityKey: `${P}-${key}` },
-    });
-    await prisma.album.create({
-        data: { id: `${P}${key}alb`, artistId: `${P}${key}`, rgMbid: `${P}-rg-${key}`, primaryType: "Album", title: `${name} Album` },
-    });
-    for (const [i, title] of titles.entries()) {
-        await prisma.track.create({
-            data: {
-                id: `${P}${key}t${i}`, albumId: `${P}${key}alb`, title, trackNo: i + 1, duration: 200,
-                filePath: `/tmp/${P}-${key}-${i}.flac`, fileModified: new Date(), fileSize: 1000,
-            },
-        });
-    }
-}
+const cleanup = () => removeImportRows(P);
+const artistWithTracks = (key: string, name: string, titles: string[]) =>
+    addArtistWithTracks(P, key, name, titles, name.toLowerCase());
 
 beforeAll(async () => {
     await cleanup();

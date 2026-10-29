@@ -90,9 +90,7 @@ beforeAll(async () => {
             })),
         });
     }
-});
 
-beforeAll(async () => {
     await prisma.artist.create({
         data: { id: `${P}art_17`, name: "Spelling Artist 17", normalizedName: "spelling artist 17", identityKey: `${P}ak_17`, genres: ["hip hop"] },
     });

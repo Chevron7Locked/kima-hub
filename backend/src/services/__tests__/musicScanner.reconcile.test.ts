@@ -7,24 +7,14 @@
  * Real scanner, temp directory, test database.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-jest.mock("../../services/featureDetection", () => ({
-    featureDetection: {
-        getFeatures: jest.fn().mockResolvedValue({
-            musicCNN: false, vibeEmbeddings: false, audiobookshelfEnabled: false, fpcalc: false,
-        }),
-    },
-}));
-jest.mock("../../services/acoustidService", () => ({ acoustidService: { lookup: jest.fn().mockResolvedValue(null) } }));
-jest.mock("../../services/fpcalc", () => ({
-    fpcalcService: { isAvailable: jest.fn().mockResolvedValue(false), fingerprintFile: jest.fn().mockResolvedValue(null) },
-}));
-jest.mock("../../services/coverArtExtractor", () => ({ CoverArtExtractor: jest.fn().mockImplementation(() => ({})) }));
-jest.mock("../../services/artwork", () => ({ findAlbumArtwork: jest.fn().mockResolvedValue(null) }));
-jest.mock("../../services/artistCountsService", () => ({ backfillAllArtistCounts: jest.fn().mockResolvedValue(undefined) }));
-jest.mock("../../services/imageStorage", () => ({ findLocalArtistImage: jest.fn().mockResolvedValue(null) }));
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../services/featureDetection", () => require("./helpers/scannerMocks").featureDetectionMock());
+jest.mock("../../services/acoustidService", () => require("./helpers/scannerMocks").acoustidServiceMock());
+jest.mock("../../services/fpcalc", () => require("./helpers/scannerMocks").fpcalcMock());
+jest.mock("../../services/coverArtExtractor", () => require("./helpers/scannerMocks").coverArtExtractorMock());
+jest.mock("../../services/artwork", () => require("./helpers/scannerMocks").artworkMock());
+jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
+jest.mock("../../services/imageStorage", () => require("./helpers/scannerMocks").imageStorageMock());
 
 import fs from "fs";
 import os from "os";

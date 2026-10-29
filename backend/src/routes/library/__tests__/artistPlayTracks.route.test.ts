@@ -92,7 +92,7 @@ beforeAll(async () => {
     await makeTrack(`${P}alb-disc`, 5, { disc: 2 });
     await makeTrack(`${P}alb-disc`, 1, { disc: 1 });
     await makeTrack(`${P}alb-disc`, 3, { disc: 1 });
-    // No year at all: sorts last, like iOS treating missing as 0.
+    // No year at all: sorts last.
     await makeAlbum(`${P}alb-nodate`, "Delta", {});
     await makeTrack(`${P}alb-nodate`, 1);
     // An album kept from Discover: it may be a pending or failed download, so it stays out of the queue.
@@ -102,7 +102,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
     await cleanup();
-    await prisma.$disconnect();
     await closeEngineConnections();
 });
 
@@ -120,8 +119,7 @@ describe("GET /library/artists/:id/play-tracks", () => {
             // no year: last
             `${P}alb-nodate-t1`,
         ]);
-        // DISCOVER-owned albums never ride the queue — a pending or failed
-        // download has no file to stream
+        // A DISCOVER album may be a pending or failed download with no file to stream.
         expect(res.body.tracks.map((t: any) => t.id)).not.toContain(`${P}alb-disco-t1`);
     });
 
@@ -129,18 +127,18 @@ describe("GET /library/artists/:id/play-tracks", () => {
         const res = await request(app).get(`/artists/${P}art/play-tracks`);
         const track = res.body.tracks[0];
         expect(Object.keys(track).sort()).toEqual([
-"album", "artist", "discNumber", "duration", "id", "title", "trackNo",
+            "album", "artist", "discNumber", "duration", "id", "title", "trackNo",
         ]);
         expect(Object.keys(track.album).sort()).toEqual(["coverArt", "id", "title"]);
         expect(Object.keys(track.artist).sort()).toEqual(["id", "name"]);
         expect(res.body.artist).toEqual({ id: `${P}art`, name: "Play Tracks Artist" });
-        // The page's heavy payload must not ride along.
+        // The artist page's heavy fields are left out.
         expect(track.audioFeatures).toBeUndefined();
         expect(track.bpm).toBeUndefined();
         expect(track.embedding).toBeUndefined();
     });
 
-    it("sorts an untagged disc with disc one, like the iOS albumOrder", async () => {
+    it("sorts an untagged disc with disc one", async () => {
         await makeAlbum(`${P}alb-mixed`, "Mixed", { year: 2019 });
         await makeTrack(`${P}alb-mixed`, 3, { disc: 1, title: "D1 T3" });
         await makeTrack(`${P}alb-mixed`, 2, { disc: null, title: "untagged" });

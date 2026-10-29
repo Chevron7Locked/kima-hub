@@ -2,15 +2,13 @@
  * GET /podcasts/listening: across the shows a user follows, episodes in progress (latest played first) and each
  * show's newest episode while unplayed; shows they don't follow and played episodes stay out. Real router and database.
  */
-jest.mock("../../middleware/auth", () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: "u_podlisten", username: "t" }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: "u_podlisten", username: "t" }; next(); },
-}));
+jest.mock("../../middleware/auth", () => require("./helpers/podcastRoute").podcastAuthMock("u_podlisten"));
 
 import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
+import { episodeOnDay } from "./helpers/podcastRoute";
 
 const app = express();
 app.use(express.json());
@@ -22,7 +20,6 @@ const OTHER = "pod_listen_other";
 const SECOND = "pod_listen_second";
 const CAUGHT_UP = "pod_listen_caught_up";
 const SHOWS = [FOLLOWED, OTHER, SECOND, CAUGHT_UP];
-const ep = (id: string, day: number) => ({ id, guid: id, title: id, audioUrl: `https://a.invalid/${id}.mp3`, duration: 600, publishedAt: new Date(Date.UTC(2026, 9, day)) });
 
 beforeAll(async () => {
     await prisma.podcast.deleteMany({ where: { id: { in: SHOWS } } });
@@ -30,24 +27,24 @@ beforeAll(async () => {
     await prisma.podcast.create({
         data: {
             id: FOLLOWED, feedUrl: "https://feeds.example.invalid/listen-1", title: "Followed Show",
-            episodes: { create: [ep("ep_new", 10), ep("ep_half", 5), ep("ep_done", 1)] },
+            episodes: { create: [episodeOnDay("ep_new", 10), episodeOnDay("ep_half", 5), episodeOnDay("ep_done", 1)] },
             subscriptions: { create: { userId: USER } },
         },
     });
     await prisma.podcast.create({
-        data: { id: OTHER, feedUrl: "https://feeds.example.invalid/listen-2", title: "Not Followed", episodes: { create: [ep("ep_other", 12)] } },
+        data: { id: OTHER, feedUrl: "https://feeds.example.invalid/listen-2", title: "Not Followed", episodes: { create: [episodeOnDay("ep_other", 12)] } },
     });
     await prisma.podcast.create({
         data: {
             id: SECOND, feedUrl: "https://feeds.example.invalid/listen-3", title: "Second Show",
-            episodes: { create: [ep("ep_second_new", 11), ep("ep_second_old", 8)] },
+            episodes: { create: [episodeOnDay("ep_second_new", 11), episodeOnDay("ep_second_old", 8)] },
             subscriptions: { create: { userId: USER } },
         },
     });
     await prisma.podcast.create({
         data: {
             id: CAUGHT_UP, feedUrl: "https://feeds.example.invalid/listen-4", title: "Caught Up",
-            episodes: { create: [ep("ep_caught_latest", 9), ep("ep_caught_old", 2)] },
+            episodes: { create: [episodeOnDay("ep_caught_latest", 9), episodeOnDay("ep_caught_old", 2)] },
             subscriptions: { create: { userId: USER } },
         },
     });

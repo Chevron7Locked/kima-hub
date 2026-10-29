@@ -1,8 +1,7 @@
 /**
- * The scanner's name helpers (nameKey) and the artistNormalization utilities it uses.
+ * nameKey (the shared name fold), normalizeArtistName and the artistNormalization utilities.
  */
 
-// All mocks must be before imports
 jest.mock('../../utils/db', () => ({
     prisma: {
         artist: { findFirst: jest.fn() },
@@ -18,50 +17,6 @@ jest.mock('../../utils/db', () => ({
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
-
-jest.mock('../../services/coverArtExtractor', () => ({
-    CoverArtExtractor: jest.fn().mockImplementation(() => ({})),
-}));
-
-jest.mock('../../services/deezer', () => ({
-    deezerService: {},
-}));
-
-jest.mock('../../services/artistCountsService', () => ({
-    backfillAllArtistCounts: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock('../../services/imageStorage', () => ({
-    findLocalArtistImage: jest.fn(),
-}));
-
-// AcoustID identification stack (imported by musicScanner). featureDetection
-// must be mocked at this boundary: the real one pulls utils/redis -> config,
-// whose zod validation requires env vars this unit suite does not provide.
-jest.mock('../../services/featureDetection', () => ({
-    featureDetection: {
-        getFeatures: jest.fn().mockResolvedValue({
-            musicCNN: false,
-            vibeEmbeddings: false,
-            audiobookshelfEnabled: false,
-            fpcalc: true,
-        }),
-    },
-}));
-
-jest.mock('../../services/acoustidService', () => ({
-    acoustidService: { lookup: jest.fn().mockResolvedValue(null) },
-}));
-
-jest.mock('../../services/fpcalc', () => ({
-    fpcalcService: {
-        isAvailable: jest.fn().mockResolvedValue(false),
-        fingerprintFile: jest.fn().mockResolvedValue(null),
-    },
-}));
-
-// music-metadata is pure ESM; provide a CJS-compatible stub
-jest.mock('music-metadata', () => ({ parseFile: jest.fn() }), { virtual: true });
 
 import { nameKey } from '../nameFold';
 import { normalizeArtistName } from '../artistIdentity';
@@ -158,7 +113,6 @@ describe('canonicalizeVariousArtists', () => {
     });
 });
 
-
 // ---------------------------------------------------------------------------
 // sanitizeTagString
 // ---------------------------------------------------------------------------
@@ -189,7 +143,6 @@ describe('sanitizeTagString', () => {
         expect(sanitizeTagString('  Track  ')).toBe('Track');
     });
 });
-
 
 // ---------------------------------------------------------------------------
 // parseArtistFromPath

@@ -12,8 +12,7 @@ const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const realSetImmediate = globalThis.setImmediate;
 
-// Clients register themselves at birth (ioredis.cjs, mapped in jest.config.js) on `net`, the one object every test
-// file's sandbox shares; the reaper closes whatever is still open when the file finishes.
+// Clients register themselves at birth (ioredis.cjs, mapped in jest.config.js).
 const registry = net.__testRedisClients || (net.__testRedisClients = new Map());
 
 async function reap(client) {

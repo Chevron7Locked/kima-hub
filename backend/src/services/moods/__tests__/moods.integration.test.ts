@@ -1,6 +1,6 @@
 /**
  * The mood step on a real database, checked against the arithmetic done in TypeScript from what the database holds:
- * each stored score against the folded dot product in float64 and against W1's shipped models before folding, which
+ * each stored score against the folded dot product in float64 and against the shipped models before folding, which
  * rows are recomputed and which are left alone, the cascade from the sound vector, the library statistics, and the
  * progress count.
  */
@@ -9,10 +9,14 @@ import { logger } from "../../../utils/logger";
 import { parseEmbedding } from "../../../utils/embedding";
 import { RECIPES, UnrankableLibraryError, getRecipe } from "../../mixes/recipes";
 import { pickStationTracks } from "../../../__tests__/helpers/stationPicks";
+import { seededRandom } from "../../matching/mapLayout";
+import { gaussian as sharedGaussian } from "../../../__tests__/fixtures/gaussian";
 import { refreshMoodSnapshot } from "../../moodBucketService";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { READINGS, buildMoodState, buildMoods, loadMoodState, moodProgress, updateMoods, type Reading } from "../state";
 import { writeMoodTags } from "../tags";
+import { insertEmbeddings, vectorLiteral } from "../../../__tests__/helpers/embeddingFixtures";
+import { removeMoodRows, untilWaiting } from "../../__tests__/helpers/moodRows";
 import reference from "./fixtures/shipped-reference.json";
 
 jest.mock("../../../utils/logger", () => ({
@@ -36,17 +40,8 @@ const UNANALYSED = `${P}unanalysed`;
 const NO_INSTRUMENTAL = `${P}noinstr`;
 const fixtureId = (n: number) => `${P}fix${n}`;
 
-function random(seed: number): () => number {
-    let s = seed >>> 0;
-    return () => {
-        s = (s + 0x6d2b79f5) >>> 0;
-        let x = Math.imul(s ^ (s >>> 15), 1 | s);
-        x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-    };
-}
-const rand = random(20261023);
-const gaussian = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+const rand = seededRandom(20261023);
+const gaussian = () => sharedGaussian(rand);
 /** A unit vector scaled a little off unit length, as the writer allows, or far off to show the scaling. */
 const vector = (scale = 1) => {
     const v = Array.from({ length: 512 }, gaussian);
@@ -66,22 +61,11 @@ async function insertTrack(id: string, extra: Record<string, unknown> = {}) {
 }
 
 async function insertVector(id: string, values: number[], model = MOOD_HEADS.model) {
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, $3, clock_timestamp())
-         ON CONFLICT (track_id) DO UPDATE SET embedding = EXCLUDED.embedding, analyzed_at = EXCLUDED.analyzed_at`,
-        id, `[${values.join(",")}]`, model,
-    );
+    await insertEmbeddings([{ trackId: id, vector: vectorLiteral(values) }], { model, clock: "clock_timestamp", replace: true });
 }
 
 /** The counts below are exact, so no sound vector from another file may be left in this worker's database. */
-async function cleanup() {
-    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-    await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
-}
+const cleanup = () => removeMoodRows(P);
 
 async function seed() {
     await prisma.artist.create({ data: { id: ARTIST, name: "Mood Artist", identityKey: `${P}-a` } });
@@ -171,7 +155,7 @@ describe("the mood step", () => {
         expect(maxScoreError(rows.values())).toBeLessThan(1e-4);
     });
 
-    it("matches W1's shipped models before folding, computed in NumPy, to 1e-4", async () => {
+    it("matches the shipped models before folding, computed in NumPy, to 1e-4", async () => {
         expect(reference.version).toBe(MOOD_HEADS.version);
         const rows = await stored();
         let worst = 0;
@@ -336,18 +320,7 @@ describe("a re-run that deletes a sound vector while the step scores it", () => 
             async (tx) => {
                 await tx.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, gone);
                 building = buildMoods();
-                // The build's insert waits on the deleted vector's row; watched from outside this transaction.
-                const giveUp = Date.now() + 20_000;
-                for (;;) {
-                    if (Date.now() > giveUp) throw new Error("The build never waited on the deleted vector");
-                    const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
-                        `SELECT count(*)::int AS n FROM pg_stat_activity
-                         WHERE datname = current_database() AND wait_event_type = 'Lock'
-                           AND position('INSERT INTO track_moods' IN query) > 0`,
-                    );
-                    if (n > 0) break;
-                    await new Promise((resolve) => setTimeout(resolve, 20));
-                }
+                await untilWaiting("INSERT INTO track_moods");
             },
             { timeout: 30_000, maxWait: 30_000 },
         );

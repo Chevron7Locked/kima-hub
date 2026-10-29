@@ -12,6 +12,8 @@ import { buildMoods, loadMoodState } from "../state";
 import { TAG_LINE_Z, writeMoodTags } from "../tags";
 import { rerunEnrichment } from "../../enrichmentRestart";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { insertEmbeddings } from "../../../__tests__/helpers/embeddingFixtures";
+import { removeMoodRows, untilWaiting } from "../../__tests__/helpers/moodRows";
 
 jest.mock("../../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -32,7 +34,7 @@ const SAD = [1.5, 1.24, 1.26, -1.5, -1.25, -0.75, -0.5, 0, 0, 0];
 const TAGS_BEFORE: string[][] = [["happy", "sad"], ["happy"], ["happy", "sad"], [], [], [], [], [], [], []];
 /** Scored, outside the statistics: a missing file. */
 const GONE = `${P}gone`;
-/** No sound vector yet, carrying the old analyzer's tags. */
+/** No sound vector yet, carrying tags of its own. */
 const UNSCORED = `${P}unscored`;
 
 async function insertTrack(id: string, extra: Record<string, unknown> = {}) {
@@ -56,10 +58,9 @@ let nextAxis = 100;
 /** A sound vector of the heads' model, and scores for it as if the mood step had computed them. */
 async function insertScores(id: string, scores: Partial<Record<Mood, number>>) {
     const axis = nextAxis++;
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-         VALUES ($1, $2::vector, $3, clock_timestamp())`,
-        id, `[${Array.from({ length: MOOD_HEADS.dims }, (_, i) => (i === axis ? 1 : 0)).join(",")}]`, MOOD_HEADS.model,
+    await insertEmbeddings(
+        [{ trackId: id, vector: `[${Array.from({ length: MOOD_HEADS.dims }, (_, i) => (i === axis ? 1 : 0)).join(",")}]` }],
+        { model: MOOD_HEADS.model, clock: "clock_timestamp" },
     );
     const values = MOODS.map((mood) => scores[mood] ?? 0);
     await prisma.$executeRawUnsafe(
@@ -92,35 +93,10 @@ async function tagsOf(ids: string[]): Promise<string[][]> {
 
 const library = (n: number) => Array.from({ length: n }, (_, i) => trackId(i));
 
-/**
- * Until a statement containing `fragment` waits on a lock. Watched from outside any transaction, which would see one
- * snapshot of the activity throughout; given up well inside a transaction's timeout, so a statement that never waits
- * fails the test.
- */
-async function untilWaiting(fragment: string) {
-    const giveUp = Date.now() + 20_000;
-    for (;;) {
-        if (Date.now() > giveUp) throw new Error(`No statement with ${fragment} waited on a lock`);
-        const [{ n }] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
-            `SELECT count(*)::int AS n FROM pg_stat_activity
-             WHERE datname = current_database() AND wait_event_type = 'Lock' AND position($1 IN query) > 0`,
-            fragment,
-        );
-        if (n > 0) return;
-        await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-}
-
 const holdTrack = (tx: Prisma.TransactionClient, id: string) =>
     tx.$executeRawUnsafe(`UPDATE "Track" SET title = title WHERE id = $1`, id);
 
-async function cleanup() {
-    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
-    await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${P}%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`);
-}
+const cleanup = () => removeMoodRows(P);
 
 beforeAll(async () => {
     await cleanup();
@@ -151,7 +127,7 @@ describe("mood tags", () => {
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
 
-    it("leave a track the statistics leave out untagged, the old analyzer's tags included", async () => {
+    it("leave a track the statistics leave out untagged, tags it already carries included", async () => {
         expect(await tagsOf([GONE, UNSCORED])).toEqual([[], []]);
     });
 
@@ -440,7 +416,8 @@ describe("the tags of a defined mood", () => {
 
     it("re-tags when only a tempo changes: the fingerprint covers it", async () => {
         const before = await tagsWith("driving");
-        // d00 becomes a steady 100 BPM song and d04 a steady 40 BPM one (80 doubled is out of the band, 20 halved too).
+        expect(before.length).toBeGreaterThan(0);
+        // d02 becomes a steady 100 BPM song and d04 a steady 40 BPM one (80 doubled is out of the band, 20 halved too).
         await prisma.track.update({ where: { id: dId(4) }, data: { bpm: 40 } });
         await prisma.track.update({ where: { id: dId(2) }, data: { bpm: 100, bpmConfidence: 3 } });
         const result = await pass();
@@ -448,7 +425,6 @@ describe("the tags of a defined mood", () => {
         list[4].bpm = 40;
         Object.assign(list[2], { bpm: 100, bpmConfidence: 3 });
         expect(await tagsWith("driving")).toEqual(expectedDriving(list));
-        expect(before.length).toBeGreaterThan(0);
     });
 
     it("tags no song while the library holds fewer than 8 scored songs", async () => {

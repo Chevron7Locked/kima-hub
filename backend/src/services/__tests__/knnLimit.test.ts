@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { connectionLimit, prisma } from "../../utils/db";
 import { MAX_SCAN_TUPLES, efFor, withEfSearch } from "../../utils/knn";
 import { searchTracksByEmbedding } from "../textEmbeddingBridge";
+import { insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -84,18 +85,7 @@ beforeAll(async () => {
             fileSize: 1000,
         })),
     });
-    for (let start = 0; start < TRACK_COUNT; start += 25) {
-        const ids = ALL_IDS.slice(start, start + 25);
-        const values = ids
-            .map((_, j) => `($${2 * j + 1}, $${2 * j + 2}::vector, 'laion-clap-music-onnx-v1', now())`)
-            .join(",");
-        const params = ids.flatMap((id, j) => [id, randomUnit(start + j)]);
-        await prisma.$executeRawUnsafe(
-            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-             VALUES ${values}`,
-            ...params,
-        );
-    }
+    await insertEmbeddings(ALL_IDS.map((trackId, i) => ({ trackId, vector: randomUnit(i) })));
     // The planner decides index vs seq scan from pg_class statistics, which a
     // plain INSERT leaves stale (reltuples=0 => "empty table" => seq scan).
     // ANALYZE makes the EXPLAIN guard below a truthful planner decision.
@@ -188,7 +178,6 @@ describe("utils/knn helper contract", () => {
     });
 });
 
-
 describe("text search with equal distances", () => {
     // Six copies of one sound, written in their ids' order: without the tie-break the index hands them back reversed.
     const COPY = randomUnit(777777);
@@ -202,11 +191,7 @@ describe("text search with equal distances", () => {
                     filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
                 },
             });
-            await prisma.$executeRawUnsafe(
-                `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-                 VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-                id, COPY,
-            );
+            await insertEmbeddings([{ trackId: id, vector: COPY }]);
         }
     });
 
@@ -284,11 +269,7 @@ describe("text search fills its limit past rows the index walk cannot return", (
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE 'cknn%'`);
         for (const [i, id] of ALL_IDS.entries()) {
             if (!KEPT.has(id)) continue;
-            await prisma.$executeRawUnsafe(
-                `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
-                 VALUES ($1, $2::vector, 'laion-clap-music-onnx-v1', now())`,
-                id, randomUnit(i),
-            );
+            await insertEmbeddings([{ trackId: id, vector: randomUnit(i) }]);
         }
         expect(await throughIndex()).toBe(true);
         const rows = await searchTracksByEmbedding(QUERY, 50);

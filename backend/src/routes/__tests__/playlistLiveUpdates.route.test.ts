@@ -11,7 +11,8 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import playlistsRoutes from "../playlists";
 import { prisma } from "../../utils/db";
-import { eventBus, type SSEEvent } from "../../services/eventBus";
+import type { SSEEvent } from "../../services/eventBus";
+import { cleanupMarked, listenTo, playlistAnnouncements, seedSongs } from "./helpers/liveEvents";
 
 const MARK = "zz-playlist-live";
 
@@ -28,37 +29,21 @@ let trackIds: string[];
 const heard: Record<string, SSEEvent[]> = {};
 const unsubscribe: Array<() => void> = [];
 
-async function cleanup(): Promise<void> {
-    await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
-    await prisma.track.deleteMany({ where: { title: { startsWith: MARK } } });
-    await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
-    await prisma.artist.deleteMany({ where: { name: { startsWith: MARK } } });
-}
-
 beforeAll(async () => {
-    await cleanup();
+    await cleanupMarked(MARK);
     owner = await prisma.user.create({ data: { username: `${MARK}-owner`, passwordHash: "test" } });
     other = await prisma.user.create({ data: { username: `${MARK}-other`, passwordHash: "test" } });
-    const artist = await prisma.artist.create({ data: { name: `${MARK} Artist`, identityKey: `${MARK}-artist`, libraryAlbumCount: 1 } });
-    const album = await prisma.album.create({
-        data: { rgMbid: `${MARK}-rg`, identityKey: `${MARK}-album`, primaryType: "Album", title: `${MARK} Album`, artistId: artist.id, location: "LIBRARY" },
-    });
-    trackIds = [];
-    for (let i = 0; i < 2; i += 1) {
-        const track = await prisma.track.create({
-            data: { title: `${MARK} Song ${i}`, albumId: album.id, trackNo: i + 1, duration: 100, filePath: `/${MARK}/${i}.flac`, fileModified: new Date(), fileSize: 1000 },
-        });
-        trackIds.push(track.id);
-    }
+    trackIds = await seedSongs(MARK, 2, { libraryAlbumCount: 1 });
     for (const user of [owner, other]) {
-        heard[user.id] = [];
-        unsubscribe.push(eventBus.subscribe(user.id, { send: (event) => (heard[user.id].push(event), true) }));
+        const listener = listenTo(user.id);
+        heard[user.id] = listener.heard;
+        unsubscribe.push(listener.stop);
     }
 });
 
 afterAll(async () => {
     unsubscribe.forEach((stop) => stop());
-    await cleanup();
+    await cleanupMarked(MARK);
 });
 
 beforeEach(() => {
@@ -69,7 +54,7 @@ beforeEach(() => {
 const asOwner = () => `Bearer ${tokenFor(owner.id, owner.username)}`;
 
 /** The playlist ids the owner's other devices were told about. */
-const announced = () => heard[owner.id].filter((e) => e.type === "playlist:updated").map((e) => e.payload.playlistId);
+const announced = () => playlistAnnouncements(heard[owner.id]).map((payload) => payload.playlistId);
 
 /** A playlist of the owner's, made directly, holding the given songs in order. */
 async function playlistWith(songs: string[]): Promise<string> {

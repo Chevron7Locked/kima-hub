@@ -1,8 +1,7 @@
 /**
  * findSimilarTracks returns at most 2 tracks per album and 4 per artist, the
- * seed included, and still fills the requested length; the features-only
- * fallback follows the same caps. The seed's album and artist sit strictly
- * closest, so an uncapped ranking would be flooded by them.
+ * seed included, and still fills the requested length. The seed's album and
+ * artist sit strictly closest, so an uncapped ranking would be flooded by them.
  */
 
 import { prisma } from "../../utils/db";
@@ -137,7 +136,7 @@ function countsBy<T>(rows: T[], key: (row: T) => string): Map<string, number> {
     return counts;
 }
 
-/** Highest per-group count in `counts` (0 when empty) — the crowding measure. */
+/** Highest per-group count in `counts` (-Infinity when empty) — the crowding measure. */
 function maxCount(counts: Map<string, number>): number {
     return Math.max(...Array.from(counts.values()));
 }

@@ -1,7 +1,6 @@
 /**
  * An episode's stored length becomes its audio's once the file is cached: ad networks stitch ads in,
- * so the feed's length runs minutes short (a real Acast episode: feed 4844 s, file 5344.2 s by
- * music-metadata, 5344.7 s by ffprobe). Real database; music-metadata is the suite's CJS stub.
+ * so the feed's length can run minutes short of the file. Real database; music-metadata is the suite's CJS stub.
  */
 import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";

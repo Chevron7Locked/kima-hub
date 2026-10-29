@@ -1,8 +1,8 @@
 /**
  * Caching an episode, downloaded from a real local host (under a public name, through the real address check) into
  * a temporary cache folder, with the real database.
- * A feed's declared enclosure length is not the size of the file a host sends (Acast declares 106,668,461 bytes
- * for an episode it sends as 70.6 or 82.7 MB), so only the host's own Content-Length can judge a download.
+ * A feed's declared enclosure length is not the size of the file a host sends, so only the host's own
+ * Content-Length can judge a download.
  */
 import fs from "fs";
 import http from "http";

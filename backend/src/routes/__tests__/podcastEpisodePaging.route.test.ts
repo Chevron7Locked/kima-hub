@@ -72,7 +72,6 @@ describe('podcast episode paging', () => {
 
         await request(app).get('/podcasts/p1');
 
-        // The query orders by date and takes a page.
         const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
         expect(args.take).toBe(50);
         expect(args.skip).toBe(0);

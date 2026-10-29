@@ -1,9 +1,7 @@
 /**
  * The Release Radar resolves artwork through the providers and
- * prefers it over Lidarr's unchecked Cover Art Archive address. Failure path first.
+ * prefers it over Lidarr's unchecked Cover Art Archive address.
  */
-
-// All mocks before imports.
 
 jest.mock('../../utils/db', () => ({
     prisma: {

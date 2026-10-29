@@ -1,7 +1,7 @@
 /**
  * The similar-artists strip on GET /artists/:id gets images through
  * `artwork.ts` on both its paths, and an artist already in the library keeps the
- * library's picture. Failure and boundary paths first.
+ * library's picture.
  */
 
 jest.mock("p-limit", () => () => (fn: (...args: any[]) => any) => fn());
@@ -134,9 +134,7 @@ const subject = (similarArtistsJson: unknown) => ({
     _count: { albums: 0 },
 });
 
-async function similarFrom(res: any): Promise<any[]> {
-    return res.body.similarArtists || [];
-}
+const similarFrom = (res: any): any[] => res.body.similarArtists || [];
 
 describe("the similar-artists strip and where its pictures come from", () => {
     beforeEach(() => {
@@ -155,7 +153,7 @@ describe("the similar-artists strip and where its pictures come from", () => {
             const res = await request(makeApp()).get("/library/artists/art-1");
 
             expect(res.status).toBe(200);
-            const [first] = await similarFrom(res);
+            const [first] = similarFrom(res);
             expect(first?.coverArt ?? null).toBeNull();
         });
 
@@ -169,7 +167,7 @@ describe("the similar-artists strip and where its pictures come from", () => {
                 name: "Carpenter Brut",
                 mbid: "sim-1",
             });
-            const [first] = await similarFrom(res);
+            const [first] = similarFrom(res);
             expect(first?.coverArt).toBe(FOUND);
         });
 
@@ -190,13 +188,13 @@ describe("the similar-artists strip and where its pictures come from", () => {
 
             const res = await request(makeApp()).get("/library/artists/art-1");
 
-            const [first] = await similarFrom(res);
+            const [first] = similarFrom(res);
             expect(first?.coverArt).toBe(LOCAL);
             expect(mockFindArtistArtwork).not.toHaveBeenCalled();
         });
     });
 
-    describe("built from a live Last.fm lookup", () => {
+    describe("built from the similarity engine", () => {
         it("asks the one door here too", async () => {
             mockArtistFindUnique.mockResolvedValue(subject(null));
             mockGetSimilarArtists.mockResolvedValue([

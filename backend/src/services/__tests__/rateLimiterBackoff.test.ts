@@ -29,7 +29,7 @@ describe('rate limiter backoff', () => {
 
         expect(result).toBe('ok');
         expect(requestFn).toHaveBeenCalledTimes(2);
-        // musicbrainz baseDelay is 2000 ms; the bug retried at 0.
+        // musicbrainz baseDelay is 2000 ms; the retry must wait that long, not fire at once.
         expect(stamps[1] - stamps[0]).toBeGreaterThanOrEqual(1500);
     }, 10000);
 

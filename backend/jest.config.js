@@ -26,7 +26,7 @@ module.exports = {
     // not, so it is transformed to CJS rather than mocked: the encryption tests
     // must run the real cipher.
     transformIgnorePatterns: [
-        'node_modules/(?!(p-queue|eventemitter3|@noble)/)',
+        'node_modules/(?!@noble/)',
     ],
     // The ts-jest preset only claims .ts/.tsx; the second entry is what actually
     // transforms the ESM above. Scoped to .js/.mjs so nothing else changes.

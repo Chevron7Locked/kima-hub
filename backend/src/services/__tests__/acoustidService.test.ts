@@ -8,7 +8,7 @@
 import { acoustidService } from "../acoustidService";
 import { config } from "../../config";
 
-// ── Mocks (must be registered before the imports above run them) ────
+// ── Mocks ────
 
 jest.mock("../../utils/logger", () => ({
     logger: {

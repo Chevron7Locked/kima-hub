@@ -1,36 +1,19 @@
 /**
- * Every exported mix generator, run against a real Postgres holding a 3,000
- * track synthetic library (see src/__tests__/fixtures/syntheticLibrary.ts;
- * ids are handed out in energy order, so reading "the first N rows" would show
- * as ids bunched at the front) with learned mood scores and the library's mood
- * statistics.
+ * Every exported mix generator, run against a real Postgres holding a 3,000-track synthetic library
+ * (src/__tests__/fixtures/syntheticLibrary.ts) with learned mood scores and the library's mood statistics.
  *
- * Mixes drawn from a recipe are checked against the recipe engine itself: each
- * is the engine's draw for its recipe, day and user, under the mix's own id,
- * title, description and colour, on its weekday only, and a refresh's reroll or
- * another user draws again. The engine's own rules are tested in
- * recipes.integration.test.ts.
+ * Mixes drawn from a recipe are checked against the recipe engine: each is the engine's draw for its recipe, day and
+ * user, on its weekday only, and a refresh's reroll or another user draws again.
  *
- * For every other generator, over 40 different dates (160 for the decade and
- * genre mixes, whose spread is judged over the mixes that picked the first
- * one's decade or genre; 40 repeated calls where the mix does not take a
- * date), the suite checks:
- *   1. size   - the documented number of tracks, no repeats;
- *   2. clause - every returned track satisfies the clause the generator's
- *               `where` states, re-written here by hand and checked against the
- *               stored row;
- *   3. files  - no track whose file is missing is returned;
- *   4. spread - together the calls reach the first and the last third of the
- *               ids that match, and well beyond one pool;
- *   5. repeat - a seeded mix returns identical tracks for the same date and
- *               different ones for another date or a refresh's reroll; an
- *               unseeded one varies.
+ * Every other generator is run over 40 dates (160 for the decade and genre mixes) and checked for: size (the
+ * documented count, no repeats), clause (every track satisfies the generator's `where`, re-written here by hand),
+ * files (no missing file), spread (the calls reach the first and last third of the matching ids) and repeat (a seeded
+ * mix repeats for the same date and differs for another date or a reroll; an unseeded one varies).
  *
- * The daily rotation and the refresh path run through the playlist service.
- * Only the similar-artist lookup (a call to ListenBrainz/Deezer over the
- * network) is faked. The database is real.
+ * Only the similar-artist lookup, a network call, is faked.
  */
 import { prisma } from "../../../utils/db";
+import { consecutiveDates, datesOn } from "./helpers/dates";
 import {
     LibraryHandle,
     Row,
@@ -97,7 +80,7 @@ function medianArousal(): number {
     return xs[Math.floor(at)] + (xs[Math.ceil(at)] - xs[Math.floor(at)]) * (at - Math.floor(at));
 }
 
-const dates = Array.from({ length: CALLS }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10));
+const dates = consecutiveDates(CALLS);
 /** Calls for a "grouped" case: enough that each decade or genre the date picks is picked several times. */
 const GROUPED_CALLS = 160;
 /** What a refresh appends to the day: the time of the refresh. */
@@ -111,10 +94,6 @@ const NOT_DATE: any[] = [
     "setTimeout", "clearTimeout",
 ];
 
-/** `n` dates a week apart that fall on `day` (0 = Sunday): a weekday mix exists on the day it is drawn for. */
-const datesOn = (day: number, n: number) =>
-    // 2026-01-04 is a Sunday.
-    Array.from({ length: n }, (_, k) => new Date(Date.UTC(2026, 0, 4 + day + 7 * k)).toISOString().slice(0, 10));
 
 interface Case {
     name: string;
@@ -182,10 +161,10 @@ const cases: Case[] = [
 /** Names of the artists the faked similarity lookup returns: artists 10 to 17. */
 const SIMILAR = Array.from({ length: 8 }, (_, i) => `synthetic artist ${10 + i}`);
 
+const fakeSimilarArtists = async () => SIMILAR.map((name) => ({ name, mbid: null, match: 0.5 }));
+
 beforeEach(() => {
-    (getSimilarArtists as jest.Mock).mockImplementation(async () =>
-        SIMILAR.map((name) => ({ name, mbid: null, match: 0.5 })),
-    );
+    (getSimilarArtists as jest.Mock).mockImplementation(fakeSimilarArtists);
 });
 
 describe.each(cases)("$name", (c) => {
@@ -199,9 +178,7 @@ describe.each(cases)("$name", (c) => {
               : dates;
 
     beforeAll(async () => {
-        (getSimilarArtists as jest.Mock).mockImplementation(async () =>
-            SIMILAR.map((name) => ({ name, mbid: null, match: 0.5 })),
-        );
+        (getSimilarArtists as jest.Mock).mockImplementation(fakeSimilarArtists);
         callDates = c.spread === "repeat" ? Array(CALLS).fill(caseDates[0]) : caseDates;
         mixes = [];
         for (const d of callDates) {
@@ -307,7 +284,7 @@ interface RecipeCase {
     name: string;
     run: (userId: string, today: string) => Promise<ProgrammaticMix | null>;
     recipe: string;
-    /** What the mix shows: its id prefix, type, title, description and colour key, as before the recipes. */
+    /** What the mix shows: its id prefix, type, title, description and colour key. */
     id: string;
     type: string;
     title: string;
@@ -390,7 +367,6 @@ const recipeCases: RecipeCase[] = [
 ];
 
 const RECIPE_DATES = dates.slice(0, 5);
-/** What a refresh appends to the day: the time of the refresh. */
 
 describe.each(recipeCases)("$name (recipe $recipe)", (c) => {
     let members = new Set<string>();

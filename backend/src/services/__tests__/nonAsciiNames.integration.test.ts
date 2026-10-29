@@ -299,7 +299,7 @@ describe("bounded lookups", () => {
 
     it("getTopSongs finds an artist by its identity key without listing artists", async () => {
         const many = jest.spyOn(prisma.artist, "findMany");
-        const res = await request(app()).get("/rest/getTopSongs.view").query({ artist: "бДДТ".slice(1), f: "json" });
+        const res = await request(app()).get("/rest/getTopSongs.view").query({ artist: "ДДТ", f: "json" });
         expect((res.body["subsonic-response"].topSongs?.song ?? []).map((s: { id: string }) => s.id)).toContain(trackId("ddt"));
         expect(many).not.toHaveBeenCalled();
     });

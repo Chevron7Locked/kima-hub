@@ -4,6 +4,7 @@
  * play no part. Runs against the migrated test database.
  */
 
+import { putStage } from "../../__tests__/helpers/trackStage";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import {
@@ -54,41 +55,6 @@ async function wipe(): Promise<void> {
   await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, id("art"));
 }
 
-/**
- * Write one stage record, replacing any existing one. `attempt`, `retryable`
- * and `nextRetryAt` are the scheduling fields getNextWork reads.
- */
-async function putStage(
-  trackId: string,
-  stage: string,
-  status: string,
-  opts: { source?: string; attempt?: number; retryable?: boolean; nextRetryAt?: Date | null } = {},
-): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "TrackStage"
-        (id, "trackId", stage, status, source, attempt, "lastErrorCode",
-         "lastErrorMessage", "failureClass", retryable, "nextRetryAt", evidence)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
-     ON CONFLICT ("trackId", stage) DO UPDATE
-        SET status = EXCLUDED.status,
-            source = EXCLUDED.source,
-            attempt = EXCLUDED.attempt,
-            "lastErrorCode" = EXCLUDED."lastErrorCode",
-            "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-            "failureClass" = EXCLUDED."failureClass",
-            retryable = EXCLUDED.retryable,
-            "nextRetryAt" = EXCLUDED."nextRetryAt",
-            evidence = EXCLUDED.evidence`,
-    `${trackId}__${stage}`, trackId, stage, status,
-    opts.source ?? "analyzer", opts.attempt ?? 0,
-    status === "done" ? null : "TEST_SEED",
-    status === "done" ? null : "seeded by test",
-    status === "done" ? null : "INCONCLUSIVE",
-    opts.retryable ?? true, opts.nextRetryAt ?? null,
-    JSON.stringify({ probe: "ffmpeg -i", rc: 1 }),
-  );
-}
-
 describe("getNextWork", () => {
   beforeEach(async () => {
     await wipe();
@@ -104,7 +70,6 @@ describe("getNextWork", () => {
 
   afterAll(async () => {
     await wipe();
-    await prisma.$disconnect();
     // Importing the real modules opens connections the unit under test never
     // uses: the enrichment queues, the state singleton's clients, and the
     // shared Redis client. Left open, Jest outlives the suite on them.

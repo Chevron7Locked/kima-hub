@@ -1,7 +1,7 @@
 /**
  * `/cover-art/native:<id>.jpg` (file missing on disk) and `/album-cover/:mbid`
  * go through `artwork.ts`; the latter looks up the album so Deezer can be
- * searched by artist and title. Failure and boundary paths first.
+ * searched by artist and title.
  */
 
 jest.mock("../../utils/db", () => ({
@@ -140,7 +140,7 @@ describe("the cover-art route asks every source", () => {
     });
 
     describe("GET /album-cover/:mbid", () => {
-        it("still looks up an album whose id this app invented", async () => {
+        it("looks up an album whose id this app invented", async () => {
             (prisma.album.findFirst as jest.Mock).mockResolvedValue({
                 title: "Reliance",
                 artist: { name: "Soen" },
@@ -170,7 +170,7 @@ describe("the cover-art route asks every source", () => {
             });
         });
 
-        it("still asks for an album the library does not have a row for", async () => {
+        it("asks for an album the library does not have a row for", async () => {
             (prisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "coverartarchive" });
 

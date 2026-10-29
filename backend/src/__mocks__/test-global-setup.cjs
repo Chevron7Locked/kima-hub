@@ -1,8 +1,7 @@
 /**
  * Runs once before any worker. Creates the base test database as SQL_ASCII / C (the encoding real installs use),
  * migrates it, and clones a fresh database per Jest worker (`<base>_w<id>`, 1..maxWorkers) every run, wiped to zero
- * rows. Files on different workers cannot touch each other's rows; shared-database parallel runs failed with
- * unexplained FK violations. One run at a time holds the base (a Postgres advisory lock, released in the global
+ * rows. Files on different workers cannot touch each other's rows. One run at a time holds the base (a Postgres advisory lock, released in the global
  * teardown or by Postgres itself when the run's process dies).
  */
 const crypto = require('crypto');
@@ -141,7 +140,9 @@ module.exports = async function globalSetup(globalConfig) {
     const lockUrl = new URL(adminDatabaseUrl(baseUrl));
     lockUrl.searchParams.set('connection_limit', '1');
     const admin = new PrismaClient({ datasources: { db: { url: lockUrl.toString() } } });
-    const [{ locked }] = await admin.$queryRaw`SELECT pg_try_advisory_lock(hashtext(${`kima-jest:${baseDbName}`})) AS locked`;
+    // Takes the run's lock on the base database, or confirms this connection still holds it.
+    const tryLock = async () => (await admin.$queryRaw`SELECT pg_try_advisory_lock(hashtext(${`kima-jest:${baseDbName}`})) AS held`)[0].held;
+    const locked = await tryLock();
     if (!locked) {
         // A run whose machine slept or froze can hold the lock for hours without running, so the holder is named
         // with the command that frees it.
@@ -165,8 +166,7 @@ module.exports = async function globalSetup(globalConfig) {
     // drops or clones a database the lock is taken again on the current connection (a no-op while it still holds it),
     // and the run stops if another run took it in between.
     const holdLock = async () => {
-        const [{ held }] = await admin.$queryRaw`SELECT pg_try_advisory_lock(hashtext(${`kima-jest:${baseDbName}`})) AS held`;
-        if (!held) throw new Error(`The lock on the test database ${baseDbName} was lost to another run.`);
+        if (!(await tryLock())) throw new Error(`The lock on the test database ${baseDbName} was lost to another run.`);
     };
 
     try {
@@ -261,8 +261,8 @@ module.exports = async function globalSetup(globalConfig) {
     let failedChecks = 0;
     globalThis.__kimaTestLockCheck = setInterval(() => {
         if (globalThis.__kimaTestLockStopping || globalThis.__kimaTestLockTick) return;
-        globalThis.__kimaTestLockTick = admin.$queryRaw`SELECT pg_try_advisory_lock(hashtext(${`kima-jest:${baseDbName}`})) AS held`
-            .then(([{ held }]) => {
+        globalThis.__kimaTestLockTick = tryLock()
+            .then((held) => {
                 failedChecks = 0;
                 if (!held) return `Another run took the lock on the test database ${baseDbName}.`;
                 return null;

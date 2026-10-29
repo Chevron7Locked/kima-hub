@@ -1,7 +1,7 @@
 /**
  * The daily integrity check (and an admin's "fix tagging") moves a library album to Discover only when Discover's
- * records name exactly that album. It used to move any album whose title or artist matched any Discover record, which
- * re-filed listeners' own albums. Real test database, nothing stood in.
+ * records name exactly that album, not any album whose title or artist merely matches a record. Real test database,
+ * nothing stood in.
  */
 import { prisma } from "../../utils/db";
 import { relocateDiscoverAlbums } from "../discovery/discoverEvidence";
@@ -15,13 +15,13 @@ const USER = `${P}user`;
 
 /** key, artist, title, expected location after the check */
 const ALBUMS = [
-    // A Discover download asked for exactly this album, filed as LIBRARY with no ownership record (an older scanner).
+    // A Discover download asked for exactly this album, filed as LIBRARY with no ownership record.
     ["asked", "Rda Discover Artist", "Rda Asked Album", "DISCOVER"],
     // Another album by the same artist, which the listener got themselves.
     ["sameartist", "Rda Discover Artist", "Rda Own Album", "LIBRARY"],
     // Another artist's album with the same title as a Discover download.
     ["sametitle", "Rda Other Artist", "Rda Asked Album", "LIBRARY"],
-    // An artist Discover once suggested (a different album, let go): their album the listener owns.
+    // An artist Discover suggested a different album of: their album the listener owns.
     ["oncesuggested", "Rda Suggested Artist", "Rda The Observer", "LIBRARY"],
     // A Discover download the listener liked, whose suggestion no longer matches the album's id.
     ["liked", "Rda Liked Artist", "Rda Liked Album", "LIBRARY"],

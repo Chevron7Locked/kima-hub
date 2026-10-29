@@ -126,7 +126,7 @@ describe("at-rest encryption", () => {
         expect(() => decrypt(legacyEncrypt("ab\u0085c", SHA256_KEY))).toThrow(/not encrypted with this server's key/);
     });
 
-    it("keeps a leading byte-order mark, as the old decoding did", () => {
+    it("keeps a leading byte-order mark, as the legacy decoding does", () => {
         expect(decrypt(legacyEncrypt("\ufeffkey", SHA256_KEY))).toBe("\ufeffkey");
     });
 
