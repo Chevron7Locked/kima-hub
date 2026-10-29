@@ -84,7 +84,7 @@ class ExtractMoodsTest(unittest.TestCase):
         a = _analyzer_with(self._heads())
         a.enhanced_mode = False
         a.models_error = 'MusiCNN models failed to load: out of memory'
-        a.load_audio = lambda path, max_duration=None: self.fail('nothing is decoded without the models')
+        a.load_audio = lambda path: self.fail('nothing is decoded without the models')
         out = a.analyze('/music/x.flac')
         self.assertEqual(out['_error'], 'MusiCNN models failed to load: out of memory')
 

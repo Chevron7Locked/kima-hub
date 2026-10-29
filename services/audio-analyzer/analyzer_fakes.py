@@ -73,7 +73,7 @@ def stubbed_analyzer(
     a.prediction_models = heads or {}
     a.musicnn_model = lambda audio: np.zeros((4, 200), dtype=np.float32)
     decoded = _tone() if audio is None else audio
-    a.load_audio = lambda path, max_duration=None: decoded
+    a.load_audio = lambda path: decoded
     a.rhythm_extractor = rhythm
     a.key_extractor = lambda audio: ("A", "minor", 0.8)
     a.rms = lambda frame: 0.1

@@ -1,6 +1,33 @@
-// The permanent changelog and the quiet open ledger, on the real database.
-// The point: dismissing records READ, never DONE — an owed action stays open
-// until the server can verify it happened, and closes itself when it can.
+// The permanent changelog and the quiet open ledger, on the real database. Dismissing records READ, never DONE:
+// an owed action stays open until the server can verify it happened, and closes itself when it can. Two fixture
+// releases stand in for the catalogue, so the test does not change with each release; their dates fall between the
+// test library's analysis date and today, so the library reads as an upgrade until a re-run stamps it.
+
+import type { Release } from "../../services/releases/catalog";
+
+const FIXTURES: Release[] = [
+    {
+        version: "9.0.0",
+        title: "Kima 9",
+        summary: "An older fixture release.",
+        date: "2026-06-01",
+        items: [
+            { kind: "action", key: "fixture.wipe", title: "Wipe", summary: "s", body: "b", cta: "Wipe", run: "wipeEnrichment", requires: "admin", olderLibraryOnly: true },
+            { kind: "choice", key: "fixture.choice", title: "Choice", summary: "s", body: "b", defaultValue: false, requires: "admin" },
+        ],
+    },
+    {
+        version: "9.1.0",
+        title: "Kima 9.1",
+        summary: "A newer fixture release.",
+        date: "2026-07-01",
+        items: [{ kind: "note", key: "fixture.rebuild", title: "Rebuilt", summary: "s", body: "b", olderLibraryOnly: true }],
+    },
+];
+jest.mock("../../services/releases/catalog", () => {
+    const actual = jest.requireActual("../../services/releases/catalog");
+    return { ...actual, RELEASES: FIXTURES, findRelease: (v: string) => FIXTURES.find((r) => r.version === v) };
+});
 
 import express from "express";
 import request from "supertest";
@@ -9,10 +36,6 @@ import { generateToken } from "../../middleware/auth";
 import whatsNewRoutes from "../whatsNew";
 import { RELEASES } from "../../services/releases/catalog";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-
-// The GPU choice is only shown where CUDA can exist; this ledger test needs the
-// host to look GPU-capable so the choice is asked and its dismissal recorded.
-jest.mock("../../services/gpuRuntime", () => ({ gpuSupported: () => true, setGpuToggles: jest.fn() }));
 
 const P = "zz-changelog";
 const USER = `${P}-user`;
@@ -66,34 +89,34 @@ it("lists every release newest first, and hides admin-only items from members", 
     // Newest first by release date, never by the version's text (which sorts 1.9 after 1.10).
     const dates = admin.releases.map((r) => r.date);
     expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)));
-    expect(releaseOf(admin, "1.11.0").items.some((i) => i.key === "engine.wipe")).toBe(true);
+    expect(releaseOf(admin, "9.0.0").items.some((i) => i.key === "fixture.wipe")).toBe(true);
 
     const member = await changelog("user");
     expect(member.releases.length).toBe(admin.releases.length);
-    expect(releaseOf(member, "1.11.0").items.some((i) => i.key === "engine.wipe")).toBe(false);
+    expect(releaseOf(member, "9.0.0").items.some((i) => i.key === "fixture.wipe")).toBe(false);
     expect(member.openCount).toBe(0);
 });
 
-it("tells an upgraded library, and only an upgraded one, that its sound features are rebuilt", async () => {
-    // This library holds analysis from before 1.12: an upgrade, so everyone is told, members too.
-    expect(releaseOf(await changelog("admin"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(true);
-    expect(releaseOf(await changelog("user"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(true);
+it("shows an upgrade-only note to an upgraded library, and only an upgraded one", async () => {
+    // This library holds analysis from before the release: an upgrade, so everyone is told, members too.
+    expect(releaseOf(await changelog("admin"), "9.1.0").items.some((i) => i.key === "fixture.rebuild")).toBe(true);
+    expect(releaseOf(await changelog("user"), "9.1.0").items.some((i) => i.key === "fixture.rebuild")).toBe(true);
 
     // A library analysed only after the release is a fresh install: there was nothing to rebuild.
     await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: new Date() } });
     try {
-        expect(releaseOf(await changelog("admin"), "1.12.0").items.some((i) => i.key === "sound.rebuild")).toBe(false);
+        expect(releaseOf(await changelog("admin"), "9.1.0").items.some((i) => i.key === "fixture.rebuild")).toBe(false);
     } finally {
         await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: OLD_DATE } });
     }
 });
 
 it("keeps a dismissed requirement open until the library verifiably passes through, then closes itself", async () => {
-    expect((await request(app()).post("/whats-new/1.11.0/dismiss").set("Authorization", as(ADMIN, "admin")).send({})).status).toBe(200);
+    expect((await request(app()).post("/whats-new/9.0.0/dismiss").set("Authorization", as(ADMIN, "admin")).send({})).status).toBe(200);
 
     const open = await changelog("admin");
-    const wipe = releaseOf(open, "1.11.0").items.find((i) => i.key === "engine.wipe")!;
-    expect(releaseOf(open, "1.11.0").dismissed).toBe(true);
+    const wipe = releaseOf(open, "9.0.0").items.find((i) => i.key === "fixture.wipe")!;
+    expect(releaseOf(open, "9.0.0").dismissed).toBe(true);
     expect(wipe.open).toBe(true);
     expect(wipe.done).toBe(false);
 
@@ -106,20 +129,20 @@ it("keeps a dismissed requirement open until the library verifiably passes throu
         RELEASES.filter((r) => r.items.some((i) => (i.kind === "action" || i.kind === "note") && i.olderLibraryOnly)).map((r) => r.date),
     );
     expect(askedAboutLibrary()).toBe(upgradeDates.size);
-    expect(ledger.body.items).toEqual([expect.objectContaining({ version: "1.11.0", key: "engine.wipe" })]);
+    expect(ledger.body.items).toEqual([expect.objectContaining({ version: "9.0.0", key: "fixture.wipe" })]);
 
     // The rerun stamps the track with today's date; the ledger then closes with no further ceremony.
     await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: new Date() } });
     const closed = await changelog("admin");
-    const wipeAfter = releaseOf(closed, "1.11.0").items.find((i) => i.key === "engine.wipe");
+    const wipeAfter = releaseOf(closed, "9.0.0").items.find((i) => i.key === "fixture.wipe");
     expect(wipeAfter === undefined || wipeAfter.open === false).toBe(true);
     expect(closed.openCount).toBe(0);
     libraryAsked.mockRestore();
 });
 
 it("shows a recorded choice honestly: a dismissal is silence at the default, never consent", async () => {
-    const gpu = releaseOf(await changelog("admin"), "1.11.0").items.find((i) => i.key === "gpu.accelerate")!;
-    expect(gpu.answer).toEqual({ enabled: false, decidedBy: "DISMISSED" });
+    const choice = releaseOf(await changelog("admin"), "9.0.0").items.find((i) => i.key === "fixture.choice")!;
+    expect(choice.answer).toEqual({ enabled: false, decidedBy: "DISMISSED" });
 });
 
 it("needs a signed-in user", async () => {

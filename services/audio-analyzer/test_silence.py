@@ -20,7 +20,7 @@ def _analyze(monkeypatch, audio):
     monkeypatch.setattr(analyzer, "ESSENTIA_AVAILABLE", True)
     a = object.__new__(analyzer.AudioAnalyzer)
     a.enhanced_mode = True
-    a.load_audio = lambda path, max_duration=None: audio[np.newaxis, :]
+    a.load_audio = lambda path: audio[np.newaxis, :]
     measured = []
 
     def rhythm(_):

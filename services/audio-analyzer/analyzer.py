@@ -101,6 +101,9 @@ SILENCE_PEAK = 10 ** (-80 / 20)
 LOUDNESS_RANGE_OK = (-70.0, 0.5)
 DYNAMIC_RANGE_OK = (0.0, 60.0)
 
+# Seconds of each song the analysis reads: the middle 90, or the whole song when it is shorter.
+ANALYSIS_WINDOW_SECONDS = 90
+
 # How long to block waiting for work, in seconds (at least 5).
 BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', '5')))
 
@@ -340,7 +343,7 @@ def _run_decode(command: List[str], keep_first_bytes: int) -> Tuple[bytes, int, 
     return raw, rc, stderr_text, None, total
 
 
-def _decode_to_stereo(file_path: str, duration: int = 90):
+def _decode_to_stereo(file_path: str, duration: int = ANALYSIS_WINDOW_SECONDS):
     """Decode the middle ``duration`` seconds of the first audio stream (the whole song when it is
     shorter), skipping bad frames rather than failing. The middle is the song: the ends carry quiet
     intros, fade-outs, silent tails and hidden tracks after minutes of silence. The header's length
@@ -453,8 +456,8 @@ class AudioAnalyzer:
             self.models_error = f'MusiCNN heads missing: {missing}'
             logger.error(self.models_error)
 
-    def load_audio(self, file_path: str, max_duration: int = 90) -> Optional[np.ndarray]:
-        """The middle max_duration seconds at 44.1 kHz, ``(channels, n)``: the decode from
+    def load_audio(self, file_path: str) -> Optional[np.ndarray]:
+        """The analysis window (ANALYSIS_WINDOW_SECONDS) at 44.1 kHz, ``(channels, n)``: the decode from
         _decode_to_stereo. The decode is the only integrity check; a file with a logged
         bad frame is analysed.
         """
@@ -464,7 +467,7 @@ class AudioAnalyzer:
 
         (samples, _, channels, window,
          command, rc, stderr, cls) = _decode_to_stereo(
-            file_path, duration=max_duration)
+            file_path)
         if samples is None:
             logger.error(f"Decode failed for {file_path}: {stderr}")
             # An unsupported file names its codec ("UNSUPPORTED::dts -- ..."), which the failure list shows.
@@ -525,9 +528,8 @@ class AudioAnalyzer:
             result['_error'] = self.models_error or 'MusiCNN models not loaded'
             return result
 
-        MAX_ANALYZE_SECONDS = int(os.getenv('MAX_ANALYZE_SECONDS', '90'))
         try:
-            decoded = self.load_audio(file_path, max_duration=MAX_ANALYZE_SECONDS)
+            decoded = self.load_audio(file_path)
         except MemoryError:
             logger.error(f"MemoryError: Could not load audio for {file_path}")
             result['_error'] = 'MemoryError: audio file too large'

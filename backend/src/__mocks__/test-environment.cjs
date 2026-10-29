@@ -8,9 +8,8 @@
  * 2. Refuses every outbound connection and name lookup that leaves this machine (net connects, dns.lookup and the
  *    dns resolve family, callback and promise forms). A test that reaches a real service (MusicBrainz, Deezer, ...)
  *    passes or fails by the internet's mood, which is a flaky test. Loopback, unix sockets and the hosts of the suite's
- *    database and Redis are allowed. A refused attempt throws an error
- *    naming the host and the test file, is printed to stderr, is appended to the file named by
- *    KIMA_NET_GUARD_LOG when that is set, and fails the test file at teardown even if the code swallowed the error.
+ *    database and Redis are allowed. A refused attempt throws an error naming the host and the test file, is printed to
+ *    stderr, and fails the test file at teardown even if the code swallowed the error.
  */
 const net = require('net');
 const dns = require('dns');
@@ -73,14 +72,6 @@ class KimaTestEnvironment extends TestEnvironment {
             const message = `[net-guard] ${how} to ${host} refused in ${this.testPath}: tests must not reach outside services`;
             this.violations.push(message);
             process.stderr.write(`${message}\n`);
-            if (process.env.KIMA_NET_GUARD_LOG) {
-                try {
-                    const where = (new Error().stack || '').split('\n').filter((l) => l.includes('/src/') && !l.includes('__mocks__')).slice(0, 8).join('\n');
-                    require('fs').appendFileSync(process.env.KIMA_NET_GUARD_LOG, `${message}\n${where}\n`);
-                } catch {
-                    /* the log is optional */
-                }
-            }
             const err = new Error(message);
             err.code = 'ENETGUARD';
             return err;

@@ -1,8 +1,9 @@
 /**
  * A synthetic music library for integration tests that need "the whole set" to
- * differ from "the first rows": 3,000 tracks over 500 albums and 125 artists,
- * written to the real test database with a fixed random seed, so every run
- * builds the same library.
+ * differ from "the first rows": 3,000 tracks over 500 albums and 125 artists
+ * (6 songs an album, 4 albums an artist) unless asked for another size, written
+ * to the real test database with a fixed random seed, so every run builds the
+ * same library.
  *
  * Track ids run `<prefix>trk_00000` .. `<prefix>trk_02999` and are handed out in
  * order of ENERGY (lowest first). A query that reads "the first N rows" would
@@ -33,9 +34,8 @@ import { seededRandom } from "../../services/matching/mapLayout";
 import { gaussian } from "./gaussian";
 
 export const TRACK_COUNT = 3000;
-const ALBUM_COUNT = 500;
-const TRACKS_PER_ALBUM = TRACK_COUNT / ALBUM_COUNT;
-const ARTIST_COUNT = 125;
+const TRACKS_PER_ALBUM = 6;
+const ALBUMS_PER_ARTIST = 4;
 
 const PARTY_GENRES = [
     "dance", "electronic", "pop", "disco", "house", "techno", "edm", "funk", "electro",
@@ -78,9 +78,13 @@ export interface LibraryHandle {
 
 const trackId = (prefix: string, i: number) => `${prefix}trk_${String(i).padStart(5, "0")}`;
 
-/** Writes the library under `prefix`. Call `removeSyntheticLibrary(prefix)` when done. */
-export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandle> {
+/** Writes the library under `prefix`, `tracks` songs (3,000 by default). Call `removeSyntheticLibrary(prefix)` when done. */
+export async function seedSyntheticLibrary(prefix: string, tracks = TRACK_COUNT): Promise<LibraryHandle> {
+    // The similar-artist web below reaches artist 49, so the library needs 50 artists (1,200 songs).
+    if (tracks < 1200) throw new Error(`seedSyntheticLibrary needs at least 1,200 tracks, not ${tracks}`);
     await removeSyntheticLibrary(prefix);
+    const ALBUM_COUNT = Math.ceil(tracks / TRACKS_PER_ALBUM);
+    const ARTIST_COUNT = Math.ceil(ALBUM_COUNT / ALBUMS_PER_ARTIST);
     const rng = seededRandom(20261021);
     const pick = <T,>(xs: T[]) => xs[Math.floor(rng() * xs.length)];
     const subset = <T,>(xs: T[], min: number, max: number) => {
@@ -127,7 +131,7 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
         albumRows.push({
             id: `${prefix}alb_${b}`,
             rgMbid: `${prefix}rg_${b}`,
-            artistId: `${prefix}art_${Math.floor(b / (ALBUM_COUNT / ARTIST_COUNT))}`,
+            artistId: `${prefix}art_${Math.floor(b / ALBUMS_PER_ARTIST)}`,
             identityKey: `${prefix}ik_${b}`,
             title: `Synthetic Album ${b}`,
             primaryType: "Album",
@@ -140,7 +144,7 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
     }
     await prisma.album.createMany({ data: albumRows });
     await prisma.ownedAlbum.createMany({
-        data: artistRows.map((a, i) => ({ artistId: a.id, rgMbid: albumRows[i * (ALBUM_COUNT / ARTIST_COUNT)].rgMbid, source: "test" })),
+        data: artistRows.map((a, i) => ({ artistId: a.id, rgMbid: albumRows[i * ALBUMS_PER_ARTIST].rgMbid, source: "test" })),
     });
     // Artist i is similar to the ten artists after it.
     const similar: Prisma.SimilarArtistCreateManyInput[] = [];
@@ -150,14 +154,14 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
     await prisma.similarArtist.createMany({ data: similar });
 
     // Raw tracks, then ids handed out in energy order.
-    const albumOrder = Array.from({ length: TRACK_COUNT }, (_, i) => i);
+    const albumOrder = Array.from({ length: tracks }, (_, i) => i);
     for (let i = albumOrder.length - 1; i > 0; i--) {
         const j = Math.floor(rng() * (i + 1));
         [albumOrder[i], albumOrder[j]] = [albumOrder[j], albumOrder[i]];
     }
     type Raw = Record<string, any>;
     const raws: Raw[] = [];
-    for (let i = 0; i < TRACK_COUNT; i++) {
+    for (let i = 0; i < tracks; i++) {
         const kind = rng();
         const nullReadings = kind >= 0.07 && kind < 0.09;
         const energy = r4(rng());
@@ -223,11 +227,11 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
     };
     const top = new Set<number>();
     while (top.size < 25) {
-        const idx = Math.floor(rng() * TRACK_COUNT);
+        const idx = Math.floor(rng() * tracks);
         if (!trackRows[idx].missingSince) top.add(idx);
     }
     [...top].forEach((idx, rank) => addPlays(user1, trackId(prefix, idx), 40 - rank));
-    for (let i = 0; i < TRACK_COUNT; i++) {
+    for (let i = 0; i < tracks; i++) {
         if (!top.has(i)) {
             const u = rng();
             if (u < 0.05) addPlays(user1, trackId(prefix, i), 3);
@@ -241,14 +245,14 @@ export async function seedSyntheticLibrary(prefix: string): Promise<LibraryHandl
 }
 
 /**
- * Gives every track under `prefix` a sound vector of the mood heads' model, its 22 learned mood scores (independent
+ * Gives the `tracks` tracks under `prefix` a sound vector of the mood heads' model, its 22 learned mood scores (independent
  * normal logits, mean -1, SD 1.5) and a tempo confidence (uniform 0-4, none on a tenth of tracks), from a seed of its
  * own so `seedSyntheticLibrary`'s readings stay as they are. The library's mood statistics are left to the caller.
  */
-export async function seedSyntheticMoods(prefix: string): Promise<void> {
+export async function seedSyntheticMoods(prefix: string, tracks = TRACK_COUNT): Promise<void> {
     const rng = seededRandom(20261024);
     const r4 = (x: number) => Math.round(x * 10000) / 10000;
-    const ids = Array.from({ length: TRACK_COUNT }, (_, i) => trackId(prefix, i));
+    const ids = Array.from({ length: tracks }, (_, i) => trackId(prefix, i));
     const analyzedAt = new Date("2026-10-23T00:00:00Z");
     const unit = `[1${",0".repeat(MOOD_HEADS.dims - 1)}]`;
     await prisma.$executeRaw`
