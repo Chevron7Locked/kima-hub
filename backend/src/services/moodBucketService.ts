@@ -40,15 +40,6 @@ const MOOD_BY_ID: Record<MoodType, (typeof MOODS)[number]> = Object.fromEntries(
     MOODS.map((m) => [m.id, m])
 ) as Record<MoodType, (typeof MOODS)[number]>;
 
-const MOOD_GRADIENTS: Record<MoodType, string> = {
-    happy: getMixColor("happy"),
-    sad: "linear-gradient(to bottom, rgba(30, 58, 138, 0.6), rgba(88, 28, 135, 0.5), rgba(15, 23, 42, 0.4))",
-    chill: getMixColor("chill"),
-    party: "linear-gradient(to bottom, rgba(162, 28, 175, 0.6), rgba(131, 24, 67, 0.5), rgba(59, 7, 100, 0.4))",
-    aggressive:
-        "linear-gradient(to bottom, rgba(69, 10, 10, 0.7), rgba(17, 24, 39, 0.6), rgba(0, 0, 0, 0.5))",
-};
-
 /** A track's learned mood scores (logits), under the client-facing names. */
 export type MoodValues = { [F in MoodField]: number | null };
 
@@ -271,6 +262,7 @@ async function pageSongCount(recipe: string): Promise<number> {
     }
 }
 
+/** The mood pages' mixes, and each listener's saved one. */
 class MoodBucketService {
     /**
      * Get mood presets with track counts for the UI. A preset's count is how many songs its mood page draws from: the
@@ -302,9 +294,6 @@ class MoodBucketService {
         }));
     }
 
-    /**
-     * Get a mood mix for a specific mood
-     */
     async getMoodMix(
         mood: MoodType,
         limit: number = 15,
@@ -349,7 +338,7 @@ class MoodBucketService {
             trackIds: orderedTracks.map((t) => t.id),
             coverUrls,
             trackCount: orderedTracks.length,
-            color: MOOD_GRADIENTS[mood],
+            color: getMixColor(mood),
         };
     }
 
@@ -376,109 +365,38 @@ class MoodBucketService {
         const config = MOOD_BY_ID[mood];
         const generatedAt = new Date();
 
-        // If explicit trackIds are provided, derive coverUrls from them and persist
+        // The listener's own picks that exist, in their order; otherwise a fresh mix that skips what they were served.
+        let mixTrackIds: string[];
+        let coverUrls: string[];
         if (trackIds && trackIds.length > 0) {
-            const tracks = await prisma.track.findMany({
-                where: { id: { in: trackIds } },
-                select: {
-                    id: true,
-                    album: { select: { coverUrl: true } },
-                },
-            });
-
-            // Preserve order of provided trackIds
-            const orderedTracks = trackIds
-                .map((id) => tracks.find((t) => t.id === id))
-                .filter(Boolean);
-
-            const coverUrls = albumCoverUrls(orderedTracks.map((t) => t!));
-
-            const persistedTrackIds = orderedTracks.map((t) => t!.id);
-
-            // Upsert the user's mood mix with explicit trackIds
-            await prisma.userMoodMix.upsert({
-                where: { userId },
-                create: {
-                    userId,
-                    mood,
-                    trackIds: persistedTrackIds,
-                    coverUrls,
-                    servedTrackIds: persistedTrackIds,
-                    generatedAt,
-                },
-                update: {
-                    mood,
-                    trackIds: persistedTrackIds,
-                    coverUrls,
-                    servedTrackIds: persistedTrackIds,
-                    generatedAt,
-                },
-            });
-
-            logger.debug(
-                `[MoodBucket] Saved ${mood} mix for user ${userId} (${persistedTrackIds.length} explicit tracks)`
-            );
-
-            return {
-                id: `your-mood-mix-${generatedAt.getTime()}`,
-                mood,
-                name: `Your ${config.name} Mix`,
-                description: `Based on your ${config.name.toLowerCase()} preferences`,
-                trackIds: persistedTrackIds,
-                coverUrls,
-                trackCount: persistedTrackIds.length,
-                color: MOOD_GRADIENTS[mood],
-                generatedAt: generatedAt.toISOString(),
-            };
+            const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
+            mixTrackIds = tracks.map((t) => t.id);
+            coverUrls = albumCoverUrls(tracks);
+        } else {
+            const mix = await this.getMoodMix(mood, limit, await this.getRememberedTrackIds(userId, mood));
+            if (!mix) return null;
+            mixTrackIds = mix.trackIds;
+            coverUrls = mix.coverUrls;
         }
 
-        // Fallback: regenerate a fresh mix via getMoodMix, skipping what this
-        // user was already served so the next mix doesn't repeat it
-        const remembered = await this.getRememberedTrackIds(userId, mood);
-        const mix = await this.getMoodMix(mood, limit, remembered);
-        if (!mix) return null;
+        const saved = { mood, trackIds: mixTrackIds, coverUrls, servedTrackIds: mixTrackIds, generatedAt };
+        await prisma.userMoodMix.upsert({ where: { userId }, create: { userId, ...saved }, update: saved });
+        logger.debug(`[MoodBucket] Saved ${mood} mix for user ${userId} (${mixTrackIds.length} tracks)`);
 
-        // Upsert the user's mood mix
-        await prisma.userMoodMix.upsert({
-            where: { userId },
-            create: {
-                userId,
-                mood,
-                trackIds: mix.trackIds,
-                coverUrls: mix.coverUrls,
-                servedTrackIds: mix.trackIds,
-                generatedAt,
-            },
-            update: {
-                mood,
-                trackIds: mix.trackIds,
-                coverUrls: mix.coverUrls,
-                servedTrackIds: mix.trackIds,
-                generatedAt,
-            },
-        });
-
-        logger.debug(
-            `[MoodBucket] Saved ${mood} mix for user ${userId} (${mix.trackCount} tracks)`
-        );
-
-        // Return with user-specific naming
         return {
             id: `your-mood-mix-${generatedAt.getTime()}`,
             mood,
             name: `Your ${config.name} Mix`,
             description: `Based on your ${config.name.toLowerCase()} preferences`,
-            trackIds: mix.trackIds,
-            coverUrls: mix.coverUrls,
-            trackCount: mix.trackCount,
-            color: MOOD_GRADIENTS[mood],
+            trackIds: mixTrackIds,
+            coverUrls,
+            trackCount: mixTrackIds.length,
+            color: getMixColor(mood),
             generatedAt: generatedAt.toISOString(),
         };
     }
 
-    /**
-     * Get user's current saved mood mix for display on home page
-     */
+    /** The listener's saved mood mix, for the home page. */
     async getUserMoodMix(userId: string): Promise<{
         id: string;
         type: string;
@@ -510,7 +428,7 @@ class MoodBucketService {
             trackIds: userMix.trackIds,
             coverUrls: userMix.coverUrls,
             trackCount: userMix.trackIds.length,
-            color: MOOD_GRADIENTS[mood],
+            color: getMixColor(mood),
         };
     }
 
@@ -539,8 +457,7 @@ class MoodBucketService {
 
         if (!row || row.mood !== mood) return [];
 
-        // Rows written before the servedTrackIds migration carry no history.
-        return Array.from(new Set([...(row.servedTrackIds ?? []), ...row.trackIds]));
+        return Array.from(new Set([...row.servedTrackIds, ...row.trackIds]));
     }
 
     /**

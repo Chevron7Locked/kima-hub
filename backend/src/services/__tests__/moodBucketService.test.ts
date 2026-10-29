@@ -120,6 +120,7 @@ describe("saveUserMoodMix with explicit trackIds", () => {
             mood: MOOD,
             trackIds: explicitTrackIds,
             coverUrls: expectedCoverUrls,
+            servedTrackIds: explicitTrackIds,
             generatedAt: new Date(),
         });
 
@@ -137,6 +138,7 @@ describe("saveUserMoodMix with explicit trackIds", () => {
             mood: MOOD,
             trackIds: explicitTrackIds,
             coverUrls: expectedCoverUrls,
+            servedTrackIds: explicitTrackIds,
             generatedAt: new Date(),
         });
 
