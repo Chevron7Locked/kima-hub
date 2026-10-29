@@ -62,7 +62,6 @@
     --animate-fade-soft: fade-soft 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
     --animate-pop: pop 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
     --animate-panel-up: panel-up 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
-    --animate-panel-down: panel-down 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
     --animate-slide-in: slide-in 280ms cubic-bezier(0.25, 1, 0.5, 1) both;
     --animate-sweep: sweep 1600ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
     --animate-kima-drift: kima-drift 16s linear infinite;
@@ -83,10 +82,6 @@
         from { opacity: 0; transform: translateY(16px); }
         to { opacity: 1; transform: translateY(0); }
     }
-    @keyframes panel-down {
-        from { opacity: 1; transform: translateY(0); }
-        to { opacity: 0; transform: translateY(8px); }
-    }
     @keyframes slide-in {
         from { transform: translateX(100%); }
         to { transform: translateX(0); }
@@ -106,8 +101,6 @@
 }
 
 :root {
-    /* Kima Design System - Dark Theme Only */
-
     /* Background Layers */
     --bg-primary: #0a0a0a; /* Primary canvas */
     --bg-secondary: #0f0f0f; /* Cards, panels */
@@ -125,7 +118,7 @@
     /* 5.4:1 on the page ground, 4.7:1 on the lightest card surface (#1a1a1a). */
     --text-muted: #858585; /* labels, meta, timestamps */
 
-/* Stacking order: one ladder, named by what sits on each rung. */
+    /* Stacking order: one ladder, named by what sits on each rung. */
     --z-raised: 10;            /* overlay inside a component: hover play, scrim */
     --z-scene: 20;             /* overlays within the vibe canvas */
     --z-scene-panel: 30;       /* the song-path and blend panels over the map */
@@ -459,17 +452,9 @@ button:disabled {
    ===================================================== */
 
 /* Reduced motion zeroes both duration and delay, so staggered lists appear at
- * once, and turns off smooth scrolling. --motion-ok and useReducedMotion expose
- * the same preference for motion a media query cannot reach. */
-:root {
-    --motion-ok: 1;
-}
-
+ * once, and turns off smooth scrolling. useReducedMotion reads the same
+ * preference for motion a media query cannot reach. */
 @media (prefers-reduced-motion: reduce) {
-    :root {
-        --motion-ok: 0;
-    }
-
     html {
         scroll-behavior: auto !important;
     }
@@ -734,28 +719,6 @@ body.tv-mode a:focus {
 body.tv-mode [data-tv-card] {
     outline: none;
     transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-/* Filter buttons / tabs focus */
-body.tv-mode [data-tv-filter]:focus {
-    outline: none;
-    background: rgba(252, 162, 0, 0.2);
-    color: var(--color-brand);
-    box-shadow: 0 0 0 2px var(--color-brand);
-}
-
-/* Track list items focus */
-body.tv-mode [data-tv-track]:focus {
-    outline: none;
-    background: rgba(252, 162, 0, 0.15);
-    box-shadow: inset 0 0 0 2px var(--color-brand);
-}
-
-/* Action buttons in action bars */
-body.tv-mode [data-tv-action]:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--color-brand);
-    transform: scale(1.05);
 }
 
 /* Smooth scrolling for TV */
