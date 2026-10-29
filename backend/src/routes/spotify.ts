@@ -1,15 +1,13 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import multer from "multer";
 import path from "path";
 import { createRateLimiter } from "../middleware/rateLimiter";
-import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
-import { deezerService } from "../services/deezer";
 import { parseM3U } from "../services/m3uParser";
 
 const router = Router();
@@ -30,17 +28,16 @@ const m3uUpload = multer({
 // All routes require authentication
 router.use(requireAuthOrToken);
 
-// Validation schemas
 const parseUrlSchema = z.object({
     url: z.string().url(),
 });
 
 const importSchema = z.object({
     spotifyPlaylistId: z.string(),
-    url: z.string().url().optional(),
     playlistName: z.string().min(1).max(200),
     albumMbidsToDownload: z.array(z.string()),
-    previewJobId: z.string().optional(),
+    // The web and the app both make a preview first; the import is built from it.
+    previewJobId: z.string(),
 });
 
 const quickImportSchema = z.object({
@@ -63,6 +60,28 @@ const PLAYLIST_URL_PREFIXES: Array<[string, string]> = [
     ["mixcloud.com", "/"],
 ];
 
+/** A bad body is the request's (400); anything else is the server's. */
+function answerFailure(res: Response, context: string, error: unknown) {
+    if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request body" });
+    }
+    safeError(res, context, error);
+}
+
+/** The caller's import job named by `:jobId`, or null once 404 (gone) or 403 (someone else's) is sent. */
+async function ownImportJob(req: Request, res: Response, action: string) {
+    const job = await getImportJob(req.params.jobId);
+    if (!job) {
+        res.status(404).json({ error: "Import job not found" });
+        return null;
+    }
+    if (job.userId !== req.user!.id) {
+        res.status(403).json({ error: `Not authorized to ${action} this job` });
+        return null;
+    }
+    return job;
+}
+
 /**
  * POST /api/spotify/preview/start
  * Start a background preview job and return a job ID immediately.
@@ -82,10 +101,7 @@ router.post("/preview/start", async (req, res) => {
         const { jobId } = await spotifyImportService.startPreviewJob(url, req.user!.id);
         res.json({ jobId });
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request body" });
-        }
-        safeError(res, "Playlist preview start", error);
+        answerFailure(res, "Playlist preview start", error);
     }
 });
 
@@ -118,7 +134,7 @@ router.post("/import/quick", async (req, res) => {
     try {
         const { url, playlistName } = quickImportSchema.parse(req.body);
 
-        if (!PLAYLIST_URL_PREFIXES.some(([domain, path]) => url.includes(domain + path))) {
+        if (!PLAYLIST_URL_PREFIXES.some(([domain, shape]) => url.includes(domain + shape))) {
             return res.status(400).json({
                 error: "Invalid URL. Supported: Spotify, Deezer, YouTube, SoundCloud, Bandcamp, Mixcloud.",
             });
@@ -128,10 +144,7 @@ router.post("/import/quick", async (req, res) => {
 
         res.json({ jobId });
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request body" });
-        }
-        safeError(res, "Quick import", error);
+        answerFailure(res, "Quick import", error);
     }
 });
 
@@ -141,7 +154,7 @@ router.post("/import/quick", async (req, res) => {
  */
 router.post("/import", async (req, res) => {
     try {
-        const { spotifyPlaylistId, url, playlistName, albumMbidsToDownload, previewJobId } =
+        const { spotifyPlaylistId, playlistName, albumMbidsToDownload, previewJobId } =
             importSchema.parse(req.body);
         const userId = req.user!.id;
         // Matching the playlist to the library is open to everyone; downloading its missing albums is not.
@@ -149,44 +162,14 @@ router.post("/import", async (req, res) => {
             return res.status(403).json({ error: ACQUIRE_REFUSED });
         }
 
-        let preview;
-        if (previewJobId) {
-            const stored = await spotifyImportService.getPreviewResult(previewJobId);
-            if (!stored || stored.status !== "completed" || !stored.preview) {
-                return res.status(400).json({
-                    error: "Preview not ready or expired. Please generate a new preview.",
-                });
-            }
-            if (stored.userId && stored.userId !== userId) {
-                return res.status(403).json({ error: "Not authorized to use this preview" });
-            }
-            preview = stored.preview;
-        } else {
-            // No preview job: build the preview now
-            const effectiveUrl =
-                url?.trim() ||
-                `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
-
-            if (effectiveUrl.includes("deezer.com")) {
-                const deezerMatch = effectiveUrl.match(/playlist[\/:](\d+)/);
-                if (!deezerMatch) {
-                    return res
-                        .status(400)
-                        .json({ error: "Invalid Deezer playlist URL" });
-                }
-                const playlistId = deezerMatch[1];
-                const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(playlistId));
-                if (!deezerPlaylist) {
-                    return res
-                        .status(404)
-                        .json({ error: "Deezer playlist not found" });
-                }
-                preview = await spotifyImportService.generatePreviewFromDeezer(deezerPlaylist);
-            } else if (spotifyImportService.isExternalPlatformUrl(effectiveUrl)) {
-                preview = await spotifyImportService.generatePreviewFromExternalPlatform(effectiveUrl);
-            } else {
-                preview = await spotifyImportService.generatePreview(effectiveUrl);
-            }
+        const stored = await spotifyImportService.getPreviewResult(previewJobId);
+        if (!stored || stored.status !== "completed" || !stored.preview) {
+            return res.status(400).json({
+                error: "Preview not ready or expired. Please generate a new preview.",
+            });
+        }
+        if (stored.userId && stored.userId !== userId) {
+            return res.status(403).json({ error: "Not authorized to use this preview" });
         }
 
         logger.debug(
@@ -201,7 +184,7 @@ router.post("/import", async (req, res) => {
             spotifyPlaylistId,
             playlistName,
             albumMbidsToDownload,
-            preview
+            stored.preview
         );
 
         res.json({
@@ -210,10 +193,7 @@ router.post("/import", async (req, res) => {
             message: "Import started",
         });
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request body" });
-        }
-        safeError(res, "Spotify import", error);
+        answerFailure(res, "Spotify import", error);
     }
 });
 
@@ -223,19 +203,8 @@ router.post("/import", async (req, res) => {
  */
 router.get("/import/:jobId/status", async (req, res) => {
     try {
-        const { jobId } = req.params;
-        const userId = req.user!.id;
-
-        const job = await getImportJob(jobId);
-        if (!job) {
-            return res.status(404).json({ error: "Import job not found" });
-        }
-
-        if (job.userId !== userId) {
-            return res
-                .status(403)
-                .json({ error: "Not authorized to view this job" });
-        }
+        const job = await ownImportJob(req, res, "view");
+        if (!job) return;
 
         res.json(job);
     } catch (error) {
@@ -263,21 +232,10 @@ router.get("/imports", async (req, res) => {
  */
 router.post("/import/:jobId/refresh", async (req, res) => {
     try {
-        const { jobId } = req.params;
-        const userId = req.user!.id;
+        const job = await ownImportJob(req, res, "refresh");
+        if (!job) return;
 
-        const job = await getImportJob(jobId);
-        if (!job) {
-            return res.status(404).json({ error: "Import job not found" });
-        }
-
-        if (job.userId !== userId) {
-            return res
-                .status(403)
-                .json({ error: "Not authorized to refresh this job" });
-        }
-
-        const result = await spotifyImportService.refreshJobMatches(jobId);
+        const result = await spotifyImportService.refreshJobMatches(job.id);
 
         res.json({
             message:
@@ -298,21 +256,10 @@ router.post("/import/:jobId/refresh", async (req, res) => {
  */
 router.post("/import/:jobId/cancel", async (req, res) => {
     try {
-        const { jobId } = req.params;
-        const userId = req.user!.id;
+        const job = await ownImportJob(req, res, "cancel");
+        if (!job) return;
 
-        const job = await getImportJob(jobId);
-        if (!job) {
-            return res.status(404).json({ error: "Import job not found" });
-        }
-
-        if (job.userId !== userId) {
-            return res
-                .status(403)
-                .json({ error: "Not authorized to cancel this job" });
-        }
-
-        const result = await spotifyImportService.cancelJob(jobId);
+        const result = await spotifyImportService.cancelJob(job.id);
 
         res.json({
             message: result.playlistCreated
