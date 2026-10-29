@@ -3,7 +3,7 @@
 // confirm opened inside it before the window.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 
@@ -51,6 +51,11 @@ const R12: Release = {
 
 let container: HTMLDivElement;
 let root: Root;
+
+afterEach(() => {
+    act(() => root?.unmount());
+    container?.remove();
+});
 
 async function renderWindow(releases: Release[]) {
     container = document.createElement("div");

@@ -1,7 +1,7 @@
 // The category page keeps its chart when a background refresh of Apple's category list fails; the "couldn't reach
 // apple podcasts" screen is only for having no list at all.
-import { describe, it, expect, vi } from "vitest";
-import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -22,12 +22,20 @@ vi.mock("@/lib/api", () => ({
 
 import PodcastCategoryPage from "@/app/podcasts/category/[id]/page";
 
+let container: HTMLDivElement;
+let root: Root;
+
+afterEach(() => {
+    act(() => root?.unmount());
+    container?.remove();
+});
+
 describe("/podcasts/category/:id", () => {
     it("keeps showing the chart when a refresh of the category list fails", async () => {
         categories.mockResolvedValueOnce([{ id: 1303, name: "Comedy", parentId: null }]);
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        const container = document.body.appendChild(document.createElement("div"));
-        const root = createRoot(container);
+        container = document.body.appendChild(document.createElement("div"));
+        root = createRoot(container);
         await act(async () => root.render(<QueryClientProvider client={client}><PodcastCategoryPage /></QueryClientProvider>));
         await act(async () => new Promise((r) => setTimeout(r, 50)));
         expect(container.textContent).toContain("Comedy Bang Bang");
@@ -41,6 +49,5 @@ describe("/podcasts/category/:id", () => {
         await act(async () => new Promise((r) => setTimeout(r, 50)));
         expect(container.textContent).toContain("Comedy Bang Bang");
         expect(container.textContent).not.toContain("couldn't reach apple podcasts");
-        act(() => root.unmount());
     });
 });

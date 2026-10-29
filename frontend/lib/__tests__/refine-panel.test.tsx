@@ -3,26 +3,12 @@
  * when focus leaves it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 import { RefinePanel } from "@/features/library/components/RefinePanel";
 import type { LibraryFilter, SortOption } from "@/hooks/useQueries";
+import { mountHost } from "./helpers/dom";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-let host: HTMLDivElement;
-let root: Root;
-
-beforeEach(() => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-});
-
-afterEach(() => {
-    act(() => root.unmount());
-    host.remove();
-});
+const dom = mountHost();
 
 function show(props: Partial<React.ComponentProps<typeof RefinePanel>> = {}) {
     const handlers = {
@@ -32,14 +18,14 @@ function show(props: Partial<React.ComponentProps<typeof RefinePanel>> = {}) {
         onReset: vi.fn<() => void>(),
     };
     act(() =>
-        root.render(
+        dom.root.render(
             <RefinePanel activeTab="albums" filter="owned" sortBy="name" itemsPerPage={40} {...handlers} {...props} />,
         ),
     );
     return handlers;
 }
 
-const trigger = () => host.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+const trigger = () => dom.host.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
 const panel = () => document.getElementById("refine-panel");
 const open = () => act(() => trigger().click());
 const group = (name: string) =>
@@ -197,8 +183,8 @@ describe("RefinePanel", () => {
             vi.stubGlobal("innerHeight", 800);
             main = document.createElement("main");
             main.id = "main-content";
-            host.replaceWith(main);
-            main.appendChild(host);
+            dom.host.replaceWith(main);
+            main.appendChild(dom.host);
             buttonRect = rect(284, 304, 44, 100);
             vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
                 if (this.id === "main-content") return rect(64, 272, 632, 944); // ends at 696, above the player bar
@@ -210,7 +196,7 @@ describe("RefinePanel", () => {
         afterEach(() => {
             vi.restoreAllMocks();
             vi.unstubAllGlobals();
-            document.body.appendChild(host);
+            document.body.appendChild(dom.host);
             main.remove();
         });
 

@@ -3,8 +3,7 @@
  * open on "downloads" when the app asks for it, and the vibe page's phone sheet switches activity with the panels'
  * text options, not an icon row. The lists themselves are stubbed; the panels and option strips are the real ones.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot, type Root } from "react-dom/client";
+import { describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 
 vi.mock("@/hooks/useNotifications", () => ({
@@ -38,40 +37,28 @@ import { ActivityPanel } from "@/components/layout/ActivityPanel";
 import { VibePanelSheet } from "@/features/vibe/VibePanelSheet";
 import { ActivityPanelSettingsProvider } from "@/lib/activity-panel-settings-context";
 import { setActivityPanelTab } from "@/hooks/useActivityPanel";
+import { mountHost } from "./helpers/dom";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
     disconnect() {}
 } as unknown as typeof ResizeObserver;
 
-let host: HTMLDivElement;
-let root: Root;
+const dom = mountHost();
 
-beforeEach(() => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-});
-
-afterEach(() => {
-    act(() => root.unmount());
-    host.remove();
-});
-
-const shown = () => host.querySelector('[data-testid="activity-content"]')?.textContent;
+const shown = () => dom.host.querySelector('[data-testid="activity-content"]')?.textContent;
 const tabs = (list: string) =>
-    [...host.querySelectorAll<HTMLElement>(`[role="tablist"][aria-label="${list}"] [role="tab"]`)].map((t) => t.textContent?.trim());
+    [...dom.host.querySelectorAll<HTMLElement>(`[role="tablist"][aria-label="${list}"] [role="tab"]`)].map((t) => t.textContent?.trim());
 const tab = (list: string, name: string) =>
-    [...host.querySelectorAll<HTMLElement>(`[role="tablist"][aria-label="${list}"] [role="tab"]`)].find((t) =>
+    [...dom.host.querySelectorAll<HTMLElement>(`[role="tablist"][aria-label="${list}"] [role="tab"]`)].find((t) =>
         t.textContent?.trim().startsWith(name),
     )!;
 
 describe("activity areas", () => {
     it("the desktop panel opens on the downloads list when the app asks for downloads", () => {
         act(() =>
-            root.render(
+            dom.root.render(
                 <ActivityPanelSettingsProvider>
                     <UnifiedPanel isOpen onToggle={() => {}} />
                 </ActivityPanelSettingsProvider>,
@@ -84,7 +71,7 @@ describe("activity areas", () => {
 
     it("the phone overlay shows the downloads list on the downloads tab", () => {
         act(() =>
-            root.render(
+            dom.root.render(
                 <ActivityPanelSettingsProvider>
                     <ActivityPanel isOpen onToggle={() => {}} activeTab="downloads" />
                 </ActivityPanelSettingsProvider>,
@@ -96,11 +83,11 @@ describe("activity areas", () => {
 
     it("the vibe sheet switches activity with the panels' options, counts and all", () => {
         act(() =>
-            root.render(
+            dom.root.render(
                 <VibePanelSheet onSearch={() => {}} results={null} onPickResult={() => {}} clearSignal={0} />,
             ),
         );
-        expect(host.querySelector("[aria-pressed]")).toBeNull();
+        expect(dom.host.querySelector("[aria-pressed]")).toBeNull();
         act(() => tab("vibe panel", "activity").click());
         expect(tabs("activity")).toEqual(["all", "alerts2", "downloads1", "imports", "history"]);
         act(() => tab("activity", "downloads").click());

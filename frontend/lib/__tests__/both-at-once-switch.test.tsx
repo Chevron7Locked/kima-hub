@@ -30,8 +30,10 @@ const button = (text: string) =>
     Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim().toLowerCase() === text) as HTMLButtonElement | undefined;
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-async function render(stored: boolean) {
-    getTogether.mockResolvedValue({ together: stored });
+/** Renders the switch over a stored setting, or over a read that fails. */
+async function render(stored: boolean | Error) {
+    if (stored instanceof Error) getTogether.mockRejectedValueOnce(stored);
+    else getTogether.mockResolvedValue({ together: stored });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     await act(async () => {
         root.render(<QueryClientProvider client={client}><BothAtOnceSwitch id="t" /></QueryClientProvider>);
@@ -86,12 +88,7 @@ describe("BothAtOnceSwitch", () => {
     });
 
     it("says when the setting couldn't be read, and reads it again on request", async () => {
-        getTogether.mockRejectedValueOnce(new Error("down"));
-        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        await act(async () => {
-            root.render(<QueryClientProvider client={client}><BothAtOnceSwitch id="t" /></QueryClientProvider>);
-        });
-        await settle();
+        await render(new Error("down"));
         expect(box().disabled).toBe(true);
         expect(container.textContent?.toLowerCase()).toContain("couldn't read this setting");
         getTogether.mockResolvedValueOnce({ together: false });

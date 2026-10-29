@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertTrack, removeTrack } from "../queue-edit";
+import { appendTracks, insertTrack, isLastInPlayOrder, removeTrack } from "../queue-edit";
 
 const snap = (queue: string[], currentIndex: number, shuffleIndices: number[] = [], isShuffle = false) => ({
     queue,
@@ -92,5 +92,34 @@ describe("removeTrack", () => {
 
     it("renumbers shuffle order", () => {
         expect(removeTrack(snap(["a", "b", "c"], 0, [2, 0, 1], true), cur, 1).shuffleIndices).toEqual([1, 0]);
+    });
+});
+
+describe("appendTracks", () => {
+    it("adds to the end of the queue", () => {
+        const next = appendTracks({ queue: ["a", "b"], currentIndex: 1, shuffleIndices: [], isShuffle: false }, ["c", "d"]);
+        expect(next.queue).toEqual(["a", "b", "c", "d"]);
+    });
+
+    it("adds to the end of the shuffle order without reordering it", () => {
+        const next = appendTracks({ queue: ["a", "b", "c"], currentIndex: 2, shuffleIndices: [1, 0, 2], isShuffle: true }, ["x", "y"]);
+        expect(next.shuffleIndices).toEqual([1, 0, 2, 3, 4]);
+    });
+});
+
+describe("isLastInPlayOrder", () => {
+    it("is true on the last queue position when not shuffled", () => {
+        expect(isLastInPlayOrder({ queue: ["a", "b"], currentIndex: 1, shuffleIndices: [], isShuffle: false })).toBe(true);
+        expect(isLastInPlayOrder({ queue: ["a", "b"], currentIndex: 0, shuffleIndices: [], isShuffle: false })).toBe(false);
+    });
+
+    it("follows the shuffle order when shuffled", () => {
+        const snap = { queue: ["a", "b", "c"], shuffleIndices: [1, 2, 0], isShuffle: true };
+        expect(isLastInPlayOrder({ ...snap, currentIndex: 0 })).toBe(true);
+        expect(isLastInPlayOrder({ ...snap, currentIndex: 2 })).toBe(false);
+    });
+
+    it("is false for an empty queue", () => {
+        expect(isLastInPlayOrder({ queue: [], currentIndex: 0, shuffleIndices: [], isShuffle: false })).toBe(false);
     });
 });

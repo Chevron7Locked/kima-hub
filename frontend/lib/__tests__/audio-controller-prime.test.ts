@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AudioController } from "../audio-controller";
+import { createFakeAudioElement, type FakeAudioElement } from "./helpers/audioControllerEnv";
 
 // AudioController uses document, window, navigator and localStorage as bare
 // globals, so each is stubbed per test.
@@ -65,32 +66,6 @@ class MockAudioContext {
     addEventListener() {}
     removeEventListener() {}
 }
-
-function createFakeAudioElement() {
-    return {
-        preload: "",
-        crossOrigin: "",
-        src: "",
-        currentTime: 0,
-        duration: 0,
-        paused: true,
-        volume: 1,
-        muted: false,
-        readyState: 0,
-        error: null,
-        style: {} as Record<string, string>,
-        setAttribute: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        play: vi.fn().mockResolvedValue(undefined),
-        pause: vi.fn(),
-        load: vi.fn(),
-        removeAttribute: vi.fn(),
-        remove: vi.fn(),
-    };
-}
-
-type FakeAudioElement = ReturnType<typeof createFakeAudioElement>;
 
 type DocListeners = Record<string, Array<() => void>>;
 

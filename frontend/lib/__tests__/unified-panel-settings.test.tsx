@@ -4,8 +4,7 @@
  * it. The panel's data hooks and its content views are stubbed; the panel, its option strips and the settings context
  * are the real ones.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot, type Root } from "react-dom/client";
+import { describe, it, expect, vi } from "vitest";
 import React, { act, useState } from "react";
 
 vi.mock("@/hooks/useNotifications", () => ({
@@ -28,22 +27,9 @@ vi.mock("@/components/activity/ActivityFeed", () => ({ ActivityFeed: () => <div>
 import { UnifiedPanel } from "@/components/layout/UnifiedPanel";
 import { ActivityPanelSettingsProvider, useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { leaveActivityPanelSettings, setActivityPanelTab } from "@/hooks/useActivityPanel";
+import { mountHost } from "./helpers/dom";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-let host: HTMLDivElement;
-let root: Root;
-
-beforeEach(() => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-});
-
-afterEach(() => {
-    act(() => root.unmount());
-    host.remove();
-});
+const dom = mountHost();
 
 /** A page that puts its settings in the panel, as the lyrics toggle does. */
 function PageWithSettings() {
@@ -70,15 +56,15 @@ function App() {
     );
 }
 
-const q = (selector: string) => host.querySelector<HTMLElement>(selector);
+const q = (selector: string) => dom.host.querySelector<HTMLElement>(selector);
 const activityTab = (name: string) =>
-    [...host.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="activity"] [role="tab"]')].find(
+    [...dom.host.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="activity"] [role="tab"]')].find(
         (t) => t.textContent?.trim().startsWith(name),
     )!;
 
 describe("the desktop side panel", () => {
     it("comes back from a page's settings on the activity tab that was showing", () => {
-        act(() => root.render(<App />));
+        act(() => dom.root.render(<App />));
         act(() => activityTab("history").click());
         expect(q('[data-testid="activity-content"]')?.textContent).toBe("history");
 
@@ -93,7 +79,7 @@ describe("the desktop side panel", () => {
     });
 
     it("moves focus to the handle when it closes and to the hide button when it opens", () => {
-        act(() => root.render(<App />));
+        act(() => dom.root.render(<App />));
         const hide = q('button[aria-label="hide panel"]')!;
         act(() => hide.focus());
         act(() => hide.click());

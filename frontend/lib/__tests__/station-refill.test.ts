@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { refillAndResume, refillStation, startStationSession, stationBatches } from "../station-refill";
-import { appendTracks, isLastInPlayOrder } from "../queue-edit";
 
 const t = (...ids: string[]) => ids.map((id) => ({ id }));
 
@@ -66,35 +65,6 @@ describe("refillStation", () => {
     it("skips tracks the listener added to the queue themselves", async () => {
         const session = startStationSession(t("a"), async () => t("x", "b"));
         expect(await refillStation(session, "1", t("a", "x"))).toEqual(t("b"));
-    });
-});
-
-describe("appendTracks", () => {
-    it("adds to the end of the queue", () => {
-        const next = appendTracks({ queue: ["a", "b"], currentIndex: 1, shuffleIndices: [], isShuffle: false }, ["c", "d"]);
-        expect(next.queue).toEqual(["a", "b", "c", "d"]);
-    });
-
-    it("adds to the end of the shuffle order without reordering it", () => {
-        const next = appendTracks({ queue: ["a", "b", "c"], currentIndex: 2, shuffleIndices: [1, 0, 2], isShuffle: true }, ["x", "y"]);
-        expect(next.shuffleIndices).toEqual([1, 0, 2, 3, 4]);
-    });
-});
-
-describe("isLastInPlayOrder", () => {
-    it("is true on the last queue position when not shuffled", () => {
-        expect(isLastInPlayOrder({ queue: ["a", "b"], currentIndex: 1, shuffleIndices: [], isShuffle: false })).toBe(true);
-        expect(isLastInPlayOrder({ queue: ["a", "b"], currentIndex: 0, shuffleIndices: [], isShuffle: false })).toBe(false);
-    });
-
-    it("follows the shuffle order when shuffled", () => {
-        const snap = { queue: ["a", "b", "c"], shuffleIndices: [1, 2, 0], isShuffle: true };
-        expect(isLastInPlayOrder({ ...snap, currentIndex: 0 })).toBe(true);
-        expect(isLastInPlayOrder({ ...snap, currentIndex: 2 })).toBe(false);
-    });
-
-    it("is false for an empty queue", () => {
-        expect(isLastInPlayOrder({ queue: [], currentIndex: 0, shuffleIndices: [], isShuffle: false })).toBe(false);
     });
 });
 

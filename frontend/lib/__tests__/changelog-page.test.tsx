@@ -2,7 +2,7 @@
 // and answered says who answered. The API is canned here; the live contract is pinned server-side.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 
@@ -55,10 +55,15 @@ beforeEach(() => {
     document.body.appendChild(container);
 });
 
-async function render() {
+afterEach(() => {
+    act(() => root?.unmount());
+});
+
+/** Renders the page and waits for the changelog to arrive; returns the query client it used. */
+async function render(client = new QueryClient()) {
     root = createRoot(container);
     await act(async () => {
-        root.render(<QueryClientProvider client={new QueryClient()}><ChangelogPage /></QueryClientProvider>);
+        root.render(<QueryClientProvider client={client}><ChangelogPage /></QueryClientProvider>);
     });
     // The query hands its answer over on a timer, after the first flush.
     for (let i = 0; i < 50 && container.textContent?.includes("Loading the changelog"); i++) {
@@ -66,7 +71,17 @@ async function render() {
             await new Promise((r) => setTimeout(r, 10));
         });
     }
+    return client;
 }
+
+const click = async (el: Element | null | undefined) =>
+    act(async () => {
+        (el as HTMLElement).click();
+    });
+const buttonNamed = (text: string) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === text);
+const wipeItem = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
+const confirmWipe = () =>
+    click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run"));
 
 describe("/changelog", () => {
     it("stacks releases newest first with 1.11's note preserved verbatim", async () => {
@@ -91,7 +106,7 @@ describe("/changelog", () => {
 
     it("expands an item to its full body and its run control", async () => {
         await render();
-        const toggle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"))!;
+        const toggle = wipeItem()!;
         await act(async () => {
             toggle.click();
         });
@@ -109,15 +124,9 @@ describe("/changelog", () => {
     });
 
     it("asks before wiping, then says the run started; a failure says so and leaves the button", async () => {
-        const { api } = await import("@/lib/api");
         const wipe = vi.mocked(api.wipeAndRerunEnrichment);
         await render();
-        const button = (text: string) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === text);
-        const click = async (el: HTMLElement | undefined) =>
-            act(async () => {
-                el!.click();
-            });
-        await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment")));
+        await click(wipeItem());
 
         wipe.mockRejectedValueOnce(new Error("down"));
         await click(container.querySelector<HTMLElement>('[data-testid="wipe-run"]')!);
@@ -125,38 +134,32 @@ describe("/changelog", () => {
         // Drawn at the page's top level, never inside the window or page that asked.
         expect(container.contains(document.querySelector('[role="dialog"]'))).toBe(false);
         expect(wipe).not.toHaveBeenCalled();
-        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run") as HTMLElement);
+        await confirmWipe();
         expect(wipe).toHaveBeenCalledTimes(1);
         expect(container.textContent).toContain("Couldn't start it.");
         expect(container.querySelector('[data-testid="wipe-run"]')).not.toBeNull();
 
         await click(container.querySelector<HTMLElement>('[data-testid="wipe-run"]')!);
-        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run") as HTMLElement);
+        await confirmWipe();
         expect(wipe).toHaveBeenCalledTimes(2);
         expect(container.querySelector('[data-testid="wipe-started"]')).not.toBeNull();
         expect(container.querySelector('[data-testid="wipe-run"]')).toBeNull();
-        expect(button("Not now")).toBeUndefined();
+        expect(buttonNamed("Not now")).toBeUndefined();
     });
 
     it("shows a wipe still starting after the item is closed and opened again, and never sends a second", async () => {
-        const { api } = await import("@/lib/api");
         const wipe = vi.mocked(api.wipeAndRerunEnrichment);
         wipe.mockClear();
         let finish = () => {};
         wipe.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve({ artists: 0, tracks: 0, vectors: 0 }))));
         await render();
-        const item = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
-        const click = async (el: Element | null | undefined) =>
-            act(async () => {
-                (el as HTMLElement).click();
-            });
-        await click(item());
+        await click(wipeItem());
         await click(container.querySelector('[data-testid="wipe-run"]'));
-        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run"));
+        await confirmWipe();
         expect(wipe).toHaveBeenCalledTimes(1);
 
-        await click(item());
-        await click(item());
+        await click(wipeItem());
+        await click(wipeItem());
         const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
         expect(run.disabled).toBe(true);
         expect(run.textContent).toContain("Starting");
@@ -168,22 +171,16 @@ describe("/changelog", () => {
     });
 
     it("tells a reopened wipe control that the request failed, and offers it again", async () => {
-        const { api } = await import("@/lib/api");
         const wipe = vi.mocked(api.wipeAndRerunEnrichment);
         wipe.mockClear();
         let fail = () => {};
         wipe.mockImplementationOnce(() => new Promise((_, reject) => (fail = () => reject(new Error("down")))));
         await render();
-        const item = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"));
-        const click = async (el: Element | null | undefined) =>
-            act(async () => {
-                (el as HTMLElement).click();
-            });
-        await click(item());
+        await click(wipeItem());
         await click(container.querySelector('[data-testid="wipe-run"]'));
-        await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === "Wipe and re-run"));
-        await click(item());
-        await click(item());
+        await confirmWipe();
+        await click(wipeItem());
+        await click(wipeItem());
         await act(async () => fail());
         expect(container.textContent).toContain("Couldn't start it.");
         const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
@@ -193,7 +190,7 @@ describe("/changelog", () => {
     it("Escape closes only the wipe confirm, and focus goes back to the button that opened it", async () => {
         await render();
         await act(async () => {
-            Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Wipe and re-run enrichment"))!.click();
+            wipeItem()!.click();
         });
         const run = container.querySelector<HTMLButtonElement>('[data-testid="wipe-run"]')!;
         run.focus();
@@ -215,17 +212,7 @@ describe("/changelog", () => {
 
     it("a deep link opens that release's items, and a reload of the list keeps what the reader then closed", async () => {
         window.history.replaceState(null, "", "/changelog#1.11.0");
-        let client!: QueryClient;
-        root = createRoot(container);
-        await act(async () => {
-            client = new QueryClient();
-            root.render(<QueryClientProvider client={client}><ChangelogPage /></QueryClientProvider>);
-        });
-        for (let i = 0; i < 50 && container.textContent?.includes("Loading the changelog"); i++) {
-            await act(async () => {
-                await new Promise((r) => setTimeout(r, 10));
-            });
-        }
+        const client = await render();
         const toggleOf = (key: string) =>
             Array.from(document.getElementById("1.11.0")!.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")).find((b) => b.textContent?.includes(key))!;
         expect(toggleOf("Wipe and re-run enrichment").getAttribute("aria-expanded")).toBe("true");

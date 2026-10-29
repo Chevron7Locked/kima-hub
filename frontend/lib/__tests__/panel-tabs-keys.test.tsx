@@ -2,26 +2,12 @@
  * The side panel's option strip is a tablist: only the chosen tab is in the Tab order, and the arrow keys, Home and
  * End choose and focus the others.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot, type Root } from "react-dom/client";
+import { describe, it, expect, vi } from "vitest";
 import React, { act, useState } from "react";
 import { PanelOptions } from "@/components/layout/panelChrome";
+import { mountHost } from "./helpers/dom";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-let host: HTMLDivElement;
-let root: Root;
-
-beforeEach(() => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-});
-
-afterEach(() => {
-    act(() => root.unmount());
-    host.remove();
-});
+const dom = mountHost();
 
 type Key = "up-next" | "lyrics" | "about";
 
@@ -45,7 +31,7 @@ function Strip({ onChange }: { onChange: (key: Key) => void }) {
     );
 }
 
-const tabs = () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+const tabs = () => [...dom.host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 const press = (key: string) =>
     act(() => {
         (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
@@ -53,13 +39,13 @@ const press = (key: string) =>
 
 describe("panel option strip", () => {
     it("keeps only the chosen tab in the Tab order", () => {
-        act(() => root.render(<Strip onChange={vi.fn()} />));
+        act(() => dom.root.render(<Strip onChange={vi.fn()} />));
         expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1]);
     });
 
     it("moves with the arrow keys, Home and End, choosing and focusing the tab", () => {
         const onChange = vi.fn<(key: Key) => void>();
-        act(() => root.render(<Strip onChange={onChange} />));
+        act(() => dom.root.render(<Strip onChange={onChange} />));
         act(() => tabs()[0].focus());
 
         press("ArrowRight");
@@ -85,7 +71,7 @@ describe("panel option strip", () => {
 
     it("leaves other keys alone", () => {
         const onChange = vi.fn<(key: Key) => void>();
-        act(() => root.render(<Strip onChange={onChange} />));
+        act(() => dom.root.render(<Strip onChange={onChange} />));
         act(() => tabs()[0].focus());
         press("ArrowDown");
         press("a");

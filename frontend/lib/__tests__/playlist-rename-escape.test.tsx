@@ -1,7 +1,7 @@
 // Escape in the playlist page's rename field cancels the rename and marks the key as used, so page-wide Escape
 // handlers (TV Back) leave it alone. The real page; the server, the player and the router are stand-ins.
-import { describe, it, expect, vi } from "vitest";
-import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -36,11 +36,19 @@ import PlaylistPage from "@/app/playlist/[id]/page";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+let container: HTMLDivElement;
+let root: Root;
+
+afterEach(() => {
+    act(() => root?.unmount());
+    container?.remove();
+});
+
 describe("the playlist page's rename field and Escape", () => {
     it("cancels the rename, saves nothing, and marks the key as used", async () => {
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        const container = document.body.appendChild(document.createElement("div"));
-        const root = createRoot(container);
+        container = document.body.appendChild(document.createElement("div"));
+        root = createRoot(container);
         await act(async () => root.render(<QueryClientProvider client={client}><PlaylistPage /></QueryClientProvider>));
         await act(async () => new Promise((r) => setTimeout(r, 0)));
 
@@ -54,7 +62,5 @@ describe("the playlist page's rename field and Escape", () => {
         expect(container.querySelector('input[type="text"]'), "the rename field is still open").toBeNull();
         expect(updatePlaylist).not.toHaveBeenCalled();
         expect(escape.defaultPrevented).toBe(true);
-        act(() => root.unmount());
-        container.remove();
     });
 });
