@@ -40,11 +40,6 @@ jest.mock('../../middleware/auth', () => ({
     requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 
-jest.mock('../../middleware/playlistOwner', () => ({
-    requirePlaylistOwner: (_req: any, _res: any, next: any) => next(),
-    requirePlaylistReader: (_req: any, _res: any, next: any) => next(),
-}));
-
 import express from 'express';
 import request from 'supertest';
 import playlistRoutes from '../playlists';

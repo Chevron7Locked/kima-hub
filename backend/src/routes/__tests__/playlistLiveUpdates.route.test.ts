@@ -109,10 +109,11 @@ describe("a playlist change reaches the owner's other devices", () => {
         expect(announced()).toEqual([id]);
     });
 
-    it("removing songs, one and several", async () => {
+    it("removing songs", async () => {
         const id = await playlistWith(trackIds);
-        expect((await request(app).delete(`/playlists/${id}/items/${trackIds[0]}`).set("Authorization", asOwner())).status).toBe(200);
-        expect((await request(app).delete(`/playlists/${id}/items`).set("Authorization", asOwner()).send({ trackIds: [trackIds[1]] })).status).toBe(200);
+        for (const trackId of trackIds) {
+            expect((await request(app).delete(`/playlists/${id}/items/${trackId}`).set("Authorization", asOwner())).status).toBe(200);
+        }
         expect(announced()).toEqual([id, id]);
     });
 
