@@ -5,8 +5,10 @@ import { backendUrl } from "@/lib/backend-url";
 
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
+/** An access token with less than this many seconds left is refreshed before it is used. */
+const REFRESH_WITHIN_S = 3600;
 
-// Mood Bucket Types (simplified mood system)
+/** The mood mixer's moods. */
 export type MoodType = "happy" | "sad" | "chill" | "aggressive" | "party";
 
 /** The six enrichment steps a re-run can start from. */
@@ -59,10 +61,7 @@ interface VibeTrack {
     artist: { id: string; name: string };
 }
 
-/**
- * The 1.11 release window's mood-mix answer (backend services/releases/moodMixes.ts).
- * "remove" clears a retired mix and does the same as "rebuild".
- */
+/** A listener's answer about their saved mood mix. "remove" clears a retired mix and does the same as "rebuild". */
 export type MoodMixDecision = "rebuild" | "keep" | "remove";
 
 interface UpdateStatus {
@@ -96,11 +95,13 @@ interface ServiceTestResult {
     error?: string;
 }
 
-// API response data type - represents unvalidated JSON from the server.
-// Using a single suppression here allows all 100+ API methods to return
-// properly loose types without scattering suppressions across the file.
+// Unvalidated JSON from the server: one suppression here lets the untyped methods stay loose without scattering
+// suppressions across the file.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ApiData = any;
+
+/** The browser's time zone, for the routes whose answer depends on the listener's day. */
+const timeZoneParam = () => encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
 /** A show from Apple's catalogue, as /search/discover?type=podcasts answers it (backend routes/search.ts). */
 export interface PodcastShowResult {
@@ -315,7 +316,7 @@ class ApiClient {
         const storage = authStorage();
         if (storage) {
             this.token = storage.getItem(AUTH_TOKEN_KEY);
-            // Note: Refresh token is loaded on-demand via getRefreshToken()
+            // The refresh token is read from storage when a refresh needs it.
         }
     }
 
@@ -337,12 +338,12 @@ class ApiClient {
         }
     }
 
-    getRefreshToken(): string | null {
+    private getRefreshToken(): string | null {
         const storage = authStorage();
         return storage ? storage.getItem(REFRESH_TOKEN_KEY) : null;
     }
 
-    clearToken() {
+    private clearToken() {
         this.token = null;
         const storage = authStorage();
         if (storage) {
@@ -382,15 +383,8 @@ class ApiClient {
 
     private async _doEnsureFreshToken(): Promise<"fresh" | RefreshResult> {
         const secondsLeft = this.tokenSecondsLeft();
-        if (secondsLeft !== null && secondsLeft > 3600) return "fresh";
-
-        if (this.refreshPromise) return (await this.refreshPromise);
-        this.refreshPromise = this._doRefresh();
-        try {
-            return await this.refreshPromise;
-        } finally {
-            this.refreshPromise = null;
-        }
+        if (secondsLeft !== null && secondsLeft > REFRESH_WITHIN_S) return "fresh";
+        return this.refreshAccessToken();
     }
 
     /** Returns the Authorization header value for the current token, or null. */
@@ -417,7 +411,7 @@ class ApiClient {
 
     private tokenExpiresWithin60Min(): boolean {
         const secondsLeft = this.tokenSecondsLeft();
-        return secondsLeft !== null && secondsLeft < 3600;
+        return secondsLeft !== null && secondsLeft < REFRESH_WITHIN_S;
     }
 
     private async _doRefresh(): Promise<"refreshed" | "rejected" | "network-error"> {
@@ -531,7 +525,7 @@ class ApiClient {
             let error: Record<string, unknown>;
             try {
                 error = await response.json();
-            } catch (_parseError) {
+            } catch {
                 error = {
                     error: response.statusText || "Request failed",
                     status: response.status,
@@ -545,7 +539,6 @@ class ApiClient {
                     status: response.status,
                     statusText: response.statusText,
                     error,
-                    headers: Object.fromEntries(response.headers.entries()),
                 });
             }
 
@@ -821,15 +814,17 @@ class ApiClient {
         return this.tokenizedUrl(`/api/library/tracks/${trackId}/stream`);
     }
 
-    /** `<audio>` cannot send headers, so the access token rides in the query; a token near expiry is refreshed in the background. */
-    private tokenizedUrl(path: string): string {
-        const baseUrl = `${getApiBaseUrl()}${path}`;
+    /**
+     * `<audio>` cannot send headers, so the access token rides in the query beside any `params`; a token near expiry
+     * is refreshed in the background.
+     */
+    private tokenizedUrl(path: string, params: Record<string, string> = {}): string {
+        const query = new URLSearchParams(params);
         const token = this.getCurrentToken();
         if (this.tokenExpiresWithin60Min()) void this.ensureFreshToken();
-        if (token) {
-            return `${baseUrl}?token=${encodeURIComponent(token)}`;
-        }
-        return baseUrl;
+        if (token) query.set("token", token);
+        const qs = query.toString();
+        return `${getApiBaseUrl()}${path}${qs ? `?${qs}` : ""}`;
     }
 
     prewarmTrack(trackId: string): void {
@@ -861,22 +856,10 @@ class ApiClient {
         const baseUrl = getApiBaseUrl();
         const token = includeToken ? this.getCurrentToken() : null;
 
-        // Check if this is an audiobook cover path (served by audiobooks endpoint, not proxied)
-        if (coverId && coverId.startsWith("/audiobooks/")) {
+        // Audiobook and podcast cover paths are served by their own endpoints, not the image proxy.
+        if (coverId && (coverId.startsWith("/audiobooks/") || coverId.startsWith("/podcasts/"))) {
             const url = `${baseUrl}/api${coverId}`;
-            if (token) {
-                return `${url}?token=${encodeURIComponent(token)}`;
-            }
-            return url;
-        }
-
-        // Check if this is a podcast cover path (served by podcasts endpoint, not proxied)
-        if (coverId && coverId.startsWith("/podcasts/")) {
-            const url = `${baseUrl}/api${coverId}`;
-            if (token) {
-                return `${url}?token=${encodeURIComponent(token)}`;
-            }
-            return url;
+            return token ? `${url}?token=${encodeURIComponent(token)}` : url;
         }
 
         // Check if coverId is an external URL (needs to be proxied)
@@ -1028,14 +1011,9 @@ class ApiClient {
         playlistId: string,
         pendingTrackId: string
     ): string {
-        const baseUrl = `${getApiBaseUrl()}/api/playlists/${encodeURIComponent(
-            playlistId
-        )}/pending/${encodeURIComponent(pendingTrackId)}/preview/stream`;
-        const token = this.getCurrentToken();
-        if (token) {
-            return `${baseUrl}?token=${encodeURIComponent(token)}`;
-        }
-        return baseUrl;
+        return this.tokenizedUrl(
+            `/api/playlists/${encodeURIComponent(playlistId)}/pending/${encodeURIComponent(pendingTrackId)}/preview/stream`
+        );
     }
 
     // Settings
@@ -1051,7 +1029,7 @@ class ApiClient {
     }
 
     // System Features
-    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean; liveReporting?: boolean }> {
+    async getFeatures() {
         return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean; audiobookshelfEnabled: boolean; liveReporting?: boolean }>(
             "/system/features"
         );
@@ -1298,14 +1276,9 @@ class ApiClient {
     }
 
     getTrackPreviewStreamUrl(artistName: string, trackTitle: string): string {
-        const baseUrl = `${getApiBaseUrl()}/api/artists/preview/${encodeURIComponent(
-            artistName
-        )}/${encodeURIComponent(trackTitle)}/stream`;
-        const token = this.getCurrentToken();
-        if (token) {
-            return `${baseUrl}?token=${encodeURIComponent(token)}`;
-        }
-        return baseUrl;
+        return this.tokenizedUrl(
+            `/api/artists/preview/${encodeURIComponent(artistName)}/${encodeURIComponent(trackTitle)}/stream`
+        );
     }
 
     // Audiobooks
@@ -1324,14 +1297,7 @@ class ApiClient {
     }
 
     getAudiobookStreamUrl(id: string, trackIndex = 0): string {
-        const baseUrl = `${getApiBaseUrl()}/api/audiobooks/${id}/stream`;
-        const token = this.getCurrentToken();
-        if (this.tokenExpiresWithin60Min()) void this.ensureFreshToken();
-        const params = new URLSearchParams();
-        if (token) params.set("token", token);
-        if (trackIndex > 0) params.set("trackIndex", String(trackIndex));
-        const qs = params.toString();
-        return qs ? `${baseUrl}?${qs}` : baseUrl;
+        return this.tokenizedUrl(`/api/audiobooks/${id}/stream`, trackIndex > 0 ? { trackIndex: String(trackIndex) } : {});
     }
 
     async updateAudiobookProgress(
@@ -1374,9 +1340,8 @@ class ApiClient {
     }
 
     async previewPodcast(itunesId: string) {
-        // Bound the preview so a slow or dead feed ends in an error, not an endless spinner. 25 s sits
-        // above the backend's worst case (~18 s on the Deezer path: Deezer fetch, iTunes resolve, the
-        // 8 s RSS bound), so an answerable feed is not aborted as a false timeout.
+        // Bound the preview so a slow or dead feed ends in an error, not an endless spinner. 25 s sits above the
+        // backend's own limits (the Apple lookup, the 8 s feed read), so an answerable feed is not cut off.
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 25000);
         try {
@@ -1431,8 +1396,10 @@ class ApiClient {
         return this.request<PodcastCategory[]>("/podcasts/categories");
     }
 
-    /** Apple's chart for a category, or the overall chart for `null`. */
-    /** `background`: nobody is waiting on it yet, so the server asks Apple for it after the requests people are. */
+    /**
+     * Apple's chart for a category, or the overall chart for `null`. `background`: nobody is waiting on it yet, so the
+     * server asks Apple for it after the requests people are.
+     */
     async getPodcastChart(category: number | null, limit = 24, offset = 0, background = false) {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (category !== null) params.set("category", String(category));
@@ -1630,16 +1597,16 @@ class ApiClient {
 
     // Programmatic Mixes
     async getMixes() {
-        return this.request<Mix[]>(`/mixes?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
+        return this.request<Mix[]>(`/mixes?tz=${timeZoneParam()}`);
     }
 
     async getMix(id: string) {
-        return this.request<ApiData>(`/mixes/${id}?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
+        return this.request<ApiData>(`/mixes/${id}?tz=${timeZoneParam()}`);
     }
 
     async refreshMixes() {
         return this.request<{ message: string; mixes: ApiData[] }>(
-            `/mixes/refresh?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
+            `/mixes/refresh?tz=${timeZoneParam()}`,
             {
                 method: "POST",
             }
@@ -1648,7 +1615,7 @@ class ApiClient {
 
     async saveMixAsPlaylist(mixId: string, customName?: string) {
         return this.request<{ id: string; name: string; trackCount: number }>(
-            `/mixes/${mixId}/save?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`,
+            `/mixes/${mixId}/save?tz=${timeZoneParam()}`,
             {
                 method: "POST",
                 body: customName
@@ -1658,12 +1625,12 @@ class ApiClient {
         );
     }
 
-    // Release window: the mood-mix question
+    /** The listener's saved mood mix and their answer about it. */
     async getMoodMixReleaseState() {
         return this.get<MoodMixReleaseState>("/whats-new/mood-mixes");
     }
 
-    // Release window: is a newer server release out?
+    /** Whether a newer server release is out. */
     async getUpdateStatus() {
         return this.get<UpdateStatus>("/whats-new/update-status");
     }
@@ -1682,7 +1649,7 @@ class ApiClient {
         );
     }
 
-    // Mood Bucket System (simplified, pre-computed)
+    // The mood mixer
     async getMoodBucketPresets() {
         return this.request<MoodBucketPreset[]>("/mixes/mood/buckets/presets");
     }
@@ -1691,9 +1658,10 @@ class ApiClient {
         return this.request<MoodBucketMix>(`/mixes/mood/buckets/${mood}`);
     }
 
-    // Pass the ids that were actually played, so the saved mix is the one the
-    // user heard: without them the server draws a fresh selection, which
-    // skips the tracks just served and never matches.
+    /**
+     * Pass the ids that were actually played, so the saved mix is the one the user heard: without them the server
+     * draws a fresh selection, which skips the tracks just served and never matches.
+     */
     async saveMoodBucketMix(mood: MoodType, trackIds?: string[]) {
         return this.request<{
             success: boolean;
@@ -1812,8 +1780,7 @@ class ApiClient {
         );
     }
 
-    /** Re-run the enrichment from one of the six steps; everything that
-     * depends on the step is worked out again. */
+    /** Re-run the enrichment from one of the six steps; everything that depends on the step is worked out again. */
     async rerunEnrichment(step: EnrichmentRerunStep) {
         return this.request<{ artists: number; tracks: number; vectors: number; message: string }>(
             "/enrichment/rerun",
