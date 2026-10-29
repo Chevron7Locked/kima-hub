@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { ChoiceButton } from "./ChoiceButton";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
@@ -111,16 +112,10 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
                 {mix.name} &middot; {mix.trackCount} {mix.trackCount === 1 ? "track" : "tracks"}
             </p>
             {savedNote ?? (
-                <button
-                    type="button"
-                    onClick={save}
-                    disabled={busy !== null}
-                    data-testid="moodmix-save"
-                    className="self-start h-11 px-4 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-60"
-                >
+                <Button onClick={save} disabled={busy !== null} data-testid="moodmix-save" className="self-start">
                     {busy === "save" && <Loader2 className="w-4 h-4 animate-spin" />}
                     {busy === "save" ? "Saving..." : "Save as playlist"}
-                </button>
+                </Button>
             )}
             <div className="flex gap-2">
                 {mix.retired ? (
