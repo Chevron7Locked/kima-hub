@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Edit, X, Save } from "lucide-react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
@@ -121,7 +122,9 @@ export function MetadataEditor({
                 <Edit className="w-4 h-4 text-white" />
             </button>
 
-            {isOpen && (
+            {/* Drawn at the page's top level: opened from an animated header, a fixed overlay left in place is clipped
+                to the header and painted under the content after it. */}
+            {isOpen && createPortal(
                 <div
                     className="fixed inset-0 bg-black/80 flex items-center justify-center z-(--z-modal) p-4"
                     onClick={handleClose}
@@ -415,7 +418,8 @@ export function MetadataEditor({
                             </Button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
             <ConfirmDialog
                 isOpen={confirmReset}
