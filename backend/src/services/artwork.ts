@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { BlockedAddressError, InvalidAddressError, UnresolvedAddressError, fetchChecked } from "../utils/ssrf";
+import { USER_AGENT } from "../config";
 import { isMbid } from "./artistIdentity";
 import { coverArtService } from "./coverArt";
 import { deezerService } from "./deezer";
@@ -23,8 +24,6 @@ const FOUND_TTL_SECONDS = 30 * 24 * 60 * 60;
 const NONE_TTL_SECONDS = 24 * 60 * 60;
 
 const NONE = "NONE";
-const USER_AGENT = "Kima/1.0 (+https://github.com/chevron7locked/kima)";
-
 
 export interface AlbumArtworkQuery {
     /** MusicBrainz release-group id, when the caller has one. */
@@ -56,13 +55,7 @@ interface Source<Q> {
     find: (query: Q) => Promise<string | null>;
 }
 
-/* ── the sources ─────────────────────────────────────────────────────────── */
-
-/**
- * Order: Fanart (best artist thumbnails, skips itself without an MBID or key),
- * Deezer (most coverage, fastest), then the Cover Art Archive (authoritative but
- * slow, with gaps).
- */
+/** Deezer first (most coverage, fastest), then the Cover Art Archive (authoritative, slower), then Fanart. */
 const ALBUM_SOURCES: Source<AlbumArtworkQuery>[] = [
     {
         name: "deezer",
@@ -81,6 +74,7 @@ const ALBUM_SOURCES: Source<AlbumArtworkQuery>[] = [
     },
 ];
 
+/** Fanart first (the best artist pictures; skipped without an MBID or key), then Deezer. */
 const ARTIST_SOURCES: Source<ArtistArtworkQuery>[] = [
     {
         name: "fanart",
@@ -95,14 +89,7 @@ const ARTIST_SOURCES: Source<ArtistArtworkQuery>[] = [
     },
 ];
 
-/* ── the loop ────────────────────────────────────────────────────────────── */
-
-/**
- * Walk the sources in order and take the first real answer.
- *
- * A source that throws is logged and skipped, never fatal: one provider being
- * down must not cost us the answer another one has.
- */
+/** The first source's answer, in order. A source that throws is skipped, and the run is then not a full "no". */
 async function firstAnswer<Q>(
     sources: Source<Q>[],
     query: Q,
@@ -148,8 +135,6 @@ async function addressLoads(url: string): Promise<boolean> {
         return !(err instanceof BlockedAddressError || err instanceof InvalidAddressError || err instanceof UnresolvedAddressError);
     }
 }
-
-/* ── the cache in front ──────────────────────────────────────────────────── */
 
 function keyFor(kind: string, identity: string): string {
     return `artwork:${kind}:${crypto.createHash("md5").update(identity).digest("hex")}`;
@@ -205,14 +190,7 @@ function once(
     return running;
 }
 
-/* ── the door ────────────────────────────────────────────────────────────── */
-
-/**
- * Find a cover for an album, from whichever source has one.
- *
- * Every caller that wants album artwork goes through here, whether the album is
- * in the library or not. Returns null only when every source has been asked.
- */
+/** An album's cover from the first source that has one; every album cover lookup comes here. */
 export async function findAlbumArtwork(
     query: AlbumArtworkQuery,
 ): Promise<ArtworkResult | null> {
@@ -220,7 +198,7 @@ export async function findAlbumArtwork(
     return findArtwork(albumKey(query), ALBUM_SOURCES, query, `${query.artistName} - ${query.albumTitle}`);
 }
 
-/** Find an image for an artist, from whichever source has one. */
+/** An artist's picture from the first source that has one. */
 export async function findArtistArtwork(
     query: ArtistArtworkQuery,
 ): Promise<ArtworkResult | null> {
@@ -258,30 +236,34 @@ async function findArtwork<Q extends { candidateUrl?: string | null }>(
     });
 }
 
-/* ── a page's worth at a time ────────────────────────────────────────────── */
-
 /** Polite to three public APIs, fast enough for a page of covers. */
 const CONCURRENCY = 6;
 
 /** How long a page will wait for covers it does not already know. */
-const DEFAULT_BUDGET_MS = 3000;
+const BUDGET_MS = 3000;
+
+/** Runs `work` on each item, CONCURRENCY at a time. */
+async function inPool<I>(items: I[], work: (item: I) => Promise<void>): Promise<void> {
+    const queue = [...items];
+    const worker = async () => {
+        for (let next = queue.shift(); next !== undefined; next = queue.shift()) await work(next);
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+}
 
 /**
- * Put artwork on a list of albums, spending at most `budgetMs` on unknown ones.
- * `read` and `write` adapt the caller's shape. Whatever is unanswered at the
- * deadline is sent without art and finished in the background for the next view.
+ * Puts artwork on a list of albums, waiting at most BUDGET_MS for unknown ones; `read` and `write` adapt the caller's
+ * shape. What is unanswered by then is sent without art and finished in the background for the next view.
  */
 export function withAlbumArtwork<T>(
     items: T[],
     read: (item: T) => AlbumArtworkQuery,
     write: (item: T, coverUrl: string | null) => T,
-    options: { budgetMs?: number } = {},
 ): Promise<T[]> {
     return withArtwork(items, read, write, {
         usable: (q) => !!(q.artistName && q.albumTitle),
         key: albumKey,
         find: findAlbumArtwork,
-        budgetMs: options.budgetMs,
     });
 }
 
@@ -290,13 +272,11 @@ export function withArtistArtwork<T>(
     items: T[],
     read: (item: T) => ArtistArtworkQuery,
     write: (item: T, imageUrl: string | null) => T,
-    options: { budgetMs?: number } = {},
 ): Promise<T[]> {
     return withArtwork(items, read, write, {
         usable: (q) => !!q.name,
         key: artistKey,
         find: findArtistArtwork,
-        budgetMs: options.budgetMs,
     });
 }
 
@@ -308,12 +288,10 @@ async function withArtwork<T, Q>(
         usable: (q: Q) => boolean;
         key: (q: Q) => string;
         find: (q: Q) => Promise<ArtworkResult | null>;
-        budgetMs?: number;
     },
 ): Promise<T[]> {
     if (items.length === 0) return items;
 
-    const budgetMs = how.budgetMs ?? DEFAULT_BUDGET_MS;
     const queries = items.map(read);
     const answers = new Map<string, string | null>();
 
@@ -337,29 +315,20 @@ async function withArtwork<T, Q>(
     // lookups fix it on the next view.
     for (const [key] of unresolved) answers.set(key, null);
 
-    const deadline = Date.now() + budgetMs;
-    const queue = [...unresolved];
+    const deadline = Date.now() + BUDGET_MS;
     const leftover: Q[] = [];
-
-    const worker = async () => {
-        for (;;) {
-            const next = queue.shift();
-            if (!next) return;
-            const [key, q] = next;
-            if (Date.now() >= deadline) {
-                leftover.push(q);
-                continue;
-            }
-            const found = await how.find(q).catch(() => null);
-            answers.set(key, found?.url ?? null);
+    await inPool(unresolved, async ([key, q]) => {
+        if (Date.now() >= deadline) {
+            leftover.push(q);
+            return;
         }
-    };
-
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+        const found = await how.find(q).catch(() => null);
+        answers.set(key, found?.url ?? null);
+    });
 
     if (leftover.length > 0) {
         logger.debug(
-            `[Artwork] ${leftover.length} images ran past the ${budgetMs}ms budget; finishing in the background`,
+            `[Artwork] ${leftover.length} images ran past the ${BUDGET_MS}ms budget; finishing in the background`,
         );
         void finishLater(leftover, how.find);
     }
@@ -371,19 +340,13 @@ async function withArtwork<T, Q>(
     });
 }
 
-/** Answer the stragglers after the response has gone, so the next view is right. */
-async function finishLater<Q>(pending: Q[], find: (q: Q) => Promise<ArtworkResult | null>): Promise<void> {
-    const queue = [...pending];
-    const worker = async () => {
-        for (;;) {
-            const q = queue.shift();
-            if (!q) return;
-            try {
-                await find(q);
-            } catch (error) {
-                logger.debug(`[Artwork] Background lookup failed: ${String(error)}`);
-            }
+/** Answers the stragglers after the reply has gone, so the next view is right. */
+function finishLater<Q>(pending: Q[], find: (q: Q) => Promise<ArtworkResult | null>): Promise<void> {
+    return inPool(pending, async (q) => {
+        try {
+            await find(q);
+        } catch (error) {
+            logger.debug(`[Artwork] Background lookup failed: ${String(error)}`);
         }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+    });
 }

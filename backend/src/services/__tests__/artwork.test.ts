@@ -81,7 +81,19 @@ describe("the one door for artwork", () => {
                 ({ ok: false, status: 404 }) as unknown as Response) as never);
     });
 
-    afterEach(() => fetchSpy.mockRestore());
+    let clock: jest.SpyInstance | undefined;
+    afterEach(() => {
+        fetchSpy.mockRestore();
+        clock?.mockRestore();
+        clock = undefined;
+    });
+
+    /** Every clock read after the first is 3 s on, so the page's wait for unknown covers is already over. */
+    const pastTheBudget = () => {
+        const start = Date.now();
+        let reads = 0;
+        clock = jest.spyOn(Date, "now").mockImplementation(() => start + (reads++ === 0 ? 0 : 3_000));
+    };
 
     /**
      * A page that stops waiting leaves its lookup running, and that lookup then checks the candidate address with
@@ -451,31 +463,32 @@ describe("the one door for artwork", () => {
                 () => new Promise((resolve) => setTimeout(() => resolve(null), 60)),
             );
 
-            const started = Date.now();
+            const started = performance.now();
+            pastTheBudget();
             const result = await withAlbumArtwork(
                 [{ coverUrl: GUESS as string | null }],
                 () => ({ ...ALBUM, candidateUrl: GUESS }),
                 (i, coverUrl) => ({ ...i, coverUrl }),
-                { budgetMs: 0 },
             );
 
-            expect(Date.now() - started).toBeLessThan(40);
+            expect(performance.now() - started).toBeLessThan(40);
             expect(result[0].coverUrl).toBeNull();
             await outlivedLookup();
         });
 
         it("never falls back to the unchecked address when it runs out of time", async () => {
             // A slow load must not pass an unchecked candidate address through;
-            // the placeholder is returned instead.
+            // the placeholder is returned instead, though the address would load.
             deezerAlbum.mockImplementation(
                 () => new Promise((resolve) => setTimeout(() => resolve(null), 60)),
             );
+            fetchSpy.mockImplementation((async () => ({ ok: true, status: 200 }) as unknown as Response) as never);
+            pastTheBudget();
 
             const result = await withAlbumArtwork(
                 [{ coverUrl: GUESS as string | null }],
                 () => ({ ...ALBUM, candidateUrl: GUESS }),
                 (i, coverUrl) => ({ ...i, coverUrl }),
-                { budgetMs: 0 },
             );
 
             expect(result[0].coverUrl).not.toBe(GUESS);
