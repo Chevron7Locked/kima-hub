@@ -1,9 +1,4 @@
-/**
- * Enrichment State Management Service
- *
- * Manages the state of enrichment processes using Redis for cross-process coordination.
- * Allows pause/resume/stop controls and tracks current progress.
- */
+/** The enrichment run's state in Redis, shared across processes: pause, resume and stop, and its progress. */
 
 import { logger } from "../utils/logger";
 import Redis from "ioredis";
@@ -163,10 +158,7 @@ class EnrichmentStateService {
         }
 
         const updated = { ...current, ...updates };
-        // Heartbeat honesty: stamp lastActivity only if the write actually
-        // moved counters or changed status/phase. A phase-only rewrite of
-        // status="running" over an unchanged counter set is the exact
-        // false-heartbeat signature this class exists to kill.
+        // lastActivity moves only when the write changed counters or status, never phase alone (shouldRefreshLastActivity).
         await this.setState(updated, {
             stampActivity: shouldRefreshLastActivity(current, updated),
         });

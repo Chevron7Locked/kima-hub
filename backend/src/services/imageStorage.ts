@@ -1,9 +1,4 @@
-/**
- * Image Storage Service
- *
- * Downloads and stores images locally for fast serving.
- * Images are stored in the covers directory and served directly from disk.
- */
+/** Downloads images into the covers folder, which is served straight from disk. */
 
 import { fetchChecked } from "../utils/ssrf";
 import fs from "fs";
