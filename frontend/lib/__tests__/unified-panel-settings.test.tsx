@@ -13,9 +13,13 @@ vi.mock("@/hooks/useNotifications", () => ({
     useActiveDownloads: () => ({ downloads: [] }),
 }));
 vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ queue: [], currentIndex: 0 }) }));
-vi.mock("@/features/vibe/panel-shared", () => ({
-    ActivityContent: ({ type }: { type: string }) => <div data-testid="activity-content">{type}</div>,
+const { list } = vi.hoisted(() => ({
+    list: (name: string) => () => <div data-testid="activity-content">{name}</div>,
 }));
+vi.mock("@/components/activity/NotificationsTab", () => ({ NotificationsTab: list("notifications") }));
+vi.mock("@/components/activity/ActiveDownloadsTab", () => ({ ActiveDownloadsTab: list("downloads") }));
+vi.mock("@/components/activity/ImportsTab", () => ({ ImportsTab: list("imports") }));
+vi.mock("@/components/activity/HistoryTab", () => ({ HistoryTab: list("history") }));
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => <div>queue</div> }));
 vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({ ArtistAbout: () => null, NowPlayingStrip: () => null }));
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => null }));

@@ -2,15 +2,12 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ActivityIconBar, type ActivityType } from "./ActivityIconBar";
-import {
-    type VibeTab,
-    ActivityContent,
-    ActivityHeader,
-    TabBar,
-    TabContent,
-} from "./panel-shared";
 import type { LibraryMatches } from "./librarySearch";
+import { NowPlayingTab } from "./tabs/NowPlayingTab";
+import { QueueTab } from "./tabs/QueueTab";
+import { LyricsView } from "@/components/lyrics/LyricsView";
+import { ActivityOptions, ActivityPane, useActivityCounts, type ActivityView } from "@/components/activity/ActivityBody";
+import { PanelOptions, panelTabId } from "@/components/layout/panelChrome";
 import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -19,6 +16,7 @@ import { Waypoints, Sparkles, AudioWaveform, Play, Pause, Search, X, Music, type
 import { cn } from "@/lib/cn";
 
 type SnapPoint = "peek" | "half" | "full";
+type SheetTab = "now-playing" | "queue" | "lyrics" | "activity";
 
 /** The grab strip. A finger-sized target, and the sheet's own handle. */
 const HANDLE = 44;
@@ -35,7 +33,7 @@ function SheetAction({ icon: Icon, label, primary = false, ...props }: { icon: L
             className={cn(
                 "flex-1 flex flex-col items-center gap-1 min-h-[52px] py-2 px-1 rounded-lg border text-[var(--text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2",
                 primary
-                    ? "bg-[var(--color-brand)]/15 border-[var(--color-brand)]/40 focus-visible:ring-[var(--color-brand)]/60"
+                    ? "bg-brand/15 border-brand/40 focus-visible:ring-brand/60"
                     : "bg-white/[0.06] hover:bg-white/[0.12] border-white/10 focus-visible:ring-white/40",
             )}
             {...props}
@@ -95,8 +93,9 @@ export function VibePanelSheet({
     const [hostHeight, setHostHeight] = useState(0);
     const [contentFloor, setContentFloor] = useState(0);
     const [snap, setSnap] = useState<SnapPoint>("peek");
-    const [activeTab, setActiveTab] = useState<VibeTab>("now-playing");
-    const [expandedActivity, setExpandedActivity] = useState<ActivityType | null>(null);
+    const [activeTab, setActiveTab] = useState<SheetTab>("now-playing");
+    const [activity, setActivity] = useState<ActivityView>("all");
+    const counts = useActivityCounts();
 
     const [query, setQuery] = useState("");
     const [active, setActive] = useState(0);
@@ -150,7 +149,7 @@ export function VibePanelSheet({
         const el = sheetRef.current;
         if (!el || snap === "full") return;
         setContentFloor(el.scrollHeight);
-    }, [snap, hasPlayback, hasActions, selectedTrackId, expandedActivity, intro]);
+    }, [snap, hasPlayback, hasActions, selectedTrackId, activeTab, intro]);
 
     const searching = results !== null && query.trim().length >= 2;
     const clampedActive = results && results.top.length > 0 ? Math.min(active, results.top.length - 1) : 0;
@@ -279,14 +278,8 @@ export function VibePanelSheet({
         setSnap(target);
     }, [nearest, setSnap, stops]);
 
-    const handleToggleActivity = (type: ActivityType) => {
-        setExpandedActivity((prev) => (prev === type ? null : type));
-        if (snap === "peek") setSnap("half");
-    };
-
-    const handleTabClick = (tab: VibeTab) => {
+    const handleTabClick = (tab: SheetTab) => {
         setActiveTab(tab);
-        setExpandedActivity(null);
         if (snap === "peek") setSnap("half");
     };
 
@@ -507,31 +500,40 @@ export function VibePanelSheet({
                             <div className="shrink-0 border-b border-white/5 px-4 pb-3">{intro}</div>
                         )}
 
-                        <div className="shrink-0">
-                            <ActivityIconBar
-                                expandedActivity={expandedActivity}
-                                onToggleActivity={handleToggleActivity}
-                            />
-                        </div>
-
-                        {expandedActivity ? (
-                            <>
-                                <ActivityHeader
-                                    type={expandedActivity}
-                                    onClose={() => setExpandedActivity(null)}
-                                />
-                                <div className="flex-1 overflow-y-auto overscroll-contain">
-                                    <ActivityContent type={expandedActivity} />
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <TabBar activeTab={activeTab} onTabClick={handleTabClick} />
-                                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
-                                    <TabContent activeTab={activeTab} />
-                                </div>
-                            </>
+                        <PanelOptions<SheetTab>
+                            label="vibe panel"
+                            controls="vibe-sheet-tab"
+                            value={activeTab}
+                            onChange={handleTabClick}
+                            options={[
+                                { key: "now-playing", label: "now playing" },
+                                { key: "queue", label: "queue" },
+                                { key: "lyrics", label: "lyrics" },
+                                { key: "activity", label: "activity", count: counts.unread + counts.downloads, urgent: true },
+                            ]}
+                        />
+                        {activeTab === "activity" && (
+                            <ActivityOptions controls="vibe-sheet-activity" value={activity} onChange={setActivity} />
                         )}
+                        <div
+                            id="vibe-sheet-tab"
+                            role="tabpanel"
+                            aria-labelledby={panelTabId("vibe-sheet-tab", activeTab)}
+                            className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]"
+                        >
+                            {activeTab === "now-playing" && <NowPlayingTab />}
+                            {activeTab === "queue" && <QueueTab />}
+                            {activeTab === "lyrics" && <LyricsView variant="panel" />}
+                            {activeTab === "activity" && (
+                                <div
+                                    id="vibe-sheet-activity"
+                                    role="tabpanel"
+                                    aria-labelledby={panelTabId("vibe-sheet-activity", activity)}
+                                >
+                                    <ActivityPane view={activity} onOpen={setActivity} />
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

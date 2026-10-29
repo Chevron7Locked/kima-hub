@@ -50,7 +50,7 @@ export default function DiscoverWeeklyPage() {
         try {
             const result = await api.retryUnavailableAlbums();
             if (result.success && result.queued > 0) {
-                openActivityPanel("active");
+                openActivityPanel("downloads");
                 refreshBatchStatus();
                 setTimeout(() => reloadData(), 15000);
             } else {

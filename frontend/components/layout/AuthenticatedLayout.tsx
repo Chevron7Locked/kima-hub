@@ -119,10 +119,10 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     <WhatsNewGate />
                         <TopBar />
 
-                        {/* Sidebar - renders MobileSidebar for hamburger menu */}
+                        {/* On a phone or tablet the sidebar is the menu the top bar's button opens. */}
                         <Sidebar />
 
-                        {/* Activity Panel - for mobile notifications (rendered as overlay) */}
+                        {/* The activity overlay: alerts, downloads, imports and history. */}
                         <ActivityPanel
                             isOpen={activityPanel.isOpen}
                             onToggle={activityPanel.toggle}

@@ -142,7 +142,7 @@ export function useSoulseekSearch({
             );
 
             if (typeof window !== "undefined") {
-                openActivityPanel("active");
+                openActivityPanel("downloads");
                 queryClient.invalidateQueries({ queryKey: ["notifications"] });
             }
 

@@ -3,15 +3,18 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { useNotifications, useActiveDownloads } from "@/hooks/useNotifications";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { useAudioState } from "@/lib/audio-state-context";
-import type { ActivityType } from "@/features/vibe/ActivityIconBar";
-import { ActivityContent } from "@/features/vibe/panel-shared";
 import { QueueTab } from "@/features/vibe/tabs/QueueTab";
 import { ArtistAbout, NowPlayingStrip } from "@/features/vibe/tabs/NowPlayingTab";
 import { LyricsView } from "@/components/lyrics/LyricsView";
-import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import {
+    ActivityOptions,
+    ActivityPane,
+    isActivityView,
+    useActivityCounts,
+    type ActivityView,
+} from "@/components/activity/ActivityBody";
 import { PanelHeading, PanelOptions, panelIconButton, panelTabId } from "./panelChrome";
 
 interface UnifiedPanelProps {
@@ -20,19 +23,9 @@ interface UnifiedPanelProps {
 }
 
 type Listening = "up-next" | "lyrics" | "about";
-type Activity = "all" | ActivityType;
 
 const OPEN_WIDTH = 380;
 const CLOSED_WIDTH = 16;
-
-/** The tab names the rest of the app opens the panel on, as this panel's activity options. */
-const FROM_APP_TAB: Record<string, Activity> = {
-    all: "all",
-    notifications: "notifications",
-    active: "downloads",
-    imports: "imports",
-    history: "history",
-};
 
 /**
  * The desktop panel on the right, in two halves with one grammar, the same as the left library panel's: listening
@@ -41,16 +34,13 @@ const FROM_APP_TAB: Record<string, Activity> = {
  */
 export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [listening, setListening] = useState<Listening>("up-next");
-    const [activity, setActivity] = useState<Activity>("all");
-    // Externally-registered settings content (discover settings gear, lyrics).
-    // Pages register it via useActivityPanelSettings and open it by dispatching
-    // "set-activity-panel-tab" { tab: "settings" }; this panel renders it.
+    const [activity, setActivity] = useState<ActivityView>("all");
+    // A page's settings (Discover's, the lyrics'), put in the panel through useActivityPanelSettings and opened on
+    // the "settings" tab.
     const [showSettings, setShowSettings] = useState(false);
     const { settingsContent } = useActivityPanelSettings();
-    const { unreadCount } = useNotifications();
-    const { downloads: activeDownloads } = useActiveDownloads();
+    const { any: hasActivity } = useActivityCounts();
     const { queue, currentIndex } = useAudioState();
-    const hasActivity = unreadCount > 0 || activeDownloads.length > 0;
     const upNext = Math.max(0, queue.length - currentIndex - 1);
 
     // Focus follows the panel, as it does for the left library: closing lands on the handle that reopens it, and
@@ -65,7 +55,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
         focusAfterToggle.current = false;
         (isOpen ? hideRef : handleRef).current?.focus();
     }, [isOpen]);
-    // Reset settings view on collapse so reopening shows the halves.
+    // Closing leaves a page's settings, so reopening shows the halves.
     const handleCollapse = () => {
         setShowSettings(false);
         focusAfterToggle.current = true;
@@ -81,7 +71,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 return;
             }
             setShowSettings(false);
-            if (tab && FROM_APP_TAB[tab]) setActivity(FROM_APP_TAB[tab]);
+            if (isActivityView(tab)) setActivity(tab);
         };
         // Leaving a page's settings returns to the halves as they were.
         const handleLeave = () => setShowSettings(false);
@@ -93,8 +83,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
         };
     }, []);
 
-    // settingsContent null (owner page unmounted) falls through to the halves
-    // via the `settingsContent &&` render guard -- no reset effect needed.
+    // A page that unmounts takes its settings with it, and the halves show again.
     const settingsActive = showSettings && !!settingsContent;
 
     return (
@@ -139,9 +128,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                     )}
                 >
                     {settingsActive ? (
-                        // Externally-registered settings (discover gear / lyrics).
-                        // The content provides its own header and back button,
-                        // which calls leaveActivityPanelSettings to exit.
+                        // The settings bring their own heading and a back button (leaveActivityPanelSettings).
                         <div className="flex-1 min-h-0 overflow-hidden">{settingsContent}</div>
                     ) : (
                         <>
@@ -190,29 +177,13 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
 
                             <section aria-label="activity" className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06]">
                                 <PanelHeading label="activity" />
-                                <PanelOptions<Activity>
-                                    label="activity"
-                                    controls="panel-activity"
-                                    value={activity}
-                                    onChange={setActivity}
-                                    options={[
-                                        { key: "all", label: "all" },
-                                        { key: "notifications", label: "alerts", count: unreadCount, urgent: true },
-                                        { key: "downloads", label: "downloads", count: activeDownloads.length, urgent: true },
-                                        { key: "imports", label: "imports" },
-                                        { key: "history", label: "history" },
-                                    ]}
-                                />
+                                <ActivityOptions controls="panel-activity" value={activity} onChange={setActivity} />
                                 <div
                                     id="panel-activity"
                                     role="tabpanel"
                                     aria-labelledby={panelTabId("panel-activity", activity)}
                                     className="min-h-0 flex-1 overflow-y-auto">
-                                    {activity === "all" ? (
-                                        <ActivityFeed onOpen={setActivity} />
-                                    ) : (
-                                        <ActivityContent type={activity} />
-                                    )}
+                                    <ActivityPane view={activity} onOpen={setActivity} />
                                 </div>
                             </section>
                         </>

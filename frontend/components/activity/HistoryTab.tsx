@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { useDownloadHistory, type DownloadHistoryItem } from "@/hooks/useNotifications";
 import { DownloadRow, RowAction } from "./DownloadRow";
 import { usePublicConfig } from "@/hooks/useQueries";
+import { ListHeader } from "./ListHeader";
 
 export function HistoryTab() {
     const queryClient = useQueryClient();
@@ -75,15 +76,7 @@ export function HistoryTab() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="flex items-center justify-end px-4 py-2.5 border-b border-white/10">
-                <button
-                    type="button"
-                    onClick={handleClearAll}
-                    className="rounded-full px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-white/10 hover:text-white"
-                >
-                    clear all
-                </button>
-            </div>
+            <ListHeader action={{ label: "clear all", onClick: handleClearAll }} />
 
             <div className="flex-1 overflow-y-auto">
                 {failed.length > 0 && (

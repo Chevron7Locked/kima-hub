@@ -2,24 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, Bell, Check, Download, ListMusic, X, type LucideIcon } from "lucide-react";
-import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/relative-time";
 import { useActiveDownloads, useDownloadHistory, useNotifications } from "@/hooks/useNotifications";
-import type { ActivityType } from "@/features/vibe/ActivityIconBar";
-
-interface ImportSummary {
-    id: string;
-    playlistName: string;
-    status: string;
-    progress: number;
-    createdAt: string;
-}
+import type { ActivityKind } from "./ActivityBody";
+import { statusLabel, userImportsQuery } from "./ImportsTab";
 
 interface FeedRow {
     key: string;
-    opens: ActivityType;
+    opens: ActivityKind;
     icon: LucideIcon;
     tone: "busy" | "new" | "good" | "bad" | "quiet";
     title: string;
@@ -38,17 +30,12 @@ const MAX_ROWS = 40;
  * Everything Kima is doing and has done, as one list: downloads still running first, then alerts, imports and
  * finished downloads, newest first. A row opens its own list, where its actions are.
  */
-export function ActivityFeed({ onOpen }: { onOpen: (type: ActivityType) => void }) {
+export function ActivityFeed({ onOpen }: { onOpen: (kind: ActivityKind) => void }) {
     const { isAuthenticated } = useAuth();
     const { notifications, isLoading: loadingAlerts } = useNotifications();
     const { downloads } = useActiveDownloads();
     const { history } = useDownloadHistory();
-    // The same query, and cache, as the imports list.
-    const { data: imports = [] } = useQuery({
-        queryKey: ["user-imports"],
-        queryFn: () => api.get<ImportSummary[]>("/spotify/imports"),
-        enabled: isAuthenticated,
-    });
+    const { data: imports = [] } = useQuery({ ...userImportsQuery, enabled: isAuthenticated });
 
     const running: FeedRow[] = [
         ...downloads.map<FeedRow>((d) => ({
@@ -70,7 +57,7 @@ export function ActivityFeed({ onOpen }: { onOpen: (type: ActivityType) => void 
                 icon: ListMusic,
                 tone: "busy",
                 title: i.playlistName,
-                detail: `importing · ${i.status}`,
+                detail: `importing · ${statusLabel(i.status)}`,
                 at: i.createdAt,
                 progress: i.progress,
                 running: true,

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import type { ActivityView } from "@/components/activity/ActivityBody";
 
 const ACTIVITY_PANEL_KEY = "kima_activity_panel_open";
 
-export type ActivityPanelTab = "all" | "notifications" | "active" | "imports" | "history" | "settings";
+/** What the panel can be opened on: an activity view, or the settings a page put in it. */
+export type ActivityPanelTab = ActivityView | "settings";
 
 export function setActivityPanelTab(tab: ActivityPanelTab) {
     window.dispatchEvent(new CustomEvent("set-activity-panel-tab", { detail: { tab } }));
@@ -12,7 +14,7 @@ export function setActivityPanelTab(tab: ActivityPanelTab) {
 
 /**
  * Leaves the settings a page put in the panel (Discover's, the lyrics'), back to what the panel showed before them.
- * Not a tab: "active" means "show the downloads", which is right after starting one and wrong after "back".
+ * Not a tab: "downloads" means "show the downloads", which is right after starting one and wrong after "back".
  */
 export function leaveActivityPanelSettings() {
     window.dispatchEvent(new CustomEvent("leave-activity-panel-settings"));

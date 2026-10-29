@@ -66,9 +66,9 @@ describe("leaving the panel's settings", () => {
 
     it("keeps the downloads when they were showing before the settings", () => {
         act(() => root.render(<Layout />));
-        act(() => setActivityPanelTab("active"));
+        act(() => setActivityPanelTab("downloads"));
         act(() => setActivityPanelTab("settings"));
         act(() => leaveActivityPanelSettings());
-        expect(shown()).toBe("active");
+        expect(shown()).toBe("downloads");
     });
 });

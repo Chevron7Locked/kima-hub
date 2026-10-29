@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import Link from "next/link";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { timeAgo } from "@/lib/relative-time";
+import { ListHeader } from "./ListHeader";
 
 export function NotificationsTab() {
     const {
@@ -75,19 +76,12 @@ export function NotificationsTab() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="flex h-9 shrink-0 items-center justify-between px-3 text-xs text-[var(--text-muted)]">
-                <span className="tabular-nums">
+            <ListHeader action={{ label: "clear all", onClick: handleClearAll }}>
+                <span>
                     {notifications.length} {notifications.length === 1 ? "alert" : "alerts"}
                     {unread > 0 && <span className="text-brand"> · {unread} new</span>}
                 </span>
-                <button
-                    type="button"
-                    onClick={handleClearAll}
-                    className="rounded-md px-1.5 py-1 outline-none transition-colors hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-brand/60"
-                >
-                    clear all
-                </button>
-            </div>
+            </ListHeader>
 
             <ul className="flex-1 overflow-y-auto pb-1">
                 {notifications.map((notification) => {

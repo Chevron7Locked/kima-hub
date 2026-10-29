@@ -176,7 +176,7 @@ export default function PlaylistDetailPage() {
         preview.toggle(pendingId, api.getPendingTrackPreviewStreamUrl(playlistId, pendingId));
 
     const showRetryProgress = (reloadAfterMs: number) => {
-        openActivityPanel("active");
+        openActivityPanel("downloads");
         queryClient.invalidateQueries({ queryKey: ["notifications"] });
         setTimeout(() => {
             queryClient.invalidateQueries({

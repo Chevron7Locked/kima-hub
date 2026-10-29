@@ -14,7 +14,7 @@ import { shownTitle } from "@/lib/track-title";
 
 const OPERATION_STYLES: Record<string, { label: string; borderColor: string }> = {
     drift: { label: "Song Path", borderColor: "var(--color-brand)" },
-    vibe: { label: "Vibe", borderColor: "#fca200" },
+    vibe: { label: "Vibe", borderColor: "var(--color-brand)" },
     blend: { label: "Blend", borderColor: "#a056e0" },
     similar: { label: "Similar", borderColor: "#5c8dd6" },
 };

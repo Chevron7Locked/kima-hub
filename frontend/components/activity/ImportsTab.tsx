@@ -16,8 +16,9 @@ import { cn } from "@/lib/cn";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/relative-time";
+import { ListHeader } from "./ListHeader";
 
-interface ImportJob {
+export interface ImportJob {
     id: string;
     playlistName: string;
     status: string;
@@ -41,32 +42,20 @@ const ACTIVE_STATUSES = [
     "matching_tracks",
 ];
 
-function statusLabel(status: string): string {
-    switch (status) {
-        case "pending":
-            return "pending";
-        case "fetching":
-            return "fetching";
-        case "downloading":
-            return "downloading";
-        case "scanning":
-            return "scanning";
-        case "creating_playlist":
-            return "creating";
-        case "matching_tracks":
-            return "matching";
-        case "completed":
-            return "done";
-        case "failed":
-            return "failed";
-        case "cancelled":
-            return "cancelled";
-        default:
-            // An unmapped status from the server, shown as-is rather than
-            // stamped into capitals.
-            return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
-    }
-}
+/** The statuses whose word changes on screen; any other shows as the server names it, with spaces for underscores. */
+const STATUS_LABEL: Record<string, string> = {
+    creating_playlist: "creating",
+    matching_tracks: "matching",
+    completed: "done",
+};
+
+export const statusLabel = (status: string) => STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+
+/** The listener's imports, one query and cache for the imports list and the merged activity list. */
+export const userImportsQuery = {
+    queryKey: ["user-imports"],
+    queryFn: () => api.get<ImportJob[]>("/spotify/imports"),
+};
 
 function statusColor(status: string): string {
     if (ACTIVE_STATUSES.includes(status)) return "text-brand";
@@ -81,9 +70,8 @@ export function ImportsTab() {
     const queryClient = useQueryClient();
     const [cancelling, setCancelling] = useState<Set<string>>(new Set());
 
-    const { data: imports = [], isLoading } = useQuery<ImportJob[]>({
-        queryKey: ["user-imports"],
-        queryFn: () => api.get<ImportJob[]>("/spotify/imports"),
+    const { data: imports = [], isLoading } = useQuery({
+        ...userImportsQuery,
         enabled: isAuthenticated,
         refetchInterval: 10000,
         refetchIntervalInBackground: false,
@@ -126,16 +114,18 @@ export function ImportsTab() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="flex h-9 shrink-0 items-center px-3 text-xs tabular-nums text-[var(--text-muted)]">
-                {activeImports.length > 0 ? (
-                    <span className="text-brand">{activeImports.length} importing</span>
-                ) : (
-                    <span>
-                        {pastImports.length} {pastImports.length === 1 ? "import" : "imports"}
-                    </span>
-                )}
-                {activeImports.length > 0 && pastImports.length > 0 && <span>&nbsp;· {pastImports.length} earlier</span>}
-            </div>
+            <ListHeader>
+                <span>
+                    {activeImports.length > 0 ? (
+                        <span className="text-brand">{activeImports.length} importing</span>
+                    ) : (
+                        <>
+                            {pastImports.length} {pastImports.length === 1 ? "import" : "imports"}
+                        </>
+                    )}
+                    {activeImports.length > 0 && pastImports.length > 0 && <> · {pastImports.length} earlier</>}
+                </span>
+            </ListHeader>
 
             <ul className="flex-1 overflow-y-auto pb-1">
                 {activeImports.map((job) => (

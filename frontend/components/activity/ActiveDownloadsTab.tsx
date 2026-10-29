@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useActiveDownloads } from "@/hooks/useNotifications";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import { DownloadRow, RowAction } from "./DownloadRow";
+import { ListHeader } from "./ListHeader";
 
 export function ActiveDownloadsTab() {
     const { downloads, isLoading: loading, refetch } = useActiveDownloads();
@@ -55,19 +56,10 @@ export function ActiveDownloadsTab() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10">
-                <span className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-                    <span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden />
-                    <span className="tabular-nums">{downloads.length} downloading</span>
-                </span>
-                <button
-                    type="button"
-                    onClick={handleCancelAll}
-                    className="rounded-full px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-white/10 hover:text-danger-light"
-                >
-                    cancel all
-                </button>
-            </div>
+            <ListHeader action={{ label: "cancel all", onClick: handleCancelAll, danger: true }}>
+                <span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden />
+                <span className="text-brand">{downloads.length} downloading</span>
+            </ListHeader>
 
             <ul className="flex-1 space-y-0.5 overflow-y-auto p-2">
                 {downloads.map((download) => (
