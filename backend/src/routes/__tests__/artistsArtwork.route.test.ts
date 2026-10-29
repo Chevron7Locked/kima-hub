@@ -56,8 +56,10 @@ jest.mock("../../services/musicbrainz", () => ({
     },
 }));
 
+const mockGetArtistTopTracks = jest.fn();
 jest.mock("../../services/deezer", () => ({
     deezerService: {
+        getArtistTopTracks: (...a: unknown[]) => mockGetArtistTopTracks(...a),
         getTrackPreview: jest.fn().mockResolvedValue(null),
         getFreshTrackPreview: jest.fn().mockResolvedValue(null),
     },
@@ -92,6 +94,7 @@ describe("the discovery routes and the pictures they promise", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockGetSimilarArtists.mockResolvedValue([]);
+        mockGetArtistTopTracks.mockResolvedValue([]);
         mockSearchArtist.mockResolvedValue(noData);
         mockGetArtist.mockResolvedValue(answeredWith({ name: "Perturbator", id: MBID }));
         mockGetReleaseGroups.mockResolvedValue(noData);
@@ -105,6 +108,34 @@ describe("the discovery routes and the pictures they promise", () => {
     });
 
     describe("GET /artists/discover/:nameOrMbid", () => {
+        it("answers 404 for a name nothing knows: not MusicBrainz, not Deezer, no picture", async () => {
+            const res = await request(makeApp()).get("/artists/discover/nonexistent-id-12345");
+            expect(res.status).toBe(404);
+            expect(redisClient.setex).not.toHaveBeenCalled();
+        });
+
+        it("serves a name MusicBrainz lacks when Deezer has its songs", async () => {
+            mockGetArtistTopTracks.mockResolvedValue([
+                { title: "Song", durationMs: 200_000, rank: 1, previewUrl: null, album: "Album", coverUrl: null },
+            ]);
+            const res = await request(makeApp()).get("/artists/discover/Deezer%20Only");
+            expect(res.status).toBe(200);
+            expect(res.body.topTracks).toHaveLength(1);
+        });
+
+        it("serves, and does not cache, a name MusicBrainz lacks while Deezer could not be asked", async () => {
+            mockGetArtistTopTracks.mockRejectedValue(new Error("Deezer timed out"));
+            const res = await request(makeApp()).get("/artists/discover/Deezer%20Only");
+            expect(res.status).toBe(200);
+            expect(redisClient.setex).not.toHaveBeenCalled();
+        });
+
+        it("serves a name whose MusicBrainz search failed, since nothing proved it unknown", async () => {
+            mockSearchArtist.mockResolvedValue({ kind: "transient", error: { message: "timeout" } });
+            const res = await request(makeApp()).get("/artists/discover/Someone");
+            expect(res.status).toBe(200);
+        });
+
         it("serves but does not cache a page built while MusicBrainz was failing", async () => {
             mockGetReleaseGroups.mockResolvedValue({ kind: "transient", error: { message: "timeout" } });
             const res = await request(makeApp()).get(`/artists/discover/${MBID}`);

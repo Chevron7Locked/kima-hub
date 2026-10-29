@@ -74,6 +74,8 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         let artistName: string = isMbid ? "" : nameOrMbid;
         // A page built while MusicBrainz failed is served but not cached.
         let complete = true;
+        // MusicBrainz answered that it has no artist by this name (not merely failed to answer).
+        let unknownToMusicBrainz = false;
 
         // If we have a name but no MBID, search for it
         if (!mbid && artistName) {
@@ -84,6 +86,7 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
                 mbid = found.value.mbid;
                 artistName = found.value.name;
             } else if (found.kind === "absent") {
+                unknownToMusicBrainz = true;
                 logger.debug(
                     `[Discovery] no artist named ${artistName} on MusicBrainz`
                 );
@@ -326,11 +329,19 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
                     })
                 );
             } catch (dzError) {
+                // Unanswered, not empty: the page is built without Deezer and not cached.
+                complete = false;
                 logger.debug(
                     `[Discovery] Deezer top tracks failed for ${artistName}:`,
                     dzError
                 );
             }
+        }
+
+        // A name MusicBrainz does not know still gets a page when Deezer (or the artwork sources) know it, or when
+        // Deezer could not be asked; when every source answered and none knows it, it is a broken or made-up link.
+        if (unknownToMusicBrainz && complete && !image && topTracks.length === 0 && similarArtists.length === 0) {
+            return res.status(404).json({ error: "Artist not found" });
         }
 
         const response = {
