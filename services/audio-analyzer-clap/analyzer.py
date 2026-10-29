@@ -15,7 +15,7 @@ import gc
 import asyncio
 import secrets
 import threading
-from typing import Optional, Tuple
+from typing import Optional
 import numpy as np
 import librosa
 import requests
@@ -53,10 +53,9 @@ HEARTBEAT_SECONDS = 30
 # no live worker refreshes is gone after 3 heartbeats, so a stale count is
 # never what holds analysis back.
 INFLIGHT_TTL_SECONDS = 3 * HEARTBEAT_SECONDS
-# Resolve the ONNX model path the same way the backend does: default to the
-# analyzer's own models/ directory (where the validated music_audio.onnx lives),
-# overridable with CLAP_ONNX_MODEL_PATH.
+# The model: models/music_audio.onnx beside this code (onnx_backend.ONNX_MODEL_PATH).
 from onnx_backend import ONNX_MODEL_PATH as CLAP_ONNX_MODEL_PATH
+from music_clap_mel import SAMPLE_RATE as CLAP_SAMPLE_RATE
 
 # Queue and channel names
 VIBE_QUEUE_NAME = 'enrichment-vibe'  # BullMQ queue consumed by BullMQVibeWorker
@@ -106,8 +105,7 @@ PROMPTS = {
 # intro/verse/chorus/bridge/outro better than one mid-song slice, and the
 # mean of their vectors is still a single 512-d embedding downstream.
 WINDOW_COUNT = 5
-WINDOW_SECONDS = 10  # each window is 10 seconds (matches the ONNX backend)
-CLAP_SAMPLE_RATE = 48000  # 48kHz for CLAP model
+WINDOW_SECONDS = 10
 
 
 def compute_window_offsets(duration: float,
@@ -222,28 +220,27 @@ class CLAPAnalyzer:
             logger.info("CLAP model unloaded")
 
     def _load_window(self, audio_path: str, start: float, window_seconds: float,
-                     duration: float) -> Tuple[Optional[np.ndarray], int]:
-        """Load a window from `start` of a track `duration` seconds long, clamped to its end; (None, 0)
-        on error."""
+                     duration: float) -> Optional[np.ndarray]:
+        """A window from `start` of a track `duration` seconds long, clamped to its end, at the model's
+        sample rate; None on error."""
         try:
             # Clamp so we never start past the end of the file.
             start = max(0.0, min(start, max(0.0, duration - 1e-3)))
             available = max(0.0, duration - start)
             take = min(window_seconds, available)
 
-            audio, sr = librosa.load(
+            audio, _ = librosa.load(
                 audio_path,
                 sr=CLAP_SAMPLE_RATE,
                 offset=start,
                 duration=(take if take > 0 else None),
                 mono=True
             )
-
-            return audio, sr
+            return audio
 
         except Exception as e:
             logger.exception(f"Failed to load window at {start:.1f}s from {audio_path}: {e}")
-            return None, 0
+            return None
 
     def get_audio_embedding(self, audio_path: str) -> Optional[np.ndarray]:
         """512-d embedding of a track: five 10 s windows (see window offsets) embedded together,
@@ -271,7 +268,7 @@ class CLAPAnalyzer:
         # averaged as if they were the whole track.
         clips = []
         for start in offsets:
-            audio, _ = self._load_window(audio_path, start, WINDOW_SECONDS, duration)
+            audio = self._load_window(audio_path, start, WINDOW_SECONDS, duration)
             if audio is None:
                 logger.error(f"Window at {start:.1f}s of {audio_path} failed to load; no vector")
                 return None
@@ -389,8 +386,7 @@ class BullMQVibeWorker:
     CLAPAnalyzer._lock serialises inference, so extra concurrency overlaps DB
     I/O with inference."""
 
-    def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event,
-                 concurrency: int = None):
+    def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event, concurrency: int):
         self.analyzer = analyzer
         self.stop_event = stop_event
         self._redis_client = None
@@ -402,9 +398,7 @@ class BullMQVibeWorker:
         # that number lands. Guarded because ControlHandler sets it from a
         # different thread.
         self._concurrency_lock = threading.Lock()
-        self._desired_concurrency = (
-            max(1, min(os.cpu_count() or 8, int(concurrency))) if concurrency else load_configured_workers()
-        )
+        self._desired_concurrency = max(1, min(os.cpu_count() or 8, int(concurrency)))
         self._active_concurrency = None
         # Jobs this worker is computing right now. The backend reads the published
         # count to keep MusiCNN and CLAP one at a time across a re-run, where a
@@ -958,7 +952,7 @@ class ControlHandler(PubSubHandler):
 
     channel = CONTROL_CHANNEL
 
-    def __init__(self, stop_event: threading.Event, worker: "BullMQVibeWorker" = None):
+    def __init__(self, stop_event: threading.Event, worker: "BullMQVibeWorker"):
         super().__init__(stop_event)
         self.worker = worker
 
@@ -974,14 +968,9 @@ class ControlHandler(PubSubHandler):
 
             if command == 'set_workers':
                 requested = control.get('count', NUM_WORKERS)
-                if self.worker is None:
-                    logger.warning(
-                        f"set_workers={requested} received but no worker is attached to the control handler"
-                    )
-                else:
-                    previous = self.worker.desired_concurrency
-                    applied = self.worker.set_concurrency(requested)
-                    logger.info(f"Worker concurrency {previous} -> {applied} (applied live)")
+                previous = self.worker.desired_concurrency
+                applied = self.worker.set_concurrency(requested)
+                logger.info(f"Worker concurrency {previous} -> {applied} (applied live)")
             elif command in ('install_gpu', 'cancel_gpu_install'):
                 import gpu_runtime
                 action = 'install' if command == 'install_gpu' else 'cancel'

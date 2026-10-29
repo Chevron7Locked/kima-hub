@@ -2,7 +2,6 @@
 The image can run ONNX: requirements.txt carries onnxruntime, _ensure_onnx_backend loads the model eagerly, and a
 window failure fails the track.
 """
-import contextlib
 import importlib.util
 import os
 import sys
@@ -19,7 +18,7 @@ _spec.loader.exec_module(analyzer)
 CLAPAnalyzer = analyzer.CLAPAnalyzer
 
 
-def test_ensure_onnx_backend_eagerly_loads_model(monkeypatch):
+def test_ensure_onnx_backend_eagerly_loads_model():
     # Construction and load must happen in _ensure_onnx_backend (which the
     # startup path calls before claiming ONNX works), and the load must not
     # raise when the shipped model and onnxruntime are present.
@@ -59,7 +58,7 @@ def test_a_failed_window_fails_the_track(monkeypatch):
 
     def load(path, start, seconds, duration):
         loads["n"] += 1
-        return (None, 0) if loads["n"] == 3 else (np.zeros(480000, dtype=np.float32), 48000)
+        return None if loads["n"] == 3 else np.zeros(480000, dtype=np.float32)
 
     a.onnx_backend = Backend()
     monkeypatch.setattr(a, "_load_window", load)

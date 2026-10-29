@@ -125,7 +125,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # transformers supplies the tokenizer (RobertaTokenizer) for the text encoder;
 # the sound model's front end is numpy and librosa's mel filter bank
 # (music_clap_mel.py). The same pins as services/audio-analyzer-clap/
-# requirements.txt (test_ship_blocker.py checks). transformers is exact:
+# requirements.txt (test_onnx_runtime_ready.py checks). transformers is exact:
 # torchless imports crash on unvetted releases, so a bump ships only with a
 # full ONNX re-validation. 5.10.4 is validated (mel, tokenizer, 512-d
 # audio and text embeddings bit-identical to 4.57.6) and closes

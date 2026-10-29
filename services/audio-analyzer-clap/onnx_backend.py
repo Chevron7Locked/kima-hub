@@ -14,7 +14,6 @@ import numpy as np
 
 logger = logging.getLogger('clap-analyzer')
 
-CLAP_SAMPLE_RATE = 48000
 EPS = 1e-12
 
 # The validated export the images copy next to the analyzer; CLAP_ONNX_MODEL_PATH overrides it.

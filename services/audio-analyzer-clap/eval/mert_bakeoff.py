@@ -47,7 +47,8 @@ def _init_worker(model_id: str, backend: str) -> None:
     _BACKEND = backend
     if backend == 'onnx-v1':
         # The shipped tower itself, through the shipped ONNX backend.
-        from onnx_backend import OnnxCLAPBackend, CLAP_SAMPLE_RATE
+        from onnx_backend import OnnxCLAPBackend
+        from music_clap_mel import SAMPLE_RATE as CLAP_SAMPLE_RATE
         _MODEL = OnnxCLAPBackend()
         _MODEL.load_model()
         _SR = CLAP_SAMPLE_RATE
