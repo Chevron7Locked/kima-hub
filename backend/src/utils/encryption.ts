@@ -18,13 +18,14 @@ const NONCE_BYTES = 24;
 // Insecure default that must not be used in production
 const INSECURE_DEFAULT = "default-encryption-key-change-me";
 
-/**
- * Get and validate the encryption key from environment
- * Throws error if not set or using insecure default
- */
+/** The configured secret: SETTINGS_ENCRYPTION_KEY, else ENCRYPTION_KEY (the older name, still read). */
+function configuredSecret(): string | undefined {
+    return process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+}
+
+/** The secret, checked (set, not the insecure default), as a 256-bit key; throws when it is unusable. */
 function getEncryptionKey(): Buffer {
-    // Support both SETTINGS_ENCRYPTION_KEY (primary) and ENCRYPTION_KEY (compatibility)
-    const key = process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+    const key = configuredSecret();
 
     if (!key) {
         throw new Error(
@@ -64,7 +65,7 @@ const V2_KEY = Buffer.from(
 
 // Legacy key derivation for backward compatibility with data encrypted before SHA-256 normalization
 function getLegacyEncryptionKey(): Buffer | null {
-    const key = process.env.SETTINGS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+    const key = configuredSecret();
     if (!key || key.length < 32) return null; // Short keys already used SHA-256
     return Buffer.from(key.slice(0, 32));
 }
@@ -126,11 +127,9 @@ export function decrypt(text: string): string {
 }
 
 /**
- * Every value Kima stored is text: valid UTF-8 with no control characters other than tab and line breaks.
- * AES-256-CBC carries no MAC, so a wrong key passes the padding check about one time in 256 and decrypts to
- * random bytes. Those bytes read as text like this about one time in 120,000 for the shortest value (one block),
- * so a wrong key is accepted about once in 31 million per key tried rather than once in 256; the rest are refused
- * instead of handed back as a credential. A leading byte-order mark is kept, as the old decoding kept it.
+ * Every value Kima stored is text: valid UTF-8 with no control characters but tab and line breaks. AES-256-CBC has no
+ * MAC, so a wrong key passes the padding check about 1 time in 256; requiring stored text refuses the random bytes it
+ * gives, so a wrong key is accepted about once in 31 million instead. A leading byte-order mark is kept, as before.
  */
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const NOT_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
