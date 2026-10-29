@@ -15,7 +15,7 @@ import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/disco
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -266,8 +266,8 @@ type UnavailableRow = Awaited<ReturnType<typeof prisma.unavailableAlbum.findMany
 
 /**
  * Splits a week's unavailable albums into those still missing and those that turned up since: a suggestion of the
- * week downloaded the release, an album with its release id exists, or an album by that artist carries its title
- * (a bracketed part of the title ignored).
+ * week downloaded the release, an album with its release id exists, or an album of the same artist and title by
+ * `lookupKey` exists. Another edition is not the album asked for.
  */
 async function unavailableStillMissing(
     userId: string,
@@ -286,20 +286,15 @@ async function unavailableStillMissing(
     ]);
     const suggestedMbids = new Set(suggested.map((a) => a.rgMbid));
     const existingMbids = new Set(withMbid.map((a) => a.rgMbid));
-    const index = everyAlbum.map((a) => ({
-        title: a.title.toLowerCase().trim(),
-        artist: a.artist.name.toLowerCase().trim(),
-    }));
+    const byName = new Set(everyAlbum.map((a) => lookupKey(a.artist.name, a.title)));
 
     const missing: UnavailableRow[] = [];
     const turnedUp: UnavailableRow[] = [];
     for (const album of albums) {
-        const artist = album.artistName.toLowerCase().trim();
-        const title = album.albumTitle.toLowerCase().replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").trim();
         const found =
             suggestedMbids.has(album.albumMbid) ||
             existingMbids.has(album.albumMbid) ||
-            index.some((lib) => lib.title.includes(title) && lib.artist.includes(artist));
+            byName.has(lookupKey(album.artistName, album.albumTitle));
         (found ? turnedUp : missing).push(album);
     }
     return { missing, turnedUp };

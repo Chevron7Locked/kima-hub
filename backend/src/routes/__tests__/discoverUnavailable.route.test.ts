@@ -1,7 +1,7 @@
 /**
  * The week's unavailable albums (suggestions no download found) leave the list once they turn up: a suggestion of the
- * week downloaded the release, an album with its release id exists, or an album by that artist carries its title (a
- * bracketed part of the title such as "(Deluxe)" ignored). GET /discover/current hides those; POST
+ * week downloaded the release, an album with its release id exists, or an album of the same artist and title by the
+ * shared name fold exists. Another edition ("Plain (Deluxe)" for "Plain") is not the album asked for. GET /discover/current hides those; POST
  * /discover/retry-unavailable deletes them instead of downloading them again. Both apply the same rule. Real database
  * and router; auth is passed through.
  */
@@ -44,7 +44,7 @@ const unavailable = (albumMbid: string, artistName: string, albumTitle: string) 
         data: { userId: listener, albumMbid, artistName, albumTitle, similarity: 0.5, tier: "medium", weekStartDate: week() },
     });
 
-/** Four unavailable albums: three that have turned up since, and one still missing. */
+/** Five unavailable albums: three that have turned up since, and two still missing. */
 async function seed() {
     const artist = await prisma.artist.create({ data: { name: `${MARK} Band`, identityKey: `${MARK}-band` } });
     await prisma.album.create({
@@ -59,6 +59,7 @@ async function seed() {
     await unavailable(`${MARK}-rg-suggested`, `${MARK} Band`, `${MARK} Suggested`);
     await unavailable(`${MARK}-rg-owned`, `${MARK} Band`, `${MARK} Renamed`);
     await unavailable(`${MARK}-rg-deluxe`, `${MARK} Band`, `${MARK} Plain (Deluxe)`);
+    await unavailable(`${MARK}-rg-same-name`, `${MARK} BAND`, `${MARK} plain`);
     await unavailable(`${MARK}-rg-missing`, `${MARK} Band`, `${MARK} Missing`);
 }
 
@@ -75,13 +76,13 @@ beforeEach(async () => {
 });
 
 describe("unavailable albums that have turned up", () => {
-    it("GET /current lists only the album still missing", async () => {
+    it("GET /current lists only the albums still missing, another edition among them", async () => {
         const res = await request(app).get("/discover/current").expect(200);
-        expect(res.body.unavailable.map((a: { albumId: string }) => a.albumId)).toEqual([`${MARK}-rg-missing`]);
+        expect(res.body.unavailable.map((a: { albumId: string }) => a.albumId).sort()).toEqual([`${MARK}-rg-deluxe`, `${MARK}-rg-missing`]);
     });
 
     it("POST /retry-unavailable deletes the ones that turned up and downloads nothing when none is left", async () => {
-        await prisma.unavailableAlbum.deleteMany({ where: { userId: listener, albumMbid: `${MARK}-rg-missing` } });
+        await prisma.unavailableAlbum.deleteMany({ where: { userId: listener, albumMbid: { in: [`${MARK}-rg-missing`, `${MARK}-rg-deluxe`] } } });
 
         const res = await request(app).post("/discover/retry-unavailable").expect(200);
 
