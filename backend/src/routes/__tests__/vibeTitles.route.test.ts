@@ -81,3 +81,24 @@ describe("vibe answers carry the edited title", () => {
         ]);
     });
 });
+
+describe("how many results a vibe answer holds", () => {
+    it.each([
+        [undefined, 20],
+        [7, 7],
+        ["7", 7],
+        [500, 100],
+        ["many", 20],
+        [-3, 1],
+    ])("a search asking for %p gets %p", async (limit, expected) => {
+        mockSearch.mockResolvedValue([]);
+        await request(app).post("/vibe/search").send({ query: "calm piano", ...(limit === undefined ? {} : { limit }) });
+        expect(mockSearch.mock.calls.at(-1)?.[1]).toBe(expected);
+    });
+
+    it.each([["500", 100], ["many", 20], ["7", 7]])("similar songs asking for %p get %p", async (limit, expected) => {
+        mockSimilar.mockResolvedValue([row(`${P}_plain`)]);
+        await request(app).get(`/vibe/similar/${P}_seed?limit=${limit}`);
+        expect(mockSimilar.mock.calls.at(-1)?.[1]).toBe(expected);
+    });
+});

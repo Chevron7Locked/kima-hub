@@ -15,12 +15,6 @@ import { createHash } from "node:crypto";
 import { parseLimit } from "./library/paging";
 import { prisma } from "../utils/db";
 
-/** A requested result count: 1 to 100, 20 when missing or not a number. */
-function resultLimit(value: unknown): number {
-    const n = Math.floor(Number(value));
-    return Number.isFinite(n) && n > 0 ? Math.min(n, 100) : 20;
-}
-
 const router = Router();
 const gzipAsync = promisify(gzip);
 
@@ -31,8 +25,8 @@ function sanitizeForLog(s: string): string {
 }
 
 // A large library's map is tens of megabytes of JSON that compresses ~8x, and
-// the app has no global compression middleware. Gzip it here, once per version
-// of the map and of the mood snapshot, not once per request.
+// the app has no global compression middleware. Gzip it here, once per map
+// content, not once per request.
 let gzippedMap: { key: string; body: Buffer } | null = null;
 async function sendMapJson(req: Request, res: Response, mapData: MapResponse) {
     const acceptsGzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
@@ -147,7 +141,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
             return res.status(400).json({ error: "'subtract' must contain valid track IDs" });
         }
 
-        const limit = resultLimit(requestedLimit);
+        const limit = parseLimit(requestedLimit, 20, 100);
         const addIds: string[] = add;
         const subtractIds: string[] = subtract ?? [];
 
@@ -245,8 +239,7 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
     }
 });
 
-// Convert pgvector cosine distance to similarity (0-1)
-// distance 0 = identical, distance 1 = orthogonal, distance 2 = opposite
+/** pgvector's cosine distance as a 0-1 similarity. */
 function distanceToSimilarity(distance: number): number {
     return Math.max(0, 1 - distance);
 }
@@ -273,7 +266,7 @@ router.post("/search", requireAuth, async (req, res) => {
             });
         }
 
-        const limit = resultLimit(requestedLimit);
+        const limit = parseLimit(requestedLimit, 20, 100);
 
         const trimmedQuery = query.trim();
         const rows = await searchTracksByText(trimmedQuery, limit);

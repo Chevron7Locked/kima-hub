@@ -18,6 +18,7 @@ import { getLiveState, liveListenerCount, publicUserId, subscribeLive, LiveEvent
 import { searchTracksByText, TextSearchRow } from "../services/textEmbeddingBridge";
 import { findAlbumArtwork } from "../services/artwork";
 import { getLocalImagePath } from "../services/imageStorage";
+import { parseLimit } from "./library/paging";
 
 const TRACK_ID_RE = /^c[a-z0-9]{16,30}$/;
 const LIVE_STREAM_CAP = 4;
@@ -37,12 +38,6 @@ function requireServiceToken(req: Request, res: Response, next: NextFunction): v
         return;
     }
     next();
-}
-
-function parseListLimit(value: unknown): number {
-    const n = Number(value);
-    if (value === undefined || value === "" || !Number.isFinite(n)) return 20;
-    return Math.min(100, Math.max(1, Math.floor(n)));
 }
 
 function etagFor(buffer: Buffer): string {
@@ -184,7 +179,7 @@ router.post(
             return;
         }
         try {
-            const ranked = await searchTracksByText(query, parseListLimit(req.query.limit));
+            const ranked = await searchTracksByText(query, parseLimit(req.query.limit, 20, 100));
             res.header("Cache-Control", "no-store");
             res.json({
                 query,
