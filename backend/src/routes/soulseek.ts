@@ -4,7 +4,7 @@ import { safeError } from "../utils/errors";
 /** Soulseek routes: UI searches and track downloads over the vendored soulseek-ts connection. */
 
 import { Router } from "express";
-import { requireAuth, requireAcquirePermission } from "../middleware/auth";
+import { requireAuth, requireAdmin, requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
@@ -111,11 +111,12 @@ router.get("/status", requireAuth, async (_req, res) => {
 
 /**
  * POST /soulseek/connect
- * Manually trigger connection to Soulseek network
+ * Connects the server's one Soulseek connection, shared by every listener, so admins only.
  */
 router.post(
     "/connect",
     requireAuth,
+    requireAdmin,
     requireSoulseekConfigured,
     async (_req, res) => {
         try {
@@ -447,9 +448,9 @@ router.post(
 
 /**
  * POST /soulseek/disconnect
- * Disconnect from Soulseek network
+ * Drops the server's one Soulseek connection, for every listener, so admins only.
  */
-router.post("/disconnect", requireAuth, async (_req, res) => {
+router.post("/disconnect", requireAuth, requireAdmin, async (_req, res) => {
     try {
         soulseekService.disconnect();
         res.json({ success: true, message: "Disconnected" });
