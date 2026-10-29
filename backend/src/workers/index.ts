@@ -57,18 +57,13 @@ const discoverWorker = new Worker("discover-weekly-v2", processDiscoverWeekly, {
     lockDuration: 120000,
 });
 
-const importWorker = new Worker(
-    "playlist-import",
-    async (job) => processImportJob(job),
-    {
-        connection: createWorkerConnection(),
-        concurrency: 1,
-        lockDuration: 600000, // 10 minutes -- imports with downloads can be slow
-    }
-);
+const importWorker = new Worker("playlist-import", processImportJob, {
+    connection: createWorkerConnection(),
+    concurrency: 1,
+    lockDuration: 600000, // 10 minutes -- imports with downloads can be slow
+});
 
-// Start unified enrichment worker
-// Handles: artist metadata, track mood tags, audio analysis queueing (Essentia)
+// The enrichment loop: identification, artist metadata, analysis and sound vectors, moods, similarity.
 startUnifiedEnrichmentWorker().catch((err) => {
     logger.error("Failed to start unified enrichment worker:", err);
 });
@@ -113,7 +108,7 @@ discoverWorker.on("failed", (job, err) => {
 });
 
 discoverWorker.on("active", (job) => {
-    logger.debug(` Discover job ${job.id} started for user ${job.data.userId}`);
+    logger.debug(`Discover job ${job.id} started for user ${job.data.userId}`);
 });
 
 discoverWorker.on("error", (err) => {
@@ -266,5 +261,3 @@ export async function shutdownWorkers(): Promise<void> {
 
     logger.debug("Workers shutdown complete");
 }
-
-// Export queues for use in other modules
