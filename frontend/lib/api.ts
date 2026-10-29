@@ -250,9 +250,6 @@ interface FailureCounts {
 
 interface ConcurrencyConfig {
     concurrency: number;
-    estimatedSpeed: string;
-    artistsPerMin: number;
-    tracksPerMin: number;
 }
 
 export interface AnalysisWorkersConfig {

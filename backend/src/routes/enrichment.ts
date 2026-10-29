@@ -751,18 +751,7 @@ router.post("/tracks/:id/reset", requireAuth, requireAdmin, async (req, res) => 
 router.get("/concurrency", requireAuth, async (_req, res) => {
   try {
     const settings = await getSystemSettings();
-    const concurrency = settings?.enrichmentConcurrency || 1;
-
-    // Calculate estimated speeds based on concurrency
-    const artistsPerMin = Math.round(10 * concurrency);
-    const tracksPerMin = Math.round(60 * concurrency);
-
-    res.json({
-      concurrency,
-      estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
-      artistsPerMin,
-      tracksPerMin,
-    });
+    res.json({ concurrency: settings?.enrichmentConcurrency || 1 });
   } catch (error) {
     logger.error("Failed to get enrichment settings:", error);
     res.status(500).json({ error: "Failed to get enrichment settings" });
@@ -808,20 +797,11 @@ router.put("/concurrency", requireAuth, requireAdmin, async (req, res) => {
     // Update rate limiter concurrency multiplier
     rateLimiter.updateConcurrencyMultiplier(clampedConcurrency);
 
-    // Calculate estimated speeds
-    const artistsPerMin = Math.round(10 * clampedConcurrency);
-    const tracksPerMin = Math.round(60 * clampedConcurrency);
-
     logger.debug(
       `[Enrichment Settings] Updated concurrency to ${clampedConcurrency}`,
     );
 
-    res.json({
-      concurrency: clampedConcurrency,
-      estimatedSpeed: `~${artistsPerMin} artists/min, ~${tracksPerMin} tracks/min`,
-      artistsPerMin,
-      tracksPerMin,
-    });
+    res.json({ concurrency: clampedConcurrency });
   } catch (error) {
     logger.error("Failed to update enrichment settings:", error);
     res.status(500).json({ error: "Failed to update enrichment settings" });

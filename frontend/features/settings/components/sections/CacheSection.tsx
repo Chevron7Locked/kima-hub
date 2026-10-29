@@ -562,10 +562,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             const previousConcurrency = queryClient.getQueryData([
                 "enrichment-concurrency",
             ]);
-            queryClient.setQueryData(["enrichment-concurrency"], {
-                concurrency: newConcurrency,
-                artistsPerMin: newConcurrency * 6,
-            });
+            queryClient.setQueryData(["enrichment-concurrency"], { concurrency: newConcurrency });
             return { previousConcurrency };
         },
         onError: (_err, _newConcurrency, context) => {
@@ -1162,28 +1159,17 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     Loading...
                                 </span>
                             ) : (
-                                <>
-                                    <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
-                                        {enrichmentSpeed === 1
-                                            ? "Conservative"
-                                            : enrichmentSpeed === 2
-                                            ? "Moderate"
-                                            : enrichmentSpeed === 3
-                                            ? "Balanced"
-                                            : enrichmentSpeed === 4
-                                            ? "Fast"
-                                            : "Maximum"}
-                                    </span>
-                                    {concurrencyConfig && (
-                                        <span className="text-xs tabular-nums text-[var(--text-muted)] w-24 text-right">
-                                            ~
-                                            {
-                                                concurrencyConfig.artistsPerMin
-                                            }{" "}
-                                            artists/min
-                                        </span>
-                                    )}
-                                </>
+                                <span className="text-xs tabular-nums text-[var(--text-secondary)] w-24 text-right">
+                                    {enrichmentSpeed === 1
+                                        ? "Conservative"
+                                        : enrichmentSpeed === 2
+                                        ? "Moderate"
+                                        : enrichmentSpeed === 3
+                                        ? "Balanced"
+                                        : enrichmentSpeed === 4
+                                        ? "Fast"
+                                        : "Maximum"}
+                                </span>
                             )}
                         </div>
                     </div>
