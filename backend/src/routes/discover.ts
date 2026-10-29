@@ -15,7 +15,7 @@ import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/disco
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { lookupKey, relocateDiscoverAlbums, sameName } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -537,22 +537,15 @@ router.post("/like", async (req, res) => {
         } else {
             try {
                 const lidarrArtists = await lidarrService.getArtists();
-                const lidarrArtist = lidarrArtists.find(
-                    (a) =>
-                        a.artistName.toLowerCase() ===
-                        discoveryAlbum.artistName.toLowerCase()
-                );
+                // Every artist of that name: removing the tag from a namesake only keeps it.
+                const namedArtists = lidarrArtists.filter((a) => sameName(a.artistName, discoveryAlbum.artistName));
 
-                if (lidarrArtist) {
+                if (namedArtists.length > 0) {
                     const tagId = await lidarrService.getOrCreateDiscoveryTag();
-                    if (tagId && lidarrArtist.tags?.includes(tagId)) {
-                        await lidarrService.removeTagsFromArtist(
-                            lidarrArtist.id,
-                            [tagId]
-                        );
-                        logger.debug(
-                            `   Removed discovery tag from ${lidarrArtist.artistName} (found by name)`
-                        );
+                    for (const lidarrArtist of namedArtists) {
+                        if (!tagId || !lidarrArtist.tags?.includes(tagId)) continue;
+                        await lidarrService.removeTagsFromArtist(lidarrArtist.id, [tagId]);
+                        logger.debug(`   Removed discovery tag from ${lidarrArtist.artistName} (found by name)`);
                     }
                 } else {
                     logger.debug(
