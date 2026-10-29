@@ -63,7 +63,7 @@ Click a star to see the song with four actions: Play, Match Vibe (queue the song
 
 ### How it is worked out
 
-After a scan, Kima runs five enrichment steps in the background: artist metadata, mood tags, audio analysis, vibe embeddings (the sound vectors) and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 9,004 songs took 87 minutes with an NVIDIA RTX 4060 Ti and both GPU switches on: about 1 minute per 100 songs. Without a graphics card, an earlier 1.11 build on the same machine took 98 minutes for 8,985 songs, about 1.1 minutes per 100. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card; see [docs/gpu.md](docs/gpu.md).
+After a scan, Kima runs six enrichment steps in the background: song identification, artist metadata, audio analysis, vibe embeddings (the sound vectors), moods and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 9,004 songs took 87 minutes with an NVIDIA RTX 4060 Ti and both GPU switches on: about 1 minute per 100 songs. Without a graphics card, an earlier 1.11 build on the same machine took 98 minutes for 8,985 songs, about 1.1 minutes per 100. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card; see [docs/gpu.md](docs/gpu.md).
 
 ## Features
 
@@ -79,7 +79,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 
 ### Your library
 
-- **Your files.** Reads MP3, FLAC, M4A, AAC, OGG, Opus, WAV, WMA, APE and WV files, and identifies them with MusicBrainz: first by a MusicBrainz tag in the file, then by the album's track list and a title-checked name search, and last by an AcoustID audio fingerprint.
+- **Your files.** Reads MP3, FLAC, M4A, AAC, OGG, Opus, WAV, WMA, APE and WV files, and identifies them with MusicBrainz: first by a MusicBrainz tag in the file, then by an AcoustID audio fingerprint, then by the album's track list, the ISRC and a title-checked name search.
 - **Streaming quality.** Play the original file, or have Kima convert it on the fly to 320, 192 or 128 kbps.
 - **Lyrics.** Shows lyrics stored in the file, or fetches them from LRCLIB. Timed lyrics follow along with the song.
 - **Playlists.** Make them private or public to the other accounts on your server, drag to reorder, or share one as a link that opens without an account.
@@ -102,7 +102,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 ### Finding something to play
 
 - **Mood mixes.** Pick one of five moods and Kima builds a playlist from the songs that fit.
-- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, and stations for your common genres and decades.
+- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, stations for your common genres and decades, and 14 mood stations (Calm, Late Night, Road Trip, Wildcard and more) drawn from the 22 moods Kima learns for each song.
 - **Similar artists.** Taken from ListenBrainz, with Deezer as a fallback, and ranked toward your library. Each one shows how many of their albums you own.
 - **Weekly discovery.** Weekly playlists of music you do not own, built from similar artists and downloaded through Lidarr or Soulseek.
 
@@ -137,7 +137,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 
 - Docker, on a `linux/amd64` or `linux/arm64` machine.
 - A folder of music.
-- Memory: each audio analysis worker needs about 1 to 1.5 GB, and up to 2 to 3 GB at its peak. The example Compose file limits the container to 6 GB. On a small machine, lower the worker count in **Settings > Library Enrichment**.
+- Memory: each audio analysis worker needs about 1 to 1.5 GB, and up to 2 to 3 GB at its peak. `docker-compose.server.yml` and `docker-compose.prod.yml` limit the container to 6 GB. On a small machine, lower the worker count in **Settings > Library Enrichment**.
 - A modern web browser.
 - Optional: an NVIDIA graphics card (see [docs/gpu.md](docs/gpu.md)), and Lidarr, Audiobookshelf or slskd if you use those features.
 

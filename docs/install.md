@@ -10,7 +10,7 @@ Kima ships as one Docker image that holds the web app, the API server, Postgres,
 | --- | --- | --- |
 | `docker run chevron7locked/kima` | The all-in-one image | You want the simplest install |
 | `docker-compose.prod.yml` | The all-in-one image, with the options in a Compose file | You prefer Compose to a long `docker run` line |
-| `docker-compose.server.yml` | The all-in-one image plus Lidarr, Prowlarr, FlareSolverr, qBittorrent and NZBGet | You want the download tools started alongside Kima |
+| `docker-compose.server.yml` | The all-in-one image plus Lidarr, Prowlarr, FlareSolverr, qBittorrent and SABnzbd | You want the download tools started alongside Kima |
 | `docker-compose.services.yml` | Only those download tools, with no Kima | You want to add them next to an existing install |
 | `docker-compose.yml` | Separate backend, frontend, Postgres, Redis and analyzer containers, built from this repository, plus Lidarr, Prowlarr, FlareSolverr, qBittorrent and SABnzbd | You want to build from source or run the parts apart |
 | `docker-compose.dev.yml` | Only Postgres, Redis and the audio analyzer, for development | You are working on the code (see [development.md](development.md)) |

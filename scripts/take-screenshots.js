@@ -9,11 +9,8 @@
  * with names (for example `vibe-map mobile-player social-card`) it takes only those.
  * The card is rendered last from scripts/social-card.html, using the screenshots already on disk.
  *
- * Desktop shots are 1440x900 at 2x, phone shots 390x844 at 3x. A real song is started first so
- * the player shows one. The picks below suit the maintainer's library; override them with
- * KIMA_SHOT_ALBUM, KIMA_SHOT_ALBUM_ARTIST, KIMA_SHOT_ARTIST and KIMA_SHOT_TRACK. Headless
- * Chromium needs the ANGLE/SwiftShader flags set in main() or the 3-D map renders blank.
- * PNGs over 700 KB are shrunk with pngquant when it is installed (a few photo-heavy pages stay a little over).
+ * Override the album, artist and song it shows with KIMA_SHOT_ALBUM, KIMA_SHOT_ALBUM_ARTIST, KIMA_SHOT_ARTIST and
+ * KIMA_SHOT_TRACK.
  */
 
 const { execFileSync } = require("child_process");

@@ -17,7 +17,7 @@ Most of Kima is configured in the web app, under **Settings**. Environment varia
 | P2P Networks | Soulseek | Admins |
 | Artwork | Fanart.tv and AcoustID keys | Admins |
 | Storage | Music and download paths, the server address, and Check for updates (a daily look at GitHub for a newer release) | Admins |
-| Library Enrichment | The five enrichment steps, worker counts, caches, the NVIDIA GPU switches, re-run from a chosen step, wipe and re-run | Admins |
+| Library Enrichment | The six enrichment steps, worker counts, caches, the NVIDIA GPU switches, re-run from a chosen step, wipe and re-run | Admins |
 | Corrupt Tracks | Files that could not be read | Admins |
 | Users | Create and delete accounts, set roles | Admins |
 

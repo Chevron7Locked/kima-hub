@@ -2,13 +2,8 @@
 # Built from the repository root (docker-compose.yml), so it can carry the shared
 # GPU wrapper from the CLAP service.
 
-# MusiCNN and its three heads (danceability, DEAM and emoMusic valence/arousal) ship as converted ONNX checked into the repo
-# (services/audio-analyzer/models/), together with the reference answers
-# recorded from the validated pipeline. The build gate below runs the vendored
-# graphs on this image's own ONNX Runtime and fails unless they answer within
-# 1e-4 of the reference pass. The frozen TensorFlow originals (pb/) and the
-# converter (convert_musicnn.py) stay in the repo so anyone can re-derive the
-# ONNX and re-verify; they are no longer part of any image build.
+# MusiCNN and its three heads ship as vendored ONNX (models/); the build gate below fails unless they answer within 1e-4
+# of the vendored reference answers on this image's ONNX Runtime.
 
 FROM python:3.11-slim
 
@@ -27,12 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg procps \
 
 WORKDIR /app
 
-# The versions the main image ships. Essentia is built from the pinned source
-# (no Linux arm64 wheel exists; the amd64 wheel is bypassed so both
-# architectures run the same source build, which matches the wheel's answers to
-# 1e-6 — the gate below proves it on this image). numpy 1.24.4 is the
-# sound-vector parity pin; Essentia's wheels claim numpy>=1.25 but run on
-# 1.24.4, and so does the source build.
+# The main image's versions. Essentia is built from the pinned source on every architecture (no Linux arm64 wheel
+# exists), so amd64 and arm64 run the same build; numpy 1.24.4 is the sound-vector parity pin.
 RUN pip3 install --no-cache-dir 'numpy==1.24.4' 'onnxruntime==1.30.0' pyyaml six redis psycopg2-binary \
     && curl -fsSL --retry 5 -o /tmp/essentia.tar.gz \
         'https://github.com/MTG/essentia/archive/36ec3d929402d491cbbb1120c54631e8c205b0ff.tar.gz' \

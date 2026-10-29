@@ -33,22 +33,10 @@ RUN python3 export_music_onnx.py --ckpt ckpt/music_audioset_epoch_15_esc_90.14.p
     && echo '6dbba074b27f8973d84c5c7ae9acd0b9139a6cd9dd82bea6e87954dc3b835956  music_text.onnx' | sha256sum -c - \
     && echo '[builder] music_audio.onnx and music_text.onnx exported and sha-verified'
 
-# ============================================================
-# MUSICNN MODELS (vendored ONNX + reference answers)
-# MusiCNN and its three heads (danceability, DEAM and emoMusic valence/arousal) ship as converted ONNX checked into the repo
-# (services/audio-analyzer/models/), together with the reference answers
-# recorded from the validated pipeline. The build gate below runs the vendored
-# graphs on this image's own ONNX Runtime and fails unless they answer within
-# 1e-4 of the reference pass -- a tampered or drifted weights file fails the
-# build. The frozen TensorFlow originals (pb/) and the converter
-# (convert_musicnn.py) stay in the repo so anyone can re-derive the ONNX and
-# re-verify; they are no longer part of any image build.
-
 FROM node:24-slim
 
-# Point-release the base layer before anything is installed: the node:24-slim
-# digest on the build cache predates the current bookworm security updates
-# (trivy found 42 fixable HIGH/CRIT in the Debian layer of rc-* images).
+# Point-release the base layer before anything is installed, so a cached node:24-slim digest still gets the current
+# Debian security updates.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && apt-get update
 
 # Add PostgreSQL 16 repository (Debian Bookworm only has PG15 by default)
@@ -127,9 +115,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # (music_clap_mel.py). The same pins as services/audio-analyzer-clap/
 # requirements.txt (test_onnx_runtime_ready.py checks). transformers is exact:
 # torchless imports crash on unvetted releases, so a bump ships only with a
-# full ONNX re-validation. 5.10.4 is validated (mel, tokenizer, 512-d
-# audio and text embeddings bit-identical to 4.57.6) and closes
-# CVE-2026-4372/5241/9856 in the model-loading path.
+# full ONNX re-validation (mel, tokenizer and the 512-d audio and text embeddings).
 RUN pip3 install --no-cache-dir --break-system-packages \
     'onnxruntime==1.30.0' \
     'transformers==5.10.4' \
@@ -158,15 +144,14 @@ RUN pip3 install --no-cache-dir --break-system-packages 'numpy==1.24.4' 'six' 'p
     && cd / && rm -rf /tmp/essentia-src /tmp/essentia.tar.gz
 
 # numpy 1.24.4 is what Essentia, the MusiCNN gate and the CLAP parity were validated with.
-# Force exact wheel versions to avoid resolver drift leaving incompatible pandas/scipy.
-RUN pip3 uninstall -y pandas scipy numpy || true \
+# Force exact wheel versions so the resolver cannot leave an incompatible scipy.
+RUN pip3 uninstall -y scipy numpy || true \
     && pip3 install --no-cache-dir --break-system-packages --force-reinstall \
     'numpy==1.24.4' \
-    'scipy==1.10.1' \
-    'pandas==2.0.3'
+    'scipy==1.10.1'
 
 # Fail fast during build if the CLAP ONNX runtime stack imports cleanly.
-RUN python3 -c "import numpy, scipy, pandas, onnxruntime, librosa, transformers; from transformers import RobertaTokenizer; from transformers.audio_utils import spectrogram, mel_filter_bank, window_function; print(f'CLAP ONNX deps OK: ort={onnxruntime.__version__} transformers={transformers.__version__} numpy={numpy.__version__}')" 
+RUN python3 -c "import numpy, scipy, onnxruntime, librosa, transformers; from transformers import RobertaTokenizer; from transformers.audio_utils import spectrogram, mel_filter_bank, window_function; print(f'CLAP ONNX deps OK: ort={onnxruntime.__version__} transformers={transformers.__version__} numpy={numpy.__version__}')" 
 
 # Cleanup
 RUN pip cache purge \
@@ -268,11 +253,6 @@ if [ $REDIS_COUNTER -ge $TIMEOUT ]; then
     exit 1
 fi
 
-# Quick check for schema ready flag
-if [ -f /data/.schema_ready ]; then
-    echo "[wait-for-db] Schema ready flag found, verifying connection..."
-fi
-
 while [ $COUNTER -lt $TIMEOUT ]; do
     if PGPASSWORD=kima psql -h localhost -U kima -d kima -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
         echo "[wait-for-db] ✓ Database is ready and schema exists!"
@@ -304,7 +284,6 @@ WORKDIR /app/backend
 # Copy backend package files and install dependencies
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
-RUN echo "=== Migrations copied ===" && ls -la prisma/migrations/ && echo "=== End migrations ==="
 RUN npm ci && npm cache clean --force
 RUN npx prisma generate
 
@@ -314,8 +293,6 @@ COPY backend/tsconfig.json ./
 RUN npm run build && \
     npm prune --production && \
     rm -rf src tests __tests__ tsconfig*.json
-
-COPY backend/docker-entrypoint.sh ./
 
 # Create log directory (cache will be in /data volume)
 RUN mkdir -p /app/backend/logs
@@ -338,7 +315,7 @@ COPY frontend/ ./
 ENV NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:3006
 
 # Marks a non-release build in the UI, so a screenshot or a bug report says
-# which channel the image came from. The pre-release workflow passes "preview";
+# which channel the image came from. The pre-release workflow passes "prerelease";
 # a tagged release passes nothing and renders a bare version number.
 ARG NEXT_PUBLIC_BUILD_TYPE=""
 ENV NEXT_PUBLIC_BUILD_TYPE=${NEXT_PUBLIC_BUILD_TYPE}
@@ -536,22 +513,6 @@ fi
 # Start PostgreSQL temporarily to create database and user
 gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w start
 
-# Migrate from Lidify -> Kima: rename old database and user if they exist
-if gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'lidify'" | grep -q 1; then
-    echo "Found legacy 'lidify' database, migrating to 'kima'..."
-    # Terminate any connections to the old database
-    gosu postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'lidify' AND pid <> pg_backend_pid();" 2>/dev/null || true
-    # Rename the database
-    gosu postgres psql -c "ALTER DATABASE lidify RENAME TO kima;"
-    echo "✓ Database renamed: lidify -> kima"
-    # Rename the user if it exists
-    if gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'lidify'" | grep -q 1; then
-        gosu postgres psql -c "ALTER USER lidify RENAME TO kima;"
-        gosu postgres psql -c "ALTER USER kima WITH PASSWORD 'kima';"
-        echo "✓ User renamed: lidify -> kima"
-    fi
-fi
-
 # Create user and database if they don't exist (fresh install)
 gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'kima'" | grep -q 1 || \
     gosu postgres psql -c "CREATE USER kima WITH PASSWORD 'kima';"
@@ -566,7 +527,6 @@ gosu postgres psql -d kima -c "CREATE EXTENSION IF NOT EXISTS vector;"
 cd /app/backend
 export DATABASE_URL="postgresql://kima:kima@localhost:5432/kima"
 echo "Running Prisma migrations..."
-ls -la prisma/migrations/ || echo "No migrations directory!"
 
 # Check if _prisma_migrations table exists (indicates previous Prisma setup)
 MIGRATIONS_EXIST=$(gosu postgres psql -d kima -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '_prisma_migrations')" 2>/dev/null || echo "f")
@@ -617,10 +577,6 @@ if ! gosu postgres psql -d kima -c "SELECT 1 FROM \"Track\" LIMIT 1" >/dev/null 
     exit 1
 fi
 echo "✓ Schema verification passed"
-
-# Create flag file for wait-for-db.sh
-touch /data/.schema_ready
-echo "✓ Schema ready flag created"
 
 # Stop PostgreSQL (supervisord will start it)
 gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w stop

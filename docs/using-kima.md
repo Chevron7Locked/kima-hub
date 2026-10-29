@@ -4,7 +4,7 @@ A tour of the web app once it is running. Setup is in [install.md](install.md).
 
 ## First start
 
-The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: five steps that work out each song's sound, feel and genres and then build the map. The vibe map and the match data appear when enrichment has finished, which takes roughly 1 minute per 100 songs on a 16-core machine (see [How it is worked out](../README.md#how-it-is-worked-out)). Progress is shown in **Settings > Library Enrichment**; see [administration.md](administration.md).
+The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: six steps that identify each song, work out its sound, feel, moods and genres, and then build the map. The vibe map and the match data appear when enrichment has finished, which takes roughly 1 minute per 100 songs on a 16-core machine (see [How it is worked out](../README.md#how-it-is-worked-out)). Progress is shown in **Settings > Library Enrichment**; see [administration.md](administration.md).
 
 ## Home
 

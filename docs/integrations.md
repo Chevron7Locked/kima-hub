@@ -33,7 +33,7 @@ When you save, Lidarr sends a test event. If it cannot reach Kima, admins get a 
 
 ### Companion containers
 
-`docker-compose.server.yml` starts Kima with Lidarr, Prowlarr, FlareSolverr, qBittorrent and NZBGet. `docker-compose.services.yml` starts only those tools. Both are starting points; you still configure the indexers and download clients inside them.
+`docker-compose.server.yml` starts Kima with Lidarr, Prowlarr, FlareSolverr, qBittorrent and SABnzbd. `docker-compose.services.yml` starts only those tools. Both are starting points; you still configure the indexers and download clients inside them.
 
 ## Soulseek
 

@@ -5,7 +5,7 @@ import jwt from "jsonwebtoken";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 
-// JWT_SECRET is required - SESSION_SECRET is used as fallback since docker-entrypoint.sh generates it
+// JWT_SECRET, or SESSION_SECRET when it is unset (the backend image's entrypoint and the all-in-one start script generate it).
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
 
 if (!JWT_SECRET) {

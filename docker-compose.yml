@@ -12,9 +12,6 @@ services:
         environment:
             # Database
             DATABASE_URL: postgresql://${POSTGRES_USER:-kimadb}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-kima}
-            POSTGRES_USER: ${POSTGRES_USER:-kimadb}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-            POSTGRES_DB: ${POSTGRES_DB:-kima}
             REDIS_URL: redis://redis:6379
 
             # Server config
@@ -77,7 +74,7 @@ services:
                 # If you need a custom API URL, set NEXT_PUBLIC_API_URL explicitly.
                 NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
                 # Build type: labels a non-release build in the UI. "dev" for this
-                # local stack, "preview" for the pre-release channel, unset for a
+                # local stack, "prerelease" for the pre-release channel, unset for a
                 # tagged release (which then shows a bare version number).
                 NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-dev}
                 # Backend URL for Next.js rewrites (compiled at build time).
@@ -232,7 +229,7 @@ services:
     # AUDIO ANALYSIS SERVICE (Essentia)
     # ==============================================================================
 
-    # Audio Analyzer - Extracts BPM, key, mood, and other audio features
+    # Audio Analyzer - tempo, key, energy, valence, arousal and the MusiCNN readings
     audio-analyzer:
         build:
             context: .
@@ -310,7 +307,6 @@ services:
         deploy:
             resources:
                 limits:
-                    # 3GB is sufficient - we only process 60s chunks
                     memory: 3G
                     cpus: "4"
                 reservations:

@@ -24,7 +24,6 @@ services:
       - kima_data:/data
     environment:
       - TZ=${TZ:-UTC}
-      - SESSION_SECRET=${SESSION_SECRET:-}
       # How Lidarr reaches Kima. Lidarr resolves it, so on Linux Lidarr's own container
       # needs host.docker.internal too, or use an address it can reach (http://192.168.0.20:3030).
       - KIMA_CALLBACK_URL=${KIMA_CALLBACK_URL:-http://host.docker.internal:3030}

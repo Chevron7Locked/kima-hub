@@ -4,14 +4,15 @@ Day-to-day running of a Kima server. Most of this is in **Settings**, and most o
 
 ## Library enrichment
 
-Enrichment is how Kima works out what is in your library. It runs in the background after a scan and covers five steps:
+Enrichment is how Kima works out what is in your library. It runs in the background after a scan and covers six steps:
 
 | Step | What it does |
 | --- | --- |
-| Artist Metadata | Bios, images and similar artists from ListenBrainz and MusicBrainz |
-| Mood Tags | Mood data from the enrichment pipeline |
-| Audio Analysis | Beats per minute, key, energy, danceability, and the valence and arousal behind a song's feel, read from the middle 90 seconds of each file |
-| Vibe Embeddings | The sound vector for each song, from the CLAP model |
+| Song Identification | Which recording each song is, from its MusicBrainz tag, an AcoustID fingerprint made on this server, and MusicBrainz |
+| Artist Metadata | Bios, photos, genres and similar artists from Wikipedia, Fanart.tv, Deezer, MusicBrainz and ListenBrainz |
+| Audio Analysis | Tempo, key, energy, danceability, and the valence and arousal behind a song's feel, read from the middle 90 seconds of each file |
+| Vibe Embeddings | The sound vector for each song, from the CLAP music model |
+| Moods | The 22 learned moods for each song, scored from its sound vector, behind the mood mixes, stations and song tags |
 | Similarity | The matches between songs, and the vibe map, from sound, feel and artist genre |
 
 **Settings > Library Enrichment** shows each step's progress and has these buttons:
@@ -19,7 +20,7 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 - **Sync New:** sync the library (and Audiobookshelf, when connected) and enrich what is new.
 - **Retry what didn't work:** run every incomplete song again. Complete songs are skipped and nothing is deleted.
 - **Start over on everything** (admin): process the whole library again. Existing matches are kept and nothing is deleted. It takes about as long as a first enrichment (see [How it is worked out](../README.md#how-it-is-worked-out)).
-- **Re-run from** (admin): pick a step (similarity and the map, sound vectors, audio analysis, artists, or identification) and redo it and everything after it. A fresh vibe map comes with every re-run. Use **audio analysis** after upgrading to 1.12 if your library was already re-run under 1.11: 1.12 reads the middle 90 seconds of each song instead of the last 90.
+- **Re-run from** (admin): pick a step (identification, artists, audio analysis, sound vectors, moods, or similarity and the map) and redo it and everything after it. Every re-run but moods lays out a fresh vibe map. Upgrading from 1.11 needs no button: the update analyses your songs again and gives them new sound vectors on its own.
 - **Wipe and re-run** (admin): clear what Kima worked out about your music (which recording each track is, audio analysis, vibe data, the vibe map, artist bios and similar artists) and work it out again. Your music, playlists, plays, likes and edits stay. It takes about as long as a first enrichment (roughly 1 minute per 100 songs with a GPU; see [How it is worked out](../README.md#how-it-is-worked-out)), and the vibe map comes back when it finishes. Use it after upgrading to 1.11 or later from 1.10 or earlier, which changes how everything is worked out; one run also covers 1.12's new analysis window.
 - **Pause**, **Resume** and **Stop** appear while enrichment is running.
 
@@ -49,6 +50,16 @@ If you are locked out of every administrator account, see `ADMIN_RESET_PASSWORD`
 ## Job queues
 
 Kima runs its background work through job queues. A dashboard for them (Bull Board) is at `/api/admin/queues` on your server's address, for signed-in administrators.
+
+## Admin tools without a button
+
+These endpoints have no screen in the app; call them with a token an administrator made in **Settings > Native Apps**, sent in the `X-API-Key` header.
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/enrichment/retry` with `{"ids": [...]}` | Tries the listed enrichment failures again (ids from `GET /api/enrichment/failures`). |
+| `POST /api/soulseek/connect`, `POST /api/soulseek/disconnect` | Opens or drops the server's one Soulseek connection, which every listener shares. Connecting needs Soulseek set up in Settings first. |
+| `GET /api/webhooks/lidarr/verify` | Answers `{"status":"ok"}` with Kima's version, to check that Lidarr can reach Kima. Needs no sign-in. |
 
 ## Backups
 

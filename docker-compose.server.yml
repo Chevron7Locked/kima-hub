@@ -21,8 +21,6 @@ services:
             - kima_data:/data
         environment:
             - TZ=${TZ:-UTC}
-            # Generate with: openssl rand -base64 32
-            - SESSION_SECRET=${SESSION_SECRET:-changeme-generate-secure-key}
             # How Lidarr reaches Kima. Lidarr resolves it, so on Linux Lidarr's own container
             # needs host.docker.internal too, or use an address it can reach (http://192.168.0.20:3030).
             - KIMA_CALLBACK_URL=${KIMA_CALLBACK_URL:-http://host.docker.internal:3030}
@@ -111,20 +109,19 @@ services:
             - "6881:6881/udp"
         restart: unless-stopped
 
-    # NZBGet - Usenet client
-    nzbget:
-        image: lscr.io/linuxserver/nzbget:latest
-        container_name: kima_nzbget
+    # SABnzbd - Usenet client
+    sabnzbd:
+        image: lscr.io/linuxserver/sabnzbd:latest
+        container_name: kima_sabnzbd
         environment:
             - PUID=${PUID:-1000}
             - PGID=${PGID:-1000}
             - TZ=${TZ:-UTC}
         volumes:
-            - nzbget_config:/config
-            - ${MUSIC_PATH:-./music}/usenet:/music/usenet
+            - sabnzbd_config:/config
             - ${DOWNLOAD_PATH:-./downloads}:/downloads
         ports:
-            - "6789:6789"
+            - "8085:8080"
         restart: unless-stopped
 
 volumes:
@@ -134,7 +131,7 @@ volumes:
     lidarr_config:
     prowlarr_config:
     qbittorrent_config:
-    nzbget_config:
+    sabnzbd_config:
 
 networks:
     default:
