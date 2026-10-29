@@ -53,7 +53,9 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     useLayoutEffect(() => {
         if (!focusAfterToggle.current) return;
         focusAfterToggle.current = false;
-        (isOpen ? hideRef : handleRef).current?.focus();
+        // Without preventScroll the browser scrolls the clipped page row sideways to reveal the button, which throws the
+        // whole page left for a frame as the panel opens.
+        (isOpen ? hideRef : handleRef).current?.focus({ preventScroll: true });
     }, [isOpen]);
     // Closing leaves a page's settings, so reopening shows the halves.
     const handleCollapse = () => {
@@ -88,9 +90,10 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
 
     return (
         // The frame's width moves with the panel's slide, on the same curve, so the page beside it is pushed the way the
-        // left library panel pushes it, instead of jumping to its new width while the panel slides over it.
+        // left library panel pushes it. It clips the panel: closed, the panel would otherwise hang past the screen's
+        // edge as overflow the page row can be scrolled to.
         <div
-            className="shrink-0 h-full relative z-(--z-raised) transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+            className="shrink-0 h-full relative overflow-hidden z-(--z-raised) transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
             style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
         >
             <aside
