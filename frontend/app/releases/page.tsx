@@ -23,7 +23,7 @@ interface ReleaseItem {
     albumMbid: string;
     releaseDate: string;
     coverUrl: string | null;
-    source: 'lidarr' | 'similar';
+    source: 'lidarr';
     status: 'upcoming' | 'released' | 'available';
     inLibrary: boolean;
     canDownload: boolean;
@@ -33,7 +33,6 @@ interface ReleaseRadarData {
     upcoming: ReleaseItem[];
     recent: ReleaseItem[];
     monitoredArtistCount: number;
-    similarArtistCount: number;
 }
 
 export default function ReleasesPage() {

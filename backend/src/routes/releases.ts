@@ -1,10 +1,4 @@
-/**
- * Release Radar API
- *
- * Provides upcoming and recent releases from:
- * 1. Lidarr monitored artists (via calendar API)
- * 2. Similar artists from user's library (local similarity engine)
- */
+/** Release Radar: the upcoming and recent releases of the artists Lidarr monitors, and downloading one. */
 
 import { Router } from "express";
 import { logger } from "../utils/logger";
@@ -12,6 +6,7 @@ import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
 import { ConfigurationError } from "../utils/errors";
 import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
+import { acquisitionService } from "../services/acquisitionService";
 import { withAlbumArtwork } from "../services/artwork";
 import { z } from "zod";
 
@@ -51,7 +46,6 @@ interface ReleaseRadarResponse {
     upcoming: ReleaseItem[];
     recent: ReleaseItem[];
     monitoredArtistCount: number;
-    similarArtistCount: number;
 }
 
 interface ReleaseItem {
@@ -62,7 +56,7 @@ interface ReleaseItem {
     albumMbid: string;
     releaseDate: string;
     coverUrl: string | null;
-    source: 'lidarr' | 'similar';
+    source: 'lidarr';
     status: 'upcoming' | 'released' | 'available';
     inLibrary: boolean;
     canDownload: boolean;
@@ -70,9 +64,6 @@ interface ReleaseItem {
 
 /**
  * GET /releases/radar
- * 
- * Get upcoming and recent releases for the user's monitored artists
- * and their similar artists.
  */
 router.get("/radar", async (req, res) => {
     try {
@@ -92,43 +83,8 @@ router.get("/radar", async (req, res) => {
         // 1. Get releases from Lidarr calendar (monitored artists)
         const lidarrReleases = await lidarrService.getCalendar(startDate, endDate);
         
-        // 2. Get monitored artists from Lidarr
         const monitoredArtists = await lidarrService.getMonitoredArtists();
-        const monitoredMbids = new Set(monitoredArtists.map(a => a.mbid));
-
-        // 3. Get similar artists from user's library that aren't monitored
-        const similarArtists = await prisma.similarArtist.findMany({
-            where: {
-                // Source artist is in the library (has albums)
-                fromArtist: {
-                    albums: { some: {} }
-                },
-                // Target artist is NOT in library (no albums)
-                toArtist: {
-                    albums: { none: {} }
-                }
-            },
-            select: {
-                toArtist: {
-                    select: {
-                        id: true,
-                        name: true,
-                        mbid: true,
-                    }
-                },
-                weight: true,
-            },
-            orderBy: { weight: 'desc' },
-            take: 50, // Top 50 similar artists
-        });
-
-        // Filter out any that are already monitored in Lidarr
-        const unmonitoredSimilar = similarArtists.filter(
-            sa => sa.toArtist.mbid && !monitoredMbids.has(sa.toArtist.mbid)
-        );
-
         logger.debug(`[Releases] Found ${lidarrReleases.length} Lidarr releases`);
-        logger.debug(`[Releases] Found ${unmonitoredSimilar.length} unmonitored similar artists`);
 
         // 4. Check which of these releases the library owns, looking up only their MBIDs.
         const libraryAlbumMbids = await ownedRgMbids(lidarrReleases);
@@ -169,7 +125,6 @@ router.get("/radar", async (req, res) => {
             upcoming,
             recent,
             monitoredArtistCount: monitoredArtists.length,
-            similarArtistCount: unmonitoredSimilar.length,
         };
 
         res.json(response);
@@ -192,15 +147,9 @@ const downloadReleaseSchema = z.object({
 router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) => {
     try {
         const { albumMbid } = req.params;
-        const userId = req.user?.id;
+        const userId = req.user!.id;
 
-        if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
-        }
-
-        // The radar row the client is showing already carries artist + title;
-        // they're required because the acquisition service resolves the album by
-        // name (the release-group mbid alone isn't enough for the source search).
+        // The radar row carries artist and title, and the acquisition searches sources by name.
         const parsed = downloadReleaseSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({
@@ -210,56 +159,15 @@ router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) =
         }
         const { artistName, albumTitle } = parsed.data;
 
-        logger.debug(
-            `[Releases] Download requested: ${artistName} - ${albumTitle} (${albumMbid})`
+        // One job per album for this listener, never a Discover one; a second tap gets the job already running,
+        // whose acquisition is not started again.
+        const { job, created } = await acquisitionService.findOrCreateDownloadJob(
+            { artistName, albumTitle, mbid: albumMbid },
+            { userId }
         );
+        const jobId = job.id;
 
-        // Pre-create (or reuse) the DownloadJob, so the download is trackable by id and
-        // early config errors stay visible. Dedup and create run under the lock
-        // createDownloadJob uses, so two taps cannot start two downloads.
-        const { acquisitionService } = await import(
-            "../services/acquisitionService"
-        );
-        const { distributedLock } = await import("../utils/distributedLock");
-
-        const jobWhere: any = {
-            userId,
-            status: { in: ["pending", "processing"] },
-        };
-        if (albumMbid) jobWhere.targetMbid = albumMbid;
-        else jobWhere.subject = `${artistName} - ${albumTitle}`;
-
-        const dedupKey = albumMbid || `${artistName}::${albumTitle}`;
-        const { jobId, started } = await distributedLock.withLock(
-            `release-download:${userId}:${dedupKey}`,
-            5000,
-            async () => {
-                const existing = await prisma.downloadJob.findFirst({
-                    where: jobWhere,
-                });
-                if (existing) return { jobId: existing.id, started: false };
-                const created = await prisma.downloadJob.create({
-                    data: {
-                        userId,
-                        subject: `${artistName} - ${albumTitle}`,
-                        type: "album",
-                        targetMbid: albumMbid || null,
-                        status: "pending",
-                        metadata: {
-                            artistName,
-                            albumTitle,
-                            albumMbid: albumMbid || null,
-                        },
-                    },
-                });
-                return { jobId: created.id, started: true };
-            }
-        );
-
-        // Only launch the acquisition for a FRESHLY-created job. A reused in-flight job
-        // already has an acquisition running; re-triggering would start a duplicate
-        // download and race two status writers on the same row.
-        if (started) {
+        if (created) {
             const markFailed = (message: string) =>
                 prisma.downloadJob
                     .update({
@@ -272,9 +180,7 @@ router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) =
                     })
                     .catch(() => {});
 
-            // Use the shared acquisition service, which honours the user's download source.
-            // Runs in the background against the job; config errors throw, acquisition
-            // failures resolve {success:false}, and both mark the job failed.
+            // Config errors throw and acquisition failures resolve {success:false}; both fail the job.
             void acquisitionService
                 .acquireAlbum(
                     { albumTitle, artistName, mbid: albumMbid },
@@ -302,7 +208,7 @@ router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) =
         return res.status(200).json({
             success: true,
             jobId,
-            message: started
+            message: created
                 ? `Download started for ${artistName} - ${albumTitle}`
                 : `Download already in progress for ${artistName} - ${albumTitle}`,
         });

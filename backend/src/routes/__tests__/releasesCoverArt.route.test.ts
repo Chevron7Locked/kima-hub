@@ -67,6 +67,7 @@ jest.mock('../../utils/ssrf', () => ({
 
 import express from 'express';
 import request from 'supertest';
+import { prisma } from '../../utils/db';
 import releaseRoutes from '../releases';
 
 function makeApp() {
@@ -141,6 +142,16 @@ describe('the Release Radar and the artwork it promises', () => {
             const res = await request(makeApp()).get('/releases/radar');
 
             expect(res.body.upcoming[0].coverUrl).toBe(FROM_DEEZER);
+        });
+
+        it('counts the monitored artists and nothing it does not show', async () => {
+            mockGetCalendar.mockResolvedValue([calendarEntry()]);
+
+            const res = await request(makeApp()).get('/releases/radar');
+
+            expect(res.body.monitoredArtistCount).toEqual(expect.any(Number));
+            expect(res.body).not.toHaveProperty('similarArtistCount');
+            expect(prisma.similarArtist.findMany).not.toHaveBeenCalled();
         });
 
         it('keeps every other field on the release untouched', async () => {
