@@ -5,7 +5,6 @@ import { musicBrainzService } from "./musicbrainz";
 import { topVoted } from "../utils/votes";
 import { pickRecording } from "./recordingMatch";
 import { failureCause } from "../utils/outcome";
-import { LIBRARY_LOCATION } from "./libraryFilters";
 
 interface ResolvedTrack {
     sourceUrl: string;
@@ -44,7 +43,7 @@ class TrackIdentityService {
                 const trackData = await spotifyService.getTrackBySpotifyId(spotifyId);
                 if (trackData) {
                     isrc = trackData.isrc;
-                    album = trackData.album || album;
+                    album = trackData.album || null;
                     title = trackData.title || title;
                     artist = trackData.artist || artist;
                     coverUrl = trackData.coverUrl || coverUrl;
@@ -96,26 +95,6 @@ class TrackIdentityService {
         };
     }
 
-    async storeIsrc(trackId: string, isrc: string, source: string): Promise<void> {
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
-            select: { isrc: true, isrcSource: true },
-        });
-        if (!track) return;
-
-        const priority = ["id3", "spotify", "deezer", "musicbrainz", "songlink"];
-        const existingIdx = track.isrcSource ? priority.indexOf(track.isrcSource) : -1;
-        const existingPriority = existingIdx >= 0 ? existingIdx : priority.length;
-        const newPriority = priority.indexOf(source);
-
-        if (!track.isrc || (newPriority >= 0 && newPriority < existingPriority)) {
-            await prisma.track.update({
-                where: { id: trackId },
-                data: { isrc, isrcSource: source },
-            });
-        }
-    }
-
     /**
      * The track's genres are its identified recording's: this set replaces whatever an earlier answer left.
      * Songs of one album finish together with the same new genres: inserts skip duplicates, waiting for a
@@ -139,31 +118,6 @@ class TrackIdentityService {
             }
             await tx.trackGenre.deleteMany({ where: { trackId, genreId: { notIn: ids } } });
         });
-    }
-
-    async findTrackByIsrc(isrc: string): Promise<{
-        id: string;
-        title: string;
-        albumId: string;
-        albumTitle: string;
-        artistName: string;
-    } | null> {
-        const track = await prisma.track.findFirst({
-            where: { isrc, album: { location: LIBRARY_LOCATION } },
-            include: {
-                album: {
-                    include: { artist: { select: { name: true } } },
-                },
-            },
-        });
-        if (!track) return null;
-        return {
-            id: track.id,
-            title: track.title,
-            albumId: track.albumId,
-            albumTitle: track.album.title,
-            artistName: track.album.artist.name,
-        };
     }
 }
 

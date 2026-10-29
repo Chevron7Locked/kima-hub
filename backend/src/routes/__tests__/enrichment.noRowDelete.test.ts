@@ -91,7 +91,6 @@ jest.mock("../../services/featureDetection", () => ({
 jest.mock("../../services/trackIdentity", () => ({
     trackIdentityService: {
         populateTrackGenres: jest.fn().mockResolvedValue(undefined),
-        storeIsrc: jest.fn().mockResolvedValue(undefined),
     },
 }));
 

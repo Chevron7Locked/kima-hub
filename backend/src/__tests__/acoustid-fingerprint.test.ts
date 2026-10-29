@@ -52,11 +52,9 @@ jest.mock("../services/musicbrainz", () => ({
     },
 }));
 
-const mockStoreIsrc = jest.fn().mockResolvedValue(undefined);
 const mockPopulateTrackGenres = jest.fn().mockResolvedValue(undefined);
 jest.mock("../services/trackIdentity", () => ({
     trackIdentityService: {
-        storeIsrc: (...args: unknown[]) => mockStoreIsrc(...args),
         populateTrackGenres: (...args: unknown[]) => mockPopulateTrackGenres(...args),
     },
 }));
