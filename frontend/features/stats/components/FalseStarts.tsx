@@ -11,6 +11,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
+import { StatTrackRow } from "./StatTrackRow";
 
 interface FalseStartTrack {
     trackId: string;
@@ -226,21 +227,21 @@ export function FalseStarts() {
                         <ul className="divide-y divide-white/[0.05]">
                             {showIgnored
                                 ? audit.ignored.slice(from, from + rows).map((t) => (
-                                    <li key={t.trackId} className="flex items-center justify-between gap-4 py-3">
-                                        <span className="min-w-0">
-                                            <span className="block truncate text-sm text-[var(--text-secondary)]">
-                                                {t.title}
-                                            </span>
-                                            <span className="block truncate t-meta">{t.artist}</span>
-                                        </span>
-                                        <button
-                                            onClick={() => act("restore", [t.trackId], () => "restored")}
-                                            disabled={busy}
-                                            className="shrink-0 h-9 px-3 rounded-lg t-control text-[var(--text-secondary)] hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                                        >
-                                            restore
-                                        </button>
-                                    </li>
+                                    <StatTrackRow
+                                        key={t.trackId}
+                                        className="py-3"
+                                        title={t.title}
+                                        artist={t.artist}
+                                        trailing={
+                                            <button
+                                                onClick={() => act("restore", [t.trackId], () => "restored")}
+                                                disabled={busy}
+                                                className="shrink-0 h-9 px-3 rounded-lg t-control text-[var(--text-secondary)] hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                                            >
+                                                restore
+                                            </button>
+                                        }
+                                    />
                                 ))
                                 : audit.tracks.slice(from, from + rows).map((t) => {
                                     const on = picked.has(t.trackId);

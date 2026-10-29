@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useInView } from "@/hooks/useInView";
 import { hourLabel, whenLabel } from "../format";
 import type { ListeningStats } from "../types";
+import { StatCount, StatTrackRow } from "./StatTrackRow";
 
 /** Backend rows are Sunday-first; read them out Monday-first. */
 const ROWS = [1, 2, 3, 4, 5, 6, 0];
@@ -296,21 +297,14 @@ function HourPanel({ detail, loading }: { detail: HourDetail | null; loading: bo
                 <h3 className="t-label text-[var(--text-secondary)]">tracks</h3>
                 <ol className="flex flex-col gap-2.5">
                     {detail.tracks.map((t, i) => (
-                        <li
+                        <StatTrackRow
                             key={`${t.title}-${t.artist}`}
-                            className="flex items-baseline justify-between gap-4 animate-rise"
+                            className="animate-rise"
                             style={{ animationDelay: `${Math.min(i, 6) * 45}ms` }}
-                        >
-                            <span className="min-w-0">
-                                <span className="block truncate text-sm text-[var(--text-primary)]">
-                                    {t.title}
-                                </span>
-                                <span className="block truncate t-meta">{t.artist}</span>
-                            </span>
-                            <span className="t-meta shrink-0 text-[var(--text-secondary)]">
-                                {t.listens}
-                            </span>
-                        </li>
+                            title={t.title}
+                            artist={t.artist}
+                            trailing={<StatCount>{t.listens}</StatCount>}
+                        />
                     ))}
                 </ol>
             </div>
