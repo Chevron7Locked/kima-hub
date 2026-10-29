@@ -168,16 +168,10 @@ function artistListWhereSql(show: CollectionFilter, yourDiscover: string[], quer
 
 router.get("/artists", async (req, res) => {
   try {
-    const {
-      query = "",
-      limit: limitParam = "50",
-      offset: offsetParam = "0",
-      filter = "owned",
-      sortBy = "name",
-    } = req.query;
+    const { query = "", filter = "owned", sortBy = "name" } = req.query;
 
-    const limit = parseLimit(limitParam, 50);
-    const offset = parseOffset(offsetParam);
+    const limit = parseLimit(req.query.limit, 50);
+    const offset = parseOffset(req.query.offset);
 
     const order = artistOrder(sortBy);
     const show = collectionFilter(filter);

@@ -19,12 +19,11 @@ router.post("/scan", requireAdmin, async (req, res) => {
       });
     }
 
+    // Soulseek downloads are filed first; a failure there does not stop the scan.
     try {
-      logger.info("[Scan] Organizing Soulseek downloads before scan...");
       await organizeSingles();
-      logger.info("[Scan] Soulseek organization complete");
     } catch (err: any) {
-      logger.info("[Scan] Soulseek organization skipped:", err.message);
+      logger.warn(`[Scan] Filing Soulseek downloads failed, scanning anyway: ${err.message}`);
     }
 
     const userId = req.user?.id || "system";
@@ -67,17 +66,11 @@ router.get("/scan/status/:jobId", async (req, res) => {
   }
 });
 
-router.post("/organize", requireAdmin, async (_req, res) => {
-  try {
-    organizeSingles().catch((err) => {
-      logger.error("Manual organization failed:", err);
-    });
-
-    res.json({ message: "Organization started in background" });
-  } catch (error) {
-    logger.error("Organization trigger error:", error);
-    res.status(500).json({ error: "Failed to start organization" });
-  }
+router.post("/organize", requireAdmin, (_req, res) => {
+  organizeSingles().catch((err) => {
+    logger.error("Manual organization failed:", err);
+  });
+  res.json({ message: "Organization started in background" });
 });
 
 router.get("/corrupt-tracks", requireAdmin, async (_req, res) => {

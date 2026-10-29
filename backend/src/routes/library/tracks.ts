@@ -46,7 +46,7 @@ const RETIRED_MOOD_STATIONS = new Set(["summer", "3am-thoughts", "friday-night"]
 router.get("/recently-listened", async (req, res) => {
   try {
     const userId = req.user!.id;
-    const limitNum = Math.min(parseLimit(req.query.limit, 10), 100);
+    const limitNum = parseLimit(req.query.limit, 10, 100);
 
     const [recentPlays, inProgressAudiobooks, inProgressPodcasts] =
       await Promise.all([
@@ -217,7 +217,7 @@ router.get("/recently-listened", async (req, res) => {
 
 router.get("/recently-added", async (req, res) => {
   try {
-    const limitNum = Math.min(parseLimit(req.query.limit, 10), 100);
+    const limitNum = parseLimit(req.query.limit, 10, 100);
 
     // Artists ordered by their newest library album with songs, one row each.
     const newest = await prisma.album.groupBy({
@@ -268,14 +268,9 @@ router.get("/recently-added", async (req, res) => {
 
 router.get("/tracks", async (req, res) => {
   try {
-    const {
-      albumId,
-      limit: limitParam = "100",
-      offset: offsetParam = "0",
-      sortBy = "name",
-    } = req.query;
-    const limit = parseLimit(limitParam, 100);
-    const offset = parseOffset(offsetParam);
+    const { albumId, sortBy = "name" } = req.query;
+    const limit = parseLimit(req.query.limit, 100);
+    const offset = parseOffset(req.query.offset);
 
     let orderBy: any;
     if (albumId) {
@@ -329,8 +324,7 @@ router.get("/tracks", async (req, res) => {
 
 router.get("/tracks/shuffle", async (req, res) => {
   try {
-    const { limit: limitParam = "100" } = req.query;
-    const limit = parseLimit(limitParam, 100);
+    const limit = parseLimit(req.query.limit, 100);
 
     const totalTracks = await prisma.track.count({ where: LIBRARY_PLAYABLE });
 
@@ -720,8 +714,8 @@ function parseStationRequest(query: Record<string, unknown>, limit: number, list
 
 router.get("/radio", async (req, res) => {
   try {
-    const { type, value, limit = "50" } = req.query;
-    const limitNum = Math.min(parseLimit(limit, 50), 100);
+    const { type, value } = req.query;
+    const limitNum = parseLimit(req.query.limit, 50, 100);
     if (!type) {
       return res.status(400).json({ error: "Radio type is required" });
     }

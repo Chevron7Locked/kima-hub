@@ -24,17 +24,10 @@ const ALBUM_SORT_MAP: Record<string, any> = {
 const router = Router();
 
 router.get("/albums", async (req, res) => {
-  const start = Date.now();
   try {
-    const {
-      artistId,
-      limit: limitParam = "500",
-      offset: offsetParam = "0",
-      filter = "owned",
-      sortBy = "name",
-    } = req.query;
-    const limit = parseLimit(limitParam, 500);
-    const offset = parseOffset(offsetParam);
+    const { artistId, filter = "owned", sortBy = "name" } = req.query;
+    const limit = parseLimit(req.query.limit, 500);
+    const offset = parseOffset(req.query.offset);
 
     const orderBy = ALBUM_SORT_MAP[sortBy as string] ?? {
       sortName: "asc" as const,
@@ -82,9 +75,6 @@ router.get("/albums", async (req, res) => {
     });
   } catch (error) {
     safeError(res, "Get albums", error);
-  } finally {
-    const elapsed = Date.now() - start;
-    logger.info(`GET /albums completed in ${elapsed}ms`);
   }
 });
 
@@ -184,11 +174,7 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
       where: { id: req.params.id },
       include: {
         artist: true,
-        tracks: {
-          include: {
-            album: true,
-          },
-        },
+        tracks: true,
       },
     });
 
