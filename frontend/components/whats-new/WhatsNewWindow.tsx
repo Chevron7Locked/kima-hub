@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { X, Check, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { useDialog } from "@/hooks/useDialog";
@@ -18,10 +18,13 @@ import { Button } from "@/components/ui/Button";
 import { shortVersion } from "@/lib/format";
 import { ReleaseBody } from "./ReleaseBody";
 import { ReleaseLinks } from "./ReleaseLinks";
+import { ChoiceButton } from "./ChoiceButton";
 import type { Release, ReleaseItem } from "./types";
 
-/** The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column. */
-// An item opened from an older release's page remembers that release, so going back returns there.
+/**
+ * The window shows exactly one of these below `lg`; from `lg` the list stays put and this selects the right column.
+ * An item opened from an older release's page remembers that release, so going back returns there.
+ */
 type WindowView =
     | { pane: "list" }
     | { pane: "needs" }
@@ -436,24 +439,5 @@ export function WhatsNewWindow({
                 </footer>
             </div>
         </div>
-    );
-}
-
-
-function ChoiceButton({ selected, onClick, label }: { selected: boolean; onClick: () => void; label: string }) {
-    return (
-        <button
-            onClick={onClick}
-            aria-pressed={selected}
-            className={[
-                "h-11 px-4 rounded-lg text-sm font-medium transition-colors flex items-center gap-2",
-                selected
-                    ? "bg-brand text-black"
-                    : "bg-white/[0.04] text-[var(--text-secondary)] hover:text-white hover:bg-white/[0.08]",
-            ].join(" ")}
-        >
-            {selected && <Check className="w-4 h-4" />}
-            {label}
-        </button>
     );
 }

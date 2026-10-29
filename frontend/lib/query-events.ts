@@ -1,16 +1,7 @@
 /** Typed CustomEvents that tell listeners to refetch queries after data changes. */
 
-/**
- * Available query event types
- */
-export type QueryEventType =
-    | "audiobook-progress-updated"
-    | "podcast-progress-updated"
-    | "mixes-updated";
+export type QueryEventType = "audiobook-progress-updated" | "podcast-progress-updated";
 
-/**
- * Event payload interface - can be extended for event-specific data
- */
 export interface QueryEventDetail {
     [key: string]: unknown;
 }

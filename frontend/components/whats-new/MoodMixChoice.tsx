@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { ChoiceButton } from "./ChoiceButton";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -124,7 +125,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
             <div className="flex gap-2">
                 {mix.retired ? (
                     // Can't be shown any more, so there is nothing to keep.
-                    <DecisionButton
+                    <ChoiceButton
                         label="Remove"
                         selected={false}
                         busy={busy === "remove"}
@@ -134,7 +135,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
                     />
                 ) : (
                     <>
-                        <DecisionButton
+                        <ChoiceButton
                             label="Rebuild"
                             selected={false}
                             busy={busy === "rebuild"}
@@ -142,7 +143,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
                             onClick={() => decide("rebuild")}
                             testId="moodmix-rebuild"
                         />
-                        <DecisionButton
+                        <ChoiceButton
                             label="Keep"
                             selected={decision === "keep"}
                             busy={busy === "keep"}
@@ -155,40 +156,5 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
             </div>
             {error && <p className="text-sm text-danger-light" data-testid="moodmix-error">{error}</p>}
         </div>
-    );
-}
-
-function DecisionButton({
-    label,
-    selected,
-    busy,
-    disabled,
-    onClick,
-    testId,
-}: {
-    label: string;
-    selected: boolean;
-    busy: boolean;
-    disabled: boolean;
-    onClick: () => void;
-    testId: string;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            disabled={disabled}
-            aria-pressed={selected}
-            data-testid={testId}
-            className={[
-                "h-11 px-4 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-60",
-                selected
-                    ? "bg-brand text-black"
-                    : "bg-white/[0.04] text-[var(--text-secondary)] hover:text-white hover:bg-white/[0.08]",
-            ].join(" ")}
-        >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : selected ? <Check className="w-4 h-4" /> : null}
-            {label}
-        </button>
     );
 }

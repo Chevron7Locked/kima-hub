@@ -1,7 +1,5 @@
 /** Loads every Home section and refreshes the mixes. */
 
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { notify } from "@/lib/notify";
 import type {
@@ -23,7 +21,6 @@ import {
     useAudiobooksQuery,
     useRefreshMixesMutation,
     useBrowseAllQuery,
-    queryKeys,
 } from "@/hooks/useQueries";
 
 export interface UseHomeDataReturn {
@@ -49,22 +46,7 @@ export interface UseHomeDataReturn {
 /** Every Home section: continue listening, recently added, recommended, mixes, popular, podcasts, audiobooks. */
 export function useHomeData(): UseHomeDataReturn {
     const { isAuthenticated } = useAuth();
-    const queryClient = useQueryClient();
 
-    // Listen for mixes-updated event (fired when user saves mood preferences)
-    // Use refetchQueries instead of invalidateQueries to force immediate UI update
-    useEffect(() => {
-        const handleMixesUpdated = () => {
-            // refetchQueries forces immediate refetch, unlike invalidateQueries which only marks stale
-            queryClient.refetchQueries({ queryKey: queryKeys.mixes() });
-        };
-
-        window.addEventListener("mixes-updated", handleMixesUpdated);
-        return () =>
-            window.removeEventListener("mixes-updated", handleMixesUpdated);
-    }, [queryClient]);
-
-    // React Query hooks - these automatically handle caching, refetching, and loading states
     const { data: recentlyListenedData, isLoading: isLoadingListened } =
         useRecentlyListenedQuery(10);
     const { data: recentlyAddedData, isLoading: isLoadingAdded } =
@@ -84,22 +66,17 @@ export function useHomeData(): UseHomeDataReturn {
     const { mutateAsync: refreshMixes, isPending: isRefreshingMixes } =
         useRefreshMixesMutation();
 
-    /**
-     * Refresh mixes and update cache
-     */
     const handleRefreshMixes = async () => {
         try {
             await refreshMixes();
-        } catch (error) {
-            console.error("Failed to refresh mixes:", error);
+        } catch {
             notify.error("Failed to refresh mixes");
         }
     };
 
-    // Process recently listened data - can contain artists, podcasts, or audiobooks
+    // Artists, podcasts and audiobooks, in the order they were last played.
     const items = recentlyListenedData?.items || [];
 
-    // Calculate overall loading state - true if any query is loading
     const isLoading =
         !isAuthenticated ||
         isLoadingListened ||

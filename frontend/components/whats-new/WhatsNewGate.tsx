@@ -132,26 +132,22 @@ export function WhatsNewGate() {
     };
 
     return (
-        <>
-            <WhatsNewWindow
-                releases={queue}
-                answered={answered}
-                onDismiss={dismissAll}
-                onClose={() => { closeAll(); setQueue([]); refreshOpenCount(queryClient); }}
-                onNavigate={defer}
-                done={done}
-                renderAction={(item) =>
-                    item.kind === "action" && (item.requires === "savedMoodMix" || item.requires === "retiredMoodMix") ? (
-                        // Rebuild / keep / save as playlist, or for a mix under a
-                        // removed mood, save / remove. The server only sends these
-                        // to users who have that kind of saved mix.
-                        <MoodMixChoice onNavigate={defer} />
-                    ) : item.run === "wipeEnrichment" ? (
-                        <WipeAction item={item} done={done.includes(item.key)} onDone={() => setDone((d) => [...d, item.key])} />
-                    ) : null
-                }
-            />
-
-        </>
+        <WhatsNewWindow
+            releases={queue}
+            answered={answered}
+            onDismiss={dismissAll}
+            onClose={() => { closeAll(); setQueue([]); refreshOpenCount(queryClient); }}
+            onNavigate={defer}
+            done={done}
+            renderAction={(item) =>
+                item.kind === "action" && (item.requires === "savedMoodMix" || item.requires === "retiredMoodMix") ? (
+                    // Rebuild, keep or save as a playlist (save or remove for a mix under a removed mood); the server
+                    // sends these only to listeners with that kind of saved mood mix.
+                    <MoodMixChoice onNavigate={defer} />
+                ) : item.run === "wipeEnrichment" ? (
+                    <WipeAction item={item} done={done.includes(item.key)} onDone={() => setDone((d) => [...d, item.key])} />
+                ) : null
+            }
+        />
     );
 }

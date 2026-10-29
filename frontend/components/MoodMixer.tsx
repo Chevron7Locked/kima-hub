@@ -29,8 +29,6 @@ type BucketMood = Extract<MoodType, "happy" | "sad" | "chill" | "aggressive" | "
 
 // The presets endpoint also reports how many library tracks still await mood
 // analysis, so an empty mood can say "not analysed yet" rather than look final.
-type PresetWithPending = MoodBucketPreset & { pendingTracks?: number };
-
 const MOOD_CONFIG: Record<
     BucketMood,
     {
@@ -77,7 +75,7 @@ const MOOD_ORDER: BucketMood[] = ["happy", "party", "chill", "sad", "aggressive"
 export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
     const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
-    const [presets, setPresets] = useState<PresetWithPending[]>([]);
+    const [presets, setPresets] = useState<MoodBucketPreset[]>([]);
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState<BucketMood | null>(null);
     const [isVisible, setIsVisible] = useState(isOpen);
@@ -136,7 +134,6 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
 
                 // Refetched now, not just marked stale, so the home page shows the new mix at once.
                 await queryClient.refetchQueries({ queryKey: ["mixes"] });
-                window.dispatchEvent(new CustomEvent("mixes-updated"));
 
                 onClose();
             } else {
@@ -152,7 +149,6 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
     };
 
     const getTrackCount = (mood: BucketMood): number => {
-        // MoodBucketPreset uses 'id' as the mood identifier
         const preset = presets.find((p) => p.id === mood);
         return preset?.trackCount || 0;
     };
@@ -199,7 +195,6 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                             <Loader2 className="w-8 h-8 animate-spin text-brand" />
                         </div>
                     ) : (
-                        /* Mood Grid */
                         <div className="grid grid-cols-3 gap-3">
                             {MOOD_ORDER.map((mood, i) => {
                                 const config = MOOD_CONFIG[mood];
@@ -249,7 +244,6 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                                             {trackCount}
                                         </span>
 
-                                        {/* Hover overlay with play icon */}
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                             {!isGenerating && !isDisabled && (
                                                 <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
