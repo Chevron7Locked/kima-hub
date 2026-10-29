@@ -12,8 +12,8 @@ export const MIN_MIX_TRACKS = 8;
 export const ARTIST_CAPS = [2, 3, Infinity];
 
 /**
- * The identity keys of the album artist rows that name no one (artistSql). Worked out on each call, not at load, as
- * before: tests that mock artistIdentity with only artistSortName still load this module.
+ * The identity keys of the album artist rows that name no one (artistSql). Worked out per call, not at load, so the
+ * module still loads where artistIdentity is only partly stubbed.
  */
 function noOneKeys(): string[] {
     return [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];

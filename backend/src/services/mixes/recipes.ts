@@ -360,12 +360,11 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: Famil
     }
 
     const active = recipe.familiarity !== undefined && boost && boost.ids.length > 0 ? boost : null;
-    const familiar = active !== null;
     const defined = definedCtes(recipe.id, state, definitions, "library", {
-        columns: familiar ? Prisma.sql`, COALESCE(fb.boost, 0::float8) AS fam` : Prisma.empty,
-        joins: familiar
+        columns: active ? Prisma.sql`, COALESCE(fb.boost, 0::float8) AS fam` : Prisma.empty,
+        joins: active
             ? Prisma.sql`LEFT JOIN (
-                SELECT * FROM unnest(${active?.ids ?? []}::text[], ${active?.boosts ?? []}::float8[]) AS u(id, boost)
+                SELECT * FROM unnest(${active.ids}::text[], ${active.boosts}::float8[]) AS u(id, boost)
             ) fb ON fb.id = l.id`
             : Prisma.empty,
     });
@@ -448,7 +447,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: Famil
         ),
         ranked AS (
             SELECT e.*, (e.score - s.mean ${
-                familiar ? Prisma.sql`+ ${recipe.familiarity!}::float8 * e.fam` : Prisma.empty
+                active ? Prisma.sql`+ ${recipe.familiarity!}::float8 * e.fam` : Prisma.empty
             }) / NULLIF(s.sd, 0) AS recipe_z
             FROM eligible e CROSS JOIN spread s
         ),
@@ -464,7 +463,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: Famil
  * through the filters, in a ranking of at least MIN_MIX_TRACKS songs (a smaller one has no members). The recipe's
  * members are these, one copy per title and artist; the focus tag takes every copy (moods/tags.ts).
  */
-export function atLineSql(alias: string): string {
+function atLineSql(alias: string): string {
     const ranked = `(SELECT eligible FROM spread) >= ${MIN_MIX_TRACKS}`;
     return `(${alias}.recipe_z >= ${RECIPE_LINE} AND ${alias}.in_filters AND ${ranked})`;
 }
