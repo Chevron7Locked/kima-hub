@@ -27,13 +27,18 @@ function unreachedByFetch(e: unknown): boolean {
  * - "down": throttled, an outage, a timeout, a host that cannot be reached, or a reply that is not what was asked for;
  * - null: not an upstream failure.
  */
+/** What an upstream's own HTTP status says: a 4xx (bar 429) means it has no such thing; a 429 or 5xx, try later. */
+export function upstreamStatusFailure(status: number): "missing" | "down" {
+    return status >= 400 && status < 500 && status !== 429 ? "missing" : "down";
+}
+
 export function upstreamFailure(error: unknown): "missing" | "down" | null {
     if (isBlockedFetch(error)) return "missing";
     let upstream = false;
     for (const e of errorChain(error)) {
         if (axios.isAxiosError(e)) {
             const status = e.response?.status;
-            if (status && status >= 400 && status < 500 && status !== 429) return "missing";
+            if (status && upstreamStatusFailure(status) === "missing") return "missing";
             upstream = true;
         } else if (e instanceof UpstreamReplyError || e instanceof TimeoutError || unreachedByFetch(e)) {
             upstream = true;

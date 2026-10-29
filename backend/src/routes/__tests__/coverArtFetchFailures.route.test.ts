@@ -25,6 +25,7 @@ import express from "express";
 import request from "supertest";
 import libraryCoverArtRoutes from "../library/coverArt";
 import { BlockedAddressError, InvalidAddressError, UnresolvedAddressError } from "../../utils/ssrf";
+import { redisClient } from "../../utils/redis";
 
 const app = express();
 app.use("/library", libraryCoverArtRoutes);
@@ -60,5 +61,14 @@ describe("GET /library/cover-art?url=", () => {
     it("answers 404 when the host has no such picture", async () => {
         mockFetchChecked.mockResolvedValueOnce(new Response("nope", { status: 404, statusText: "Not Found" }));
         expect((await cover()).status).toBe(404);
+    });
+
+    it("answers 502 when the host errs or is busy, and never remembers that as no picture", async () => {
+        for (const [status, statusText] of [[500, "Internal Server Error"], [503, "Service Unavailable"], [429, "Too Many Requests"]] as const) {
+            jest.mocked(redisClient.setex).mockClear();
+            mockFetchChecked.mockResolvedValueOnce(new Response("oops", { status, statusText }));
+            expect({ upstream: status, answer: (await cover()).status }).toEqual({ upstream: status, answer: 502 });
+            expect({ upstream: status, cached: jest.mocked(redisClient.setex).mock.calls.length }).toEqual({ upstream: status, cached: 0 });
+        }
     });
 });

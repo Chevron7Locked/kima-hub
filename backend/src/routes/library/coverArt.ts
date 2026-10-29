@@ -8,7 +8,7 @@ import { findAlbumArtwork } from "../../services/artwork";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../utils/ssrf";
-import { upstreamFailure } from "../../utils/upstream";
+import { upstreamFailure, upstreamStatusFailure } from "../../utils/upstream";
 import {
   resizeImageBuffer,
   getResizedImagePath,
@@ -105,6 +105,9 @@ async function serveAudiobookCover(
     logger.error(
       `[COVER-ART] Failed to fetch audiobook cover: ${coverUrl} (${imageResponse.status} ${imageResponse.statusText})`,
     );
+    if (upstreamStatusFailure(imageResponse.status) === "down") {
+      return res.status(502).json({ error: "Audiobookshelf did not answer; try again shortly" });
+    }
     return res.status(404).json({ error: "Audiobook cover art not found" });
   }
 
@@ -296,6 +299,9 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         }
       }
 
+      if (upstreamStatusFailure(imageResponse.status) === "down") {
+        return res.status(502).json({ error: "The picture's host did not answer; try again shortly" });
+      }
       return res.status(404).json({ error: "Cover art not found" });
     }
     logger.debug(`[COVER-ART] Successfully fetched, caching...`);
