@@ -56,10 +56,11 @@ export const webhookLimiter = createRateLimiter({
     skip: (_req, res) => res.locals.webhookVerified === true,
 });
 
-// 500 image requests a minute per IP: art-heavy pages load hundreds at once.
+// 3,000 image requests a minute per IP: a page shows 50 to 80 covers, so this is about 40 page visits a minute and
+// only stops a runaway loop.
 export const imageLimiter = createRateLimiter({
     windowMs: 60 * 1000,
-    max: 500,
+    max: 3000,
     message: "Too many image requests, please slow down.",
 });
 
