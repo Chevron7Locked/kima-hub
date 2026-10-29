@@ -1,5 +1,6 @@
 // Resetting an artist, album or song's edited metadata wipes an admin's edits, so it
-// needs admin like the edit itself. On the real database with real tokens.
+// needs admin like the edit itself. An edit and a reset answer with the same shape, and
+// both answer 404 for something that is gone. On the real database with real tokens.
 
 import express from "express";
 import request from "supertest";
@@ -77,5 +78,34 @@ describe("metadata reset is admin-only", () => {
             expect(res.status).toBe(200);
         }
         expect(await edited()).toEqual([null, null, null]);
+    });
+});
+
+describe("editing and resetting metadata", () => {
+    const kinds = [
+        { path: `/enrichment/artists/${ARTIST}`, body: { name: "edited" }, key: "artist", has: ["albums"] },
+        { path: `/enrichment/albums/${ALBUM}`, body: { title: "edited" }, key: "album", has: ["artist", "tracks"] },
+        { path: `/enrichment/tracks/${TRACK}`, body: { title: "edited" }, key: "track", has: ["album"] },
+    ];
+
+    it("an edit and a reset send back the same shape", async () => {
+        for (const kind of kinds) {
+            const edited = await request(app()).put(`${kind.path}/metadata`).set("Authorization", as(ADMIN, "admin")).send(kind.body);
+            const reset = await request(app()).post(`${kind.path}/reset`).set("Authorization", as(ADMIN, "admin")).send({});
+            expect([edited.status, reset.status]).toEqual([200, 200]);
+            expect(Object.keys(edited.body).sort()).toEqual(Object.keys(reset.body[kind.key]).sort());
+            for (const field of kind.has) expect(edited.body[field]).toBeDefined();
+        }
+    });
+
+    it("answers 404 for an edit of something that is gone", async () => {
+        for (const [path, body, name] of [
+            [`/enrichment/artists/${P}-gone/metadata`, { name: "x" }, "Artist"],
+            [`/enrichment/albums/${P}-gone/metadata`, { title: "x" }, "Album"],
+            [`/enrichment/tracks/${P}-gone/metadata`, { title: "x" }, "Track"],
+        ] as const) {
+            const res = await request(app()).put(path).set("Authorization", as(ADMIN, "admin")).send(body);
+            expect([res.status, res.body.error]).toEqual([404, `${name} not found`]);
+        }
     });
 });

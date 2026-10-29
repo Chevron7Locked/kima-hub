@@ -41,6 +41,25 @@ function respondIfDeleted(res: Response, error: unknown, entity: string): boolea
   return true;
 }
 
+// What a metadata edit and a metadata reset send back, so the editor sees the same row either way.
+const ARTIST_EDIT_REPLY = { albums: { select: { id: true, title: true, year: true, coverUrl: true } } } as const;
+const ALBUM_EDIT_REPLY = {
+  artist: { select: { id: true, name: true } },
+  tracks: { select: { id: true, title: true, trackNo: true, duration: true } },
+} as const;
+const TRACK_EDIT_REPLY = {
+  album: { select: { id: true, title: true, artist: { select: { id: true, name: true } } } },
+} as const;
+
+/** The artist page caches its hero image; an edit or reset of the artist drops it. */
+async function forgetArtistHero(artistId: string): Promise<void> {
+  try {
+    await redisClient.del(`hero:${artistId}`);
+  } catch (err) {
+    logger.warn("Failed to invalidate Redis cache:", err);
+  }
+}
+
 // Authentication is per-route: a path that matches no route must 404, not 401,
 // so the settings UI sees "no such control", not "log in".
 
@@ -453,28 +472,15 @@ router.put("/artists/:id/metadata", requireAuth, requireAdmin, async (req, res) 
       const artist = await prisma.artist.update({
         where: { id: req.params.id },
         data: updateData,
-        include: {
-          albums: {
-            select: {
-              id: true,
-              title: true,
-              year: true,
-              coverUrl: true,
-            },
-          },
-        },
+        include: ARTIST_EDIT_REPLY,
       });
-  
-      // Invalidate Redis cache for artist hero image
-      try {
-        await redisClient.del(`hero:${req.params.id}`);
-      } catch (err) {
-        logger.warn("Failed to invalidate Redis cache:", err);
-      }
+      await forgetArtistHero(req.params.id);
   
       res.json(artist);
     } catch (error) {
-      safeError(res, "Update artist metadata", error);
+      if (!respondIfDeleted(res, error, "artist")) {
+        safeError(res, "Update artist metadata", error);
+      }
     }
   });
 
@@ -550,27 +556,14 @@ router.put("/albums/:id/metadata", requireAuth, requireAdmin, async (req, res) =
       const album = await prisma.album.update({
         where: { id: req.params.id },
         data: updateData,
-        include: {
-          artist: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          tracks: {
-            select: {
-              id: true,
-              title: true,
-              trackNo: true,
-              duration: true,
-            },
-          },
-        },
+        include: ALBUM_EDIT_REPLY,
       });
   
       res.json(album);
     } catch (error) {
-      safeError(res, "Update album metadata", error);
+      if (!respondIfDeleted(res, error, "album")) {
+        safeError(res, "Update album metadata", error);
+      }
     }
   });
 
@@ -610,25 +603,14 @@ router.put("/tracks/:id/metadata", requireAuth, requireAdmin, async (req, res) =
     const track = await prisma.track.update({
       where: { id: req.params.id },
       data: updateData,
-      include: {
-        album: {
-          select: {
-            id: true,
-            title: true,
-            artist: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      },
+      include: TRACK_EDIT_REPLY,
     });
 
     res.json(track);
   } catch (error) {
-    safeError(res, "Update track metadata", error);
+    if (!respondIfDeleted(res, error, "track")) {
+      safeError(res, "Update track metadata", error);
+    }
   }
 });
 
@@ -664,24 +646,9 @@ router.post("/artists/:id/reset", requireAuth, requireAdmin, async (req, res) =>
         // it on clear.
         sortName: artistSortName(existingArtist.name),
       },
-      include: {
-        albums: {
-          select: {
-            id: true,
-            title: true,
-            year: true,
-            coverUrl: true,
-          },
-        },
-      },
+      include: ARTIST_EDIT_REPLY,
     });
-
-    // Invalidate Redis cache for artist hero image
-    try {
-      await redisClient.del(`hero:${req.params.id}`);
-    } catch (err) {
-      logger.warn("Failed to invalidate Redis cache:", err);
-    }
+    await forgetArtistHero(req.params.id);
 
     res.json({
       message: "Artist metadata reset to original values",
@@ -726,22 +693,7 @@ router.post("/albums/:id/reset", requireAuth, requireAdmin, async (req, res) => 
         // it on clear.
         sortName: artistSortName(existingAlbum.title),
       },
-      include: {
-        artist: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        tracks: {
-          select: {
-            id: true,
-            title: true,
-            trackNo: true,
-            duration: true,
-          },
-        },
-      },
+      include: ALBUM_EDIT_REPLY,
     });
 
     res.json({
@@ -781,20 +733,7 @@ router.post("/tracks/:id/reset", requireAuth, requireAdmin, async (req, res) => 
         displayTrackNo: null,
         hasUserOverrides: false,
       },
-      include: {
-        album: {
-          select: {
-            id: true,
-            title: true,
-            artist: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      },
+      include: TRACK_EDIT_REPLY,
     });
 
     res.json({
