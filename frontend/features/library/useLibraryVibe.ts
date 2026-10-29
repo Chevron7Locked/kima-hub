@@ -9,25 +9,13 @@
  */
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
 import { moodByGroup, moodShares, type MoodShare } from "@/features/vibe/mapUtils";
+import { useVibeMapQuery } from "@/features/vibe/useVibeMap";
 
 const EMPTY_MAP = new Map<string, string>();
 
 export function useLibraryVibe() {
-    const { data } = useQuery({
-        queryKey: ["vibe-map"],
-        queryFn: () => api.getVibeMap(),
-        staleTime: 1000 * 60 * 60,
-        gcTime: 1000 * 60 * 60 * 24,
-        retry: 1,
-        // A first layout of a large library computes in the background; the
-        // server answers "computing" and we ask again until it is ready.
-        refetchInterval: (query) => (query.state.data && "computing" in query.state.data ? 4000 : false),
-    });
-
-    const tracks = data && !("computing" in data) ? data.tracks : undefined;
+    const tracks = useVibeMapQuery().mapData?.tracks;
 
     const shares = useMemo<MoodShare[]>(() => (tracks ? moodShares(tracks) : []), [tracks]);
     const albumMood = useMemo(

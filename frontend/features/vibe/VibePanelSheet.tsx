@@ -3,6 +3,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { LibraryMatches } from "./librarySearch";
+import { useVibeSearch, VibeSearchResults } from "./useVibeSearch";
 import { NowPlayingTab } from "./tabs/NowPlayingTab";
 import { QueueTab } from "./tabs/QueueTab";
 import { LyricsView } from "@/components/lyrics/LyricsView";
@@ -11,7 +12,6 @@ import { PanelOptions, panelTabId } from "@/components/layout/panelChrome";
 import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { CachedImage } from "@/components/ui/CachedImage";
-import { normalizeNFC } from "@/lib/format";
 import { Waypoints, Sparkles, AudioWaveform, Play, Pause, Search, X, Music, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -97,20 +97,16 @@ export function VibePanelSheet({
     const [activity, setActivity] = useState<ActivityView>("all");
     const counts = useActivityCounts();
 
-    const [query, setQuery] = useState("");
-    const [active, setActive] = useState(0);
-    const [seenClear, setSeenClear] = useState(clearSignal);
-    if (clearSignal !== seenClear) {
-        setSeenClear(clearSignal);
+    const pickResult = (trackId: string) => {
+        onPickResult(trackId);
         setQuery("");
-        setActive(0);
-    }
-    const onSearchRef = useRef(onSearch);
-    useEffect(() => { onSearchRef.current = onSearch; }, [onSearch]);
-    useEffect(() => {
-        const timer = setTimeout(() => onSearchRef.current(query.trim()), 150);
-        return () => clearTimeout(timer);
-    }, [query]);
+    };
+    const { query, setQuery, activeIndex, setActive, searching, onResultKey } = useVibeSearch({
+        onSearch,
+        results,
+        onPick: pickResult,
+        clearSignal,
+    });
 
     // The host is the page content; its height is the sheet's full extent, so
     // the stops follow the viewport without ever measuring the sheet's content.
@@ -151,13 +147,8 @@ export function VibePanelSheet({
         setContentFloor(el.scrollHeight);
     }, [snap, hasPlayback, hasActions, selectedTrackId, activeTab, intro]);
 
-    const searching = results !== null && query.trim().length >= 2;
-    const clampedActive = results && results.top.length > 0 ? Math.min(active, results.top.length - 1) : 0;
-
-    // The snap belongs to the selection it was chosen for: a new selection opens
-    // the sheet, and a cleared one closes it. Measured on the real library: a
-    // state update issued during render is discarded here, so this has to run
-    // after commit. Verified — a tap takes the sheet from peek to half.
+    // The snap belongs to the selection it was chosen for: a new selection opens the sheet, and a cleared one closes
+    // it. This runs after commit: a state update issued during render was discarded here.
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setSnap((current) => {
@@ -365,12 +356,11 @@ export function VibePanelSheet({
                         aria-expanded={searching}
                         aria-controls="vibe-search-results"
                         aria-autocomplete="list"
-                        aria-activedescendant={searching && results.top.length > 0 ? `vibe-result-${clampedActive}` : undefined}
+                        aria-activedescendant={searching && results && results.top.length > 0 ? `vibe-result-${activeIndex}` : undefined}
                         value={query}
                         onChange={(event) => {
                             const next = event.target.value;
                             setQuery(next);
-                            setActive(0);
                             // Typing opens the sheet far enough to read the results.
                             if (next.trim().length >= 2) setSnap((current) => (current === "peek" ? "half" : current));
                         }}
@@ -380,21 +370,7 @@ export function VibePanelSheet({
                                 setQuery("");
                                 return;
                             }
-                            if (!searching || results.top.length === 0) return;
-                            if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setActive((current) => Math.min(results.top.length - 1, current + 1));
-                            } else if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setActive((current) => Math.max(0, current - 1));
-                            } else if (event.key === "Enter") {
-                                event.preventDefault();
-                                const track = results.top[clampedActive];
-                                if (track) {
-                                    onPickResult(track.id);
-                                    setQuery("");
-                                }
-                            }
+                            onResultKey(event);
                         }}
                         placeholder="find a track or artist"
                         aria-label="Search tracks or artists"
@@ -412,41 +388,16 @@ export function VibePanelSheet({
                     )}
                 </div>
 
-                {searching ? (
-                    <div
-                        id="vibe-search-results"
-                        role="listbox"
-                        aria-label="Matching tracks"
+                {searching && results ? (
+                    <VibeSearchResults
+                        results={results}
+                        query={query}
+                        activeIndex={activeIndex}
+                        onHover={setActive}
+                        onPick={pickResult}
                         inert={snap === "peek"}
                         className="flex-1 overflow-y-auto overscroll-contain border-t border-white/5 py-1"
-                    >
-                        <p className="px-3 pb-1 pt-1.5 text-[11px] text-white/60" aria-live="polite">
-                            {results.count === 0
-                                ? `no tracks match "${query.trim()}"`
-                                : `${results.count.toLocaleString()} ${results.count === 1 ? "match" : "matches"}${results.count > results.top.length ? `, showing the first ${results.top.length}` : ""}`}
-                        </p>
-                        {results.top.map((track, index) => (
-                            <button
-                                key={track.id}
-                                id={`vibe-result-${index}`}
-                                type="button"
-                                role="option"
-                                aria-selected={index === clampedActive}
-                                onMouseEnter={() => setActive(index)}
-                                onClick={() => {
-                                    onPickResult(track.id);
-                                    setQuery("");
-                                }}
-                                className={cn(
-                                    "block w-full px-3 py-2 text-left",
-                                    index === clampedActive ? "bg-white/[0.08]" : "hover:bg-white/[0.06]",
-                                )}
-                            >
-                                <span className="block truncate text-sm text-[var(--text-primary)]">{normalizeNFC(track.title)}</span>
-                                <span className="block truncate text-xs text-white/60">{normalizeNFC(track.artist)}</span>
-                            </button>
-                        ))}
-                    </div>
+                    />
                 ) : (
                     <div
                         inert={snap === "peek"}

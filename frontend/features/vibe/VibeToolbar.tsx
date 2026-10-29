@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Search, Waypoints, Blend, X } from "lucide-react";
-import { normalizeNFC } from "@/lib/format";
 import type { LibraryMatches } from "./librarySearch";
 import type { VibeMode } from "./types";
+import { useVibeSearch, VibeSearchResults } from "./useVibeSearch";
 
 interface VibeToolbarProps {
     mode: VibeMode;
@@ -25,30 +25,8 @@ const TOOL = "flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm transition
 const RAIL_TOOL = "vibe-glass flex h-11 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40";
 
 export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, onPathMode, onAlchemyMode, onReset, clearSignal }: VibeToolbarProps) {
-    const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
-    const [active, setActive] = useState(0);
-    const [seenClear, setSeenClear] = useState(clearSignal);
-    if (clearSignal !== seenClear) {
-        setSeenClear(clearSignal);
-        setQuery("");
-        setOpen(false);
-        setActive(0);
-    }
     const inputRef = useRef<HTMLInputElement>(null);
-    const onSearchRef = useRef(onSearch);
-    useEffect(() => { onSearchRef.current = onSearch; }, [onSearch]);
-
-    useEffect(() => {
-        if (compact) return; // phones search from inside the sheet
-        const timer = setTimeout(() => onSearchRef.current(query.trim()), 150);
-        return () => clearTimeout(timer);
-    }, [query, compact]);
-
-    const clearSearch = useCallback(() => {
-        onReset();
-        inputRef.current?.focus();
-    }, [onReset]);
 
     const pick = useCallback((id: string) => {
         onPickResult(id);
@@ -56,8 +34,21 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
         inputRef.current?.blur();
     }, [onPickResult]);
 
-    const items = results?.top ?? [];
-    const showList = open && !!results && query.trim().length >= 2;
+    // Phones search from inside the sheet.
+    const { query, setQuery, activeIndex, setActive, searching, onResultKey } = useVibeSearch({
+        onSearch,
+        results,
+        onPick: pick,
+        clearSignal,
+        enabled: !compact,
+    });
+
+    const clearSearch = useCallback(() => {
+        onReset();
+        inputRef.current?.focus();
+    }, [onReset]);
+
+    const showList = open && searching;
     const pathOn = mode === "path-picking";
     const blendOn = mode === "alchemy";
 
@@ -72,17 +63,15 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
                 aria-controls="vibe-search-results"
                 aria-autocomplete="list"
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
+                aria-activedescendant={showList && results && results.top.length > 0 ? `vibe-result-${activeIndex}` : undefined}
+                onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
                 onFocus={() => setOpen(true)}
-                onBlur={() => setTimeout(() => setOpen(false), 120)}
+                onBlur={() => setOpen(false)}
                 onKeyDown={(e) => {
                     if (e.key === "Escape" && query) { e.preventDefault(); clearSearch(); return; }
-                    if (!showList || items.length === 0) return;
-                    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(items.length - 1, a + 1)); }
-                    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
-                    else if (e.key === "Enter") { e.preventDefault(); pick(items[Math.min(active, items.length - 1)].id); }
+                    if (showList) onResultKey(e);
                 }}
-                placeholder="Find a track or artist"
+                placeholder="find a track or artist"
                 className="h-9 w-64 rounded-lg bg-white/[0.04] pl-8 pr-8 text-sm text-white placeholder-white/55 caret-[var(--color-brand)] outline-none transition-colors focus:bg-white/[0.07]"
                 aria-label="Search tracks or artists"
             />
@@ -92,34 +81,16 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
                 </button>
             )}
 
-            {showList && (
-                <div
-                    id="vibe-search-results"
-                    role="listbox"
-                    aria-label="Matching tracks"
+            {showList && results && (
+                <VibeSearchResults
+                    results={results}
+                    query={query}
+                    activeIndex={activeIndex}
+                    onHover={setActive}
+                    onPick={pick}
+                    keepFocus
                     className="vibe-glass vibe-glass--solid absolute left-0 top-full z-10 mt-2 w-full min-w-72 overflow-hidden rounded-xl py-1"
-                >
-                    <p className="px-3 pb-1 pt-1.5 text-[11px] text-white/60" aria-live="polite">
-                        {results.count === 0
-                            ? `No tracks match "${query.trim()}"`
-                            : `${results.count.toLocaleString()} ${results.count === 1 ? "match" : "matches"}${results.count > items.length ? ", showing the first " + items.length : ""}`}
-                    </p>
-                    {items.map((t, i) => (
-                        <button
-                            key={t.id}
-                            type="button"
-                            role="option"
-                            aria-selected={i === Math.min(active, items.length - 1)}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onMouseEnter={() => setActive(i)}
-                            onClick={() => pick(t.id)}
-                            className={`block w-full px-3 py-1.5 text-left ${i === Math.min(active, items.length - 1) ? "bg-white/[0.08]" : ""}`}
-                        >
-                            <span className="block truncate text-sm text-[var(--text-primary)]">{normalizeNFC(t.title)}</span>
-                            <span className="block truncate text-xs text-white/60">{normalizeNFC(t.artist)}</span>
-                        </button>
-                    ))}
-                </div>
+                />
             )}
         </div>
     );
@@ -127,29 +98,29 @@ export function VibeToolbar({ mode, compact, onSearch, results, onPickResult, on
     if (compact) {
         return (
             <div className="absolute right-3 top-[7.25rem] z-(--z-scene) flex flex-col gap-2 landscape-short:right-3 landscape-short:top-[max(0.75rem,env(safe-area-inset-top))] landscape-short:flex-row" role="toolbar" aria-label="Map tools">
-                    <button
-                        type="button"
-                        onClick={onPathMode}
-                        aria-pressed={pathOn}
-                        className={`${RAIL_TOOL} ${pathOn ? "text-[var(--color-brand)]" : "text-white/80"}`}
-                        aria-label="Song Path: build a queue that glides from one track to another"
-                    >
-                        <Waypoints className="h-[18px] w-[18px]" />
+                <button
+                    type="button"
+                    onClick={onPathMode}
+                    aria-pressed={pathOn}
+                    className={`${RAIL_TOOL} ${pathOn ? "text-[var(--color-brand)]" : "text-white/80"}`}
+                    aria-label="Song Path: build a queue that glides from one track to another"
+                >
+                    <Waypoints className="h-[18px] w-[18px]" />
+                </button>
+                <button
+                    type="button"
+                    onClick={onAlchemyMode}
+                    aria-pressed={blendOn}
+                    className={`${RAIL_TOOL} ${blendOn ? "text-[var(--color-brand)]" : "text-white/80"}`}
+                    aria-label="Blend: mix tracks you like (and ones you don't) into a new playlist"
+                >
+                    <Blend className="h-[18px] w-[18px]" />
+                </button>
+                {mode !== "idle" && (
+                    <button type="button" onClick={onReset} className={`${RAIL_TOOL} text-white/80`} aria-label="Clear highlights and paths">
+                        <X className="h-[18px] w-[18px]" />
                     </button>
-                    <button
-                        type="button"
-                        onClick={onAlchemyMode}
-                        aria-pressed={blendOn}
-                        className={`${RAIL_TOOL} ${blendOn ? "text-[var(--color-brand)]" : "text-white/80"}`}
-                        aria-label="Blend: mix tracks you like (and ones you don't) into a new playlist"
-                    >
-                        <Blend className="h-[18px] w-[18px]" />
-                    </button>
-                    {mode !== "idle" && (
-                        <button type="button" onClick={onReset} className={`${RAIL_TOOL} text-white/80`} aria-label="Clear highlights and paths">
-                            <X className="h-[18px] w-[18px]" />
-                        </button>
-                    )}
+                )}
             </div>
         );
     }

@@ -8,7 +8,7 @@ import { BlendFunction } from "postprocessing";
 import * as THREE from "three";
 
 import type { VibeOperation } from "@/lib/audio-state-context";
-import { useDoubleClickById } from "@/hooks/useDoubleTap";
+import { DOUBLE_CLICK_MS, useDoubleClickById } from "@/hooks/useDoubleTap";
 import { useReducedMotion } from "@/hooks/useMediaQuery";
 import { normalizeNFC } from "@/lib/format";
 import { MOOD_COLORS, moodIndex } from "../mapUtils";
@@ -58,8 +58,8 @@ const QUEUE_COLOR = "#c9b184";
 const DRAG_TOLERANCE_PX = 5;
 const PICK_RADIUS_PX = 12;
 const HOVER_DWELL_MS = 400;
-// Matches useDoubleClickById's window; nothing moves the camera inside it.
-const DOUBLE_CLICK_WINDOW_MS = 420;
+// Just past the double-click window, so a double click never finds the camera moving.
+const DOUBLE_CLICK_WINDOW_MS = DOUBLE_CLICK_MS + 20;
 // The home view looks at the cloud from a little above, far enough back that
 // 95% of the stars fit the screen across and up, whatever its shape.
 const HOME_DIRECTION = new THREE.Vector3(0, 0.42, 1).normalize();
@@ -572,6 +572,7 @@ function Scene(props: VibeMapSceneProps & { apiRef: MutableRefObject<SceneApi | 
 
             <EffectComposer>
                 <Bloom mipmapBlur luminanceThreshold={0.62} luminanceSmoothing={0.35} intensity={0.2} />
+                {/* The composer takes elements only, so reduced motion gets an empty fragment instead of the grain. */}
                 {reduced ? <></> : <Noise blendFunction={BlendFunction.OVERLAY} opacity={0.08} />}
                 <Vignette eskil={false} offset={0.22} darkness={0.82} />
             </EffectComposer>
@@ -644,8 +645,7 @@ export function VibeMapScene(props: VibeMapSceneProps) {
 
     const onPointerDown = useCallback((e: React.PointerEvent) => {
         activePointers.current.add(e.pointerId);
-        if (activePointers.current.size > 1) multiTouch.current = true;
-        else multiTouch.current = false;
+        multiTouch.current = activePointers.current.size > 1;
         if (activePointers.current.size === 1) pointer.current = { ...local(e), button: e.button, id: e.pointerId };
         setGrabbing(true);
         clearHover();

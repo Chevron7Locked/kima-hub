@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { ScenePanel } from "./ScenePanel";
+import { NumberedRow } from "@/components/ui/NumberedRow";
 import { X, Plus, Minus, FlaskConical, Play, type LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMutation } from "@tanstack/react-query";
@@ -134,21 +136,7 @@ export function VibeAlchemy({ library, onHighlight, onClose }: VibeAlchemyProps)
     }, [results, picked, replaceOperation]);
 
     return (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-(--z-scene-panel) w-[calc(100%-1.5rem)] sm:w-[480px] max-h-[min(70vh,calc(100%-5rem))] border border-white/10 bg-[rgb(12,8,20)] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)] rounded-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
-                    <FlaskConical className="w-4 h-4" /> Blend
-                </h3>
-                <button
-                    onClick={onClose}
-                    className="text-[var(--text-muted)] hover:text-white"
-                    aria-label="Close alchemy"
-                >
-                    <X className="w-4 h-4" />
-                </button>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <ScenePanel icon={FlaskConical} title="blend" closeLabel="Close alchemy" onClose={onClose} className="sm:w-[480px]">
                 <div className="p-4 space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                         {(Object.keys(COLUMNS) as Column[]).map((column) => (
@@ -189,30 +177,17 @@ export function VibeAlchemy({ library, onHighlight, onClose }: VibeAlchemyProps)
                         </div>
                         <div>
                             {results.map((track, i) => (
-                                <div
+                                <NumberedRow
                                     key={track.id}
-                                    className="px-4 py-2 hover:bg-white/5 flex items-center gap-3"
-                                >
-                                    <span className="text-[var(--text-muted)] text-xs w-5 text-right">
-                                        {i + 1}
-                                    </span>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-[var(--text-primary)] truncate">
-                                            {track.title}
-                                        </p>
-                                        <p className="text-xs text-[var(--text-muted)] truncate">
-                                            {track.artist.name}
-                                        </p>
-                                    </div>
-                                    <span className="text-xs text-[var(--text-muted)]">
-                                        {Math.round(track.similarity * 100)}%
-                                    </span>
-                                </div>
+                                    n={i + 1}
+                                    title={track.title}
+                                    subtitle={track.artist.name}
+                                    trailing={`${Math.round(track.similarity * 100)}%`}
+                                />
                             ))}
                         </div>
                     </div>
                 )}
-            </div>
-        </div>
+        </ScenePanel>
     );
 }

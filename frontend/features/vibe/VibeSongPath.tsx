@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { X, Route, ArrowRight } from "lucide-react";
+import { ScenePanel } from "./ScenePanel";
+import { Route, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { LibraryIndex } from "./librarySearch";
 import { useTrackFinder } from "./useTrackFinder";
@@ -45,46 +46,39 @@ export function VibeSongPath({ library, onStartPath, onClose }: VibeSongPathProp
     }, [startTrackId, endTrackId, onStartPath]);
 
     return (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-(--z-scene-panel) w-[calc(100%-1.5rem)] sm:w-96 max-h-[calc(100%-5rem)] overflow-y-auto overscroll-contain border border-white/10 bg-[rgb(12,8,20)] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)] rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
-                    <Route className="w-4 h-4" /> Song Path
-                </h3>
-                <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white" aria-label="Close song path">
-                    <X className="w-4 h-4" />
-                </button>
-            </div>
+        <ScenePanel icon={Route} title="song path" closeLabel="Close song path" onClose={onClose} className="sm:w-96">
+            <div className="p-4">
+                <div className="space-y-2">
+                    <TrackSearchInput
+                        id="path-start"
+                        label="Start track"
+                        value={startQuery}
+                        onChange={(e) => { setStartQuery(e.target.value); setStartTrackId(null); }}
+                        onFocus={() => setActiveInput("start")}
+                        placeholder="Start: a track, artist or sound"
+                    />
 
-            <div className="space-y-2">
-                <TrackSearchInput
-                    id="path-start"
-                    label="Start track"
-                    value={startQuery}
-                    onChange={(e) => { setStartQuery(e.target.value); setStartTrackId(null); }}
-                    onFocus={() => setActiveInput("start")}
-                    placeholder="Start: a track, artist or sound"
-                />
+                    <div className="flex justify-center" aria-hidden="true">
+                        <ArrowRight className="w-4 h-4 text-[var(--text-muted)]" />
+                    </div>
 
-                <div className="flex justify-center" aria-hidden="true">
-                    <ArrowRight className="w-4 h-4 text-[var(--text-muted)]" />
+                    <TrackSearchInput
+                        id="path-end"
+                        label="End track"
+                        value={endQuery}
+                        onChange={(e) => { setEndQuery(e.target.value); setEndTrackId(null); }}
+                        onFocus={() => setActiveInput("end")}
+                        placeholder="End: a track, artist or sound"
+                    />
                 </div>
 
-                <TrackSearchInput
-                    id="path-end"
-                    label="End track"
-                    value={endQuery}
-                    onChange={(e) => { setEndQuery(e.target.value); setEndTrackId(null); }}
-                    onFocus={() => setActiveInput("end")}
-                    placeholder="End: a track, artist or sound"
-                />
+                <TrackFinderResults finder={finder} query={activeQuery} onPick={selectTrack} className="mt-2" />
+
+                {sameTrack && <FinderNote className="mt-2">Pick a different track for the end.</FinderNote>}
+                <Button className="w-full mt-3" onClick={handleSubmit} disabled={!startTrackId || !endTrackId || sameTrack}>
+                    <Route className="w-4 h-4" /> Generate Path
+                </Button>
             </div>
-
-            <TrackFinderResults finder={finder} query={activeQuery} onPick={selectTrack} className="mt-2" />
-
-            {sameTrack && <FinderNote className="mt-2">Pick a different track for the end.</FinderNote>}
-            <Button className="w-full mt-3" onClick={handleSubmit} disabled={!startTrackId || !endTrackId || sameTrack}>
-                <Route className="w-4 h-4" /> Generate Path
-            </Button>
-        </div>
+        </ScenePanel>
     );
 }

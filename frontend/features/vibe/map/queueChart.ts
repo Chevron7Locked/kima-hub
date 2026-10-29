@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { DISC_EDGE, STAR_MAX_PX, STAR_MIN_PX, STAR_SIZE_SCALE, type StarUniforms } from "./starShader";
+import { DISC_EDGE, STAR_MAX_PX, STAR_MIN_PX, STAR_SIZE_SCALE, overlayMaterial, type StarUniforms } from "./starShader";
 
 /**
  * The play queue as a sky chart's constellation: a stipple from each song to the next,
@@ -83,14 +83,7 @@ export function createChartMaterial(color: string, stars: StarUniforms) {
         uFocusMix: stars.uFocusMix,
         uColor: { value: new THREE.Color(color) },
     };
-    const material = new THREE.ShaderMaterial({
-        uniforms,
-        vertexShader: VERT,
-        fragmentShader: FRAG,
-        transparent: true,
-        depthWrite: false,
-    });
-    return { material, uniforms };
+    return overlayMaterial(uniforms, VERT, FRAG);
 }
 
 /** How many songs after the playing one are charted, and how many already played trail behind it. */

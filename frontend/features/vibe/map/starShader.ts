@@ -104,6 +104,12 @@ export interface StarUniforms {
     uFocusColor: THREE.IUniform<THREE.Color>;
 }
 
+/** A see-through shader drawn over the scene without writing depth, as the stars and the queue chart are. */
+export function overlayMaterial<U extends Record<string, THREE.IUniform>>(uniforms: U, vertexShader: string, fragmentShader: string) {
+    const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, transparent: true, depthWrite: false });
+    return { material, uniforms };
+}
+
 export function createStarMaterial(opts: { sizeScale: number; opacity: number; minPx: number; revealFade?: number }) {
     const uniforms: StarUniforms = {
         uSizeScale: { value: opts.sizeScale },
@@ -117,14 +123,7 @@ export function createStarMaterial(opts: { sizeScale: number; opacity: number; m
         uFocusMix: { value: 0 },
         uFocusColor: { value: new THREE.Color(1, 1, 1) },
     };
-    const material = new THREE.ShaderMaterial({
-        uniforms,
-        vertexShader: VERT,
-        fragmentShader: FRAG,
-        transparent: true,
-        depthWrite: false,
-    });
-    return { material, uniforms };
+    return overlayMaterial(uniforms, VERT, FRAG);
 }
 
 /** Per-frame update: twinkle clock, load-in clock, eased mood focus, and the canvas's live pixel ratio. */

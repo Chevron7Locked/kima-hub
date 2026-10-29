@@ -1,5 +1,8 @@
 import { useRef, useCallback } from "react";
 
+/** How soon a second click on the same item counts as a double click. */
+export const DOUBLE_CLICK_MS = 400;
+
 /**
  * Hook for canvas/3D components where tracks are identified by string ID.
  * First click fires onClick; second click on the same ID within delayMs fires onDoubleClick.
@@ -7,7 +10,7 @@ import { useRef, useCallback } from "react";
 export function useDoubleClickById(
     onClick: (id: string) => void,
     onDoubleClick?: (id: string) => void,
-    delayMs = 400,
+    delayMs = DOUBLE_CLICK_MS,
 ) {
     const lastClickRef = useRef<{ id: string; time: number } | null>(null);
 

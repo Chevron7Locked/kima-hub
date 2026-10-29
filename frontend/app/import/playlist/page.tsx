@@ -1,6 +1,7 @@
 "use client";
 
 import { usePublicConfig } from "@/hooks/useQueries";
+import { NumberedRow } from "@/components/ui/NumberedRow";
 import { ACQUIRE_LOCKED } from "@/lib/acquire";
 import { useState, useEffect, useRef, Suspense, type CSSProperties } from "react";
 import { formatTime, plural } from "@/lib/format";
@@ -647,39 +648,13 @@ function ImportPlaylistPageContent() {
                                         {preview.matchedTracks
                                             .filter((m) => m.localTrack)
                                             .map((match, i) => (
-                                                <div
-                                                    key={
-                                                        match.spotifyTrack
-                                                            .spotifyId
-                                                    }
-                                                    className="flex items-center gap-3 px-4 py-2 hover:bg-white/5"
-                                                >
-                                                    <span className="text-xs text-[var(--text-muted)] w-5 text-right">
-                                                        {i + 1}
-                                                    </span>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm text-white truncate">
-                                                            {match.localTrack
-                                                                ?.title ||
-                                                                match
-                                                                    .spotifyTrack
-                                                                    .title}
-                                                        </div>
-                                                        <div className="text-xs text-[var(--text-muted)] truncate">
-                                                            {match.localTrack
-                                                                ?.artistName ||
-                                                                match
-                                                                    .spotifyTrack
-                                                                    .artist}
-                                                        </div>
-                                                    </div>
-                                                    <span className="text-xs text-[var(--text-muted)]">
-                                                        {formatTime(
-                                                            Math.round(match.spotifyTrack
-                                                                .durationMs / 1000)
-                                                        )}
-                                                    </span>
-                                                </div>
+                                                <NumberedRow
+                                                    key={match.spotifyTrack.spotifyId}
+                                                    n={i + 1}
+                                                    title={match.localTrack?.title || match.spotifyTrack.title}
+                                                    subtitle={match.localTrack?.artistName || match.spotifyTrack.artist}
+                                                    trailing={formatTime(Math.round(match.spotifyTrack.durationMs / 1000))}
+                                                />
                                             ))}
                                     </div>
                                 )}

@@ -301,6 +301,12 @@ export default function VibePage() {
         setSearchClears((n) => n + 1);
     }, [resetMode]);
 
+    // Pinning a mood ends whatever tool is running; pinning it again unpins it.
+    const toggleMood = useCallback((m: string) => {
+        if (mode !== "idle") clearAll();
+        setMoodPinned((cur) => (cur === m ? null : m));
+    }, [mode, clearAll]);
+
     // One Escape handler for the page, undoing the latest thing first: the menu,
     // an open Song Path or Blend panel, a pending song-path pick, then the
     // selection. Inputs that handle Escape themselves mark the event handled.
@@ -432,7 +438,7 @@ export default function VibePage() {
                         trackCount={mapData.trackCount}
                         activeMood={moodFocus}
                         onPreview={setMoodPreview}
-                        onToggle={(m) => { if (mode !== "idle") clearAll(); setMoodPinned((cur) => (cur === m ? null : m)); }}
+                        onToggle={toggleMood}
                     />
                 )}
                 <MapIconButton
@@ -479,7 +485,7 @@ export default function VibePage() {
                         trackCount={mapData.trackCount}
                         activeMood={moodFocus}
                         onPreview={setMoodPreview}
-                        onToggle={(m) => { if (mode !== "idle") clearAll(); setMoodPinned((cur) => (cur === m ? null : m)); }}
+                        onToggle={toggleMood}
                     />
                 </div>
             )}
