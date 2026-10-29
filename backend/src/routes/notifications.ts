@@ -4,7 +4,15 @@ import { notificationService } from "../services/notificationService";
 import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
-import { soulseekConfigured } from "../utils/soulseekConfigured";
+import {
+    createRetryJob,
+    downloadSources,
+    failRetryJob,
+    findSources,
+    NO_SOURCES,
+    retryJobTarget,
+    soulseekTarget,
+} from "../services/pendingTrackRetry";
 
 const router = Router();
 
@@ -323,45 +331,28 @@ router.post(
                     });
                 }
 
+                // Checked before the failed row is cleared, so a song that is gone leaves its row to be dismissed.
+                const pendingTrack = await prisma.playlistPendingTrack.findFirst({
+                    where: { id: pendingTrackId, playlistId, playlist: { userId: req.user!.id } },
+                });
+                if (!pendingTrack) {
+                    return res.status(404).json({ error: "Pending track not found" });
+                }
+
+                const target = await soulseekTarget();
                 await prisma.downloadJob.update({
                     where: { id: failedJob.id },
                     data: { cleared: true },
                 });
 
-                const playlist = await prisma.playlist.findUnique({
-                    where: { id: playlistId },
-                });
-                if (!playlist || playlist.userId !== req.user!.id) {
-                    return res
-                        .status(404)
-                        .json({ error: "Playlist not found" });
-                }
-
-                const pendingTrack =
-                    await prisma.playlistPendingTrack.findUnique({
-                        where: { id: pendingTrackId },
-                    });
-                if (!pendingTrack) {
-                    return res
-                        .status(404)
-                        .json({ error: "Pending track not found" });
-                }
-
-                const retryTargetId =
-                    pendingTrack.albumMbid ||
-                    pendingTrack.artistMbid ||
-                    `pendingTrack:${pendingTrack.id}`;
-
-                // Dedup: check for existing active download job
                 const existingActiveJob = await prisma.downloadJob.findFirst({
                     where: {
                         userId: req.user!.id,
-                        targetMbid: retryTargetId,
+                        targetMbid: retryJobTarget(pendingTrack),
                         status: { in: ["pending", "processing"] },
                         cleared: { not: true },
                     },
                 });
-
                 if (existingActiveJob) {
                     return res.json({
                         success: true,
@@ -370,163 +361,19 @@ router.post(
                     });
                 }
 
-                const newJobRecord = await prisma.downloadJob.create({
-                    data: {
-                        userId: req.user!.id,
-                        subject: `${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`,
-                        type: "track",
-                        targetMbid: retryTargetId,
-                        artistMbid: pendingTrack.artistMbid,
-                        status: "processing",
-                        attempts: 1,
-                        startedAt: new Date(),
-                        metadata: {
-                            downloadType: "pending-track-retry",
-                            source: "soulseek",
-                            playlistId,
-                            pendingTrackId,
-                            spotifyArtist: pendingTrack.spotifyArtist,
-                            spotifyTitle: pendingTrack.spotifyTitle,
-                            spotifyAlbum: pendingTrack.spotifyAlbum,
-                            albumMbid: pendingTrack.albumMbid,
-                        },
-                    },
-                });
-
-                const { soulseekService } = await import(
-                    "../services/soulseek"
-                );
-                const { getSystemSettings } = await import(
-                    "../utils/systemSettings"
-                );
-
-                const settings = await getSystemSettings();
-                if (!settings?.musicPath) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Music path not configured",
-                            completedAt: new Date(),
-                        },
-                    });
-                    return res.json({
-                        success: false,
-                        newJobId: newJobRecord.id,
-                        error: "Music path not configured",
-                    });
+                const job = await createRetryJob(req.user!.id, pendingTrack);
+                if ("problem" in target) {
+                    await failRetryJob(job.id, target.problem);
+                    return res.json({ success: false, newJobId: job.id, error: target.problem });
                 }
 
-                if (!soulseekConfigured(settings)) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "Soulseek credentials not configured",
-                            completedAt: new Date(),
-                        },
-                    });
-                    return res.json({
-                        success: false,
-                        newJobId: newJobRecord.id,
-                        error: "Soulseek credentials not configured",
-                    });
+                const matches = await findSources(job, pendingTrack);
+                if (matches.length === 0) {
+                    return res.json({ success: false, newJobId: job.id, error: NO_SOURCES });
                 }
 
-                const albumName =
-                    pendingTrack.spotifyAlbum !== "Unknown Album"
-                        ? pendingTrack.spotifyAlbum
-                        : pendingTrack.spotifyArtist;
-
-                const searchResult = await soulseekService.searchTrack(
-                    pendingTrack.spotifyArtist,
-                    pendingTrack.spotifyTitle,
-                    pendingTrack.spotifyAlbum !== "Unknown Album" ? pendingTrack.spotifyAlbum : undefined
-                );
-
-                if (
-                    !searchResult.found ||
-                    searchResult.allMatches.length === 0
-                ) {
-                    await prisma.downloadJob.update({
-                        where: { id: newJobRecord.id },
-                        data: {
-                            status: "failed",
-                            error: "No matching files found",
-                            completedAt: new Date(),
-                        },
-                    });
-                    return res.json({
-                        success: false,
-                        newJobId: newJobRecord.id,
-                        error: "No matching files found",
-                    });
-                }
-
-                // Start download in background (don't await)
-                soulseekService
-                    .downloadBestMatch(
-                        pendingTrack.spotifyArtist,
-                        pendingTrack.spotifyTitle,
-                        albumName,
-                        searchResult.allMatches,
-                        settings.musicPath
-                    )
-                    .then(async (result) => {
-                        if (result.success) {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
-                                    status: "completed",
-                                    completedAt: new Date(),
-                                    metadata: {
-                                        ...(newJobRecord.metadata as any),
-                                        filePath: result.filePath,
-                                    },
-                                },
-                            });
-
-                            try {
-                                const { requestScan } = await import(
-                                    "../workers/scanRequest"
-                                );
-                                await requestScan({
-                                    userId: req.user!.id,
-                                    source: "retry-pending-track",
-                                    albumMbid:
-                                        pendingTrack.albumMbid || undefined,
-                                    artistMbid:
-                                        pendingTrack.artistMbid ||
-                                        undefined,
-                                    priority: 1,
-                                    removeOnComplete: true,
-                                });
-                            } catch {
-                                // Best-effort; job status already reflects download
-                            }
-                        } else {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
-                                    status: "failed",
-                                    error: result.error || "Download failed",
-                                    completedAt: new Date(),
-                                },
-                            });
-                        }
-                    })
-                    .catch(async (error) => {
-                        await prisma.downloadJob.update({
-                            where: { id: newJobRecord.id },
-                            data: {
-                                status: "failed",
-                                error: error?.message || "Download exception",
-                                completedAt: new Date(),
-                            },
-                        });
-                    });
-
-                return res.json({ success: true, newJobId: newJobRecord.id });
+                void downloadSources(job, pendingTrack, matches, target.musicPath, "retry-pending-track");
+                return res.json({ success: true, newJobId: job.id });
             }
 
             // If this was a spotify_import job, retry with Soulseek first
