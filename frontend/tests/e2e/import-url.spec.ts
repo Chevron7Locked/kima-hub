@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
 
 /** POST /api/browse/playlists/parse: which service a pasted playlist URL belongs to. */
@@ -7,7 +7,7 @@ test.describe("Import URL parsing", () => {
         await loginAsTestUser(page);
     });
 
-    async function parse(page: Parameters<typeof loginAsTestUser>[0], url: string) {
+    async function parse(page: Page, url: string) {
         const token = await getAuthToken(page);
         return page.request.post("/api/browse/playlists/parse", {
             data: { url },
@@ -16,7 +16,7 @@ test.describe("Import URL parsing", () => {
     }
 
     async function expectParsed(
-        page: Parameters<typeof loginAsTestUser>[0],
+        page: Page,
         url: string,
         expected: { source: string; type: string; id: string },
     ) {

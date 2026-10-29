@@ -1,43 +1,14 @@
 /**
  * Removing a podcast through the UI (Remove, then Confirm), checked against the API.
- * Unsubscribing a second time must not fail.
+ * Unsubscribing a second time answers 404, not a server error.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { escapeRegExp } from "../fixtures/shared";
+import { dismissWhatsNew, getAuthToken, loginAsTestUser } from "../fixtures/test-helpers";
 import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
 import { requireBaseUrl } from "../fixtures/target";
 
 const baseUrl = requireBaseUrl();
-const USERNAME = process.env.KIMA_TEST_USERNAME || "";
-const PASSWORD = process.env.KIMA_TEST_PASSWORD || "";
-
-/**
- * The release-notes dialog opens over the app on a fresh browser context and
- * intercepts every pointer event until it is dismissed.
- */
-async function dismissWhatsNew(page: Page): Promise<void> {
-    const dialog = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-    // The dialog mounts after login, so wait for it (bounded) instead of one
-    // count(); a missed dialog blocks every click for the rest of the run.
-    const appeared = await dialog
-        .waitFor({ state: "visible", timeout: 15_000 })
-        .then(() => true)
-        .catch(() => false);
-    if (!appeared) return;
-    // The X in the header; clicking it runs the same close path as Done. The
-    // button is briefly disabled while `closing` runs, so retry until hidden.
-    const close = page.locator('div[role="dialog"] button[aria-label="Close"]').first();
-    for (let i = 0; i < 6; i++) {
-        if (await close.count()) {
-            await close.click({ timeout: 3000 }).catch(() => {});
-        }
-        const gone = await dialog
-            .waitFor({ state: "hidden", timeout: 2500 })
-            .then(() => true)
-            .catch(() => false);
-        if (gone) return;
-    }
-}
 
 test.describe.serial("Podcast removal", () => {
     let page: Page;
@@ -46,18 +17,10 @@ test.describe.serial("Podcast removal", () => {
     let podcastTitle = "";
 
     test.beforeAll(async ({ browser }) => {
-        expect(
-            USERNAME && PASSWORD,
-            "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set",
-        ).toBeTruthy();
         page = await browser.newPage();
-        await page.goto(baseUrl + "/login");
-        await page.locator('input[placeholder="Enter your username"]').fill(USERNAME);
-        await page.locator('input[placeholder="Enter your password"]').fill(PASSWORD);
-        await page.getByRole("button", { name: /sign in|log in/i }).click();
-        await page.waitForURL(/\/(home|sync|)$/, { timeout: 30_000 });
+        await loginAsTestUser(page);
         await dismissWhatsNew(page);
-        token = (await page.evaluate(() => localStorage.getItem("auth_token"))) ?? "";
+        token = await getAuthToken(page);
         expect(token, "login should yield an auth token").toBeTruthy();
     });
 
@@ -83,8 +46,8 @@ test.describe.serial("Podcast removal", () => {
             return;
         }
         const created = await res.json();
-        podcastId = created.id ?? created.podcast?.id ?? "";
-        podcastTitle = created.title ?? created.podcast?.title ?? podcastTitle;
+        podcastId = created.podcast.id;
+        podcastTitle = created.podcast.title;
         expect(podcastId, "subscribe returned no id").toBeTruthy();
     });
 
@@ -129,8 +92,7 @@ test.describe.serial("Podcast removal", () => {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!r.ok()) return -1;
-                const d = await r.json();
-                const list: Array<{ id?: string }> = Array.isArray(d) ? d : (d.podcasts ?? []);
+                const list = (await r.json()) as Array<{ id?: string }>;
                 return list.filter((p) => p.id === podcastId).length;
             }, { timeout: 30_000 })
             .toBe(0);
@@ -148,13 +110,10 @@ test.describe.serial("Podcast removal", () => {
         });
         expect(detail.status(), `detail after delete returned ${detail.status()}`).toBe(404);
 
-        // idempotency: unsubscribing an already-deleted podcast must not 500
+        // Unsubscribing a show that is no longer followed is a 404, not a server error.
         const again = await page.request.delete(`/api/podcasts/${podcastId}/unsubscribe`, {
             headers: { Authorization: `Bearer ${token}` },
         });
-        expect(
-            again.status(),
-            `second unsubscribe returned ${again.status()} -- delete on missing row must be idempotent`,
-        ).toBeLessThan(500);
+        expect(again.status(), `second unsubscribe returned ${again.status()}`).toBe(404);
     });
 });

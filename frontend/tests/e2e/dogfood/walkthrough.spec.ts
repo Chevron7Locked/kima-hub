@@ -9,9 +9,10 @@ import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
 import { PLAYER, escapeRegExp, readPlayer, settle, softwareWebGL } from "../fixtures/shared";
 import { requireBaseUrl } from "../fixtures/target";
+import { withApiKey } from "./apiKey";
+import { STORAGE_KEYS } from "../../../lib/storage-keys";
 import { LibraryPicker, PickedAlbum } from "../fixtures/picker";
 
-// Read the queue from the server, where it lives.
 /** Opens the right-hand panel on its queue tab, without leaving the page: the queue lives in React state. */
 async function openQueuePanel(page: Page): Promise<void> {
     const open = page.getByRole("button", { name: "open panel" });
@@ -20,6 +21,27 @@ async function openQueuePanel(page: Page): Promise<void> {
     await page.locator("[data-queue-now], [data-queue-row]").first().waitFor({ timeout: 10_000 });
 }
 
+/** Follows the show; returns its id and title, or why a service outside Kima blocked it (a failure of Kima's own throws). */
+async function subscribeToShow(
+    page: Page,
+    token: string,
+    itunesId: string,
+): Promise<{ id: string; title: string } | { blocked: string; status: number }> {
+    const res = await page.request.post("/api/podcasts/subscribe", {
+        data: { itunesId },
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    const blocked = await outsideFailure(res, "following the show");
+    if (blocked) return { blocked, status: res.status() };
+    const { podcast } = await res.json();
+    expect(podcast.id, "subscribing succeeded but returned no podcast id").toBeTruthy();
+    return { id: podcast.id, title: podcast.title };
+}
+
+/** How many Next.js error screens or "something went wrong" messages the page shows. */
+const crashScreens = (p: Page) => p.locator("text=/application error|something went wrong/i").count();
+
+// Read the queue from the server, where it lives.
 const queueLength = (page: Page) =>
     page.evaluate(async () => {
         try {
@@ -230,8 +252,7 @@ test.describe("Dogfood walkthrough", () => {
         // A src attribute and a Pause icon prove the UI changed its mind, not that a
         // single sample reached the speakers. Position moving forward is the evidence.
         await session.step("audio is genuinely advancing", async () => {
-            const read = () =>
-                readPlayer(page);
+            const read = () => readPlayer(page);
 
             const first = await read();
             await page.waitForTimeout(2500);
@@ -294,7 +315,7 @@ test.describe("Dogfood walkthrough", () => {
             });
             expect(res.ok(), `looking up the playing track returned ${res.status()}`).toBeTruthy();
             const body = await res.json();
-            const title: string = body.title ?? body.track?.title ?? "";
+            const title: string = body.title;
             expect(title, "the playing track has no title").toBeTruthy();
 
             const text = ((await page.locator("[data-queue-now]").textContent()) ?? "").replace(/\s+/g, " ");
@@ -471,8 +492,7 @@ test.describe("Dogfood walkthrough", () => {
 
             await page.getByTitle("play", { exact: true }).click();
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 10_000 });
-            const read = () =>
-                readPlayer(page);
+            const read = () => readPlayer(page);
             const a = await read();
             await page.waitForTimeout(2500);
             const b = await read();
@@ -742,7 +762,7 @@ test.describe("Dogfood walkthrough", () => {
                 headers: { Authorization: `Bearer ${token}` },
             });
             const body = await res.json();
-            const serverName = body.name ?? body.playlist?.name ?? "";
+            const serverName: string = body.name;
             expect(serverName, `renamed to "${renamed}" but the server still says "${serverName}"`).toBe(renamed);
             return { renamedTo: serverName };
         });
@@ -800,10 +820,6 @@ test.describe("Dogfood walkthrough", () => {
     test("4c. curate: reorder tracks and the order survives a reload", async () => {
         session.setJourney("4c. Playlist reorder");
         test.setTimeout(180_000);
-        let moveReqs = 0;
-        page.on("request", (r) => {
-            if (r.method() === "PATCH" && r.url().includes("/move")) moveReqs++;
-        });
         // Create a playlist with ≥3 tracks for the reorder journey.
         // 4b creates and deletes a 2-track playlist, so we need our own.
         let playlistId = "";
@@ -817,7 +833,7 @@ test.describe("Dogfood walkthrough", () => {
             });
             expect(createRes.ok(), `playlist creation returned ${createRes.status()}`).toBeTruthy();
             const created = await createRes.json();
-            playlistId = created.id ?? created.playlist?.id ?? "";
+            playlistId = created.id;
             expect(playlistId, "playlist creation returned no id").toBeTruthy();
             createdPlaylistIds.push(playlistId);
 
@@ -876,7 +892,7 @@ test.describe("Dogfood walkthrough", () => {
             await moveUp.click();
             await settle(page, 800);
 
-            return { movedTitle: movedTrackTitle, moves: 2, moveReqs };
+            return { movedTitle: movedTrackTitle, moves: 2 };
         });
 
         await session.step("assert DOM order changed after moves", async () => {
@@ -911,16 +927,13 @@ test.describe("Dogfood walkthrough", () => {
             });
             expect(res.ok(), `playlist fetch returned ${res.status()}`).toBeTruthy();
             const body = await res.json();
-            const items = body.items ?? body.playlist?.items ?? [];
+            const items = body.items;
             expect(items.length, "playlist has no items from API").toBeGreaterThanOrEqual(3);
 
             const rows = page.locator("[data-track-index]");
             const domTitles = await rowTitles(rows);
 
-            const apiTitles = items.map(
-                (item: { track?: { title?: string }; title?: string }) =>
-                    item.track?.title ?? item.title ?? "",
-            );
+            const apiTitles = items.map((item: { track: { title: string } }) => item.track.title);
 
             // Verify API order matches DOM order (not just presence)
             for (let i = 0; i < domTitles.length; i++) {
@@ -1062,7 +1075,7 @@ test.describe("Dogfood walkthrough", () => {
                     `-- the projection step is broken, not the embedder`,
             ).toBeTruthy();
             const body = await res.json();
-            const mapped = Array.isArray(body) ? body : (body.tracks ?? []);
+            const mapped = body.tracks;
             expect(mapped.length, "the map projected no tracks").toBeGreaterThan(0);
 
             const placed = mapped.filter(
@@ -1117,21 +1130,13 @@ test.describe("Dogfood walkthrough", () => {
             }
 
             await session.step("subscribe to it", async () => {
-                const res = await page.request.post("/api/podcasts/subscribe", {
-                    data: { itunesId: chosenShow!.itunesId },
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-
-                const blocked = await outsideFailure(res, "following the show");
-                if (blocked) {
-                    externalBlocker = blocked;
-                    return { subscribed: false, status: res.status() };
+                const followed = await subscribeToShow(page, token, chosenShow!.itunesId);
+                if ("blocked" in followed) {
+                    externalBlocker = followed.blocked;
+                    return { subscribed: false, status: followed.status };
                 }
-
-                const created = await res.json();
-                podcastId = created.id ?? created.podcast?.id ?? "";
-                podcastTitle = created.title ?? created.podcast?.title ?? podcastTitle;
-                expect(podcastId, "subscribing succeeded but returned no podcast id").toBeTruthy();
+                podcastId = followed.id;
+                podcastTitle = followed.title;
                 return { id: podcastId, title: podcastTitle };
             });
 
@@ -1174,8 +1179,7 @@ test.describe("Dogfood walkthrough", () => {
                 await page.locator("[data-episode-row]").first().getByLabel(/^play /i).click();
                 await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 30_000 });
 
-                const read = () =>
-                    readPlayer(page);
+                const read = () => readPlayer(page);
 
                 const first = await read();
                 await page.waitForTimeout(3000);
@@ -1253,9 +1257,9 @@ test.describe("Dogfood walkthrough", () => {
                     })
                     .catch(() => {});
                 await page
-                    .evaluate(() => {
-                        localStorage.removeItem("kima_current_podcast");
-                    })
+                    .evaluate((key) => {
+                        localStorage.removeItem(key);
+                    }, STORAGE_KEYS.CURRENT_PODCAST)
                     .catch(() => {});
             }
         }
@@ -1279,20 +1283,13 @@ test.describe("Dogfood walkthrough", () => {
                     externalBlocker = picked.none;
                     return { subscribed: false };
                 }
-                const candidate = picked.show;
-                const res = await page.request.post("/api/podcasts/subscribe", {
-                    data: { itunesId: candidate.itunesId },
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                const followBlocked = await outsideFailure(res, "following the show");
-                if (followBlocked) {
-                    externalBlocker = followBlocked;
+                const followed = await subscribeToShow(page, token, picked.show.itunesId);
+                if ("blocked" in followed) {
+                    externalBlocker = followed.blocked;
                     return { subscribed: false };
                 }
-                const created = await res.json();
-                podcastId = created.id ?? created.podcast?.id ?? "";
-                podcastTitle = created.title ?? created.podcast?.title ?? candidate.title;
-                expect(podcastId, "subscribing succeeded but returned no podcast id").toBeTruthy();
+                podcastId = followed.id;
+                podcastTitle = followed.title;
                 return { id: podcastId, title: podcastTitle };
             });
 
@@ -1318,7 +1315,7 @@ test.describe("Dogfood walkthrough", () => {
                 });
                 expect(res.status(), `podcast detail returned ${res.status()}`).toBe(200);
                 const body = await res.json();
-                const episodes = body.episodes ?? body.podcast?.episodes ?? [];
+                const episodes = body.episodes;
                 expect(episodes.length, "podcast detail listed no episodes").toBeGreaterThan(0);
                 return { episodes: episodes.length };
             });
@@ -1329,11 +1326,10 @@ test.describe("Dogfood walkthrough", () => {
                 });
                 expect(epRes.status(), `episode list returned ${epRes.status()}`).toBe(200);
                 const epBody = await epRes.json();
-                const episodeList = epBody.episodes ?? epBody;
-                const episodes = Array.isArray(episodeList) ? episodeList : [];
+                const episodes = epBody.episodes;
                 expect(episodes.length, "no episodes to mark as played").toBeGreaterThan(0);
 
-                const episodeId = episodes[0].id ?? episodes[0].episodeId ?? "";
+                const episodeId: string = episodes[0].id;
                 expect(episodeId, "episode list returned entries without an id").toBeTruthy();
                 const duration = Number(episodes[0].duration) || 0;
 
@@ -1355,7 +1351,7 @@ test.describe("Dogfood walkthrough", () => {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const againBody = await again.json();
-                const marked = ((againBody.episodes ?? againBody) as Array<{ id: string; progress?: { isFinished?: boolean } | null }>)
+                const marked = (againBody.episodes as Array<{ id: string; progress?: { isFinished?: boolean } | null }>)
                     .find((e) => e.id === episodeId);
                 expect(marked?.progress?.isFinished, "the episode marked as played does not read back as finished").toBe(true);
                 return { episodeId, markedPlayed: true };
@@ -1366,19 +1362,19 @@ test.describe("Dogfood walkthrough", () => {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const beforeBody = await before.json();
-                const beforeCount = (beforeBody.episodes ?? beforeBody.podcast?.episodes ?? []).length;
+                const beforeCount = beforeBody.episodes.length;
 
                 const refreshRes = await page.request.get(`/api/podcasts/${podcastId}/refresh`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                // Refresh may be 200 (immediate) or 202 (queued) or 200 with updated data
+                // The refresh answers 200 with the new-episode count, or 404 for an unknown show.
                 expect(refreshRes.status(), `podcast refresh returned ${refreshRes.status()}`).toBeLessThan(400);
 
                 const after = await page.request.get(`/api/podcasts/${podcastId}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const afterBody = await after.json();
-                const afterCount = (afterBody.episodes ?? afterBody.podcast?.episodes ?? []).length;
+                const afterCount = afterBody.episodes.length;
                 return { beforeEpisodes: beforeCount, afterEpisodes: afterCount, refreshed: true };
             });
 
@@ -1456,7 +1452,6 @@ test.describe("Dogfood walkthrough", () => {
                     `audiobookshelf credentials rejected -- token refresh is an operator ask (${msg})`,
                 );
                 test.skip(true, `Audiobookshelf rejected credentials: ${msg}`);
-                return;
             }
             expect(
                 res.status(),
@@ -1497,8 +1492,7 @@ test.describe("Dogfood walkthrough", () => {
             await play.first().click();
             await page.getByLabel("Pause", { exact: true }).waitFor({ timeout: 30_000 });
 
-            const read = () =>
-                readPlayer(page);
+            const read = () => readPlayer(page);
 
             const first = await read();
             await page.waitForTimeout(3000);
@@ -1792,7 +1786,7 @@ test.describe("Dogfood walkthrough", () => {
             await page.getByRole("button", { name: "Library", exact: true }).click().catch(() => {});
             await page.goto("/search?q=zzqxjv%20no%20such%20thing%20kima");
             await settle(page, 4000);
-            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            const crashed = await crashScreens(page);
             expect(crashed, "a no-match search showed a crash screen").toBe(0);
             const stack = page.locator(".section-stack");
             return { noCrash: true, stackRendered: (await stack.count()) > 0 };
@@ -1815,7 +1809,7 @@ test.describe("Dogfood walkthrough", () => {
             await settle(page, 6000);
             await p2p.click();
             await settle(page, 5000);
-            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            const crashed = await crashScreens(page);
             expect(crashed, "the P2P tab crashed").toBe(0);
             return { p2p: true, rendered: true };
         });
@@ -1831,7 +1825,7 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("open the Spotify import page", async () => {
             await page.goto("/import/playlist");
             await settle(page, 2500);
-            const crashed = await page.locator("text=/application error|something went wrong/i").count();
+            const crashed = await crashScreens(page);
             expect(crashed, "the Spotify import page crashed").toBe(0);
             return { spotify: true };
         });
@@ -1965,25 +1959,28 @@ test.describe("Dogfood walkthrough", () => {
             const code = page.locator("code");
             await expect(code.first()).toBeVisible({ timeout: 15_000 });
             const digits = (await code.first().textContent())?.trim() ?? "";
-            expect(digits, "no pairing code is shown").toBeTruthy();
-            const qr = await page.locator("svg").count();
-            return { code: digits.slice(0, 2) + "****", qrRendered: qr > 0 };
+            expect(digits, "the pairing code is not six characters from the server's alphabet").toMatch(
+                /^[A-HJ-NP-Z2-9]{6}$/,
+            );
+
+            // The QR is the 180px svg on the white tile next to the code; drawn modules are filled paths.
+            const qr = page.locator("main .bg-white svg");
+            await expect(qr, "the pairing QR is not drawn").toBeVisible();
+            const box = await qr.boundingBox();
+            expect(Math.abs((box?.width ?? 0) - 180), "the pairing QR is not drawn at the app's 180 px width").toBeLessThanOrEqual(1);
+            expect(Math.abs((box?.height ?? 0) - 180), "the pairing QR is not drawn at the app's 180 px height").toBeLessThanOrEqual(1);
+            const drawn = await qr.locator("path[d]").evaluateAll((paths) =>
+                paths.filter((p) => (p.getAttribute("d") ?? "").trim() !== "").length,
+            );
+            expect(drawn, "the pairing QR has no drawn modules").toBeGreaterThan(0);
+            return { code: digits.slice(0, 2) + "****", qrSize: Math.round(box?.width ?? 0) };
         });
 
         // The server holds no plaintext secret, so it cannot answer Subsonic's MD5 token
         // login; the supported credential is an OpenSubsonic API key, created here the
         // way a client would and revoked after.
         await session.step("the Subsonic API answers an API-key ping", async () => {
-            const keyName = "dogfood-gate";
-            const made = await page.request.post("/api/api-keys", {
-                data: { deviceName: keyName },
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            expect(made.ok(), `provisioning an API key returned ${made.status()}`).toBeTruthy();
-            const apiKey = (await made.json()).apiKey as string;
-            expect(apiKey, "the key was created but no plaintext came back").toBeTruthy();
-
-            try {
+            return await withApiKey(page, token, "dogfood-gate", async (apiKey) => {
                 const res = await page.request.get(
                     `/rest/ping?u=${encodeURIComponent(username)}&apiKey=${encodeURIComponent(apiKey)}` +
                         `&v=1.16.1&c=kima-dogfood&f=json`,
@@ -1993,20 +1990,7 @@ test.describe("Dogfood walkthrough", () => {
                 const status = body?.["subsonic-response"]?.status ?? "";
                 expect(status, `the Subsonic ping answered status "${status}" instead of "ok"`).toBe("ok");
                 return { subsonic: status };
-            } finally {
-                const list = await page.request.get("/api/api-keys", {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                if (list.ok()) {
-                    const keys = (await list.json()).apiKeys as Array<{ id: string; name?: string }>;
-                    const mine = keys.find((k) => (k.name ?? "").includes(keyName));
-                    if (mine) {
-                        await page.request
-                            .delete(`/api/api-keys/${mine.id}`, { headers: { Authorization: `Bearer ${token}` } })
-                            .catch(() => {});
-                    }
-                }
-            }
+            });
         });
 
         session.assertClean("Journey 6c (device + subsonic)");
@@ -2181,14 +2165,14 @@ test.describe("Dogfood walkthrough", () => {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const body = await res.json();
-                const title: string = body.title ?? body.track?.title ?? "";
+                const title: string = body.title;
                 expect(title, "the playing track has no title").toBeTruthy();
 
                 await other.goto("/");
                 await settle(other, 6000);
                 // Only the player's title counts: the home page's rows, or the player's own artist
                 // line, can carry the same words. Matched on the page's text, not its lowercased display.
-                const exactly = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+                const exactly = new RegExp(`^${escapeRegExp(title)}$`);
                 const shown = other
                     .getByRole("region", { name: "now playing" })
                     .locator("[data-player-title]")
@@ -2277,9 +2261,7 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("an album that does not exist", async () => {
             await page.goto("/album/definitely-not-a-real-id");
             await settle(page, 2000);
-            const crashed = await page
-                .locator("text=/application error|something went wrong/i")
-                .count();
+            const crashed = await crashScreens(page);
             expect(crashed, "a bad album id showed a crash screen").toBe(0);
             return { handled: true };
         });
@@ -2287,9 +2269,7 @@ test.describe("Dogfood walkthrough", () => {
         await session.step("an artist that does not exist", async () => {
             await page.goto("/artist/definitely-not-a-real-id");
             await settle(page, 2000);
-            const crashed = await page
-                .locator("text=/application error|something went wrong/i")
-                .count();
+            const crashed = await crashScreens(page);
             expect(crashed, "a bad artist id showed a crash screen").toBe(0);
             return { handled: true };
         });

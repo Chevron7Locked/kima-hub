@@ -1,5 +1,8 @@
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
+/** Dungeons and Daddies: a long-running show with plenty of episodes, used by the podcast specs. */
+export const SEED_SHOW = "1450241676";
+
 /**
  * The answers Kima's podcast routes give when a service outside Kima failed: Apple's directory or a show's feed did
  * not answer (502), Apple has no such chart or show, Apple does not know the show, nothing is at the feed address
@@ -33,7 +36,7 @@ export async function outsideFailure(res: APIResponse, what: string): Promise<st
 }
 
 /** What `pickUnfollowedShow` found: a show to follow, or why there is none. */
-export type ShowPick = { show: { itunesId: string; title: string } } | { none: string };
+type ShowPick = { show: { itunesId: string; title: string } } | { none: string };
 
 /**
  * The first show on Apple's top chart that the signed-in user does not follow yet, so a journey that

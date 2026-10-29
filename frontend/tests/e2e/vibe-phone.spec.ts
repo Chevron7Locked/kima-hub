@@ -2,27 +2,18 @@ import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { escapeRegExp, readPlayer, softwareWebGL } from "./fixtures/shared";
 import { requireBaseUrl } from "./fixtures/target";
+import { dismissWhatsNew } from "./fixtures/test-helpers";
 
-// ---------------------------------------------------------------------------
-// The phone layout of /vibe at 390x664, driven through the real page.
-//
-// This run signs in for real: it waits for the login form, submits the
-// credentials, and keeps the app's own Bearer token (`auth_token` in
-// localStorage) for the direct /api/vibe/map call. The app does not use a
-// cookie session — POST /api/auth/login returns the token in the body and no
-// Set-Cookie — so a cookie-credentialed fetch is a 401 by construction.
-//
-// Nothing is intercepted. Every number below is read back from the rendered
-// page, and the tracks come from the app's own /api/vibe/map answer.
-//
-// Where a contract names a hook (data-testid, data-snap) the same requirement
-// is also expressed from the page's own geometry, so a missing hook cannot be
-// the only reason a journey fails.
-// ---------------------------------------------------------------------------
+// The phone layout of /vibe at 390x664, driven through the real page: it signs in on the login page,
+// keeps the app's Bearer token (the app sets no cookie), and reads every number back from the rendered
+// page. Nothing is intercepted; the tracks come from the app's own /api/vibe/map answer.
 
 const BASE_URL = requireBaseUrl();
-const USERNAME = process.env.KIMA_TEST_USERNAME ?? "kima_agent";
-const PASSWORD = process.env.KIMA_TEST_PASSWORD ?? "kima-test";
+const USERNAME = process.env.KIMA_TEST_USERNAME ?? "";
+const PASSWORD = process.env.KIMA_TEST_PASSWORD ?? "";
+if (!USERNAME || !PASSWORD) {
+    throw new Error("Export KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD before running E2E tests.");
+}
 
 const PHONE = {
     viewport: { width: 390, height: 664 },
@@ -38,9 +29,9 @@ const SEARCH = '[aria-label="Search tracks or artists"]';
 const RESULTS = "#vibe-search-results";
 const HANDLE = '[role="separator"][aria-label="vibe panel"]';
 
-/** The peek height the brief fixes for the playing state: handle 44 + player 52 + search 52. */
+/** The peek height with a track playing: handle 44 + player 52 + search 52. */
 const PEEK_WITH_PLAYBACK = 44 + 52 + 52;
-/** "within a few px" from the brief. */
+/** How far a measured peek height may differ from the expected one. */
 const PEEK_TOLERANCE = 4;
 
 interface Rect {
@@ -132,37 +123,6 @@ test.beforeAll(async ({ browser }) => {
         await context.close();
     }
 });
-
-/**
- * The What's New window is aria-modal and swallows pointer events. Close it
- * through its own control; if the instance refuses that acknowledgement, use
- * the window's changelog link — the app's path for deferring it in this tab —
- * and come back to /vibe.
- */
-async function dismissWhatsNew(page: Page): Promise<void> {
-    const modal = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-    const shown = await modal
-        .waitFor({ state: "visible", timeout: 10_000 })
-        .then(() => true)
-        .catch(() => false);
-    if (!shown) return;
-
-    const close = modal.getByRole("button", { name: /^close$/i }).first();
-    if (await close.isVisible().catch(() => false)) {
-        await close.click().catch(() => {});
-        const gone = await modal
-            .waitFor({ state: "hidden", timeout: 12_000 })
-            .then(() => true)
-            .catch(() => false);
-        if (gone) return;
-    }
-
-    const changelog = modal.locator('a[href="/changelog"]');
-    await expect(changelog.first(), "the What's New window must be dismissible").toBeVisible({ timeout: 5_000 });
-    await changelog.first().click();
-    await page.waitForURL(/\/changelog/, { timeout: 20_000 });
-    await page.goto("/vibe", { waitUntil: "domcontentloaded" });
-}
 
 /**
  * The map payload, read from the app's own endpoint with the Bearer token this
@@ -259,6 +219,11 @@ async function readSheet(page: Page): Promise<SheetState> {
     if (!state.sheet) throw new Error("the sheet is missing");
     if (!state.field) throw new Error("the vibe map field is missing");
     return state as SheetState;
+}
+
+/** The sheet's height animates for 340 ms after a snap change; wait that out before measuring. */
+async function waitForSheetToRest(page: Page): Promise<void> {
+    await page.waitForTimeout(600);
 }
 
 /** The part of the sheet that is inside the page content. */
@@ -362,7 +327,6 @@ async function libraryQuery(page: Page, tracks: MapTrack[]): Promise<string> {
             .catch(() => false);
         if (!matched) continue;
 
-        console.log(`[vibe-phone] search query taken from the library: "${word}"`);
         const clear = page.getByRole("button", { name: /clear search/i });
         if (await clear.isVisible().catch(() => false)) {
             await clear.click();
@@ -394,7 +358,7 @@ async function pickFirstResult(page: Page, query: string): Promise<string> {
     expect(title, "a search result should carry a title").not.toBe("");
 
     await option.click();
-    // A selection opens the sheet; the contract is that this is the half stop.
+    // A selection opens the sheet at its half stop.
     await expect(page.getByTestId("vibe-sheet")).toHaveAttribute("data-snap", "half", { timeout: 8_000 });
     await page.waitForTimeout(400);
     return title;
@@ -403,7 +367,7 @@ async function pickFirstResult(page: Page, query: string): Promise<string> {
 /**
  * Starts the picked track from the sheet's own action and waits until the
  * audio element really has a source and is not paused. An instance that cannot
- * open a stream for the track skips the playing-state contracts with that
+ * open a stream for the track skips the playing-state tests with that
  * reason; a stream that opens but never plays is a failure.
  */
 async function playPicked(page: Page): Promise<void> {
@@ -451,7 +415,7 @@ async function nowPlayingRegions(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe("Vibe, phone layout", () => {
-    // Contract 1: one bottom surface. No floating mini player outside the
+    // one bottom surface. No floating mini player outside the
     // sheet on /vibe; exactly one "now playing" region, inside the sheet.
     test("one bottom surface: no floating player outside the sheet", async ({ page }) => {
         const query = await libraryQuery(page, mapTracks);
@@ -485,7 +449,7 @@ test.describe("Vibe, phone layout", () => {
         expect(hit.insideSheet, `the surface at the content's foot must be the sheet (hit ${hit.tag})`).toBe(true);
     });
 
-    // Contract 2: the sheet reports its snap state via data-snap.
+    // the sheet reports its snap state via data-snap.
     test("the sheet reports its snap state through data-snap", async ({ page }) => {
         const sheet = page.getByTestId("vibe-sheet");
         await expect(sheet, "the sheet element must exist").toBeVisible({ timeout: 8_000 });
@@ -501,7 +465,7 @@ test.describe("Vibe, phone layout", () => {
         await expect(sheet, "a sheet dragged to the top must report full").toHaveAttribute("data-snap", "full");
     });
 
-    // Contract 3: at peek with a track playing, the visible height is 148 px
+    // at peek with a track playing, the visible height is 148 px
     // (handle 44 + player row 52 + search 52), within a few px.
     test("at peek with a track playing the sheet is 148 px tall", async ({ page }) => {
         const query = await libraryQuery(page, mapTracks);
@@ -524,7 +488,7 @@ test.describe("Vibe, phone layout", () => {
         ).toBeLessThanOrEqual(PEEK_TOLERANCE);
     });
 
-    // Contract 4: picking a search result opens the sheet to half, and the
+    // picking a search result opens the sheet to half, and the
     // queue tab bar is fully on screen while a track is playing.
     test("picking a search result opens the sheet to half with the queue tab on screen", async ({ page }) => {
         const query = await libraryQuery(page, mapTracks);
@@ -558,7 +522,7 @@ test.describe("Vibe, phone layout", () => {
         ).toBeLessThanOrEqual(sheetBottom + 1);
     });
 
-    // Contract 5: search lives in the sheet; results stay inside it and clear
+    // search lives in the sheet; results stay inside it and clear
     // of the actions.
     test("search lives in the sheet and its results stay inside it, clear of the actions", async ({ page }) => {
         const query = await libraryQuery(page, mapTracks);
@@ -590,33 +554,27 @@ test.describe("Vibe, phone layout", () => {
             bottomOf(state.sheet) + 0.5,
         );
 
-        const geometry = await page.evaluate(() => {
-            const rect = (el: Element | null) => {
-                if (!el) return null;
-                const r = el.getBoundingClientRect();
-                return { x: r.x, y: r.y, width: r.width, height: r.height };
-            };
-            const list = rect(document.querySelector("#vibe-search-results"));
-            const actions = rect(document.querySelector('[data-testid="vibe-sheet-actions"]'));
-            const intersects = (
-                a: { x: number; y: number; width: number; height: number } | null,
-                b: { x: number; y: number; width: number; height: number } | null,
-            ) => !!a && !!b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-            const actionButtons = [...document.querySelectorAll("button")]
+        const actionsBox = await page.locator('[data-testid="vibe-sheet-actions"]').boundingBox();
+        const buttonBoxes: Rect[] = await page.evaluate(() =>
+            [...document.querySelectorAll("button")]
                 .filter((b) => /^(play this track|match vibe|similar|song path)\b/i.test(b.getAttribute("aria-label") ?? ""))
-                .map((b) => rect(b));
-            return {
-                actionsPresent: !!actions,
-                intersectsActions: intersects(list, actions),
-                intersectsButton: actionButtons.some((button) => intersects(list, button)),
-            };
-        });
+                .map((b) => {
+                    const r = b.getBoundingClientRect();
+                    return { x: r.x, y: r.y, width: r.width, height: r.height };
+                }),
+        );
+        const intersects = (a: Rect, b: Rect | null) =>
+            !!b && a.x < rightOf(b) && b.x < rightOf(a) && a.y < bottomOf(b) && b.y < bottomOf(a);
+        const geometry = {
+            intersectsActions: intersects(list, actionsBox),
+            intersectsButton: buttonBoxes.some((button) => intersects(list, button)),
+        };
 
         expect(geometry.intersectsActions, "the results must not cover the sheet's action row").toBe(false);
         expect(geometry.intersectsButton, "the results must not cover an action button").toBe(false);
     });
 
-    // Contract 6: dragging the handle to the top makes the sheet full: the whole page content, top to bottom,
+    // dragging the handle to the top makes the sheet full: the whole page content, top to bottom,
     // so the queue and lyrics get the height.
     test("dragging the handle to the top makes the sheet fill the page", async ({ page }) => {
         const full = await openFull(page);
@@ -633,15 +591,12 @@ test.describe("Vibe, phone layout", () => {
         ).toBeLessThanOrEqual(1);
     });
 
-    // Contract 7: an open sheet's scrim covers the map and blurs it.
+    // an open sheet's scrim covers the map and blurs it.
     test("an open sheet's scrim covers the map and has a backdrop blur", async ({ page }) => {
         const half = await openHalf(page);
         const scrim = page.getByTestId("vibe-sheet-scrim");
         await expect(scrim, "an open sheet must show its scrim").toBeVisible({ timeout: 5_000 });
 
-        // MDN, backdrop-filter: "The backdrop-filter CSS property lets you
-        // apply graphical effects such as blurring or color shifting to the
-        // area behind an element." A value of none means no filter.
         const style = await page.evaluate(() => {
             const el = document.querySelector('[data-testid="vibe-sheet-scrim"]');
             if (!el) return null;
@@ -653,10 +608,7 @@ test.describe("Vibe, phone layout", () => {
         expect(filter, "the scrim must set a backdrop-filter, not none").not.toBe("none");
         expect(filter, `the scrim's backdrop-filter must blur the map, got "${filter}"`).toMatch(/blur\(\s*[1-9]/);
 
-        // MDN, Document.elementFromPoint: "Elements with pointer-events set to
-        // none will be ignored, and the element below it will be returned."
-        // The scrim is pointer-events: auto, so it must be the hit target over
-        // the map.
+        // The scrim takes pointer events, so it must be the element hit over the map.
         const cx = Math.round(half.main.x + half.main.width / 2);
         const y = Math.round(half.sheet.y - 40);
         const hit = await page.evaluate(
@@ -677,7 +629,7 @@ test.describe("Vibe, phone layout", () => {
         ).toBe(true);
     });
 
-    // Contract 8: a scrim tap returns the sheet to peek.
+    // a scrim tap returns the sheet to peek.
     test("a scrim tap returns the sheet to peek", async ({ page }) => {
         const peekBefore = await readSheet(page);
         const peekHeight = visibleHeight(peekBefore);
@@ -686,9 +638,7 @@ test.describe("Vibe, phone layout", () => {
         await page.mouse.click(Math.round(half.main.x + half.main.width / 2), Math.round(half.sheet.y - 40));
 
         await expect(page.getByTestId("vibe-sheet")).toHaveAttribute("data-snap", "peek", { timeout: 8_000 });
-        // The height animates for 340ms after the state changes; measure the
-        // resting sheet, not the first frame of the transition.
-        await page.waitForTimeout(600);
+        await waitForSheetToRest(page);
         const after = await readSheet(page);
         expect(
             Math.abs(visibleHeight(after) - peekHeight),
@@ -697,7 +647,7 @@ test.describe("Vibe, phone layout", () => {
         await expect(page.getByTestId("vibe-sheet-scrim")).toHaveCount(0);
     });
 
-    // Contract 9: dragging down from half returns the sheet to peek.
+    // dragging down from half returns the sheet to peek.
     test("dragging down from half returns the sheet to peek", async ({ page }) => {
         const peekBefore = await readSheet(page);
         const peekHeight = visibleHeight(peekBefore);
@@ -713,7 +663,7 @@ test.describe("Vibe, phone layout", () => {
         ).toBeLessThanOrEqual(2);
     });
 
-    // Contract 10: the mood legend is a compact control, not a full-width band.
+    // the mood legend is a compact control, not a full-width band.
     test("the mood legend is a compact control, not a full-width band", async ({ page }) => {
         const chip = page.locator('button[aria-label="Moods"]');
         await expect(chip, "the compact mood control must be visible at rest").toBeVisible({ timeout: 5_000 });
@@ -739,7 +689,7 @@ test.describe("Vibe, phone layout", () => {
         await expect(dialog, "the compact control must open the mood list").toBeVisible({ timeout: 5_000 });
     });
 
-    // Contract 11: Escape steps full -> half -> peek.
+    // Escape steps full -> half -> peek.
     test("Escape steps the sheet full to half to peek", async ({ page }) => {
         const peekBefore = await readSheet(page);
         const peekHeight = visibleHeight(peekBefore);
@@ -750,19 +700,17 @@ test.describe("Vibe, phone layout", () => {
 
         await page.keyboard.press("Escape");
         await expect(page.getByTestId("vibe-sheet")).toHaveAttribute("data-snap", "half", { timeout: 8_000 });
-        // The height animates for 340ms after the state changes; measure the
-        // resting sheet, not the first frame of the transition.
-        await page.waitForTimeout(600);
+        await waitForSheetToRest(page);
         const half = await readSheet(page);
         // The half stop grows to clear the selected track's actions and the tab
-        // bar, so on a tall sheet it can reach the full height; the contract is
-        // the snap sequence, and the peek height is fixed.
+        // bar, so on a tall sheet it can reach the full height; the snap
+        // sequence is what is checked, and the peek height is fixed.
         expect(visibleHeight(half), "Escape must not grow the sheet past full").toBeLessThanOrEqual(fullHeight + 0.5);
         expect(visibleHeight(half), "Escape must not jump past half to peek").toBeGreaterThanOrEqual(peekHeight);
 
         await page.keyboard.press("Escape");
         await expect(page.getByTestId("vibe-sheet")).toHaveAttribute("data-snap", "peek", { timeout: 8_000 });
-        await page.waitForTimeout(600);
+        await waitForSheetToRest(page);
         const peek = await readSheet(page);
         expect(
             Math.abs(visibleHeight(peek) - peekHeight),

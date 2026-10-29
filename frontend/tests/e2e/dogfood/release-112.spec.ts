@@ -37,6 +37,59 @@ async function signIn(page: Page, session: DogfoodSession, user: string, pass: s
 
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
+/** Makes a playlist holding four library songs with different titles, in that order. */
+async function buildPlaylist(api: APIRequestContext, token: string, name: string) {
+    const created = await api.post("/api/playlists", { data: { name }, headers: bearer(token) });
+    expect(created.ok(), `creating the playlist returned ${created.status()}`).toBeTruthy();
+    const playlistId: string = (await created.json()).id;
+    expect(playlistId).toBeTruthy();
+    // Distinct titles so a row can be told apart on screen.
+    const picks = await new LibraryPicker(api, token).distinctTitleTracks(4);
+    expect(picks.length, "the library needs four songs with different titles").toBe(4);
+    for (const t of picks) {
+        const add = await api.post(`/api/playlists/${playlistId}/items`, { data: { trackId: t.id }, headers: bearer(token) });
+        expect(add.ok(), `adding ${t.id} returned ${add.status()}`).toBeTruthy();
+    }
+    return { playlistId, ids: picks.map((t) => t.id), titles: picks.map((t) => t.title) };
+}
+
+/** The song ids in the queue the server has saved for this user; no saved state or a cleared queue reads as empty. */
+async function serverQueue(api: APIRequestContext, token: string): Promise<string[]> {
+    const state = await (await api.get("/api/playback-state", { headers: bearer(token) })).json();
+    return ((state?.queue ?? []) as Array<{ id: string }>).map((q) => q.id);
+}
+
+/** Opens a browser window signed in as the test user, with the session recorder attached and the sign-in checked clean. */
+/** Opens the window and signs in; a failed sign-in still writes its report and closes the window. */
+async function startSession(browser: Browser, reportDir: string) {
+    expect(username && password, "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set").toBeTruthy();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    const session = new DogfoodSession(page, baseUrl);
+    session.attach();
+    session.setJourney("0. sign in");
+    try {
+        const token = await signIn(page, session, username, password);
+        expect(token, "no auth token after signing in").toBeTruthy();
+        session.assertClean("sign in");
+        return { context, page, api: page.request, session, token };
+    } catch (err) {
+        // The sign-in failure is the error to report, not any leftover it recorded on the way.
+        await endSession(session, context, reportDir).catch(() => {});
+        throw err;
+    }
+}
+
+/** Fails if the session left anything behind, then writes its report and closes the window. */
+async function endSession(session: DogfoodSession | undefined, context: BrowserContext | undefined, reportDir: string) {
+    try {
+        session?.assertNoneLeft();
+    } finally {
+        if (session) console.log(`\n[release-112] report written to ${session.writeReport(reportDir)}`);
+        await context?.close();
+    }
+}
+
 test.describe("Release 1.12 (non-podcast)", () => {
     let browser: Browser;
     let context: BrowserContext;
@@ -47,26 +100,10 @@ test.describe("Release 1.12 (non-podcast)", () => {
 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
-        expect(username && password, "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set").toBeTruthy();
-        context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-        page = await context.newPage();
-        api = page.request;
-        session = new DogfoodSession(page, baseUrl);
-        session.attach();
-        session.setJourney("0. sign in");
-        token = await signIn(page, session, username, password);
-        expect(token, "no auth token after signing in").toBeTruthy();
-        session.assertClean("sign in");
+        ({ context, page, api, session, token } = await startSession(browser, "test-results/release-112"));
     });
 
-    test.afterAll(async () => {
-        try {
-            session?.assertNoneLeft();
-        } finally {
-            if (session) console.log(`\n[release-112] report written to ${session.writeReport("test-results/release-112")}`);
-            await context?.close();
-        }
-    });
+    test.afterAll(() => endSession(session, context, "test-results/release-112"));
 
     // ------------------------------------------------------------------------------------------
     test("1. playlist reverse order: shown, queued, remembered, and drag lands where it looks", async () => {
@@ -77,21 +114,8 @@ test.describe("Release 1.12 (non-podcast)", () => {
             let ids: string[] = [];
             let titles: string[] = [];
             await session.step("build a playlist of four library songs", async () => {
-                const created = await api.post("/api/playlists", { data: { name: `${RUN_TAG}-reverse` }, headers: bearer(token) });
-                expect(created.ok(), `creating the playlist returned ${created.status()}`).toBeTruthy();
-                const body = await created.json();
-                playlistId = body.id ?? body.playlist?.id;
-                expect(playlistId).toBeTruthy();
-
-                // Distinct titles so a row can be told apart on screen.
-                const picks = await new LibraryPicker(api, token).distinctTitleTracks(4);
-                expect(picks.length, "the library needs four songs with different titles").toBe(4);
-                for (const t of picks) {
-                    const add = await api.post(`/api/playlists/${playlistId}/items`, { data: { trackId: t.id }, headers: bearer(token) });
-                    expect(add.ok(), `adding ${t.id} returned ${add.status()}`).toBeTruthy();
-                }
-                ids = picks.map((t) => t.id);
-                titles = picks.map((t) => t.title);
+                const built = await buildPlaylist(api, token, `${RUN_TAG}-reverse`);
+                ({ playlistId, ids, titles } = built);
                 return { playlistId, order: titles.join(" | ") };
             });
 
@@ -133,12 +157,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
                 const want = [...ids].reverse();
                 await expect
                     .poll(
-                        async () => {
-                            const res = await api.get("/api/playback-state", { headers: bearer(token) });
-                            const state = await res.json();
-                            const queue = (state?.queue ?? []) as Array<{ id?: string; trackId?: string; track?: { id?: string } }>;
-                            return queue.map((q) => q.id ?? q.trackId ?? q.track?.id);
-                        },
+                        () => serverQueue(api, token),
                         { timeout: 20_000, message: "the saved queue never matched the order shown" },
                     )
                     .toEqual(want);
@@ -402,7 +421,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
                 await news.getByRole("button", { name: "Close", exact: true }).click();
                 await expect(news).toHaveCount(0);
                 const me = await (await member.request.get("/api/auth/me", { headers: bearer(memberToken) })).json();
-                expect(me.role ?? me.user?.role, "the new user must be a member, not an admin").toBe("user");
+                expect(me.role, "the new user must be a member, not an admin").toBe("user");
                 // An artist with albums the library lacks, so an allowed user is offered a download button.
                 const artist = await new LibraryPicker(api, token).artistWithUnownedAlbums();
                 artistId = artist?.id ?? "";
@@ -461,7 +480,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
                     await openArtist();
                     await expect(member.getByRole("button", { name: /download all/i })).toBeVisible({ timeout: 20_000 });
                 }
-                // The server no longer answers 403 (the fake id is rejected for being unknown, not for permission).
+                // A permitted member is rejected for the unknown id (400), not for permission (403).
                 const after = await member.request.post("/api/downloads", {
                     headers: bearer(memberToken),
                     data: { type: "album", mbid: "not-an-mbid", subject: "x", artistName: "x", albumTitle: "x" },
@@ -554,26 +573,10 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
-        expect(username && password, "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set").toBeTruthy();
-        context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-        page = await context.newPage();
-        api = page.request;
-        session = new DogfoodSession(page, baseUrl);
-        session.attach();
-        session.setJourney("0. sign in");
-        token = await signIn(page, session, username, password);
-        expect(token, "no auth token after signing in").toBeTruthy();
-        session.assertClean("sign in");
+        ({ context, page, api, session, token } = await startSession(browser, "test-results/release-112-library"));
     });
 
-    test.afterAll(async () => {
-        try {
-            session?.assertNoneLeft();
-        } finally {
-            if (session) console.log(`\n[release-112] report written to ${session.writeReport("test-results/release-112-library")}`);
-            await context?.close();
-        }
-    });
+    test.afterAll(() => endSession(session, context, "test-results/release-112-library"));
 
     /** The panel's open handle when it is collapsed; the panel is the page's right edge either way. */
     const panelBox = async () => (await page.locator("#activity-panel").boundingBox())!;
@@ -604,18 +607,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             let ids: string[] = [];
             let titles: string[] = [];
             await session.step("build a playlist of four library songs and play it from its page", async () => {
-                const created = await api.post("/api/playlists", { data: { name: `${RUN_TAG}-queue` }, headers: bearer(token) });
-                expect(created.ok(), `creating the playlist returned ${created.status()}`).toBeTruthy();
-                const body = await created.json();
-                playlistId = body.id ?? body.playlist?.id;
-                const picks = await new LibraryPicker(api, token).distinctTitleTracks(4);
-                expect(picks.length, "the library needs four songs with different titles").toBe(4);
-                for (const t of picks) {
-                    const add = await api.post(`/api/playlists/${playlistId}/items`, { data: { trackId: t.id }, headers: bearer(token) });
-                    expect(add.ok(), `adding ${t.id} returned ${add.status()}`).toBeTruthy();
-                }
-                ids = picks.map((t) => t.id);
-                titles = picks.map((t) => t.title);
+                ({ playlistId, ids, titles } = await buildPlaylist(api, token, `${RUN_TAG}-queue`));
                 await page.goto(`/playlist/${playlistId}`);
                 await expect(page.locator("[data-track-index]")).toHaveCount(4, { timeout: 15_000 });
                 await page.getByRole("button", { name: "Play all" }).click();
@@ -623,11 +615,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                 return { playlistId, first: titles[0] };
             });
 
-            const serverQueue = async (): Promise<string[]> => {
-                const state = await (await api.get("/api/playback-state", { headers: bearer(token) })).json();
-                const queue = (state?.queue ?? []) as Array<{ id?: string; trackId?: string; track?: { id?: string } }>;
-                return queue.map((q) => (q.id ?? q.trackId ?? q.track?.id) as string);
-            };
+            const queueOnServer = () => serverQueue(api, token);
             const rowTitles = () =>
                 page.locator("[data-queue-row]").evaluateAll((els) => els.map((el) => el.querySelector("p")?.textContent?.trim() ?? ""));
 
@@ -638,7 +626,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                 expect(await rowTitles()).toEqual(titles.slice(1));
                 await expect(page.locator("[data-queue-count]")).toHaveText("4 tracks in the queue");
                 await expect(page.getByRole("tab", { name: /^up next/ })).toContainText("3");
-                await expect.poll(serverQueue, { timeout: 20_000, message: "the server's queue never matched the playlist" }).toEqual(ids);
+                await expect.poll(queueOnServer, { timeout: 20_000, message: "the server's queue never matched the playlist" }).toEqual(ids);
                 expect(await playingId(), "the player is not on the first song").toBe(ids[0]);
             });
 
@@ -647,7 +635,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                 await page.getByRole("button", { name: `move ${titles[1]} down` }).click();
                 await expect.poll(rowTitles).toEqual([titles[2], titles[1], titles[3]]);
                 await expect
-                    .poll(serverQueue, { timeout: 20_000, message: "the server's queue did not follow the move" })
+                    .poll(queueOnServer, { timeout: 20_000, message: "the server's queue did not follow the move" })
                     .toEqual([ids[0], ids[2], ids[1], ids[3]]);
             });
 
@@ -655,15 +643,15 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                 await page.locator("[data-queue-row]").first().hover();
                 await page.getByRole("button", { name: `remove ${titles[2]} from the queue` }).click();
                 await expect.poll(rowTitles).toEqual([titles[1], titles[3]]);
-                await expect.poll(serverQueue, { timeout: 20_000 }).toEqual([ids[0], ids[1], ids[3]]);
+                await expect.poll(queueOnServer, { timeout: 20_000 }).toEqual([ids[0], ids[1], ids[3]]);
             });
 
-            await session.step("clearing the queue empties the panel (puts the queue back)", async () => {
+            await session.step("clearing the queue empties the panel", async () => {
                 await page.getByRole("button", { name: "clear queue" }).first().click();
                 await page.getByRole("dialog").getByRole("button", { name: "clear queue" }).click();
                 await expect(page.locator("[data-queue-row]")).toHaveCount(0);
                 await expect(page.getByText("the queue is empty")).toBeVisible();
-                await expect.poll(serverQueue, { timeout: 20_000, message: "the server still holds the cleared queue" }).toEqual([]);
+                await expect.poll(queueOnServer, { timeout: 20_000, message: "the server still holds the cleared queue" }).toEqual([]);
             });
 
             session.assertClean("Journey 6 (queue in the panel)");
@@ -725,7 +713,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
         await session.step("the alerts count matches the server's unread count", async () => {
             const served = await (await api.get("/api/notifications/unread-count", { headers: bearer(token) })).json();
-            const unread = Number(served.count ?? served.unreadCount ?? 0);
+            const unread = Number(served.count);
             const alerts = page.getByRole("tablist", { name: "activity", exact: true }).getByRole("tab", { name: /^alerts/ });
             const text = (await alerts.innerText()).replace(/\D+/g, "");
             expect(Number(text || 0), "the alerts badge differs from the server's unread count").toBe(Math.min(unread, 99));

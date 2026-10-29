@@ -1,4 +1,4 @@
-import { Page, TestInfo, test } from "@playwright/test";
+import { Page, TestInfo, expect, test } from "@playwright/test";
 import { PLAYER, readPlayer } from "./shared";
 import { LibraryPicker } from "./picker";
 
@@ -19,6 +19,51 @@ export async function loginAsTestUser(page: Page): Promise<void> {
     await page.locator("#password").fill(password);
     await page.getByRole("button", { name: "Sign In" }).click();
     await page.waitForURL(/\/($|\?|home)/);
+}
+
+/**
+ * Closes the What's New window, which is aria-modal and swallows every pointer event while it is up.
+ * It mounts late on a cold session, so the first one is waited for (15 s); each release closed
+ * can bring the next, so up to four are cleared. If the Close button is refused, the window's
+ * changelog link is followed and the page it started on is reopened. With `watch`, a handler
+ * also closes any later appearance on this page. Returns whether a window was shown.
+ */
+export async function dismissWhatsNew(page: Page, opts: { watch?: boolean } = {}): Promise<boolean> {
+    const dialog = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
+    const close = dialog.locator('button[aria-label="Close"]').first();
+    if (opts.watch) {
+        await page.addLocatorHandler(dialog, async () => {
+            if (await close.isVisible().catch(() => false)) await close.click();
+        });
+    }
+    let shownAny = false;
+    for (let release = 0; release < 4; release++) {
+        const shown = await dialog
+            .waitFor({ state: "visible", timeout: release === 0 ? 15_000 : 3_000 })
+            .then(() => true)
+            .catch(() => false);
+        if (!shown) break;
+        shownAny = true;
+        // The button is disabled while the close is being saved, so retry until the window is gone.
+        let gone = false;
+        for (let i = 0; i < 6 && !gone; i++) {
+            if (await close.count()) await close.click({ timeout: 3_000 }).catch(() => {});
+            gone = await dialog
+                .waitFor({ state: "hidden", timeout: 2_500 })
+                .then(() => true)
+                .catch(() => false);
+        }
+        if (!gone) {
+            const from = page.url();
+            const changelog = dialog.locator('a[href="/changelog"]').first();
+            await expect(changelog, "the What's New window must be dismissible").toBeVisible({ timeout: 5_000 });
+            await changelog.click();
+            await page.waitForURL(/\/changelog/, { timeout: 20_000 });
+            await page.goto(from, { waitUntil: "domcontentloaded" });
+        }
+    }
+    await expect(dialog, "the What's New window must be closed").toBeHidden({ timeout: 10_000 });
+    return shownAny;
 }
 
 /** Read the auth token from localStorage (set after login) for use in page.request calls. */

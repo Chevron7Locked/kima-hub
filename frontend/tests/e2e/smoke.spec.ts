@@ -1,18 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { skipIfEmptyLibrary, getAudioCurrentTime } from "./fixtures/test-helpers";
-
-const username = process.env.KIMA_TEST_USERNAME || "predeploy";
-const password = process.env.KIMA_TEST_PASSWORD || "predeploy-password";
+import { loginAsTestUser, skipIfEmptyLibrary, getAudioCurrentTime } from "./fixtures/test-helpers";
 
 test("core smoke: login → play album → play/pause/next/prev", async ({ page }) => {
-    // Login
-    await page.goto("/login");
-    await page.locator("#username").fill(username);
-    await page.locator("#password").fill(password);
-    await page.getByRole("button", { name: "Sign In" }).click();
-
-    // The e2e user has completed onboarding, so login lands on /.
-    await page.waitForURL(/\/($|\?)/);
+    await loginAsTestUser(page);
 
     await skipIfEmptyLibrary(page);
 

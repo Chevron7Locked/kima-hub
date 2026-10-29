@@ -12,7 +12,7 @@ interface Violation {
     /** Which journey and step were executing when this happened. */
     journey: string;
     step: string;
-    kind: "console" | "pageerror" | "http" | "overflow" | "sse" | "assertion";
+    kind: "console" | "pageerror" | "http" | "overflow" | "assertion";
     detail: string;
     at: number;
 }
@@ -415,14 +415,6 @@ export async function navigateByClick(page: Page, href: string, timeoutMs = 10_0
 }
 
 /**
- * The first album card in <main>. The sidebar's recently-played thumbnails also
- * link to albums and sit under the Next.js dev overlay.
- */
-export function firstAlbumCard(page: Page) {
-    return page.locator('main a[href^="/album/"]').first();
-}
-
-/**
  * An album page's rows for songs the library has. A song the album should have but the library
  * lacks is a preview-only row with no queue or playlist buttons.
  */
@@ -446,19 +438,4 @@ export async function openAlbumById(page: Page, albumId: string, opts: { tap?: b
     await page.waitForURL(new RegExp(`/album/${albumId}`), { timeout: timeoutMs });
     await playableRows(page).first().waitFor({ state: "visible", timeout: timeoutMs });
     await settle(page, 1200);
-}
-
-/**
- * Opens Collection on its Albums tab through the tab button; a URL navigation
- * would reload and lose the session state.
- */
-export async function openAlbumsTab(page: Page, timeoutMs = 15_000): Promise<void> {
-    if (!page.url().includes("/collection")) {
-        await navigateByClick(page, "/collection", timeoutMs);
-    }
-    const albumsTab = page.getByRole("button", { name: "Albums", exact: true });
-    await albumsTab.waitFor({ state: "visible", timeout: timeoutMs });
-    await albumsTab.click();
-    await page.waitForURL(/tab=albums/, { timeout: timeoutMs });
-    await firstAlbumCard(page).waitFor({ state: "visible", timeout: timeoutMs });
 }

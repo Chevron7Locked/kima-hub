@@ -1,14 +1,18 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
+import { dismissWhatsNew as dismiss, loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
 import { softwareWebGL } from "./fixtures/shared";
+
+// Each journey must clear the What's New window before touching the toolbar or the field; it mounts late,
+// so the watcher also closes it if it appears during a later action.
+const dismissWhatsNew = (page: Page) => dismiss(page, { watch: true });
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Returns the first two track IDs that have vibe embeddings, or null if none. */
-async function getVibeTrackIds(page: Parameters<typeof loginAsTestUser>[0]): Promise<[string, string] | null> {
+async function getVibeTrackIds(page: Page): Promise<[string, string] | null> {
     try {
         const token = await getAuthToken(page);
         const res = await page.request.get("/api/vibe/map", {
@@ -42,7 +46,7 @@ async function getVibeTrackIds(page: Parameters<typeof loginAsTestUser>[0]): Pro
  * Finds two distinct vibe search queries (music descriptors) that each return
  * at least one result. Returns null if the library lacks sufficient embeddings.
  */
-async function getTwoVibeSearchQueries(page: Parameters<typeof loginAsTestUser>[0]): Promise<[string, string] | null> {
+async function getTwoVibeSearchQueries(page: Page): Promise<[string, string] | null> {
     const candidates = ["rock", "pop", "electronic", "bright", "run", "soft", "dark", "sad", "piano"];
     const token = await getAuthToken(page);
     const working: string[] = [];
@@ -66,25 +70,6 @@ async function getTwoVibeSearchQueries(page: Parameters<typeof loginAsTestUser>[
 // ---------------------------------------------------------------------------
 
 test.use(softwareWebGL);
-
-// The What's New modal (aria-modal) sits over the page on a fresh login and
-// intercepts every pointer event — each journey below must dismiss it before
-// touching the toolbar or the field.
-async function dismissWhatsNew(page: Page) {
-    const modal = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-    const dismiss = modal.getByRole("button", { name: "Close" });
-    // The modal mounts late (after the version fetch over a cold session) and
-    // an aria-modal overlay intercepts every pointer event. Register a handler
-    // so any later action that gets blocked by it dismisses it automatically,
-    // then clear it now if it is already up.
-    await page.addLocatorHandler(modal, async () => {
-        if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
-    });
-    if (await dismiss.isVisible({ timeout: 8000 }).catch(() => false)) {
-        await dismiss.click();
-        await dismiss.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
-    }
-}
 
 test.describe("Vibe", () => {
     test.beforeEach(async ({ page }) => {
@@ -287,11 +272,6 @@ test.describe("Vibe", () => {
     // Stars are WebGL points, so a star is found by resting the pointer on the
     // field until the hover nameplate (a DOM chip) appears, then clicking there.
     test("clicking a star opens a panel with that track's own data", async ({ page }) => {
-        await page.goto("/login");
-        await page.fill("#username", process.env.KIMA_TEST_USERNAME!);
-        await page.fill("#password", process.env.KIMA_TEST_PASSWORD!);
-        await page.getByRole("button", { name: "Sign In" }).click();
-        await page.waitForURL(/\/($|\?|home)/, { timeout: 20_000 });
         await page.goto("/vibe", { waitUntil: "domcontentloaded" });
         await dismissWhatsNew(page);
 

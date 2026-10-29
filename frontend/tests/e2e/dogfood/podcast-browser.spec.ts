@@ -6,13 +6,11 @@
  */
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { DogfoodSession } from "./session";
-import { outsideFailure } from "./podcastReplies";
+import { outsideFailure, SEED_SHOW } from "./podcastReplies";
 import { loginAsTestUser, getAuthToken } from "../fixtures/test-helpers";
 import { requireBaseUrl } from "../fixtures/target";
 
 const baseUrl = requireBaseUrl();
-// Dungeons and Daddies: a long-running show with plenty of episodes, used by the other podcast specs.
-const SEED_SHOW = "1450241676";
 // Two more long-running shows, so "latest episode" has several shows with different newest dates to order.
 const SORT_SHOWS = [SEED_SHOW, "201671138", "152249110"];
 

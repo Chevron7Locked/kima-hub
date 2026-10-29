@@ -27,7 +27,7 @@ export interface PickedAlbum {
 }
 
 /** A song shorter than this cannot be played long enough for the player checks. */
-export const MIN_PLAY_SECONDS = 60;
+const MIN_PLAY_SECONDS = 60;
 
 const PAGE = 2000;
 
@@ -117,7 +117,7 @@ export class LibraryPicker {
         return (await this.playableTracks()).find((t) => t.analysed) ?? null;
     }
 
-    /** The first playable song by an artist whose name can be searched for (not empty). */
+    /** The first playable song in the library. */
     async firstTrack(): Promise<PickedTrack | null> {
         return (await this.playableTracks())[0] ?? null;
     }

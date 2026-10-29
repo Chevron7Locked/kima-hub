@@ -1,6 +1,6 @@
-import { test, expect, Page, Response, ConsoleMessage } from "@playwright/test";
-import { skipIfEmptyLibrary, username, password } from "./fixtures/test-helpers";
-import { settle } from "./fixtures/shared";
+import { test, expect, Page, Response } from "@playwright/test";
+import { loginAsTestUser as login, skipIfEmptyLibrary } from "./fixtures/test-helpers";
+import { readPlayer, settle, softwareWebGL } from "./fixtures/shared";
 import { requireBaseUrl } from "./fixtures/target";
 
 /** The app shell scrolls inside #main-content, so the document alone never overflows. */
@@ -11,31 +11,58 @@ const OVERFLOWS = () =>
 
 const baseUrl = requireBaseUrl();
 
-async function login(page: Page): Promise<void> {
-    await page.goto("/login");
-    await page.locator("#username").fill(username);
-    await page.locator("#password").fill(password);
-    await page.getByRole("button", { name: "Sign In" }).click();
-    await page.waitForURL(/\/($|\?|home)/, { timeout: 15000 });
+test.use(softwareWebGL);
+
+const ROUTES = [
+    { path: "/", name: "Home" },
+    { path: "/collection", name: "Collection" },
+    { path: "/collection?tab=albums", name: "Albums Tab" },
+    { path: "/collection?tab=artists", name: "Artists Tab" },
+    { path: "/collection?tab=tracks", name: "Tracks Tab" },
+    { path: "/search", name: "Search" },
+    { path: "/settings", name: "Settings" },
+    { path: "/discover", name: "Discover" },
+    { path: "/releases", name: "Releases" },
+    { path: "/vibe", name: "Vibe" },
+    { path: "/playlists", name: "Playlists" },
+    { path: "/audiobooks", name: "Audiobooks" },
+    { path: "/podcasts", name: "Podcasts" },
+    { path: "/radio", name: "Radio" },
+];
+
+const SEARCH_INPUT = 'input[type="search"], input[placeholder*="search" i], input[type="text"]';
+
+/** Opens the collection's albums tab, then the first album's page. */
+async function openFirstAlbum(page: Page): Promise<void> {
+    await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
+    await settle(page, 3000);
+    const firstAlbum = page.locator('a[href^="/album/"]').first();
+    await expect(firstAlbum).toBeVisible({ timeout: 10000 });
+    await firstAlbum.click();
+    await expect(page).toHaveURL(/\/album\//);
+    await settle(page, 3000);
+}
+
+/** Waits for the search page to show the results heading for `query`. */
+async function searchFor(page: Page, query: string): Promise<void> {
+    await page.goto("/search", { waitUntil: "domcontentloaded" });
+    await settle(page, 2000);
+    const input = page.locator(SEARCH_INPUT).first();
+    await input.fill(query);
+    await input.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`[?&]q=${encodeURIComponent(query)}(&|$)`));
+    await expect(page.getByRole("heading", { level: 1, name: query, exact: true })).toBeVisible({ timeout: 10000 });
 }
 
 function isBrowserNoise(text: string): boolean {
     return text.includes("favicon") || text.includes("serviceWorker");
 }
 
-function collectConsoleErrors(page: Page): string[] {
-    const errors: string[] = [];
-    page.on("console", (msg) => {
-        if (msg.type() === "error" && !isBrowserNoise(msg.text())) errors.push(msg.text());
-    });
-    return errors;
-}
-
 /** "status METHOD path" for a failed API response, or null for anything else. */
 function apiFailure(resp: Response): string | null {
     const url = resp.url();
     if (!url.includes("/api/") || resp.status() < 400) return null;
-    return `${resp.status()} ${resp.request().method()} ${url.replace("http://127.0.0.1:3006", "").replace(baseUrl, "")}`;
+    return `${resp.status()} ${resp.request().method()} ${url.replace(baseUrl, "")}`;
 }
 
 function collectNetworkErrors(page: Page): string[] {
@@ -95,44 +122,22 @@ test.describe("Route Health", () => {
     test.beforeEach(async ({ page }) => { await login(page); });
 
     test("all main routes load without crashing", async ({ page }) => {
-        const routes = [
-            { path: "/", name: "Home" },
-            { path: "/collection", name: "Collection" },
-            { path: "/collection?tab=albums", name: "Albums Tab" },
-            { path: "/collection?tab=artists", name: "Artists Tab" },
-            { path: "/collection?tab=tracks", name: "Tracks Tab" },
-            { path: "/search", name: "Search" },
-            { path: "/settings", name: "Settings" },
-            { path: "/discover", name: "Discover" },
-            { path: "/releases", name: "Releases" },
-            { path: "/vibe", name: "Vibe" },
-            { path: "/playlists", name: "Playlists" },
-            { path: "/audiobooks", name: "Audiobooks" },
-            { path: "/podcasts", name: "Podcasts" },
-            { path: "/radio", name: "Radio" },
-        ];
-
         const results: Array<{ route: string; name: string; status: string; errors: string[] }> = [];
 
-        for (const route of routes) {
-            const networkErrors: string[] = [];
-            const handler = (resp: Response) => {
-                const failure = apiFailure(resp);
-                if (failure) networkErrors.push(failure);
-            };
-            page.on("response", handler);
-
+        for (const route of ROUTES) {
+            const networkErrors = collectNetworkErrors(page);
             try {
                 const response = await page.goto(route.path, { timeout: 15000, waitUntil: "domcontentloaded" });
                 await page.waitForTimeout(2500);
 
                 const hasErrorBoundary = await page.locator("text=/something went wrong|application error/i").count();
                 const httpStatus = response?.status() || 0;
+                const serverErrors = networkErrors.filter((e) => /^5\d\d /.test(e));
 
                 results.push({
                     route: route.path,
                     name: route.name,
-                    status: httpStatus >= 500 || hasErrorBoundary > 0 ? "ERROR" : "OK",
+                    status: httpStatus >= 500 || hasErrorBoundary > 0 || serverErrors.length > 0 ? "ERROR" : "OK",
                     errors: [...networkErrors],
                 });
             } catch (err) {
@@ -143,18 +148,14 @@ test.describe("Route Health", () => {
                     errors: [String(err).slice(0, 150)],
                 });
             }
-            page.removeListener("response", handler);
-        }
-
-        console.log("\n=== ROUTE HEALTH CHECK ===");
-        for (const r of results) {
-            const tag = r.errors.length > 0 ? ` [${r.errors.length} API errors]` : "";
-            console.log(`  ${r.status.padEnd(6)} ${r.name.padEnd(15)} ${r.route}${tag}`);
-            r.errors.forEach((e) => console.log(`         -> ${e}`));
+            page.removeAllListeners("response");
         }
 
         const crashes = results.filter((r) => r.status === "CRASH" || r.status === "ERROR");
-        expect(crashes, `Routes crashed: ${crashes.map((c) => c.name).join(", ")}`).toHaveLength(0);
+        expect(
+            crashes.map((c) => `${c.name} ${c.route}: ${c.errors.join("; ")}`),
+            "routes that crashed, showed an error screen or got a 5xx from the API",
+        ).toEqual([]);
     });
 });
 
@@ -177,9 +178,7 @@ test.describe("Collection & Library", () => {
         await settle(page, 3000);
         const albumLinks = page.locator('a[href^="/album/"]');
         await expect(albumLinks.first()).toBeVisible({ timeout: 10000 });
-        const count = await albumLinks.count();
-        expect(count).toBeGreaterThan(0);
-        console.log(`Albums displayed: ${count}`);
+        expect(await albumLinks.count()).toBeGreaterThan(0);
     });
 
     test("artists tab shows artist cards", async ({ page }) => {
@@ -188,36 +187,28 @@ test.describe("Collection & Library", () => {
         await settle(page, 3000);
         const artistLinks = page.locator('a[href^="/artist/"]');
         await expect(artistLinks.first()).toBeVisible({ timeout: 10000 });
-        const count = await artistLinks.count();
-        console.log(`Artists displayed: ${count}`);
+        expect(await artistLinks.count()).toBeGreaterThan(0);
     });
 
     test("tracks tab shows track rows", async ({ page }) => {
+        await skipIfEmptyLibrary(page);
         await page.goto("/collection?tab=tracks", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(200);
+        // Track rows are divs; the tab pills above them are buttons with the same marker.
+        const rows = page.locator("div[data-tv-card]");
+        await expect(rows.first()).toBeVisible({ timeout: 10000 });
+        await expect(rows.first().getByRole("button", { name: /^(Play|Pause)$/ })).toBeAttached();
     });
 
     test("album detail page has play button and track list", async ({ page }) => {
         await skipIfEmptyLibrary(page);
         const netErrors = collectNetworkErrors(page);
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
+        await openFirstAlbum(page);
 
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await expect(firstAlbum).toBeVisible({ timeout: 10000 });
-        await firstAlbum.click();
-        await expect(page).toHaveURL(/\/album\//);
-        await settle(page, 3000);
-
-        const playBtn = page.locator('button:has-text("Play"), button[aria-label*="Play" i], button[title*="Play" i]');
-        const playCount = await playBtn.count();
-        console.log(`Album detail: ${playCount} play buttons found`);
-
-        if (netErrors.length > 0) {
-            console.log("ALBUM DETAIL - API errors:", netErrors);
-        }
+        await expect(page.getByRole("button", { name: "play all", exact: true })).toBeVisible({ timeout: 5000 });
+        await expect(page.locator("[data-track-index]").first()).toBeVisible();
+        await expect(page.getByRole("heading", { name: /album not found|couldn't load this album/i })).toHaveCount(0);
+        expect(netErrors.filter((e) => /^5\d\d /.test(e)), "the album page got 5xx API answers").toEqual([]);
     });
 
     test("artist detail page loads", async ({ page }) => {
@@ -231,8 +222,8 @@ test.describe("Collection & Library", () => {
         await expect(page).toHaveURL(/\/artist\//);
         await settle(page, 3000);
 
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(100);
+        await expect(page.getByRole("heading", { name: /artist not found|couldn't load this artist/i })).toHaveCount(0);
+        await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
     });
 });
 
@@ -250,29 +241,14 @@ test.describe("Search", () => {
     });
 
     test("typing in search triggers results", async ({ page }) => {
-        await page.goto("/search", { waitUntil: "domcontentloaded" });
-        await settle(page, 2000);
-
-        const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[type="text"]').first();
-        await searchInput.fill("a");
-        await searchInput.press("Enter");
-        await page.waitForTimeout(3000);
-
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(100);
+        await searchFor(page, "a");
+        await expect(page.getByText("Scanning library and network...")).toBeHidden({ timeout: 30_000 });
     });
 
-    test("search with gibberish shows no results or empty state", async ({ page }) => {
-        await page.goto("/search", { waitUntil: "domcontentloaded" });
-        await settle(page, 2000);
-
-        const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[type="text"]').first();
-        await searchInput.fill("xyznonexistentquery12345");
-        await searchInput.press("Enter");
-        await page.waitForTimeout(3000);
-
-        const body = await page.locator("body").textContent();
-        expect(body).toBeTruthy();
+    test("search with gibberish completes and shows the query", async ({ page }) => {
+        await searchFor(page, "xyznonexistentquery12345");
+        await expect(page.getByText("Scanning library and network...")).toBeHidden({ timeout: 30_000 });
+        await expect(page.getByText(/something went wrong|application error/i)).toHaveCount(0);
     });
 });
 
@@ -284,51 +260,33 @@ test.describe("Playback", () => {
 
     test("player appears when track starts playing", async ({ page }) => {
         await skipIfEmptyLibrary(page);
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 2000);
-
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await firstAlbum.waitFor({ timeout: 10_000 });
-        await firstAlbum.click();
-        await page.waitForURL(/\/album\//);
-        await page.waitForTimeout(500);
+        await openFirstAlbum(page);
 
         await page.getByLabel("Play all").click();
 
         await expect(page.getByTitle("pause", { exact: true })).toBeVisible({ timeout: 10_000 });
     });
 
-    test("clicking play on album starts playback UI", async ({ page }) => {
+    test("clicking play on album plays audio that advances", async ({ page }) => {
         await skipIfEmptyLibrary(page);
-        const consoleErrors = collectConsoleErrors(page);
-
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await firstAlbum.click();
-        await settle(page, 3000);
+        await openFirstAlbum(page);
 
         const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await expect(playBtn).toBeVisible({ timeout: 5000 });
         await playBtn.click();
-        await page.waitForTimeout(3000);
+        await expect(page.getByTitle("pause", { exact: true })).toBeVisible({ timeout: 10_000 });
 
-        const pauseBtn = await page.locator('button[title="pause"], button[aria-label="Pause"]').count();
-        console.log(`After play click: pause button visible = ${pauseBtn > 0}`);
-        if (consoleErrors.length > 0) {
-            console.log("PLAYBACK console errors:", consoleErrors);
-        }
+        const first = await readPlayer(page);
+        await page.waitForTimeout(3000);
+        const second = await readPlayer(page);
+        expect(second.src, "the audio element has no stream source").toMatch(/\/tracks\/[^/]+\/stream/);
+        expect(second.paused, "the player shows Pause but the audio is paused").toBe(false);
+        expect(second.t, `playback did not advance (${first.t}s -> ${second.t}s)`).toBeGreaterThan(first.t);
     });
 
     test("play/pause toggle works", async ({ page }) => {
         await skipIfEmptyLibrary(page);
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await firstAlbum.click();
-        await settle(page, 3000);
+        await openFirstAlbum(page);
 
         const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await playBtn.click();
@@ -342,12 +300,7 @@ test.describe("Playback", () => {
 
     test("next/prev buttons visible during playback", async ({ page }) => {
         await skipIfEmptyLibrary(page);
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await firstAlbum.click();
-        await settle(page, 3000);
+        await openFirstAlbum(page);
 
         const playBtn = page.getByRole("button", { name: "play all", exact: true });
         await playBtn.click();
@@ -369,21 +322,19 @@ test.describe("Settings", () => {
         await page.goto("/settings", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(100);
-
-        if (netErrors.length > 0) {
-            console.log("SETTINGS - API errors:", netErrors);
-        }
+        await expect(page.getByText("Settings could not be loaded")).toHaveCount(0);
+        await expect(page.locator(".section-stack")).toBeVisible({ timeout: 10000 });
+        expect(netErrors.filter((e) => /^5\d\d /.test(e)), "settings got 5xx API answers").toEqual([]);
     });
 
     test("settings has navigable sections", async ({ page }) => {
         await page.goto("/settings", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
-        const sections = page.locator("text=/general|media|library|display|account|server|integration|enrichment/i");
-        const count = await sections.count();
-        console.log(`Settings sections/links found: ${count}`);
+        // Every user, admin or not, gets these four sections.
+        for (const id of ["account", "subsonic", "playback", "scrobbling"]) {
+            await expect(page.locator(`section#${id}`), `the ${id} section is missing`).toBeAttached({ timeout: 10000 });
+        }
     });
 });
 
@@ -394,16 +345,17 @@ test.describe("Vibe & Discovery", () => {
     test.beforeEach(async ({ page }) => { await login(page); });
 
     test("vibe page loads without crash", async ({ page }) => {
-        const consoleErrors = collectConsoleErrors(page);
         const netErrors = collectNetworkErrors(page);
         await page.goto("/vibe", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(50);
-
-        if (consoleErrors.length > 0) console.log("VIBE - Console errors:", consoleErrors);
-        if (netErrors.length > 0) console.log("VIBE - Network errors:", netErrors);
+        // Any of these is a healthy answer for some instance: the map, a build in progress, or no analysed tracks yet.
+        const healthy = page
+            .getByTestId("vibe-map-field")
+            .or(page.getByText(/charting your library|getting your sound features ready|no tracks with vibe analysis yet/i));
+        await expect(healthy.first()).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText(/the music map did not load|the map could not be drawn/i)).toHaveCount(0);
+        expect(netErrors.filter((e) => /^5\d\d /.test(e)), "the vibe page got 5xx API answers").toEqual([]);
     });
 
     test("discover page loads", async ({ page }) => {
@@ -411,10 +363,9 @@ test.describe("Vibe & Discovery", () => {
         await page.goto("/discover", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(50);
-
-        if (netErrors.length > 0) console.log("DISCOVER - Network errors:", netErrors);
+        await expect(page.getByText("Could not load discovery data.")).toHaveCount(0);
+        await expect(page.getByRole("heading", { level: 1, name: "Discover Weekly" })).toBeVisible({ timeout: 10000 });
+        expect(netErrors.filter((e) => /^5\d\d /.test(e)), "discover got 5xx API answers").toEqual([]);
     });
 
     test("releases page loads", async ({ page }) => {
@@ -422,10 +373,9 @@ test.describe("Vibe & Discovery", () => {
         await page.goto("/releases", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(50);
-
-        if (netErrors.length > 0) console.log("RELEASES - Network errors:", netErrors);
+        await expect(page.getByRole("heading", { level: 1, name: "New and upcoming" })).toBeVisible({ timeout: 10000 });
+        await expect(page.getByRole("heading", { name: "Couldn't load releases" })).toHaveCount(0);
+        expect(netErrors.filter((e) => /^5\d\d /.test(e)), "releases got 5xx API answers").toEqual([]);
     });
 });
 
@@ -439,7 +389,9 @@ test.describe("Asset Loading", () => {
         const brokenAssets: string[] = [];
         page.on("response", (resp) => {
             const url = resp.url();
-            if ((url.includes("cover") || url.includes("image") || url.includes(".jpg") || url.includes(".webp")) && resp.status() >= 400) {
+            // A cover-art 404 is the server's "this album has no art"; the page then draws no image (CachedImage).
+            const noArt = url.includes("/cover-art") && resp.status() === 404;
+            if ((url.includes("cover") || url.includes("image") || url.includes(".jpg") || url.includes(".webp")) && resp.status() >= 400 && !noArt) {
                 brokenAssets.push(`${resp.status()} ${url.slice(0, 100)}`);
             }
         });
@@ -447,19 +399,16 @@ test.describe("Asset Loading", () => {
         await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
         await settle(page, 4000);
 
-        if (brokenAssets.length > 0) {
-            console.log(`BROKEN ASSETS (${brokenAssets.length}):`);
-            brokenAssets.slice(0, 10).forEach((a) => console.log(`  ${a}`));
-        }
+        expect(brokenAssets, "cover or image requests that failed").toEqual([]);
 
-        const imgs = page.locator("img");
-        const imgCount = await imgs.count();
-        let broken = 0;
-        for (let i = 0; i < Math.min(imgCount, 20); i++) {
-            const naturalWidth = await imgs.nth(i).evaluate((el: HTMLImageElement) => el.naturalWidth);
-            if (naturalWidth === 0) broken++;
-        }
-        console.log(`Images: ${imgCount} total, ${broken} broken (0 naturalWidth)`);
+        // An image the browser finished loading with no pixels is a broken picture.
+        const failedImages = await page.evaluate(() =>
+            Array.from(document.querySelectorAll("img"))
+                .slice(0, 20)
+                .filter((img) => img.complete && img.naturalWidth === 0)
+                .map((img) => img.src.slice(0, 100)),
+        );
+        expect(failedImages, "images that finished loading with no pixels").toEqual([]);
     });
 });
 
@@ -482,9 +431,11 @@ test.describe("Mobile Layout", () => {
         await page.goto("/", { waitUntil: "domcontentloaded" });
         await settle(page, 2000);
 
-        const bottomNav = page.locator('nav, [class*="mobile" i], [class*="bottom" i], [class*="MobileNav"]');
-        const count = await bottomNav.count();
-        console.log(`Mobile: nav elements found = ${count}`);
+        const nav = page.getByRole("navigation", { name: "Main navigation" });
+        await expect(nav).toBeVisible({ timeout: 10000 });
+        for (const name of ["collection", "vibe", "podcasts", "playlists"]) {
+            await expect(nav.getByRole("link", { name }), `the bottom nav has no ${name} link`).toBeVisible();
+        }
     });
 
     test("mobile: collection page works at small viewport", async ({ page }) => {
@@ -498,12 +449,7 @@ test.describe("Mobile Layout", () => {
 
     test("mobile: album detail has no overflow", async ({ page }) => {
         await skipIfEmptyLibrary(page);
-        await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const firstAlbum = page.locator('a[href^="/album/"]').first();
-        await firstAlbum.click();
-        await settle(page, 3000);
+        await openFirstAlbum(page);
 
         const hasOverflow = await page.evaluate(OVERFLOWS);
         expect(hasOverflow, "the album page must not scroll sideways").toBe(false);
@@ -537,25 +483,12 @@ test.describe("Accessibility", () => {
     test.beforeEach(async ({ page }) => { await login(page); });
 
     test("heading hierarchy audit", async ({ page }) => {
-        const routes = ["/", "/collection", "/search", "/settings"];
-        console.log("\n=== HEADING HIERARCHY ===");
-
-        for (const route of routes) {
+        for (const route of ["/", "/collection", "/search", "/settings"]) {
             await page.goto(route, { waitUntil: "domcontentloaded" });
             await settle(page, 2000);
 
-            const headings = await page.evaluate(() =>
-                Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6")).map(
-                    (h) => `${h.tagName}: ${h.textContent?.trim().slice(0, 50)}`
-                )
-            );
-
-            console.log(`  ${route}:`);
-            if (headings.length === 0) {
-                console.log("    [NO HEADINGS]");
-            } else {
-                headings.forEach((h) => console.log(`    ${h}`));
-            }
+            const headings = await page.evaluate(() => document.querySelectorAll("h1, h2, h3, h4, h5, h6").length);
+            expect(headings, `${route} has no headings`).toBeGreaterThan(0);
         }
     });
 
@@ -563,33 +496,34 @@ test.describe("Accessibility", () => {
         await page.goto("/", { waitUntil: "domcontentloaded" });
         await settle(page, 2000);
 
-        const unlabeled = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll("button"))
-                .filter((btn) => {
-                    const text = btn.textContent?.trim();
-                    const ariaLabel = btn.getAttribute("aria-label");
-                    const title = btn.getAttribute("title");
-                    return !text && !ariaLabel && !title;
-                })
-                .map((btn) => btn.outerHTML.slice(0, 150));
-        });
+        const unlabeled = await page.evaluate(() =>
+            Array.from(document.querySelectorAll("button"))
+                .filter(
+                    (btn) =>
+                        !btn.textContent?.trim() &&
+                        !btn.getAttribute("aria-label") &&
+                        !btn.getAttribute("aria-labelledby") &&
+                        !btn.getAttribute("title") &&
+                        !btn.querySelector("img[alt]:not([alt=''])"),
+                )
+                .map((btn) => btn.outerHTML.slice(0, 150)),
+        );
 
-        console.log(`Buttons without accessible names: ${unlabeled.length}`);
-        unlabeled.slice(0, 5).forEach((h) => console.log(`  ${h}`));
+        expect(unlabeled, "buttons with no text, label or title").toEqual([]);
     });
 
     test("images without alt text audit", async ({ page }) => {
         await page.goto("/collection?tab=albums", { waitUntil: "domcontentloaded" });
         await settle(page, 3000);
 
+        // alt="" marks a decorative image and is fine; a missing alt attribute is not.
         const noAlt = await page.evaluate(() =>
             Array.from(document.querySelectorAll("img"))
-                .filter((img) => !img.alt && !img.getAttribute("role"))
-                .map((img) => ({ src: img.src.slice(0, 80), w: img.width }))
+                .filter((img) => !img.hasAttribute("alt") && !img.getAttribute("role"))
+                .map((img) => img.src.slice(0, 80)),
         );
 
-        console.log(`Images without alt text: ${noAlt.length}`);
-        noAlt.slice(0, 5).forEach((img) => console.log(`  ${img.src} (${img.w}px)`));
+        expect(noAlt, "images with no alt attribute").toEqual([]);
     });
 });
 
@@ -601,32 +535,17 @@ test.describe("Error Handling", () => {
 
     test("invalid album ID handled gracefully", async ({ page }) => {
         await page.goto("/album/nonexistent-id-12345", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(10);
-
-        const url = page.url();
-        const hasErrorText = /not found|error|404|doesn.t exist/i.test(body || "");
-        const redirected = !url.includes("nonexistent");
-        console.log(`Invalid album: errorText=${hasErrorText}, redirected=${redirected}`);
+        await expect(page.getByRole("heading", { name: "Album not found" })).toBeVisible({ timeout: 15000 });
     });
 
     test("invalid artist ID handled gracefully", async ({ page }) => {
         await page.goto("/artist/nonexistent-id-12345", { waitUntil: "domcontentloaded" });
-        await settle(page, 3000);
-
-        const body = await page.locator("body").textContent();
-        expect(body!.length).toBeGreaterThan(10);
+        await expect(page.getByRole("heading", { name: "Artist not found" })).toBeVisible({ timeout: 15000 });
     });
 
     test("nonexistent route handled", async ({ page }) => {
         await page.goto("/this-route-does-not-exist-xyz", { waitUntil: "domcontentloaded" });
-        await settle(page, 2000);
-
-        const body = await page.locator("body").textContent();
-        console.log(`404 page: ${body!.length} chars, url=${page.url()}`);
-        expect(body!.length).toBeGreaterThan(10);
+        await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible({ timeout: 10000 });
     });
 });
 
@@ -637,7 +556,7 @@ test.describe("Performance", () => {
     test.beforeEach(async ({ page }) => { await login(page); });
 
     test("page load times", async ({ page }) => {
-        const timings: Array<{ name: string; ms: number }> = [];
+        const timings: string[] = [];
         for (const [name, path] of [
             ["Home", "/"],
             ["Collection", "/collection?tab=albums"],
@@ -646,127 +565,81 @@ test.describe("Performance", () => {
             ["Vibe", "/vibe"],
         ] as const) {
             const start = Date.now();
-            await page.goto(path, { waitUntil: "domcontentloaded" });
+            // The navigation's own timeout fails the test if a page never reaches domcontentloaded.
+            const response = await page.goto(path, { waitUntil: "domcontentloaded" });
+            expect(response?.status() ?? 0, `${name} answered ${response?.status()}`).toBeLessThan(400);
+            timings.push(`${name} ${Date.now() - start}ms`);
             await page.waitForTimeout(1000);
-            timings.push({ name, ms: Date.now() - start });
         }
 
-        console.log("\n=== PAGE LOAD TIMES ===");
-        timings.forEach((t) => {
-            const bar = t.ms > 5000 ? " [SLOW]" : "";
-            console.log(`  ${t.name.padEnd(15)} ${t.ms}ms${bar}`);
-        });
+        test.info().annotations.push({ type: "domcontentloaded times", description: timings.join(", ") });
     });
 
-    test("home page API request count", async ({ page }) => {
-        const requests: string[] = [];
+    test("home page API replies are all successful", async ({ page }) => {
+        const replies: string[] = [];
+        const failed: string[] = [];
 
-        // Navigate first, THEN start capturing to avoid counting leftover
-        // requests from the previous page (login redirect to home).
-        await page.goto("/", { waitUntil: "domcontentloaded" });
-
-        page.on("request", (req) => {
-            if (req.url().includes("/api/")) {
-                requests.push(`${req.method()} ${req.url().replace(/http:\/\/127\.0\.0\.1:\d+/, "")}`);
-            }
+        // The listener starts after sign-in has finished, so its leftover replies are not counted.
+        page.on("response", (res) => {
+            if (!res.url().includes("/api/")) return;
+            const line = `${res.request().method()} ${new URL(res.url()).pathname}`;
+            replies.push(line);
+            if (res.status() >= 400) failed.push(`${res.status()} ${line}`);
         });
 
-        await page.waitForTimeout(5000);
+        // networkidle never fires (the app holds an event stream open), so the home page's own content marks loaded.
+        await page.goto("/", { waitUntil: "domcontentloaded" });
+        await expect(page.locator(".section-stack")).toBeVisible({ timeout: 10000 });
 
-        // Count unique API endpoints (ignore cover-art images and polling duplicates)
-        const apiCalls = requests.filter(r => !r.includes("/cover-art"));
-        const uniqueApis = new Set(apiCalls.map(r => r.replace(/\?.*$/, "")));
-
-        console.log(`\nHome page API requests: ${requests.length} total (${uniqueApis.size} unique API endpoints)`);
-        apiCalls.forEach((r) => console.log(`  ${r}`));
-
-        if (uniqueApis.size > 25) {
-            console.log(`\n  WARNING: ${uniqueApis.size} unique API endpoints seems excessive`);
-        }
+        // Unique endpoints, ignoring cover-art images and polling repeats; the count is reported, not limited.
+        const uniqueApis = new Set(replies.filter((r) => !r.includes("/cover-art")));
+        test.info().annotations.push({ type: "home api endpoints", description: String(uniqueApis.size) });
+        expect(failed, "home page API calls that answered 400 or worse").toEqual([]);
     });
 });
 
 // ============================================================
-// 13. CONSOLE ERROR AUDIT (all pages)
+// 13. CONSOLE AND API ERROR AUDIT (all pages)
 // ============================================================
 test.describe("Full Audit", () => {
     test.beforeEach(async ({ page }) => { await login(page); });
 
     test("console error audit across all pages", async ({ page }) => {
-        const routes = [
-            "/", "/collection", "/collection?tab=albums", "/collection?tab=artists",
-            "/collection?tab=tracks", "/search", "/settings",
-            "/discover", "/releases", "/vibe", "/playlists",
-            "/audiobooks", "/podcasts", "/radio",
-        ];
-
-        const allErrors: Array<{ route: string; errors: string[] }> = [];
-
-        for (const route of routes) {
-            const errors: string[] = [];
-            const handler = (msg: ConsoleMessage) => {
-                const text = msg.text();
-                if (msg.type() === "error" && !isBrowserNoise(text) && !text.includes("net::ERR")) {
-                    errors.push(text.slice(0, 200));
-                }
-            };
-            page.on("console", handler);
-
-            await page.goto(route, { waitUntil: "domcontentloaded" });
-            await page.waitForTimeout(2500);
-
-            page.removeListener("console", handler);
-            if (errors.length > 0) allErrors.push({ route, errors });
-        }
-
-        console.log("\n=== CONSOLE ERROR AUDIT ===");
-        if (allErrors.length === 0) {
-            console.log("  No console errors found!");
-        } else {
-            for (const entry of allErrors) {
-                console.log(`\n  ${entry.route} (${entry.errors.length}):`);
-                entry.errors.forEach((e) => console.log(`    ${e}`));
+        const allErrors: string[] = [];
+        let route = "";
+        page.on("console", (msg) => {
+            const text = msg.text();
+            // The browser logs each cover-art 404 (an album with no art) as a failed resource; that is not an error.
+            const noArt = text.includes("404") && msg.location().url.includes("/cover-art");
+            if (msg.type() === "error" && !isBrowserNoise(text) && !text.includes("net::ERR") && !noArt) {
+                allErrors.push(`${route}: ${text.slice(0, 200)}`);
             }
+        });
+        page.on("pageerror", (err) => allErrors.push(`${route}: uncaught ${err.name}: ${err.message}`.slice(0, 250)));
+
+        for (const r of ROUTES) {
+            route = r.path;
+            await page.goto(r.path, { waitUntil: "domcontentloaded" });
+            await page.waitForTimeout(2500);
         }
-        console.log(`\nPages with errors: ${allErrors.length}/${routes.length}`);
+
+        expect(allErrors, "console errors and uncaught exceptions").toEqual([]);
     });
 
     test("API error audit across all pages", async ({ page }) => {
-        const routes = [
-            "/", "/collection", "/collection?tab=albums", "/collection?tab=artists",
-            "/collection?tab=tracks", "/search", "/settings",
-            "/discover", "/releases", "/vibe", "/playlists",
-            "/audiobooks", "/podcasts", "/radio",
-        ];
+        const failures: string[] = [];
+        let route = "";
+        page.on("response", (resp) => {
+            const failure = apiFailure(resp);
+            if (failure && resp.status() >= 500) failures.push(`${route}: ${failure}`);
+        });
 
-        const allErrors: Array<{ route: string; errors: string[] }> = [];
-
-        for (const route of routes) {
-            const errors: string[] = [];
-            const handler = (resp: Response) => {
-                const failure = apiFailure(resp);
-                if (failure) errors.push(failure);
-            };
-            page.on("response", handler);
-
-            await page.goto(route, { waitUntil: "domcontentloaded" });
+        for (const r of ROUTES) {
+            route = r.path;
+            await page.goto(r.path, { waitUntil: "domcontentloaded" });
             await page.waitForTimeout(2500);
-
-            page.removeListener("response", handler);
-            if (errors.length > 0) allErrors.push({ route, errors });
         }
 
-        console.log("\n=== API ERROR AUDIT ===");
-        if (allErrors.length === 0) {
-            console.log("  No API errors found!");
-        } else {
-            for (const entry of allErrors) {
-                console.log(`\n  ${entry.route} (${entry.errors.length}):`);
-                entry.errors.forEach((e) => console.log(`    ${e}`));
-            }
-        }
-
-        const total = allErrors.reduce((s, e) => s + e.errors.length, 0);
-        console.log(`\nTotal: ${total} API errors across ${allErrors.length} pages`);
+        expect(failures, "5xx API answers while loading each page").toEqual([]);
     });
 });

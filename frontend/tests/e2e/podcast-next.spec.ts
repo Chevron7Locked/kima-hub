@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
+import { SEED_SHOW as SHOW } from "./dogfood/podcastReplies";
 
 /**
  * Resuming an episode from "continue listening" and letting it end marks it finished and plays the show's next
@@ -14,9 +15,22 @@ const playingElement = (page: Page) =>
         timeout: 60_000,
     });
 
+/** Waits until audio plays past the saved minute. The player resumes there once the audio can play; jumping before that is undone by it. */
+const playingPastResume = (page: Page, timeout: number) =>
+    page.waitForFunction(
+        () => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.currentTime >= 60),
+        null,
+        { timeout },
+    );
 
-/** Show used by these tests. Each test saves progress on it and unfollows it at the end. */
-const SHOW = "1450241676";
+/** Jumps the playing audio to four seconds before its own end (the feed's length is shorter than the audio's). */
+const seekNearEnd = (page: Page) =>
+    page.evaluate(() => {
+        const a = Array.from(document.querySelectorAll("audio")).find((x) => !x.paused)!;
+        a.currentTime = a.duration - 4;
+    });
+
+// Each test saves progress on the show and unfollows it at the end.
 
 /**
  * Follows the show and returns its id, but skips the test when the user already follows it:
@@ -55,15 +69,8 @@ test("an episode that ends is finished, and the next one plays; the player's nex
         await page.getByRole("button", { name: `resume ${resumed.title}` }).click();
         await playingElement(page);
         // The player resumes at the saved minute once the audio can play; jumping before that is undone by it.
-        await page.waitForFunction(
-            () => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.currentTime >= 60),
-            null,
-            { timeout: 30_000 },
-        );
-        await page.evaluate(() => {
-            const a = Array.from(document.querySelectorAll("audio")).find((x) => !x.paused)!;
-            a.currentTime = a.duration - 4;
-        });
+        await playingPastResume(page, 30_000);
+        await seekNearEnd(page);
 
         const player = page.getByRole("region", { name: "now playing" }).first();
         await expect(player.locator("[data-player-title]").filter({ hasText: first.title }).first()).toBeAttached({ timeout: 45_000 });
@@ -103,15 +110,8 @@ test("the show's newest episode ending stays finished: nothing next, and leaving
         await page.goto("/podcasts");
         await page.getByRole("button", { name: `resume ${newest.title}` }).click();
         await playingElement(page);
-        await page.waitForFunction(
-            () => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.currentTime >= 60),
-            null,
-            { timeout: 30_000 },
-        );
-        await page.evaluate(() => {
-            const a = Array.from(document.querySelectorAll("audio")).find((x) => !x.paused)!;
-            a.currentTime = a.duration - 4;
-        });
+        await playingPastResume(page, 30_000);
+        await seekNearEnd(page);
         await expect.poll(() => saves.some((s) => s.isFinished), { timeout: 30_000 }).toBe(true);
         // Nothing comes next: the player stops, then the page is left.
         await page.waitForTimeout(5_000);
@@ -137,12 +137,6 @@ test("an episode played to 95% of its own length is finished; seeking back and s
         const list = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();
         return list.episodes[0].progress as { isFinished: boolean; currentTime: number } | null;
     };
-    const playingAudio = () =>
-        page.waitForFunction(
-            () => Array.from(document.querySelectorAll("audio")).some((a) => !a.paused && !a.seeking && a.currentTime >= 60),
-            null,
-            { timeout: 60_000 },
-        );
     try {
         const show = await (await page.request.get(`/api/podcasts/${podcastId}/episodes?order=newest&limit=1`, { headers: auth })).json();
         const ep: Ep = show.episodes[0];
@@ -157,7 +151,7 @@ test("an episode played to 95% of its own length is finished; seeking back and s
 
         await page.goto("/podcasts");
         await page.getByRole("button", { name: `resume ${ep.title}` }).click();
-        await playingAudio();
+        await playingPastResume(page, 60_000);
 
         // Jump to 96% of the audio's own length (not the feed's), then pause: pausing saves progress.
         const target = await page.evaluate(() => {

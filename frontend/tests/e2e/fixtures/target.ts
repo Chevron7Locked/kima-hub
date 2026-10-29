@@ -7,7 +7,7 @@
 const PRODUCTION_PORT = "3030";
 
 /** The host:port of a URL, with the scheme's default port filled in. */
-export function hostPort(url: string): string {
+function hostPort(url: string): string {
     const u = new URL(url);
     const port = u.port || (u.protocol === "https:" ? "443" : "80");
     return `${u.hostname}:${port}`;
@@ -41,7 +41,7 @@ export function requireBaseUrl(): string {
 }
 
 /** The playlist name that marks an account as a disposable copy of a real one. */
-export const TEST_COPY_MARKER = "__kima-test-copy__";
+const TEST_COPY_MARKER = "__kima-test-copy__";
 
 export type DestructiveVerdict = { ok: true } | { ok: false; reason: string };
 
@@ -53,27 +53,25 @@ export type DestructiveVerdict = { ok: true } | { ok: false; reason: string };
  *
  * @param playlistNames names of the playlists the signed-in user owns
  */
-export function destructiveVerdict(baseUrl: string, playlistNames: () => Promise<string[]>): Promise<DestructiveVerdict> {
-    return (async (): Promise<DestructiveVerdict> => {
-        const target = hostPort(baseUrl);
-        if (target.endsWith(`:${PRODUCTION_PORT}`)) {
-            return { ok: false, reason: `${target} is the production port` };
-        }
-        const allowed = (process.env.KIMA_STATS_ALLOWED_TARGETS ?? "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        if (!allowed.includes(target)) {
-            return { ok: false, reason: `${target} is not listed in KIMA_STATS_ALLOWED_TARGETS` };
-        }
-        if (process.env.KIMA_STATS_DESTRUCTIVE_OK !== target) {
-            return { ok: false, reason: `KIMA_STATS_DESTRUCTIVE_OK is not set to exactly ${target}` };
-        }
-        // A copy is marked by giving its test account a playlist with this name; a real account has none.
-        const names = await playlistNames();
-        if (!names.includes(TEST_COPY_MARKER)) {
-            return { ok: false, reason: `the signed-in account has no playlist named ${TEST_COPY_MARKER}, so it is not a marked test copy` };
-        }
-        return { ok: true };
-    })();
+export async function destructiveVerdict(baseUrl: string, playlistNames: () => Promise<string[]>): Promise<DestructiveVerdict> {
+    const target = hostPort(baseUrl);
+    if (target.endsWith(`:${PRODUCTION_PORT}`)) {
+        return { ok: false, reason: `${target} is the production port` };
+    }
+    const allowed = (process.env.KIMA_STATS_ALLOWED_TARGETS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (!allowed.includes(target)) {
+        return { ok: false, reason: `${target} is not listed in KIMA_STATS_ALLOWED_TARGETS` };
+    }
+    if (process.env.KIMA_STATS_DESTRUCTIVE_OK !== target) {
+        return { ok: false, reason: `KIMA_STATS_DESTRUCTIVE_OK is not set to exactly ${target}` };
+    }
+    // A copy is marked by giving its test account a playlist with this name; a real account has none.
+    const names = await playlistNames();
+    if (!names.includes(TEST_COPY_MARKER)) {
+        return { ok: false, reason: `the signed-in account has no playlist named ${TEST_COPY_MARKER}, so it is not a marked test copy` };
+    }
+    return { ok: true };
 }

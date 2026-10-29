@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
 
 // Wipes enrichment data, re-enriches, and checks the library still works.
@@ -8,10 +8,9 @@ import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
 const POLL_INTERVAL_MS = 10_000;
 const ENRICHMENT_TIMEOUT_MS = 45 * 60 * 1000;
 
-type Step = { total: number; completed: number; failed?: number };
+type Step = { total: number; completed: number };
 type EnrichmentProgress = {
     artists: Step;
-    trackTags: { total: number; enriched: number };
     audioAnalysis: Step;
     clapEmbeddings: Step;
     moods: Step;
@@ -21,7 +20,7 @@ type EnrichmentProgress = {
 
 /** Poll /api/enrichment/progress until every step, through moods and similarity, is complete again. */
 async function waitForEnrichment(
-    page: Parameters<typeof loginAsTestUser>[0],
+    page: Page,
     token: string,
     timeoutMs: number,
 ): Promise<EnrichmentProgress> {
@@ -88,7 +87,7 @@ test.describe("Enrichment Cycle", () => {
             headers: { Authorization: `Bearer ${token}` },
         });
         expect(vibeRes.ok()).toBe(true);
-        const vibeData = (await vibeRes.json()) as { tracks: unknown[]; trackCount: number };
+        const vibeData = (await vibeRes.json()) as { tracks: unknown[] };
         expect(Array.isArray(vibeData.tracks)).toBe(true);
         expect(vibeData.tracks.length).toBeGreaterThan(0);
 

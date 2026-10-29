@@ -9,6 +9,7 @@ import { test, expect, Browser, Page, BrowserContext, APIRequestContext, request
 import { DogfoodSession, navigateByClick, openAlbumById } from "./session";
 import { LibraryPicker } from "../fixtures/picker";
 import { readPlayer, settle } from "../fixtures/shared";
+import { dismissWhatsNew, getAuthToken, loginAsTestUser } from "../fixtures/test-helpers";
 import { requireBaseUrl } from "../fixtures/target";
 
 const baseUrl = requireBaseUrl();
@@ -33,6 +34,13 @@ const NEWEST = {
     changelogText: /podcast browser/i,
 };
 
+/** GET /api<path> as the holder of `token`, expecting 200, and parse the body. */
+async function getJsonAs<T>(page: Page, token: string, path: string): Promise<T> {
+    const res = await page.request.get(`/api${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status(), `GET /api${path}`).toBe(200);
+    return (await res.json()) as T;
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () => {
@@ -47,11 +55,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     let gpuBefore: { enabled: boolean; analysis: boolean } | null = null;
 
     const auth = () => ({ Authorization: `Bearer ${token}` });
-    const getJson = async <T>(path: string): Promise<T> => {
-        const res = await page.request.get(`/api${path}`, { headers: auth() });
-        expect(res.status(), `GET /api${path}`).toBe(200);
-        return (await res.json()) as T;
-    };
+    const getJson = <T>(path: string) => getJsonAs<T>(page, token, path);
     const live = async () => {
         const res = await publicApi.get("/api/public/vibe/live", {
             headers: { Authorization: `Bearer ${vibeToken}` },
@@ -122,22 +126,13 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         });
 
         await session.step("sign in", async () => {
-            await page.goto("/login");
-            await page.locator("#username").fill(username);
-            await page.locator("#password").fill(password);
-            await page.getByRole("button", { name: /sign in/i }).click();
-            await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 30_000 });
-            token = await page.evaluate(() => localStorage.getItem("auth_token") ?? "");
+            await loginAsTestUser(page);
+            token = await getAuthToken(page);
             expect(token, "a token should be stored after login").toBeTruthy();
         });
 
         await session.step("close any release window", async () => {
-            const dialog = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-            for (let i = 0; i < 4 && (await dialog.isVisible({ timeout: 3_000 }).catch(() => false)); i++) {
-                await page.getByTestId("whatsnew-done").click();
-                await settle(page, 800);
-            }
-            await expect(dialog).toBeHidden();
+            await dismissWhatsNew(page);
         });
 
         session.clearExpectedFailures();
@@ -415,11 +410,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         const dialog = fp.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
         const heading = fp.locator("#whats-new-title");
         let freshToken = "";
-        const freshGet = async <T>(path: string): Promise<T> => {
-            const res = await fp.request.get(`/api${path}`, { headers: { Authorization: `Bearer ${freshToken}` } });
-            expect(res.status(), `GET /api${path}`).toBe(200);
-            return (await res.json()) as T;
-        };
+        const freshGet = <T>(path: string) => getJsonAs<T>(fp, freshToken, path);
 
         try {
             await session.step("create an admin who has seen no release", async () => {
