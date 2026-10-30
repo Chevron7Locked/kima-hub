@@ -26,19 +26,19 @@ Kima is a music server you run yourself. Point it at a folder of music and it gi
 
 ## The vibe engine
 
-Kima describes every song three ways and matches songs on all three.
+Kima compares songs on three things: how they sound, how they feel and their artists' genres.
 
 | | What it is | Weight |
 | --- | --- | --- |
 | **Sound** | A list of numbers that an audio model (CLAP, from LAION) produces by listening to the song. Songs that sound alike get similar lists. | 1 |
-| **Feel** | How the song feels: calm or intense, bright or dark (its valence and arousal). It is read from the audio and set against the range of your own library, so "calm" means calm for your music. | 0.25 |
+| **Feel** | How the song feels: calm or intense, bright or dark (its valence and arousal). It is read from the audio and measured against the rest of your library, so a song counts as calm compared with your other music. | 0.25 |
 | **Genre** | The genres MusicBrainz lists for the song's artist. They count only between songs by different artists, so one artist's songs do not match each other just because they share genres. | 0.25 |
 
-The three make one similarity score. Every vibe feature uses it: similar tracks, recommendations from a track, Song Path, Blend and the ranking of similar artists. A list holds at most 2 songs from one album and 4 from one artist. Searching with words matches on sound only, because a sentence has no feel or genre. Library radio stations are separate and do not use the score. Moods (Upbeat, Melancholic, Calm, Intense and Energetic) are not part of it either; they label songs for mood mixes and for the map's mood buttons.
+The three are combined into one similarity score, which every vibe feature uses: similar tracks, recommendations from a track, Song Path, Blend and the ranking of similar artists. A list holds at most 2 songs from one album and 4 from one artist. Searching with words matches on sound only, because a sentence has no feel or genre. Library radio stations are separate and do not use the score. Moods (Upbeat, Melancholic, Calm, Intense and Energetic) are not part of it either. They label songs for mood mixes and for the map's mood buttons.
 
 ### The map
 
-Open **Vibe** in the sidebar. Your library appears as a 3D picture laid out from that same score, so songs that match sit close together. The map is laid out once, after your library has been through enrichment. New songs are placed among the others and keep their place; a wipe and re-run lays the whole map out fresh.
+Open **Vibe** in the sidebar. Your library appears as a 3D picture laid out from that same score, so songs that match sit close together. The map is laid out once, after your library has been through enrichment. New songs are placed among the others and keep their place. Wiping and re-running enrichment lays out a new map.
 
 <p align="center">
   <img src="assets/screenshots/vibe-map.png" alt="The vibe map: a library drawn as stars in 3D" width="800">
@@ -62,9 +62,9 @@ Click a star to see the song with four actions: Play, Match Vibe (queue the song
   <img src="assets/screenshots/vibe-blend.png" alt="Blend: more like these songs, less like those" width="49%">
 </p>
 
-### How it is worked out
+### How songs are analysed
 
-After a scan, Kima runs six enrichment steps in the background: song identification, artist metadata, audio analysis, vibe embeddings (the sound vectors), moods and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 1.11 took 87 minutes for 9,004 songs with an NVIDIA RTX 4060 Ti and both GPU switches on, and 98 minutes for 8,985 songs without a graphics card. 1.12 adds the moods step and a heavier sound model: on the same machine with the GPU, upgrading a 9,176-song library, which redoes everything but identification and artists, took 1 hour 55 minutes. A first enrichment on 1.12 has not been timed yet. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card; see [docs/gpu.md](docs/gpu.md).
+After a scan, Kima runs six enrichment steps in the background: song identification, artist metadata, audio analysis, vibe embeddings (the sound vectors), moods and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 1.11 took 87 minutes for 9,004 songs with an NVIDIA RTX 4060 Ti and both GPU switches on, and 98 minutes for 8,985 songs without a graphics card. 1.12 adds the moods step and a heavier sound model. On the same machine with the GPU, upgrading a 9,176-song library took 1 hour 55 minutes. The upgrade redoes every step except identification and artist metadata. A first enrichment on 1.12 has not been timed yet. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card (see [docs/gpu.md](docs/gpu.md)).
 
 ## Features
 
@@ -72,7 +72,7 @@ After a scan, Kima runs six enrichment steps in the background: song identificat
   <img src="assets/screenshots/desktop-home.png" alt="The home page on a computer" width="800">
 </p>
 
-Each update opens with a short list of what changed and, sometimes, a note from Kevin; every line opens its own page with the buttons and links for it.
+After each update, Kima shows a short list of what changed, sometimes with a note from Kevin. Each item opens a page with more detail and any buttons or links it needs.
 
 <p align="center">
   <img src="assets/screenshots/whats-new.png" alt="The update window" width="800">
@@ -100,7 +100,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 ### Finding something to play
 
 - **Mood mixes.** Pick one of five moods and Kima builds a playlist from the songs that fit.
-- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, stations for your common genres and decades, and 14 mood stations (Calm, Road Trip, Wildcard, Late Night and more). Late Night plays from your own late-night listening; the others are built from the 21 moods Kima learns for each song.
+- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, stations for your common genres and decades, and 14 mood stations (Calm, Road Trip, Wildcard, Late Night and more). Late Night plays from your own late-night listening. The others are built from the 21 moods Kima scores for each song.
 - **Similar artists.** Taken from ListenBrainz, with Deezer as a fallback, and ranked toward your library. Each one shows how many of their albums you own.
 - **Weekly discovery.** Weekly playlists of music you do not own, built from similar artists and downloaded through Lidarr or Soulseek.
 
@@ -128,7 +128,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 ### Accounts and apps
 
 - **Several users.** Each account has its own plays, playlists and settings. The first account is the administrator, and any account can turn on two-factor authentication.
-- **Other apps.** Kima speaks the OpenSubsonic API, so Subsonic music apps can play from it. Each app gets its own token, which you can revoke.
+- **Other apps.** Kima supports the OpenSubsonic API, so Subsonic music apps can play from it. Each app gets its own token, which you can revoke.
 - **Scrobbling.** Optionally send your plays to your own ListenBrainz account.
 - **TV.** Kima switches to a layout for remote controls on Android TV, Fire TV and Google TV browsers.
 
@@ -212,13 +212,13 @@ Kima has no telemetry or analytics, and the author receives nothing from your in
 
 ## Contributing
 
-Bug reports and questions go to [GitHub Issues](https://github.com/Chevron7Locked/kima-hub/issues); include your Kima version and the output of `docker logs kima`. To change the code, read [CONTRIBUTING.md](CONTRIBUTING.md), then [docs/development.md](docs/development.md) for running Kima from source and the checks a pull request must pass.
+Bug reports and questions go to [GitHub Issues](https://github.com/Chevron7Locked/kima-hub/issues). Include your Kima version and the output of `docker logs kima`. To change the code, read [CONTRIBUTING.md](CONTRIBUTING.md), then [docs/development.md](docs/development.md) for running Kima from source and the checks a pull request must pass.
 
 ## Licence
 
 Kima is released under the [GNU General Public License v3.0](LICENSE).
 
-The feel weights in `backend/src/services/matching/feelProbe.json` are derived from the DEAM dataset (Aljanaki, Yang & Soleymani, PLOS ONE 2017), which its authors release under Creative Commons BY-NC. That file is licensed under those terms and credited to DEAM; the rest of Kima stays under the GPL.
+The feel weights in `backend/src/services/matching/feelProbe.json` are derived from the DEAM dataset (Aljanaki, Yang & Soleymani, PLOS ONE 2017), which its authors release under Creative Commons BY-NC. That file is licensed under those terms and credited to DEAM. The rest of Kima is under the GPL.
 
 ## Acknowledgements
 
