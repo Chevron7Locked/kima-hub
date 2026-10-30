@@ -96,20 +96,20 @@ docker pull chevron7locked/kima:v1.12.0
 
 ### Pre-release
 
-A pre-release is an unreleased build that the maintainer publishes on purpose. It goes to GitHub's container registry only; Docker Hub carries stable releases.
+A pre-release is an unreleased build that the maintainer publishes on purpose.
+
+A release candidate, such as 1.12.0-rc1, is published to Docker Hub and GitHub's container registry, with release notes on the [releases page](https://github.com/Chevron7Locked/kima-hub/releases). It is tagged `:prerelease` and by its own name, such as `:v1.12.0-rc1`, and a running one shows that version, such as `1.12.0-rc1`. It never moves `:latest`.
 
 ```bash
-docker pull ghcr.io/chevron7locked/kima:prerelease
+docker pull chevron7locked/kima:prerelease
 ```
 
-`:prerelease` always points at the newest one. Each build also has a tag with its commit, such as `:prerelease-a1b2c3d`, for pinning a build or naming it in a bug report. A running pre-release shows its version with `-prerelease` after it, so you can tell which channel it came from.
-
-In Compose the registry prefix is required. Docker assumes Docker Hub when there is none, and the pre-release is not there:
+Between release candidates the maintainer can also publish a build to GitHub's container registry only. It moves `ghcr.io/chevron7locked/kima:prerelease`, has a tag with its commit, such as `:prerelease-a1b2c3d`, for pinning a build or naming it in a bug report, and shows its version with `-prerelease` after it. Docker Hub's `:prerelease` stays on the last release candidate. Pull those with the `ghcr.io/` prefix (`ghcr.io/chevron7locked/kima:prerelease`), in Compose too: without it Docker reads Docker Hub.
 
 ```yaml
 services:
     kima:
-        image: ghcr.io/chevron7locked/kima:prerelease
+        image: chevron7locked/kima:prerelease
 ```
 
 Pre-releases can be unstable. A pre-release applies new database migrations on its first start, and an older image cannot read a database after that. Point it at a fresh data volume and a different port to run it beside your real instance, or back up first.

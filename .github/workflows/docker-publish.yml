@@ -15,7 +15,29 @@ env:
     DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/kima
 
 jobs:
+    # The release text is the version's CHANGELOG.md section; a tag with none stops here, before any image is pushed.
+    changelog:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Find the version's changelog section
+              env:
+                  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+              run: |
+                  base="${VERSION#v}"
+                  base="${base%%-*}"
+                  notes=$(awk -v v="$base" 'index($0, "## [" v "]") == 1 { f = 1; next } f && /^## \[/ { exit } f' CHANGELOG.md)
+                  if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+                    echo "::error::CHANGELOG.md has no section for ${base}"
+                    exit 1
+                  fi
+
     build-amd64:
+        needs: [changelog]
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -52,7 +74,7 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
-            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it moves `prerelease`, never `latest`.
             - name: Extract version
               id: version
               run: |
@@ -62,7 +84,13 @@ jobs:
                     version="${GITHUB_REF#refs/tags/}"
                   fi
                   echo "version=${version}" >> "$GITHUB_OUTPUT"
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+                  if [[ "${version}" == *-* ]]; then
+                    echo "prerelease=true" >> "$GITHUB_OUTPUT"
+                    echo "suffix=${version#*-}" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
+                    echo "suffix=" >> "$GITHUB_OUTPUT"
+                  fi
 
             # Scan the Intel image before publishing; the digest push below reuses
             # its cached layers. Reports only: most findings are base-image packages
@@ -110,6 +138,9 @@ jobs:
                   context: .
                   file: ./Dockerfile
                   platforms: linux/amd64
+                  # The running app shows a pre-release's suffix (1.12.0-rc1); a release shows a bare version.
+                  build-args: |
+                      NEXT_PUBLIC_BUILD_TYPE=${{ steps.version.outputs.suffix }}
                   outputs: type=image,name=${{ env.DOCKERHUB_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
@@ -129,6 +160,7 @@ jobs:
                   retention-days: 1
 
     build-arm64:
+        needs: [changelog]
         runs-on: ubuntu-24.04-arm
         permissions:
             contents: read
@@ -163,6 +195,24 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it moves `prerelease`, never `latest`.
+            - name: Extract version
+              id: version
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    version="${{ inputs.version }}"
+                  else
+                    version="${GITHUB_REF#refs/tags/}"
+                  fi
+                  echo "version=${version}" >> "$GITHUB_OUTPUT"
+                  if [[ "${version}" == *-* ]]; then
+                    echo "prerelease=true" >> "$GITHUB_OUTPUT"
+                    echo "suffix=${version#*-}" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
+                    echo "suffix=" >> "$GITHUB_OUTPUT"
+                  fi
+
             - name: Build and push by digest (arm64)
               id: push
               uses: docker/build-push-action@v7
@@ -170,6 +220,9 @@ jobs:
                   context: .
                   file: ./Dockerfile
                   platforms: linux/arm64
+                  # The running app shows a pre-release's suffix (1.12.0-rc1); a release shows a bare version.
+                  build-args: |
+                      NEXT_PUBLIC_BUILD_TYPE=${{ steps.version.outputs.suffix }}
                   outputs: type=image,name=${{ env.DOCKERHUB_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
@@ -223,7 +276,7 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
-            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it moves `prerelease`, never `latest`.
             - name: Extract version
               id: version
               run: |
@@ -233,7 +286,13 @@ jobs:
                     version="${GITHUB_REF#refs/tags/}"
                   fi
                   echo "version=${version}" >> "$GITHUB_OUTPUT"
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+                  if [[ "${version}" == *-* ]]; then
+                    echo "prerelease=true" >> "$GITHUB_OUTPUT"
+                    echo "suffix=${version#*-}" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
+                    echo "suffix=" >> "$GITHUB_OUTPUT"
+                  fi
 
             - name: Create manifest list and push
               working-directory: ${{ runner.temp }}/digests
@@ -241,6 +300,8 @@ jobs:
                   tags=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }}" -t "${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }}")
                   if [ "${{ steps.version.outputs.prerelease }}" = "false" ]; then
                     tags+=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:latest" -t "${{ env.GHCR_IMAGE_NAME }}:latest")
+                  else
+                    tags+=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:prerelease" -t "${{ env.GHCR_IMAGE_NAME }}:prerelease")
                   fi
                   digests=()
                   for digest in *; do digests+=("${{ env.DOCKERHUB_IMAGE_NAME }}@sha256:${digest}"); done
@@ -259,7 +320,7 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v7
 
-            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it moves `prerelease`, never `latest`.
             - name: Extract version
               id: version
               run: |
@@ -269,30 +330,52 @@ jobs:
                     version="${GITHUB_REF#refs/tags/}"
                   fi
                   echo "version=${version}" >> "$GITHUB_OUTPUT"
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+                  if [[ "${version}" == *-* ]]; then
+                    echo "prerelease=true" >> "$GITHUB_OUTPUT"
+                    echo "suffix=${version#*-}" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
+                    echo "suffix=" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # The release text is this version's CHANGELOG.md section (an rc reads its version's section), then a
+            # quick start. The changelog job has already checked the section exists.
+            - name: Write release notes
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+                  IMAGE: ${{ env.DOCKERHUB_IMAGE_NAME }}
+              run: |
+                  base="${VERSION#v}"
+                  base="${base%%-*}"
+                  notes=$(awk -v v="$base" 'index($0, "## [" v "]") == 1 { f = 1; next } f && /^## \[/ { exit } f' CHANGELOG.md)
+                  if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+                    echo "::error::CHANGELOG.md has no section for ${base}"
+                    exit 1
+                  fi
+                  {
+                    printf '%s\n\n' "$notes"
+                    cat <<EOF
+                  ## Quick start
+
+                  \`\`\`bash
+                  docker run -d \\
+                    --name kima \\
+                    -p 3030:3030 \\
+                    -v /path/to/your/music:/music \\
+                    -v kima_data:/data \\
+                    ${IMAGE}:${VERSION}
+                  \`\`\`
+
+                  Then open http://localhost:3030 and create your account. See the [README](https://github.com/${GITHUB_REPOSITORY}#readme) for full documentation.
+                  EOF
+                  } > "$RUNNER_TEMP/release-notes.md"
 
             - name: Create Release
               uses: softprops/action-gh-release@v3
               with:
                   tag_name: ${{ steps.version.outputs.version }}
                   name: Kima ${{ steps.version.outputs.version }}
-                  body: |
-                      ## Quick Start
-
-                      ```bash
-                      docker run -d \
-                        --name kima \
-                        -p 3030:3030 \
-                        -v /path/to/your/music:/music \
-                        -v kima_data:/data \
-                        ${{ secrets.DOCKERHUB_USERNAME }}/kima:${{ steps.version.outputs.version }}
-                      ```
-
-                      Then open http://localhost:3030 and create your account!
-
-                      ## Documentation
-
-                      See the [README](https://github.com/${{ github.repository }}#readme) for full documentation.
+                  body_path: ${{ runner.temp }}/release-notes.md
                   draft: false
                   prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
                   make_latest: ${{ steps.version.outputs.prerelease == 'true' && 'false' || 'true' }}
