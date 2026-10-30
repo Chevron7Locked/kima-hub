@@ -3,10 +3,11 @@
 /**
  * The collection's masthead: the title, one line on how much of the library
  * has been played, and a thin band split by each mood's share of it in the
- * vibe map's colours, under a soft violet bleed from the top-right.
+ * vibe map's colours (songs that stand out on no single mood as a blend of
+ * all five), under a soft violet bleed from the top-right.
  */
 
-import { MOOD_COLORS, moodLabel, type MoodShare } from "@/features/vibe/mapUtils";
+import { MOOD_COLORS, MOOD_KEYS, moodLabel, type MoodShare } from "@/features/vibe/mapUtils";
 
 interface CollectionMastheadProps {
     title: string;
@@ -40,33 +41,46 @@ export function CollectionMasthead({ title, heardLine, fallbackLine, shares }: C
     );
 }
 
+const rgb = ([r, g, b]: [number, number, number]) => `rgb(${r} ${g} ${b})`;
+
+/** The songs that stand out on no single mood: every one of them still has all five scores, so a blend of the five. */
+const BLEND = `linear-gradient(90deg, ${MOOD_KEYS.map((key) => rgb(MOOD_COLORS[key])).join(", ")})`;
+
+/** What makes a song a mood, on hover: the same line the mixes, stations and tags use. */
+const BAND_TOOLTIP =
+    "a song counts as a mood when it scores 1.25 standard deviations or more above your library's average for that " +
+    "mood. songs that don't stand out on any one of the five are the blend.";
+
+const bandName = (key: string) => (key === "neutral" ? "a mix of moods" : moodLabel(key).toLowerCase());
+
 /** One 4px band, each mood's stretch as wide as its share; a quiet track until the map loads. */
 function MoodBand({ shares }: { shares: MoodShare[] }) {
     const label = shares.length
-        ? "moods: " + shares.map((s) => `${moodLabel(s.key).toLowerCase()} ${Math.round(s.fraction * 100)}%`).join(", ")
+        ? "moods: " + shares.map((s) => `${bandName(s.key)} ${Math.round(s.fraction * 100)}%`).join(", ")
         : undefined;
 
     return (
-        <div
-            role={shares.length ? "img" : undefined}
-            aria-label={label}
-            className="mt-3 h-1 w-full overflow-hidden rounded-full"
-            style={{ background: "rgba(255, 240, 214, 0.06)" }}
-        >
-            <div className="flex h-full w-full">
-                {shares.map((share) => {
-                    const colour = MOOD_COLORS[share.key] ?? MOOD_COLORS.neutral;
-                    return (
+        // A few pixels of hover room around the 4px band, so the tooltip can be reached.
+        <div title={shares.length ? BAND_TOOLTIP : undefined} className="-mb-2 mt-1 py-2">
+            <div
+                role={shares.length ? "img" : undefined}
+                aria-label={label}
+                className="h-1 w-full overflow-hidden rounded-full"
+                style={{ background: "rgba(255, 240, 214, 0.06)" }}
+            >
+                <div className="flex h-full w-full">
+                    {shares.map((share) => (
                         <div
                             key={share.key}
+                            data-mood={share.key}
                             className="h-full transition-[width] duration-500"
                             style={{
                                 width: `${share.fraction * 100}%`,
-                                background: `rgb(${colour[0]} ${colour[1]} ${colour[2]})`,
+                                background: share.key === "neutral" ? BLEND : rgb(MOOD_COLORS[share.key] ?? MOOD_COLORS.neutral),
                             }}
                         />
-                    );
-                })}
+                    ))}
+                </div>
             </div>
         </div>
     );
