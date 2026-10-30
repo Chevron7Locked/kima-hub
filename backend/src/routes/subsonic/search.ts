@@ -11,7 +11,12 @@ export const searchRouter = Router();
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
-    const query = (req.query.query as string | undefined) ?? "";
+    // Clients enumerate the library with `query=` or `query=""` (two literal quote
+    // characters, URL-encoded %22%22). Both mean "browse all" in the Subsonic
+    // ecosystem, so normalise a quotes-only query to the empty string.
+    const query = ((req.query.query as string | undefined) ?? "")
+        .replace(/^["'\s]+/, "")
+        .replace(/["'\s]+$/, "");
 
     const artistCount = clamp(parseIntParam(req.query.artistCount as string | undefined, 20), 0, 500);
     const albumCount  = clamp(parseIntParam(req.query.albumCount  as string | undefined, 20), 0, 500);
@@ -24,10 +29,8 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const isLegacySearch = req.path.startsWith("/search.") || req.path.startsWith("/search/") || req.path.startsWith("/search");
     const responseKey = isSearch3 ? "searchResult3" : isLegacySearch ? "searchResult" : "searchResult2";
 
-    if (!query.trim()) {
-        return subsonicOk(req, res, { [responseKey]: {} });
-    }
-
+    // An empty query means "browse all": the *Fallback helpers below match every
+    // library item on an empty query, respecting count/offset pagination.
     const [artists, rawAlbums, tracks] = await Promise.all([
         artistCount > 0
             ? searchService.searchArtists({ query, limit: artistCount, offset: artistOffset })

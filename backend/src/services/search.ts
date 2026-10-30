@@ -150,8 +150,9 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
+        // Empty query = browse all: the fallback matches every artist.
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchArtistsFallback({ query, limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
@@ -242,8 +243,9 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
+        // Empty query = browse all: the fallback matches every album.
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchAlbumsFallback({ query, limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
@@ -350,8 +352,9 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<TrackSearchResult[]> {
+        // Empty query = browse all: the fallback matches every track.
         if (!query || query.trim().length === 0) {
-            return [];
+            return this.searchTracksFallback({ query, limit, offset });
         }
 
         const tsquery = this.queryToTsquery(query);
