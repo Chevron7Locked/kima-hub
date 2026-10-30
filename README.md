@@ -95,9 +95,6 @@ Each update opens with a short list of what changed and, sometimes, a note from 
   <img src="assets/screenshots/desktop-artist.png" alt="An artist page" width="49%">
 </p>
 
-<p align="center">
-  <img src="assets/screenshots/desktop-collection.png" alt="The collection: browse by mood, album, artist and genre" width="800">
-</p>
 
 ### Finding something to play
 
@@ -107,7 +104,8 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 - **Weekly discovery.** Weekly playlists of music you do not own, built from similar artists and downloaded through Lidarr or Soulseek.
 
 <p align="center">
-  <img src="assets/screenshots/mood-mixer.png" alt="The mood mixer" width="800">
+  <img src="assets/screenshots/desktop-radio.png" alt="Radio: quick-start stations and 14 mood stations" width="49%">
+  <img src="assets/screenshots/mood-mixer.png" alt="The mood mixer" width="49%">
 </p>
 
 ### Podcasts and audiobooks

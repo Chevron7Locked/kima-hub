@@ -10,7 +10,10 @@
  * The card is rendered last from scripts/social-card.html, using the screenshots already on disk.
  *
  * Override the album, artist and song it shows with KIMA_SHOT_ALBUM, KIMA_SHOT_ALBUM_ARTIST, KIMA_SHOT_ARTIST and
- * KIMA_SHOT_TRACK.
+ * KIMA_SHOT_TRACK. KIMA_SHOT_DIR saves somewhere other than assets/screenshots, for a trial run.
+ *
+ * The update window (whats-new) is taken only when it opens by itself after signing in, so sign in with an account
+ * that has not answered the newest release yet.
  */
 
 const { execFileSync } = require("child_process");
@@ -50,15 +53,15 @@ const { chromium } = require(require.resolve("playwright", { paths: [process.cwd
 const BASE_URL = requireBaseUrl();
 const USERNAME = process.env.KIMA_TEST_USERNAME;
 const PASSWORD = process.env.KIMA_TEST_PASSWORD;
-const OUT_DIR = path.resolve(__dirname, "../assets/screenshots");
+const OUT_DIR = path.resolve(process.env.KIMA_SHOT_DIR || path.resolve(__dirname, "../assets/screenshots"));
 const CARD_HTML = path.resolve(__dirname, "social-card.html");
 const CARD_OUT = path.resolve(__dirname, "../assets/social-card.png");
 const MAX_BYTES = 700 * 1024;
 
 const PICKS = {
-    album: process.env.KIMA_SHOT_ALBUM || "Discovery",
-    albumArtist: process.env.KIMA_SHOT_ALBUM_ARTIST || "Daft Punk",
-    artist: process.env.KIMA_SHOT_ARTIST || "Radiohead",
+    album: process.env.KIMA_SHOT_ALBUM || "Violator",
+    albumArtist: process.env.KIMA_SHOT_ALBUM_ARTIST || "Depeche Mode",
+    artist: process.env.KIMA_SHOT_ARTIST || "Muse",
     track: process.env.KIMA_SHOT_TRACK || "Digital Love",
     search: "quiet piano",
     pathStart: "calm ambient pads",
@@ -128,9 +131,8 @@ async function guard(page, name) {
     if (bad.length) throw new Error(`${name} shows ${bad.join(" and ")}`);
 }
 
-// The bell's activity dot and the count badges would show the owner's notifications.
-const HIDE_INDICATORS =
-    'button[aria-label="Toggle activity panel"] > span.absolute, button[aria-label^="Notifications ("] > span.absolute, button[aria-label^="Downloads ("] > span.absolute { visibility: hidden; }';
+// The bell's activity dot would show the owner's notifications.
+const HIDE_INDICATORS = 'button[aria-label="Toggle activity panel"] > span.absolute { visibility: hidden; }';
 
 async function shot(page, name) {
     await guard(page, name);
@@ -144,6 +146,9 @@ async function shot(page, name) {
     console.log(`  [ok] ${name}.png (${Math.round(fs.statSync(file).size / 1024)} KB)`);
 }
 
+// The page the shots in progress are taken on, for keeping a picture of a failed one.
+let currentPage = null;
+
 async function attempt(name, fn, { always = false } = {}) {
     if (!always && !want(name)) return;
     try {
@@ -151,6 +156,10 @@ async function attempt(name, fn, { always = false } = {}) {
     } catch (e) {
         failures.push(name);
         console.warn(`  [fail] ${name}: ${e.message.split("\n")[0]}`);
+        // A trial run (KIMA_SHOT_DIR) keeps what the page showed when the shot failed.
+        if (currentPage && process.env.KIMA_SHOT_DIR) {
+            await currentPage.screenshot({ path: path.join(OUT_DIR, `${name}.failed.png`) }).catch(() => {});
+        }
     }
 }
 
@@ -165,14 +174,15 @@ async function login(page) {
 // The release window opens over a fresh login and swallows every click; close it whenever it appears.
 async function dismissWhatsNew(page) {
     const modal = page.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-    const dismiss = modal.locator('[aria-label="Dismiss"]');
-    await page.addLocatorHandler(modal, async () => {
-        if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
-    });
+    const dismiss = modal.locator('[aria-label="Close"]');
+    // Closed by hand first: a click made once the handler is in place would be taken over by the handler itself.
     if (await dismiss.isVisible({ timeout: 4000 }).catch(() => false)) {
         await dismiss.click();
         await dismiss.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
     }
+    await page.addLocatorHandler(modal, async () => {
+        if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
+    });
 }
 
 // Client-side navigation, so the song that is playing keeps playing.
@@ -271,15 +281,14 @@ async function openPathPanel(page) {
     await page.waitForTimeout(1200);
 }
 
-// Opens the right-hand activity panel on its Queue tab. The header carries the
-// unread and download counts; they are not part of any picture, so they are hidden.
+// Opens the right-hand panel on its up next list. The activity counts are not part of any picture, so they are hidden.
 async function showQueue(page) {
-    const toggle = page.getByLabel("Toggle activity panel");
-    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-        await toggle.click();
+    const open = page.getByRole("button", { name: "open panel" });
+    if (await open.isVisible().catch(() => false)) {
+        await open.click();
         await page.waitForTimeout(1200);
     }
-    const tab = page.getByRole("button", { name: /^queue$/i });
+    const tab = page.getByRole("tab", { name: /^up next/ });
     await tab.waitFor({ timeout: 10_000 });
     await tab.click();
     await settle(page, 1500);
@@ -365,7 +374,16 @@ async function takeDesktopShots(browser) {
     console.log("\nDesktop (1440x900 at 2x)...");
     const ctx = await browser.newContext(DESKTOP);
     const p = await ctx.newPage();
+    currentPage = p;
     await login(p);
+
+    await attempt("whats-new", async () => {
+        const modal = p.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
+        await modal.waitFor({ timeout: 15_000 });
+        await settle(p, 2500);
+        await shot(p, "whats-new");
+    });
+
     await dismissWhatsNew(p);
     await p.waitForTimeout(3000);
 
@@ -399,6 +417,12 @@ async function takeDesktopShots(browser) {
         await p.locator("h2, h3", { hasText: /^popular$/i }).first().waitFor({ timeout: 45_000 });
         await settle(p);
         await shot(p, "desktop-artist");
+    });
+
+    await attempt("desktop-radio", async () => {
+        await nav(p, "/radio");
+        await settle(p, 2500);
+        await shot(p, "desktop-radio");
     });
 
     await attempt("desktop-stats", async () => {
@@ -441,6 +465,7 @@ async function takePhoneShots(browser) {
     console.log("\nPhone (390x844 at 3x)...");
     const ctx = await browser.newContext(PHONE);
     const p = await ctx.newPage();
+    currentPage = p;
     await login(p);
     await dismissWhatsNew(p);
     await p.waitForTimeout(3000);
@@ -462,17 +487,9 @@ async function takePhoneShots(browser) {
     });
 
     await attempt("mobile-vibe", async () => {
+        // The page as it opens: the whole map, and the sheet at rest with the playing song and the search.
         await openMap(p);
-        await pickOnMap(p, PICKS.track);
-        await p.getByLabel("Play this track").first().click();
-        await p.waitForFunction(() => {
-            const a = document.querySelector("audio");
-            return !!a && a.currentTime > 2;
-        }, null, { timeout: 20_000 });
-        // One song alone in the queue, so the map shows no queue thread; then back to the whole map.
-        await p.getByLabel("Clear highlights and paths").first().click();
-        await p.getByLabel("Show the whole library").click();
-        await p.waitForTimeout(4000);
+        await settle(p, 2000);
         await shot(p, "mobile-vibe");
     });
 
@@ -520,7 +537,7 @@ async function main() {
     });
 
     try {
-        const desktop = ["desktop-home", "desktop-library", "desktop-album", "desktop-artist", "desktop-stats", "mood-mixer", "desktop-podcasts", "desktop-audiobooks", "vibe-map", "vibe-track", "vibe-search", "vibe-blend", "vibe-songpath"];
+        const desktop = ["whats-new", "desktop-home", "desktop-library", "desktop-radio", "desktop-album", "desktop-artist", "desktop-stats", "mood-mixer", "desktop-podcasts", "desktop-audiobooks", "vibe-map", "vibe-track", "vibe-search", "vibe-blend", "vibe-songpath"];
         const phone = ["mobile-home", "mobile-library", "mobile-vibe", "mobile-player"];
         if (desktop.some(want)) await takeDesktopShots(browser);
         if (phone.some(want)) await takePhoneShots(browser);
