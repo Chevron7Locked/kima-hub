@@ -7,8 +7,8 @@ import { test, expect, Browser, Page, BrowserContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
 import { PLAYER, settle } from "../fixtures/shared";
 import { dismissWhatsNew, getAuthToken, loginAsTestUser } from "../fixtures/test-helpers";
-import { withApiKey } from "./apiKey";
 import { requireBaseUrl, destructiveVerdict } from "../fixtures/target";
+import { stackSql } from "../fixtures/stackDb";
 
 const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
@@ -558,10 +558,17 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
             return (await res.json()).totalRows;
         };
 
-        await session.step("scrobble three back-dated plays, five seconds apart", async () => {
-            // Five seconds of a track is a provable skip, so the first two plays
-            // give the audit something to act on in every run. The dates sit long
-            // before any real play; a repeat run's rows are refused as duplicates.
+        await session.step("plant back-dated plays from before the listen rule on three tracks, five seconds apart", async () => {
+            // Every play recorded today has passed the listen rule and is stored as heard, so no request can make a
+            // skip. The audit exists for history older versions wrote (rows not marked heard); those are planted in the
+            // stack's database. Five seconds of a track is a provable skip, so the first two give the audit something
+            // to act on; three rows on the first make one duplicate to merge. The dates sit long before any real
+            // play; a repeat run first clears what an earlier run left.
+            if (stackSql("SELECT 1") === null) {
+                session.noteNotCovered("stats 7b (merge, ignore, restore, remove play history) did not run: KIMA_CONTAINER does not name the stack's container, so no old-style history could be planted");
+                test.skip(true, "no container to plant play history in");
+            }
+            const me = await (await page.request.get("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })).json();
             const tracksRes = await page.request.get("/api/library/tracks?limit=50", {
                 headers: { Authorization: `Bearer ${token}` },
             });
@@ -577,18 +584,18 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
             });
             expect(restored.ok(), `putting the tracks back returned ${restored.status()}`).toBeTruthy();
 
-            await withApiKey(page, token, "dogfood-audit", async (apiKey) => {
-                const start = Date.UTC(2001, 0, 1);
-                for (const [i, track] of picked.entries()) {
-                    const res = await page.request.get(
-                        `/rest/scrobble.view?u=${encodeURIComponent(username)}` +
-                            `&apiKey=${encodeURIComponent(apiKey)}&id=${track.id}` +
-                            `&time=${start + i * 5000}&submission=true&v=1.16.1&c=kima-dogfood&f=json`,
-                    );
-                    const status = (await res.json())?.["subsonic-response"]?.status;
-                    expect(status, `scrobble ${i + 1} answered "${status}"`).toBe("ok");
-                }
-            });
+            const rows: Array<[string, number]> = [
+                [picked[0].id, 0],
+                [picked[0].id, 1],
+                [picked[0].id, 2],
+                [picked[1].id, 5],
+                [picked[2].id, 10],
+            ];
+            const values = rows
+                .map(([trackId, s], n) => `('dogfood-audit-${n}', '${me.id}', '${trackId}', TIMESTAMP '2000-01-01 00:00:00' + INTERVAL '${s} seconds', 'SUBSONIC', false)`)
+                .join(", ");
+            stackSql(`DELETE FROM "Play" WHERE id LIKE 'dogfood-audit-%'`);
+            stackSql(`INSERT INTO "Play" (id, "userId", "trackId", "playedAt", source, heard) VALUES ${values}`);
 
             const flagged = new Set((await audit()).tracks.map((t: { trackId: string }) => t.trackId));
             expect(
