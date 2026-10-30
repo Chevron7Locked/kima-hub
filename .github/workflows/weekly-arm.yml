@@ -1,70 +1,22 @@
-name: Nightly Full Suite
+name: Weekly ARM Checks
+
+# The image boots on a native ARM runner and its vendored MusiCNN models still match a fresh conversion of their
+# committed sources. The full end-to-end suite is not run here: it needs a real music library, which CI does not
+# have; the release gate runs it on a full stack.
 
 on:
     schedule:
-        - cron: "0 3 * * *"
+        - cron: "0 3 * * 0"
     workflow_dispatch:
 
 concurrency:
-    group: nightly
+    group: weekly-arm
     cancel-in-progress: true
 
+permissions:
+    contents: read
+
 jobs:
-    full-e2e:
-        name: Full E2E Suite
-        runs-on: ubuntu-latest
-        timeout-minutes: 60
-        permissions:
-            issues: write
-
-        steps:
-            - uses: actions/checkout@v4
-
-            - name: Build image, start stack, create test user, install Playwright
-              uses: ./.github/actions/e2e-stack
-              with:
-                  tag: nightly
-                  container: kima-nightly
-                  volume: kima_nightly_data
-
-            - name: Run full E2E suite
-              working-directory: frontend
-              run: npx playwright test --reporter=list
-              env:
-                  KIMA_TEST_USERNAME: ${{ env.KIMA_TEST_USERNAME }}
-                  KIMA_TEST_PASSWORD: ${{ env.KIMA_TEST_PASSWORD }}
-                  KIMA_UI_BASE_URL: http://127.0.0.1:3080
-
-            - name: Upload results
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: nightly-report-${{ github.run_id }}
-                  path: |
-                      frontend/test-results/
-                      frontend/playwright-report/
-                  retention-days: 14
-
-            - name: Open issue on failure
-              if: failure()
-              uses: actions/github-script@v7
-              with:
-                  script: |
-                      await github.rest.issues.create({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        title: `Nightly suite failed -- ${new Date().toISOString().split('T')[0]}`,
-                        body: `The nightly E2E suite failed on ${context.sha}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-                        labels: ['bug', 'ci']
-                      });
-
-            - name: Stop stack
-              if: always()
-              uses: ./.github/actions/e2e-teardown
-              with:
-                  container: kima-nightly
-                  volume: kima_nightly_data
-
     arm64-smoke:
         name: ARM64 native boot check
         runs-on: ubuntu-24.04-arm
@@ -73,13 +25,13 @@ jobs:
             contents: read
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Build image (native arm64)
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -118,7 +70,7 @@ jobs:
 
             - name: Upload boot log
               if: always()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: arm64-smoke-log-${{ github.run_id }}
                   path: /tmp/arm64-boot.log
@@ -138,7 +90,7 @@ jobs:
             contents: read
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             # Re-derives the vendored ONNX from the frozen .pb sources and gates
             # it against the vendored reference answers, on the architecture the
@@ -153,3 +105,35 @@ jobs:
                   docker build \
                     -f ci-reprove.Dockerfile -t musicnn-reproof . \
                     || { echo "::error::vendored ONNX does not match a fresh conversion of the committed .pb sources"; exit 1; }
+
+    report-failure:
+        name: Open an issue on failure
+        needs: [arm64-smoke, musicnn-reproof]
+        if: failure() && github.event_name == 'schedule'
+        runs-on: ubuntu-latest
+        permissions:
+            issues: write
+        steps:
+            - uses: actions/github-script@v9
+              with:
+                  script: |
+                      // One open issue per failing check: a repeat failure comments on it instead of opening another.
+                      const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+                      const open = await github.paginate(github.rest.issues.listForRepo, {
+                        owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'ci',
+                      });
+                      const existing = open.find((i) => i.title.startsWith('Weekly ARM checks failed'));
+                      if (existing) {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number,
+                          body: `Failed again on ${context.sha}.\n\nRun: ${run}`,
+                        });
+                      } else {
+                        await github.rest.issues.create({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          title: `Weekly ARM checks failed -- ${new Date().toISOString().split('T')[0]}`,
+                          body: `The weekly ARM checks failed on ${context.sha}.\n\nRun: ${run}`,
+                          labels: ['bug', 'ci']
+                        });
+                      }

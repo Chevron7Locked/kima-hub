@@ -11,19 +11,22 @@ on:
         - cron: "0 2 * * 0"
     workflow_dispatch:
 
+permissions:
+    contents: read
+
 jobs:
     dependency-audit:
         name: Dependency & Secret Scan
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             # Trivy reads both lockfiles and the Python requirements in one pass,
             # and finds committed secrets at the same time.
             - name: Install Trivy
               uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
               with:
-                  version: v0.74.0
+                  version: v0.76.1
                   cache: true
 
             # Blocks on anything HIGH or CRITICAL that has a fix published --
@@ -73,7 +76,7 @@ jobs:
         timeout-minutes: 30
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Build image, start stack, create test user, install Playwright
               uses: ./.github/actions/e2e-stack
@@ -92,7 +95,7 @@ jobs:
 
             - name: Upload results on failure
               if: failure()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: security-test-results-${{ github.run_id }}
                   path: frontend/test-results/
@@ -104,3 +107,35 @@ jobs:
               with:
                   container: kima-security
                   volume: kima_security_data
+
+    report-failure:
+        name: Open an issue on failure
+        needs: [dependency-audit, security-e2e]
+        if: failure() && github.event_name == 'schedule'
+        runs-on: ubuntu-latest
+        permissions:
+            issues: write
+        steps:
+            - uses: actions/github-script@v9
+              with:
+                  script: |
+                      // One open issue per failing check: a repeat failure comments on it instead of opening another.
+                      const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+                      const open = await github.paginate(github.rest.issues.listForRepo, {
+                        owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'ci',
+                      });
+                      const existing = open.find((i) => i.title.startsWith('Weekly security checks failed'));
+                      if (existing) {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number,
+                          body: `Failed again on ${context.sha}.\n\nRun: ${run}`,
+                        });
+                      } else {
+                        await github.rest.issues.create({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          title: `Weekly security checks failed -- ${new Date().toISOString().split('T')[0]}`,
+                          body: `The weekly security checks failed on ${context.sha}.\n\nRun: ${run}`,
+                          labels: ['bug', 'ci']
+                        });
+                      }

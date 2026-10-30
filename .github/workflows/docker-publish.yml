@@ -22,7 +22,7 @@ jobs:
             packages: write
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Set GHCR image name
               run: |
@@ -37,35 +37,38 @@ jobs:
                   sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to DockerHub
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   username: ${{ secrets.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
             - name: Extract version
               id: version
               run: |
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                    echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+                    version="${{ inputs.version }}"
                   else
-                    echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                    version="${GITHUB_REF#refs/tags/}"
                   fi
+                  echo "version=${version}" >> $GITHUB_OUTPUT
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
 
             # Scan the Intel image before publishing; the digest push below reuses
             # its cached layers. Reports only: most findings are base-image packages
             # with no fix yet, and security.yml blocks on the fixable ones.
             - name: Build image for scanning (amd64)
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -79,7 +82,7 @@ jobs:
             - name: Install Trivy
               uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
               with:
-                  version: v0.74.0
+                  version: v0.76.1
                   cache: true
 
             - name: Scan the image (report only)
@@ -102,7 +105,7 @@ jobs:
 
             - name: Build and push by digest (amd64)
               id: push
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -118,7 +121,7 @@ jobs:
                   touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
             - name: Upload digest
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: digests-amd64
                   path: ${{ runner.temp }}/digests/*
@@ -132,7 +135,7 @@ jobs:
             packages: write
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             # Same head room the amd64 job needs: the image carries the ML
             # models and a full Postgres, so a default runner's disk fills
@@ -145,16 +148,16 @@ jobs:
                   sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to DockerHub
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   username: ${{ secrets.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
@@ -162,7 +165,7 @@ jobs:
 
             - name: Build and push by digest (arm64)
               id: push
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -178,7 +181,7 @@ jobs:
                   touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
             - name: Upload digest
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: digests-arm64
                   path: ${{ runner.temp }}/digests/*
@@ -198,44 +201,48 @@ jobs:
                   echo "GHCR_IMAGE_NAME=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
 
             - name: Download digests
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                   path: ${{ runner.temp }}/digests
                   pattern: digests-*
                   merge-multiple: true
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to DockerHub
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   username: ${{ secrets.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
             - name: Extract version
               id: version
               run: |
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                    echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+                    version="${{ inputs.version }}"
                   else
-                    echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                    version="${GITHUB_REF#refs/tags/}"
                   fi
+                  echo "version=${version}" >> $GITHUB_OUTPUT
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
 
             - name: Create manifest list and push
               working-directory: ${{ runner.temp }}/digests
               run: |
-                  docker buildx imagetools create -t ${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-                    -t ${{ env.DOCKERHUB_IMAGE_NAME }}:latest \
-                    -t ${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-                    -t ${{ env.GHCR_IMAGE_NAME }}:latest \
+                  tags=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }}" -t "${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }}")
+                  if [ "${{ steps.version.outputs.prerelease }}" = "false" ]; then
+                    tags+=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:latest" -t "${{ env.GHCR_IMAGE_NAME }}:latest")
+                  fi
+                  docker buildx imagetools create "${tags[@]}" \
                     $(printf '${{ env.DOCKERHUB_IMAGE_NAME }}@sha256:%s ' *)
 
             - name: Inspect image
@@ -249,19 +256,22 @@ jobs:
             contents: write
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
+            # A version with a suffix (v1.12.0-rc1) is a pre-release: it never moves `latest`.
             - name: Extract version
               id: version
               run: |
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                    echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+                    version="${{ inputs.version }}"
                   else
-                    echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                    version="${GITHUB_REF#refs/tags/}"
                   fi
+                  echo "version=${version}" >> $GITHUB_OUTPUT
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
 
             - name: Create Release
-              uses: softprops/action-gh-release@v2
+              uses: softprops/action-gh-release@v3
               with:
                   tag_name: ${{ steps.version.outputs.version }}
                   name: Kima ${{ steps.version.outputs.version }}
@@ -283,5 +293,6 @@ jobs:
 
                       See the [README](https://github.com/${{ github.repository }}#readme) for full documentation.
                   draft: false
-                  prerelease: false
+                  prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+                  make_latest: ${{ steps.version.outputs.prerelease == 'true' && 'false' || 'true' }}
                   generate_release_notes: true

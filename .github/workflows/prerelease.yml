@@ -32,7 +32,7 @@ jobs:
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Set image name
               run: |
@@ -49,10 +49,10 @@ jobs:
                   sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
@@ -64,7 +64,7 @@ jobs:
 
             - name: Build and push by digest (amd64)
               id: push
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -88,7 +88,7 @@ jobs:
                   touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
             - name: Upload digest
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: digests-amd64
                   path: ${{ runner.temp }}/digests/*
@@ -105,7 +105,7 @@ jobs:
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Set image name
               run: |
@@ -123,10 +123,10 @@ jobs:
                   sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
@@ -138,7 +138,7 @@ jobs:
 
             - name: Build and push by digest (arm64)
               id: push
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: ./Dockerfile
@@ -162,7 +162,7 @@ jobs:
                   touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
             - name: Upload digest
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: digests-arm64
                   path: ${{ runner.temp }}/digests/*
@@ -179,7 +179,7 @@ jobs:
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Set image name
               run: |
@@ -187,17 +187,17 @@ jobs:
                   echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
 
             - name: Download digests
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                   path: ${{ runner.temp }}/digests
                   pattern: digests-*
                   merge-multiple: true
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}

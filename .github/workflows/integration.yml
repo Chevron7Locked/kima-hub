@@ -6,9 +6,13 @@ on:
         types: [labeled]
     workflow_dispatch:
 
+# Keyed by label too, so adding some other label (a run that does nothing) never cancels an e2e run in progress.
 concurrency:
-    group: integration-${{ github.ref }}
+    group: integration-${{ github.ref }}-${{ github.event.label.name || 'manual' }}
     cancel-in-progress: true
+
+permissions:
+    contents: read
 
 jobs:
     e2e:
@@ -18,7 +22,7 @@ jobs:
         timeout-minutes: 60
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Build image, start stack, create test user, install Playwright
               uses: ./.github/actions/e2e-stack
@@ -53,7 +57,7 @@ jobs:
 
             - name: Upload test results on failure
               if: failure()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: playwright-results-${{ github.run_id }}
                   path: |

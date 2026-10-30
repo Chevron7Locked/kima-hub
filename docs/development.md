@@ -90,7 +90,7 @@ npm run test:predeploy
 
 The stats journey's destructive buttons (wiping play history and the like) also need a marked copy of an account: the target's `host:port` listed in `KIMA_STATS_ALLOWED_TARGETS` (comma-separated), `KIMA_STATS_DESTRUCTIVE_OK` set to that same `host:port`, and a playlist named `__kima-test-copy__` owned by the test user. Without all three that journey is recorded as not covered.
 
-`npm run test:predeploy` covers sign-in, integrations, the library and playback. `npm run test:dogfood` runs the longer walkthrough. In CI the shorter set runs on a built image when a pull request carries the `run-e2e` label, and the full suite runs nightly.
+`npm run test:predeploy` covers sign-in, integrations, the library and playback. `npm run test:dogfood` runs the longer walkthrough. In CI the shorter set runs on a built image (with no music library) when a pull request carries the `run-e2e` label. The full suite needs a real library, so it runs before a release on full test stacks, one ARM and one amd64.
 
 ## Building the image
 
