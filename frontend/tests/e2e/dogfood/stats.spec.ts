@@ -150,7 +150,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
                 expect(
                     body,
                     "the concentration figure the ledger prints must be the one the API returned",
-                ).toContain(`${allTime!.forHalf} songs`);
+                ).toContain(`${allTime!.forHalf} ${allTime!.forHalf === 1 ? "track" : "tracks"}`);
             }
         });
 
@@ -287,7 +287,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         await session.step("pressing play on a top track starts audio", async () => {
             await page.goto("/stats");
             await settle(page);
-            const trackRow = page.locator('main ol li button[aria-label^="Play "]').first();
+            const trackRow = page.locator('main ol li button[aria-label^="play " i]').first();
             await expect(trackRow).toBeVisible({ timeout: 15_000 });
             await trackRow.click();
 
