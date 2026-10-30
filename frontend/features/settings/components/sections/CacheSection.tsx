@@ -880,7 +880,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         <EnrichmentStage
                                             icon={Smile}
                                             label="Moods"
-                                            description="The 22 learned moods for each song, scored from its sound vector, behind the mood mixes, stations and song tags"
+                                            description="The 21 moods Kima learns for each song, scored from its sound vector, behind the mood mixes, mood stations and song tags"
                                             completed={enrichmentProgress.moods.completed}
                                             total={enrichmentProgress.moods.total}
                                             progress={enrichmentProgress.moods.progress}

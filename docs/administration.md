@@ -12,7 +12,7 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 | Artist Metadata | Bios, photos, genres and similar artists from Wikipedia, Fanart.tv, Deezer, MusicBrainz and ListenBrainz |
 | Audio Analysis | Tempo, key, energy, danceability, and the valence and arousal behind a song's feel, read from the middle 90 seconds of each file |
 | Vibe Embeddings | The sound vector for each song, from the CLAP music model |
-| Moods | The 22 learned moods for each song, scored from its sound vector, behind the mood mixes, stations and song tags |
+| Moods | The 21 moods Kima learns for each song, scored from its sound vector, behind the mood mixes, mood stations and song tags |
 | Similarity | The matches between songs, and the vibe map, from sound, feel and artist genre |
 
 **Settings > Library Enrichment** shows each step's progress and has these buttons:

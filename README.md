@@ -99,7 +99,7 @@ Each update opens with a short list of what changed and, sometimes, a note from 
 ### Finding something to play
 
 - **Mood mixes.** Pick one of five moods and Kima builds a playlist from the songs that fit.
-- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, stations for your common genres and decades, and 14 mood stations (Calm, Late Night, Road Trip, Wildcard and more) drawn from the 22 moods Kima learns for each song.
+- **Made for you and radio.** Generated mixes on the home page, and one-click radio stations: shuffle everything, high energy, lesser-played, most played, stations for your common genres and decades, and 14 mood stations (Calm, Road Trip, Wildcard, Late Night and more). Late Night plays from your own late-night listening; the others are built from the 21 moods Kima learns for each song.
 - **Similar artists.** Taken from ListenBrainz, with Deezer as a fallback, and ranked toward your library. Each one shows how many of their albums you own.
 - **Weekly discovery.** Weekly playlists of music you do not own, built from similar artists and downloaded through Lidarr or Soulseek.
 
