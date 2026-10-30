@@ -7,6 +7,7 @@
  * all five), under a soft violet bleed from the top-right.
  */
 
+import { useId, useState } from "react";
 import { MOOD_COLORS, MOOD_KEYS, moodLabel, type MoodShare } from "@/features/vibe/mapUtils";
 
 interface CollectionMastheadProps {
@@ -46,42 +47,68 @@ const rgb = ([r, g, b]: [number, number, number]) => `rgb(${r} ${g} ${b})`;
 /** The songs that stand out on no single mood: every one of them still has all five scores, so a blend of the five. */
 const BLEND = `linear-gradient(90deg, ${MOOD_KEYS.map((key) => rgb(MOOD_COLORS[key])).join(", ")})`;
 
-/** What makes a song a mood, on hover: the same line the mixes, stations and tags use. */
+/** What makes a song a mood, on hover or a tap: the same line the mixes, stations and tags use. */
 const BAND_TOOLTIP =
     "a song counts as a mood when it scores 1.25 standard deviations or more above your library's average for that " +
     "mood. songs that don't stand out on any one of the five are the blend.";
 
 const bandName = (key: string) => (key === "neutral" ? "a mix of moods" : moodLabel(key).toLowerCase());
 
-/** One 4px band, each mood's stretch as wide as its share; a quiet track until the map loads. */
+/**
+ * One 4px band, each mood's stretch as wide as its share; a quiet track until the map loads. Hovering it shows what makes
+ * a song a mood; a tap or a click spells it out under the band, for touch screens, where a hover tooltip never shows.
+ */
 function MoodBand({ shares }: { shares: MoodShare[] }) {
+    const [explained, setExplained] = useState(false);
+    const explanationId = useId();
     const label = shares.length
         ? "moods: " + shares.map((s) => `${bandName(s.key)} ${Math.round(s.fraction * 100)}%`).join(", ")
         : undefined;
 
-    return (
-        // A few pixels of hover room around the 4px band, so the tooltip can be reached.
-        <div title={shares.length ? BAND_TOOLTIP : undefined} className="-mb-2 mt-1 py-2">
-            <div
-                role={shares.length ? "img" : undefined}
-                aria-label={label}
-                className="h-1 w-full overflow-hidden rounded-full"
-                style={{ background: "rgba(255, 240, 214, 0.06)" }}
-            >
-                <div className="flex h-full w-full">
-                    {shares.map((share) => (
-                        <div
-                            key={share.key}
-                            data-mood={share.key}
-                            className="h-full transition-[width] duration-500"
-                            style={{
-                                width: `${share.fraction * 100}%`,
-                                background: share.key === "neutral" ? BLEND : rgb(MOOD_COLORS[share.key] ?? MOOD_COLORS.neutral),
-                            }}
-                        />
-                    ))}
-                </div>
+    const band = (
+        // The keyboard ring hugs the band itself, not the larger tap area around it.
+        <div
+            className="h-1 w-full overflow-hidden rounded-full group-focus-visible:outline-2 group-focus-visible:outline-offset-4 group-focus-visible:outline-brand"
+            style={{ background: "rgba(255, 240, 214, 0.06)" }}
+        >
+            <div className="flex h-full w-full">
+                {shares.map((share) => (
+                    <div
+                        key={share.key}
+                        data-mood={share.key}
+                        className="h-full transition-[width] duration-500"
+                        style={{
+                            width: `${share.fraction * 100}%`,
+                            background: share.key === "neutral" ? BLEND : rgb(MOOD_COLORS[share.key] ?? MOOD_COLORS.neutral),
+                        }}
+                    />
+                ))}
             </div>
         </div>
+    );
+
+    // Until the map loads there is nothing to explain: a plain track where the band will be.
+    if (!shares.length) return <div className="mt-3">{band}</div>;
+
+    return (
+        <>
+            {/* A 44px target around the 4px band, which stays exactly where it was. */}
+            <button
+                type="button"
+                title={BAND_TOOLTIP}
+                aria-label={label}
+                aria-expanded={explained}
+                aria-controls={explanationId}
+                onClick={() => setExplained((open) => !open)}
+                className="group -mb-5 -mt-2 block w-full py-5"
+                // The global keyboard ring would box the whole tap area across the text around it; the band draws its own.
+                style={{ outline: "none" }}
+            >
+                {band}
+            </button>
+            <p id={explanationId} hidden={!explained} className="mt-2 max-w-prose text-xs text-[var(--text-muted)]">
+                {BAND_TOOLTIP}
+            </p>
+        </>
     );
 }

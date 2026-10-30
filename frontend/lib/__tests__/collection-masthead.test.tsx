@@ -20,7 +20,7 @@ function show() {
     act(() =>
         dom.root.render(<CollectionMasthead title="Collection" heardLine={null} fallbackLine="9 albums" shares={shares} />),
     );
-    return dom.host.querySelector<HTMLElement>('[role="img"]')!;
+    return dom.host.querySelector<HTMLElement>('button[aria-label^="moods:"]')!;
 }
 
 describe("CollectionMasthead mood band", () => {
@@ -40,11 +40,24 @@ describe("CollectionMasthead mood band", () => {
 
     it("says what makes a song a mood, and names the blend as a mix", () => {
         const band = show();
-        const tooltip = band.closest("[title]")?.getAttribute("title") ?? "";
+        const tooltip = band.getAttribute("title") ?? "";
         expect(tooltip).toMatch(/1\.25/);
         expect(tooltip).toMatch(/your library's average/);
         expect(tooltip).toBe(tooltip.toLowerCase());
         expect(band.getAttribute("aria-label")).toContain("a mix of moods 49%");
         expect(band.getAttribute("aria-label")).not.toContain("no single mood");
+    });
+
+    it("spells the rule out under the band on a tap, for touch screens where a tooltip never shows", () => {
+        const band = show();
+        const explanation = document.getElementById(band.getAttribute("aria-controls")!)!;
+        expect(band.getAttribute("aria-expanded")).toBe("false");
+        expect(explanation.hidden).toBe(true);
+        act(() => band.click());
+        expect(band.getAttribute("aria-expanded")).toBe("true");
+        expect(explanation.hidden).toBe(false);
+        expect(explanation.textContent).toBe(band.getAttribute("title"));
+        act(() => band.click());
+        expect(explanation.hidden).toBe(true);
     });
 });
