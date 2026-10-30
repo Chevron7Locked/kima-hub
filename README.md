@@ -14,7 +14,7 @@ Kima is a music server you run yourself. Point it at a folder of music and it gi
 **iOS app:** coming soon to the App Store.
 
 > [!IMPORTANT]
-> **Upgrading from 1.11 to 1.12:** Kima now uses the music-tuned sound model, so the update replaces your library's sound vectors and builds them again in the background, on its own. Until it finishes, similar tracks, the vibe map, search by sound and the mood stations fill in as songs are done. Your music, playlists, plays, likes, edits and the rest of enrichment stay. It took about half an hour for 9,000 songs with a GPU; without one, plan on roughly an hour or more per 10,000 songs. See the [1.12 release notes](https://github.com/Chevron7Locked/kima-hub/releases).
+> **Upgrading from 1.11 to 1.12:** Kima now uses the music-tuned sound model, so the update replaces your library's sound vectors and analyses every song again, in the background, on its own. Until it finishes, similar tracks, the vibe map, search by sound and the mood stations fill in as songs are done. Your music, playlists, plays, likes, edits, identification and artists stay. It took just under two hours for 9,176 songs with a GPU, and takes longer without one. See the [1.12 release notes](https://github.com/Chevron7Locked/kima-hub/releases).
 
 <p align="center">
   <img src="assets/screenshots/mobile-home.png" alt="The home page on a phone" width="22%">
@@ -63,7 +63,7 @@ Click a star to see the song with four actions: Play, Match Vibe (queue the song
 
 ### How it is worked out
 
-After a scan, Kima runs six enrichment steps in the background: song identification, artist metadata, audio analysis, vibe embeddings (the sound vectors), moods and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 9,004 songs took 87 minutes with an NVIDIA RTX 4060 Ti and both GPU switches on: about 1 minute per 100 songs. Without a graphics card, an earlier 1.11 build on the same machine took 98 minutes for 8,985 songs, about 1.1 minutes per 100. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card; see [docs/gpu.md](docs/gpu.md).
+After a scan, Kima runs six enrichment steps in the background: song identification, artist metadata, audio analysis, vibe embeddings (the sound vectors), moods and similarity (the matches and the map). **Settings > Library Enrichment** shows their progress. On a 16-core machine running 16 workers, 1.11 took 87 minutes for 9,004 songs with an NVIDIA RTX 4060 Ti and both GPU switches on, and 98 minutes for 8,985 songs without a graphics card. 1.12 adds the moods step and a heavier sound model: on the same machine with the GPU, upgrading a 9,176-song library, which redoes everything but identification and artists, took 1 hour 55 minutes. A first enrichment on 1.12 has not been timed yet. Fewer cores or workers take longer. Audio analysis reads the middle 90 seconds of each song, or the whole song when it is shorter. The sound vector comes from five 10-second samples spread across the song. Both audio models run on ONNX Runtime on the processor, and an optional switch moves them to an NVIDIA graphics card; see [docs/gpu.md](docs/gpu.md).
 
 ## Features
 

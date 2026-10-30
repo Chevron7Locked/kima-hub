@@ -117,16 +117,16 @@ export const RELEASES: Release[] = [
                 key: "sound.rebuild",
                 title: "Your sound features are rebuilt after this update",
                 summary:
-                    "Kima now uses the music-tuned sound model, so it builds your library's sound vectors again, on its own.",
+                    "Kima now uses the music-tuned sound model, so it analyses every song again and builds its sound vectors again, on its own.",
                 body:
                     "This update replaces the sound vectors your library got in 1.11 with ones from the music-tuned sound " +
-                    "model, and builds them again in the background. You don't need to start anything.\n\n" +
+                    "model. It also analyses every song again, because analysis now reads the middle of each song and works out feel differently. Both " +
+                    "run in the background; you don't need to start anything.\n\n" +
                     "Until it finishes, similar tracks, the vibe map, search by sound, and the new mood stations and mixes " +
                     "fill in as songs are done. Everything else stays as it is: your music, playlists, plays, likes, edits, " +
-                    "and what enrichment already worked out about each song.\n\n" +
-                    "How long it takes depends on your library and hardware: about half an hour for 9,000 songs with a GPU, " +
-                    "and roughly an hour or more per 10,000 songs without one. Settings, under Library Enrichment, shows the " +
-                    "progress.",
+                    "identification and artists.\n\n" +
+                    "How long it takes depends on your library and hardware: just under two hours for 9,176 songs with a " +
+                    "GPU, and longer without one. Settings, under Library Enrichment, shows the progress.",
                 links: [{ label: "See progress in Settings", href: "/settings#cache" }],
                 olderLibraryOnly: true,
             },
@@ -215,13 +215,9 @@ export const RELEASES: Release[] = [
                     "for the whole song. It now reads the middle 90 seconds. Tempo, key, energy, danceability and part of " +
                     "each song's feel come from this reading. Song matching and moods don't depend on it: they listen " +
                     "across the whole song.\n\n" +
-                    "Songs analysed before 1.12 keep their old readings until they are analysed again. If your library " +
-                    "hasn't had 1.11's wipe and re-run yet, that is the one to do: it re-runs everything, this analysis " +
-                    "included. If it has, an admin can re-run from audio analysis in Library Enrichment.",
-                links: [
-                    { label: "1.11's wipe and re-run", href: "/changelog#1.11.0" },
-                    { label: "Open Library Enrichment settings", href: "/settings#cache" },
-                ],
+                    "Songs analysed by an earlier version are analysed again on their own after the update, so every song " +
+                    "gets the new reading.",
+                links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
             },
             {
                 kind: "note",
