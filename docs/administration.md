@@ -8,7 +8,7 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 
 | Step | What it does |
 | --- | --- |
-| Song Identification | Which recording each song is, from its MusicBrainz tag, an AcoustID fingerprint made on this server, and MusicBrainz |
+| Song Identification | Which recording each song is, from its MusicBrainz tag, an AcoustID fingerprint made on this server, and MusicBrainz. The progress list shows the fingerprints as their own line. |
 | Artist Metadata | Bios, photos, genres and similar artists from Wikipedia, Fanart.tv, Deezer, MusicBrainz and ListenBrainz |
 | Audio Analysis | Tempo, key, energy, danceability, and the valence and arousal behind a song's feel, read from the middle 90 seconds of each file |
 | Vibe Embeddings | The sound vector for each song, from the CLAP music model |
@@ -17,11 +17,11 @@ Enrichment is how Kima works out what is in your library. It runs in the backgro
 
 **Settings > Library Enrichment** shows each step's progress and has these buttons:
 
-- **Sync New:** sync the library (and Audiobookshelf, when connected) and enrich what is new.
+- **Sync New:** sync Audiobookshelf (when connected) and start enrichment now instead of waiting for its next run. It does not scan the music folder.
 - **Retry what didn't work:** run every incomplete song again. Complete songs are skipped and nothing is deleted.
-- **Start over on everything** (admin): process the whole library again. Existing matches are kept and nothing is deleted. It takes about as long as a first enrichment (see [How it is worked out](../README.md#how-it-is-worked-out)).
-- **Re-run from** (admin): pick a step (identification, artists, audio analysis, sound vectors, moods, or similarity and the map) and redo it and everything after it. Every re-run but moods lays out a fresh vibe map. Upgrading from 1.11 needs no button: the update analyses your songs again and gives them new sound vectors in the background.
-- **Wipe and re-run** (admin): clear what Kima worked out about your music (which recording each track is, audio analysis, vibe data, the vibe map, artist bios and similar artists) and work it out again. Your music, playlists, plays, likes and edits stay. It takes about as long as a first enrichment (see [How it is worked out](../README.md#how-it-is-worked-out)), and the vibe map comes back when it finishes. Use it after upgrading to 1.11 or later from 1.10 or earlier, which changes how everything is worked out; one run also covers 1.12's new analysis window.
+- **Start over on everything** (admin): process the whole library again. Existing matches are kept and nothing is deleted. It takes about as long as a first enrichment (see [How songs are analysed](../README.md#how-songs-are-analysed)).
+- **Re-run from** (admin): pick a step (identification, artists, audio analysis, sound vectors, moods, or similarity and the map) and redo it and everything after it. Every re-run but moods lays out a fresh vibe map. Upgrading from 1.11 needs no button. The update analyses your songs again and gives them new sound vectors in the background.
+- **Wipe and re-run** (admin): clear what Kima worked out about your music (which recording each track is, audio analysis, vibe data, moods, the vibe map, artist bios and similar artists) and work it out again. Your music, playlists, plays, likes and edits stay. It takes about as long as a first enrichment (see [How songs are analysed](../README.md#how-songs-are-analysed)), and the vibe map comes back when it finishes. Use it after upgrading to 1.11 or later from 1.10 or earlier, which changes how everything is worked out. One run also covers 1.12's new analysis window.
 - **Pause**, **Resume** and **Stop** appear while enrichment is running.
 
 The **Auto sync library** switch below them keeps library changes up to date automatically.
@@ -30,11 +30,12 @@ The **Auto sync library** switch below them keeps library changes up to date aut
 
 - **Metadata Fetch Speed** (1 to 5) sets how many MusicBrainz and metadata requests run at once.
 - **Audio Analysis Workers** and **Vibe Embedding Workers** set how many songs are processed at once on the processor. Audio analysis goes up to the number of cores. Each audio analysis worker needs about 1 to 1.5 GB of memory, and up to 2 to 3 GB at its peak, so more workers than your memory allows will slow things down rather than speed them up.
-- An NVIDIA graphics card can take over vibe embeddings and audio analysis; see [gpu.md](gpu.md).
+- **Run audio analysis and sound vectors at the same time** is off by default: Kima analyses your songs first, then makes their sound vectors, so each job has the machine to itself. Turning it on asks first, because both jobs then share the processor and the graphics card.
+- An NVIDIA graphics card can take over vibe embeddings and audio analysis (see [gpu.md](gpu.md)).
 
 ### Caches and clean-up
 
-- **User cache size** and **Transcode cache size** set how much disk each cache may use. The transcode cache holds streams converted to a lower quality; a change to its size needs a restart.
+- **Transcode cache size** sets how much disk the transcode cache may use. The cache holds streams converted to a lower quality. A change applies when saved.
 - Under **Maintenance Operations**: **Clear All Caches**, **Cleanup Stale Jobs** and, when analysis has failures, **Retry Failed Analysis.**
 
 ## Corrupt tracks

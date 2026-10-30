@@ -31,7 +31,7 @@ If you turn on two-factor authentication for your account, your account password
 
 - **Browsing:** artists, albums, songs, genres, folders, album lists and random songs.
 - **Search:** `search`, `search2` and `search3`.
-- **Playing:** streaming, downloads, cover art, lyrics, scrobbling and now playing, and the transcoding endpoints (`hls`, `getTranscodeStream`).
+- **Playing:** streaming, downloads, cover art, lyrics, scrobbling and now playing, and the transcoding endpoints (`hls`, `getTranscodeDecision` and `getTranscodeStream`).
 - **Playlists:** list, read, create, update and delete.
 - **Queue and bookmarks:** saving and restoring the play queue, by id or by position, and bookmarks.
 - **Starring and ratings:** star, unstar, starred lists and `setRating`.
@@ -43,11 +43,11 @@ If you turn on two-factor authentication for your account, your account password
 
 OpenSubsonic extensions announced to clients: `apiKeyAuthentication`, `songLyrics`, `indexBasedQueue` and `getPodcastEpisode`.
 
-Not supported: chat, video, captions, the jukebox and internet radio. Listing calls for these answer empty, and calls that would change something answer with an error rather than pretending to succeed.
+Not supported: chat, video, captions, the jukebox and internet radio. Listing calls for these answer empty, except `getCaptions` and `jukeboxControl`, which answer with an error. Calls that would change something answer with an error rather than pretending to succeed.
 
 Artist descriptions and genres that clients see come from Kima's metadata enrichment, not only from file tags.
 
 ## Notes
 
-- Album search results leave out albums that were downloaded as discovery suggestions.
-- The route code lives in `backend/src/routes/subsonic/`, one file per area. `index.ts` there holds the shared sign-in, rate limit and system endpoints.
+- Songs and albums that Discover downloaded as suggestions are left out of search, browsing and album lists until a like moves them into your library.
+- The route code lives in `backend/src/routes/subsonic/`, one file per area. `index.ts` there applies the sign-in and rate limit and holds the system endpoints. The sign-in itself is in `backend/src/middleware/subsonicAuth.ts`.

@@ -52,4 +52,4 @@ Kima trusts the proxy's forwarded address, so the login limit counts the real cl
 
 ## Network use
 
-Kima has no telemetry and sends nothing to its author. It contacts outside services only for features you use. The full list, and what is sent to each, is in [PRIVACY.md](../PRIVACY.md).
+Kima has no telemetry and sends nothing to its author. Apart from a daily update check against GitHub, which you can turn off, it contacts outside services only for features you use. The full list, and what is sent to each, is in [PRIVACY.md](../PRIVACY.md).

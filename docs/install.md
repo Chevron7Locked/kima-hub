@@ -96,8 +96,6 @@ docker pull chevron7locked/kima:v1.12.0
 
 ### Pre-release
 
-A pre-release is an unreleased build that the maintainer publishes on purpose.
-
 A release candidate, such as 1.12.0-rc1, is published to Docker Hub and GitHub's container registry, with release notes on the [releases page](https://github.com/Chevron7Locked/kima-hub/releases). It is tagged `:prerelease` and by its own name, such as `:v1.12.0-rc1`, and a running one shows that version, such as `1.12.0-rc1`. It never moves `:latest`.
 
 ```bash

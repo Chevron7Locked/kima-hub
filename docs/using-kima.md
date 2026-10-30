@@ -4,13 +4,13 @@ A tour of the web app once it is running. Setup is in [install.md](install.md).
 
 ## First start
 
-The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: six steps that identify each song, work out its sound, feel, moods and genres, and then build the map. The vibe map and the match data appear when enrichment has finished, which can take a couple of hours for a large library (see [How it is worked out](../README.md#how-it-is-worked-out)). Progress is shown in **Settings > Library Enrichment**; see [administration.md](administration.md).
+The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: six steps that identify each song, work out its sound, feel, moods and genres, and then build the map. The vibe map and the match data appear when enrichment has finished, which can take a couple of hours for a large library (see [How songs are analysed](../README.md#how-songs-are-analysed)). Progress is shown in **Settings > Library Enrichment** (see [administration.md](administration.md)).
 
 ## Home
 
 The home page shows the sections that have something to show:
 
-- **Library Radio:** one-click stations. Shuffle All, Workout (high energy), Discovery (lesser-played) and Favorites (most played), plus stations for your common genres and decades.
+- **Library Radio:** one-click stations. Shuffle All, Workout (high energy), Discovery (lesser-played) and Favorites (most played), plus stations for your common genres and decades, and the 14 mood stations, such as Calm, Road Trip, Wildcard and Late Night.
 - **Continue Listening** and **Recently Added.**
 - **Made For You:** generated mixes. The **Mood Mixer** button beside it makes a playlist from one of the five moods: Upbeat, Melancholic, Calm, Intense or Energetic.
 - **Recommended:** artists picked from your listening.

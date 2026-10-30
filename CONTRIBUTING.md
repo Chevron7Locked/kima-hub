@@ -17,7 +17,9 @@ All development happens on the `main` branch:
 -   Preview images are built on demand, not on a schedule: push the `prerelease`
     branch, or run the **Pre-release Image** workflow from the Actions tab. They
     publish to this repository's GitHub Container Registry only
--   Stable releases are created via version tags, and those publish to Docker Hub
+-   Releases are made by pushing a version tag, and publish to Docker Hub and the
+    GitHub Container Registry. A tag with a suffix, such as `v1.12.0-rc1`, is a
+    release candidate published as `:prerelease`.
 
 ## Making Contributions
 
@@ -49,14 +51,22 @@ npm run lint
 
 ### Backend
 
-Follow existing code patterns and TypeScript conventions.
+Follow existing code patterns and TypeScript conventions. Before submitting a PR:
+
+```bash
+cd backend
+npm run typecheck
+npm test
+```
+
+The backend tests need Postgres and Redis; [docs/development.md](docs/development.md) says how to start them.
 
 ## Pull Request Process
 
 1. **Target the `main` branch**
 2. Fill out the PR template completely
-3. Ensure the Docker build check passes
-4. Wait for review - we'll provide feedback or approve
+3. Make sure the checks pass: frontend lint and unit tests, both typechecks, the backend tests, the Python analyzer tests and the Docker build
+4. Wait for review. You'll get feedback or an approval
 
 ## Questions?
 

@@ -10,7 +10,7 @@ Kima is two separate Node packages, with no workspace at the root, plus Python a
 | --- | --- |
 | `backend/` | The API server: Express, TypeScript, Prisma, Postgres with pgvector, and Redis with BullMQ queues. Listens on port 3006 unless `PORT` says otherwise. |
 | `frontend/` | The web app: Next.js (App Router), React, TanStack Query. Passes `/api`, `/rest` and `/health` to the backend. |
-| `services/audio-analyzer/` | Python analyzer for audio features and moods (Essentia, MusiCNN on ONNX Runtime). |
+| `services/audio-analyzer/` | Python analyzer for audio features, valence and arousal (Essentia, MusiCNN on ONNX Runtime). Moods are scored by the backend from the sound vectors. |
 | `services/audio-analyzer-clap/` | Python analyzer for the sound vectors (CLAP on ONNX Runtime), the optional GPU runtime, and the evaluation scripts used to measure matching. |
 | `docs/` | These guides. |
 | `scripts/` | Development and test helpers. |

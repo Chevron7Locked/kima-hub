@@ -1,6 +1,6 @@
 # Integrations
 
-Kima works on its own. Each service below is optional and set up in **Settings**; most are for admins only. What Kima sends to each is listed in [PRIVACY.md](../PRIVACY.md).
+Kima needs none of these. Each service below is optional and set up in **Settings**, and most are for admins only. What Kima sends to each is listed in [PRIVACY.md](../PRIVACY.md).
 
 ## Lidarr
 
