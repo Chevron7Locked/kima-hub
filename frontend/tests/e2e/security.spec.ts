@@ -111,6 +111,18 @@ test.describe("Security", () => {
                 headers: { Authorization: `Bearer ${victimToken}` },
             });
         });
+
+        // The attacker account is this run's alone: the admin test user removes it, so runs leave no accounts behind.
+        test.afterAll(async ({ request }) => {
+            const loginRes = await request.post("/api/auth/login", { data: { username, password } });
+            if (!loginRes.ok()) return;
+            const auth = { Authorization: `Bearer ${((await loginRes.json()) as { token: string }).token}` };
+            const usersRes = await request.get("/api/auth/users", { headers: auth });
+            if (!usersRes.ok()) return;
+            const users = (await usersRes.json()) as { id: string; username: string }[];
+            const attacker = users.find((u) => u.username === ATTACKER_USER);
+            if (attacker) await request.delete(`/api/auth/users/${attacker.id}`, { headers: auth });
+        });
     });
 
     // ── XSS ──────────────────────────────────────────────────────────────────

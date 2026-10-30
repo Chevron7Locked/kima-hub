@@ -1,9 +1,22 @@
 import { test, expect } from "@playwright/test";
-import { loginAsTestUser, getAuthToken, skipIfEmptyLibrary } from "./fixtures/test-helpers";
+import { loginAsTestUser, getAuthToken, skipIfEmptyLibrary, username, password } from "./fixtures/test-helpers";
 
 const TEST_PLAYLIST_NAME = `e2e-test-${Date.now()}`;
 
 test.describe("Playlists", () => {
+    // Playlists this run made, including one created through the page, which no test deletes by id.
+    test.afterAll(async ({ request }) => {
+        const loginRes = await request.post("/api/auth/login", { data: { username, password } });
+        if (!loginRes.ok()) return;
+        const auth = { Authorization: `Bearer ${((await loginRes.json()) as { token: string }).token}` };
+        const listRes = await request.get("/api/playlists?limit=100", { headers: auth });
+        if (!listRes.ok()) return;
+        const playlists = (await listRes.json()) as { id: string; name: string }[];
+        for (const p of playlists.filter((p) => p.name === TEST_PLAYLIST_NAME)) {
+            await request.delete(`/api/playlists/${p.id}`, { headers: auth });
+        }
+    });
+
     test.beforeEach(async ({ page }) => {
         await loginAsTestUser(page);
     });

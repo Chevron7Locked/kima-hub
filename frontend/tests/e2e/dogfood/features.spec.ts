@@ -1,8 +1,9 @@
 /**
  * The notification tray, ListenBrainz, the public library export and live feed, the
- * GPU runtime and the release window as one watched session. Needs
- * KIMA_PUBLIC_VIBE_TOKEN, both GPU switches on, and the analyzers restarted since
- * the GPU runtime was last installed.
+ * GPU runtime and the release window as one watched session. Needs both GPU switches
+ * on and the analyzers restarted since the GPU runtime was last installed; the public
+ * feed journey needs the instance's KIMA_PUBLIC_VIBE_TOKEN and is recorded as not covered
+ * when the run is not given one.
  */
 
 import { test, expect, Browser, Page, BrowserContext, APIRequestContext, request } from "@playwright/test";
@@ -79,7 +80,6 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     test.beforeAll(async ({ browser: launched }) => {
         browser = launched;
         expect(username && password, "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set").toBeTruthy();
-        expect(vibeToken, "KIMA_PUBLIC_VIBE_TOKEN must be set").toBeTruthy();
         publicApi = await request.newContext({ baseURL: baseUrl });
         context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
         page = await context.newPage();
@@ -232,6 +232,10 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     test("4. public feed: the export, the live trip, and the sharing switch", async () => {
         test.setTimeout(10 * 60_000);
         session.setJourney("4. Public feed");
+        if (!vibeToken) {
+            session.noteNotCovered("public feed: KIMA_PUBLIC_VIBE_TOKEN is not set for this run, so the export and live feed were not checked");
+            return;
+        }
         shareBefore = (await getJson<{ shareLiveListening: boolean }>("/settings")).shareLiveListening;
 
         await session.step("the export refuses a missing token", async () => {
