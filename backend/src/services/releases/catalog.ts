@@ -110,7 +110,7 @@ export const RELEASES: Release[] = [
         title: "Kima 1.12",
         summary:
             "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
-        date: "2026-10-14",
+        date: "2026-10-30",
         items: [
             {
                 kind: "note",
@@ -215,7 +215,7 @@ export const RELEASES: Release[] = [
                     "for the whole song. It now reads the middle 90 seconds. Tempo, key, energy, danceability and part of " +
                     "each song's feel come from this reading. Song matching and moods don't depend on it: they listen " +
                     "across the whole song.\n\n" +
-                    "Songs analysed by an earlier version are analysed again on their own after the update, so every song " +
+                    "Songs analysed by an earlier version are analysed again in the background after the update, so every song " +
                     "gets the new reading.",
                 links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
             },

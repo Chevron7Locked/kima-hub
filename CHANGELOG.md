@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
-## [1.12.0] - 2026-10-14
+## [1.12.0] - 2026-10-30
 
 > [!CAUTION]
 > ### Upgrading from 1.11 to 1.12 redoes your library's enrichment
