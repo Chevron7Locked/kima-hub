@@ -1016,7 +1016,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
     });
 
     // ------------------------------------------------------------------------------------------
-    test("11. library only: the collection lists library albums, and the Refine panel fits the screen at three sizes", async () => {
+    test("11. library only: the collection lists library albums, and the refine controls fit the screen at three sizes", async () => {
         test.setTimeout(180_000);
         session.setJourney("11. library only and refine");
         // An album cover held at an outside address that no longer has it: the cover proxy answers not-found by design.
@@ -1056,29 +1056,51 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
         ];
         try {
             for (const { w, h } of sizes) {
-                await session.step(`the Refine panel fits a ${w}x${h} window and every control can be reached`, async () => {
+                await session.step(`the refine controls fit a ${w}x${h} window and every control can be reached`, async () => {
                     await page.setViewportSize({ width: w, height: h });
                     await page.goto("/collection?tab=albums");
                     await expect(page.locator('a[href^="/album/"]').first()).toBeVisible({ timeout: 15_000 });
                     // The desktop's open panel carries over in storage and covers the page as a sheet below the desktop width.
                     const sheet = page.getByRole("button", { name: "close activity" });
                     if (await sheet.isVisible().catch(() => false)) await sheet.click();
-                    await page.getByRole("button", { name: /^Refine/ }).click({ timeout: 10_000 });
-                    const panel = page.locator("#refine-panel");
-                    await expect(panel).toBeVisible();
-                    await expect(panel).toHaveAttribute("aria-label", "Refine options");
                     const inside = async (box: { x: number; y: number; width: number; height: number }) => {
                         expect(box.x, "left edge outside the window").toBeGreaterThanOrEqual(-1);
                         expect(box.y, "top edge outside the window").toBeGreaterThanOrEqual(-1);
                         expect(box.x + box.width, "right edge outside the window").toBeLessThanOrEqual(w + 1);
                         expect(box.y + box.height, "bottom edge outside the window").toBeLessThanOrEqual(h + 1);
                     };
-                    // The panel slides in; measure once it has stopped.
+
+                    if (w >= 640) {
+                        // Beside a phone the controls sit on the toolbar line: no button, no overlay.
+                        await expect(page.getByRole("button", { name: /^Refine/ })).toBeHidden();
+                        const bar = page.getByRole("group", { name: "Refine options" });
+                        await expect(bar).toBeVisible();
+                        await inside((await bar.boundingBox())!);
+                        const radios = bar.getByRole("radio");
+                        expect(await radios.count()).toBe(3);
+                        for (let i = 0; i < 3; i++) await inside((await radios.nth(i).boundingBox())!);
+                        const sort = bar.getByLabel("Sort by");
+                        const perPage = bar.getByLabel("Per page");
+                        await inside((await sort.boundingBox())!);
+                        await inside((await perPage.boundingBox())!);
+                        await perPage.selectOption("200");
+                        await expect(page).toHaveURL(/[?&]per=200/);
+                        await bar.getByRole("button", { name: "Reset" }).click();
+                        await expect(page).not.toHaveURL(/[?&]per=/);
+                        await expect(bar.getByRole("button", { name: "Reset" })).toHaveCount(0);
+                        return { size: `${w}x${h}`, choices: 3 + (await sort.locator("option").count()) + 4 };
+                    }
+
+                    await page.getByRole("button", { name: /^Refine/ }).click({ timeout: 10_000 });
+                    const panel = page.locator("#refine-panel");
+                    await expect(panel).toBeVisible();
+                    await expect(panel).toHaveAttribute("aria-label", "Refine options");
+                    // The sheet slides in; measure once it has stopped.
                     await expect
                         .poll(() => panel.evaluate((el) => el.getAnimations().every((a) => a.playState === "finished")))
                         .toBe(true);
                     await inside((await panel.boundingBox())!);
-                    // Each choice, after scrolling inside the panel, sits within the panel and the window.
+                    // Each choice, after scrolling inside the sheet, sits within the sheet and the window.
                     const radios = panel.getByRole("radio");
                     const count = await radios.count();
                     expect(count).toBeGreaterThanOrEqual(9);
@@ -1088,17 +1110,15 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                         const box = (await radio.boundingBox())!;
                         const pb = (await panel.boundingBox())!;
                         await inside(box);
-                        expect(box.y, `choice ${i} is above the panel`).toBeGreaterThanOrEqual(pb.y - 1);
-                        expect(box.y + box.height, `choice ${i} is below the panel`).toBeLessThanOrEqual(pb.y + pb.height + 1);
+                        expect(box.y, `choice ${i} is above the sheet`).toBeGreaterThanOrEqual(pb.y - 1);
+                        expect(box.y + box.height, `choice ${i} is below the sheet`).toBeLessThanOrEqual(pb.y + pb.height + 1);
                     }
-                    // The last choice works: pick the largest page size, then reset.
+                    // The last choice works: pick the largest page size, then reset and close.
                     await panel.getByRole("radio", { name: "200", exact: true }).click();
                     await expect(page).toHaveURL(/[?&]per=200/);
                     await page.getByRole("button", { name: "Reset" }).click();
                     await expect(page).not.toHaveURL(/[?&]per=/);
-                    // A phone's sheet has a close button; beside a phone the panel closes on Escape and gives focus back.
-                    if (w < 640) await page.getByRole("button", { name: "Close refine panel" }).click();
-                    else await page.keyboard.press("Escape");
+                    await page.getByRole("button", { name: "Close refine panel" }).click();
                     await expect(panel).toHaveCount(0);
                     await expect(page.getByRole("button", { name: /^Refine/ })).toBeFocused();
                     return { size: `${w}x${h}`, choices: count };

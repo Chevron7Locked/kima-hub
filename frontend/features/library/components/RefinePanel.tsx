@@ -1,14 +1,15 @@
 "use client";
 
-import { KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { createPortal } from "react-dom";
-import { SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useIsTV } from "@/lib/tv-utils";
 import { LibraryFilter, SortOption } from "@/hooks/useQueries";
 import { Tab } from "../types";
 
-interface RefinePanelProps {
+interface RefineProps {
     activeTab: Tab;
     filter: LibraryFilter;
     sortBy: SortOption;
@@ -36,8 +37,8 @@ export function sortOptionsFor(tab: Tab) {
     });
 }
 
-// Human-readable labels -- backend filter values ("owned"/"discovery") unchanged. The line under the switch
-// describes the chosen one, in the tab's own noun.
+// Human-readable labels -- backend filter values ("owned"/"discovery") unchanged. The description says what the chosen
+// one shows, in the tab's own noun.
 const FILTER_OPTIONS: { label: string; value: LibraryFilter; describe: (noun: string) => string }[] = [
     { label: "In your library", value: "owned", describe: () => "Music you own or have saved" },
     { label: "Recommended", value: "discovery", describe: (noun) => `${noun} suggested by your listening history` },
@@ -49,7 +50,7 @@ export const PER_PAGE_OPTIONS = [24, 40, 80, 200];
 /** What the collection shows when the address names nothing else. */
 export const DEFAULT_REFINE = { filter: "owned" as LibraryFilter, sortBy: "name" as SortOption, itemsPerPage: 40 };
 
-/** The refinements that differ from DEFAULT_REFINE, in words, for the trigger's spoken name. */
+/** The refinements that differ from DEFAULT_REFINE, in words, for the phone button's spoken name. */
 function changedFromDefault(filter: LibraryFilter, sortBy: SortOption, itemsPerPage: number): string[] {
     const changed: string[] = [];
     if (filter !== DEFAULT_REFINE.filter) changed.push(FILTER_OPTIONS.find((o) => o.value === filter)?.label ?? filter);
@@ -58,75 +59,17 @@ function changedFromDefault(filter: LibraryFilter, sortBy: SortOption, itemsPerP
     return changed;
 }
 
-const GAP = 8;
-/** The panel is as wide as its widest row; this stands in until it has been drawn and can be measured. */
-const PANEL_WIDTH = 352;
-
-/** Where the panel goes beside a phone; `sheet` when it is the phone's bottom sheet instead. */
-type Placement = { top: number; left: number; maxHeight: number; sheet: boolean };
-
-/**
- * Where the panel sits above a phone-width screen: under its button, kept inside the page's scrolling area (which
- * ends above the desktop player bar, and above the bottom navigation where there is one; on a tablet the floating
- * mini player sits inside that area, and the panel is drawn over it) and scrolling inside itself when that area is
- * shorter. When the page scrolls the button out of that area, `onLost` is called (the panel would otherwise follow it
- * under the top bar). On a phone the panel is a sheet placed by CSS, so nothing is measured.
- */
-function usePanelPlacement(
-    open: boolean,
-    buttonRef: React.RefObject<HTMLButtonElement | null>,
-    panelRef: React.RefObject<HTMLDivElement | null>,
-    onLost: () => void,
-) {
-    const [place, setPlace] = useState<Placement | null>(null);
-
-    const measure = useCallback(
-        (e?: Event) => {
-            const button = buttonRef.current;
-            if (!button) return;
-            if (e?.target instanceof Node && panelRef.current?.contains(e.target)) return;
-            if (!window.matchMedia("(min-width: 640px)").matches) {
-                setPlace((prev) => (prev?.sheet ? prev : { top: 0, left: 0, maxHeight: 0, sheet: true }));
-                return;
-            }
-            const rect = button.getBoundingClientRect();
-            const area = button.closest("#main-content")?.getBoundingClientRect();
-            const areaTop = area?.top ?? 0;
-            const areaBottom = Math.min(area?.bottom ?? window.innerHeight, window.innerHeight);
-            if (rect.top < areaTop || rect.bottom > areaBottom) {
-                onLost();
-                return;
-            }
-            const top = Math.round(rect.bottom + GAP);
-            const width = panelRef.current?.offsetWidth || PANEL_WIDTH;
-            const left = Math.round(Math.max(GAP, Math.min(rect.left, window.innerWidth - width - 2 * GAP)));
-            const maxHeight = Math.max(Math.round(areaBottom - top - GAP), 0);
-            setPlace((prev) =>
-                prev && !prev.sheet && prev.top === top && prev.left === left && prev.maxHeight === maxHeight
-                    ? prev
-                    : { top, left, maxHeight, sheet: false },
-            );
-        },
-        [buttonRef, panelRef, onLost],
-    );
-
-    useLayoutEffect(() => {
-        if (!open) return;
-        // Measured before paint, so the panel never shows in the wrong place for a frame.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        measure();
-        window.addEventListener("resize", measure);
-        // The page scrolls inside #main-content, not the window: listen in the capture phase to hear it.
-        window.addEventListener("scroll", measure, true);
-        return () => {
-            window.removeEventListener("resize", measure);
-            window.removeEventListener("scroll", measure, true);
-        };
-    }, [open, measure]);
-
-    // A closed panel has no placement; the last one is measured afresh on the next open.
-    return open ? place : null;
+/** What the controls share: whether the tab has a filter, and what is changed from the default. */
+function useRefineState({ activeTab, filter, sortBy, itemsPerPage }: RefineProps) {
+    const showFilterSection = activeTab === "artists" || activeTab === "albums";
+    const changed = changedFromDefault(showFilterSection ? filter : DEFAULT_REFINE.filter, sortBy, itemsPerPage);
+    const noun = activeTab === "albums" ? "Albums" : "Artists";
+    const description = (FILTER_OPTIONS.find((o) => o.value === filter) ?? FILTER_OPTIONS[0]).describe(noun);
+    return { showFilterSection, changed, hasRefinements: changed.length > 0, description };
 }
+
+/** The width from which the controls sit on the toolbar line; below it they open as a sheet (Tailwind's `sm`). */
+const WIDE = "(min-width: 640px)";
 
 interface Choice<T> {
     label: string;
@@ -135,7 +78,7 @@ interface Choice<T> {
 
 /**
  * One choice of several, as a radio group: arrow keys, Home and End move and choose; Tab enters on the chosen one and
- * leaves.
+ * leaves. `inline` hides the legend (the choices name themselves on the toolbar line).
  */
 function ChoiceGroup<T extends string | number>({
     legend,
@@ -143,14 +86,22 @@ function ChoiceGroup<T extends string | number>({
     value,
     onChange,
     numeric,
+    inline,
+    description,
+    tvCards,
 }: {
     legend: string;
     choices: Choice<T>[];
     value: T;
     onChange: (value: T) => void;
     numeric?: boolean;
+    inline?: boolean;
+    description?: string;
+    /** Each choice is a stop in the TV remote's row. */
+    tvCards?: boolean;
 }) {
     const legendId = useId();
+    const descriptionId = useId();
     const refs = useRef<(HTMLButtonElement | null)[]>([]);
     const selected = Math.max(
         choices.findIndex((c) => c.value === value),
@@ -177,14 +128,17 @@ function ChoiceGroup<T extends string | number>({
     };
 
     return (
-        <div className="flex flex-col gap-1.5">
-            <span id={legendId} className="text-xs font-medium text-[var(--text-muted)]">
+        <div className={cn("flex flex-col gap-1.5", inline && "gap-0")}>
+            <span id={legendId} className={cn("text-xs font-medium text-[var(--text-muted)]", inline && "sr-only")}>
                 {legend}
             </span>
             <div
                 role="radiogroup"
                 aria-labelledby={legendId}
-                onKeyDown={onKeyDown}
+                aria-describedby={description ? descriptionId : undefined}
+                title={inline && description ? description.toLowerCase() : undefined}
+                // On a TV the remote's arrows move between stops and Enter chooses, so the group leaves arrows alone.
+                onKeyDown={tvCards ? undefined : onKeyDown}
                 className="flex gap-1 rounded-lg border border-white/5 bg-white/[0.03] p-1"
             >
                 {choices.map((choice, i) => {
@@ -199,10 +153,12 @@ function ChoiceGroup<T extends string | number>({
                             role="radio"
                             aria-checked={checked}
                             tabIndex={checked ? 0 : -1}
+                            data-tv-card={tvCards || undefined}
                             onClick={() => onChange(choice.value)}
                             className={cn(
                                 // A touch target where fingers choose; a mouse needs far less.
-                                "min-h-[44px] can-hover:min-h-8 flex-auto whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors sm:px-2.5 duration-150",
+                                "min-h-[44px] can-hover:min-h-8 flex-auto whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors duration-150",
+                                inline && "px-2.5",
                                 numeric && "tabular-nums",
                                 checked
                                     ? "bg-brand/10 text-brand"
@@ -214,34 +170,150 @@ function ChoiceGroup<T extends string | number>({
                     );
                 })}
             </div>
+            {description && (
+                <p id={descriptionId} className={cn("px-1 pt-0.5 text-xs text-[var(--text-muted)]", inline && "sr-only")}>
+                    {description}
+                </p>
+            )}
         </div>
     );
 }
 
-export function RefinePanel({
-    activeTab,
-    filter,
-    sortBy,
-    itemsPerPage,
-    onFilterChange,
-    onSortChange,
-    onItemsPerPageChange,
-    onReset,
-}: RefinePanelProps) {
+/** A native select styled as one of the toolbar's controls. Option text is lowercased in source: CSS cannot reach it. */
+function ToolbarSelect<T extends string | number>({
+    label,
+    choices,
+    value,
+    onChange,
+}: {
+    label: string;
+    choices: Choice<T>[];
+    value: T;
+    onChange: (value: T) => void;
+}) {
+    return (
+        <label className="relative flex items-stretch">
+            <span className="sr-only">{label}</span>
+            <select
+                value={String(value)}
+                onChange={(e) => {
+                    const chosen = choices.find((c) => String(c.value) === e.target.value);
+                    if (chosen) onChange(chosen.value);
+                }}
+                className="min-h-11 can-hover:min-h-9 cursor-pointer appearance-none rounded-lg border border-white/10 bg-white/5 pl-3 pr-8 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-white/20 hover:text-white focus-visible:border-brand focus-visible:outline-none [&>option]:bg-[var(--bg-secondary)] [&>option]:text-white"
+            >
+                {choices.map((c) => (
+                    <option key={String(c.value)} value={String(c.value)}>
+                        {c.label.toLowerCase()}
+                    </option>
+                ))}
+            </select>
+            <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 right-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]"
+            />
+        </label>
+    );
+}
+
+/** The refine controls on the toolbar line, beside a phone: show, sort and page size, and Reset once one is changed. */
+export function RefineBar(props: RefineProps) {
+    const { activeTab, filter, sortBy, itemsPerPage, onFilterChange, onSortChange, onItemsPerPageChange, onReset } =
+        props;
+    const { showFilterSection, hasRefinements, description } = useRefineState(props);
+    // A TV remote moves between buttons only, and a native dropdown's list may not take it: there sort and page size
+    // are switches like the filter.
+    const tv = useIsTV();
+    const sortChoices = sortOptionsFor(activeTab);
+    const barRef = useRef<HTMLDivElement>(null);
+
+    return (
+        // Stretched, so the dropdowns stand as tall as the show switch beside them.
+        <div
+            ref={barRef}
+            role="group"
+            aria-label="Refine options"
+            className="hidden min-w-0 flex-wrap items-stretch gap-2 sm:flex"
+        >
+            {showFilterSection && (
+                <ChoiceGroup
+                    legend="Show"
+                    choices={FILTER_OPTIONS}
+                    value={filter}
+                    onChange={onFilterChange}
+                    description={description}
+                    inline
+                    tvCards={tv}
+                />
+            )}
+            {tv ? (
+                <>
+                    <ChoiceGroup
+                        legend="Sort by"
+                        choices={sortChoices}
+                        value={sortBy}
+                        onChange={onSortChange}
+                        inline
+                        tvCards
+                    />
+                    <ChoiceGroup
+                        legend="Per page"
+                        choices={PER_PAGE_OPTIONS.map((n) => ({ label: `${n} per page`, value: n }))}
+                        value={itemsPerPage}
+                        onChange={onItemsPerPageChange}
+                        numeric
+                        inline
+                        tvCards
+                    />
+                </>
+            ) : (
+                <>
+                    <ToolbarSelect
+                        label="Sort by"
+                        choices={sortChoices.map((o) => ({ label: `Sort: ${o.label}`, value: o.value }))}
+                        value={sortBy}
+                        onChange={onSortChange}
+                    />
+                    <ToolbarSelect
+                        label="Per page"
+                        choices={PER_PAGE_OPTIONS.map((n) => ({ label: `${n} per page`, value: n }))}
+                        value={itemsPerPage}
+                        onChange={onItemsPerPageChange}
+                    />
+                </>
+            )}
+            {hasRefinements && (
+                <button
+                    type="button"
+                    data-tv-card={tv || undefined}
+                    onClick={() => {
+                        // This button goes once nothing is changed: hand focus to the row's first control first, or a
+                        // keyboard or TV remote is left with nothing focused.
+                        barRef.current?.querySelector<HTMLElement>('[role="radio"], select')?.focus();
+                        onReset();
+                    }}
+                    className="min-h-[44px] can-hover:min-h-9 rounded-lg px-2.5 text-sm font-medium text-brand hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+                >
+                    Reset
+                </button>
+            )}
+        </div>
+    );
+}
+
+/** On a phone the toolbar line has no room for the controls: a Refine button opens them as a sheet. */
+export function RefinePanel(props: RefineProps) {
+    const { activeTab, filter, sortBy, itemsPerPage, onFilterChange, onSortChange, onItemsPerPageChange, onReset } =
+        props;
+    const { showFilterSection, changed, hasRefinements, description } = useRefineState(props);
     const [open, setOpen] = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
-
-    const showFilterSection = activeTab === "artists" || activeTab === "albums";
-    const changed = changedFromDefault(showFilterSection ? filter : DEFAULT_REFINE.filter, sortBy, itemsPerPage);
-    const hasRefinements = changed.length > 0;
 
     const close = useCallback((refocus: boolean) => {
         setOpen(false);
         if (refocus) buttonRef.current?.focus();
     }, []);
-    const lose = useCallback(() => setOpen(false), []);
-    const place = usePanelPlacement(open, buttonRef, panelRef, lose);
 
     useEffect(() => {
         if (!open) return;
@@ -264,20 +336,27 @@ export function RefinePanel({
             }
         }
 
+        // A window widened past a phone's shows the controls on the toolbar line, so the sheet goes.
+        const wide = window.matchMedia?.(WIDE);
+        const onWide = () => {
+            if (wide?.matches) setOpen(false);
+        };
+
         document.addEventListener("pointerdown", handlePointerDown);
         document.addEventListener("keydown", handleKeyDown);
+        wide?.addEventListener?.("change", onWide);
         return () => {
             document.removeEventListener("pointerdown", handlePointerDown);
             document.removeEventListener("keydown", handleKeyDown);
+            wide?.removeEventListener?.("change", onWide);
         };
     }, [open, close]);
 
-    // The panel is drawn at the end of the page, so the page's Tab order cannot reach it: opening it moves focus to the
+    // The sheet is drawn at the end of the page, so the page's Tab order cannot reach it: opening it moves focus to the
     // chosen sort, and Tab past either end closes it and returns to the button, from where Tab carries on.
-    const placed = place !== null;
     useEffect(() => {
-        if (open && placed) panelRef.current?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus();
-    }, [open, placed]);
+        if (open) panelRef.current?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus();
+    }, [open]);
 
     const onPanelKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
         if (e.key !== "Tab") return;
@@ -289,76 +368,47 @@ export function RefinePanel({
         }
     };
 
-    const noun = activeTab === "albums" ? "Albums" : "Artists";
-    const filterChoice = FILTER_OPTIONS.find((o) => o.value === filter) ?? FILTER_OPTIONS[0];
-
     const panel = (
         <>
-            {/* On a phone the panel is a sheet over the page; the scrim says the page behind is not live. */}
-            <div aria-hidden className="fixed inset-0 z-(--z-dropdown) bg-black/50 animate-fade-in sm:hidden" />
+            {/* The sheet covers the page; the scrim says the page behind is not live. */}
+            <div aria-hidden className="fixed inset-0 z-(--z-dropdown) bg-black/50 animate-fade-in" />
             <div
                 id="refine-panel"
                 ref={panelRef}
-                // The phone sheet covers the page behind a scrim, so it is a modal dialog there.
-                role={place?.sheet ? "dialog" : "group"}
-                aria-modal={place?.sheet || undefined}
+                role="dialog"
+                aria-modal
                 aria-label="Refine options"
                 onKeyDown={onPanelKeyDown}
-                // Tabbing out of the panel closes it, as clicking outside does.
+                // Tabbing out of the sheet closes it, as tapping outside does.
                 onBlur={(e) => {
                     const next = e.relatedTarget as Node | null;
                     if (next && !panelRef.current?.contains(next) && !buttonRef.current?.contains(next)) close(false);
                 }}
-                style={
-                    place
-                        ? ({
-                              "--refine-top": `${place.top}px`,
-                              "--refine-left": `${place.left}px`,
-                              "--refine-max-h": `${place.maxHeight}px`,
-                          } as React.CSSProperties)
-                        : undefined
-                }
-                className={cn(
-                    "fixed z-(--z-dropdown) flex flex-col overflow-y-auto overscroll-contain border border-[var(--border-subtle)] bg-[var(--bg-secondary)] animate-panel-up",
-                    // Phone: a sheet along the bottom edge, clear of the home indicator.
-                    "inset-x-0 bottom-0 max-h-[80dvh] rounded-t-2xl border-b-0 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]",
-                    // Wider: a panel under its button, inside the page's scrolling area.
-                    "sm:inset-x-auto sm:bottom-auto sm:top-(--refine-top) sm:left-(--refine-left) sm:max-h-(--refine-max-h) sm:w-max sm:rounded-xl sm:border-b sm:px-3 sm:pt-3 sm:pb-3",
-                )}
+                // Along the bottom edge, clear of the home indicator.
+                className="fixed inset-x-0 bottom-0 z-(--z-dropdown) flex max-h-[80dvh] flex-col overflow-y-auto overscroll-contain rounded-t-2xl border border-b-0 border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-panel-up"
             >
-                {/* Beside a phone the panel closes on Escape or a click outside, so its top row is only for Reset. Left out
-                    rather than hidden, so the first and last buttons Tab counts are ones that are there. */}
-                {(place?.sheet || hasRefinements) && (
-                    <div
-                        className={cn(
-                            "sticky top-0 z-(--z-raised) -mx-4 flex min-h-[44px] items-center justify-between bg-[var(--bg-secondary)] px-2 pt-1",
-                            "sm:static sm:-mx-1 sm:-mt-1 sm:mb-1 sm:min-h-0 sm:justify-end sm:px-0 sm:pt-0",
-                        )}
-                    >
-                        {hasRefinements ? (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    // This button goes once nothing is changed: keep focus in the panel, on the sort.
-                                    panelRef.current?.querySelector<HTMLElement>('[role="radio"]')?.focus();
-                                    onReset();
-                                }}
-                                className="min-h-[44px] can-hover:min-h-8 rounded-md px-2 text-sm font-medium text-brand hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
-                            >
-                                Reset
-                            </button>
-                        ) : (
-                            <span />
-                        )}
-                        {place?.sheet && (
-                            <Button variant="icon" aria-label="Close refine panel" onClick={() => close(true)}>
-                                <X className="h-4 w-4" />
-                            </Button>
-                        )}
-                    </div>
-                )}
+                <div className="sticky top-0 z-(--z-raised) -mx-4 flex min-h-[44px] items-center justify-between bg-[var(--bg-secondary)] px-2 pt-1">
+                    {hasRefinements ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                // This button goes once nothing is changed: keep focus in the sheet, on the sort.
+                                panelRef.current?.querySelector<HTMLElement>('[role="radio"]')?.focus();
+                                onReset();
+                            }}
+                            className="min-h-[44px] rounded-md px-2 text-sm font-medium text-brand hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+                        >
+                            Reset
+                        </button>
+                    ) : (
+                        <span />
+                    )}
+                    <Button variant="icon" aria-label="Close refine panel" onClick={() => close(true)}>
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
 
-                <div className="flex flex-col gap-4 sm:gap-3">
+                <div className="flex flex-col gap-4">
                     <ChoiceGroup
                         legend="Sort by"
                         choices={sortOptionsFor(activeTab)}
@@ -367,15 +417,13 @@ export function RefinePanel({
                     />
 
                     {showFilterSection && (
-                        <div className="flex flex-col gap-2">
-                            <ChoiceGroup
-                                legend="Show"
-                                choices={FILTER_OPTIONS}
-                                value={filter}
-                                onChange={onFilterChange}
-                            />
-                            <p className="px-1 text-xs text-[var(--text-muted)]">{filterChoice.describe(noun)}</p>
-                        </div>
+                        <ChoiceGroup
+                            legend="Show"
+                            choices={FILTER_OPTIONS}
+                            value={filter}
+                            onChange={onFilterChange}
+                            description={description}
+                        />
                     )}
 
                     <ChoiceGroup
@@ -391,7 +439,7 @@ export function RefinePanel({
     );
 
     return (
-        <div className="relative">
+        <div className="relative sm:hidden">
             <button
                 ref={buttonRef}
                 type="button"

@@ -1,10 +1,13 @@
 /**
- * The collection's Refine panel: its choices are radio groups, it says what is changed, resets in one step, and closes
- * when focus leaves it.
+ * The collection's refine controls. On a phone, a sheet whose choices are radio groups: it says what is changed, resets
+ * in one step, and closes when focus leaves it. Beside a phone, the same choices on the toolbar line.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
-import { RefinePanel } from "@/features/library/components/RefinePanel";
+import { RefineBar, RefinePanel } from "@/features/library/components/RefinePanel";
+
+const tv = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/tv-utils", () => ({ useIsTV: () => tv.on }));
 import type { LibraryFilter, SortOption } from "@/hooks/useQueries";
 import { mountHost } from "./helpers/dom";
 
@@ -170,104 +173,162 @@ describe("RefinePanel", () => {
         expect(trigger().getAttribute("aria-controls")).toBe("refine-panel");
     });
 
-    describe("placement", () => {
-        const rect = (top: number, left: number, height: number, width: number) =>
-            ({ top, left, bottom: top + height, right: left + width, height, width, x: left, y: top, toJSON() {} }) as DOMRect;
-        let main: HTMLElement;
-        let buttonRect: DOMRect;
-        let wide = true;
+    it("is a modal sheet with a close button", () => {
+        show();
+        open();
+        expect(panel()!.getAttribute("role")).toBe("dialog");
+        expect(panel()!.getAttribute("aria-modal")).toBe("true");
+        const close = panel()!.querySelector<HTMLButtonElement>('[aria-label="Close refine panel"]')!;
+        act(() => close.click());
+        expect(panel()).toBeNull();
+        expect(document.activeElement).toBe(trigger());
+    });
 
-        beforeEach(() => {
-            wide = true;
-            vi.stubGlobal("matchMedia", (q: string) => ({ matches: wide && q === "(min-width: 640px)", media: q }));
-            vi.stubGlobal("innerWidth", 1280);
-            vi.stubGlobal("innerHeight", 800);
-            main = document.createElement("main");
-            main.id = "main-content";
-            dom.host.replaceWith(main);
-            main.appendChild(dom.host);
-            buttonRect = rect(284, 304, 44, 100);
-            vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-                if (this.id === "main-content") return rect(64, 272, 632, 944); // ends at 696, above the player bar
-                if (this.hasAttribute("aria-expanded")) return buttonRect;
-                return rect(0, 0, 0, 0);
-            });
-        });
-
-        afterEach(() => {
-            vi.restoreAllMocks();
-            vi.unstubAllGlobals();
-            document.body.appendChild(dom.host);
-            main.remove();
-        });
-
-        const vars = () => {
-            const style = panel()!.style;
-            return ["--refine-top", "--refine-left", "--refine-max-h"].map((v) => style.getPropertyValue(v));
+    it("closes when the window widens past a phone's, where the controls sit on the toolbar line", () => {
+        let onChange: (() => void) | undefined;
+        const query = {
+            matches: false,
+            addEventListener: (_: string, fn: () => void) => (onChange = fn),
+            removeEventListener: () => {},
         };
-
-        it("sits under its button and ends inside the page's scrolling area", () => {
+        vi.stubGlobal("matchMedia", () => query);
+        try {
             show();
             open();
-            // 284 + 44 + 8 = 336 down; 696 - 336 - 8 = 352 tall at most.
-            expect(vars()).toEqual(["336px", "304px", "352px"]);
-            expect(panel()!.getAttribute("role")).toBe("group");
-        });
-
-        it("keeps clear of the right edge", () => {
-            buttonRect = rect(284, 1100, 44, 100);
-            show();
-            open();
-            // 1280 - 352 - 16 = 912 (jsdom draws nothing, so the stand-in width).
-            expect(vars()[1]).toBe("912px");
-        });
-
-        it("keeps clear of the right edge by its own drawn width", () => {
-            const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(300);
-            try {
-                buttonRect = rect(284, 1100, 44, 100);
-                show();
-                open();
-                // 1280 - 300 - 16 = 964.
-                expect(vars()[1]).toBe("964px");
-            } finally {
-                width.mockRestore();
-            }
-        });
-
-        it("closes when its button scrolls out of the page's scrolling area", () => {
-            show();
-            open();
-            buttonRect = rect(30, 304, 44, 100);
-            act(() => {
-                main.dispatchEvent(new Event("scroll"));
-            });
+            expect(panel()).not.toBeNull();
+            query.matches = true;
+            act(() => onChange!());
             expect(panel()).toBeNull();
-            expect(trigger().getAttribute("aria-expanded")).toBe("false");
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+});
+
+describe("RefineBar", () => {
+    function showBar(props: Partial<React.ComponentProps<typeof RefineBar>> = {}) {
+        const handlers = {
+            onFilterChange: vi.fn<(f: LibraryFilter) => void>(),
+            onSortChange: vi.fn<(s: SortOption) => void>(),
+            onItemsPerPageChange: vi.fn<(n: number) => void>(),
+            onReset: vi.fn<() => void>(),
+        };
+        act(() =>
+            dom.root.render(
+                <RefineBar activeTab="albums" filter="owned" sortBy="name" itemsPerPage={40} {...handlers} {...props} />,
+            ),
+        );
+        return handlers;
+    }
+    const select = (label: string) =>
+        [...dom.host.querySelectorAll("label")].find((l) => l.textContent?.startsWith(label))!.querySelector("select")!;
+    const choose = (el: HTMLSelectElement, value: string) =>
+        act(() => {
+            el.value = value;
+            el.dispatchEvent(new Event("change", { bubbles: true }));
         });
 
-        it("is a modal sheet on a phone, placed by CSS rather than measured", () => {
-            wide = false;
-            show();
-            open();
-            expect(panel()!.getAttribute("role")).toBe("dialog");
-            expect(panel()!.getAttribute("aria-modal")).toBe("true");
-            expect(vars()).toEqual(["0px", "0px", "0px"]);
-            expect(panel()!.querySelector('[aria-label="Close refine panel"]')).not.toBeNull();
-        });
+    it("puts show, sort and page size on the line, with option text lowercased in source", () => {
+        showBar();
+        expect(dom.host.querySelector('[role="radiogroup"]')).not.toBeNull();
+        expect([...select("Sort by").options].map((o) => o.textContent)).toEqual([
+            "sort: name (a–z)",
+            "sort: name (z–a)",
+            "sort: year (newest)",
+        ]);
+        expect([...select("Per page").options].map((o) => o.textContent)).toEqual([
+            "24 per page",
+            "40 per page",
+            "80 per page",
+            "200 per page",
+        ]);
+        expect(select("Per page").value).toBe("40");
+    });
 
-        it("beside a phone has no close button, so Shift+Tab from the chosen sort leaves and gives focus back", () => {
-            show();
-            open();
-            expect(panel()!.querySelector('[aria-label="Close refine panel"]')).toBeNull();
+    it("changes sort, page size and filter, and offers reset only once something is changed", () => {
+        const { onSortChange, onItemsPerPageChange, onFilterChange } = showBar();
+        expect([...dom.host.querySelectorAll("button")].some((b) => b.textContent === "Reset")).toBe(false);
+        choose(select("Sort by"), "name-desc");
+        expect(onSortChange).toHaveBeenLastCalledWith("name-desc");
+        choose(select("Per page"), "200");
+        expect(onItemsPerPageChange).toHaveBeenLastCalledWith(200);
+        act(() => [...dom.host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((r) => r.textContent === "All")!.click());
+        expect(onFilterChange).toHaveBeenLastCalledWith("all");
+
+        const { onReset } = showBar({ itemsPerPage: 200 });
+        const reset = [...dom.host.querySelectorAll("button")].find((b) => b.textContent === "Reset")!;
+        act(() => reset.click());
+        expect(onReset).toHaveBeenCalledTimes(1);
+    });
+
+    it("on a TV is a remote row of switches: the remote moves between buttons only, and owns the arrows", () => {
+        tv.on = true;
+        try {
+            const { onSortChange, onItemsPerPageChange } = showBar();
+            expect(dom.host.querySelector("select")).toBeNull();
+            const groups = [...dom.host.querySelectorAll<HTMLElement>('[role="radiogroup"]')];
+            expect(groups).toHaveLength(3);
+            act(() => [...groups[1].querySelectorAll("button")].find((r) => r.textContent === "Name (Z–A)")!.click());
+            expect(onSortChange).toHaveBeenLastCalledWith("name-desc");
+            act(() => [...groups[2].querySelectorAll("button")].find((r) => r.textContent === "200 per page")!.click());
+            expect(onItemsPerPageChange).toHaveBeenLastCalledWith(200);
+            // Every choice a stop in the remote's row (the toolbar is the row), and the arrows left to the remote.
+            expect(dom.host.querySelectorAll('[role="radio"][data-tv-card]')).toHaveLength(3 + 3 + 4);
+            onSortChange.mockClear();
+            act(() => {
+                groups[1].querySelector("button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+            });
+            expect(onSortChange).not.toHaveBeenCalled();
+        } finally {
+            tv.on = false;
+        }
+    });
+
+    it("hands focus to the row's first control when reset removes its own button", () => {
+        const handlers = showBar({ filter: "all" });
+        const reset = [...dom.host.querySelectorAll("button")].find((b) => b.textContent === "Reset")!;
+        reset.focus();
+        act(() => reset.click());
+        expect(handlers.onReset).toHaveBeenCalledTimes(1);
+        showBar({ filter: "owned", onReset: handlers.onReset });
+        expect(document.activeElement?.textContent).toBe("In your library");
+    });
+
+    it("on the tracks tab, which has no filter, hands focus to the sort", () => {
+        const handlers = showBar({ activeTab: "tracks", itemsPerPage: 80 });
+        const reset = [...dom.host.querySelectorAll("button")].find((b) => b.textContent === "Reset")!;
+        reset.focus();
+        act(() => reset.click());
+        showBar({ activeTab: "tracks", itemsPerPage: 40, onReset: handlers.onReset });
+        expect(document.activeElement).toBe(select("Sort by"));
+    });
+
+    it("on a TV hands focus to the row's first switch, so the remote keeps working", () => {
+        tv.on = true;
+        try {
+            const handlers = showBar({ activeTab: "tracks", sortBy: "name-desc" });
+            const reset = [...dom.host.querySelectorAll("button")].find((b) => b.textContent === "Reset")!;
+            reset.focus();
+            act(() => reset.click());
+            showBar({ activeTab: "tracks", sortBy: "name", onReset: handlers.onReset });
             expect(document.activeElement?.textContent).toBe("Name (A–Z)");
-            act(() => {
-                document.activeElement!.dispatchEvent(
-                    new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
-                );
-            });
-            expect(panel()).toBeNull();
-            expect(document.activeElement).toBe(trigger());
-        });
+            expect(document.activeElement?.hasAttribute("data-tv-card")).toBe(true);
+        } finally {
+            tv.on = false;
+        }
+    });
+
+    it("has no filter on the tracks tab", () => {
+        showBar({ activeTab: "tracks" });
+        expect(dom.host.querySelector('[role="radiogroup"]')).toBeNull();
+    });
+
+    it("says what the chosen filter shows, to screen readers and on hover", () => {
+        showBar({ filter: "discovery" });
+        const group = dom.host.querySelector('[role="radiogroup"]')!;
+        expect(document.getElementById(group.getAttribute("aria-describedby")!)?.textContent).toBe(
+            "Albums suggested by your listening history",
+        );
+        expect(group.getAttribute("title")).toBe("albums suggested by your listening history");
     });
 });
