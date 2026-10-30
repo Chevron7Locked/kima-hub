@@ -33,14 +33,15 @@ HASH=$(docker exec -e "TEST_PASS=${TEST_PASS}" "${CONTAINER}" bash -c '
 docker exec -e "HASH=${HASH}" -e "TEST_USER=${TEST_USER}" "${CONTAINER}" bash -c '
   # Heredoc is unquoted so ${TEST_USER} and ${HASH} expand (env vars set via -e above).
   # SQL single quotes are plain literals here -- no shell escaping needed.
-  psql -U kima -d kima <<ENDSQL
+  # Stop at the first error, so a schema change that breaks this script fails the setup instead of passing quietly.
+  psql -v ON_ERROR_STOP=1 -U kima -d kima <<ENDSQL
 INSERT INTO "User" (id, username, "passwordHash", role, "onboardingComplete")
 VALUES ('\''e2e_test_user_kima'\'', '\''${TEST_USER}'\'', '\''${HASH}'\'', '\''admin'\'', true)
 ON CONFLICT (username) DO UPDATE
   SET "passwordHash" = EXCLUDED."passwordHash",
       role = EXCLUDED.role;
-INSERT INTO "UserSettings" ("userId", "playbackQuality", "wifiOnly", "offlineEnabled", "maxCacheSizeMb")
-VALUES ('\''e2e_test_user_kima'\'', '\''original'\'', false, false, 10240)
+INSERT INTO "UserSettings" ("userId", "playbackQuality", "wifiOnly")
+SELECT id, '\''original'\'', false FROM "User" WHERE username = '\''${TEST_USER}'\''
 ON CONFLICT ("userId") DO NOTHING;
 ENDSQL
 '
