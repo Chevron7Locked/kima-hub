@@ -27,7 +27,7 @@ jobs:
             - name: Set GHCR image name
               run: |
                   OWNER="${{ github.repository_owner }}"
-                  echo "GHCR_IMAGE_NAME=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+                  echo "GHCR_IMAGE_NAME=ghcr.io/${OWNER,,}/kima" >> "$GITHUB_ENV"
 
             - name: Free up disk space
               run: |
@@ -61,8 +61,8 @@ jobs:
                   else
                     version="${GITHUB_REF#refs/tags/}"
                   fi
-                  echo "version=${version}" >> $GITHUB_OUTPUT
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
+                  echo "version=${version}" >> "$GITHUB_OUTPUT"
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
             # Scan the Intel image before publishing; the digest push below reuses
             # its cached layers. Reports only: most findings are base-image packages
@@ -198,7 +198,7 @@ jobs:
             - name: Set GHCR image name
               run: |
                   OWNER="${{ github.repository_owner }}"
-                  echo "GHCR_IMAGE_NAME=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+                  echo "GHCR_IMAGE_NAME=ghcr.io/${OWNER,,}/kima" >> "$GITHUB_ENV"
 
             - name: Download digests
               uses: actions/download-artifact@v8
@@ -232,8 +232,8 @@ jobs:
                   else
                     version="${GITHUB_REF#refs/tags/}"
                   fi
-                  echo "version=${version}" >> $GITHUB_OUTPUT
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
+                  echo "version=${version}" >> "$GITHUB_OUTPUT"
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
             - name: Create manifest list and push
               working-directory: ${{ runner.temp }}/digests
@@ -242,8 +242,9 @@ jobs:
                   if [ "${{ steps.version.outputs.prerelease }}" = "false" ]; then
                     tags+=(-t "${{ env.DOCKERHUB_IMAGE_NAME }}:latest" -t "${{ env.GHCR_IMAGE_NAME }}:latest")
                   fi
-                  docker buildx imagetools create "${tags[@]}" \
-                    $(printf '${{ env.DOCKERHUB_IMAGE_NAME }}@sha256:%s ' *)
+                  digests=()
+                  for digest in *; do digests+=("${{ env.DOCKERHUB_IMAGE_NAME }}@sha256:${digest}"); done
+                  docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
             - name: Inspect image
               run: |
@@ -267,8 +268,8 @@ jobs:
                   else
                     version="${GITHUB_REF#refs/tags/}"
                   fi
-                  echo "version=${version}" >> $GITHUB_OUTPUT
-                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> $GITHUB_OUTPUT; else echo "prerelease=false" >> $GITHUB_OUTPUT; fi
+                  echo "version=${version}" >> "$GITHUB_OUTPUT"
+                  if [[ "${version}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
             - name: Create Release
               uses: softprops/action-gh-release@v3

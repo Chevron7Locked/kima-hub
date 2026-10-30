@@ -37,7 +37,7 @@ jobs:
             - name: Set image name
               run: |
                   OWNER="${{ github.repository_owner }}"
-                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> "$GITHUB_ENV"
 
             # The image carries the ML models and a full Postgres, so a default
             # runner runs out of disk partway through the build.
@@ -60,7 +60,7 @@ jobs:
 
             - name: Get short SHA
               id: sha
-              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+              run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
             - name: Build and push by digest (amd64)
               id: push
@@ -110,7 +110,7 @@ jobs:
             - name: Set image name
               run: |
                   OWNER="${{ github.repository_owner }}"
-                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> "$GITHUB_ENV"
 
             # Same head room the amd64 job needs: the image carries the ML
             # models and a full Postgres, so a default runner's disk fills
@@ -134,7 +134,7 @@ jobs:
 
             - name: Get short SHA
               id: sha
-              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+              run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
             - name: Build and push by digest (arm64)
               id: push
@@ -184,7 +184,7 @@ jobs:
             - name: Set image name
               run: |
                   OWNER="${{ github.repository_owner }}"
-                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> $GITHUB_ENV
+                  echo "GHCR_IMAGE=ghcr.io/${OWNER,,}/kima" >> "$GITHUB_ENV"
 
             - name: Download digests
               uses: actions/download-artifact@v8
@@ -205,7 +205,7 @@ jobs:
 
             - name: Get short SHA
               id: sha
-              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+              run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
             - name: Compose tag list
               id: tags
@@ -218,7 +218,7 @@ jobs:
                     echo 'list<<TAGS_EOF'
                     echo "${TAGS}"
                     echo 'TAGS_EOF'
-                  } >> $GITHUB_OUTPUT
+                  } >> "$GITHUB_OUTPUT"
 
             - name: Create manifest list and push
               working-directory: ${{ runner.temp }}/digests
@@ -229,8 +229,9 @@ jobs:
                   done <<TAGS_EOF
                   ${{ steps.tags.outputs.list }}
                   TAGS_EOF
-                  docker buildx imagetools create "${args[@]}" \
-                    $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
+                  digests=()
+                  for digest in *; do digests+=("${{ env.GHCR_IMAGE }}@sha256:${digest}"); done
+                  docker buildx imagetools create "${args[@]}" "${digests[@]}"
 
             - name: Summary
               run: |
