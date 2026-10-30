@@ -3,7 +3,8 @@
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/cn";
 import { Play, Pause, Music, ChevronUp, ChevronDown, X, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -50,6 +51,18 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
 
     const opStyle = OPERATION_STYLES[activeOperation.type];
     const trackCount = queue.length;
+
+    // A queue may hold 10,000 songs, so only the rows in view are drawn: every queue position but the playing one.
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const playingShown = currentIndex >= 0 && currentIndex < queue.length;
+    const queueIndex = (row: number) => (playingShown && row >= currentIndex ? row + 1 : row);
+    const virtualizer = useVirtualizer({
+        count: queue.length - (playingShown ? 1 : 0),
+        estimateSize: () => 52,
+        overscan: 10,
+        getScrollElement: () => scrollRef.current,
+        getItemKey: (row) => `${queue[queueIndex(row)]?.id}-${queueIndex(row)}`,
+    });
 
     const handlePlayFromIndex = (index: number) => {
         playTracks(queue, index);
@@ -128,85 +141,93 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto">
-                {queue.length === 0 && (
-                    <div className="flex items-center justify-center py-12 text-center">
-                        <p className="text-sm text-[var(--text-muted)]">the queue is empty</p>
-                    </div>
-                )}
-                {queue.length > 0 && !withNowPlaying && queue.length - currentIndex - 1 <= 0 && (
-                    <p className="px-3 py-4 text-xs text-[var(--text-muted)]">nothing up next: add songs, or play an album</p>
-                )}
-                {queue.map((track, index) => {
-                    if (index === currentIndex) return null;
-                    const upcoming = index > currentIndex;
+            {queue.length === 0 && (
+                <div className="flex items-center justify-center py-12 text-center">
+                    <p className="text-sm text-[var(--text-muted)]">the queue is empty</p>
+                </div>
+            )}
+            {queue.length > 0 && !withNowPlaying && queue.length - currentIndex - 1 <= 0 && (
+                <p className="shrink-0 px-3 py-4 text-xs text-[var(--text-muted)]">nothing up next: add songs, or play an album</p>
+            )}
 
-                    return (
-                        <div
-                            key={`${track.id}-${index}`}
-                            data-queue-row
-                            className={cn(
-                                "group flex items-center gap-1 pr-2 transition-colors hover:bg-white/5 focus-within:bg-white/5",
-                                !upcoming && "opacity-50",
-                            )}
-                        >
-                            <button
-                                type="button"
-                                onClick={() => handlePlayFromIndex(index)}
-                                aria-label={`play ${shownTitle(track)}`}
-                                className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
+            {/* Nothing but the rows inside the scroller, so a row's place is its offset in the list. */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+                    {virtualizer.getVirtualItems().map((item) => {
+                        const index = queueIndex(item.index);
+                        const track = queue[index];
+                        const upcoming = index > currentIndex;
+
+                        return (
+                            <div
+                                key={item.key}
+                                data-index={item.index}
+                                ref={virtualizer.measureElement}
+                                data-queue-row
+                                className={cn(
+                                    "group absolute left-0 top-0 flex w-full items-center gap-1 pr-2 transition-colors hover:bg-white/5 focus-within:bg-white/5",
+                                    !upcoming && "opacity-50",
+                                )}
+                                style={{ transform: `translateY(${item.start}px)` }}
                             >
-                                <QueueCover coverArt={track.album?.coverArt} />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-[var(--text-primary)] truncate">{shownTitle(track)}</p>
-                                    <p className="text-xs text-[var(--text-muted)] truncate">
-                                        {track.artist?.name}
-                                    </p>
-                                </div>
-                                <span
-                                    className={cn(
-                                        "text-xs text-[var(--text-muted)] tabular-nums shrink-0",
-                                        // The actions take the duration's place on rows that have them.
-                                        upcoming && "hidden can-hover:block can-hover:group-hover:hidden can-hover:group-focus-within:hidden",
-                                    )}
+                                <button
+                                    type="button"
+                                    onClick={() => handlePlayFromIndex(index)}
+                                    aria-label={`play ${shownTitle(track)}`}
+                                    className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
                                 >
-                                    {formatTime(track.duration)}
-                                </span>
-                            </button>
-                            {/* Shown on hover or focus where there is a pointer; always on a touch screen. */}
-                            {upcoming && (
-                                <div className="flex shrink-0 items-center can-hover:hidden can-hover:group-hover:flex can-hover:group-focus-within:flex">
-                                    <button
-                                        type="button"
-                                        onClick={() => swap(index, index - 1)}
-                                        disabled={index <= currentIndex + 1}
-                                        aria-label={`move ${shownTitle(track)} up`}
-                                        className={rowAction}
+                                    <QueueCover coverArt={track.album?.coverArt} />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-[var(--text-primary)] truncate">{shownTitle(track)}</p>
+                                        <p className="text-xs text-[var(--text-muted)] truncate">
+                                            {track.artist?.name}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={cn(
+                                            "text-xs text-[var(--text-muted)] tabular-nums shrink-0",
+                                            // The actions take the duration's place on rows that have them.
+                                            upcoming && "hidden can-hover:block can-hover:group-hover:hidden can-hover:group-focus-within:hidden",
+                                        )}
                                     >
-                                        <ChevronUp aria-hidden="true" className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => swap(index, index + 1)}
-                                        disabled={index >= queue.length - 1}
-                                        aria-label={`move ${shownTitle(track)} down`}
-                                        className={rowAction}
-                                    >
-                                        <ChevronDown aria-hidden="true" className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeFromQueue(index)}
-                                        aria-label={`remove ${shownTitle(track)} from the queue`}
-                                        className={cn(rowAction, "hover:bg-danger/10 hover:text-danger-light")}
-                                    >
-                                        <X aria-hidden="true" className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
+                                        {formatTime(track.duration)}
+                                    </span>
+                                </button>
+                                {/* Shown on hover or focus where there is a pointer; always on a touch screen. */}
+                                {upcoming && (
+                                    <div className="flex shrink-0 items-center can-hover:hidden can-hover:group-hover:flex can-hover:group-focus-within:flex">
+                                        <button
+                                            type="button"
+                                            onClick={() => swap(index, index - 1)}
+                                            disabled={index <= currentIndex + 1}
+                                            aria-label={`move ${shownTitle(track)} up`}
+                                            className={rowAction}
+                                        >
+                                            <ChevronUp aria-hidden="true" className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => swap(index, index + 1)}
+                                            disabled={index >= queue.length - 1}
+                                            aria-label={`move ${shownTitle(track)} down`}
+                                            className={rowAction}
+                                        >
+                                            <ChevronDown aria-hidden="true" className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeFromQueue(index)}
+                                            aria-label={`remove ${shownTitle(track)} from the queue`}
+                                            className={cn(rowAction, "hover:bg-danger/10 hover:text-danger-light")}
+                                        >
+                                            <X aria-hidden="true" className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
 
             <ConfirmDialog
