@@ -119,5 +119,25 @@ services/audio-analyzer-clap/models/
 # Model caches are large binaries, not source
 services/audio-analyzer-clap/cache/
 
-# Lab experiment folders stay out of the product repo; the archive lives in kima-labs research/hub-eval-archive-2026-10.
+# Lab experiment folders (dated) stay out of the product repo.
 services/audio-analyzer-clap/eval/*-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
+# AI assistant and editor tool files: notes, sessions, caches and scans, never part of the product
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+/PRODUCT.md
+/DESIGN.md
+handoff/
+.claude/
+.cursor/
+.serena/
+.hermes/
+.qwen/
+.roo/
+.opencode/
+.aider*
+.impeccable/
+.impeccable.md
+.cleanup-scan/
+.fallow/

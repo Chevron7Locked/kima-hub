@@ -24,6 +24,17 @@ scripts
 **/.impeccable
 **/.cleanup-scan
 **/handoff
+**/.claude
+**/.cursor
+**/.serena
+**/.hermes
+**/.qwen
+# Local runtime data, proofs of concept and evaluation datasets: large, and never part of an image.
+backend/cache
+.pocs
+.mock
+services/audio-analyzer-clap/eval/.cache
+services/audio-analyzer-clap/eval/services
 *.test.ts
 __tests__
 android
