@@ -123,15 +123,18 @@ describe("a stored cover", () => {
         expect(res.status).toBe(400);
     });
 
-    it.each(["by query", "by path"])("whose file is gone is looked up again and remembered %s", async (how) => {
+    // Served through Kima, never a redirect off-site: the web app's service worker may only fetch Kima itself.
+    it.each(["by query", "by path"])("whose file is gone is looked up again, remembered and served %s", async (how) => {
         await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: `native:${P}_gone.jpg` } });
         mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
         const id = encodeURIComponent(`native:${P}_gone.jpg`);
 
         const res = await request(app).get(how === "by query" ? `/library/cover-art?url=${id}` : `/library/cover-art/${id}`);
 
-        expect(res.status).toBe(302);
-        expect(res.headers.location).toBe("https://covers.example.org/found.jpg");
+        expect(res.status).toBe(200);
+        expect(Buffer.from(res.body)).toEqual(JPEG);
+        expect(mockFetchChecked).toHaveBeenCalledWith("https://covers.example.org/found.jpg", expect.anything());
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
     });
 
@@ -139,9 +142,10 @@ describe("a stored cover", () => {
         await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: "https://covers.example.org/own.jpg" } });
         mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
 
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
         const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:${P}_gone.jpg`)}`);
 
-        expect(res.status).toBe(302);
+        expect(res.status).toBe(200);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/own.jpg");
     });
 

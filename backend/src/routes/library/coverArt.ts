@@ -124,15 +124,19 @@ async function serveAudiobookCover(
 
 /**
  * A cover stored in the covers folder: 400 for a path outside it. When the file is gone, the album it belonged to is
- * looked up in every artwork source, and what is found is remembered and redirected to; otherwise 404.
+ * looked up in every artwork source, and what is found is remembered and returned for the caller to serve through
+ * Kima (never a redirect off-site: the web app's service worker may only fetch Kima itself); otherwise 404.
+ * Returns the address to serve, or null once it has answered.
  */
-async function serveStoredCover(nativePath: string, size: string | undefined, req: Request, res: Response) {
+async function serveStoredCover(nativePath: string, size: string | undefined, req: Request, res: Response): Promise<string | null> {
   const file = resolveInCoversDir(nativePath);
   if (!file) {
-    return res.status(400).json({ error: "Invalid cover path" });
+    res.status(400).json({ error: "Invalid cover path" });
+    return null;
   }
   if (fs.existsSync(file)) {
-    return serveNativeImage(file, nativePath, size, req, res);
+    await serveNativeImage(file, nativePath, size, req, res);
+    return null;
   }
 
   logger.warn(`[COVER-ART] Stored cover not found: ${file}, asking the artwork sources`);
@@ -154,13 +158,14 @@ async function serveStoredCover(nativePath: string, size: string | undefined, re
           where: { id: albumId, coverUrl: `native:${nativePath}` },
           data: { coverUrl: found.url },
         });
-        return res.redirect(found.url);
+        return found.url;
       }
     }
   } catch (error) {
     logger.error(`[COVER-ART] Artwork lookup for ${albumId} failed:`, error);
   }
-  return res.status(404).json({ error: "Cover art not found" });
+  res.status(404).json({ error: "Cover art not found" });
+  return null;
 }
 
 const router = Router();
@@ -223,14 +228,15 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     if (address.startsWith("audiobook__")) {
       return serveAudiobookCover(address.replace("audiobook__", ""), req, res);
     }
+    let coverUrl = address;
     if (address.startsWith("native:")) {
-      return serveStoredCover(address.replace("native:", ""), size, req, res);
-    }
-    // A path id is a picture's address or nothing; a query url is fetched and checked by the address guard.
-    if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
+      const found = await serveStoredCover(address.replace("native:", ""), size, req, res);
+      if (!found) return;
+      coverUrl = found;
+    } else if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
+      // A path id is a picture's address or nothing; a query url is fetched and checked by the address guard.
       return res.status(400).json({ error: "Invalid cover ID format" });
     }
-    const coverUrl = address;
 
     const cacheKey = `cover-art:${crypto
       .createHash("md5")

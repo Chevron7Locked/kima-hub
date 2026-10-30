@@ -48,6 +48,12 @@ jest.mock("../../services/musicbrainz", () => ({
     },
 }));
 
+const mockFetchChecked = jest.fn();
+jest.mock("../../utils/ssrf", () => ({
+    ...jest.requireActual("../../utils/ssrf"),
+    fetchChecked: (...a: unknown[]) => mockFetchChecked(...a),
+}));
+
 const mockFindAlbumArtwork = jest.fn();
 jest.mock("../../services/artwork", () => ({
     findAlbumArtwork: (...a: unknown[]) => mockFindAlbumArtwork(...a),
@@ -117,7 +123,7 @@ describe("the cover-art route asks every source", () => {
             });
         });
 
-        it("remembers the replacement against the album and sends the reader there", async () => {
+        it("remembers the replacement against the album and serves it through Kima", async () => {
             (prisma.album.findUnique as jest.Mock).mockResolvedValue({
                 id: "a1",
                 title: "Age Of Aquarius",
@@ -125,13 +131,16 @@ describe("the cover-art route asks every source", () => {
                 artist: { name: "Perturbator" },
             });
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+            mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
 
             const res = await request(makeApp()).get(
                 "/library/cover-art/" + encodeURIComponent("native:a1.jpg"),
             );
 
-            expect(res.status).toBe(302);
-            expect(res.headers.location).toBe(FOUND);
+            // Never a redirect off-site: the web app's service worker may only fetch Kima itself.
+            expect(res.status).toBe(200);
+            expect(res.headers.location).toBeUndefined();
+            expect(mockFetchChecked).toHaveBeenCalledWith(FOUND, expect.anything());
             expect(prisma.album.updateMany).toHaveBeenCalledWith({
                 where: { id: "a1", coverUrl: "native:a1.jpg" },
                 data: { coverUrl: FOUND },
