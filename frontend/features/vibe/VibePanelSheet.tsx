@@ -26,6 +26,21 @@ const SEARCH_ROW = 52;
 const PLAYER_ROW = 52;
 /** How the sheet settles on a stop. */
 const SETTLE = "height 340ms cubic-bezier(0.32, 0.72, 0, 1)";
+/**
+ * The scrim fades with the same curve and time as the sheet settles. At peek it is also hidden, so the blur costs
+ * nothing at rest: it shows at once when opening and hides only once the fade out is over.
+ */
+const SCRIM_IN = "opacity 340ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s";
+const SCRIM_OUT = "opacity 340ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s linear 340ms";
+
+/** The scrim at rest: in over an open sheet, out and hidden at peek. */
+function scrimAtRest(open: boolean) {
+    return {
+        opacity: open ? "1" : "0",
+        visibility: (open ? "visible" : "hidden") as React.CSSProperties["visibility"],
+        transition: open ? SCRIM_IN : SCRIM_OUT,
+    } satisfies React.CSSProperties;
+}
 
 function SheetAction({ icon: Icon, label, primary = false, ...props }: { icon: LucideIcon; label: string; primary?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
     return (
@@ -195,6 +210,12 @@ export function VibePanelSheet({
     const frame = useRef(0);
     const scrimRef = useRef<HTMLDivElement>(null);
 
+    // The blur fades in over the first stretch, from peek to half, and stays in above it.
+    const scrimOpacity = useCallback(
+        (h: number) => Math.min(1, Math.max(0, (h - stops.peek) / Math.max(1, stops.half - stops.peek))),
+        [stops],
+    );
+
     // A drag moves the sheet element directly, once per frame, without re-rendering the sheet; React takes over
     // again at the stop it settles on.
     const onHandleDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -208,9 +229,13 @@ export function VibePanelSheet({
             el.style.transition = "none";
             el.style.height = `${start}px`;
         }
-        // The blur over the map is recomposited on every frame the sheet moves; it returns at the stop.
-        if (scrimRef.current) scrimRef.current.style.backdropFilter = "none";
-    }, [height]);
+        // The scrim is held at the sheet's height too, not left to finish a fade it was part-way through.
+        if (scrimRef.current) {
+            scrimRef.current.style.transition = "none";
+            scrimRef.current.style.opacity = String(scrimOpacity(start));
+            scrimRef.current.style.visibility = "visible";
+        }
+    }, [height, scrimOpacity]);
 
     const onHandleMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         if (!drag.current) return;
@@ -227,8 +252,9 @@ export function VibePanelSheet({
         frame.current = requestAnimationFrame(() => {
             frame.current = 0;
             if (sheetRef.current) sheetRef.current.style.height = `${liveHeight.current}px`;
+            if (scrimRef.current) scrimRef.current.style.opacity = String(scrimOpacity(liveHeight.current));
         });
-    }, [stops]);
+    }, [stops, scrimOpacity]);
 
     useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
@@ -258,13 +284,14 @@ export function VibePanelSheet({
 
         cancelAnimationFrame(frame.current);
         frame.current = 0;
-        // Settle on the stop here: when it is the stop the drag began at, React has nothing new to write.
+        // Settle the sheet and its scrim on the stop here: when it is the stop the drag began at, React has nothing new
+        // to write.
         const el = sheetRef.current;
         if (el) {
             el.style.transition = SETTLE;
             el.style.height = `${stops[target]}px`;
         }
-        if (scrimRef.current) scrimRef.current.style.backdropFilter = "";
+        if (scrimRef.current) Object.assign(scrimRef.current.style, scrimAtRest(target !== "peek"));
         setAnimate(true);
         setSnap(target);
     }, [nearest, setSnap, stops]);
@@ -276,15 +303,18 @@ export function VibePanelSheet({
 
     return (
         <div ref={hostRef} className="pointer-events-none absolute inset-0 z-(--z-sheet)">
-            {snap !== "peek" && (
-                <div
-                    ref={scrimRef}
-                    data-testid="vibe-sheet-scrim"
-                    aria-hidden="true"
-                    onClick={() => setSnap("peek")}
-                    className="pointer-events-auto absolute inset-0 bg-black/40 backdrop-blur-sm"
-                />
-            )}
+            {/* Always there, so a drag up from peek can fade it in; at peek it is clear and lets taps through. */}
+            <div
+                ref={scrimRef}
+                data-testid="vibe-sheet-scrim"
+                aria-hidden="true"
+                onClick={() => setSnap("peek")}
+                className={cn(
+                    "absolute inset-0 bg-black/40 backdrop-blur-sm",
+                    snap === "peek" ? "pointer-events-none" : "pointer-events-auto",
+                )}
+                style={{ ...scrimAtRest(snap !== "peek"), ...(animate ? {} : { transition: "none" }) }}
+            />
 
             <div
                 ref={sheetRef}

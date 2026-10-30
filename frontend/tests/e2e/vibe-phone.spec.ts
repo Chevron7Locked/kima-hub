@@ -631,6 +631,56 @@ test.describe("Vibe, phone layout", () => {
         ).toBe(true);
     });
 
+    // The blur behind the sheet does not flicker off while the sheet is dragged, and fades in with the drag up from peek.
+    test("the scrim keeps its blur during a drag, and fades in as the sheet is pulled up from peek", async ({ page }) => {
+        const scrimState = () =>
+            page.evaluate(() => {
+                const el = document.querySelector('[data-testid="vibe-sheet-scrim"]');
+                if (!el) return null;
+                const style = getComputedStyle(el);
+                return { filter: style.backdropFilter || style.getPropertyValue("-webkit-backdrop-filter"), opacity: Number(style.opacity) };
+            });
+        const grabHandle = async () => {
+            const handle = must(await page.locator(HANDLE).boundingBox(), "the sheet handle");
+            const x = handle.x + handle.width / 2;
+            const y = handle.y + handle.height / 2;
+            await page.mouse.move(x, y);
+            await page.mouse.down();
+            return { x, y };
+        };
+        const moveTo = async (x: number, from: number, to: number) => {
+            for (let i = 1; i <= 8; i++) {
+                await page.mouse.move(x, from + ((to - from) * i) / 8);
+                await page.waitForTimeout(18);
+            }
+            await page.waitForTimeout(120);
+        };
+
+        // Half to full: the blur stays on the whole way.
+        const half = await openHalf(page);
+        let grip = await grabHandle();
+        await moveTo(grip.x, grip.y, half.host.y + half.host.height * 0.25);
+        const midDrag = await scrimState();
+        await page.mouse.up();
+        await waitForSheetToRest(page);
+        expect(midDrag, "the scrim must stay while the sheet is dragged").not.toBeNull();
+        expect(midDrag!.filter, `mid-drag the scrim must still blur the map, got "${midDrag!.filter}"`).toMatch(/blur\(\s*[1-9]/);
+
+        // Peek, part of the way to half: the blur is already fading in, not waiting for the release.
+        const peek = await closeToPeek(page);
+        grip = await grabHandle();
+        const halfY = peek.host.y + peek.host.height * 0.5;
+        await moveTo(grip.x, grip.y, grip.y + (halfY - grip.y) * 0.4);
+        const pulling = await scrimState();
+        await page.mouse.move(grip.x, grip.y);
+        await page.mouse.up();
+        await waitForSheetToRest(page);
+        expect(pulling, "pulling up from peek must already show the scrim").not.toBeNull();
+        expect(pulling!.filter, `the scrim must blur while pulling up, got "${pulling!.filter}"`).toMatch(/blur\(\s*[1-9]/);
+        expect(pulling!.opacity, "part of the way up, the scrim must be part of the way in").toBeGreaterThan(0.05);
+        expect(pulling!.opacity, "part of the way up, the scrim must not be fully in yet").toBeLessThan(0.95);
+    });
+
     // a scrim tap returns the sheet to peek.
     test("a scrim tap returns the sheet to peek", async ({ page }) => {
         const peekBefore = await readSheet(page);
@@ -646,7 +696,40 @@ test.describe("Vibe, phone layout", () => {
             Math.abs(visibleHeight(after) - peekHeight),
             `the sheet must return to its peek height (${peekHeight} px), measured ${visibleHeight(after)}`,
         ).toBeLessThanOrEqual(2);
-        await expect(page.getByTestId("vibe-sheet-scrim")).toHaveCount(0);
+        // Back at peek the scrim is hidden: nothing blurs the map and taps reach it.
+        const scrim = page.getByTestId("vibe-sheet-scrim");
+        await expect(scrim).toBeHidden();
+        await expect(scrim).toHaveCSS("pointer-events", "none");
+    });
+
+    // Grabbing the sheet while it settles holds the blur where it was, rather than jumping it to the end of its fade.
+    test("grabbing the sheet mid-settle holds the scrim's fade where it was", async ({ page }) => {
+        const peek = (await readSheet(page)).sheet.height;
+        const half = await openHalf(page);
+        // Transitions at a tenth of their speed, so the grab lands mid-settle wherever the handle has got to.
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send("Animation.enable");
+        await cdp.send("Animation.setPlaybackRate", { playbackRate: 0.1 });
+        await page.mouse.click(Math.round(half.main.x + half.main.width / 2), Math.round(half.sheet.y - 40));
+        await page.waitForTimeout(400);
+        const handle = must(await page.locator(HANDLE).boundingBox(), "the sheet handle");
+        await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+        await page.mouse.down();
+        const held = await page.evaluate(() => {
+            const sheet = document.querySelector('[data-testid="vibe-sheet"]')!.getBoundingClientRect().height;
+            const scrim = Number(getComputedStyle(document.querySelector('[data-testid="vibe-sheet-scrim"]')!).opacity);
+            return { sheet, scrim };
+        });
+        await page.mouse.up();
+        await cdp.send("Animation.setPlaybackRate", { playbackRate: 1 });
+        await waitForSheetToRest(page);
+        const along = (held.sheet - peek) / (half.sheet.height - peek);
+        expect(along, "the grab must land while the sheet is still on its way down").toBeGreaterThan(0.2);
+        expect(along, "the grab must land while the sheet is still on its way down").toBeLessThan(0.95);
+        expect(
+            Math.abs(held.scrim - along),
+            `the scrim must match the sheet's height at the grab: opacity ${held.scrim}, sheet ${Math.round(along * 100)}% of the way up`,
+        ).toBeLessThan(0.1);
     });
 
     // dragging down from half returns the sheet to peek.
