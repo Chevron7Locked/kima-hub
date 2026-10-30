@@ -21,7 +21,7 @@ Kima reaches out to third-party services for features you use, the same way your
 | AcoustID | Identifying files with missing tags | An audio fingerprint of the file and its length |
 | LRCLIB | Lyrics | Track, artist, album, duration |
 | ListenBrainz | Similar artists, charts and scrobbling | Artist MBIDs for similar artists, with no account. Your plays only if you connect your account, and then only to your own account |
-| Apple Podcasts (iTunes) | Podcast search, charts, categories, show details | Your search text; the chart country set in Settings; the Apple ids of shows Kima lists for you, opens or you follow |
+| Apple Podcasts (iTunes) | Podcast search, charts, categories, show details and their artwork | Your search text; the chart country set in Settings; the Apple ids of shows Kima lists for you, opens or you follow |
 | Deezer | Similar artists when ListenBrainz has none, artwork, playlist browsing and previews | Artist and album names, and the playlists you open |
 | Fanart.tv | Artist images, only if you turn it on and enter a key | Artist MBIDs |
 | Spotify, Deezer, YouTube, YouTube Music, SoundCloud, Bandcamp, Mixcloud, Odesli (song.link), MusicBrainz | Playlist import | The playlist and song links you paste, then each track's links to song.link and its ISRC to MusicBrainz to match it to your library. No account is needed |
@@ -33,7 +33,7 @@ Kima reaches out to third-party services for features you use, the same way your
 
 Every one of these calls is a lookup: a name, a fingerprint, a playlist link. Lyrics and song previews look up the song they are for. Beyond those, the only flows that carry what you listen to are services you deliberately connect, scrobbling to your own ListenBrainz account being the obvious one. Play history and your library listing stay in your database everywhere else. Enrichment can be paused in settings, and features you never touch (podcasts, imports, scrobbling) never make a call.
 
-Album and artist art for your library is fetched by your server and handed to your browser. Some other images, such as Deezer playlist covers on the browse and import pages and similar-album suggestions, your browser loads straight from Deezer's image servers: an image request to a public CDN, carrying the picture it's for. Subsonic apps are sent to the remote cover's address the same way, and to a podcast episode's own audio address on the show's host. In the web app your server streams podcast episodes.
+Album and artist art for your library, and podcast artwork from Apple, is fetched by your server and handed to your browser. Some other images, such as Deezer playlist covers on the browse and import pages and similar-album suggestions, your browser loads straight from Deezer's image servers: an image request to a public CDN, carrying the picture it's for. Subsonic apps are sent to the remote cover's address the same way, and to a podcast episode's own audio address on the show's host. In the web app your server streams podcast episodes.
 
 ## What is stored, and where
 
