@@ -605,7 +605,10 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         });
 
         await session.step("open the panel and ask it to look", async () => {
+            // The previous journey ends on this same address with its own scan showing; going there again only moves
+            // to the anchor, so the page is reloaded to scan the history just planted.
             await page.goto("/stats#false-starts");
+            await page.reload();
             await settle(page);
             await scanPlayHistory(page);
         });

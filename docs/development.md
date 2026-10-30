@@ -88,7 +88,9 @@ npm run test:predeploy
 
 `KIMA_UI_BASE_URL` has no default, and an address on port 3030 is refused: that is the port a real Kima listens on, and these tests sign in, change settings and follow podcasts. Run the test server on another port; for a dev server, `npx next dev -p 3040`.
 
-The stats journey's destructive buttons (wiping play history and the like) also need a marked copy of an account: the target's `host:port` listed in `KIMA_STATS_ALLOWED_TARGETS` (comma-separated), `KIMA_STATS_DESTRUCTIVE_OK` set to that same `host:port`, and a playlist named `__kima-test-copy__` owned by the test user. Without all three that journey is recorded as not covered.
+The stats journey's destructive buttons (wiping play history and the like) also need a marked copy of an account: the target's `host:port` listed in `KIMA_STATS_ALLOWED_TARGETS` (comma-separated), `KIMA_STATS_DESTRUCTIVE_OK` set to that same `host:port`, and a playlist named `__kima-test-copy__` owned by the test user. The audit part writes play history in the form older versions stored it, so it also needs `KIMA_CONTAINER` naming the stack's all-in-one container on this machine. Without these that journey is recorded as not covered.
+
+Most of the stats journeys need a listening history. On a throwaway test stack marked as above, `node scripts/seed-e2e-plays.mjs` (same `KIMA_UI_BASE_URL`, test user and `KIMA_STATS_ALLOWED_TARGETS`) sends the test user about 120 scrobbles spread over two years; it does nothing when the account already has more than 50 plays.
 
 `npm run test:predeploy` covers sign-in, integrations, the library and playback. `npm run test:dogfood` runs the longer walkthrough. In CI the shorter set runs on a built image (with no music library) when a pull request carries the `run-e2e` label. The full suite needs a real library, so it runs before a release on full test stacks, one ARM and one amd64.
 
