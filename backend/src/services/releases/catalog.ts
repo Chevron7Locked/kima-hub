@@ -117,7 +117,7 @@ export const RELEASES: Release[] = [
                 key: "sound.rebuild",
                 title: "Your sound features are rebuilt after this update",
                 summary:
-                    "Kima now uses the music-tuned sound model, so it analyses every song again and builds its sound vectors again, on its own.",
+                    "Kima now uses the music-tuned sound model, so it analyses every song again and builds its sound vectors again, in the background.",
                 body:
                     "This update replaces the sound vectors your library got in 1.11 with ones from the music-tuned sound " +
                     "model. It also analyses every song again, because analysis now reads the middle of each song and works out feel differently. Both " +
