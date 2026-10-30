@@ -118,7 +118,8 @@ describe("RefinePanel", () => {
             act(() => {
                 document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true }));
             });
-        // Shift+Tab from the chosen sort stays inside: reset and close come before it. From reset, the first stop, it leaves.
+        // Shift+Tab from the chosen sort stays inside: reset (and on a phone, close) come before it. From reset, the first
+        // stop, it leaves.
         tab(true);
         expect(panel()).not.toBeNull();
         [...panel()!.querySelectorAll("button")].find((b) => b.textContent === "Reset")!.focus();
@@ -217,8 +218,21 @@ describe("RefinePanel", () => {
             buttonRect = rect(284, 1100, 44, 100);
             show();
             open();
-            // 1280 - 384 - 16 = 880.
-            expect(vars()[1]).toBe("880px");
+            // 1280 - 352 - 16 = 912 (jsdom draws nothing, so the stand-in width).
+            expect(vars()[1]).toBe("912px");
+        });
+
+        it("keeps clear of the right edge by its own drawn width", () => {
+            const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(300);
+            try {
+                buttonRect = rect(284, 1100, 44, 100);
+                show();
+                open();
+                // 1280 - 300 - 16 = 964.
+                expect(vars()[1]).toBe("964px");
+            } finally {
+                width.mockRestore();
+            }
         });
 
         it("closes when its button scrolls out of the page's scrolling area", () => {
@@ -239,6 +253,21 @@ describe("RefinePanel", () => {
             expect(panel()!.getAttribute("role")).toBe("dialog");
             expect(panel()!.getAttribute("aria-modal")).toBe("true");
             expect(vars()).toEqual(["0px", "0px", "0px"]);
+            expect(panel()!.querySelector('[aria-label="Close refine panel"]')).not.toBeNull();
+        });
+
+        it("beside a phone has no close button, so Shift+Tab from the chosen sort leaves and gives focus back", () => {
+            show();
+            open();
+            expect(panel()!.querySelector('[aria-label="Close refine panel"]')).toBeNull();
+            expect(document.activeElement?.textContent).toBe("Name (A–Z)");
+            act(() => {
+                document.activeElement!.dispatchEvent(
+                    new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+                );
+            });
+            expect(panel()).toBeNull();
+            expect(document.activeElement).toBe(trigger());
         });
     });
 });

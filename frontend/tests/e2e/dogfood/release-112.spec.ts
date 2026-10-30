@@ -1096,8 +1096,11 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                     await expect(page).toHaveURL(/[?&]per=200/);
                     await page.getByRole("button", { name: "Reset" }).click();
                     await expect(page).not.toHaveURL(/[?&]per=/);
-                    await page.getByRole("button", { name: "Close refine panel" }).click();
+                    // A phone's sheet has a close button; beside a phone the panel closes on Escape and gives focus back.
+                    if (w < 640) await page.getByRole("button", { name: "Close refine panel" }).click();
+                    else await page.keyboard.press("Escape");
                     await expect(panel).toHaveCount(0);
+                    await expect(page.getByRole("button", { name: /^Refine/ })).toBeFocused();
                     return { size: `${w}x${h}`, choices: count };
                 });
             }

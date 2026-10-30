@@ -59,8 +59,8 @@ function changedFromDefault(filter: LibraryFilter, sortBy: SortOption, itemsPerP
 }
 
 const GAP = 8;
-/** sm:w-96, the panel's width beside a phone. */
-const PANEL_WIDTH = 384;
+/** The panel is as wide as its widest row; this stands in until it has been drawn and can be measured. */
+const PANEL_WIDTH = 352;
 
 /** Where the panel goes beside a phone; `sheet` when it is the phone's bottom sheet instead. */
 type Placement = { top: number; left: number; maxHeight: number; sheet: boolean };
@@ -98,7 +98,8 @@ function usePanelPlacement(
                 return;
             }
             const top = Math.round(rect.bottom + GAP);
-            const left = Math.round(Math.max(GAP, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 2 * GAP)));
+            const width = panelRef.current?.offsetWidth || PANEL_WIDTH;
+            const left = Math.round(Math.max(GAP, Math.min(rect.left, window.innerWidth - width - 2 * GAP)));
             const maxHeight = Math.max(Math.round(areaBottom - top - GAP), 0);
             setPlace((prev) =>
                 prev && !prev.sheet && prev.top === top && prev.left === left && prev.maxHeight === maxHeight
@@ -200,7 +201,8 @@ function ChoiceGroup<T extends string | number>({
                             tabIndex={checked ? 0 : -1}
                             onClick={() => onChange(choice.value)}
                             className={cn(
-                                "min-h-[44px] flex-auto whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors duration-150",
+                                // A touch target where fingers choose; a mouse needs far less.
+                                "min-h-[44px] can-hover:min-h-8 flex-auto whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors sm:px-2.5 duration-150",
                                 numeric && "tabular-nums",
                                 checked
                                     ? "bg-brand/10 text-brand"
@@ -321,31 +323,42 @@ export function RefinePanel({
                     // Phone: a sheet along the bottom edge, clear of the home indicator.
                     "inset-x-0 bottom-0 max-h-[80dvh] rounded-t-2xl border-b-0 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]",
                     // Wider: a panel under its button, inside the page's scrolling area.
-                    "sm:inset-x-auto sm:bottom-auto sm:top-(--refine-top) sm:left-(--refine-left) sm:max-h-(--refine-max-h) sm:w-96 sm:rounded-xl sm:border-b sm:pb-4",
+                    "sm:inset-x-auto sm:bottom-auto sm:top-(--refine-top) sm:left-(--refine-left) sm:max-h-(--refine-max-h) sm:w-max sm:rounded-xl sm:border-b sm:px-3 sm:pt-3 sm:pb-3",
                 )}
             >
-                <div className="sticky top-0 z-(--z-raised) -mx-4 flex min-h-[44px] items-center justify-between bg-[var(--bg-secondary)] px-2 pt-1">
-                    {hasRefinements ? (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                // This button goes once nothing is changed: keep focus in the panel, on the sort.
-                                panelRef.current?.querySelector<HTMLElement>('[role="radio"]')?.focus();
-                                onReset();
-                            }}
-                            className="min-h-[44px] rounded-md px-2 text-sm font-medium text-brand hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
-                        >
-                            Reset
-                        </button>
-                    ) : (
-                        <span />
-                    )}
-                    <Button variant="icon" aria-label="Close refine panel" onClick={() => close(true)}>
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
+                {/* Beside a phone the panel closes on Escape or a click outside, so its top row is only for Reset. Left out
+                    rather than hidden, so the first and last buttons Tab counts are ones that are there. */}
+                {(place?.sheet || hasRefinements) && (
+                    <div
+                        className={cn(
+                            "sticky top-0 z-(--z-raised) -mx-4 flex min-h-[44px] items-center justify-between bg-[var(--bg-secondary)] px-2 pt-1",
+                            "sm:static sm:-mx-1 sm:-mt-1 sm:mb-1 sm:min-h-0 sm:justify-end sm:px-0 sm:pt-0",
+                        )}
+                    >
+                        {hasRefinements ? (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    // This button goes once nothing is changed: keep focus in the panel, on the sort.
+                                    panelRef.current?.querySelector<HTMLElement>('[role="radio"]')?.focus();
+                                    onReset();
+                                }}
+                                className="min-h-[44px] can-hover:min-h-8 rounded-md px-2 text-sm font-medium text-brand hover:bg-brand/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+                            >
+                                Reset
+                            </button>
+                        ) : (
+                            <span />
+                        )}
+                        {place?.sheet && (
+                            <Button variant="icon" aria-label="Close refine panel" onClick={() => close(true)}>
+                                <X className="h-4 w-4" />
+                            </Button>
+                        )}
+                    </div>
+                )}
 
-                <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-4 sm:gap-3">
                     <ChoiceGroup
                         legend="Sort by"
                         choices={sortOptionsFor(activeTab)}
