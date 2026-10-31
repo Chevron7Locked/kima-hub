@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useLibraryDecadesQuery, useLibraryGenresQuery } from "@/hooks/useQueries";
-import { TileCard } from "@/components/cards/TileCard";
+import { StationCard } from "@/features/home/components/StationCard";
 import {
     RadioStation,
     STATIC_STATIONS,
@@ -23,7 +23,7 @@ function SectionSkeleton() {
     return (
         <div className="grid-media">
             {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-20 rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
+                <div key={i} className="h-30 rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
             ))}
         </div>
     );
@@ -38,20 +38,15 @@ interface StationGridProps {
 function StationGrid({ stations, loadingStation, onStart }: StationGridProps) {
     return (
         <div className="grid-media">
-            {stations.map((station) => (
-                <TileCard
+            {stations.map((station, i) => (
+                <StationCard
                     key={station.id}
-                    title={station.name}
-                    subtitle={station.description}
-                    wrapSubtitle
-                    tint={station.color}
-                    hoverBorder={station.hoverBorder}
-                    accent={station.accentGradient}
-                    onClick={() => onStart(station)}
-                    playable
+                    station={station}
+                    onStart={onStart}
                     busy={loadingStation === station.id}
                     disabled={loadingStation !== null}
-                    className="w-full h-20"
+                    index={i}
+                    className="w-full h-30"
                 />
             ))}
         </div>

@@ -869,7 +869,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
         await session.step("starting a genre station plays a song from the server's answer for it", async () => {
             const genre = (await radioTiles("By Genre").first().textContent())!;
             const first = page.locator("button[data-tv-card]").filter({ has: page.locator("h3", { hasText: new RegExp(`^${escapeRegExp(genre)}$`) }) });
-            const answer = page.waitForResponse((r) => r.url().includes("/api/library/radio?") && r.url().includes("type=genre"));
+            const answer = page.waitForResponse((r) => r.url().includes("/api/library/radio?") && r.url().includes("type=genre") && r.url().includes("limit=100"));
             await first.click();
             const res = await answer;
             expect(res.status()).toBe(200);
@@ -902,7 +902,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             }
             await expect(radioTiles("By Mood").first()).toBeVisible();
             const tile = page.locator("button[data-tv-card]").filter({ has: page.locator("h3", { hasText: new RegExp(`^${escapeRegExp(pick.name)}$`) }) });
-            const answer = page.waitForResponse((r) => r.url().includes("/api/library/radio?") && r.url().includes("type=mood"));
+            const answer = page.waitForResponse((r) => r.url().includes("/api/library/radio?") && r.url().includes("type=mood") && r.url().includes("limit=100"));
             await tile.click();
             const tracks = ((await (await answer).json()).tracks ?? []) as Array<{ id: string }>;
             await page.getByTitle("pause", { exact: true }).waitFor({ timeout: 20_000 });

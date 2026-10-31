@@ -187,6 +187,27 @@ function getDecadeName(decade: number): string {
     return decade >= 1900 && decade < 2000 ? `${decade.toString().slice(2)}s` : `${decade}s`;
 }
 
+/** The request a station plays from (GET /library/radio): its type and value, and how many songs. */
+export function stationParams(station: RadioStation, limit: number): URLSearchParams {
+    const params = new URLSearchParams();
+    params.set("type", station.filter.type);
+    if (station.filter.value) params.set("value", station.filter.value);
+    params.set("limit", String(limit));
+    // Late Night plays this listener's own songs from after dark, read in their time zone.
+    params.set("tz", Intl.DateTimeFormat().resolvedOptions().timeZone);
+    return params;
+}
+
+/** The cover a station's tile shows: the first among its songs, in the order it would play them. */
+export function stationCover(tracks: { album?: { coverArt?: string | null } | null }[]): string | null {
+    return tracks.find((track) => track.album?.coverArt)?.album?.coverArt ?? null;
+}
+
+/** A station's colour: the first in its accent (every style above writes it as `from-[#hex] to-[#hex]`). */
+export function stationHue(station: RadioStation): string {
+    return station.accentGradient.match(/#[0-9a-f]{6}/i)![0];
+}
+
 export function useRadioPlayer() {
     const { playStation } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
@@ -194,17 +215,10 @@ export function useRadioPlayer() {
     const startRadio = async (station: RadioStation) => {
         setLoadingStation(station.id);
         try {
-            const params = new URLSearchParams();
-            params.set("type", station.filter.type);
-            if (station.filter.value) params.set("value", station.filter.value);
-            params.set("limit", "100");
-            // Late Night plays this listener's own songs from after dark, read in their time zone.
-            params.set("tz", Intl.DateTimeFormat().resolvedOptions().timeZone);
-
             // Played in the server's order (stationBatches).
             const fetchTracks = stationBatches(
                 (query) => api.get<{ tracks: Track[]; next?: number }>(`/library/radio?${query}`),
-                params
+                stationParams(station, 100)
             );
             const response = await fetchTracks();
 
