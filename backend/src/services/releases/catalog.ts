@@ -187,7 +187,8 @@ export const RELEASES: Release[] = [
                     "song in your library that fits, spread so one artist doesn't run together.\n\n" +
                     "Late Night is yours alone: it starts from the songs you actually play between 10pm and 4am, then " +
                     "songs like them. Wildcard plays the songs no mood claims. Genre stations now count each genre once, " +
-                    "however it is spelled, and play only your library.",
+                    "however it is spelled, and play only your library. Each station's tile shows a cover from its own " +
+                    "songs, and every genre station has a colour of its own.",
                 links: [{ label: "Open radio", href: "/radio" }],
             },
             {
@@ -224,7 +225,8 @@ export const RELEASES: Release[] = [
                     "alerts, downloads, imports or history. The queue page is gone: the panel's up next list moves, " +
                     "removes and clears songs.\n\n" +
                     "The sidebar's mixes show their covers, and the release radar, new and upcoming albums from artists " +
-                    "you follow, has a place in the sidebar.",
+                    "you follow, has a place in the sidebar. Both panels slide open and closed smoothly, and covers are " +
+                    "one size on every page.",
             },
             {
                 kind: "note",
@@ -286,6 +288,8 @@ export const RELEASES: Release[] = [
                     "- Playlists stay current on all your open devices, and quick edits no longer undo each other on screen\n" +
                     "- Song previews play again, and artist photos and related artists come from the right artist\n" +
                     "- Untagged albums are identified from their songs' audio fingerprints, so they get real covers and MusicBrainz ids\n" +
+                    "- An album is filed under the artist its songs name together: one song tagged with a guest no longer splits off under that guest, and a tag naming two artists is no longer glued into one made-up artist\n" +
+                    "- Artist and album pages no longer show a stray 0, and an artist's top songs list each title once\n" +
                     "- Your library follows your disk: a song whose file two scans in a row can't find is removed, and logged first; if a whole drive drops out, nothing is removed\n" +
                     "- Every release's note stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n" +
                     "- When a podcast episode ends, the show's next episode plays; an episode you've heard 95% of counts as finished, and a finished one stays finished\n" +
