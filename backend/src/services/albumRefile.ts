@@ -8,6 +8,7 @@
  * artist: onto that artist's own copy of the album when it has one, else onto a row of theirs that moves whole, else
  * onto a new row. Only those songs move. A row they leave empty goes, its cover and details passed on when the
  * survivor lacks them, and every record keyed on its release-group id (ownership, Discover) moves to the survivor.
+ * An artist row holding the files' MusicBrainz id under a name the old splitter cut gets the full name back first.
  * Artists left with nothing go. Albums or artists a person edited, Discover's albums, and albums with a song whose
  * tags cannot be read are left alone. It runs on the scan queue (workers/processors/refileProcessor.ts), so never
  * beside a scan.
@@ -19,11 +20,12 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { canonicalizeVariousArtists } from "../utils/artistNormalization";
 import { albumIdentityKey } from "./albumIdentity";
-import { artistIdentityKey, artistSortName, resolveArtist } from "./artistIdentity";
+import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist } from "./artistIdentity";
 import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { backfillAllArtistCounts } from "./artistCountsService";
+import { musicBrainzService } from "./musicbrainz";
 
 export interface RefileResult {
     songsRead: number;
@@ -35,6 +37,8 @@ export interface RefileResult {
     albumsMerged: number;
     /** Albums left where they are because a person edited the album or its artist. */
     keptEdited: number;
+    /** Artists the old splitter had cut that held the files' MusicBrainz id, given their full name back. */
+    artistsRenamed: number;
     /** Albums that could not be re-filed (an error, logged); the rest still were. */
     albumsFailed: number;
     artistsRemoved: number;
@@ -70,7 +74,8 @@ const isPlaceholder = (rgMbid: string) => rgMbid.startsWith("temp-");
 
 export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     const result: RefileResult = {
-        songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, albumsFailed: 0, artistsRemoved: 0,
+        songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, artistsRenamed: 0, albumsFailed: 0,
+        artistsRemoved: 0,
     };
 
     const songs: Song[] = (
@@ -109,6 +114,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
         else albums.set(song.credit.groupKey, [song]);
     }
 
+    const filings: { candidate: ArtistCandidate; songs: Song[] }[] = [];
     for (const group of albums.values()) {
         const elected = electAlbumArtist(group.map((s) => s.credit!));
         const byTarget = new Map<string, { candidate: ArtistCandidate; songs: Song[] }>();
@@ -119,29 +125,118 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
             if (entry) entry.songs.push(song);
             else byTarget.set(key, { candidate, songs: [song] });
         }
+        filings.push(...byTarget.values());
+    }
 
-        for (const { candidate, songs: targetSongs } of byTarget.values()) {
-            try {
-                const outcome = await refileAlbum(candidate, targetSongs);
-                if (outcome === "edited") result.keptEdited++;
-                else if (outcome === "moved") result.albumsMoved++;
-                else if (outcome === "merged") result.albumsMerged++;
-            } catch (error) {
-                result.albumsFailed++;
-                logger.warn(`[Refile] Could not re-file "${targetSongs[0].credit!.albumTitle}" under ${candidate.name}:`, error);
-            }
+    // 3. Names the old splitter cut, where the cut row holds the files' MusicBrainz id: their full names back.
+    const named = new Map<string, string>();
+    for (const { candidate } of filings) if (candidate.mbid && !named.has(candidate.mbid)) named.set(candidate.mbid, candidate.name);
+    for (const [mbid, name] of named) {
+        try {
+            if (await restoreCutName(mbid, name)) result.artistsRenamed++;
+        } catch (error) {
+            result.albumsFailed++;
+            logger.warn(`[Refile] Could not give the artist with MusicBrainz id ${mbid} its name ${name}:`, error);
+        }
+    }
+
+    // 4. Each album's songs under the artist their tags name.
+    for (const { candidate, songs: targetSongs } of filings) {
+        try {
+            const outcome = await refileAlbum(candidate, targetSongs);
+            if (outcome === "edited") result.keptEdited++;
+            else if (outcome === "moved") result.albumsMoved++;
+            else if (outcome === "merged") result.albumsMerged++;
+        } catch (error) {
+            result.albumsFailed++;
+            logger.warn(`[Refile] Could not re-file "${targetSongs[0].credit!.albumTitle}" under ${candidate.name}:`, error);
         }
     }
 
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
     await backfillAllArtistCounts().catch((err) => logger.error("[Refile] Artist counts update failed:", err));
     logger.info(
-        `[Refile] Read ${result.songsRead} songs (${result.songsUnreadable} unreadable): ${result.albumsMoved} albums moved, ` +
-            `${result.albumsMerged} merged, ${result.keptEdited} kept as edited, ${result.albumsFailed} failed, ` +
+        `[Refile] Read ${result.songsRead} songs (${result.songsUnreadable} unreadable): ${result.artistsRenamed} artists renamed, ` +
+            `${result.albumsMoved} albums moved, ${result.albumsMerged} merged, ${result.keptEdited} kept as edited, ${result.albumsFailed} failed, ` +
             `${result.artistsRemoved} artists removed`,
     );
     return result;
 }
+
+/** The separators the splitter removed before 1.10 cut names at ("Coheed and Cambria" became "Coheed"). */
+const OLD_CUTS = [" & ", " and ", " with ", ", "];
+
+/** Whether `name` is `full` cut by the old splitter: its first words, up to one of those separators. */
+export function isOldCut(name: string, full: string): boolean {
+    const lower = full.toLowerCase();
+    return OLD_CUTS.some((sep) => lower.startsWith(name.toLowerCase() + sep));
+}
+
+/**
+ * The artist row holding a MusicBrainz id whose name the old splitter cut gets its full name back, in MusicBrainz's
+ * spelling, once MusicBrainz confirms the files' name is that id's (a wrong tag must not rename a real artist). A row
+ * under the full name with no id of its own is folded into it first, its albums and ownership with it (a copy both
+ * hold becomes one, unless the holder's copy was edited or is Discover's: then nothing is renamed). Nothing else is
+ * renamed: a name that differs any other way (a translation, a spelling) is the row's.
+ */
+async function restoreCutName(mbid: string, filesName: string): Promise<boolean> {
+    const holder = await prisma.artist.findUnique({ where: { mbid }, select: { name: true, identityKey: true, hasUserOverrides: true } });
+    if (!holder || holder.hasUserOverrides || holder.identityKey === artistIdentityKey(filesName) || !isOldCut(holder.name, filesName)) {
+        return false;
+    }
+    const found = await musicBrainzService.getArtist(mbid, ["aliases"]);
+    if (found.kind !== "answered") return false;
+    const names = [found.value?.name, ...((found.value?.aliases ?? []) as Array<{ name?: string }>).map((alias) => alias.name)]
+        .filter((n): n is string => typeof n === "string");
+    if (!names.some((n) => artistIdentityKey(n) === artistIdentityKey(filesName))) return false;
+    const name: string = found.value.name;
+    if (!isOldCut(holder.name, name)) return false;
+    const identityKey = artistIdentityKey(name);
+
+    return prisma.$transaction(
+        async (tx) => {
+            const current = await tx.artist.findUnique({ where: { mbid } });
+            if (!current || current.hasUserOverrides || current.name !== holder.name) return false;
+
+            const twin = await tx.artist.findUnique({ where: { identityKey } });
+            if (twin && twin.id !== current.id) {
+                if (twin.mbid || twin.hasUserOverrides) return false;
+                const rows = await tx.album.findMany({ where: { artistId: twin.id }, select: ALBUM_FIELDS });
+                for (const row of rows) {
+                    const same = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: current.id, identityKey: row.identityKey } }, select: ALBUM_FIELDS });
+                    // Everything rolls back: an edited or Discover copy is not merged into.
+                    if (same && (same.hasUserOverrides || same.location !== "LIBRARY" || row.hasUserOverrides || row.location !== "LIBRARY")) {
+                        throw new KeptAsItIs();
+                    }
+                    if (same) {
+                        await tx.track.updateMany({ where: { albumId: row.id }, data: { albumId: same.id } });
+                        await retireIfEmpty(tx, row, same, current.id);
+                    } else {
+                        await tx.album.update({ where: { id: row.id }, data: { artistId: current.id } });
+                    }
+                }
+                // Every ownership record of the twin, with an album row or not.
+                for (const owned of await tx.ownedAlbum.findMany({ where: { artistId: twin.id }, select: { rgMbid: true } })) {
+                    await rekeyOwner(tx, twin.id, current.id, owned.rgMbid);
+                }
+                await tx.artist.delete({ where: { id: twin.id } });
+            }
+            await tx.artist.update({
+                where: { id: current.id },
+                data: { name, identityKey, normalizedName: normalizeArtistName(name), sortName: artistSortName(name) },
+            });
+            return true;
+        },
+        { timeout: ALBUM_TRANSACTION_MS },
+    ).catch((error) => {
+        if (!(error instanceof KeptAsItIs)) throw error;
+        logger.info(`[Refile] Kept "${holder.name}" as it is: "${name}" holds a copy of one of its albums a person edited or Discover holds`);
+        return false;
+    });
+}
+
+/** Thrown to roll a rename back when it would merge into an album a person edited or Discover holds. */
+class KeptAsItIs extends Error {}
 
 /**
  * Re-file one album's songs under the artist their tags name. What it finds is read inside the transaction, so an

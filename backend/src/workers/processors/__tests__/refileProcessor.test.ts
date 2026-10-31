@@ -14,7 +14,7 @@ import { prisma } from "../../../utils/db";
 import { config } from "../../../config";
 import { processRefile } from "../refileProcessor";
 
-const clean = { songsRead: 10, songsUnreadable: 0, albumsMoved: 2, albumsMerged: 1, keptEdited: 0, albumsFailed: 0, artistsRemoved: 2 };
+const clean = { songsRead: 10, songsUnreadable: 0, albumsMoved: 2, albumsMerged: 1, keptEdited: 0, artistsRenamed: 0, albumsFailed: 0, artistsRemoved: 2 };
 const job = { id: "refile-albums", data: { userId: "refile-admin" } } as Job<{ userId: string }>;
 const stamped = async () => (await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } }))?.albumsRefiledAt ?? null;
 

@@ -14,6 +14,7 @@ const REFILE_RESULT_KEY = "library-refile";
 
 function refileSummary(r: RefileResult): string {
     return [
+        ...(r.artistsRenamed ? [`${r.artistsRenamed} artists given back their full names`] : []),
         `${r.albumsMoved} albums moved, ${r.albumsMerged} joined the right artist's copy`,
         `${r.artistsRemoved} empty artists removed`,
         ...(r.keptEdited ? [`${r.keptEdited} left as a person edited them`] : []),

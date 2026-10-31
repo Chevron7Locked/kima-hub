@@ -8,6 +8,8 @@
 
 jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
+const mockGetArtist = jest.fn();
+jest.mock("../../services/musicbrainz", () => ({ musicBrainzService: { getArtist: (...a: unknown[]) => mockGetArtist(...a) } }));
 
 import fs from "fs";
 import os from "os";
@@ -38,6 +40,8 @@ beforeEach(async () => {
     await wipe();
     musicDir = fs.mkdtempSync(path.join(os.tmpdir(), "refile-"));
     tags = new Map();
+    mockGetArtist.mockReset();
+    mockGetArtist.mockResolvedValue({ kind: "absent", evidence: {} });
     (parseFile as jest.Mock).mockReset();
     (parseFile as jest.Mock).mockImplementation(async (file: string) => {
         const found = tags.get(file);
@@ -294,5 +298,74 @@ describe("re-filing albums by their tags", () => {
 
         expect((await refileLibrary(musicDir)).albumsMoved).toBe(1);
         expect(await refileLibrary(musicDir)).toMatchObject({ albumsMoved: 0, albumsMerged: 0, keptEdited: 0, albumsFailed: 0 });
+    });
+
+    it("renames a name the old splitter cut when it holds the files' MusicBrainz id, folding the full-name row into it", async () => {
+        mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Refile Cut and Band", aliases: [] }, evidence: {} });
+        const cut = await artist("Refile Cut", { mbid: FULL_ID });
+        const full = await artist("Refile Cut and Band");
+        const a = await album(cut.id, "Refile Under Cut", { rgMbid: REAL_RG });
+        const both1 = await album(cut.id, "Refile Both");
+        const b = await album(full.id, "Refile Under Full");
+        const both2 = await album(full.id, "Refile Both");
+        await own(cut.id, REAL_RG);
+        const tagged = { albumartist: "REFILE CUT AND BAND", musicbrainz_albumartistid: [FULL_ID] };
+        await song(a.id, "Refile Cut and Band/Refile Under Cut/01.flac", { album: "Refile Under Cut", ...tagged });
+        await song(both1.id, "Refile Cut and Band/Refile Both/01.flac", { album: "Refile Both", ...tagged });
+        await song(b.id, "Refile Cut and Band/Refile Under Full/01.flac", { album: "Refile Under Full", ...tagged });
+        await song(both2.id, "Refile Cut and Band/Refile Both/02.flac", { album: "Refile Both", ...tagged });
+
+        const result = await refileLibrary(musicDir);
+
+        const renamed = await prisma.artist.findUnique({ where: { id: cut.id }, select: { name: true, mbid: true, identityKey: true } });
+        expect(renamed).toEqual({ name: "Refile Cut and Band", mbid: FULL_ID, identityKey: "refilecutandband" });
+        expect(await prisma.artist.count({ where: { id: full.id } })).toBe(0);
+        for (const title of ["Refile Under Cut", "Refile Under Full"]) {
+            expect((await filing(title)).map((f) => f.artist)).toEqual(["Refile Cut and Band"]);
+        }
+        expect(await filing("Refile Both")).toEqual([expect.objectContaining({ artist: "Refile Cut and Band", songs: 2 })]);
+        expect(await prisma.ownedAlbum.findMany({ where: { rgMbid: REAL_RG }, select: { artistId: true } })).toEqual([{ artistId: cut.id }]);
+        expect(result.artistsRenamed).toBe(1);
+    });
+
+    it("keeps an artist's name when the files' name differs in any other way", async () => {
+        const named = await artist("Refile Kino", { mbid: FULL_ID });
+        const a = await album(named.id, "Refile Gruppa");
+        await song(a.id, "Refile Kino/Refile Gruppa/01.flac", { album: "Refile Gruppa", albumartist: "Refile Кино", musicbrainz_albumartistid: [FULL_ID] });
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await prisma.artist.findUnique({ where: { id: named.id }, select: { name: true } })).toEqual({ name: "Refile Kino" });
+        expect(await filing("Refile Gruppa")).toEqual([expect.objectContaining({ artist: "Refile Kino" })]);
+        expect(result.artistsRenamed).toBe(0);
+    });
+
+    it("renames nothing unless MusicBrainz confirms the full name is that id's", async () => {
+        // The files carry the id of the artist "Refile Cut" under the name "Refile Cut and Band": a wrong tag.
+        const cut = await artist("Refile Cut", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Mistagged");
+        await song(a.id, "Refile Cut and Band/Refile Mistagged/01.flac", { album: "Refile Mistagged", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Refile Cut", aliases: [] }, evidence: {} });
+        expect((await refileLibrary(musicDir)).artistsRenamed).toBe(0);
+        mockGetArtist.mockResolvedValue({ kind: "transient", error: { message: "down" } });
+        expect((await refileLibrary(musicDir)).artistsRenamed).toBe(0);
+        expect(await prisma.artist.findUnique({ where: { id: cut.id }, select: { name: true } })).toEqual({ name: "Refile Cut" });
+    });
+
+    it("renames nothing when the full-name row's copy of an album was edited or is Discover's", async () => {
+        mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Refile Cut and Band", aliases: [] }, evidence: {} });
+        const cut = await artist("Refile Cut", { mbid: FULL_ID });
+        const full = await artist("Refile Cut and Band");
+        const held = await album(cut.id, "Refile Held", { hasUserOverrides: true });
+        const twin = await album(full.id, "Refile Held");
+        await song(held.id, "Refile Cut and Band/Refile Held/01.flac", { album: "Refile Held", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+        await song(twin.id, "Refile Cut and Band/Refile Held/02.flac", { album: "Refile Held", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        const result = await refileLibrary(musicDir);
+
+        expect(result.artistsRenamed).toBe(0);
+        expect(await prisma.artist.findUnique({ where: { id: cut.id }, select: { name: true } })).toEqual({ name: "Refile Cut" });
+        expect(await prisma.album.count({ where: { id: { in: [held.id, twin.id] } } })).toBe(2);
     });
 });
