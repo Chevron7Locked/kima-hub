@@ -7,13 +7,9 @@ import { prisma } from "../utils/db";
 import PQueue from "p-queue";
 import { CoverArtExtractor } from "./coverArtExtractor";
 import { findAlbumArtwork } from "./artwork";
-import {
-    canonicalizeVariousArtists,
-    extractArtistFromRelativePath,
-    extractAlbumFromRelativePath,
-    sanitizeTagString,
-} from "../utils/artistNormalization";
-import { isMbid, parseCredit, resolveArtist, type ParsedCredit } from "./artistIdentity";
+import { sanitizeTagString } from "../utils/artistNormalization";
+import { isMbid, resolveArtist } from "./artistIdentity";
+import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { normalizeIsrc } from "./recordingMatch";
 import { resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -22,16 +18,6 @@ import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
 import { askedAgain } from "./stageReopen";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
-
-/**
- * The MusicBrainz id of a credit's primary artist, from the same tag the name came
- * from. A tag's ids follow the credit's order, so the first is the primary's only
- * when there is one id per credited name; a joint name with several ids gets none.
- */
-function primaryArtistMbid(ids: readonly string[] | undefined, credit: ParsedCredit): string | undefined {
-    if (!ids || ids.length === 0) return undefined;
-    return ids.length === 1 + credit.featured.length ? ids[0] : undefined;
-}
 
 /**
  * A replaced file reopens its stage records as `pending` with evidence "file
@@ -178,57 +164,105 @@ export class MusicScannerService {
             errors: [],
         };
 
+        const markFailed = async (audioFile: string, err: any) => {
+            const error = { file: audioFile, error: err.message || String(err) };
+            result.errors.push(error);
+            progress.errors.push(error);
+            logger.error(`Error processing ${audioFile}:`, err);
+
+            const existingTrack = tracksByPath.get(path.relative(musicPath, audioFile));
+            if (existingTrack) {
+                await prisma.track.update({ where: { id: existingTrack.id }, data: { corrupt: true } });
+                result.tracksCorrupt++;
+                logger.debug(`Marked track as corrupt: ${path.relative(musicPath, audioFile)}`);
+            }
+        };
+
+        // 1. The files to read: new ones, and ones changed since they were read.
+        const changed: string[] = [];
         for (const audioFile of audioFiles) {
-            await this.scanQueue.add(async () => {
+            this.scanQueue.add(async () => {
                 try {
                     const relativePath = path.relative(musicPath, audioFile);
+                    const stats = await fs.promises.stat(audioFile);
+                    // An empty file is an unfinished download or a stub.
+                    if (stats.size === 0) return finished();
+                    const existingTrack = tracksByPath.get(relativePath);
+                    if (existingTrack?.fileModified && existingTrack.fileModified >= stats.mtime) return finished();
+                    changed.push(audioFile);
+                } catch (err: any) {
+                    await markFailed(audioFile, err).catch((markErr) =>
+                        logger.error(`Could not record the failure for ${audioFile}:`, markErr),
+                    );
+                    finished();
+                }
+            });
+        }
+        await this.scanQueue.onIdle();
+
+        function finished() {
+            progress.filesScanned++;
+        }
+
+        // 2. Each album those files belong to elects its artist from all of its songs, the unchanged ones included,
+        // so a song added to an album is filed with it.
+        const touched = new Set(changed.map((f) => albumFolder(path.relative(musicPath, f))));
+        const voters = audioFiles.filter((f) => touched.has(albumFolder(path.relative(musicPath, f))));
+        const credits = new Map<string, FileCredit>();
+        for (const audioFile of voters) {
+            this.scanQueue.add(async () => {
+                try {
+                    progress.currentFile = path.relative(musicPath, audioFile);
+                    this.progressCallback?.(progress);
+                    const metadata = await parseFile(audioFile, { skipCovers: true });
+                    credits.set(audioFile, fileCredit(metadata.common, path.relative(musicPath, audioFile)));
+                } catch {
+                    // A file whose tags cannot be read has no vote; if it is to be filed, filing it reports the error.
+                }
+            });
+        }
+        await this.scanQueue.onIdle();
+
+        const albums = new Map<string, FileCredit[]>();
+        for (const audioFile of [...voters].sort()) {
+            const credit = credits.get(audioFile);
+            if (!credit) continue;
+            const group = albums.get(credit.groupKey);
+            if (group) group.push(credit);
+            else albums.set(credit.groupKey, [credit]);
+        }
+        const elected = new Map<string, ArtistCandidate>();
+        for (const [key, group] of albums) {
+            const artist = electAlbumArtist(group);
+            if (artist) elected.set(key, artist);
+        }
+
+        // 3. File each changed song under its album's artist, one at a time: filing reads and writes rows other
+        // songs of the album share.
+        // In path order, so which song of an album is filed first does not depend on which check finished first.
+        changed.sort();
+        for (const audioFile of changed) {
+            await this.scanQueue.add(async () => {
+                const relativePath = path.relative(musicPath, audioFile);
+                try {
                     progress.currentFile = relativePath;
                     this.progressCallback?.(progress);
 
-                    const stats = await fs.promises.stat(audioFile);
-                    // An empty file is an unfinished download or a stub.
-                    if (stats.size === 0) return;
-
                     const existingTrack = tracksByPath.get(relativePath);
-                    if (existingTrack) {
-                        if (existingTrack.fileModified && existingTrack.fileModified >= stats.mtime) return;
-                        // Every recorded answer came from the old content, so every stage is asked again.
-                        await reopenStagesForChangedFile(existingTrack.id);
-                    }
+                    // Every recorded answer came from the old content, so every stage is asked again.
+                    if (existingTrack) await reopenStagesForChangedFile(existingTrack.id);
 
-                    await this.processAudioFile(
-                        audioFile,
-                        relativePath,
-                        musicPath
-                    );
+                    await this.processAudioFile(audioFile, relativePath, musicPath, elected);
                     if (existingTrack) result.tracksUpdated++;
                     else result.tracksAdded++;
                 } catch (err: any) {
-                    const error = {
-                        file: audioFile,
-                        error: err.message || String(err),
-                    };
-                    result.errors.push(error);
-                    progress.errors.push(error);
-                    logger.error(`Error processing ${audioFile}:`, err);
-
-                    const relativePath = path.relative(musicPath, audioFile);
-                    const existingTrack = tracksByPath.get(relativePath);
-                    if (existingTrack) {
-                        await prisma.track.update({
-                            where: { id: existingTrack.id },
-                            data: { corrupt: true },
-                        });
-                        result.tracksCorrupt++;
-                        logger.debug(`Marked track as corrupt: ${relativePath}`);
-                    }
+                    await markFailed(audioFile, err);
                 } finally {
-                    progress.filesScanned++;
+                    finished();
                     this.progressCallback?.(progress);
                 }
             });
         }
-
         await this.scanQueue.onIdle();
 
         const scannedPaths = new Set(
@@ -462,7 +496,8 @@ export class MusicScannerService {
     private async processAudioFile(
         absolutePath: string,
         relativePath: string,
-        musicPath: string
+        musicPath: string,
+        elected: ReadonlyMap<string, ArtistCandidate> = new Map()
     ): Promise<void> {
         // Extract metadata
         const metadata = await parseFile(absolutePath);
@@ -485,68 +520,14 @@ export class MusicScannerService {
         // A tag that is not an ISRC (e.g. "PMEDIA") is dropped, never stored or sent.
         const isrc = normalizeIsrc(metadata.common.isrc?.[0]?.split(/[;,]/)[0]);
 
-        // The album artist groups the album under one artist ("A feat. B" tracks stay on A's
-        // album); the track artist stands in when there is none. Each name is paired only with
-        // its own tag's MusicBrainz ids, never the other tag's.
-        const albumArtistTag = sanitizeTagString(metadata.common.albumartist);
-        const trackArtistTag = sanitizeTagString(metadata.common.artist);
-        let rawArtistName = albumArtistTag || trackArtistTag;
-        let nameTag: "albumartist" | "artist" | null = albumArtistTag ? "albumartist" : trackArtistTag ? "artist" : null;
-
-        // No artist tag: the folder names it, else "Unknown Artist".
-        if (!rawArtistName || rawArtistName.trim() === "") {
-            const parsedArtist = extractArtistFromRelativePath(relativePath);
-
-            if (parsedArtist) {
-                logger.debug(
-                    `[Scanner] No metadata artist found, using path: "${relativePath}" -> "${parsedArtist}"`
-                );
-                rawArtistName = parsedArtist;
-                nameTag = null;
-            } else {
-                rawArtistName = "Unknown Artist";
-                nameTag = null;
-                logger.warn(
-                    `[Scanner] Unknown Artist assigned for: ${relativePath} (no metadata, path parse failed)`
-                );
-            }
-        }
-
-        // Soulseek downloads under Singles/ often carry compilation tags: the folder's artist beats "Various Artists".
-        if (
-            canonicalizeVariousArtists(rawArtistName) === "Various Artists" &&
-            relativePath.startsWith("Singles/")
-        ) {
-            const folderArtist = extractArtistFromRelativePath(relativePath);
-            if (folderArtist && canonicalizeVariousArtists(folderArtist) !== "Various Artists") {
-                logger.debug(
-                    `[Scanner] Singles override: "${rawArtistName}" -> "${folderArtist}" for ${relativePath}`
-                );
-                rawArtistName = folderArtist;
-                nameTag = null;
-            }
-        }
-
-        const albumTitle = sanitizeTagString(metadata.common.album)
-            || extractAlbumFromRelativePath(relativePath)
-            || "Unknown Album";
+        // The album's artist is elected from all of its songs before any is filed (albumArtistVote.ts); with no
+        // leader the song keeps its own.
+        const credit = fileCredit(metadata.common, relativePath);
+        const chosen = elected.get(credit.groupKey) ?? credit.candidate;
+        const artistName = chosen.name;
+        const artistMbid = chosen.mbid;
+        const albumTitle = credit.albumTitle;
         const year = metadata.common.year || null;
-
-        // Resolve the artist through the single identity path, which trusts a
-        // MusicBrainz id tag first and never splits band names on "&" or "and".
-        const credit = parseCredit(
-            rawArtistName,
-            nameTag === "artist" ? (metadata.common.artists as string[] | undefined) : undefined
-        );
-        const artistName = credit.primary || rawArtistName;
-        const artistMbid = primaryArtistMbid(
-            nameTag === "albumartist"
-                ? metadata.common.musicbrainz_albumartistid
-                : nameTag === "artist"
-                  ? metadata.common.musicbrainz_artistid
-                  : undefined,
-            credit
-        );
 
         let artist = await resolveArtist(prisma, {
             name: artistName,
@@ -605,19 +586,11 @@ export class MusicScannerService {
         // A library album is the listener's, a Discover one no one's, by the album row's own location (so every later
         // scan agrees). Keyed on the row's own rgMbid, so an album resolveAlbum matched by identity is credited right.
         if (album.location === "LIBRARY") {
-            await prisma.ownedAlbum.upsert({
-                where: {
-                    artistId_rgMbid: {
-                        artistId: artist.id,
-                        rgMbid: album.rgMbid,
-                    },
-                },
-                create: {
-                    rgMbid: album.rgMbid,
-                    artistId: artist.id,
-                    source: "native_scan",
-                },
-                update: {},
+            // Songs of one album are filed side by side, so the row may appear between a look and a write: an insert
+            // that skips an existing row cannot collide where an upsert can.
+            await prisma.ownedAlbum.createMany({
+                data: [{ rgMbid: album.rgMbid, artistId: artist.id, source: "native_scan" }],
+                skipDuplicates: true,
             });
         }
 
