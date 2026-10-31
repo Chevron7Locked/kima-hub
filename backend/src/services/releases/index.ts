@@ -25,6 +25,12 @@ async function isAdminUser(userId: string): Promise<boolean> {
     return user?.role === "admin";
 }
 
+/** Whether an admin's album re-file has finished cleanly (refileProcessor.ts stamps it). */
+async function albumsRefiled(): Promise<boolean> {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } });
+    return settings?.albumsRefiledAt != null;
+}
+
 /** Whether the library holds enrichment from before `date`: an install upgraded past a release, not a fresh one. */
 async function libraryEnrichedBefore(date: string): Promise<boolean> {
     const [row] = await prisma.$queryRaw<Array<{ older: boolean }>>`
@@ -43,7 +49,11 @@ export async function pendingReleases(userId: string): Promise<Release[]> {
     });
     const seen = new Set(acked.map((a) => a.version));
     const pending = RELEASES.filter((r) => !seen.has(r.version)).sort(byDate);
-    const out = await forUser(userId, pending);
+    // The window asks only what is still owed: the re-file is not, once a clean run is recorded.
+    const refiled = await albumsRefiled();
+    const out = (await forUser(userId, pending)).map((r) =>
+        refiled ? { ...r, items: r.items.filter((i) => !(i.kind === "action" && i.run === "refileAlbums")) } : r,
+    );
 
     // A mix under a mood 1.11 removed cannot be shown, so closing the window
     // must not be the last word on it: until the user saves or removes it,
@@ -85,6 +95,7 @@ export async function currentReleaseFor(
     const answers: Record<string, boolean> = Object.fromEntries(rows.map((row) => [row.key, row.enabled]));
     if (asked.includes(GPU_CHOICE_KEY)) answers[GPU_CHOICE_KEY] = await gpuChoiceAnswer();
     const done: string[] = [];
+    if (await albumsRefiled()) done.push(...release.items.filter((i) => i.kind === "action" && i.run === "refileAlbums").map((i) => i.key));
     const mixItems = release.items.filter(isMoodMixItem).map((i) => i.key);
     if (mixItems.length > 0) {
         const state = await moodMixState(userId);
@@ -193,11 +204,7 @@ async function actionSettled(
         // itself when the work is truly done.
         return !(await enrichedBefore(releaseDate));
     }
-    if (item.run === "refileAlbums") {
-        // Open until an admin's re-file has finished (albumRefile.ts stamps it).
-        const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } });
-        return settings?.albumsRefiledAt != null;
-    }
+    if (item.run === "refileAlbums") return albumsRefiled();
     if (isMoodMixItem(item)) {
         const state = await moodMixState(userId);
         return state.decision !== null || state.playlist !== null;

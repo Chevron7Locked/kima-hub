@@ -285,6 +285,19 @@ describe("catalog", () => {
         prisma.user.findUnique.mockResolvedValue({ role: "admin" });
     });
 
+    it("stops asking about the re-file once a clean run is recorded", async () => {
+        jest.restoreAllMocks();
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
+        prisma.user.findUnique.mockResolvedValue({ role: "admin" });
+        moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
+        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.0")!.items.map((i) => i.key);
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
+        expect(await keys()).toContain("albums.refile");
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: new Date() });
+        expect(await keys()).not.toContain("albums.refile");
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") });
+    });
+
     it("offers the wipe to an upgraded library and not to a fresh install", async () => {
         jest.restoreAllMocks();
         prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
