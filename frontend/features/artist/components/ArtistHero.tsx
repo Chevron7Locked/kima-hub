@@ -32,6 +32,7 @@ export function ArtistHero({
 }: ArtistHeroProps) {
     const displayData = getArtistDisplayData(artist);
     const ownedAlbums = albums.filter((a) => a.owned);
+    const listeners = artist.listeners ?? 0;
 
     // Use background image if provided, otherwise fall back to hero image
     const bgImage = backgroundImage || heroImage;
@@ -75,9 +76,9 @@ export function ArtistHero({
             }
             meta={
                 <>
-                    {artist.listeners && artist.listeners > 0 && (
+                    {listeners > 0 && (
                         <>
-                            <span>{artist.listeners.toLocaleString()} listeners</span>
+                            <span>{listeners.toLocaleString()} listeners</span>
                             <span className="mx-1">•</span>
                         </>
                     )}

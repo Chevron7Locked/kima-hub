@@ -30,6 +30,7 @@ export function AlbumHero({
     const displayData = getAlbumDisplayData(album);
 
     const totalDuration = album.duration ? formatDuration(album.duration) : "";
+    const trackCount = album.trackCount ?? 0;
 
     return (
         <MediaHero
@@ -76,16 +77,16 @@ export function AlbumHero({
                             {album.artist.name}
                         </Link>
                     )}
-                    {displayData.year && (
+                    {!!displayData.year && (
                         <>
                             <span className="mx-1">•</span>
                             <span>{displayData.year}</span>
                         </>
                     )}
-                    {album.trackCount && album.trackCount > 0 && (
+                    {trackCount > 0 && (
                         <>
                             <span className="mx-1">•</span>
-                            <span>{plural(album.trackCount, "song")}</span>
+                            <span>{plural(trackCount, "song")}</span>
                         </>
                     )}
                     {totalDuration && <span>, {totalDuration}</span>}

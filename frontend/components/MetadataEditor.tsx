@@ -244,7 +244,7 @@ export function MetadataEditor({
                                         }
                                         className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                     />
-                                    {currentData._originalYear &&
+                                    {!!currentData._originalYear &&
                                         currentData._originalYear !==
                                             (formData.year || null) && (
                                             <p className="mt-1 text-xs text-[var(--text-muted)]">
