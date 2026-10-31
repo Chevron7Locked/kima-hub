@@ -50,6 +50,8 @@ interface Playlist {
 const COLLAPSE_KEY = "kima:library-collapsed";
 const OPEN_WIDTH = 256;
 const CLOSED_WIDTH = 74;
+/** The library panel's own width beside the 56px rail, inside the 1px border: fixed, so a slide never squeezes it. */
+const PANEL_WIDTH = OPEN_WIDTH - 56 - 2;
 
 // The stored choice is read before the first paint: the server has no
 // localStorage, so the server snapshot is the open shelf and the client snapshot
@@ -391,7 +393,7 @@ export function Sidebar() {
             {/* The rail: surfaces at the top, the four corners of the library at
                 the foot. */}
             <nav
-                className="flex w-14 shrink-0 flex-col items-center justify-between border-r border-white/[0.05] bg-[#070707] py-2.5"
+                className="relative z-[1] flex w-14 shrink-0 flex-col items-center justify-between border-r border-white/[0.05] bg-[#070707] py-2.5"
                 aria-label="main navigation"
             >
                 <div className="flex flex-col items-center gap-1">
@@ -402,11 +404,14 @@ export function Sidebar() {
                 </div>
             </nav>
 
+            {/* The panel slides out from under the rail and back; collapsed, it leaves the row so the handle takes its
+                place. */}
             <div
                 className={cn(
-                    "flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-opacity duration-150",
-                    collapsed && "pointer-events-none opacity-0"
+                    "flex shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                    collapsed && "pointer-events-none absolute inset-y-0 left-14 opacity-0"
                 )}
+                style={{ width: PANEL_WIDTH, transform: collapsed ? "translateX(-100%)" : "none" }}
                 inert={collapsed}
                 aria-hidden={collapsed || undefined}
             >
@@ -653,7 +658,7 @@ export function Sidebar() {
                     }}
                     aria-label="show library"
                     title="show library"
-                    className="group flex w-4 shrink-0 flex-col items-center border-l border-white/[0.05] bg-[#0b0b0b] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
+                    className="group flex w-4 shrink-0 flex-col items-center border-l border-white/[0.05] bg-[#0b0b0b] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
                 >
                     <ChevronRight
                         aria-hidden="true"
@@ -675,7 +680,13 @@ export function Sidebar() {
 
             {!isMobileOrTablet && (
                 <aside
-                    className="relative z-(--z-raised) flex shrink-0 overflow-hidden rounded-lg border border-[var(--border-subtle)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
+                    // Only the library panel slides; the sidebar's width, and so the page beside it, changes once: at the
+                    // start of opening and after closing. A width that moved with the slide would lay the page out again
+                    // every frame, and its grids would jump a column mid-slide.
+                    className={cn(
+                        "relative z-(--z-raised) flex shrink-0 overflow-hidden rounded-lg border border-[var(--border-subtle)]",
+                        collapsed ? "[transition:width_0s_300ms]" : "[transition:width_0s]"
+                    )}
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
                     {sidebarContent}
