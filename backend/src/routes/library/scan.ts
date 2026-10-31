@@ -4,7 +4,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { scanQueue } from "../../workers/queues";
-import { requestScan } from "../../workers/scanRequest";
+import { requestRefile, requestScan } from "../../workers/scanRequest";
 import { organizeSingles } from "../../workers/organizeSingles";
 import { parseLimit, parseOffset } from "./paging";
 
@@ -64,6 +64,19 @@ router.post("/organize", requireAdmin, (_req, res) => {
     logger.error("Manual organization failed:", err);
   });
   res.json({ message: "Organization started in background" });
+});
+
+// Files every library album again by its songs' own tags (albumRefile.ts), as a job on the scan queue so it never
+// runs beside a scan; the outcome goes to the admin's notification tray. One at a time.
+router.post("/refile", requireAdmin, async (req, res) => {
+  try {
+    const result = await requestRefile(req.user!.id);
+    if (!result.queued) return res.status(409).json({ error: `Albums are already being re-filed (${result.reason})` });
+    res.status(202).json({ message: "Re-filing albums by their tags" });
+  } catch (error) {
+    logger.error("Re-file trigger error:", error);
+    res.status(500).json({ error: "Failed to start re-filing albums" });
+  }
 });
 
 router.get("/corrupt-tracks", requireAdmin, async (_req, res) => {

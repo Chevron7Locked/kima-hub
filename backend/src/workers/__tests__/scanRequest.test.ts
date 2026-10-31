@@ -14,7 +14,7 @@ jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-import { scanDedupeKey, requestScan } from '../scanRequest';
+import { scanDedupeKey, requestScan, requestRefile } from '../scanRequest';
 import { scanQueue } from '../queues';
 
 const mockedQueue = scanQueue as jest.Mocked<typeof scanQueue>;
@@ -87,5 +87,28 @@ describe('requestScan', () => {
         expect(stale.remove).toHaveBeenCalled();
         expect(res.queued).toBe(true);
         assertValidJobId((res as { jobId: string }).jobId);
+    });
+});
+
+describe('requestRefile', () => {
+    test('queues the re-file on the scan queue, so it never runs beside a scan', async () => {
+        mockedQueue.getJob.mockResolvedValue(undefined);
+        const result = await requestRefile('admin-1');
+        expect(result).toEqual({ queued: true, jobId: 'refile-albums' });
+        assertValidJobId('refile-albums');
+        expect(mockedQueue.add).toHaveBeenCalledWith('refile', { userId: 'admin-1' }, { jobId: 'refile-albums', attempts: 1 });
+    });
+
+    test('refuses a second re-file while one is waiting or running', async () => {
+        mockedQueue.getJob.mockResolvedValue({ getState: async () => 'active' } as never);
+        expect(await requestRefile('admin-1')).toEqual({ queued: false, jobId: 'refile-albums', reason: 'a re-file is already active' });
+        expect(mockedQueue.add).not.toHaveBeenCalled();
+    });
+
+    test('clears a finished re-file and queues a fresh one', async () => {
+        const remove = jest.fn();
+        mockedQueue.getJob.mockResolvedValue({ getState: async () => 'completed', remove } as never);
+        expect((await requestRefile('admin-1')).queued).toBe(true);
+        expect(remove).toHaveBeenCalled();
     });
 });

@@ -12,6 +12,7 @@ import { notify } from "@/lib/notify";
 import { useAuth } from "@/lib/auth-context";
 import { WhatsNewWindow } from "./WhatsNewWindow";
 import { WipeAction } from "./WipeAction";
+import { RefileAction } from "./RefileAction";
 import type { Release } from "./types";
 import { MoodMixChoice } from "./MoodMixChoice";
 import { useQueryClient } from "@tanstack/react-query";
@@ -146,6 +147,8 @@ export function WhatsNewGate() {
                     <MoodMixChoice onNavigate={defer} />
                 ) : item.run === "wipeEnrichment" ? (
                     <WipeAction item={item} done={done.includes(item.key)} onDone={() => setDone((d) => [...d, item.key])} />
+                ) : item.run === "refileAlbums" ? (
+                    <RefileAction item={item} done={done.includes(item.key)} onDone={() => setDone((d) => [...d, item.key])} />
                 ) : null
             }
         />

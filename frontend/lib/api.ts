@@ -713,6 +713,11 @@ class ApiClient {
         });
     }
 
+    /** Files every library album again by its songs' tags, in the background; the outcome arrives as a notification. */
+    async refileAlbums() {
+        return this.request<{ message: string }>("/library/refile", { method: "POST" });
+    }
+
     async getScanStatus(jobId: string) {
         return this.request<{
             status: string;

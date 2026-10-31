@@ -7,6 +7,7 @@ import {
     importQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
+import { processRefile } from "./processors/refileProcessor";
 import { processDiscoverWeekly } from "./processors/discoverProcessor";
 import { processImportJob } from "./processors/importProcessor";
 import { createWorkerConnection } from "./enrichmentQueues";
@@ -45,7 +46,8 @@ function schedule(name: string, run: () => void, ms: number) {
 }
 
 // BullMQ workers for scan and discover queues
-const scanWorker = new Worker("library-scan-v2", processScan, {
+// The album re-file shares the scan queue so it never runs beside a scan.
+const scanWorker = new Worker("library-scan-v2", (job) => (job.name === "refile" ? processRefile(job) : processScan(job)), {
     connection: createWorkerConnection(),
     concurrency: 1,
     lockDuration: 300000, // 5 minutes — scans can be slow
@@ -75,6 +77,10 @@ startMoodSnapshotWorker().catch((err) => {
 
 // Event handlers for scan worker
 scanWorker.on("completed", (job, result) => {
+    if (job.name === "refile") {
+        logger.debug(`Re-file job ${job.id} completed: ${result.albumsMoved} moved, ${result.albumsMerged} merged, ${result.albumsFailed} failed`);
+        return;
+    }
     logger.debug(
         `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} removed:${result.tracksRemoved}`
     );

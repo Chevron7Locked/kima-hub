@@ -21,7 +21,10 @@ const FIXTURES: Release[] = [
         title: "Kima 9.1",
         summary: "A newer fixture release.",
         date: "2026-07-01",
-        items: [{ kind: "note", key: "fixture.rebuild", title: "Rebuilt", summary: "s", body: "b", olderLibraryOnly: true }],
+        items: [
+            { kind: "note", key: "fixture.rebuild", title: "Rebuilt", summary: "s", body: "b", olderLibraryOnly: true },
+            { kind: "action", key: "fixture.refile", title: "Refile", summary: "s", body: "b", cta: "Re-file", run: "refileAlbums", requires: "admin", installedBeforeOnly: true },
+        ],
     },
 ];
 jest.mock("../../services/releases/catalog", () => {
@@ -129,15 +132,45 @@ it("keeps a dismissed requirement open until the library verifiably passes throu
         RELEASES.filter((r) => r.items.some((i) => (i.kind === "action" || i.kind === "note") && i.olderLibraryOnly)).map((r) => r.date),
     );
     expect(askedAboutLibrary()).toBe(upgradeDates.size);
-    expect(ledger.body.items).toEqual([expect.objectContaining({ version: "9.0.0", key: "fixture.wipe" })]);
+    expect(ledger.body.items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ version: "9.0.0", key: "fixture.wipe" })]),
+    );
 
     // The rerun stamps the track with today's date; the ledger then closes with no further ceremony.
     await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: new Date() } });
     const closed = await changelog("admin");
     const wipeAfter = releaseOf(closed, "9.0.0").items.find((i) => i.key === "fixture.wipe");
     expect(wipeAfter === undefined || wipeAfter.open === false).toBe(true);
-    expect(closed.openCount).toBe(0);
     libraryAsked.mockRestore();
+});
+
+it("keeps the re-file open for admins until albums have been re-filed, then closes it", async () => {
+    await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: OLD_DATE } });
+    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", createdAt: OLD_DATE }, update: { albumsRefiledAt: null, createdAt: OLD_DATE } });
+    // Tracked once the window that offered it is closed.
+    expect((await request(app()).post("/whats-new/9.1.0/dismiss").set("Authorization", as(ADMIN, "admin")).send({})).status).toBe(200);
+    try {
+        const refile = releaseOf(await changelog("admin"), "9.1.0").items.find((i) => i.key === "fixture.refile")!;
+        expect(refile.open).toBe(true);
+        expect(refile.done).toBe(false);
+        expect(releaseOf(await changelog("user"), "9.1.0").items.some((i) => i.key === "fixture.refile")).toBe(false);
+
+        // The upgrade's own re-analysis restamps every song; the re-file is still owed.
+        await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: new Date() } });
+        expect(releaseOf(await changelog("admin"), "9.1.0").items.find((i) => i.key === "fixture.refile")!.open).toBe(true);
+
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { albumsRefiledAt: new Date() } });
+        const after = releaseOf(await changelog("admin"), "9.1.0").items.find((i) => i.key === "fixture.refile")!;
+        expect(after.open).toBe(false);
+        expect(after.done).toBe(true);
+
+        // A server set up after the release never had albums filed the old way: it is not offered.
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { createdAt: new Date("2026-08-01T00:00:00Z") } });
+        expect(releaseOf(await changelog("admin"), "9.1.0").items.some((i) => i.key === "fixture.refile")).toBe(false);
+    } finally {
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { albumsRefiledAt: null, createdAt: OLD_DATE } });
+        await prisma.track.update({ where: { id: `${P}-trk` }, data: { analyzedAt: OLD_DATE } });
+    }
 });
 
 it("shows a recorded choice honestly: a dismissal is silence at the default, never consent", async () => {

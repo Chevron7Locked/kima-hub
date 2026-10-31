@@ -659,6 +659,8 @@ model SystemSettings {
   updateChecksEnabled         Boolean   @default(true)
   /// When the one-time sort of albums filed as Discover ran (services/discovery/sortDiscoverAlbums.ts); null until it has.
   discoverAlbumsSortedAt      DateTime? @default(now())
+  /// When an admin last re-filed every album by its songs' tags (services/albumRefile.ts); null until it has run.
+  albumsRefiledAt             DateTime?
   identityKeysCheckedAt       DateTime? @default(now())
   /// Country whose Apple podcast charts the podcasts page shows (ISO 3166 alpha-2, lowercase).
   podcastChartCountry         String    @default("us")

@@ -17,6 +17,7 @@ import { cn } from "@/lib/cn";
 import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
 import { ReleaseLinks } from "@/components/whats-new/ReleaseLinks";
 import { WipeAction } from "@/components/whats-new/WipeAction";
+import { RefileAction } from "@/components/whats-new/RefileAction";
 import { CHANGELOG } from "@/components/whats-new/useVersionChip";
 import type { Release, ReleaseItem } from "@/components/whats-new/types";
 
@@ -154,6 +155,13 @@ export default function ChangelogPage() {
                                                 <div className="flex flex-col gap-2">
                                                     {item.run === "wipeEnrichment" && (
                                                         <WipeAction
+                                                            item={item}
+                                                            done={doneKeys.has(item.key) || !!item.done}
+                                                            onDone={() => setDoneKeys((d) => new Set([...d, item.key]))}
+                                                        />
+                                                    )}
+                                                    {item.run === "refileAlbums" && (
+                                                        <RefileAction
                                                             item={item}
                                                             done={doneKeys.has(item.key) || !!item.done}
                                                             onDone={() => setDoneKeys((d) => new Set([...d, item.key]))}

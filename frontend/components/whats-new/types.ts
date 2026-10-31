@@ -18,7 +18,7 @@ export type ReleaseItem =
     | (ItemBase & {
           kind: "action";
           cta: string;
-          run?: "wipeEnrichment";
+          run?: "wipeEnrichment" | "refileAlbums";
           confirmTitle?: string;
           confirmMessage?: string;
           confirmLabel?: string;

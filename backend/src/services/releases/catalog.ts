@@ -33,7 +33,7 @@ export type ReleaseItem =
           /** The label on the button that runs it. */
           cta: string;
           /** Something the window runs itself, behind a confirm. */
-          run?: "wipeEnrichment";
+          run?: "wipeEnrichment" | "refileAlbums";
           confirmTitle?: string;
           confirmMessage?: string;
           confirmLabel?: string;
@@ -49,6 +49,11 @@ export type ReleaseItem =
           requires?: "savedMoodMix" | "retiredMoodMix" | "admin";
           /** Show only when the library holds enrichment from before this release's date (an upgrade, not a fresh install). */
           olderLibraryOnly?: boolean;
+          /**
+           * Show only on a server set up before this release's date. Unlike olderLibraryOnly it stays true after the
+           * upgrade re-analyses the library, for an item that is owed until it is run.
+           */
+          installedBeforeOnly?: boolean;
       })
     | (ItemBase & {
           kind: "choice";
@@ -129,6 +134,32 @@ export const RELEASES: Release[] = [
                     "GPU, and longer without one. Settings, under Library Enrichment, shows the progress.",
                 links: [{ label: "See progress in Settings", href: "/settings#cache" }],
                 olderLibraryOnly: true,
+            },
+            {
+                kind: "action",
+                key: "albums.refile",
+                title: "Re-file albums by their tags",
+                summary: "Puts albums older versions filed under the wrong artist back where their songs' tags say.",
+                body:
+                    "Older versions of Kima could file an album under the wrong artist. Band names were cut at " +
+                    "\"and\", \"&\" or \"with\" (Coheed and Cambria became Coheed), one song tagged with a guest's " +
+                    "name split off its album under that guest, and a tag naming two artists was glued into one name. " +
+                    "This version files new songs the right way, but albums already in your library stay where they " +
+                    "were put.\n\n" +
+                    "Re-filing reads every song's tags again and moves each album to the artist its songs name, joining " +
+                    "it to that artist's copy of the album when there is one. Albums you edited and Discover's albums " +
+                    "stay where they are. Plays, likes and playlists stay with their songs. It takes a few minutes on a " +
+                    "large library, and the result shows in your notifications. You can also run it any time from " +
+                    "Settings, under Library Enrichment.",
+                cta: "Re-file albums",
+                run: "refileAlbums",
+                confirmTitle: "Re-file albums by their tags?",
+                confirmMessage:
+                    "Reads every song's tags again and files each album under the artist its songs name. Albums you " +
+                    "edited and Discover's albums stay where they are; plays, likes and playlists stay with their songs.",
+                confirmLabel: "Re-file albums",
+                requires: "admin",
+                installedBeforeOnly: true,
             },
             {
                 kind: "note",

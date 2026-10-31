@@ -246,7 +246,7 @@ function EnrichmentFailuresList({ active = false }: { active?: boolean }) {
 }
 
 type QueueResult = "retry" | "everything" | "wipe" | "rerun";
-type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | null;
+type ConfirmTarget = "retryFailedAndBlocked" | "redecideEverything" | "wipeAndRerun" | "refileAlbums" | null;
 
 /**
  * What each step a re-run can start from redoes (services/enrichmentRestart.ts); a step added to the API must be
@@ -326,6 +326,16 @@ const confirmMeta: Record<
         title: "Wipe and Re-run Enrichment?",
         message: WIPE_MESSAGE,
         confirmText: "Wipe and Re-run",
+    },
+    refileAlbums: {
+        title: "Re-file Albums by Their Tags?",
+        message:
+            "Reads every song's tags again and files each album under the artist its songs name, joining it to that " +
+            "artist's copy of the album when there is one; artists left with no albums are removed. This fixes albums " +
+            "older versions filed under a cut-off name or split over a guest's name. Albums you edited and Discover's " +
+            "albums stay where they are. Plays, likes and playlists stay with their songs. It runs after any library " +
+            "scan and takes a few minutes on a large library.",
+        confirmText: "Re-file Albums",
     },
 };
 
@@ -473,6 +483,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const [queueResult, setQueueResult] = useState<QueueResult | null>(null);
     const [wiping, setWiping] = useState(false);
     const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
+    const [refileStarted, setRefileStarted] = useState(false);
+    const [refileStarting, setRefileStarting] = useState(false);
     const [rerunStep, setRerunStep] = useState<EnrichmentRerunStep>("similarity");
     const [rerunConfirmStep, setRerunConfirmStep] = useState<EnrichmentRerunStep | null>(null);
     const [rerunningStep, setRerunningStep] = useState(false);
@@ -727,6 +739,21 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         if (target === "retryFailedAndBlocked") await execRetryFailedAndBlocked();
         else if (target === "redecideEverything") await execRedecideEverything();
         else if (target === "wipeAndRerun") await execWipeAndRerun();
+        else if (target === "refileAlbums") await execRefileAlbums();
+    };
+
+    const execRefileAlbums = async () => {
+        setRefileStarted(false);
+        setRefileStarting(true);
+        setError(null);
+        try {
+            await api.refileAlbums();
+            setRefileStarted(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to start re-filing albums");
+        } finally {
+            setRefileStarting(false);
+        }
     };
 
     const controlEnrichment = async (run: () => Promise<unknown>, failure: string, alsoRefresh: string[] = []) => {
@@ -1214,7 +1241,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 Maintenance Operations
                             </span>
                             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                                Cache clearing, stale job cleanup, failed-analysis retry
+                                Cache clearing, stale job cleanup, failed-analysis retry, re-filing albums
                             </p>
                         </div>
                         <ChevronDown
@@ -1230,6 +1257,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             <Button size="sm" onClick={handleCleanupStaleJobs} disabled={cleaningStaleJobs}>
                                 {cleaningStaleJobs ? "Cleaning..." : "Cleanup Stale Jobs"}
                             </Button>
+                            <Button size="sm" onClick={() => setConfirmTarget("refileAlbums")} disabled={refileStarting}>
+                                Re-file Albums by Tags
+                            </Button>
                             {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
                                 <Button
                                     size="sm"
@@ -1242,6 +1272,11 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                 </Button>
                             )}
 
+                            {refileStarted && (
+                                <p className="text-xs text-success">
+                                    Re-filing albums. The result will show in your notifications.
+                                </p>
+                            )}
                             {retryResult && (
                                 <p className="text-xs tabular-nums text-success">
                                     Reset {retryResult.reset} failed tracks to pending

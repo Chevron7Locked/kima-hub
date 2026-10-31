@@ -1,0 +1,298 @@
+/**
+ * The admin re-file: every library album is filed again by its files' own tags, by the scanner's album vote
+ * (albumArtistVote.ts). An album under the wrong artist moves to the right one, and onto that artist's copy of it
+ * when there is one, its ownership records with it; an artist left with nothing goes. Albums a person edited and
+ * Discover albums are left alone. An artist that gains albums is asked again of MusicBrainz.
+ * Real database, temp music folder, stand-in tags.
+ */
+
+jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
+jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
+
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { parseFile } from "music-metadata";
+import { prisma } from "../../utils/db";
+import { refileLibrary } from "../albumRefile";
+
+jest.setTimeout(60_000);
+
+const FULL_ID = "7c1d2e3f-0000-4000-8000-000000000001";
+const REAL_RG = "7c1d2e3f-0000-4000-8000-0000000000a1";
+const OTHER_RG = "7c1d2e3f-0000-4000-8000-0000000000a2";
+
+let musicDir: string;
+let tags: Map<string, unknown>;
+
+async function wipe() {
+    await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryAlbum" WHERE "albumTitle" LIKE 'Refile%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id = 'refile-user'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "OwnedAlbum" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Refile%')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "filePath" LIKE 'Refile%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE title LIKE 'Refile%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name LIKE 'Refile%'`);
+}
+
+beforeEach(async () => {
+    await wipe();
+    musicDir = fs.mkdtempSync(path.join(os.tmpdir(), "refile-"));
+    tags = new Map();
+    (parseFile as jest.Mock).mockReset();
+    (parseFile as jest.Mock).mockImplementation(async (file: string) => {
+        const found = tags.get(file);
+        if (!found) throw new Error("unreadable");
+        return found;
+    });
+});
+
+afterEach(() => fs.rmSync(musicDir, { recursive: true, force: true }));
+
+afterAll(async () => {
+    await wipe();
+    await prisma.$disconnect();
+});
+
+let n = 0;
+const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+async function artist(name: string, extra: Record<string, unknown> = {}) {
+    return prisma.artist.create({ data: { name, normalizedName: name.toLowerCase(), identityKey: key(name), ...extra } });
+}
+
+async function album(artistId: string, title: string, extra: Record<string, unknown> = {}) {
+    return prisma.album.create({
+        data: { artistId, title, identityKey: key(title), rgMbid: `temp-refile-${++n}`, primaryType: "Album", location: "LIBRARY", ...extra },
+    });
+}
+
+/** A song on disk filed under `albumId`, whose tags say `common` (none: its tags cannot be read). */
+async function song(albumId: string, rel: string, common: Record<string, unknown> | null) {
+    const file = path.join(musicDir, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "dummy audio bytes");
+    if (common) tags.set(file, { common: { track: { no: 1 }, disk: { no: 1 }, ...common }, format: {}, native: {} });
+    return prisma.track.create({
+        data: { albumId, title: rel, trackNo: 1, duration: 200, filePath: rel, fileModified: new Date(), fileSize: 17 },
+    });
+}
+
+const own = (artistId: string, rgMbid: string, source = "native_scan") =>
+    prisma.ownedAlbum.create({ data: { artistId, rgMbid, source } });
+
+async function artistOf(rel: string) {
+    return (await prisma.track.findUnique({ where: { filePath: rel }, select: { album: { select: { artist: { select: { name: true } } } } } }))!.album.artist.name;
+}
+
+async function filing(title: string) {
+    const rows = await prisma.album.findMany({
+        where: { title },
+        select: { rgMbid: true, artist: { select: { name: true } }, _count: { select: { tracks: true } } },
+    });
+    return rows.map((r) => ({ artist: r.artist.name, rgMbid: r.rgMbid, songs: r._count.tracks }));
+}
+
+describe("re-filing albums by their tags", () => {
+    it("moves an album from a cut-off name to the artist its files name, ownership included", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Album", { rgMbid: REAL_RG });
+        await own(cut.id, REAL_RG);
+        for (const i of [1, 2]) {
+            await song(a.id, `Refile Cut and Band/Refile Album/0${i}.flac`, {
+                album: "Refile Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+            });
+        }
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await filing("Refile Album")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 2 }]);
+        expect(await prisma.ownedAlbum.findMany({ where: { rgMbid: REAL_RG }, select: { artistId: true } })).toEqual([{ artistId: full.id }]);
+        expect(await prisma.artist.count({ where: { name: "Refile Cut" } })).toBe(0);
+        expect(result.albumsMoved).toBe(1);
+    });
+
+    it("merges an album onto the right artist's copy of it, keeping the row with a real id", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Twin", { rgMbid: REAL_RG });
+        const kept = await album(full.id, "Refile Twin");
+        await own(cut.id, REAL_RG, "discovery_liked");
+        await own(full.id, kept.rgMbid);
+        await song(stray.id, "Refile Cut and Band/Refile Twin/01.flac", { album: "Refile Twin", artist: "Refile Cut & Band" });
+        for (const i of [2, 3, 4]) {
+            await song(kept.id, `Refile Cut and Band/Refile Twin/0${i}.flac`, {
+                album: "Refile Twin", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+            });
+        }
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await filing("Refile Twin")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 4 }]);
+        // The stronger ownership source survives on the merged album.
+        expect(await prisma.ownedAlbum.findMany({ where: { artistId: full.id }, select: { rgMbid: true, source: true } })).toEqual([
+            { rgMbid: REAL_RG, source: "native_scan" },
+        ]);
+        expect(await prisma.album.count({ where: { id: kept.id } }) + (await prisma.album.count({ where: { id: stray.id } }))).toBe(1);
+        expect(result.albumsMerged).toBe(1);
+    });
+
+    it("puts a lone song tagged with a guest as album artist back on its album", async () => {
+        const mike = await artist("Refile Mike");
+        const janet = await artist("Refile Janet", { enrichmentStatus: "unresolvable" });
+        const main = await album(mike.id, "Refile History");
+        const split = await album(janet.id, "Refile History");
+        for (const i of [1, 2, 3]) {
+            await song(main.id, `Refile Mike/Refile History/CD 2/0${i}.flac`, { album: "Refile History", albumartist: "Refile Mike" });
+        }
+        await song(split.id, "Refile Mike/Refile History/CD 2/04.flac", { album: "Refile History", albumartist: "Refile Janet" });
+
+        await refileLibrary(musicDir);
+
+        expect(await filing("Refile History")).toEqual([{ artist: "Refile Mike", rgMbid: main.rgMbid, songs: 4 }]);
+        expect(await prisma.artist.count({ where: { name: "Refile Janet" } })).toBe(0);
+    });
+
+    it("asks MusicBrainz again about an artist that gains an album", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
+        const a = await album(cut.id, "Refile Gain");
+        await song(a.id, "Refile Cut and Band/Refile Gain/01.flac", { album: "Refile Gain", albumartist: "Refile Cut and Band" });
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.artist.findUnique({ where: { id: full.id }, select: { enrichmentStatus: true, enrichmentFailures: true } }))
+            .toEqual({ enrichmentStatus: "pending", enrichmentFailures: 0 });
+    });
+
+    it("leaves an album a person edited, and Discover's albums, where they are", async () => {
+        const cut = await artist("Refile Cut");
+        const edited = await album(cut.id, "Refile Edited", { hasUserOverrides: true });
+        const discover = await album(cut.id, "Refile Discover", { location: "DISCOVER" });
+        await song(edited.id, "Refile Elsewhere/Refile Edited/01.flac", { album: "Refile Edited", albumartist: "Refile Other" });
+        await song(discover.id, "Refile Elsewhere/Refile Discover/01.flac", { album: "Refile Discover", albumartist: "Refile Other" });
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await filing("Refile Edited")).toEqual([{ artist: "Refile Cut", rgMbid: edited.rgMbid, songs: 1 }]);
+        expect(await filing("Refile Discover")).toEqual([{ artist: "Refile Cut", rgMbid: discover.rgMbid, songs: 1 }]);
+        expect(await prisma.artist.count({ where: { name: "Refile Other" } })).toBe(0);
+        expect(result.keptEdited).toBe(1);
+    });
+
+    it("changes nothing when every album is already where its tags say", async () => {
+        const band = await artist("Refile Band");
+        const a = await album(band.id, "Refile Settled");
+        await song(a.id, "Refile Band/Refile Settled/01.flac", { album: "Refile Settled", albumartist: "Refile Band" });
+
+        const result = await refileLibrary(musicDir);
+
+        expect(result).toMatchObject({ albumsMoved: 0, albumsMerged: 0, artistsRemoved: 0 });
+        expect(await filing("Refile Settled")).toEqual([{ artist: "Refile Band", rgMbid: a.rgMbid, songs: 1 }]);
+    });
+
+    it("never deletes the right artist's own copy, even when it has only a placeholder id and was edited", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Edited Twin", { rgMbid: REAL_RG });
+        const edited = await album(full.id, "Refile Edited Twin", { hasUserOverrides: true, userCoverUrl: "/mine.jpg" });
+        await song(stray.id, "Refile Cut and Band/Refile Edited Twin/01.flac", { album: "Refile Edited Twin", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+        await song(edited.id, "Refile Cut and Band/Refile Edited Twin/02.flac", { album: "Refile Edited Twin", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        await refileLibrary(musicDir);
+
+        const kept = await prisma.album.findUnique({ where: { id: edited.id }, select: { userCoverUrl: true, rgMbid: true, _count: { select: { tracks: true } } } });
+        expect(kept).toEqual({ userCoverUrl: "/mine.jpg", rgMbid: edited.rgMbid, _count: { tracks: 2 } });
+        expect(await prisma.album.count({ where: { id: stray.id } })).toBe(0);
+    });
+
+    it("moves only an album's own songs off a row it shares with another album, in either order", async () => {
+        for (const [first, second] of [["A", "B"], ["B", "A"]]) {
+            await wipe();
+            const mixed = await artist("Refile Mixed");
+            const tee = await artist("Refile Tee");
+            const shared = await album(mixed.id, "Refile Shared");
+            await song(shared.id, `Refile ${first}/Refile Shared/01.flac`, { album: "Refile Shared", albumartist: "Refile Tee" });
+            await song(shared.id, `Refile ${second}/Refile Shared/01.flac`, { album: "Refile Shared", albumartist: "Refile You" });
+
+            await refileLibrary(musicDir);
+
+            expect(await artistOf(`Refile ${first}/Refile Shared/01.flac`)).toBe("Refile Tee");
+            expect(await artistOf(`Refile ${second}/Refile Shared/01.flac`)).toBe("Refile You");
+            expect(await prisma.artist.count({ where: { id: mixed.id } })).toBe(0);
+            // A new row gets its ownership record, as a scanned album does.
+            const owned = await prisma.ownedAlbum.findMany({ where: { artistId: tee.id }, select: { source: true } });
+            expect(owned).toEqual([{ source: "native_scan" }]);
+        }
+    });
+
+    it("carries another artist's ownership, Discover's records and the album's details onto the surviving album", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const guest = await artist("Refile Guest");
+        await song((await album(guest.id, "Refile Guest Own")).id, "Refile Guest/Refile Guest Own/01.flac", { album: "Refile Guest Own", albumartist: "Refile Guest" });
+        const stray = await album(cut.id, "Refile Details", { rgMbid: OTHER_RG, coverUrl: "/cover.jpg", year: 1999, label: "Refile Label" });
+        const kept = await album(full.id, "Refile Details", { rgMbid: REAL_RG });
+        await own(guest.id, OTHER_RG);
+        await prisma.user.create({ data: { id: "refile-user", username: "refile-user", passwordHash: "x" } });
+        await prisma.discoveryAlbum.create({
+            data: { userId: "refile-user", rgMbid: OTHER_RG, artistName: "Refile Cut", albumTitle: "Refile Details", weekStartDate: new Date("2026-10-26") },
+        });
+        await song(stray.id, "Refile Cut and Band/Refile Details/01.flac", { album: "Refile Details", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+        await song(kept.id, "Refile Cut and Band/Refile Details/02.flac", { album: "Refile Details", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.album.findUnique({ where: { id: kept.id }, select: { coverUrl: true, year: true, label: true, rgMbid: true } }))
+            .toEqual({ coverUrl: "/cover.jpg", year: 1999, label: "Refile Label", rgMbid: REAL_RG });
+        expect(await prisma.ownedAlbum.findMany({ where: { artistId: guest.id, rgMbid: { in: [REAL_RG, OTHER_RG] } }, select: { rgMbid: true } })).toEqual([{ rgMbid: REAL_RG }]);
+        expect(await prisma.discoveryAlbum.findMany({ where: { albumTitle: "Refile Details" }, select: { rgMbid: true } })).toEqual([{ rgMbid: REAL_RG }]);
+    });
+
+    it("leaves an album alone when one of its songs cannot be read", async () => {
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Unread");
+        await song(a.id, "Refile Cut and Band/Refile Unread/01.flac", { album: "Refile Unread", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+        await song(a.id, "Refile Cut and Band/Refile Unread/02.flac", null);
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await filing("Refile Unread")).toEqual([{ artist: "Refile Cut", rgMbid: a.rgMbid, songs: 2 }]);
+        expect(result.songsUnreadable).toBe(1);
+    });
+
+    it("counts an album it could not re-file and still re-files the rest", async () => {
+        const identity = jest.requireActual("../artistIdentity");
+        const real = identity.resolveArtist;
+        const spy = jest.spyOn(identity, "resolveArtist").mockImplementation(async (...args: any[]) => {
+            if (args[1].name === "Refile Broken") throw new Error("boom");
+            return real(...args);
+        });
+        try {
+            const cut = await artist("Refile Cut");
+            const a = await album(cut.id, "Refile Breaks");
+            const b = await album(cut.id, "Refile Works");
+            await song(a.id, "Refile Broken/Refile Breaks/01.flac", { album: "Refile Breaks", albumartist: "Refile Broken" });
+            await song(b.id, "Refile Fine/Refile Works/01.flac", { album: "Refile Works", albumartist: "Refile Fine" });
+
+            const result = await refileLibrary(musicDir);
+
+            expect(result.albumsFailed).toBe(1);
+            expect(await artistOf("Refile Fine/Refile Works/01.flac")).toBe("Refile Fine");
+            expect(await artistOf("Refile Broken/Refile Breaks/01.flac")).toBe("Refile Cut");
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("changes nothing on a second run", async () => {
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Twice", { rgMbid: REAL_RG });
+        await song(a.id, "Refile Cut and Band/Refile Twice/01.flac", { album: "Refile Twice", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        expect((await refileLibrary(musicDir)).albumsMoved).toBe(1);
+        expect(await refileLibrary(musicDir)).toMatchObject({ albumsMoved: 0, albumsMerged: 0, keptEdited: 0, albumsFailed: 0 });
+    });
+});

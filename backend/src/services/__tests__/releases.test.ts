@@ -20,6 +20,8 @@ jest.mock("../../utils/db", () => {
             // pendingReleases reads the role only for items that require an
             // admin; the shipped catalog has one, so these tests answer as one.
             user: { findUnique: jest.fn().mockResolvedValue({ role: "admin" }) },
+            // When this server was set up: before every release, so it reads as an upgrade.
+            systemSettings: { findUnique: jest.fn().mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") }) },
             // Whether the library has enrichment from before a release's date.
             $queryRaw: jest.fn().mockResolvedValue([{ older: true }]),
             $transaction: jest.fn(async (fn: (t: unknown) => unknown) => fn(tx)),
@@ -259,6 +261,28 @@ describe("catalog", () => {
         const wipe = release.items.find((i) => i.key === "engine.wipe");
         expect(wipe).toMatchObject({ kind: "action", run: "wipeEnrichment", requires: "admin" });
         expect(catalog.RELEASES.find((r) => r.version === "1.10.1")!.items.some((i) => i.key === "engine.wipe")).toBe(false);
+    });
+
+    it("offers admins of an upgraded library to re-file their albums in 1.12.0, and no one else", async () => {
+        const refile = catalog.RELEASES.find((r) => r.version === "1.12.0")!.items.find((i) => i.key === "albums.refile");
+        expect(refile).toMatchObject({ kind: "action", run: "refileAlbums", requires: "admin", installedBeforeOnly: true });
+
+        jest.restoreAllMocks();
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
+        moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
+        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.0")!.items.map((i) => i.key);
+        prisma.user.findUnique.mockResolvedValue({ role: "admin" });
+        // Still offered once the upgrade's re-analysis leaves no song analysed before the release.
+        prisma.$queryRaw.mockResolvedValue([{ older: false }]);
+        expect(await keys()).toContain("albums.refile");
+        // Not offered to a server set up after the release.
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-12-01T00:00:00Z") });
+        expect(await keys()).not.toContain("albums.refile");
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") });
+        prisma.$queryRaw.mockResolvedValue([{ older: true }]);
+        prisma.user.findUnique.mockResolvedValue({ role: "user" });
+        expect(await keys()).not.toContain("albums.refile");
+        prisma.user.findUnique.mockResolvedValue({ role: "admin" });
     });
 
     it("offers the wipe to an upgraded library and not to a fresh install", async () => {

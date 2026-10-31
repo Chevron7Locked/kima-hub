@@ -1,6 +1,7 @@
 /**
  * The Library Enrichment section shows the mood step between vibe embeddings and similarity, names the step a run is
  * on in the list's words, and the moods re-run says the vibe map stays (it is the one step that does not lay it out).
+ * Its maintenance operations offer re-filing albums by their tags, after a confirmation.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +31,7 @@ const progress = {
 };
 
 const rerun = vi.fn();
+const refile = vi.fn();
 
 vi.mock("@/lib/api", () => ({
     api: {
@@ -42,6 +44,7 @@ vi.mock("@/lib/api", () => ({
         getClapWorkers: async () => ({ workers: 1, cpuCores: 8 }),
         getGpuStatus: async () => ({ supported: false }),
         rerunEnrichment: (...a: unknown[]) => rerun(...a),
+        refileAlbums: (...a: unknown[]) => refile(...a),
     },
 }));
 vi.mock("@/lib/features-context", () => ({
@@ -125,6 +128,40 @@ describe("the enrichment steps", () => {
         expect(document.body.textContent).toContain("then the moods and the vibe map");
         expect(document.body.textContent).toContain("The vibe map is laid out again when it finishes.");
         expect(rerun).not.toHaveBeenCalled();
+    });
+});
+
+describe("re-filing albums", () => {
+    const openMaintenance = async () => {
+        const toggle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Maintenance Operations"))!;
+        await act(async () => toggle.click());
+    };
+    const refileButton = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Re-file Albums by Tags");
+
+    it("asks first, then starts the re-file and says where the result will appear", async () => {
+        refile.mockResolvedValue({ message: "Re-filing albums by their tags" });
+        await render();
+        await openMaintenance();
+        await act(async () => refileButton()!.click());
+        expect(document.body.textContent).toContain("Albums you edited and Discover's albums stay where they are.");
+        expect(refile).not.toHaveBeenCalled();
+
+        const confirm = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Re-file Albums")!;
+        await act(async () => confirm.click());
+        await settle();
+        expect(refile).toHaveBeenCalledTimes(1);
+        expect(container.textContent).toContain("The result will show in your notifications.");
+    });
+
+    it("says so when a re-file is already running", async () => {
+        refile.mockRejectedValue(new Error("Albums are already being re-filed"));
+        await render();
+        await openMaintenance();
+        await act(async () => refileButton()!.click());
+        const confirm = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Re-file Albums")!;
+        await act(async () => confirm.click());
+        await settle();
+        expect(container.textContent).toContain("Albums are already being re-filed");
     });
 });
 

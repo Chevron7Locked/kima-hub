@@ -191,4 +191,14 @@ describe("one album, one artist", () => {
         await scan();
         expect(await albumsOf("Vote Growing")).toEqual([{ artist: "Vote Grow", mbid: null, songs: 4 }]);
     });
+
+    it("asks MusicBrainz again about an artist it could not find once that artist gains a song", async () => {
+        await prisma.artist.create({
+            data: { name: "Vote Unfound", normalizedName: "vote unfound", identityKey: "voteunfound", enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+        });
+        place("Vote Unfound/Vote New Album/01.flac", { title: "A", album: "Vote New Album", albumartist: "Vote Unfound" });
+        await scan();
+        expect(await prisma.artist.findFirst({ where: { name: "Vote Unfound" }, select: { enrichmentStatus: true, enrichmentFailures: true } }))
+            .toEqual({ enrichmentStatus: "pending", enrichmentFailures: 0 });
+    });
 });

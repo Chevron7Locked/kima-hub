@@ -89,3 +89,21 @@ export async function requestScan(req: ScanRequest): Promise<ScanRequestResult> 
     });
     return { queued: true, jobId };
 }
+
+export const REFILE_JOB_ID = "refile-albums";
+
+/**
+ * Queue the album re-file (albumRefile.ts) on the scan queue, whose one-at-a-time worker keeps it from running beside
+ * a scan. One at a time: queued:false while one is waiting or running.
+ */
+export async function requestRefile(userId: string): Promise<ScanRequestResult> {
+    const existing: Job | undefined = await scanQueue.getJob(REFILE_JOB_ID);
+    if (existing) {
+        const state = await existing.getState();
+        if (LIVE_STATES.has(state)) return { queued: false, jobId: REFILE_JOB_ID, reason: `a re-file is already ${state}` };
+        await existing.remove();
+    }
+    // Once: a failed re-file says so in the tray and can be started again; retries would repeat it unasked.
+    await scanQueue.add("refile", { userId }, { jobId: REFILE_JOB_ID, attempts: 1 });
+    return { queued: true, jobId: REFILE_JOB_ID };
+}

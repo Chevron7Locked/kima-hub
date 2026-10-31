@@ -40,11 +40,11 @@ export const isKimaChosen = (source: string | null | undefined): boolean =>
 const sourceStrength = (source: string | null | undefined) =>
     source === "editor" ? 3 : source == null || source === "tag" ? 2 : 1;
 
-type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion">;
+export type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion">;
 
 /** Which ownership source protects an artist best (dataIntegrity, discover's fix-tagging). */
 const OWNERSHIP_RANK = ["native_scan", "discovery_liked"];
-const ownershipRank = (source: string) => {
+export const ownershipRank = (source: string) => {
     const rank = OWNERSHIP_RANK.indexOf(source);
     return rank === -1 ? OWNERSHIP_RANK.length : rank;
 };
@@ -63,7 +63,7 @@ export async function reassignAlbumRgMbid(
     return prisma.$transaction((tx) => moveAlbumRgMbid(tx, albumId, newRgMbid, opts));
 }
 
-async function moveAlbumRgMbid(
+export async function moveAlbumRgMbid(
     tx: MoveClient,
     albumId: string,
     newRgMbid: string,
@@ -108,7 +108,7 @@ async function moveAlbumRgMbid(
 }
 
 /** Every artist's ownership row for the old id moves, keeping its source. */
-async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
     const rows = await tx.ownedAlbum.findMany({ where: { rgMbid: oldRgMbid } });
     for (const row of rows) {
         const clash = await tx.ownedAlbum.findUnique({
@@ -138,7 +138,7 @@ async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: strin
  * taken are left and logged, since a unique violation would abort the transaction; a racing
  * insert still can, and identification retries later.
  */
-async function moveDiscoveryAlbums(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+export async function moveDiscoveryAlbums(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
     const staleRows = await tx.discoveryAlbum.findMany({
         where: { rgMbid: oldRgMbid },
         select: { id: true, userId: true, weekStartDate: true },
@@ -169,7 +169,7 @@ async function moveDiscoveryAlbums(tx: MoveClient, oldRgMbid: string, newRgMbid:
 }
 
 /** A user's "don't suggest this album" moves too; a clash keeps the later dates. */
-async function moveDiscoverExclusions(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
+export async function moveDiscoverExclusions(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
     const rows = await tx.discoverExclusion.findMany({ where: { albumMbid: oldRgMbid } });
     for (const row of rows) {
         const clash = await tx.discoverExclusion.findUnique({

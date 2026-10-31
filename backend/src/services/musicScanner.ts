@@ -16,6 +16,7 @@ import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
 import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
+import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { askedAgain } from "./stageReopen";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
@@ -355,43 +356,7 @@ export class MusicScannerService {
         result.tracksRemoved = reconcile.removed;
 
         // Albums with no songs, then artists with no albums, go.
-        const orphanedAlbums = await prisma.album.findMany({
-            where: {
-                tracks: { none: {} },
-            },
-            select: { id: true, title: true, artistId: true },
-        });
-
-        if (orphanedAlbums.length > 0) {
-            logger.debug(`Removing ${orphanedAlbums.length} orphaned albums...`);
-            await prisma.album.deleteMany({
-                where: {
-                    id: { in: orphanedAlbums.map((a) => a.id) },
-                },
-            });
-        }
-
-        const orphanedArtists = await prisma.artist.findMany({
-            where: {
-                albums: { none: {} },
-            },
-            select: { id: true, name: true },
-        });
-
-        if (orphanedArtists.length > 0) {
-            logger.debug(
-                `Removing ${
-                    orphanedArtists.length
-                } orphaned artists: ${orphanedArtists
-                    .map((a) => a.name)
-                    .join(", ")}`
-            );
-            await prisma.artist.deleteMany({
-                where: {
-                    id: { in: orphanedArtists.map((a) => a.id) },
-                },
-            });
-        }
+        await pruneEmptyAlbumsAndArtists();
 
         result.duration = Date.now() - startTime;
         logger.debug(
@@ -593,6 +558,13 @@ export class MusicScannerService {
                 skipDuplicates: true,
             });
         }
+
+        // MusicBrainz is asked about a name only with the artist's album titles as proof, so an artist it could not
+        // find is asked again once it has a new song.
+        await prisma.artist.updateMany({
+            where: { id: artist.id, enrichmentStatus: "unresolvable" },
+            data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
+        });
 
         await this.ensureAlbumCover(album, absolutePath, artistName, albumTitle);
 

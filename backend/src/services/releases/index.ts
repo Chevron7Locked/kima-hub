@@ -107,8 +107,16 @@ async function forUser(
     const mixState = async () => (state ??= await moodMixState(userId));
     let roleChecked: boolean | undefined;
     const isAdmin = async () => (roleChecked ??= await isAdminUser(userId));
+    let setUpAt: Date | null | undefined;
+    const installedBefore = async (date: string) => {
+        if (setUpAt === undefined) {
+            setUpAt = (await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { createdAt: true } }))?.createdAt ?? null;
+        }
+        return setUpAt !== null && setUpAt < new Date(date);
+    };
     const applies = async (item: ReleaseItem, release: Release): Promise<boolean> => {
         if ((item.kind === "action" || item.kind === "note") && item.olderLibraryOnly && !(await enrichedBefore(release.date))) return false;
+        if (item.kind === "action" && item.installedBeforeOnly && !(await installedBefore(release.date))) return false;
         // The GPU choice is only asked where the CUDA runtime can exist; on
         // other hosts the answer would always be "unsupported_platform".
         if (item.kind === "choice" && item.key === GPU_CHOICE_KEY && !gpuSupported()) return false;
@@ -136,7 +144,7 @@ interface ChangelogItem {
     summary: string;
     body: string;
     cta?: string;
-    run?: "wipeEnrichment";
+    run?: "wipeEnrichment" | "refileAlbums";
     confirmTitle?: string;
     confirmMessage?: string;
     confirmLabel?: string;
@@ -184,6 +192,11 @@ async function actionSettled(
         // library has been through the new engine. A rerun restamps what it finishes, so this closes
         // itself when the work is truly done.
         return !(await enrichedBefore(releaseDate));
+    }
+    if (item.run === "refileAlbums") {
+        // Open until an admin's re-file has finished (albumRefile.ts stamps it).
+        const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } });
+        return settings?.albumsRefiledAt != null;
     }
     if (isMoodMixItem(item)) {
         const state = await moodMixState(userId);
