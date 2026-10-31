@@ -2,7 +2,8 @@
  * Kima 1.12's non-podcast features, driven through the real UI and checked against the server's own answers:
  * playlist reverse order, per-step enrichment re-runs, update pings, operator-only downloads, and the
  * What's new / changelog doors; then the queue and right-hand panel, the left rail, radio stations, track details,
- * and library-only collection. Every test puts back what it changed.
+ * library-only collection, and re-filing albums by their tags. Every test puts back what it changed, except the
+ * re-file, which is meant to stay: a second run must find nothing left to move.
  */
 import { test, expect, devices, Browser, BrowserContext, Page, APIRequestContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
@@ -1130,5 +1131,161 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
         session.assertClean("Journey 11 (library only and refine)");
         session.clearExpectedFailures();
+    });
+
+    // ------------------------------------------------------------------------------------------
+    test("12. re-file albums: Settings starts it, the result reaches the tray, no song is lost, and a second run moves nothing", async () => {
+        test.setTimeout(40 * 60_000);
+        session.setJourney("12. re-file albums");
+        type Note = { id: string; title: string; message: string | null; createdAt: string };
+        const RESULT = "Albums re-filed by their tags";
+
+        /** Every library artist, every page. */
+        const allArtists = async () => {
+            const out: Array<{ id: string; name: string; albumCount: number }> = [];
+            for (let offset = 0; ; offset += 1000) {
+                const part = (await (await api.get(`/api/library/artists?limit=1000&offset=${offset}`, { headers: bearer(token) })).json()) as {
+                    artists: Array<{ id: string; name: string; albumCount: number }>;
+                    total: number;
+                };
+                out.push(...part.artists);
+                if (part.artists.length < 1000 || out.length >= part.total) break;
+            }
+            return out;
+        };
+        /** Every library song's id, every page. The library's own scan may add songs meanwhile; none may go. */
+        const allTrackIds = async () => {
+            const ids = new Set<string>();
+            for (let offset = 0; ; offset += 1000) {
+                const part = (await (await api.get(`/api/library/tracks?limit=1000&offset=${offset}`, { headers: bearer(token) })).json()) as {
+                    tracks: Array<{ id: string }>;
+                    total: number;
+                };
+                for (const t of part.tracks) ids.add(t.id);
+                if (part.tracks.length < 1000 || offset + 1000 >= part.total) break;
+            }
+            return ids;
+        };
+        const lost = (now: Set<string>) => [...before].filter((id) => !now.has(id));
+        // Every outcome of a run, good or bad, replaces one tray row (one group) and restamps it with the server's own
+        // clock. A run is told apart from the one before by that stamp changing, never by the test machine's clock.
+        const resultRow = async (): Promise<Note | null> => {
+            const notes = (await (await api.get("/api/notifications", { headers: bearer(token) })).json()) as Note[];
+            return notes.find((n) => n.title === RESULT || /^Re-filing albums /.test(n.title)) ?? null;
+        };
+        const stampOf = async () => (await resultRow())?.createdAt ?? null;
+        const waitForResult = async (previous: string | null) => {
+            let note: Note | null = null;
+            await expect
+                .poll(async () => {
+                    note = await resultRow();
+                    return note !== null && note.createdAt !== previous;
+                }, { timeout: 30 * 60_000, intervals: [2000, 5000], message: "the re-file's result never reached the tray" })
+                .toBe(true);
+            expect(note!.title, `the re-file reported a failure: ${note!.message}`).toBe(RESULT);
+            return note!;
+        };
+
+        let before = new Set<string>();
+        await session.step("read the library before", async () => {
+            before = await allTrackIds();
+            expect(before.size, "the library has no songs").toBeGreaterThan(0);
+            return { songs: before.size };
+        });
+
+        let firstStamp: string | null = null;
+        await session.step("Settings: the re-file button asks first, then starts it", async () => {
+            await page.goto("/settings");
+            await settle(page, 1500);
+            // The button sits in the folded "Maintenance Operations" part of Library Enrichment.
+            const maintenance = page.getByRole("button", { name: /maintenance operations/i });
+            await expect(maintenance).toBeVisible({ timeout: 15_000 });
+            const button = page.getByRole("button", { name: "Re-file Albums by Tags" });
+            // A click before the page has hydrated is lost, so open the section until the button shows.
+            await expect(async () => {
+                if ((await maintenance.getAttribute("aria-expanded")) !== "true") await maintenance.click();
+                await expect(button).toBeVisible({ timeout: 2000 });
+            }).toPass({ timeout: 20_000 });
+            await button.click();
+            const dialog = page.getByRole("dialog");
+            await expect(dialog).toBeVisible();
+            await expect(dialog).toContainText(/re-file albums by their tags/i);
+            firstStamp = await stampOf();
+            const started = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/api/library/refile"));
+            await dialog.getByRole("button", { name: "Re-file Albums", exact: true }).click();
+            expect((await started).status(), "the re-file was not queued").toBe(202);
+            await expect(page.getByText(/re-filing albums\. the result will show in your notifications/i)).toBeVisible({ timeout: 10_000 });
+        });
+
+        await session.step("asking again while it runs is refused, not queued twice", async () => {
+            const again = await api.post("/api/library/refile", { headers: bearer(token) });
+            // A 202 means the first run finished before one more request could be made, and a second is now queued;
+            // which run then wrote the tray row cannot be told apart, so this needs a library a run takes longer on.
+            expect(again.status(), "the re-file finished before a second request; this journey needs a larger library").toBe(409);
+        });
+
+        await session.step("the result reaches the tray and names what moved", async () => {
+            const first = await waitForResult(firstStamp);
+            expect(first.message ?? "").toMatch(/\d+ albums moved, \d+ joined the right artist's copy; \d+ empty artists removed/);
+            expect(first.message ?? "", "some albums could not be re-filed").not.toMatch(/could not be re-filed/);
+            await page.reload();
+            await settle(page, 1500);
+            // A folded panel still counts as visible (it is slid off the edge), so open it by its handle.
+            const handle = page.getByRole("button", { name: "open panel" });
+            if (await handle.isVisible().catch(() => false)) await handle.click();
+            const tabs = page.getByRole("tablist", { name: "activity", exact: true });
+            await tabs.getByRole("tab", { name: /^alerts/ }).click({ timeout: 15_000 });
+            await expect(page.locator("#panel-activity")).toContainText(/albums re-filed by their tags/i, { timeout: 15_000 });
+            return { message: first.message ?? "" };
+        });
+
+        await session.step("no song is lost, and no artist name carries a hidden character", async () => {
+            const after = await allTrackIds();
+            expect(lost(after), "songs that were in the library before the re-file").toEqual([]);
+            const artists = await allArtists();
+            // A tag naming two artists used to be glued into one name with a NUL or byte-order mark between them.
+            const hidden = artists.filter((a) => /[\u0000﻿​]/.test(a.name)).map((a) => JSON.stringify(a.name));
+            expect(hidden, "artist names with hidden characters").toEqual([]);
+            // The list holds only artists with a library album, so a count of 0 is a count the re-file left stale.
+            const stale = artists.filter((a) => !(a.albumCount > 0)).map((a) => a.name);
+            expect(stale, "library artists whose album count was not brought up to date").toEqual([]);
+            return { songs: after.size, artists: artists.length };
+        });
+
+        await session.step("a second run finds nothing left to move", async () => {
+            const previous = await stampOf();
+            const started = await api.post("/api/library/refile", { headers: bearer(token) });
+            expect(started.status(), "the second re-file was not queued").toBe(202);
+            const second = await waitForResult(previous);
+            // A rename can still lead the line, if MusicBrainz could not be reached the first time.
+            expect(second.message ?? "", "the second run moved albums the first one placed").toMatch(/(^|; )0 albums moved, 0 joined the right artist's copy; 0 empty artists removed/);
+            expect(lost(await allTrackIds()), "songs that were in the library before the re-file").toEqual([]);
+            return { message: second.message ?? "" };
+        });
+
+        await session.step("once re-filed, the 1.12 window no longer asks and shows it done", async () => {
+            const current = (await (await api.get("/api/whats-new/current", { headers: bearer(token) })).json()) as {
+                release: { items: Array<{ key: string }> };
+                done: string[];
+            };
+            // Offered only to servers set up before 1.12; a fresh install never sees it.
+            if (current.release.items.some((i) => i.key === "albums.refile")) {
+                expect(current.done, "the window does not show the re-file as done").toContain("albums.refile");
+                // While 1.12 is unread, its window must not ask for the re-file again; once read it is not shown at all.
+                const pending = (await (await api.get("/api/whats-new/pending", { headers: bearer(token) })).json()) as {
+                    releases: Array<{ version: string; items: Array<{ key: string }> }>;
+                };
+                const unread = pending.releases.find((r) => r.version === "1.12.0");
+                if (unread) {
+                    expect(unread.items.map((i) => i.key), "the window still asks for the re-file").not.toContain("albums.refile");
+                } else {
+                    session.noteNotCovered("re-file: the unread 1.12 window dropping the item, since this user already closed it");
+                }
+            } else {
+                session.noteNotCovered("re-file: the 1.12 window's item, since this server was set up after 1.12");
+            }
+        });
+
+        session.assertClean("Journey 12 (re-file albums)");
     });
 });
