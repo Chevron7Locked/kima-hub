@@ -31,9 +31,9 @@ export function CollectionMasthead({ title, heardLine, fallbackLine, shares }: C
                 }}
             />
 
-            <div className="relative page-shell pt-8 pb-6">
-                <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white leading-none">{title}</h1>
-                <p className="mt-3 text-sm tabular-nums text-[var(--text-secondary)] truncate transition-opacity duration-500">
+            <div className="relative page-shell pt-6 pb-5">
+                <h1 className="t-page-title">{title}</h1>
+                <p className="mt-2 text-sm tabular-nums text-[var(--text-secondary)] truncate transition-opacity duration-500">
                     {heardLine ?? fallbackLine}
                 </p>
                 <MoodBand shares={shares} />

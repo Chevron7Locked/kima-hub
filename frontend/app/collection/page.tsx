@@ -391,14 +391,12 @@ export default function LibraryPage() {
             />
 
             <div className="relative page-shell pb-24">
-                <div className="mb-6">
+                {/* Tabs and refine controls share one line; on a TV each keeps a row of its own for the remote. */}
+                <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 pb-4 border-b border-white/5">
                     <LibraryTabs
                         activeTab={activeTab}
                         onTabChange={changeTab}
                     />
-                </div>
-
-                <div className="mb-8">
                     <LibraryToolbar
                         activeTab={activeTab}
                         filter={filter}
@@ -411,6 +409,9 @@ export default function LibraryPage() {
                         onShuffleLibrary={handleShuffleLibrary}
                     />
                 </div>
+
+                {/* The cards' titles are h3s; this names the list they sit in for screen readers. */}
+                <h2 className="sr-only">{activeTab}</h2>
 
                 <div
                     aria-busy={activeQuery.isPlaceholderData}

@@ -13,7 +13,7 @@ export function PodcastShelf({ podcasts, ranked = false }: { podcasts: Discovery
         <HorizontalCarousel style={cascadeStyle(podcasts.length)}>
             {podcasts.map((p, index) => (
                 <CarouselItem key={p.itunesId}>
-                    <PodcastCard podcast={p} index={index} ranked={ranked} sizes="180px" className="mx-1" />
+                    <PodcastCard podcast={p} index={index} ranked={ranked} sizes="180px" />
                 </CarouselItem>
             ))}
         </HorizontalCarousel>
@@ -29,7 +29,7 @@ export function PodcastShelfPlaceholder({ count = 8 }: { count?: number }) {
         <HorizontalCarousel>
             {Array.from({ length: count }, (_, i) => (
                 <CarouselItem key={i}>
-                    <div data-placeholder-card className="mx-1">
+                    <div data-placeholder-card>
                         <div className="aspect-square w-full rounded-lg bg-[#181818] ring-1 ring-white/10 animate-pulse" />
                         <div className="h-0.5 mt-1" />
                         <div className="pt-1.5 px-0.5">

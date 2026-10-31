@@ -86,8 +86,9 @@ export function HorizontalCarousel({
                 className={cn(
                     "flex overflow-x-auto scrollbar-hide scroll-smooth",
                     "snap-x snap-mandatory",
-                    "gap-3",
-                    "px-1"
+                    // The padding leaves room for a card's focus ring and the negative margin keeps the first card on
+                    // the page edge; the scroll padding stops snapping from scrolling that padding out of view.
+                    "gap-(--card-gap) px-1 -mx-1 scroll-px-1"
                 )}
             >
                 {children}
@@ -133,8 +134,8 @@ export function CarouselItem({ children, className }: CarouselItemProps) {
         <div
             className={cn(
                 "flex-shrink-0 snap-start",
-                // Responsive widths - smaller items that fit more on screen
-                "w-[140px] sm:w-[160px] md:w-[170px] lg:w-[180px]",
+                // The grid's card width from a tablet up; a phone shows a narrower card so the next one peeks in.
+                "w-[140px] sm:w-[160px] md:w-(--card-w)",
                 className
             )}
         >

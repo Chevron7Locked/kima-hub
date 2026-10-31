@@ -146,6 +146,21 @@
  * is only for machine strings (codes, tokens, URLs); aligned digits use tabular
  * figures instead. */
 @layer components {
+    /* A page's title: one size on every page, 28px on a phone and 32px from a
+     * tablet up. A section heading under it is 20px. */
+    .t-page-title {
+        font-size: 1.75rem;
+        line-height: 1.1;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        color: #fff;
+    }
+    @media (min-width: 48rem) {
+        .t-page-title {
+            font-size: 2rem;
+        }
+    }
+
     /* The short status kicker above a page title. */
     .t-eyebrow {
         font-size: var(--text-micro);
@@ -215,18 +230,24 @@ code {
 }
 
 /* ── The media grid ───────────────────────────────────────────────────────
- * Every wall of artwork cards uses this grid. auto-fill keeps a short library
- * at normal card size instead of stretching it; the gap grows with the
- * viewport from 12px on a phone to 20px on a desktop. */
+ * Every wall of artwork cards and every home shelf uses one card width and
+ * one gap. A wider screen shows more cards, not bigger ones; a phone fits two
+ * to a row. */
+:root {
+    --card-w: 11.25rem; /* 180px */
+    --card-gap: clamp(0.75rem, 1.6vw, 1.25rem); /* 12px on a phone to 20px on a desktop */
+}
+
 @layer components {
     .grid-media {
-        /* Fluid card floor: extra width goes to bigger artwork, not more columns.
-         * 152px still fits two cards on a 388px phone; 14vw keeps titles
-         * readable in the column left beside the sidebar and activity rail. */
-        --card-min: clamp(9.5rem, 14vw, 12rem);
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
-        gap: clamp(0.75rem, 1.6vw, 1.25rem);
+        grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+        gap: var(--card-gap);
+    }
+    @media (min-width: 48rem) {
+        .grid-media {
+            grid-template-columns: repeat(auto-fill, minmax(min(var(--card-w), 100%), var(--card-w)));
+        }
     }
 }
 
@@ -311,11 +332,12 @@ code {
     }
 }
 
-/* The vertical beat between top-level page sections: 48px on a phone,
- * opening to 72px on a desktop. */
+/* The vertical beat between top-level page sections: 32px on a phone,
+ * opening to 48px on a desktop. A section's heading sits 16px above its
+ * content, so the space between sections always reads as the larger break. */
 @layer components {
     .section-stack > * + * {
-        margin-top: clamp(3rem, 5vw, 4.5rem);
+        margin-top: clamp(2rem, 3.5vw, 3rem);
     }
 }
 

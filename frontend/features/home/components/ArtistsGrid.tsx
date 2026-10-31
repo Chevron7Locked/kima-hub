@@ -30,7 +30,6 @@ function ArtistTileGrid({ tiles }: { tiles: ArtistTile[] }) {
                         type="artist"
                         index={index}
                         sizes="180px"
-                        className="mx-1"
                     />
                 </CarouselItem>
             ))}

@@ -26,7 +26,6 @@ const AudiobooksGrid = memo(function AudiobooksGrid({ audiobooks }: AudiobooksGr
                         type="audiobook"
                         index={index}
                         sizes="180px"
-                        className="mx-1"
                     />
                 </CarouselItem>
             ))}

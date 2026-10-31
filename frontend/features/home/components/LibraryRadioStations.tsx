@@ -101,14 +101,13 @@ export function LibraryRadioStations() {
         };
     }, [stationPages, isMobileOrTablet, updatePage]);
 
-    const tileSize = (compact: boolean) => (compact ? "flex-shrink-0 snap-start w-[180px] h-[80px]" : "w-full aspect-[5/3]");
+    const tileSize = (compact: boolean) => (compact ? "flex-shrink-0 snap-start w-(--card-w) h-20" : "w-full h-20");
 
     const renderCard = (station: RadioStation, compact: boolean, delayIdx: number) => (
         <TileCard
             key={station.id}
             title={station.name}
             subtitle={station.description}
-            wrapSubtitle={!compact}
             eyebrow={
                 <span className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
                     <Radio className="w-3 h-3" />
@@ -142,7 +141,6 @@ export function LibraryRadioStations() {
                 key="mood-retry"
                 title="Mood stations"
                 subtitle="Didn't load. Try again"
-                wrapSubtitle={!compact}
                 tint={DEFAULT_STYLE.color}
                 hoverBorder={DEFAULT_STYLE.hoverBorder}
                 accent={DEFAULT_STYLE.accentGradient}
@@ -160,7 +158,7 @@ export function LibraryRadioStations() {
                 {allItems.map((item, i) => renderItem(item, true, i))}
                 {isLoading &&
                     Array.from({ length: 6 }).map((_, i) => (
-                        <div key={i} className="flex-shrink-0 w-[180px] h-[80px] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
+                        <div key={i} className="flex-shrink-0 w-(--card-w) h-20 rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
                     ))}
             </HorizontalCarousel>
         );
@@ -171,25 +169,25 @@ export function LibraryRadioStations() {
         <div className="relative">
             <div
                 ref={scrollRef}
-                className="flex overflow-x-auto scrollbar-hide scroll-smooth snap-x snap-mandatory gap-3"
+                className="flex overflow-x-auto scrollbar-hide scroll-smooth snap-x snap-mandatory gap-(--card-gap)"
             >
                 {stationPages.map((page, pageIndex) => (
                     <div
                         key={pageIndex}
-                        className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2"
+                        className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-(--card-gap)"
                         style={cascadeStyle(page.length)}
                     >
                         {page.map((item, i) => renderItem(item, false, i))}
                         {page.length < 6 &&
                             Array.from({ length: 6 - page.length }).map((_, i) => (
-                                <div key={`empty-${i}`} className="aspect-[5/3]" />
+                                <div key={`empty-${i}`} className="h-20" />
                             ))}
                     </div>
                 ))}
                 {isLoading && (
-                    <div className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-2">
+                    <div className="flex-shrink-0 snap-start w-full grid grid-cols-2 grid-rows-3 sm:grid-cols-3 sm:grid-rows-2 gap-(--card-gap)">
                         {Array.from({ length: 6 }).map((_, i) => (
-                            <div key={i} className="aspect-[5/3] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
+                            <div key={i} className="h-20 rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
                         ))}
                     </div>
                 )}

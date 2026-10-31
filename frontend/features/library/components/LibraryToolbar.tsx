@@ -42,8 +42,8 @@ export function LibraryToolbar({
     };
     const tv = useIsTV();
     return (
-        // A row of its own for the TV remote, between the tabs and the grid: the refine choices, then shuffle.
-        <div data-tv-section="library-refine" className="flex items-center gap-3 pb-4 border-b border-white/5">
+        // A section of its own for the TV remote, between the tabs and the grid: the refine choices, then shuffle.
+        <div data-tv-section="library-refine" className="flex grow items-center gap-3 in-[.tv-mode]:basis-full">
             {/* The controls sit on this line beside a phone; on a phone they open from a Refine button. */}
             <RefineBar {...refine} />
             <RefinePanel {...refine} />

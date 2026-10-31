@@ -111,7 +111,7 @@ export default function SearchPage() {
                                 Discovery Engine
                             </span>
                         </div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 text-white leading-tight">
+                        <h1 className="t-page-title mb-4">
                             Find Your Sound
                         </h1>
                         <p className="text-lg text-[var(--text-secondary)] max-w-2xl mx-auto">
@@ -125,7 +125,7 @@ export default function SearchPage() {
                     <div className="mb-8">
                         <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h1 className="text-2xl font-semibold mb-2 tracking-tight">
+                                <h1 className="t-page-title mb-2">
                                     {query}
                                 </h1>
                                 {isLoading && (

@@ -28,7 +28,6 @@ export function ListeningShelf({ rows }: { rows: ListeningRow[] }) {
                             sizes="180px"
                             progress={row.episode.progress?.progress}
                             action={{ icon: playing ? Pause : Play, label: playing ? "pause" : "resume", onClick: () => toggle(row) }}
-                            className="mx-1"
                         />
                     </CarouselItem>
                 );

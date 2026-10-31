@@ -15,10 +15,10 @@ interface FeaturedPlaylistsGridProps {
 
 export function FeaturedPlaylistsSkeleton() {
     return (
-        <div className="flex gap-3 overflow-hidden animate-fade-soft">
+        <div className="flex gap-(--card-gap) overflow-hidden animate-fade-soft">
             {[...Array(8)].map((_, i) => (
-                <div key={i} className="flex-shrink-0 w-[140px] sm:w-[160px] md:w-[170px] lg:w-[180px]">
-                    <div className="bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden mx-1">
+                <div key={i} className="flex-shrink-0 w-[140px] sm:w-[160px] md:w-(--card-w)">
+                    <div className="bg-[var(--bg-primary)] border border-white/10 rounded-lg overflow-hidden">
                         <div className="aspect-square bg-[#181818] animate-pulse" />
                         <div className="p-3">
                             <div className="h-4 bg-white/5 rounded animate-pulse w-3/4 mb-2" />
@@ -51,7 +51,6 @@ export const FeaturedPlaylistsGrid = memo(function FeaturedPlaylistsGrid({
                         type="track"
                         index={index}
                         sizes="180px"
-                        className="mx-1"
                         badge={
                             <span className="block p-1 bg-black/60 rounded">
                                 <DeezerIcon className="w-3.5 h-3.5 text-brand" />

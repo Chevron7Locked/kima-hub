@@ -43,7 +43,6 @@ const ContinueListening = memo(function ContinueListening({ items }: ContinueLis
                             index={index}
                             sizes="180px"
                             progress={type === "artist" ? undefined : item.progress ?? undefined}
-                            className="mx-1"
                         />
                     </CarouselItem>
                 );

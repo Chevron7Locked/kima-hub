@@ -446,7 +446,7 @@ function ImportPlaylistPageContent() {
                         <ArrowLeft className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-bold text-white">
+                        <h1 className="t-page-title">
                             Import Playlist
                         </h1>
                         <p className="text-sm text-[var(--text-secondary)]">

@@ -129,7 +129,7 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
                     />
                 </SettingsRow>
 
-                <div className="py-4 px-4 bg-white/5 rounded-lg border border-white/10 mb-4">
+                <div className="py-4 mb-4">
                     <h3 className="text-xs text-[var(--text-secondary)] mb-3">Create New User</h3>
                     <div className="space-y-3">
                         <div className="flex gap-3">

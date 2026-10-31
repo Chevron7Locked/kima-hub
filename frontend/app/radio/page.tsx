@@ -23,7 +23,7 @@ function SectionSkeleton() {
     return (
         <div className="grid-media">
             {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="aspect-[4/3] rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
+                <div key={i} className="h-20 rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse" />
             ))}
         </div>
     );
@@ -51,7 +51,7 @@ function StationGrid({ stations, loadingStation, onStart }: StationGridProps) {
                     playable
                     busy={loadingStation === station.id}
                     disabled={loadingStation !== null}
-                    className="w-full aspect-[4/3]"
+                    className="w-full h-20"
                 />
             ))}
         </div>
