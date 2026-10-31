@@ -310,7 +310,16 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         }
         if (topTracks.length === 0) {
             try {
-                topTracks = (await deezerService.getArtistTopTracks(artistName, 10)).map(
+                // Deezer can rank one song twice under one title (a single and its album cut): keep the first,
+                // higher-ranked row, as the library artist page does, so each song has one id.
+                const seenTitles = new Set<string>();
+                const ranked = (await deezerService.getArtistTopTracks(artistName, 10)).filter((r) => {
+                    const title = r.title.toLowerCase();
+                    if (seenTitles.has(title)) return false;
+                    seenTitles.add(title);
+                    return true;
+                });
+                topTracks = ranked.map(
                     (r) => ({
                         id: `dz:${r.title.toLowerCase()}`,
                         title: r.title,

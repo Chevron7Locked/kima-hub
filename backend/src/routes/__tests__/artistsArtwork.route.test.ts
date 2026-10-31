@@ -123,6 +123,19 @@ describe("the discovery routes and the pictures they promise", () => {
             expect(res.body.topTracks).toHaveLength(1);
         });
 
+        it("lists a song Deezer ranks twice under one title once, the higher-ranked row", async () => {
+            mockGetArtistTopTracks.mockResolvedValue([
+                { title: "Thriller", durationMs: 357_000, rank: 900, previewUrl: "a", album: "Thriller", coverUrl: null },
+                { title: "Billie Jean", durationMs: 294_000, rank: 800, previewUrl: "b", album: "Thriller", coverUrl: null },
+                { title: "THRILLER", durationMs: 360_000, rank: 700, previewUrl: "c", album: "Thriller 25", coverUrl: null },
+            ]);
+            const res = await request(makeApp()).get("/artists/discover/Deezer%20Only");
+            expect(res.status).toBe(200);
+            const ids = res.body.topTracks.map((t: { id: string }) => t.id);
+            expect(ids).toEqual(["dz:thriller", "dz:billie jean"]);
+            expect(res.body.topTracks[0].previewUrl).toBe("a");
+        });
+
         it("serves, and does not cache, a name MusicBrainz lacks while Deezer could not be asked", async () => {
             mockGetArtistTopTracks.mockRejectedValue(new Error("Deezer timed out"));
             const res = await request(makeApp()).get("/artists/discover/Deezer%20Only");
