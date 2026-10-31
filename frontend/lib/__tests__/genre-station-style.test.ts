@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGenreStations } from "@/features/home/radioData";
+import { DEFAULT_STYLE, buildGenreStations } from "@/features/home/radioData";
 
 // The server lists one station per genre under whichever spelling most songs carry (#235); its colour follows the
 // genre, not the spelling.
@@ -19,5 +19,17 @@ describe("genre station colours", () => {
         const station = style("Hip-Hop");
         expect(station.name).toBe("Hip-Hop");
         expect(station.filter).toEqual({ type: "genre", value: "Hip-Hop" });
+    });
+
+    it("gives a genre with no colour of its own a colour, the same one for every spelling", () => {
+        for (const genre of ["metalcore", "synth-pop", "alternative rock", "deathcore", "shoegaze", "metal", "classical"]) {
+            expect(style(genre).accentGradient, genre).not.toBe(DEFAULT_STYLE.accentGradient);
+        }
+        expect(style("Synth Pop").accentGradient).toBe(style("synth-pop").accentGradient);
+    });
+
+    it("spreads those genres over several colours", () => {
+        const genres = ["metalcore", "synth-pop", "alternative rock", "deathcore", "shoegaze", "progressive rock", "alternative metal", "indie rock"];
+        expect(new Set(genres.map((g) => style(g).accentGradient)).size).toBeGreaterThanOrEqual(5);
     });
 });

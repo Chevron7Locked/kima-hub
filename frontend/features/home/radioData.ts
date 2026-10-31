@@ -130,8 +130,6 @@ const GENRE_STYLES: Record<string, { color: string; hoverBorder: string; accentG
     rap: { color: "from-[#a855f7]/15 to-[#6366f1]/10", hoverBorder: "hover:border-[#a855f7]/40", accentGradient: "from-[#a855f7] to-[#6366f1]" },
     electronic: { color: "from-[#06b6d4]/15 to-[#3b82f6]/10", hoverBorder: "hover:border-[#06b6d4]/40", accentGradient: "from-[#06b6d4] to-[#3b82f6]" },
     jazz: { color: "from-[#f59e0b]/15 to-[#eab308]/10", hoverBorder: "hover:border-[#f59e0b]/40", accentGradient: "from-[#f59e0b] to-[#eab308]" },
-    classical: { color: "from-[#94a3b8]/15 to-[#64748b]/10", hoverBorder: "hover:border-[#94a3b8]/40", accentGradient: "from-[#94a3b8] to-[#64748b]" },
-    metal: { color: "from-[#71717a]/15 to-[#52525b]/10", hoverBorder: "hover:border-[#71717a]/40", accentGradient: "from-[#71717a] to-[#52525b]" },
     country: { color: "from-[#fb923c]/15 to-[#f59e0b]/10", hoverBorder: "hover:border-[#fb923c]/40", accentGradient: "from-[#fb923c] to-[#f59e0b]" },
     folk: { color: "from-[#22c55e]/15 to-[#10b981]/10", hoverBorder: "hover:border-[#22c55e]/40", accentGradient: "from-[#22c55e] to-[#10b981]" },
     indie: { color: "from-[#8b5cf6]/15 to-[#a855f7]/10", hoverBorder: "hover:border-[#8b5cf6]/40", accentGradient: "from-[#8b5cf6] to-[#a855f7]" },
@@ -170,8 +168,19 @@ const genreKey = (genre: string) =>
 
 const GENRE_STYLES_BY_KEY = new Map(Object.entries(GENRE_STYLES).map(([name, style]) => [genreKey(name), style]));
 
+/** The mood stations' colours, minus Wildcard's grey: the colours a genre without its own is given. */
+const SPARE_GENRE_STYLES = Object.entries(MOOD_STATION_STYLES)
+    .filter(([mood]) => mood !== "wildcard")
+    .map(([, style]) => style);
+
+/** A genre's colour: its own if it has one, otherwise one of the spare colours, picked from its name so it never changes. */
 function getGenreStyle(genre: string) {
-    return GENRE_STYLES_BY_KEY.get(genreKey(genre)) || DEFAULT_STYLE;
+    const key = genreKey(genre);
+    const own = GENRE_STYLES_BY_KEY.get(key);
+    if (own) return own;
+    let hash = 0;
+    for (const char of key) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+    return SPARE_GENRE_STYLES[hash % SPARE_GENRE_STYLES.length];
 }
 
 function getDecadeStyle(decade: number) {
