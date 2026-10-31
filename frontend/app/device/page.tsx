@@ -160,7 +160,6 @@ export default function DeviceLinkPage() {
     return (
         <div className="min-h-screen pb-24">
             <PageHeader
-                eyebrow="Devices"
                 title="Link a device"
                 description="Scan the QR code, or type the code into the app on your phone"
             />

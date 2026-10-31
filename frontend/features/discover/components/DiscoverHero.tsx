@@ -36,7 +36,6 @@ export function DiscoverHero({ playlist, config, onOpenSettings }: DiscoverHeroP
 
     return (
         <PageHeader
-            eyebrow="Discovery"
             title="Discover Weekly"
             description="A new playlist every week, picked from your listening"
             actions={

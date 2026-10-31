@@ -97,7 +97,6 @@ export default function ReleasesPage() {
     return (
         <div className="min-h-screen pb-32">
             <PageHeader
-                eyebrow="Release radar"
                 title="New and upcoming"
                 description={
                     data?.monitoredArtistCount

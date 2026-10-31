@@ -618,7 +618,6 @@ export default function PlaylistsPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black section-stack">
             <PageHeader
-                eyebrow="Your library"
                 title="Playlists"
                 description={
                     `${visiblePlaylists.length} ${visiblePlaylists.length === 1 ? "playlist" : "playlists"}` +

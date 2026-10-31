@@ -131,7 +131,6 @@ export default function RadioPage() {
         <div className="min-h-screen">
             <div className="relative">
                 <PageHeader
-                    eyebrow="Your library"
                     title="Radio"
                     description={
                         isLoading || featuresLoading || moodLoading

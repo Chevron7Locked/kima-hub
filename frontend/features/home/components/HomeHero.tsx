@@ -12,5 +12,5 @@ const getGreeting = () => {
 export function HomeHero() {
     const greeting = getGreeting();
 
-    return <PageHeader eyebrow="Home" title={greeting} description="Your library at a glance" />;
+    return <PageHeader title={greeting} description="Your library at a glance" />;
 }

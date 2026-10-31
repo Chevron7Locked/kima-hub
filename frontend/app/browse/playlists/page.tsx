@@ -194,7 +194,6 @@ export default function BrowsePlaylistsPage() {
         <div className="min-h-screen">
             <div className="section-stack">
                 <PageHeader
-                    eyebrow="From Deezer"
                     title="Browse playlists"
                     description="Find playlists on Deezer and import them into your library"
                     className="pb-2"

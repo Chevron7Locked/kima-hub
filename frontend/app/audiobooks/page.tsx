@@ -306,7 +306,6 @@ export default function AudiobooksPage() {
         return (
             <div className="min-h-screen">
                 <PageHeader
-                    eyebrow="Not set up"
                     title="Audiobooks"
                     description="Connect Audiobookshelf to listen to your audiobooks here"
                 />
@@ -376,7 +375,6 @@ export default function AudiobooksPage() {
     return (
         <div className="min-h-screen">
             <PageHeader
-                eyebrow="Your library"
                 title="Audiobooks"
                 description={`${audiobooks.length} ${audiobooks.length === 1 ? "book" : "books"}`}
                 className="pb-2"

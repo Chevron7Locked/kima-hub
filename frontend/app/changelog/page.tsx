@@ -84,7 +84,7 @@ export default function ChangelogPage() {
 
     return (
         <div className="px-5 pb-24 max-w-3xl mx-auto">
-            <PageHeader eyebrow="what's new in kima, always" title="Changelog" description="Every release, newest first. Notes stay, requests stay, until the server can see they're done." />
+            <PageHeader title="Changelog" description="Every release, newest first. Notes stay, requests stay, until the server can see they're done." />
 
             {openItemsList.length > 0 && (
                 <section aria-label="Still open" className="mt-6 flex flex-col gap-1 rounded-xl border border-brand/30 bg-brand/[0.05] p-4">

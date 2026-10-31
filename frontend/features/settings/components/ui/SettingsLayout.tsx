@@ -85,7 +85,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
 
     return (
         <div className="min-h-screen bg-[var(--bg-primary)]">
-            <PageHeader eyebrow="System configuration" title="Settings">
+            <PageHeader title="Settings">
                 <label className="mt-6 block md:hidden">
                     <span className="sr-only">Jump to section</span>
                     <select
