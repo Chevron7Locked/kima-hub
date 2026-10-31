@@ -26,7 +26,7 @@ const ALEXIS = "8a2f9b1e-0000-4000-8000-000000000001";
 const SAM_COOKE = "8a2f9b1e-0000-4000-8000-000000000002";
 const NORTHLANE = "8a2f9b1e-0000-4000-8000-000000000003";
 const IN_HEARTS_WAKE = "8a2f9b1e-0000-4000-8000-000000000004";
-const NAMES = ["Pairing Alexis", "Pairing Northlane, Pairing IHW", "Pairing Solo"];
+const NAMES = ["Pairing Alexis", "Pairing Northlane, Pairing IHW", "Pairing Northlane", "Pairing Solo"];
 
 let musicDir: string;
 
@@ -75,16 +75,15 @@ describe("which MusicBrainz id an artist is filed with", () => {
         expect(artist?.mbid).toBe(ALEXIS);
     });
 
-    it("files a joint name tagged with each member's id under no id at all", async () => {
+    it("files a joint name tagged with each member's id under its first member and that member's id, never the joint name", async () => {
         await scan([
             place("Pairing Joint/Album/01.flac", {
                 title: "Song", album: "Pairing Album B",
                 albumartist: "Pairing Northlane, Pairing IHW", musicbrainz_albumartistid: [NORTHLANE, IN_HEARTS_WAKE],
             }),
         ]);
-        const artist = await prisma.artist.findFirst({ where: { name: "Pairing Northlane, Pairing IHW" } });
-        expect(artist).not.toBeNull();
-        expect(artist?.mbid).toBeNull();
+        expect(await prisma.artist.findFirst({ where: { name: "Pairing Northlane, Pairing IHW" } })).toBeNull();
+        expect((await prisma.artist.findFirst({ where: { name: "Pairing Northlane" } }))?.mbid).toBe(NORTHLANE);
     });
 
     it("takes the track artist's own id when there is no album artist", async () => {

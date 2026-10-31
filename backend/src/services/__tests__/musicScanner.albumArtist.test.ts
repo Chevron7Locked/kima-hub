@@ -94,6 +94,20 @@ describe("a tag that names several artists", () => {
         expect(await albumsOf("Vote Feat Album")).toEqual([{ artist: "Vote First", mbid: FIRST_ID, songs: 1 }]);
     });
 
+    it("files a joint credit tagged with one id per credited artist under its first artist and id", async () => {
+        place("Vote Joint/Vote Joint Album/01.flac", {
+            title: "Song", album: "Vote Joint Album",
+            albumartist: "Vote First & Vote Second", musicbrainz_albumartistid: [FIRST_ID, SECOND_ID],
+        });
+        place("Vote Band/Vote Band Album/01.flac", {
+            title: "Song", album: "Vote Band Album", albumartist: "Vote Simon & Vote Garfunkel", musicbrainz_albumartistid: ["9b3e0c1a-0000-4000-8000-000000000009"],
+        });
+        await scan();
+        expect(await albumsOf("Vote Joint Album")).toEqual([{ artist: "Vote First", mbid: FIRST_ID, songs: 1 }]);
+        // One id: a band whose name holds an "&", kept whole.
+        expect((await albumsOf("Vote Band Album"))[0].artist).toBe("Vote Simon & Vote Garfunkel");
+    });
+
     it("pairs a multi-valued album artist with that tag's ids by position", async () => {
         place("Vote Pair/Vote Paired Album/01.flac", {
             title: "Song", album: "Vote Paired Album",

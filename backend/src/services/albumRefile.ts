@@ -243,7 +243,10 @@ class KeptAsItIs extends Error {}
  * album re-filed just before is seen as it is now.
  */
 async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"settled" | "edited" | "moved" | "merged"> {
-    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row.artist, candidate);
+    // An album under its lead artist (with a MusicBrainz id) stays when the files name a joint credit with no id:
+    // nothing in the tags says it is not a band, and moving it would trade the lead's photo and id for neither.
+    const underLead = (artist: AlbumRow["artist"]) => Boolean(artist.mbid) && !candidate.mbid && isOldCut(artist.name, candidate.name);
+    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row.artist, candidate) && !underLead(row.artist);
     const peek = await prisma.track.findMany({ where: { id: { in: songs.map((s) => s.id) } }, select: { album: { select: ALBUM_FIELDS } } });
     if (!peek.some((t) => isMisfiled(t.album))) return "settled";
 
@@ -258,7 +261,7 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 where: { id: { in: songs.map((s) => s.id) } },
                 select: { id: true, album: { select: ALBUM_FIELDS } },
             });
-            const misfiled = tracks.filter((t) => t.album.location === "LIBRARY" && t.album.artistId !== target.id);
+            const misfiled = tracks.filter((t) => t.album.location === "LIBRARY" && t.album.artistId !== target.id && !underLead(t.album.artist));
             if (misfiled.length === 0) return "settled";
             const involved = [...new Map(misfiled.map((t) => [t.album.id, t.album])).values()];
             if (involved.some((row) => row.hasUserOverrides || row.artist.hasUserOverrides)) return "edited";

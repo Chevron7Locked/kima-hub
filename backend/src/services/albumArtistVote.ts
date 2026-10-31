@@ -66,9 +66,19 @@ function firstCredited(names: string[], ids: readonly string[] | undefined): Art
     const credit = parseCredit(names[0]);
     const name = credit.primary || names[0];
     const credited = names.reduce((count, each) => count + 1 + parseCredit(each).featured.length, 0);
-    const mbid = ids && ids.length === credited ? ids[0] : undefined;
-    return { name, ...(mbid ? { mbid } : {}) };
+    if (ids && ids.length === credited) return { name, mbid: ids[0] };
+
+    // One joint name tagged with one id per artist in it ("A & B" with two ids, as MusicBrainz taggers write a
+    // joint credit): the ids prove it is several artists, not one band with an "&" in its name (one id).
+    if (names.length === 1 && ids && ids.length > 1) {
+        const parts = names[0].split(JOINT_CREDIT).map((p) => p.trim()).filter(Boolean);
+        if (parts.length === ids.length) return { name: parts[0], mbid: ids[0] };
+    }
+    return { name };
 }
+
+/** How a joint credit joins its artists' names. Used only when the tag's ids show how many artists it names. */
+const JOINT_CREDIT = /\s*,\s*|\s*;\s*|\s+\/\s+|\s+(?:&|and|x|with|vs\.?|feat\.?|ft\.?|featuring)\s+/i;
 
 /** The album folder a file belongs to: its own folder, or the one above when its own is a disc subfolder. */
 export function albumFolder(relativePath: string): string {

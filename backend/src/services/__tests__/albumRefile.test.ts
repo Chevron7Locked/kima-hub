@@ -368,4 +368,30 @@ describe("re-filing albums by their tags", () => {
         expect(await prisma.artist.findUnique({ where: { id: cut.id }, select: { name: true } })).toEqual({ name: "Refile Cut" });
         expect(await prisma.album.count({ where: { id: { in: [held.id, twin.id] } } })).toBe(2);
     });
+
+    it("leaves an album under its lead artist when the files name a joint credit with no MusicBrainz id", async () => {
+        const lead = await artist("Refile Lead", { mbid: FULL_ID });
+        const a = await album(lead.id, "Refile Duet");
+        await song(a.id, "Refile Lead/Refile Duet/01.flac", { album: "Refile Duet", albumartist: "Refile Lead & Refile Guest" });
+
+        const result = await refileLibrary(musicDir);
+
+        expect(await filing("Refile Duet")).toEqual([expect.objectContaining({ artist: "Refile Lead" })]);
+        expect(await prisma.artist.count({ where: { name: "Refile Lead & Refile Guest" } })).toBe(0);
+        expect(result.albumsMoved + result.albumsMerged).toBe(0);
+    });
+
+    it("keeps an album whose songs sit in several folders under the artist they name", async () => {
+        const ein = await artist("Refile Einaudi", { mbid: FULL_ID });
+        const traitors = await album(ein.id, "Refile Traitors", { rgMbid: REAL_RG });
+        for (const folder of ["Refile Einaudi/Experience (2024)", "Refile Einaudi/Like A Breath (2023)", "Refile Einaudi/Music of Care (2023)"]) {
+            await song(traitors.id, `${folder}/07.mp3`, {
+                album: "Refile Traitors", albumartist: "Refile Einaudi", albumartists: ["Refile Einaudi"], artist: "Refile Einaudi", compilation: true,
+            });
+        }
+
+        await refileLibrary(musicDir);
+
+        expect(await filing("Refile Traitors")).toEqual([{ artist: "Refile Einaudi", rgMbid: REAL_RG, songs: 3 }]);
+    });
 });
