@@ -11,7 +11,7 @@ import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../ut
 import { upstreamFailure, upstreamStatusFailure } from "../../utils/upstream";
 import {
   resizeImageBuffer,
-  getResizedImagePath,
+  coverFileForWidth,
   resolveInCoversDir,
 } from "../../services/imageStorage";
 import crypto from "crypto";
@@ -42,22 +42,8 @@ async function serveNativeImage(
     return res.sendFile(coverCachePath, { headers });
   }
 
-  const resizedPath = getResizedImagePath(`native:${nativePath}`, width);
-  if (resizedPath && fs.existsSync(resizedPath)) {
-    return res.sendFile(resizedPath, { headers });
-  }
-
   try {
-    const originalBuffer = fs.readFileSync(coverCachePath);
-    const resizedBuffer = await resizeImageBuffer(originalBuffer, width);
-
-    if (resizedPath) {
-      fs.writeFileSync(resizedPath, resizedBuffer);
-      return res.sendFile(resizedPath, { headers });
-    }
-
-    Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
-    return res.send(resizedBuffer);
+    return res.sendFile(await coverFileForWidth(coverCachePath, nativePath, width), { headers });
   } catch (err) {
     logger.warn(
       `[COVER-ART] Resize failed for ${nativePath}, serving original: ${err instanceof Error ? err.message : String(err)}`,

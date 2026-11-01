@@ -213,3 +213,27 @@ export function getResizedImagePath(nativePath: string, width: number): string |
     const parsed = path.parse(relativePath);
     return resolveInCoversDir(path.join(parsed.dir, `${parsed.name}_w${width}.jpg`));
 }
+
+/**
+ * The file to serve for a stored cover at a width: a smaller copy, written beside it once, when the cover is wider;
+ * the cover itself when it is no wider (a copy would only duplicate it) or a copy's path would leave the covers folder.
+ */
+export async function coverFileForWidth(coverPath: string, relativePath: string, width: number): Promise<string> {
+    const resizedPath = getResizedImagePath(`native:${relativePath}`, width);
+    if (!resizedPath) return coverPath;
+    if (fs.existsSync(resizedPath)) return resizedPath;
+    const original = fs.readFileSync(coverPath);
+    const resized = await resizeImageBuffer(original, width);
+    if (resized === original) return coverPath;
+    // Written under a temporary name and renamed into place, so a request arriving mid-write (or after a crash)
+    // never finds, and caches for a year, a half-written copy.
+    const partial = `${resizedPath}.${process.pid}.${Date.now()}.part`;
+    try {
+        fs.writeFileSync(partial, resized);
+        fs.renameSync(partial, resizedPath);
+    } catch (err) {
+        fs.rmSync(partial, { force: true });
+        throw err;
+    }
+    return resizedPath;
+}
