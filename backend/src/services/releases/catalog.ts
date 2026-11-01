@@ -148,7 +148,8 @@ export const RELEASES: Release[] = [
                     "were put.\n\n" +
                     "Re-filing reads every song's tags again and moves each album to the artist its songs name, joining " +
                     "it to that artist's copy of the album when there is one. Albums you edited and Discover's albums " +
-                    "stay where they are. Plays, likes and playlists stay with their songs. It takes a few minutes on a " +
+                    "stay where they are, and nothing is merged into them. Plays, likes and playlists stay with their " +
+                    "songs. It takes a few minutes on a " +
                     "large library, and the result shows in your notifications. You can also run it any time from " +
                     "Settings, under Library Enrichment.",
                 cta: "Re-file albums",
@@ -156,7 +157,8 @@ export const RELEASES: Release[] = [
                 confirmTitle: "Re-file albums by their tags?",
                 confirmMessage:
                     "Reads every song's tags again and files each album under the artist its songs name. Albums you " +
-                    "edited and Discover's albums stay where they are; plays, likes and playlists stay with their songs.",
+                    "edited and Discover's albums stay where they are, and nothing is merged into them; plays, likes and " +
+                    "playlists stay with their songs.",
                 confirmLabel: "Re-file albums",
                 requires: "admin",
                 installedBeforeOnly: true,

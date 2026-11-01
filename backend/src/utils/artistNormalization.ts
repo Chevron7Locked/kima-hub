@@ -6,6 +6,12 @@ export const VARIOUS_ARTISTS_CANONICAL = "Various Artists";
 /** The artist the scanner files a song under when it has no artist tags and no folder artist (musicScanner.ts). */
 export const UNKNOWN_ARTIST = "Unknown Artist";
 
+/** Whether a name is a placeholder the scanner files songs under (Unknown Artist, Various Artists), not a real artist. */
+export function isPlaceholderArtistName(name: string): boolean {
+    const trimmed = name.trim();
+    return trimmed.toLowerCase() === UNKNOWN_ARTIST.toLowerCase() || canonicalizeVariousArtists(trimmed) === VARIOUS_ARTISTS_CANONICAL;
+}
+
 /**
  * Check if an artist name is a variation of "Various Artists"
  * and return the canonical form if so.

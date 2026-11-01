@@ -117,6 +117,40 @@ export function fileCredit(common: ICommonTagsResult, relativePath: string): Fil
     };
 }
 
+/** "A (feat. B)" is A: a parenthesised featured credit does not make a second artist. */
+function withoutFeaturedClause(name: string): string {
+    return name.replace(/\s*[(\[]\s*(?:feat\.?|ft\.?|featuring)\s[^)\]]*[)\]]\s*$/i, "");
+}
+
+/** The separators the splitter removed before 1.10 cut names at ("Coheed and Cambria" became "Coheed"). */
+const OLD_CUTS = [" & ", " and ", " with ", ", "];
+
+/** Whether `name` is `full` cut by the old splitter: its first words, up to one of those separators. */
+export function isOldCut(name: string, full: string): boolean {
+    const lower = full.toLowerCase();
+    return OLD_CUTS.some((sep) => lower.startsWith(name.toLowerCase() + sep));
+}
+
+/** The identity keys of the names an old cut of `full` could have left ("A & B and C" gives A's and "A & B"'s). */
+export function leadNameKeys(full: string): string[] {
+    const keys = new Set<string>();
+    const lower = full.toLowerCase();
+    for (const sep of OLD_CUTS) {
+        for (let at = lower.indexOf(sep); at > 0; at = lower.indexOf(sep, at + 1)) keys.add(artistIdentityKey(full.slice(0, at)));
+    }
+    return [...keys].filter(Boolean);
+}
+
+/**
+ * Whether an album under `artist` stays there when its files name `candidate`: the artist has a MusicBrainz id, the
+ * files name a joint credit with no id, and the artist's name is that credit's first words. Nothing in the tags says
+ * the credit is a band, and moving the album would trade the lead's photo and id for neither. The re-file and the
+ * scanner both ask this, so they agree on where such an album sits.
+ */
+export function keepsLeadArtist(artist: { name: string; mbid: string | null }, candidate: ArtistCandidate): boolean {
+    return Boolean(artist.mbid) && !candidate.mbid && isOldCut(artist.name, candidate.name);
+}
+
 /**
  * The artist one album's songs elect, or null when none leads and each song keeps its own. `credits` are that album's
  * files, in a stable order (by path).
@@ -124,7 +158,11 @@ export function fileCredit(common: ICommonTagsResult, relativePath: string): Fil
 export function electAlbumArtist(credits: readonly FileCredit[]): ArtistCandidate | null {
     const total = credits.length;
     if (total === 0) return null;
-    const compilation = credits.filter((c) => c.compilation).length * 2 > total;
+    // Tagged a compilation by most songs, and the songs really have more than one artist: a lone artist's album with
+    // a stray flag is that artist's.
+    const compilation =
+        credits.filter((c) => c.compilation).length * 2 > total &&
+        new Set(credits.map((c) => artistIdentityKey(withoutFeaturedClause(c.candidate.name)) || c.candidate.name)).size > 1;
     if (compilation && !credits.some((c) => c.fromAlbumArtist)) return { name: VARIOUS_ARTISTS };
 
     const votes = new Map<string, FileCredit[]>();

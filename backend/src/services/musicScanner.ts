@@ -1,17 +1,17 @@
 import * as fs from "fs";
 import { logger } from "../utils/logger";
 import * as path from "path";
-import { parseFile } from "music-metadata";
+import { parseFile, type IAudioMetadata, type ITag } from "music-metadata";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import PQueue from "p-queue";
 import { CoverArtExtractor } from "./coverArtExtractor";
 import { findAlbumArtwork } from "./artwork";
-import { sanitizeTagString } from "../utils/artistNormalization";
+import { isPlaceholderArtistName, sanitizeTagString } from "../utils/artistNormalization";
 import { isMbid, resolveArtist } from "./artistIdentity";
-import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
+import { albumFolder, electAlbumArtist, fileCredit, keepsLeadArtist, leadNameKeys, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { normalizeIsrc } from "./recordingMatch";
-import { resolveAlbum } from "./albumIdentity";
+import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
 import { closeStagesForMissingTracks } from "./missingFileStages";
@@ -96,6 +96,23 @@ export interface ScanResult {
     tracksCorrupt: number;
     errors: Array<{ file: string; error: string }>;
     duration: number;
+}
+
+/** What filing a song reads of its tags: kept between the vote step and filing, so nothing else (the quality report, the other native tags) is held. */
+export interface SlimMetadata {
+    common: IAudioMetadata["common"];
+    format: { duration?: number; codec?: string };
+    /** Only the lyrics tags. */
+    native: Record<string, ITag[]>;
+}
+
+export function slimMetadata(metadata: IAudioMetadata): SlimMetadata {
+    const native: Record<string, ITag[]> = {};
+    for (const [format, tags] of Object.entries(metadata.native ?? {})) {
+        const lyrics = tags.filter((tag) => tag.id === "LYRICS");
+        if (lyrics.length > 0) native[format] = lyrics;
+    }
+    return { common: metadata.common, format: { duration: metadata.format.duration, codec: metadata.format.codec }, native };
 }
 
 export class MusicScannerService {
@@ -210,6 +227,9 @@ export class MusicScannerService {
         const touched = new Set(changed.map((f) => albumFolder(path.relative(musicPath, f))));
         const voters = audioFiles.filter((f) => touched.has(albumFolder(path.relative(musicPath, f))));
         const credits = new Map<string, FileCredit>();
+        // A changed file's tags, read once here and handed to the filing step below.
+        const changedSet = new Set(changed);
+        const parsed = new Map<string, SlimMetadata>();
         for (const audioFile of voters) {
             this.scanQueue.add(async () => {
                 try {
@@ -217,6 +237,7 @@ export class MusicScannerService {
                     this.progressCallback?.(progress);
                     const metadata = await parseFile(audioFile, { skipCovers: true });
                     credits.set(audioFile, fileCredit(metadata.common, path.relative(musicPath, audioFile)));
+                    if (changedSet.has(audioFile)) parsed.set(audioFile, slimMetadata(metadata));
                 } catch {
                     // A file whose tags cannot be read has no vote; if it is to be filed, filing it reports the error.
                 }
@@ -253,12 +274,13 @@ export class MusicScannerService {
                     // Every recorded answer came from the old content, so every stage is asked again.
                     if (existingTrack) await reopenStagesForChangedFile(existingTrack.id);
 
-                    await this.processAudioFile(audioFile, relativePath, musicPath, elected);
+                    await this.processAudioFile(audioFile, relativePath, musicPath, elected, parsed.get(audioFile));
                     if (existingTrack) result.tracksUpdated++;
                     else result.tracksAdded++;
                 } catch (err: any) {
                     await markFailed(audioFile, err);
                 } finally {
+                    parsed.delete(audioFile);
                     finished();
                     this.progressCallback?.(progress);
                 }
@@ -458,14 +480,42 @@ export class MusicScannerService {
         }
     }
 
+    /**
+     * The lead artist an album stays under when the files name a joint credit with no id (keepsLeadArtist): one whose
+     * copy of this album already holds a song of the same album folder, as the re-file requires.
+     */
+    private async findLeadArtist(chosen: ArtistCandidate, albumTitle: string, relativePath: string) {
+        const folder = albumFolder(relativePath);
+        const keys = leadNameKeys(chosen.name);
+        if (folder === "." || keys.length === 0) return undefined;
+        const leads = await prisma.artist.findMany({
+            where: { identityKey: { in: keys }, mbid: { not: null } },
+            select: { id: true, name: true, mbid: true },
+            orderBy: { id: "asc" },
+        });
+        const identityKey = albumIdentityKey(albumTitle);
+        for (const lead of leads) {
+            if (!keepsLeadArtist(lead, chosen)) continue;
+            const held = await prisma.album.findUnique({
+                where: { artistId_identityKey: { artistId: lead.id, identityKey } },
+                select: { id: true, location: true },
+            });
+            if (!held || held.location !== "LIBRARY") continue;
+            if ((await prisma.track.count({ where: { albumId: held.id, filePath: { startsWith: `${folder}/` } } })) > 0) return lead;
+        }
+        return undefined;
+    }
+
     private async processAudioFile(
         absolutePath: string,
         relativePath: string,
         musicPath: string,
-        elected: ReadonlyMap<string, ArtistCandidate> = new Map()
+        elected: ReadonlyMap<string, ArtistCandidate> = new Map(),
+        read?: SlimMetadata
     ): Promise<void> {
-        // Extract metadata
-        const metadata = await parseFile(absolutePath);
+        // The tags the vote step already read; a file it could not read is read again, to report why. Nothing here
+        // uses the embedded pictures (the cover is extracted from the file itself), so they are never read.
+        const metadata = read ?? slimMetadata(await parseFile(absolutePath, { skipCovers: true }));
         const stats = await fs.promises.stat(absolutePath);
 
         // Parse basic info
@@ -489,10 +539,14 @@ export class MusicScannerService {
         // leader the song keeps its own.
         const credit = fileCredit(metadata.common, relativePath);
         const chosen = elected.get(credit.groupKey) ?? credit.candidate;
-        const artistName = chosen.name;
-        const artistMbid = chosen.mbid;
         const albumTitle = credit.albumTitle;
         const year = metadata.common.year || null;
+
+        // An album already under its lead artist stays there when the files name a joint credit with no id
+        // (albumArtistVote.ts keepsLeadArtist), as the re-file leaves it.
+        const lead = chosen.mbid ? undefined : await this.findLeadArtist(chosen, albumTitle, relativePath);
+        const artistName = lead?.name ?? chosen.name;
+        const artistMbid = lead?.mbid ?? chosen.mbid;
 
         let artist = await resolveArtist(prisma, {
             name: artistName,
@@ -559,12 +613,19 @@ export class MusicScannerService {
             });
         }
 
-        // MusicBrainz is asked about a name only with the artist's album titles as proof, so an artist it could not
-        // find is asked again once it has a new song.
-        await prisma.artist.updateMany({
-            where: { id: artist.id, enrichmentStatus: "unresolvable" },
-            data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
-        });
+        // MusicBrainz is asked about a name with the artist's album titles as proof, so an artist it could not find
+        // is asked again once it gains an album title (an album with no song yet), never a placeholder like
+        // Unknown Artist or Various Artists.
+        if (
+            artist.enrichmentStatus === "unresolvable" &&
+            !isPlaceholderArtistName(artist.name) &&
+            (await prisma.track.count({ where: { albumId: album.id } })) === 0
+        ) {
+            await prisma.artist.updateMany({
+                where: { id: artist.id, enrichmentStatus: "unresolvable" },
+                data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
+            });
+        }
 
         await this.ensureAlbumCover(album, absolutePath, artistName, albumTitle);
 

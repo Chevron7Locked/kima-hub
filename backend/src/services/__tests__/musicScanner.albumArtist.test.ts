@@ -22,7 +22,8 @@ import os from "os";
 import path from "path";
 import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
-import { MusicScannerService } from "../musicScanner";
+import { MusicScannerService, slimMetadata } from "../musicScanner";
+import { albumIdentityKey } from "../albumIdentity";
 
 jest.setTimeout(60_000);
 
@@ -44,6 +45,7 @@ async function wipe() {
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "filePath" LIKE 'Vote%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE title LIKE 'Vote%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name LIKE 'Vote%' OR name = 'Various Artists'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name = 'Unknown Artist' AND NOT EXISTS (SELECT 1 FROM "Album" WHERE "artistId" = "Artist".id)`);
 }
 
 beforeEach(async () => {
@@ -214,5 +216,117 @@ describe("one album, one artist", () => {
         await scan();
         expect(await prisma.artist.findFirst({ where: { name: "Vote Unfound" }, select: { enrichmentStatus: true, enrichmentFailures: true } }))
             .toEqual({ enrichmentStatus: "pending", enrichmentFailures: 0 });
+    });
+
+    it("keeps a new song of an album under its lead artist when its files name a joint credit with no id", async () => {
+        const old = new Date(Date.now() - 86_400_000);
+        const lead = await prisma.artist.create({ data: { name: "Vote Lead", normalizedName: "vote lead", identityKey: "votelead", mbid: FIRST_ID } });
+        const duet = await prisma.album.create({
+            data: { artistId: lead.id, title: "Vote Duet", identityKey: albumIdentityKey("Vote Duet"), rgMbid: "temp-vote-duet", primaryType: "Album", location: "LIBRARY" },
+        });
+        place("Vote Lead/Vote Duet/01.flac", { title: "Song 1", album: "Vote Duet", albumartist: "Vote Lead & Vote Guest" }, old);
+        await prisma.track.create({
+            data: { albumId: duet.id, title: "Song 1", trackNo: 1, duration: 200, filePath: "Vote Lead/Vote Duet/01.flac", fileModified: new Date(), fileSize: 17 },
+        });
+        place("Vote Lead/Vote Duet/02.flac", { title: "Song 2", album: "Vote Duet", albumartist: "Vote Lead & Vote Guest" });
+
+        await scan();
+
+        expect(await albumsOf("Vote Duet")).toEqual([{ artist: "Vote Lead", mbid: FIRST_ID, songs: 2 }]);
+        expect(await prisma.artist.count({ where: { name: "Vote Lead & Vote Guest" } })).toBe(0);
+    });
+
+    it("files a joint-credit song of a same-titled album in another folder under its own artist, not the lead's", async () => {
+        const old = new Date(Date.now() - 86_400_000);
+        const lead = await prisma.artist.create({ data: { name: "Vote Bob", normalizedName: "vote bob", identityKey: "votebob", mbid: FIRST_ID } });
+        const live = await prisma.album.create({
+            data: { artistId: lead.id, title: "Vote Live", identityKey: albumIdentityKey("Vote Live"), rgMbid: "temp-vote-live", primaryType: "Album", location: "LIBRARY" },
+        });
+        place("Vote Bob/Vote Live/01.flac", { title: "Song 1", album: "Vote Live", albumartist: "Vote Bob" }, old);
+        await prisma.track.create({ data: { albumId: live.id, title: "Song 1", trackNo: 1, duration: 200, filePath: "Vote Bob/Vote Live/01.flac", fileModified: new Date(), fileSize: 17 } });
+        place("Vote Bob and Vote Wailers/Vote Live/01.flac", { title: "Song 2", album: "Vote Live", albumartist: "Vote Bob & Vote Wailers" });
+
+        await scan();
+
+        expect((await albumsOf("Vote Live")).map((a) => a.artist).sort()).toEqual(["Vote Bob", "Vote Bob & Vote Wailers"]);
+    });
+
+    it("treats a parenthesised featured credit as the same artist when deciding a compilation", async () => {
+        place("Vote Feat/Vote Feat Album/01.flac", { title: "S1", album: "Vote Feat Album", artist: "Vote Singer", compilation: true });
+        place("Vote Feat/Vote Feat Album/02.flac", { title: "S2", album: "Vote Feat Album", artist: "Vote Singer (feat. Vote Guest)", compilation: true });
+        place("Vote Feat/Vote Feat Album/03.flac", { title: "S3", album: "Vote Feat Album", artist: "Vote Singer", compilation: true });
+        await scan();
+        expect((await albumsOf("Vote Feat Album")).map((a) => a.artist)).not.toContain("Various Artists");
+    });
+
+    it("keeps only what filing needs of a changed song's tags: no quality report, only lyrics among the native tags", () => {
+        const full = {
+            common: { title: "T", track: { no: 1 }, disk: { no: 1 }, lyrics: [{ text: "la" }] },
+            format: { duration: 200, codec: "flac", bitrate: 900, sampleRate: 44100 },
+            quality: { warnings: [{ message: "x".repeat(1000) }] },
+            native: { vorbis: [{ id: "TITLE", value: "T" }, { id: "LYRICS", value: "words" }, { id: "COMMENT", value: "big" }] },
+        };
+        const slim = slimMetadata(full as never);
+        expect(slim).toEqual({
+            common: full.common,
+            format: { duration: 200, codec: "flac" },
+            native: { vorbis: [{ id: "LYRICS", value: "words" }] },
+        });
+        expect("quality" in slim).toBe(false);
+    });
+
+    it("keeps a one-artist album with a stray compilation flag and no album artist under its artist", async () => {
+        for (const n of [1, 2, 3]) place(`Vote Solo/Vote Solo Album/0${n}.flac`, { title: `Song ${n}`, album: "Vote Solo Album", artist: "Vote Solo", compilation: true });
+        await scan();
+        expect(await albumsOf("Vote Solo Album")).toEqual([{ artist: "Vote Solo", mbid: null, songs: 3 }]);
+    });
+
+    it("leaves the placeholder artists Unknown Artist and Various Artists as MusicBrainz found them, however many songs they gain", async () => {
+        const mark = (name: string) =>
+            prisma.artist.upsert({
+                where: { identityKey: name.toLowerCase().replace(/[^a-z0-9]/g, "") },
+                update: { enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+                create: { name, normalizedName: name.toLowerCase(), identityKey: name.toLowerCase().replace(/[^a-z0-9]/g, ""), enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+            });
+        await mark("Unknown Artist");
+        await mark("Various Artists");
+        place("Vote Loose Unk/01.flac", { title: "A", album: "Vote Unknown Album" });
+        place("Vote Loose Va/01.flac", { title: "B", album: "Vote Va Album", albumartist: "Various Artists" });
+        await scan();
+        const status = (name: string) => prisma.artist.findFirst({ where: { name }, select: { enrichmentStatus: true, enrichmentFailures: true } });
+        expect(await status("Unknown Artist")).toEqual({ enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
+        expect(await status("Various Artists")).toEqual({ enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
+    });
+
+    it("asks MusicBrainz again only when the artist gained an album title, not for another song of an album it has", async () => {
+        const old = new Date(Date.now() - 86_400_000);
+        const found = await prisma.artist.create({
+            data: { name: "Vote Unfound Two", normalizedName: "vote unfound two", identityKey: "voteunfoundtwo", enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+        });
+        for (const n of [1, 2]) place(`Vote Unfound Two/Vote Known Album/0${n}.flac`, { title: `S${n}`, album: "Vote Known Album", albumartist: "Vote Unfound Two" }, old);
+        await scan();
+        await prisma.artist.update({ where: { id: found.id }, data: { enrichmentStatus: "unresolvable", enrichmentFailures: 3 } });
+
+        place("Vote Unfound Two/Vote Known Album/03.flac", { title: "S3", album: "Vote Known Album", albumartist: "Vote Unfound Two" });
+        await scan();
+        expect((await prisma.artist.findUnique({ where: { id: found.id } }))!.enrichmentStatus).toBe("unresolvable");
+
+        place("Vote Unfound Two/Vote Newer Album/01.flac", { title: "N1", album: "Vote Newer Album", albumartist: "Vote Unfound Two" });
+        await scan();
+        expect((await prisma.artist.findUnique({ where: { id: found.id } }))!.enrichmentStatus).toBe("pending");
+    });
+
+    it("reads a changed song's tags once for the whole scan", async () => {
+        const old = new Date(Date.now() - 86_400_000);
+        place("Vote Once/Vote Once Album/01.flac", { title: "S1", album: "Vote Once Album", albumartist: "Vote Once" }, old);
+        await scan();
+        (parseFile as jest.Mock).mockClear();
+        place("Vote Once/Vote Once Album/02.flac", { title: "S2", album: "Vote Once Album", albumartist: "Vote Once" });
+
+        await scan();
+
+        const reads = (parseFile as jest.Mock).mock.calls.map((c) => c[0] as string);
+        expect(reads.filter((f) => f.endsWith("02.flac"))).toHaveLength(1);
+        expect(reads.filter((f) => f.endsWith("01.flac"))).toHaveLength(1);
     });
 });

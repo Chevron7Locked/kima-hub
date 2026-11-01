@@ -47,9 +47,25 @@ describe("the re-file release item", () => {
         expect(onDone).toHaveBeenCalled();
     });
 
-    it("says it is running once done", async () => {
+    it("says it is running only right after this session started it", async () => {
+        refile.mockResolvedValue({ message: "ok" });
+        // The parent flips `done` when onDone fires, as the changelog page does.
+        function Host() {
+            const [done, setDone] = React.useState(false);
+            return <RefileAction item={item} done={done} onDone={() => setDone(true)} />;
+        }
+        await act(async () => root.render(<Host />));
+        await act(async () => button("Re-file albums")!.click());
+        const confirm = Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent === "Re-file albums") as HTMLButtonElement;
+        await act(async () => confirm.click());
+        expect(container.textContent).toContain("Re-filing albums. The result will show in your notifications.");
+        expect(button("Re-file albums")).toBeUndefined();
+    });
+
+    it("says it was done, not that it is running, when the server already reports it done", async () => {
         await act(async () => root.render(<RefileAction item={item} done={true} onDone={() => {}} />));
-        expect(container.textContent).toContain("The result will show in your notifications.");
+        expect(container.textContent).toContain("Albums re-filed. You can run it again from Settings, under Library Enrichment.");
+        expect(container.textContent).not.toContain("Re-filing albums");
         expect(button("Re-file albums")).toBeUndefined();
     });
 

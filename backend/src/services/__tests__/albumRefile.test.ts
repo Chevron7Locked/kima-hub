@@ -28,12 +28,14 @@ let musicDir: string;
 let tags: Map<string, unknown>;
 
 async function wipe() {
+    await prisma.$executeRawUnsafe(`DELETE FROM share_links WHERE token LIKE 'refile-%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryAlbum" WHERE "albumTitle" LIKE 'Refile%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id = 'refile-user'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "OwnedAlbum" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Refile%')`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "filePath" LIKE 'Refile%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE title LIKE 'Refile%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name LIKE 'Refile%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name = 'Various Artists' AND NOT EXISTS (SELECT 1 FROM "Album" WHERE "artistId" = "Artist".id)`);
 }
 
 beforeEach(async () => {
@@ -141,6 +143,37 @@ describe("re-filing albums by their tags", () => {
         expect(result.albumsMerged).toBe(1);
     });
 
+    it("does not ask MusicBrainz again about a placeholder artist that gains an album", async () => {
+        await prisma.artist.upsert({
+            where: { identityKey: "variousartists" },
+            update: { enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+            create: { name: "Various Artists", normalizedName: "various artists", identityKey: "variousartists", enrichmentStatus: "unresolvable", enrichmentFailures: 3 },
+        });
+        const wrong = await artist("Refile Wrong");
+        const a = await album(wrong.id, "Refile Placeholder Album");
+        await song(a.id, "Refile Mixes/Refile Placeholder Album/01.flac", { album: "Refile Placeholder Album", albumartist: "Various Artists" });
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.artist.findUnique({ where: { identityKey: "variousartists" }, select: { enrichmentStatus: true, enrichmentFailures: true } }))
+            .toEqual({ enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
+    });
+
+    it("does not ask MusicBrainz again about an artist that only gains songs on an album it has", async () => {
+        const mike = await artist("Refile Mike", { enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
+        const janet = await artist("Refile Janet");
+        const main = await album(mike.id, "Refile Known");
+        const split = await album(janet.id, "Refile Known");
+        await song(main.id, "Refile Mike/Refile Known/01.flac", { album: "Refile Known", albumartist: "Refile Mike" });
+        await song(main.id, "Refile Mike/Refile Known/02.flac", { album: "Refile Known", albumartist: "Refile Mike" });
+        await song(split.id, "Refile Mike/Refile Known/03.flac", { album: "Refile Known", albumartist: "Refile Janet" });
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.track.count({ where: { albumId: main.id } })).toBe(3);
+        expect(await prisma.artist.findUnique({ where: { id: mike.id }, select: { enrichmentStatus: true } })).toEqual({ enrichmentStatus: "unresolvable" });
+    });
+
     it("puts a lone song tagged with a guest as album artist back on its album", async () => {
         const mike = await artist("Refile Mike");
         const janet = await artist("Refile Janet", { enrichmentStatus: "unresolvable" });
@@ -195,7 +228,7 @@ describe("re-filing albums by their tags", () => {
         expect(await filing("Refile Settled")).toEqual([{ artist: "Refile Band", rgMbid: a.rgMbid, songs: 1 }]);
     });
 
-    it("never deletes the right artist's own copy, even when it has only a placeholder id and was edited", async () => {
+    it("never deletes or adds to the right artist's own copy when it was edited", async () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
         const stray = await album(cut.id, "Refile Edited Twin", { rgMbid: REAL_RG });
@@ -205,9 +238,10 @@ describe("re-filing albums by their tags", () => {
 
         await refileLibrary(musicDir);
 
+        // Nothing joins an album a person edited: it keeps its cover, id and songs, and the stray copy stays as it is.
         const kept = await prisma.album.findUnique({ where: { id: edited.id }, select: { userCoverUrl: true, rgMbid: true, _count: { select: { tracks: true } } } });
-        expect(kept).toEqual({ userCoverUrl: "/mine.jpg", rgMbid: edited.rgMbid, _count: { tracks: 2 } });
-        expect(await prisma.album.count({ where: { id: stray.id } })).toBe(0);
+        expect(kept).toEqual({ userCoverUrl: "/mine.jpg", rgMbid: edited.rgMbid, _count: { tracks: 1 } });
+        expect(await prisma.album.count({ where: { id: stray.id } })).toBe(1);
     });
 
     it("moves only an album's own songs off a row it shares with another album, in either order", async () => {
@@ -369,6 +403,21 @@ describe("re-filing albums by their tags", () => {
         expect(await prisma.album.count({ where: { id: { in: [held.id, twin.id] } } })).toBe(2);
     });
 
+    it("merges nothing into the id holder's Discover copy either", async () => {
+        mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Refile Cut and Band", aliases: [] }, evidence: {} });
+        const cut = await artist("Refile Cut", { mbid: FULL_ID });
+        const full = await artist("Refile Cut and Band");
+        const held = await album(cut.id, "Refile Held", { location: "DISCOVER" });
+        await song(held.id, "Refile Elsewhere/Refile Held/01.flac", null);
+        const twin = await album(full.id, "Refile Held");
+        await song(twin.id, "Refile Cut and Band/Refile Held/02.flac", { album: "Refile Held", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] });
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.album.count({ where: { id: { in: [held.id, twin.id] } } })).toBe(2);
+        expect(await prisma.track.count({ where: { albumId: held.id } })).toBe(1);
+    });
+
     it("leaves an album under its lead artist when the files name a joint credit with no MusicBrainz id", async () => {
         const lead = await artist("Refile Lead", { mbid: FULL_ID });
         const a = await album(lead.id, "Refile Duet");
@@ -393,5 +442,67 @@ describe("re-filing albums by their tags", () => {
         await refileLibrary(musicDir);
 
         expect(await filing("Refile Traitors")).toEqual([{ artist: "Refile Einaudi", rgMbid: REAL_RG, songs: 3 }]);
+    });
+
+    it("moves an album off an id-less artist row when another row holds the files' MusicBrainz id", async () => {
+        const idless = await artist("Refile Dup");
+        const holder = await artist("Refile Dup Alias", { mbid: FULL_ID });
+        const a1 = await album(idless.id, "Refile Twin");
+        const a2 = await album(holder.id, "Refile Twin");
+        const credit = { album: "Refile Twin", albumartist: "Refile Dup", musicbrainz_albumartistid: [FULL_ID] };
+        await song(a1.id, "Refile Dup/Refile Twin/01.flac", credit);
+        await song(a1.id, "Refile Dup/Refile Twin/02.flac", credit);
+        await song(a2.id, "Refile Dup/Refile Twin/03.flac", credit);
+
+        await refileLibrary(musicDir);
+
+        expect(await filing("Refile Twin")).toEqual([expect.objectContaining({ artist: "Refile Dup Alias", songs: 3 })]);
+    });
+
+    it("points an album's share link at the surviving album when the re-file merges the album row away", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Share");
+        const kept = await album(full.id, "Refile Share");
+        await prisma.user.create({ data: { id: "refile-user", username: "refile-user", passwordHash: "x" } });
+        await prisma.shareLink.create({ data: { token: "refile-tok", entityType: "album", entityId: stray.id, createdBy: "refile-user" } });
+        const credit = { album: "Refile Share", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] };
+        await song(stray.id, "Refile Cut and Band/Refile Share/01.flac", credit);
+        await song(kept.id, "Refile Cut and Band/Refile Share/02.flac", credit);
+
+        await refileLibrary(musicDir);
+
+        expect(await prisma.album.count({ where: { id: stray.id } })).toBe(0);
+        expect((await prisma.shareLink.findUnique({ where: { token: "refile-tok" } }))!.entityId).toBe(kept.id);
+    });
+
+    it("breaks a vote tie by path order in code, whatever order the database sorts paths in", async () => {
+        const x = await artist("Refile Tie Wrong");
+        const a = await album(x.id, "Refile Tie");
+        const credit = (name: string) => ({ album: "Refile Tie", albumartist: name });
+        // In code (and the C collation) capitals sort before lowercase, so Refile Tie First is named first.
+        for (const f of ["B1", "B2"]) await song(a.id, `Refile Tie/${f}.flac`, credit("Refile Tie First"));
+        for (const f of ["a1", "a2"]) await song(a.id, `Refile Tie/${f}.flac`, credit("Refile Tie Second"));
+        // A database collating like en_US hands the paths back as a1, a2, B1, B2.
+        const real = prisma.track.findMany.bind(prisma.track) as (args: any) => Promise<any[]>;
+        const spy = jest.spyOn(prisma.track, "findMany").mockImplementation(((args: any) =>
+            real(args).then((rows) => (args?.where?.missingSince === null ? [...rows].sort((p, q) => p.filePath.localeCompare(q.filePath, "en")) : rows))) as any);
+        try {
+            await refileLibrary(musicDir);
+        } finally {
+            spy.mockRestore();
+        }
+
+        expect((await filing("Refile Tie")).map((r) => r.artist)).toEqual(["Refile Tie First"]);
+    });
+
+    it("keeps a one-artist album with a stray compilation flag and no album artist under its artist", async () => {
+        const solo = await artist("Refile Solo");
+        const a = await album(solo.id, "Refile Solo Album");
+        for (const i of [1, 2, 3]) await song(a.id, `Refile Solo/Refile Solo Album/0${i}.flac`, { album: "Refile Solo Album", artist: "Refile Solo", compilation: true });
+
+        await refileLibrary(musicDir);
+
+        expect(await filing("Refile Solo Album")).toEqual([expect.objectContaining({ artist: "Refile Solo", songs: 3 })]);
     });
 });

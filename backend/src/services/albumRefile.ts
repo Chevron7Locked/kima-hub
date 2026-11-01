@@ -18,10 +18,10 @@ import { parseFile } from "music-metadata";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { canonicalizeVariousArtists } from "../utils/artistNormalization";
+import { canonicalizeVariousArtists, isPlaceholderArtistName } from "../utils/artistNormalization";
 import { albumIdentityKey } from "./albumIdentity";
 import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist } from "./artistIdentity";
-import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
+import { albumFolder, electAlbumArtist, fileCredit, isOldCut, keepsLeadArtist, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -64,8 +64,13 @@ const ALBUM_FIELDS = {
 } satisfies Prisma.AlbumSelect;
 type AlbumRow = Prisma.AlbumGetPayload<{ select: typeof ALBUM_FIELDS }>;
 
-/** Whether an artist row is the one a candidate names: by MusicBrainz id when both have one, else by name. */
-function isNamed(artist: AlbumRow["artist"], candidate: ArtistCandidate): boolean {
+/**
+ * Whether an album's artist row is the one a candidate names, as resolveArtist would pick it: the row holding the
+ * candidate's MusicBrainz id when one does (`holderId`), else the row of that name.
+ */
+function isNamed(row: AlbumRow, candidate: ArtistCandidate, holderId: string | null): boolean {
+    if (holderId) return row.artistId === holderId;
+    const artist = row.artist;
     if (candidate.mbid && artist.mbid) return candidate.mbid === artist.mbid;
     return artist.identityKey === artistIdentityKey(canonicalizeVariousArtists(candidate.name));
 }
@@ -82,9 +87,12 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
         await prisma.track.findMany({
             where: { missingSince: null, album: { location: "LIBRARY" } },
             select: { id: true, filePath: true },
-            orderBy: { filePath: "asc" },
         })
-    ).map((t) => ({ id: t.id, relativePath: t.filePath }));
+    )
+        .map((t) => ({ id: t.id, relativePath: t.filePath }))
+        // In code, as the scanner orders an album's songs: the database's collation could order them differently,
+        // and a tied vote goes to the artist named first.
+        .sort((a, b) => (a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0));
 
     // 1. Every song's tags. A folder with a song that cannot be read is not judged on the rest.
     const unreadableFolders = new Set<string>();
@@ -163,15 +171,6 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     return result;
 }
 
-/** The separators the splitter removed before 1.10 cut names at ("Coheed and Cambria" became "Coheed"). */
-const OLD_CUTS = [" & ", " and ", " with ", ", "];
-
-/** Whether `name` is `full` cut by the old splitter: its first words, up to one of those separators. */
-export function isOldCut(name: string, full: string): boolean {
-    const lower = full.toLowerCase();
-    return OLD_CUTS.some((sep) => lower.startsWith(name.toLowerCase() + sep));
-}
-
 /**
  * The artist row holding a MusicBrainz id whose name the old splitter cut gets its full name back, in MusicBrainz's
  * spelling, once MusicBrainz confirms the files' name is that id's (a wrong tag must not rename a real artist). A row
@@ -245,8 +244,9 @@ class KeptAsItIs extends Error {}
 async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"settled" | "edited" | "moved" | "merged"> {
     // An album under its lead artist (with a MusicBrainz id) stays when the files name a joint credit with no id:
     // nothing in the tags says it is not a band, and moving it would trade the lead's photo and id for neither.
-    const underLead = (artist: AlbumRow["artist"]) => Boolean(artist.mbid) && !candidate.mbid && isOldCut(artist.name, candidate.name);
-    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row.artist, candidate) && !underLead(row.artist);
+    const underLead = (artist: AlbumRow["artist"]) => keepsLeadArtist(artist, candidate);
+    const holder = candidate.mbid ? await prisma.artist.findUnique({ where: { mbid: candidate.mbid }, select: { id: true } }) : null;
+    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row, candidate, holder?.id ?? null) && !underLead(row.artist);
     const peek = await prisma.track.findMany({ where: { id: { in: songs.map((s) => s.id) } }, select: { album: { select: ALBUM_FIELDS } } });
     if (!peek.some((t) => isMisfiled(t.album))) return "settled";
 
@@ -267,8 +267,12 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
             if (involved.some((row) => row.hasUserOverrides || row.artist.hasUserOverrides)) return "edited";
 
             let keeper = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: target.id, identityKey } }, select: ALBUM_FIELDS });
-            if (keeper && keeper.location !== "LIBRARY") return "edited";
+            // A copy a person edited, or Discover's, is not merged into (as restoreCutName does not).
+            const closed = (row: AlbumRow) => row.location !== "LIBRARY" || row.hasUserOverrides;
+            if (keeper && closed(keeper)) return "edited";
             let outcome: "moved" | "merged" = "merged";
+            // Whether the artist gains an album title; songs joining an album it has gain none.
+            let gained = false;
 
             if (!keeper) {
                 // A row of these songs that holds nothing else can move whole: the best one, a real id first.
@@ -283,10 +287,11 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 const best = whole[0];
                 // The target may hold the album under the row's own name key rather than the tags' title.
                 const clash = best && (await tx.album.findUnique({ where: { artistId_identityKey: { artistId: target.id, identityKey: best.identityKey } }, select: ALBUM_FIELDS }));
-                if (clash && clash.location !== "LIBRARY") return "edited";
+                if (clash && closed(clash)) return "edited";
                 if (clash) {
                     keeper = clash;
                 } else if (best) {
+                    gained = true;
                     // The row takes the title its songs' tags give, as a fresh scan would file it, so the next scan
                     // finds it under the same name.
                     keeper = await tx.album.update({
@@ -297,6 +302,7 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                     await rekeyOwner(tx, best.artistId, target.id, best.rgMbid);
                     outcome = "moved";
                 } else {
+                    gained = true;
                     const source = involved[0];
                     keeper = await tx.album.create({
                         data: {
@@ -321,10 +327,12 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
 
             // MusicBrainz is asked about a name with the artist's album titles as proof, so an artist it could not
             // find is asked again once it gains an album.
-            await tx.artist.updateMany({
-                where: { id: target.id, enrichmentStatus: "unresolvable" },
-                data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
-            });
+            if (gained && !isPlaceholderArtistName(target.name)) {
+                await tx.artist.updateMany({
+                    where: { id: target.id, enrichmentStatus: "unresolvable" },
+                    data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
+                });
+            }
             return outcome;
         },
         { timeout: ALBUM_TRANSACTION_MS },
@@ -344,6 +352,8 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
     if (!row || (await tx.track.count({ where: { albumId: row.id } })) > 0) return keeper;
 
     await tx.album.delete({ where: { id: row.id } });
+    // Share links name an album by id with no foreign key: they follow the album to the survivor.
+    await tx.shareLink.updateMany({ where: { entityType: "album", entityId: row.id }, data: { entityId: keeper.id } });
     const details = {
         ...(keeper.coverUrl ? {} : { coverUrl: row.coverUrl }),
         ...(keeper.year ? {} : { year: row.year }),
