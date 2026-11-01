@@ -57,6 +57,7 @@ export function PanelOptions<K extends string>({
     onChange,
     label,
     controls,
+    className,
 }: {
     options: PanelOption<K>[];
     /** The chosen option; null while the region shows something none of them names (a page's settings). */
@@ -65,13 +66,14 @@ export function PanelOptions<K extends string>({
     label: string;
     /** The id of the region the options switch, for aria-controls. */
     controls: string;
+    className?: string;
 }) {
     return (
         <div
             role="tablist"
             aria-label={label}
             onKeyDown={(e) => tabListKeyDown(e, options.map((o) => o.key), value ?? options[0]?.key ?? ("" as K), onChange)}
-            className="flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-white/[0.05] px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className={cn("flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-white/[0.05] px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
         >
             {options.map((option, i) => {
                 const current = option.key === value;

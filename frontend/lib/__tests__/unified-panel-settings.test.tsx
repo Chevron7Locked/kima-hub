@@ -1,5 +1,5 @@
 /**
- * The desktop side panel itself: a page's settings take it whole, the settings' "back" brings the two halves back on
+ * The desktop side panel itself: a page's settings take it whole, the settings' "back" brings the panel's tabs back on
  * the activity tab that was showing, and closing or opening the panel moves keyboard focus to the control that undoes
  * it. The panel's data hooks and its content views are stubbed; the panel, its option strips and the settings context
  * are the real ones.
@@ -65,6 +65,7 @@ const activityTab = (name: string) =>
 describe("the desktop side panel", () => {
     it("comes back from a page's settings on the activity tab that was showing", () => {
         act(() => dom.root.render(<App />));
+        act(() => q('[role="tablist"][aria-label="panel"] [data-tab-key="activity"]')!.click());
         act(() => activityTab("history").click());
         expect(q('[data-testid="activity-content"]')?.textContent).toBe("history");
 

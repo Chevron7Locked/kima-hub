@@ -10,6 +10,8 @@ import {
 async function openQueueByClick(page: Page): Promise<void> {
     const open = page.getByRole("button", { name: "open panel" });
     if (await open.isVisible().catch(() => false)) await open.click();
+    const main = page.getByRole("tablist", { name: "panel", exact: true }).getByRole("tab", { name: /^listening/ });
+    if (await main.isVisible().catch(() => false)) await main.click();
     await page.getByRole("tab", { name: "up next" }).click();
 }
 

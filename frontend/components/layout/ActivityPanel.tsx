@@ -7,7 +7,7 @@ import { panelTabId } from "./panelChrome";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
-import { useActivityPanelOpen, type ActivityPanelTab } from "@/hooks/useActivityPanel";
+import { openActivityPanel, useActivityPanelOpen, type ActivityPanelTab } from "@/hooks/useActivityPanel";
 
 interface ActivityPanelProps {
     isOpen: boolean;
@@ -105,7 +105,7 @@ export function ActivityPanelToggle() {
     return (
         <button
             type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent("toggle-activity-panel"))}
+            onClick={() => (isPanelOpen ? window.dispatchEvent(new CustomEvent("toggle-activity-panel")) : openActivityPanel("all"))}
             aria-expanded={isPanelOpen}
             aria-controls={overlay ? "activity-panel-mobile" : "activity-panel"}
             className={cn(

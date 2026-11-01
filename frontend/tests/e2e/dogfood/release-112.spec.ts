@@ -673,10 +673,10 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
     });
 
     // ------------------------------------------------------------------------------------------
-    test("7. the right-hand panel: listening and activity options switch their panels, and the panel hides and reopens", async () => {
+    test("7. the right-hand panel: the listening and activity tabs and their options switch what shows, and the panel hides and reopens", async () => {
         session.setJourney("7. right-hand panel");
 
-        await session.step("the two halves offer exactly the listed options", async () => {
+        await session.step("the panel offers the listening and activity tabs, opens on listening, and lists the listening options", async () => {
             await page.goto("/");
             await settle(page, 1200);
             await openPanel();
@@ -685,8 +685,9 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                     .getByRole("tablist", { name: label, exact: true })
                     .getByRole("tab")
                     .evaluateAll((els) => els.map((el) => el.querySelector("span")?.textContent?.trim() ?? ""));
+            expect(await names("panel")).toEqual(["listening", "activity"]);
+            await expect(page.getByRole("tablist", { name: "panel", exact: true }).getByRole("tab", { name: /^listening/ })).toHaveAttribute("aria-selected", "true");
             expect(await names("listening")).toEqual(["up next", "lyrics", "about"]);
-            expect(await names("activity")).toEqual(["all", "alerts", "downloads", "imports", "history"]);
         });
 
         await session.step("each listening option selects itself and changes the panel under it", async () => {
@@ -703,6 +704,18 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             // Nothing is playing after the queue was cleared, so up next says so.
             await expect(panel).toContainText("the queue is empty");
             return { seen: seen.join(" ") };
+        });
+
+        await session.step("the activity tab takes the panel and offers exactly the listed options", async () => {
+            const main = page.getByRole("tablist", { name: "panel", exact: true });
+            await main.getByRole("tab", { name: /^activity/ }).click();
+            await expect(main.getByRole("tab", { name: /^activity/ })).toHaveAttribute("aria-selected", "true");
+            await expect(page.locator("#panel-listening")).toBeHidden();
+            const names = await page
+                .getByRole("tablist", { name: "activity", exact: true })
+                .getByRole("tab")
+                .evaluateAll((els) => els.map((el) => el.querySelector("span")?.textContent?.trim() ?? ""));
+            expect(names).toEqual(["all", "alerts", "downloads", "imports", "history"]);
         });
 
         await session.step("each activity option selects itself and shows its own content", async () => {
@@ -1230,6 +1243,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             // A folded panel still counts as visible (it is slid off the edge), so open it by its handle.
             const handle = page.getByRole("button", { name: "open panel" });
             if (await handle.isVisible().catch(() => false)) await handle.click();
+            await page.getByRole("tablist", { name: "panel", exact: true }).getByRole("tab", { name: /^activity/ }).click({ timeout: 15_000 });
             const tabs = page.getByRole("tablist", { name: "activity", exact: true });
             await tabs.getByRole("tab", { name: /^alerts/ }).click({ timeout: 15_000 });
             await expect(page.locator("#panel-activity")).toContainText(/albums re-filed by their tags/i, { timeout: 15_000 });

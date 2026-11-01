@@ -15,7 +15,7 @@ import {
     useActivityCounts,
     type ActivityView,
 } from "@/components/activity/ActivityBody";
-import { PanelHeading, PanelOptions, panelIconButton, panelTabId } from "./panelChrome";
+import { PanelOptions, panelIconButton, panelTabId } from "./panelChrome";
 
 interface UnifiedPanelProps {
     isOpen: boolean;
@@ -23,23 +23,38 @@ interface UnifiedPanelProps {
 }
 
 type Listening = "up-next" | "lyrics" | "about";
+type Main = "listening" | "activity";
 
 const OPEN_WIDTH = 380;
 const CLOSED_WIDTH = 16;
+// The tab not showing stays laid out under the other, so its scroll position and row sizes survive; inert and
+// invisible keep it out of the tab order and the accessibility tree.
+const pane = "flex min-h-0 flex-1 flex-col";
+const paneAway = "invisible pointer-events-none absolute inset-0";
 
 /**
- * The desktop panel on the right, in two halves with one grammar, the same as the left library panel's: listening
- * above (the playing song, then what is next, its lyrics or its artist) and activity below (everything Kima is doing,
- * or one kind of it). Pages can hand it settings to show instead (Discover's, the lyrics'), which take the panel whole.
+ * The desktop panel on the right, in two tabs with one grammar, the same as the left library panel's: listening (the
+ * playing song, then what is next, its lyrics or its artist) and activity (everything Kima is doing, or one kind of
+ * it). The chosen tab has the whole panel and the other stays mounted and laid out, out of sight; each opening starts on listening unless activity was asked for. Pages can hand it settings to show instead (Discover's, the lyrics'), which take the panel whole.
  */
 export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [listening, setListening] = useState<Listening>("up-next");
+    const [main, setMain] = useState<Main>("listening");
+    // Each opening decides its tab: activity when a request for it came in since the last opening, else listening.
+    // Deciding at the opening, not the closing, keeps the fade-out from flashing and a request made while closed.
+    const [asked, setAsked] = useState(false);
+    const [wasOpen, setWasOpen] = useState(isOpen);
+    if (wasOpen !== isOpen) {
+        setWasOpen(isOpen);
+        if (isOpen) setMain(asked ? "activity" : "listening");
+        setAsked(false);
+    }
     const [activity, setActivity] = useState<ActivityView>("all");
     // A page's settings (Discover's, the lyrics'), put in the panel through useActivityPanelSettings and opened on
     // the "settings" tab.
     const [showSettings, setShowSettings] = useState(false);
     const { settingsContent } = useActivityPanelSettings();
-    const { any: hasActivity } = useActivityCounts();
+    const { any: hasActivity, unread, downloads } = useActivityCounts();
     const { queue, currentIndex } = useAudioState();
     const upNext = Math.max(0, queue.length - currentIndex - 1);
 
@@ -73,7 +88,11 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 return;
             }
             setShowSettings(false);
-            if (isActivityView(tab)) setActivity(tab);
+            if (isActivityView(tab)) {
+                setActivity(tab);
+                setMain("activity");
+                setAsked(true);
+            }
         };
         // Leaving a page's settings returns to the halves as they were.
         const handleLeave = () => setShowSettings(false);
@@ -143,60 +162,76 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                         <div className="flex-1 min-h-0 overflow-hidden">{settingsContent}</div>
                     ) : (
                         <>
-                            <section aria-label="listening" className="flex min-h-0 flex-1 flex-col">
-                                <PanelHeading
-                                    label="listening"
-                                    actions={
-                                        <button
-                                            ref={hideRef}
-                                            type="button"
-                                            onClick={handleCollapse}
-                                            aria-label="hide panel"
-                                            title="hide panel"
-                                            className={panelIconButton}
-                                        >
-                                            <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                                        </button>
-                                    }
-                                />
-                                <NowPlayingStrip />
-                                <PanelOptions<Listening>
-                                    label="listening"
-                                    controls="panel-listening"
-                                    value={listening}
-                                    onChange={setListening}
+                            <div className="flex shrink-0 items-stretch">
+                                <PanelOptions<Main>
+                                    label="panel"
+                                    controls="panel-main"
+                                    value={main}
+                                    onChange={setMain}
+                                    className="min-w-0 flex-1"
                                     options={[
-                                        { key: "up-next", label: "up next", count: upNext },
-                                        { key: "lyrics", label: "lyrics" },
-                                        { key: "about", label: "about" },
+                                        { key: "listening", label: "listening" },
+                                        { key: "activity", label: "activity", count: unread + downloads, urgent: true },
                                     ]}
                                 />
-                                <div
-                                    id="panel-listening"
-                                    role="tabpanel"
-                                    aria-labelledby={panelTabId("panel-listening", listening)}
-                                    className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                                    {listening === "up-next" && <QueueTab withNowPlaying={false} />}
-                                    {listening === "lyrics" && <LyricsView variant="panel" />}
-                                    {listening === "about" && (
-                                        <div className="flex-1 overflow-y-auto">
-                                            <ArtistAbout />
-                                        </div>
-                                    )}
+                                <div className="flex items-center border-b border-white/[0.05] pr-1.5">
+                                    <button
+                                        ref={hideRef}
+                                        type="button"
+                                        onClick={handleCollapse}
+                                        aria-label="hide panel"
+                                        title="hide panel"
+                                        className={panelIconButton}
+                                    >
+                                        <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                                    </button>
                                 </div>
-                            </section>
+                            </div>
 
-                            <section aria-label="activity" className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06]">
-                                <PanelHeading label="activity" />
-                                <ActivityOptions controls="panel-activity" value={activity} onChange={setActivity} />
-                                <div
-                                    id="panel-activity"
-                                    role="tabpanel"
-                                    aria-labelledby={panelTabId("panel-activity", activity)}
-                                    className="min-h-0 flex-1 overflow-y-auto">
-                                    <ActivityPane view={activity} onOpen={setActivity} />
+                            <div
+                                id="panel-main"
+                                role="tabpanel"
+                                aria-labelledby={panelTabId("panel-main", main)}
+                                className="relative flex min-h-0 flex-1 flex-col"
+                            >
+                                <div inert={main !== "listening"} className={cn(pane, main !== "listening" && paneAway)}>
+                                    <NowPlayingStrip />
+                                    <PanelOptions<Listening>
+                                        label="listening"
+                                        controls="panel-listening"
+                                        value={listening}
+                                        onChange={setListening}
+                                        options={[
+                                            { key: "up-next", label: "up next", count: upNext },
+                                            { key: "lyrics", label: "lyrics" },
+                                            { key: "about", label: "about" },
+                                        ]}
+                                    />
+                                    <div
+                                        id="panel-listening"
+                                        role="tabpanel"
+                                        aria-labelledby={panelTabId("panel-listening", listening)}
+                                        className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                                        {listening === "up-next" && <QueueTab withNowPlaying={false} />}
+                                        {listening === "lyrics" && <LyricsView variant="panel" />}
+                                        {listening === "about" && (
+                                            <div className="flex-1 overflow-y-auto">
+                                                <ArtistAbout />
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </section>
+                                <div inert={main !== "activity"} className={cn(pane, main !== "activity" && paneAway)}>
+                                    <ActivityOptions controls="panel-activity" value={activity} onChange={setActivity} />
+                                    <div
+                                        id="panel-activity"
+                                        role="tabpanel"
+                                        aria-labelledby={panelTabId("panel-activity", activity)}
+                                        className="min-h-0 flex-1 overflow-y-auto">
+                                        <ActivityPane view={activity} onOpen={setActivity} />
+                                    </div>
+                                </div>
+                            </div>
                         </>
                     )}
                 </div>

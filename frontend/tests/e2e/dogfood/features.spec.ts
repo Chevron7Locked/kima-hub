@@ -177,6 +177,8 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
             const wasClosed = await handle.isVisible().catch(() => false);
             if (wasClosed) await handle.click();
             const panel = page.locator("#activity-panel");
+            // The panel opens on listening; the alerts are under its activity tab.
+            await panel.getByRole("tablist", { name: "panel", exact: true }).getByRole("tab", { name: /^activity/ }).click();
             const tab = panel.getByRole("tab", { name: /^alerts/ });
             await tab.click();
             await expect(tab).toHaveAttribute("aria-selected", "true");
