@@ -26,6 +26,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                     <button
                         key={item.id}
                         onClick={() => onSectionClick(item.id)}
+                        aria-current={activeSection === item.id ? "true" : undefined}
                         className={`
                             w-full text-left px-3 py-2 rounded-lg text-sm tabular-nums transition-all
                             ${activeSection === item.id
@@ -49,6 +50,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                             <button
                                 key={item.id}
                                 onClick={() => onSectionClick(item.id)}
+                                aria-current={activeSection === item.id ? "true" : undefined}
                                 className={`
                                     w-full text-left px-3 py-2 rounded-lg text-sm tabular-nums transition-all
                                     ${activeSection === item.id
