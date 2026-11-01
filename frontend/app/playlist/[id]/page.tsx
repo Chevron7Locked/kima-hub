@@ -822,7 +822,6 @@ export default function PlaylistDetailPage() {
                                 src={heroImage}
                                 alt=""
                                 fill
-                                sizes="100vw"
                                 className="object-cover"
                                 priority
                             />

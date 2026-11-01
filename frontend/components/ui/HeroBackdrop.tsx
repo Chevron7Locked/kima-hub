@@ -54,13 +54,13 @@ export function HeroBackdrop({ image, alt, colors, tint, fallback }: HeroBackdro
 
     return (
         <div className="absolute inset-0 overflow-hidden" style={FADE_MASK}>
-            {/* The cover, heavily blurred, under a dark scrim so pale sleeves stay legible. */}
+            {/* The cover, heavily blurred, under a dark scrim so pale sleeves stay legible. No `sizes`: under the blur a
+                larger file would only cost bytes, so it keeps the one small size it was asked for. */}
             <div className="absolute inset-0 scale-110 blur-2xl">
                 <CachedImage
                     src={image}
                     alt={alt}
                     fill
-                    sizes="100vw"
                     className="object-cover"
                     priority
                 />

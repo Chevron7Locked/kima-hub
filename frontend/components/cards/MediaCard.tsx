@@ -129,7 +129,8 @@ export const MediaCard = memo(function MediaCard({
     type,
     aspect = "square",
     index = 0,
-    sizes = "(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw",
+    // A card is half a phone screen, and 180-225 px from a tablet up (.grid-media and the shelves).
+    sizes = "(max-width: 767px) 50vw, 225px",
     badge,
     corner,
     progress,

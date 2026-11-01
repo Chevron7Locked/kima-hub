@@ -36,7 +36,6 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
                         src={api.getCoverArtUrl(imageUrl, 400)}
                         alt={name}
                         fill
-                        sizes="400px"
                         className="object-cover"
                         loading="lazy"
                     />

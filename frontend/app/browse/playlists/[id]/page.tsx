@@ -132,7 +132,6 @@ export default function DeezerPlaylistDetailPage() {
                                 src={playlist.imageUrl}
                                 alt={playlist.title}
                                 fill
-                                sizes="100vw"
                                 className="object-cover"
                             />
                         </div>
