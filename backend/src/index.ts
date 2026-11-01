@@ -50,6 +50,7 @@ import {
     reportEmbeddingWritePathAtStartup,
 } from "./services/embeddingsHealth";
 import { lidarrHealthMonitor } from "./services/lidarrHealth";
+import { combineAnalyzerStatus, heartbeatFresh } from "./utils/analyzerStatus";
 import { errorHandler } from "./middleware/errorHandler";
 import { requireAuth, requireAdmin, invalidateUserCache } from "./middleware/auth";
 import {
@@ -190,6 +191,9 @@ app.use("/api/events", eventsRoutes);
 // Subsonic-compatible API — rate limiting is internal to the router
 app.use("/rest", subsonicRouter);
 
+// A beat older than this is a dead analyzer: CLAP beats every 30 s, MusiCNN every loop pass (1 to 5 s).
+const ANALYZER_HEARTBEAT_WITHIN_MS = 120_000;
+
 // Health check (keep at root for simple container health checks)
 async function healthHandler(_req: express.Request, res: express.Response) {
     const checks: Record<string, string> = {};
@@ -213,26 +217,33 @@ async function healthHandler(_req: express.Request, res: express.Response) {
     const embeddingCheck = await checkEmbeddingWritePath();
     const lidarr = lidarrHealthMonitor.getState();
 
-    // Both analyzers hold an open Postgres connection under their own
-    // application_name, so the database answers "are they alive". A dead
-    // analyzer (crash loop, gave up) shows up here instead of hiding behind
-    // an all-ok — the 20h silent outage this would have caught.
-    let analyzers: string;
+    // An analyzer is alive when it holds its Postgres connection (application_name) or its Redis heartbeat is fresh,
+    // so a dead one (crash loop, gave up) still shows instead of hiding behind an all-ok. The heartbeat covers a
+    // Postgres restart, after which the connections are gone until the analyzers next get work.
+    const pgNames = new Set<string>();
+    let pgKnown = true;
     try {
         const rows = await prisma.$queryRaw<Array<{ application_name: string }>>`
             SELECT DISTINCT application_name FROM pg_stat_activity
             WHERE datname = current_database() AND application_name IN ('audio-analyzer', 'clap-analyzer')`;
-        const names = new Set(rows.map((r) => r.application_name));
-        analyzers = names.has("audio-analyzer")
-            ? names.has("clap-analyzer")
-                ? "ok"
-                : "analysis-only"
-            : names.has("clap-analyzer")
-              ? "embeddings-only"
-              : "offline";
+        for (const r of rows) pgNames.add(r.application_name);
     } catch {
-        analyzers = "unknown";
+        pgKnown = false;
     }
+    const beat = async (key: string) => {
+        try {
+            return heartbeatFresh(await redisClient.get(key), Date.now(), ANALYZER_HEARTBEAT_WITHIN_MS);
+        } catch {
+            return false;
+        }
+    };
+    const analysisAlive = pgNames.has("audio-analyzer") || (await beat("audio:worker:heartbeat"));
+    const embeddingsAlive = pgNames.has("clap-analyzer") || (await beat("clap:worker:heartbeat"));
+    const analyzers: string =
+        // Without the connection list, only two fresh heartbeats are an answer.
+        !pgKnown && !(analysisAlive && embeddingsAlive)
+            ? "unknown"
+            : combineAnalyzerStatus(analysisAlive, embeddingsAlive);
 
     const allOk = Object.values(checks).every((v) => v === "ok");
     res.status(allOk ? 200 : 503).json({

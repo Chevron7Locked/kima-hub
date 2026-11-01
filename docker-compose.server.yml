@@ -41,6 +41,7 @@ services:
             test: ["CMD", "node", "/app/healthcheck.js"]
             interval: 30s
             timeout: 10s
+            start_period: 300s
             retries: 3
 
     # ==============================================================================

@@ -349,8 +349,8 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 # ============================================
 WORKDIR /app
 
-# Copy healthcheck script
-COPY frontend/healthcheck.js /app/healthcheck.js
+# Stack health check: web app, backend (Postgres, Redis) and analyzers; see the file header
+COPY backend/healthcheck-stack.js /app/healthcheck.js
 
 # Create supervisord config - logs to stdout/stderr for Docker visibility
 RUN cat > /etc/supervisor/conf.d/kima.conf << 'EOF'
@@ -650,8 +650,10 @@ RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 # Expose ports
 EXPOSE 3030
 
-# Health check using Node.js (no wget)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Health check using Node.js (no wget). The start-period covers the slowest documented cold
+# start: migrations before supervisord (unbounded on an upgrade), wait-for-db up to 120 s,
+# the frontend's 10 s sleep and CLAP's 30 s startsecs. Warm, both analyzers connect in ~11 s.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
     CMD ["node", "/app/healthcheck.js"]
 
 # Volumes
