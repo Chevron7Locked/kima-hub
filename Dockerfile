@@ -397,7 +397,8 @@ directory=/app/backend
 priority=30
 
 [program:frontend]
-command=/bin/bash -c "sleep 10 && cd /app/frontend && exec node node_modules/next/dist/bin/next start -H 0.0.0.0 -p 3030"
+; Idle connections stay open longer than a reverse proxy keeps its own (nginx: 60 s), so the proxy always closes first.
+command=/bin/bash -c "sleep 10 && cd /app/frontend && exec node node_modules/next/dist/bin/next start -H 0.0.0.0 -p 3030 --keepAliveTimeout 65000"
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout

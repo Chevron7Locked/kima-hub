@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "next dev -p 3030",
     "build": "next build",
-    "start": "next start -H 0.0.0.0 -p 3030",
+    "start": "next start -H 0.0.0.0 -p 3030 --keepAliveTimeout 65000",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
