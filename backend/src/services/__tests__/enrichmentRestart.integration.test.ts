@@ -10,6 +10,8 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 
 const P = "cwipe";
+const ALBUM_VERDICT_KEY = `acoustid:album-vote:${P}alb`;
+const ACOUSTID_REPLY_KEY = `acoustid:lookup:200:${P}`;
 
 async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
@@ -123,6 +125,9 @@ beforeAll(async () => {
     await trackQueue.add("enrich", { trackId: `${P}asking` }, { jobId: `${P}asking-recording-4-r0` });
     await redisClient.rpush("audio:analysis:queue", JSON.stringify({ trackId: `${P}trk`, jobId: `${P}-1-r0` }));
     await vibeQueue.add("embed", { trackId: `${P}trk` }, { jobId: `${P}-vibe-1-r0` });
+    // A remembered album verdict and a saved AcoustID reply.
+    await redisClient.setex(ALBUM_VERDICT_KEY, 7 * 24 * 3600, JSON.stringify({ signature: "s", outcome: "no-agreeing-album" }));
+    await redisClient.setex(ACOUSTID_REPLY_KEY, 7 * 24 * 3600, JSON.stringify({ results: [] }));
 
     await wipeEnrichment();
 });
@@ -208,6 +213,11 @@ describe("wiping the enrichment", () => {
         expect(await prisma.trackGenre.count({ where: { trackId: `${P}trk` } })).toBe(0);
         const stage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}trk__recording` } });
         expect(stage.status).toBe("pending");
+    });
+
+    it("forgets the remembered album verdicts so every untagged album is voted on again, and keeps the saved AcoustID replies", async () => {
+        expect(await redisClient.get(ALBUM_VERDICT_KEY)).toBeNull();
+        expect(await redisClient.get(ACOUSTID_REPLY_KEY)).not.toBeNull();
     });
 
     it("keeps the artist's id for the artist step to check, images, edits, playlists, plays and likes", async () => {

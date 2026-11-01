@@ -4,13 +4,14 @@
  * is on, so the album most of the songs agree on, under this album's title, is the album.
  */
 
-import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { topVoted } from "../utils/votes";
 import { acoustidService } from "./acoustidService";
+import { readIdentityTagsOnce } from "./acoustidIdentification";
+import { fingerprintsToAsk, type FingerprintQuestion } from "./fingerprintChoice";
 import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumIdentity";
 import { lookupKey } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
@@ -136,6 +137,8 @@ function memoSignature(memo: string): string | undefined {
 
 interface CandidateAlbum {
     id: string;
+    /** Hash of the present songs' ids and fingerprints: a remembered verdict holds while it is unchanged. */
+    signature: string;
     title: string;
     rgMbid: string;
     artistId: string;
@@ -152,7 +155,12 @@ interface CandidateAlbum {
  */
 function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): Promise<CandidateAlbum[]> {
     return prisma.$queryRaw<CandidateAlbum[]>`
-        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, a.year, a.label, a.genres, a."coverUrl"
+        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, a.year, a.label, a.genres, a."coverUrl",
+               (SELECT encode(sha256(convert_to(string_agg(
+                           t.id || ':' || COALESCE(encode(sha256(convert_to(t."acoustidFingerprint", 'UTF8')), 'hex'), '-')
+                               || ':' || (extract(epoch from t."fileModified") * 1000)::bigint::text,
+                           '|' ORDER BY t.id), 'UTF8')), 'hex')
+                  FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL) AS signature
           FROM "Album" a JOIN "Artist" ar ON ar.id = a."artistId"
          WHERE a.location = ${LIBRARY_LOCATION}::"AlbumLocation"
            AND a."rgMbid" LIKE 'temp-%'
@@ -232,20 +240,19 @@ export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<s
 type AlbumOutcome = "assigned" | "decided-none" | "postponed" | "already-decided";
 
 async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
-    const tracks = await prisma.track.findMany({
-        where: { albumId: album.id, ...NOT_MISSING },
-        select: { id: true, title: true, duration: true, acoustidFingerprint: true },
-        orderBy: { id: "asc" },
-    });
-    if (tracks.length === 0) return "already-decided";
-
-    // A verdict holds while the album has the same songs and fingerprints.
-    const signature = createHash("sha256")
-        .update(tracks.map((t) => `${t.id}:${t.acoustidFingerprint ? createHash("sha256").update(t.acoustidFingerprint).digest("hex") : "-"}`).join("|"))
-        .digest("hex");
+    // A verdict holds while the album has the same songs and fingerprints (the database hashed them
+    // with the candidate query), so a remembered album costs one Redis read, not a load of its songs.
+    const signature = album.signature;
     const memoKey = `acoustid:album-vote:${album.id}`;
     const memo = await redisClient.get(memoKey).catch(() => null);
     if (memo && memoSignature(memo) === signature) return "already-decided";
+
+    const tracks = await prisma.track.findMany({
+        where: { albumId: album.id, ...NOT_MISSING },
+        select: { id: true, title: true, filePath: true, duration: true, acoustidFingerprint: true, fileModified: true },
+        orderBy: { id: "asc" },
+    });
+    if (tracks.length === 0) return "already-decided";
     const remember = (outcome: string, ttl = VERDICT_TTL) =>
         redisClient
             .setex(memoKey, ttl, JSON.stringify({ signature, outcome, at: new Date().toISOString() }))
@@ -259,29 +266,50 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
 
     // Every fingerprinted song needs a saved reply; the missing ones are asked in batches, and an
     // album still missing one waits for a later round with no verdict.
-    const askable = tracks.filter((t) => t.acoustidFingerprint && t.duration > 0);
-    const unsaved = async () => {
-        const out: typeof askable = [];
-        for (const t of askable) if (!(await acoustidService.hasSavedReply(t.duration, t.acoustidFingerprint!))) out.push(t);
+    // Each song is asked about with the fingerprints identification itself uses (the file's tag, then the
+    // stored one when AcoustID had nothing for the tag), so one saved reply serves both. The files are read
+    // here, after the memo check: a remembered album opens none, and an unchanged file is read once.
+    const songs: { title: string; duration: number; options: FingerprintQuestion[] }[] = [];
+    for (const t of tracks) {
+        const options = fingerprintsToAsk(await readIdentityTagsOnce(t), t.acoustidFingerprint, t.duration);
+        songs.push({ title: t.title, duration: t.duration, options });
+    }
+    // Where each song stands: a reply to use, a question still to ask, or no pick (every reply empty).
+    const standing = async () => {
+        const out: ({ use: FingerprintQuestion; answer: NonNullable<Awaited<ReturnType<typeof acoustidService.savedAnswer>>> } | { ask: FingerprintQuestion } | null)[] = [];
+        for (const song of songs) {
+            let state: (typeof out)[number] = null;
+            for (const option of song.options) {
+                const answer = await acoustidService.savedAnswer(option.duration, option.fingerprint, song.title);
+                if (answer === undefined) {
+                    state = { ask: option };
+                    break;
+                }
+                if (answer !== null) {
+                    state = { use: option, answer };
+                    break;
+                }
+            }
+            out.push(state);
+        }
         return out;
     };
-    let missing = await unsaved();
-    if (missing.length > 0) {
-        await acoustidService.lookupMany(missing.map((t) => ({ duration: t.duration, fingerprint: t.acoustidFingerprint! })));
-        missing = await unsaved();
-        if (missing.length > 0) {
-            await remember("waiting-for-acoustid", MISSING_REPLY_TTL);
-            return "postponed";
-        }
+    // Two passes at most: the second asks the stored fingerprint of songs whose tag fingerprint got nothing.
+    let states = await standing();
+    for (let pass = 0; pass < 2; pass++) {
+        const missing = states.flatMap((st) => (st && "ask" in st ? [st.ask] : []));
+        if (missing.length === 0) break;
+        await acoustidService.lookupMany(missing.map((q) => ({ duration: q.duration, fingerprint: q.fingerprint })));
+        states = await standing();
+    }
+    if (states.some((st) => st && "ask" in st)) {
+        await remember("waiting-for-acoustid", MISSING_REPLY_TTL);
+        return "postponed";
     }
 
-    const answers: AlbumSongAnswer[] = [];
-    for (const t of tracks) {
-        const answer = t.acoustidFingerprint && t.duration > 0
-            ? await acoustidService.savedAnswer(t.duration, t.acoustidFingerprint, t.title)
-            : null;
-        answers.push({ pick: answer ? { titleAgrees: answer.titleAgrees, releaseGroups: answer.releaseGroups } : null });
-    }
+    const answers: AlbumSongAnswer[] = states.map((st) => ({
+        pick: st && "use" in st ? { titleAgrees: st.answer.titleAgrees, releaseGroups: st.answer.releaseGroups } : null,
+    }));
     const verdict = voteAlbumReleaseGroup(album.title, answers);
     if (verdict.kind === "none") {
         await remember(verdict.reason);
@@ -300,8 +328,9 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         return "decided-none";
     }
 
-    // MusicBrainz must know the album and give its tracklist: an id it does not know (AcoustID's
-    // copy can hold one MusicBrainz has since merged away) is never written.
+    // MusicBrainz must know the album and give its tracklist: an id it does not know is never
+    // written. AcoustID's copy can hold an id MusicBrainz has since merged away; MusicBrainz then
+    // answers with the surviving album, whose id is the one stored.
     const catalogue = await musicBrainzService.getAlbumCatalogue(verdict.releaseGroupId);
     if (catalogue.kind === "absent") {
         await remember("no-tracklist");
@@ -311,9 +340,18 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         await remember("postponed", POSTPONE_TTL);
         return "postponed";
     }
+    // A tracklist saved before it named its release group (kept 30 days) has no such field: the vote's id then.
+    const releaseGroupId = catalogue.value.releaseGroupMbid ?? verdict.releaseGroupId;
+    if (releaseGroupId !== verdict.releaseGroupId) {
+        const survivorHolder = await prisma.album.findUnique({ where: { rgMbid: releaseGroupId }, select: { id: true } });
+        if (survivorHolder) {
+            await remember("collision");
+            return "decided-none";
+        }
+    }
 
     try {
-        const moved = await reassignAlbumRgMbid(album.id, verdict.releaseGroupId, {
+        const moved = await reassignAlbumRgMbid(album.id, releaseGroupId, {
             source: "acoustid",
             expectedOld: album.rgMbid,
         });
@@ -327,7 +365,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
     await fillAlbumFromCatalogue(album, albumFactsOf(catalogue.value));
     if (!album.coverUrl) {
         try {
-            const found = await findAlbumArtwork({ rgMbid: verdict.releaseGroupId, artistName: album.artist, albumTitle: album.title });
+            const found = await findAlbumArtwork({ rgMbid: releaseGroupId, artistName: album.artist, albumTitle: album.title });
             if (found) await prisma.album.updateMany({ where: { id: album.id, coverUrl: null }, data: { coverUrl: found.url } });
         } catch {
             // A cover is optional; the album keeps its id without one.
@@ -343,7 +381,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
            AND t."recordingMbid" IS NULL AND ts."decidedAt" IS NULL`;
     await remember("assigned");
     logger.info(
-        `[AlbumIdentity] ${album.artist} — "${album.title}" is MusicBrainz album ${verdict.releaseGroupId} ` +
+        `[AlbumIdentity] ${album.artist} — "${album.title}" is MusicBrainz album ${releaseGroupId} ` +
             `("${verdict.title}"): ${verdict.votes} of ${verdict.songs} songs agree`,
     );
     return "assigned";

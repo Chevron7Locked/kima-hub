@@ -35,7 +35,7 @@ jest.mock("../acoustidService", () => ({
     },
 }));
 
-import { identifyTrackByAcoustid, prefetchAcoustidReplies } from "../acoustidIdentification";
+import { identifyTrackByAcoustid, prefetchAcoustidReplies, readIdentityTagsOnce, TAGS_CACHE_LIMIT } from "../acoustidIdentification";
 import { answered } from "../../utils/outcome";
 
 const RECORDING = "8f3471b5-7e6a-48da-86a9-c1c07a0f47ae";
@@ -172,6 +172,26 @@ describe("identifyTrackByAcoustid: the stored fingerprint", () => {
         }
     });
 
+    it("asks the stored fingerprint when the one in the file's tag got no match", async () => {
+        mockLookup
+            .mockResolvedValueOnce({ kind: "absent", evidence: { fingerprint: "TAGFP" } })
+            .mockResolvedValueOnce(answered({ recordingMbid: RECORDING, artistMbid: "", releaseGroups: [], candidates: [RECORDING], title: "Song", artist: "" }, { score: 0.9 }));
+
+        const out = await identifyTrackByAcoustid(track("a.flac"), { recordingMbid: null, fingerprint: "TAGFP", artists: [], duration: 200 }, { fingerprint: "STOREDFP" });
+
+        expect(mockLookup.mock.calls.map((c) => c[1])).toEqual(["TAGFP", "STOREDFP"]);
+        expect(out.kind).toBe("answered");
+    });
+
+    it("asks only once when the tag's fingerprint is the stored one", async () => {
+        mockLookup.mockResolvedValue({ kind: "absent", evidence: {} });
+
+        const out = await identifyTrackByAcoustid(track("a.flac"), { recordingMbid: null, fingerprint: "SAMEFP", artists: [], duration: 200 }, { fingerprint: "SAMEFP" });
+
+        expect(mockLookup).toHaveBeenCalledTimes(1);
+        expect(out.kind).toBe("absent");
+    });
+
     it("does not read the file again when the caller already found its tags unreadable", async () => {
         const out = await identifyTrackByAcoustid(track("a.flac"), null, null);
         expect(mockParseFile).not.toHaveBeenCalled();
@@ -218,7 +238,16 @@ describe("prefetchAcoustidReplies: what the batch asks about", () => {
         ]);
     });
 
-    it("never reads the file of a song already answered, or of one whose tags named its recording before", async () => {
+    it("asks with the file's fingerprint tag even when the stored fingerprint already has a saved reply", async () => {
+        mockHasSavedReply.mockImplementation(async (_d: number, fp: string) => fp === "STORED-F");
+        mockParseFile.mockResolvedValue(tags({ acoustid_fingerprint: "TAG-FP-F" }));
+
+        await prefetchAcoustidReplies([{ ...track("f/own-tag.flac"), id: "f-own-tag", acoustidFingerprint: "STORED-F" }]);
+
+        expect(mockLookupMany).toHaveBeenCalledWith([{ trackId: "f-own-tag", duration: 200, fingerprint: "TAG-FP-F" }]);
+    });
+
+    it("never asks about a song already answered, and reads the file of one whose tags named its recording only once", async () => {
         mockHasSavedReply.mockImplementation(async (_d: number, fp: string) => fp === "STORED-SAVED");
         mockParseFile.mockImplementation(async (file: string) =>
             file.endsWith("named.flac") ? tags({ musicbrainz_recordingid: RECORDING }) : tags({}),
@@ -229,7 +258,7 @@ describe("prefetchAcoustidReplies: what the batch asks about", () => {
         await prefetchAcoustidReplies([named]);
 
         const opened = mockParseFile.mock.calls.map(([file]) => String(file));
-        expect(opened.filter((f) => f.endsWith("saved.flac"))).toHaveLength(0);
+        expect(opened.filter((f) => f.endsWith("saved.flac"))).toHaveLength(1);
         expect(opened.filter((f) => f.endsWith("named.flac"))).toHaveLength(1);
         expect(mockLookupMany).not.toHaveBeenCalled();
     });
@@ -286,5 +315,33 @@ describe("prefetchAcoustidReplies: what the batch asks about", () => {
     it("asks nothing when no song has a fingerprint to ask with", async () => {
         expect(await prefetchAcoustidReplies([{ ...track("a/none.flac"), acoustidFingerprint: null }])).toBe(0);
         expect(mockLookupMany).not.toHaveBeenCalled();
+    });
+});
+
+describe("readIdentityTagsOnce: the tags of an unchanged file are read once", () => {
+    const song = (id: string, modified = FILE_MODIFIED) => ({ ...track(`once/${id}.flac`), id, fileModified: modified });
+
+    it("reads a file again once its modified time changed, and not before", async () => {
+        await readIdentityTagsOnce(song("c-1"));
+        await readIdentityTagsOnce(song("c-1"));
+        expect(mockParseFile).toHaveBeenCalledTimes(1);
+
+        await readIdentityTagsOnce(song("c-1", new Date("2026-10-05T00:00:00Z")));
+        expect(mockParseFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("remembers a bounded number of files, forgetting the one used longest ago, not the one read first", async () => {
+        await readIdentityTagsOnce(song("lru-0"));
+        await readIdentityTagsOnce(song("lru-1"));
+        for (let n = 2; n < TAGS_CACHE_LIMIT; n++) await readIdentityTagsOnce(song(`lru-${n}`));
+        // lru-0 is used again, so lru-1 is now the one used longest ago.
+        await readIdentityTagsOnce(song("lru-0"));
+        await readIdentityTagsOnce(song(`lru-${TAGS_CACHE_LIMIT}`));
+        mockParseFile.mockClear();
+
+        await readIdentityTagsOnce(song("lru-0"));
+        expect(mockParseFile).not.toHaveBeenCalled();
+        await readIdentityTagsOnce(song("lru-1"));
+        expect(mockParseFile).toHaveBeenCalledTimes(1);
     });
 });

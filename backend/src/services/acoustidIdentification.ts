@@ -17,6 +17,7 @@ import {
     permanent,
 } from "../utils/outcome";
 import { acoustidService, AcoustIDResult } from "./acoustidService";
+import { fingerprintToAsk, fingerprintsToAsk } from "./fingerprintChoice";
 
 /** Track columns the identifier reads. */
 export interface IdentifiableTrack {
@@ -129,17 +130,9 @@ export async function identifyTrackByAcoustid(
     stored?: { fingerprint: string } | null
 ): Promise<Outcome<TrackIdentification>> {
     const known = tags === undefined ? await readIdentityTags(track) : tags;
-    if (!known) {
-        // The file's tags are unreadable, but a stored fingerprint can
-        // still drive the lookup — with the duration the scanner measured.
-        if (stored?.fingerprint) {
-            return askAcoustid(track, stored.fingerprint, track.duration, "stored_fingerprint");
-        }
-        return noFingerprint();
-    }
 
     // The recording id tag answers with no network call.
-    if (known.recordingMbid) {
+    if (known?.recordingMbid) {
         acoustidTrackIdentityTotal.inc({
             path: "recording_tag",
             outcome: "resolved",
@@ -154,17 +147,51 @@ export async function identifyTrackByAcoustid(
         );
     }
 
-    // The tag's fingerprint, else the fingerprint stage's stored one.
-    if (known.fingerprint) {
-        return askAcoustid(track, known.fingerprint, known.duration, "tag_fingerprint");
-    }
-    if (stored?.fingerprint) {
-        return askAcoustid(track, stored.fingerprint, known.duration, "stored_fingerprint");
+    // The file's fingerprint tag first; when AcoustID has nothing for it, the stored one (a wrong tag must not
+    // blind the song). A failure of the second ask is the answer, so the question stays open.
+    const questions = fingerprintsToAsk(known, stored?.fingerprint, track.duration);
+    if (questions.length > 0) {
+        const first = await askAcoustid(track, questions[0].fingerprint, questions[0].duration, questions[0].from);
+        if (first.kind !== "absent" || questions.length === 1) return first;
+        const second = await askAcoustid(track, questions[1].fingerprint, questions[1].duration, questions[1].from);
+        return second.kind === "absent" ? first : second;
     }
 
     // The recording stage is gated on the fingerprint question being settled,
     // so the engine never reaches this: a guard, not a wait.
     return noFingerprint();
+}
+
+/**
+ * The tags of a file, read once while the file is unchanged (`fileModified`, and the length the tags are read
+ * against): the album vote comes back to the same files every few minutes and must not open them each time.
+ * An unreadable file is not remembered, so it is tried again.
+ */
+const tagsReadOf = new Map<string, { modified: number; duration: number; tags: IdentityTags }>();
+/**
+ * At most this many files are remembered, the one used longest ago forgotten first: enough for a large library's
+ * whole pass (a pass over more would read every file again). An entry is mostly the file's fingerprint tag, about
+ * 3 KB (2.3 to 3.5 KB in the recorded album fixture), so at worst about 75 MB; a file without the tag costs a few
+ * hundred bytes.
+ */
+export const TAGS_CACHE_LIMIT = 25_000;
+export async function readIdentityTagsOnce(
+    track: IdentifiableTrack & { fileModified: Date },
+): Promise<IdentityTags | null> {
+    const modified = track.fileModified.getTime();
+    const seen = tagsReadOf.get(track.id);
+    if (seen && seen.modified === modified && seen.duration === track.duration) {
+        tagsReadOf.delete(track.id);
+        tagsReadOf.set(track.id, seen);
+        return seen.tags;
+    }
+    const tags = await readIdentityTags(track);
+    if (tags) {
+        tagsReadOf.delete(track.id);
+        tagsReadOf.set(track.id, { modified, duration: track.duration, tags });
+        if (tagsReadOf.size > TAGS_CACHE_LIMIT) tagsReadOf.delete(tagsReadOf.keys().next().value as string);
+    }
+    return tags;
 }
 
 /** A refusal, not an answer: nothing to ask AcoustID with. */
@@ -242,18 +269,17 @@ export async function prefetchAcoustidReplies(
     if (!(await acoustidService.mayAskInBatches())) return 0;
     const entries: { trackId: string; duration: number; fingerprint: string }[] = [];
     for (const track of tracks) {
-        if (track.acoustidFingerprint && (await acoustidService.hasSavedReply(track.duration, track.acoustidFingerprint))) continue;
         const modified = track.fileModified.getTime();
         if (namedByTags.get(track.id) === modified) continue;
-        const tags = await readIdentityTags(track);
+        const tags = await readIdentityTagsOnce(track);
         if (tags?.recordingMbid) {
             namedByTags.set(track.id, modified);
             continue;
         }
-        const fingerprint = tags?.fingerprint ?? track.acoustidFingerprint;
-        const duration = tags ? tags.duration : track.duration;
-        if (!fingerprint || !(duration > 0)) continue;
-        if ((fingerprint !== track.acoustidFingerprint || duration !== track.duration) && (await acoustidService.hasSavedReply(duration, fingerprint))) continue;
+        const question = fingerprintToAsk(tags, track.acoustidFingerprint, track.duration);
+        if (!question) continue;
+        const { fingerprint, duration } = question;
+        if (await acoustidService.hasSavedReply(duration, fingerprint)) continue;
         entries.push({ trackId: track.id, duration, fingerprint });
     }
     if (entries.length === 0) return 0;

@@ -71,6 +71,28 @@ beforeEach(() => {
 });
 
 describe("getAlbumCatalogue on real MusicBrainz responses", () => {
+    it("names the release group MusicBrainz answered with: a merged-away id answers with the survivor's", async () => {
+        const SURVIVOR = "11111111-2222-3333-4444-555555555555";
+        mockGet.mockImplementation(async (url: string) => {
+            if (url === `/release-group/${RG_MBID}`) return { data: { ...rgFixture, id: SURVIVOR } };
+            if (url === `/release/${EARLIEST_RELEASE}`) return { data: releaseFixture };
+            throw new Error(`unexpected url ${url}`);
+        });
+
+        const out = await musicBrainzService.getAlbumCatalogue(RG_MBID);
+
+        expect(out.kind).toBe("answered");
+        if (out.kind !== "answered") return;
+        expect(out.value.releaseGroupMbid).toBe(SURVIVOR);
+    });
+
+    it("names the release group's own id when it was not merged", async () => {
+        const out = await musicBrainzService.getAlbumCatalogue(RG_MBID);
+
+        if (out.kind !== "answered") throw new Error("expected an answer");
+        expect(out.value.releaseGroupMbid).toBe(RG_MBID);
+    });
+
     it("two songs of one album asked at once share one fetch of its tracklist", async () => {
         const [first, second] = await Promise.all([
             musicBrainzService.getAlbumCatalogue(RG_MBID),

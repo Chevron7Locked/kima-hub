@@ -70,6 +70,8 @@ const ABSENT_TTL = 7 * 24 * 3600;
 
 /** One release of an album group with its tracklist: what `getAlbumCatalogue` answers. */
 export interface AlbumCatalogue {
+    /** The release group's own id as MusicBrainz answered it: a merged-away id answers with the survivor's. */
+    releaseGroupMbid: string;
     releaseMbid: string;
     originalYear: number | null;
     label: string | null;
@@ -529,6 +531,7 @@ class MusicBrainzService {
 
                 return answered(
                     {
+                        releaseGroupMbid: typeof rg.id === "string" && rg.id ? rg.id : rgMbid,
                         releaseMbid: chosen.id,
                         originalYear: Number.isFinite(year) ? year : null,
                         label:

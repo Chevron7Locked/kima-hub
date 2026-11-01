@@ -48,7 +48,10 @@ interface AcoustIDBatchResponse {
 export interface AcoustIDResult {
     recordingMbid: string;
     artistMbid: string;
-    /** Every album (release group) AcoustID lists for the recording, in its order. */
+    /**
+     * Every album (release group) AcoustID lists for the pick; when the title agrees, the union over all
+     * the title-matching candidates, in order (the same song is often several recordings, each on other albums).
+     */
     releaseGroups: { id: string; title: string }[];
     /** The recordings of the matching result that are this track, best first; the first is `recordingMbid`. */
     candidates: string[];
@@ -69,6 +72,20 @@ const BATCH_HOLD_MS = 60_000;
 /** Saved replies: a match for 30 days, "nothing matched" for 7 (the same as MusicBrainz answers). */
 const MATCHED_TTL = 30 * 24 * 3600;
 const UNMATCHED_TTL = 7 * 24 * 3600;
+/** A fingerprint the server refuses as invalid is remembered a day: the file's fingerprint can be redone. */
+const REJECTED_TTL = 24 * 3600;
+
+/**
+ * AcoustID answers HTTP 400 when a request's own input is refused: code 3 (invalid fingerprint, when the request
+ * holds no valid one; in a batch with a valid entry the invalid ones are skipped silently instead), code 8
+ * (invalid duration) and code 2 (missing parameter, which is what a duration of 0 gets). Asking again can never
+ * help, so these are not failures of the source. Other 400s (bad key, too many requests...) are not listed here.
+ * Codes from acoustid-server, acoustid/api/errors.py.
+ */
+const REFUSED_INPUT_CODES = [2, 3, 8];
+function refusedInputReply(error: any): boolean {
+    return error?.response?.status === 400 && REFUSED_INPUT_CODES.includes(error?.response?.data?.error?.code);
+}
 
 class AcoustIDService {
     private client: AxiosInstance;
@@ -163,10 +180,16 @@ class AcoustIDService {
     private toResult(picked: { recording: AcoustIDRecording; candidates: AcoustIDRecording[]; titleAgrees: boolean }): AcoustIDResult {
         const { recording, candidates, titleAgrees } = picked;
         const artist = recording.artists?.[0];
+        const listed = new Map<string, { id: string; title: string }>();
+        for (const rec of titleAgrees ? candidates : [recording]) {
+            for (const rg of rec.releasegroups ?? []) {
+                if (!listed.has(rg.id)) listed.set(rg.id, { id: rg.id, title: rg.title ?? "" });
+            }
+        }
         return {
             recordingMbid: recording.id,
             artistMbid: artist?.id || "",
-            releaseGroups: (recording.releasegroups ?? []).map((rg) => ({ id: rg.id, title: rg.title ?? "" })),
+            releaseGroups: [...listed.values()],
             candidates: candidates.map((rec) => rec.id),
             titleAgrees,
             title: recording.title || "",
@@ -180,6 +203,19 @@ class AcoustIDService {
             await redisClient.setex(key, ttl, JSON.stringify({ results, savedAt: new Date().toISOString() }));
         } catch (err) {
             logger.warn(`[AcoustID] Could not save the reply for ${key}: ${(err as Error).message}`);
+        }
+    }
+
+    /** The server refused this fingerprint: saved as an empty reply, so the song counts as no pick and is not sent again. */
+    private async saveRejected(key: string): Promise<void> {
+        try {
+            await redisClient.setex(
+                key,
+                REJECTED_TTL,
+                JSON.stringify({ results: [], rejected: true, savedAt: new Date().toISOString() }),
+            );
+        } catch (err) {
+            logger.warn(`[AcoustID] Could not save the rejection for ${key}: ${(err as Error).message}`);
         }
     }
 
@@ -202,7 +238,7 @@ class AcoustIDService {
 
         const owed = new Map<string, { duration: number; fingerprint: string }>();
         for (const entry of entries) {
-            if (!entry.fingerprint || !Number.isFinite(entry.duration) || entry.duration <= 0) continue;
+            if (!entry.fingerprint || !Number.isFinite(entry.duration) || Math.round(entry.duration) < 1) continue;
             const key = this.replyKey(entry.duration, entry.fingerprint);
             if (!owed.has(key) && !(await this.savedResults(key))) owed.set(key, entry);
         }
@@ -227,12 +263,26 @@ class AcoustIDService {
                     this.batchesHeldUntil = Date.now() + BATCH_HOLD_MS;
                     return asked;
                 }
+                const answeredIndexes = new Set<number>();
                 for (const answer of data.fingerprints) {
                     const asking = chunk[answer.index];
-                    if (asking) await this.saveResults(asking[0], answer.results ?? []);
+                    if (asking) {
+                        answeredIndexes.add(answer.index);
+                        await this.saveResults(asking[0], answer.results ?? []);
+                    }
+                }
+                // The server skips an invalid fingerprint without a word: its index is absent from the reply.
+                for (const [i, [key]] of chunk.entries()) {
+                    if (!answeredIndexes.has(i)) await this.saveRejected(key);
                 }
                 asked += chunk.length;
             } catch (error: any) {
+                if (refusedInputReply(error)) {
+                    // Every fingerprint in this request was invalid: none will ever be answered.
+                    for (const [key] of chunk) await this.saveRejected(key);
+                    asked += chunk.length;
+                    continue;
+                }
                 if (await sourcePauseController.handleRateLimit("acoustid", error)) {
                     logger.warn("[AcoustID] Rate limited during a batch lookup; source 'acoustid' paused");
                 } else {
@@ -258,7 +308,7 @@ class AcoustIDService {
                 "No AcoustID client key configured — the question was never asked"
             );
         }
-        if (!fingerprint || !Number.isFinite(duration) || duration <= 0) {
+        if (!fingerprint || !Number.isFinite(duration) || Math.round(duration) < 1) {
             logger.debug(
                 `[AcoustID] Skipping lookup: fingerprint=${
                     fingerprint ? "present" : "missing"
@@ -319,6 +369,14 @@ class AcoustIDService {
             });
         } catch (error: any) {
             const message = error?.response?.status || error?.message;
+            if (refusedInputReply(error)) {
+                await this.saveRejected(this.replyKey(duration, fingerprint));
+                return absent({
+                    askedDuration: Math.round(duration),
+                    topScore: null,
+                    reason: "AcoustID refused the fingerprint or length as invalid",
+                });
+            }
             if (await sourcePauseController.handleRateLimit("acoustid", error)) {
                 const pause = await sourcePauseController.getPause("acoustid");
                 logger.warn(

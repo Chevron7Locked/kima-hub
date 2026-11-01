@@ -10,6 +10,7 @@
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { logger } from "../utils/logger";
 import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
 import { closeStagesForMissingTracks } from "./missingFileStages";
@@ -165,6 +166,19 @@ function resetSimilarity(tx: Tx): Promise<unknown> {
     return tx.$executeRaw`DELETE FROM matching_map`;
 }
 
+/**
+ * The remembered album verdicts ("this album's songs agree on no album", kept a week), so a re-run of identification
+ * votes every untagged album again. The saved AcoustID replies stay: they answer the vote without a request.
+ */
+async function forgetAlbumVerdicts(): Promise<void> {
+    let cursor = "0";
+    do {
+        const [next, keys] = await redisClient.scan(cursor, "MATCH", "acoustid:album-vote:*", "COUNT", 500);
+        cursor = next;
+        if (keys.length > 0) await redisClient.del(...keys);
+    } while (cursor !== "0");
+}
+
 export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> {
     const clears = STEP_CLEARS[from];
     const trackWork = clears.recording || clears.analysis || clears.vectors;
@@ -177,7 +191,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
         await vibeQueue.drain();
         await trackQueue.drain();
     }
-    return prisma.$transaction(
+    const wiped = await prisma.$transaction(
         async (tx) => {
             if (clears.similarity) await releaseMatchingState(tx);
             if (clears.moods) await releaseMoodState(tx);
@@ -211,6 +225,17 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
         },
         { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },
     );
+    // After the reset has committed: the album vote reads the songs it votes on from the database, so a round
+    // running during the reset may still write a verdict from the old state; clearing last removes that too.
+    if (clears.recording) {
+        try {
+            await forgetAlbumVerdicts();
+        } catch (err) {
+            // The reset happened; the memos expire on their own (a week), so this is not a failed rerun.
+            logger.warn(`[Enrichment] Could not clear the remembered album verdicts: ${(err as Error).message}`);
+        }
+    }
+    return wiped;
 }
 
 /** Re-runs everything: the identification step and every step after it. */

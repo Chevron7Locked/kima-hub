@@ -145,6 +145,7 @@ const mockTrackFindUnique = jest.fn();
 const mockTrackUpdate = jest.fn().mockResolvedValue({});
 const mockAlbumUpdate = jest.fn().mockResolvedValue({});
 const mockExecuteRawUnsafe = jest.fn().mockResolvedValue(1);
+const mockQueryRawUnsafe = jest.fn().mockResolvedValue([]);
 
 jest.mock("../../utils/db", () => ({
     prisma: {
@@ -165,7 +166,7 @@ jest.mock("../../utils/db", () => ({
         $queryRaw: jest.fn().mockResolvedValue([]),
         $executeRaw: jest.fn().mockResolvedValue(0),
         // Source pause reads and stage-record writes (SourceAttempt / TrackStage).
-        $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+        $queryRawUnsafe: (...args: unknown[]) => mockQueryRawUnsafe(...args),
         $executeRawUnsafe: (...args: unknown[]) => mockExecuteRawUnsafe(...args),
     },
 }));
@@ -182,6 +183,8 @@ jest.mock("../../utils/logger", () => ({
 // ── Imports (after mocks) ───────────────────────────────────────────
 
 import { enrichSingleTrack } from "../unifiedEnrichment";
+import { acoustidService } from "../../services/acoustidService";
+import { sourcePauseController } from "../../services/sourcePauseController";
 
 const TRACK_ID = "track-1";
 const RECORDING = "rec-aaaa-bbbb";
@@ -230,6 +233,7 @@ function stageWrittenDone(source: string): boolean {
 beforeEach(() => {
     jest.clearAllMocks();
     mockGetFeatures.mockResolvedValue({ fpcalc: true });
+    mockQueryRawUnsafe.mockResolvedValue([]);
     mockReadTags.mockResolvedValue({
         recordingMbid: null,
         fingerprint: null,
@@ -329,6 +333,7 @@ describe("enrichSingleTrack: the identification order", () => {
         seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             answeredWith({
+                releaseGroupMbid: RG_MBID,
                 releaseMbid: REL_MBID,
                 originalYear: 1997,
                 label: "Some Labels",
@@ -382,6 +387,7 @@ describe("enrichSingleTrack: the identification order", () => {
         seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             answeredWith({
+                releaseGroupMbid: RG_MBID,
                 releaseMbid: REL_MBID,
                 originalYear: null,
                 label: null,
@@ -503,6 +509,7 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         recordings: Array<{ recordingId: string; title: string; durationMs: number; isrcs: string[]; artists?: string[] }>,
     ) =>
         answeredWith({
+            releaseGroupMbid: RG_MBID,
             releaseMbid: REL_MBID,
             originalYear: 2015,
             label: null,
@@ -648,6 +655,11 @@ describe("AcoustID paused", () => {
         const writes = mockExecuteRawUnsafe.mock.calls.map((call) => String(call[0]));
         expect(writes.some((sql) => sql.includes(`INSERT INTO "TrackStage"`) && sql.includes("'RATE_LIMITED'"))).toBe(true);
         expect(writes.some((sql) => sql.includes("SET status = 'failed'"))).toBe(false);
+        // Parked pending, and the update of an existing record leaves its attempt and failure counts as they were.
+        const parked = writes.find((sql) => sql.includes(`INSERT INTO "TrackStage"`) && sql.includes("'RATE_LIMITED'"))!;
+        const onConflict = parked.slice(parked.indexOf("DO UPDATE"));
+        expect(onConflict).toContain("status = 'pending'");
+        expect(onConflict).not.toMatch(/attempt|failures/);
         pause.mockRestore();
     });
 });
@@ -665,6 +677,7 @@ describe("AcoustID first, and the album it names", () => {
     ];
     const dangerousDays = (rows: Array<{ recordingId: string; title: string }>) =>
         answeredWith({
+            releaseGroupMbid: DANGEROUS_DAYS,
             releaseMbid: "95353672-acb7-4bb4-ad41-a5e52e51bdc6",
             originalYear: 2014,
             label: "Blood Music",
@@ -894,5 +907,91 @@ describe("AcoustID first, and the album it names", () => {
         expect(result).toBe("deferred");
         expect(mockIdentifyRecording).toHaveBeenCalled();
         expect(mockTrackUpdate).not.toHaveBeenCalled();
+    });
+});
+
+describe("AcoustID paused: a saved reply is still used, and no lower source answers in its place", () => {
+    const pauseAcoustid = () =>
+        jest.spyOn(sourcePauseController, "getPause").mockResolvedValue({
+            source: "acoustid", until: new Date(Date.now() + 30 * 60_000), code: "RATE_LIMITED", message: null,
+        } as any);
+
+    it("with no saved reply, a lower source does not name the recording", async () => {
+        const pause = pauseAcoustid();
+        mockIdentifyRecording.mockResolvedValue(answeredWith({ id: MB_TRACK }));
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        pause.mockRestore();
+        expect(mockIdentifyRecording).not.toHaveBeenCalled();
+        expect(result).toBe("deferred");
+    });
+
+    it("with a saved reply for the song's fingerprint, AcoustID answers from it", async () => {
+        const pause = pauseAcoustid();
+        mockReadTags.mockResolvedValue({ recordingMbid: null, fingerprint: FINGERPRINT, artists: [], duration: 218 });
+        const saved = jest.spyOn(acoustidService, "savedAnswer").mockResolvedValue({ recordingMbid: MB_TRACK } as any);
+        mockIdentifyTrackByAcoustid.mockResolvedValue(
+            answeredWith({ source: "acoustid", recordingMbid: MB_TRACK, candidates: [MB_TRACK], titleAgrees: true, fingerprint: FINGERPRINT }),
+        );
+        mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        pause.mockRestore();
+        saved.mockRestore();
+        expect(mockIdentifyTrackByAcoustid).toHaveBeenCalled();
+        expect(result).toBe("identified");
+    });
+});
+
+describe("AcoustID paused: a second question is not asked live either", () => {
+    it("with the tag fingerprint's saved reply empty and none saved for the stored one, the song defers", async () => {
+        const pause = jest.spyOn(sourcePauseController, "getPause").mockResolvedValue({
+            source: "acoustid", until: new Date(Date.now() + 30 * 60_000), code: "RATE_LIMITED", message: null,
+        } as any);
+        mockReadTags.mockResolvedValue({ recordingMbid: null, fingerprint: FINGERPRINT, artists: [], duration: 218 });
+        seedTrack();
+        mockTrackFindUnique.mockResolvedValue({ ...(await mockTrackFindUnique()), acoustidFingerprint: "STORED-FINGERPRINT" });
+        const answer = jest.spyOn(acoustidService, "savedAnswer").mockImplementation(async (_d, fp) => (fp === FINGERPRINT ? null : undefined));
+        const has = jest.spyOn(acoustidService, "hasSavedReply").mockImplementation(async (_d, fp) => fp === FINGERPRINT);
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        pause.mockRestore();
+        answer.mockRestore();
+        has.mockRestore();
+        expect(result).toBe("deferred");
+        expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
+    });
+});
+
+describe("the fingerprint question closed", () => {
+    // Only the question about the fingerprint stage's record is answered; every other raw query finds nothing.
+    const fingerprintStageIs = (status: string, retryable: boolean) =>
+        mockQueryRawUnsafe.mockImplementation(async (sql: string) =>
+            String(sql).includes("stage = 'fingerprint'") ? [{ status, retryable }] : [],
+        );
+
+    it("a fingerprint stage that failed for good still asks AcoustID with the file's fingerprint tag", async () => {
+        mockReadTags.mockResolvedValue({ recordingMbid: null, fingerprint: FINGERPRINT, artists: [], duration: 218 });
+        fingerprintStageIs("failed", false);
+
+        await enrichSingleTrack(TRACK_ID);
+
+        expect(mockIdentifyTrackByAcoustid).toHaveBeenCalled();
+    });
+
+    it("a fingerprint set aside by a person closes the song as no match, not as a permanent failure", async () => {
+        fingerprintStageIs("blocked", true);
+
+        const result = await enrichSingleTrack(TRACK_ID);
+
+        expect(result).toBe("no_match");
+        expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
+        expect(stageWrittenDone("acoustid")).toBe(true);
+        expect(JSON.stringify(mockExecuteRawUnsafe.mock.calls)).toContain("not asked");
+        expect(mockExecuteRawUnsafe.mock.calls.some((c) => String(c[0]).includes("'PERMANENT'"))).toBe(false);
     });
 });

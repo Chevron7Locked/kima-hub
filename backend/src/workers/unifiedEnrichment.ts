@@ -46,6 +46,8 @@ import {
     readIdentityTags,
 } from "../services/acoustidIdentification";
 import { albumFactsOf, fillAlbumFromCatalogue, identifyAlbumsBySound, type AlbumFacts } from "../services/albumIdentification";
+import { acoustidService } from "../services/acoustidService";
+import { fingerprintToAsk, fingerprintsToAsk, type FingerprintQuestion } from "../services/fingerprintChoice";
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
 import { buildMatching, matchingProgress } from "../services/matching/state";
@@ -1851,7 +1853,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 }
 
 /**
- * True when the fingerprint stage closed as a permanent failure: the question
+ * True when the fingerprint stage closed with no fingerprint to come (failed for good, or set aside by a person): the question
  * is settled as "never", so identification skips AcoustID and records the skip.
  * Open fingerprint states never reach here; the prerequisite gate holds them.
  */
@@ -1864,7 +1866,21 @@ async function fingerprintStageSettledFailed(trackId: string): Promise<boolean> 
         trackId,
     );
     const row = rows[0];
-    return !!row && row.status === "failed" && !row.retryable;
+    return !!row && (row.status === "blocked" || (row.status === "failed" && !row.retryable));
+}
+
+/**
+ * True when saved replies alone settle the song's AcoustID question, so no request is needed: walking its
+ * questions in order, each has a saved reply, up to one with a pick (the later ones are then never asked).
+ * A question without a saved reply, or none at all, is false: while AcoustID is paused that song waits.
+ */
+async function answeredFromSavedReplies(questions: FingerprintQuestion[], title: string): Promise<boolean> {
+    for (const q of questions) {
+        const answer = await acoustidService.savedAnswer(q.duration, q.fingerprint, title);
+        if (answer === undefined) return false;
+        if (answer !== null) return true;
+    }
+    return questions.length > 0;
 }
 
 type CatalogueRecording = AlbumCatalogue["recordings"][number];
@@ -1946,9 +1962,8 @@ export async function enrichSingleTrack(
     let fingerprintToStore: string | null = tags?.fingerprint ?? null;
     let failedAsk: { source: string; outcome: FailureOutcome } | null = null;
     // Why the AcoustID step never ran, when it did not: the fingerprint question closed
-    // for good (AcoustID cannot be asked about this file), or the source is paused until
-    // a time (it can be asked then).
-    let acoustidSkipped: { reason: "fingerprint-closed" } | { reason: "paused"; until: Date } | null = null;
+    // for good (AcoustID cannot be asked about this file).
+    let acoustidSkipped: { reason: "fingerprint-closed" } | null = null;
     // AcoustID failing to answer: kept, and the cause of the deferral only when no other
     // source names the recording.
     let acoustidFailure: FailureOutcome | null = null;
@@ -1977,10 +1992,19 @@ export async function enrichSingleTrack(
     // skip and record the skip when it closed as a permanent failure.
     if (!recordingMbid) {
         const pause = await sourcePauseController.getPause("acoustid");
-        if (!track.acoustidFingerprint && (await fingerprintStageSettledFailed(track.id))) {
+        const question = fingerprintToAsk(tags, track.acoustidFingerprint, track.duration);
+        if (!question && (await fingerprintStageSettledFailed(track.id))) {
             acoustidSkipped = { reason: "fingerprint-closed" };
-        } else if (pause) {
-            acoustidSkipped = { reason: "paused", until: pause.until };
+        } else if (pause && !(await answeredFromSavedReplies(fingerprintsToAsk(tags, track.acoustidFingerprint, track.duration), track.title))) {
+            // AcoustID comes first and can be asked when its pause ends: the question waits until
+            // then, uses up no retry, and no lower source answers in its place. A reply already
+            // saved needs no request, so it is used even while paused.
+            await recordOutcomeFailure(track.id, "recording", "acoustid", {
+                kind: "rateLimited",
+                retryAfter: pause.until,
+                evidence: { asked, acoustid: "paused" },
+            }, { asked }, jobId);
+            return "deferred";
         } else {
             asked.push("acoustid");
             const identified = await askWithinBudget(
@@ -2133,16 +2157,6 @@ export async function enrichSingleTrack(
     }
 
     if (!recordingMbid) {
-        if (acoustidSkipped?.reason === "paused") {
-            // AcoustID can be asked when its pause ends: the question waits until then
-            // and uses up no retry.
-            await recordOutcomeFailure(track.id, "recording", "acoustid", {
-                kind: "rateLimited",
-                retryAfter: acoustidSkipped.until,
-                evidence: { asked, acoustid: "paused" },
-            }, { asked }, jobId);
-            return "deferred";
-        }
         // Every source that can be asked said "nothing" (AcoustID cannot be, when the
         // file's fingerprint question closed for good): close `done` with evidence
         // naming who was asked. A scan that finds the file changed asks again.

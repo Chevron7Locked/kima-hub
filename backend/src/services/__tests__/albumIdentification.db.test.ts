@@ -59,7 +59,7 @@ const mockPost = jest.fn(async (_url: string, body: string) => {
 
 const catalogue = {
     kind: "answered",
-    value: { releaseMbid: "95353672-acb7-4bb4-ad41-a5e52e51bdc6", originalYear: 2014, label: "Blood Music", genres: [{ name: "synthwave", count: 4 }], recordings: [] },
+    value: { releaseGroupMbid: DANGEROUS_DAYS, releaseMbid: "95353672-acb7-4bb4-ad41-a5e52e51bdc6", originalYear: 2014, label: "Blood Music", genres: [{ name: "synthwave", count: 4 }], recordings: [] },
     evidence: {},
 };
 
