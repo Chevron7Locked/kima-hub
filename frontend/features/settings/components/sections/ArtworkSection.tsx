@@ -62,7 +62,7 @@ export function ArtworkSection({ settings, onUpdate, onTest, isTesting }: Artwor
                         type="password"
                         value={settings.acoustidApiKey || ""}
                         onChange={(v) => onUpdate({ acoustidApiKey: v })}
-                        placeholder="Optional: Your AcoustID API key"
+                        placeholder="Your AcoustID key (optional)"
                         className="w-64"
                     />
                 </SettingsRow>

@@ -46,7 +46,7 @@ const MOOD_CONFIG: Record<
     },
     party: {
         icon: PartyPopper,
-        color: "from-violet-500 to-purple-700",
+        color: "from-pink-500 to-rose-600",
         label: "Energetic",
         description: "Lively & danceable",
     },

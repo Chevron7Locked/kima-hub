@@ -326,7 +326,7 @@ export function Sidebar() {
                         href={`/mix/${mix.id}`}
                         prefetch={false}
                         aria-current={isActive ? "page" : undefined}
-                        title={mix.description || mix.name}
+                        title={(mix.description || mix.name).toLowerCase()}
                         className="group min-w-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                     >
                         <span

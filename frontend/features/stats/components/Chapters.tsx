@@ -115,7 +115,7 @@ export function Chapters({ chapters, aside }: { chapters: Chapter[]; aside?: Rea
                     role="tablist"
                     aria-label="stats sections"
                     onKeyDown={onTabKey}
-                    className="-mb-px flex min-w-0 flex-1 gap-5 overflow-x-auto scrollbar-hide sm:gap-6"
+                    className="-mb-px flex min-w-0 flex-1 gap-5 overflow-x-auto scrollbar-hide sm:gap-6 max-sm:pr-8 max-sm:[mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]"
                 >
                     {chapters.map((c, i) => {
                         const open = c.id === active;

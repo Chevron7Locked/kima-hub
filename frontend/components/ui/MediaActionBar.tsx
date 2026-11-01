@@ -102,7 +102,7 @@ export const MediaActionButton = memo(function MediaActionButton({
     return (
         <button
             onClick={onClick}
-            title={label}
+            title={label.toLowerCase()}
             aria-label={label}
             disabled={disabled}
             className={cn(

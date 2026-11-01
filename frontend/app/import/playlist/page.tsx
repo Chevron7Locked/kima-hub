@@ -488,9 +488,9 @@ function ImportPlaylistPageContent() {
                             />
                             <p className="text-xs text-[var(--text-muted)] mt-2">
                                 Paste a public{" "}
-                                <span className="text-[#AD47FF]">Deezer</span>{" "}
+                                <span className="text-[var(--text-secondary)]">Deezer</span>{" "}
                                 or{" "}
-                                <span className="text-spotify">Spotify</span>{" "}
+                                <span className="text-[var(--text-secondary)]">Spotify</span>{" "}
                                 playlist URL
                             </p>
                         </div>

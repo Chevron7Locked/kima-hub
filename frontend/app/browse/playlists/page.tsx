@@ -202,9 +202,9 @@ export default function BrowsePlaylistsPage() {
                 <div className="relative page-shell page-end animate-rise">
                     <div className="mb-6">
                         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-type-track/5 border border-type-track/20">
-                            <Info className="w-4 h-4 text-brand shrink-0 mt-0.5" />
+                            <Info className="w-4 h-4 text-[var(--text-secondary)] shrink-0 mt-0.5" />
                             <p className="text-xs tabular-nums text-[var(--text-secondary)] leading-relaxed">
-                                <span className="font-bold text-brand">
+                                <span className="font-bold text-white">
                                     Beta
                                 </span>{" "}
                                 · Importing from Spotify and Deezer relies on

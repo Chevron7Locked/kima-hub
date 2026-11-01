@@ -127,7 +127,7 @@ export function SubsonicSection() {
                     <SettingsInput
                         value={deviceName}
                         onChange={setDeviceName}
-                        placeholder="Client name (e.g. Amperfy, Symfonium, DSub)"
+                        placeholder="Client name, e.g. Amperfy"
                     />
                     <div className="inline-flex items-center gap-3">
                         <Button

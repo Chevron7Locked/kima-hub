@@ -226,7 +226,7 @@ export default function DiscoverWeeklyPage() {
                             <div className="max-w-3xl mx-auto py-16">
                                 <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
                                     <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
-                                        <div className="w-2 h-2 bg-[var(--color-brand)]" />
+                                        <div className={cn("w-2 h-2", isGenerating ? "bg-white/30" : "bg-success")} />
                                         <span className="text-xs tabular-nums text-[var(--text-secondary)]">
                                             {isGenerating ? "Generating" : "Ready"}
                                         </span>

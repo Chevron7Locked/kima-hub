@@ -363,9 +363,26 @@ img {
     color: transparent;
 }
 
+/* The parts of the page the browser draws itself follow the dark interface: native controls and pickers, the caret,
+ * selected text and scrollbars. */
+:root {
+    color-scheme: dark;
+    accent-color: var(--color-brand);
+}
+/* Only where ::-webkit-scrollbar is unknown (Firefox): in Chrome, scrollbar-color would switch those rules off. */
+@supports not selector(::-webkit-scrollbar) {
+    :root {
+        scrollbar-color: var(--bg-hover) transparent;
+    }
+}
+::selection {
+    background: color-mix(in oklab, var(--color-brand) 35%, transparent);
+}
+
 body {
     background: var(--bg-primary);
     color: #e5e5e5;
+    caret-color: var(--color-brand);
     font-family: var(--font-montserrat), -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     min-height: 100vh;

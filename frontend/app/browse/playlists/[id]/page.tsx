@@ -267,6 +267,7 @@ export default function DeezerPlaylistDetailPage() {
                                             role={hasPreview ? "button" : undefined}
                                             tabIndex={hasPreview ? 0 : undefined}
                                             aria-label={hasPreview ? `play a preview of ${track.title}` : undefined}
+                                            title={hasPreview ? undefined : "no preview available"}
                                             onKeyDown={(e) => {
                                                 if (hasPreview && (e.key === "Enter" || e.key === " ")) {
                                                     e.preventDefault();
@@ -277,7 +278,7 @@ export default function DeezerPlaylistDetailPage() {
                                                 "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-3 py-2 rounded-lg transition-all group",
                                                 hasPreview
                                                     ? "hover:bg-white/[0.03] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                                                    : "opacity-40 cursor-not-allowed",
+                                                    : "opacity-60 cursor-not-allowed",
                                                 isCurrentlyPlaying && "bg-white/5 border border-brand/30"
                                             )}
                                         >

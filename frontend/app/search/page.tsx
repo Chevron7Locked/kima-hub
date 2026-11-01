@@ -121,8 +121,8 @@ export default function SearchPage() {
                                     {query}
                                 </h1>
                                 {isLoading && (
-                                    <div className="flex items-center gap-2 text-sm text-brand">
-                                        <div className="w-1 h-1 rounded-full bg-brand animate-ping" />
+                                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                                        <div className="w-1 h-1 rounded-full bg-white/60 animate-ping" />
                                         <span className="font-medium">
                                             Searching across sources...
                                         </span>
@@ -165,7 +165,6 @@ export default function SearchPage() {
                         <div className="flex flex-col items-center justify-center py-24 relative">
                             <div className="relative">
                                 <GradientSpinner size="xl" className="mb-6" />
-                                <div className="absolute inset-0 bg-gradient-to-r from-brand to-brand-dark opacity-20 blur-xl animate-pulse" />
                             </div>
                             <p className="text-[var(--text-secondary)] text-sm animate-pulse">
                                 Scanning library and network...
