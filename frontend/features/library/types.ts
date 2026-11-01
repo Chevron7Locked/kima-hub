@@ -45,7 +45,7 @@ export interface Track {
 
 export interface DeleteDialogState {
     isOpen: boolean;
-    type: "track" | "album" | "artist";
+    type: "track";
     id: string;
     title: string;
 }

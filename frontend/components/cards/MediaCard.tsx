@@ -2,7 +2,7 @@
 
 import { memo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { Loader2, Trash2, type LucideIcon } from "lucide-react";
+import { Loader2, type LucideIcon } from "lucide-react";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { cn } from "@/lib/cn";
 import { MOOD_COLORS, moodLabel } from "@/features/vibe/mapUtils";
@@ -40,7 +40,6 @@ interface MediaCardProps {
     action?: MediaCardAction;
     /** One of the five mood keys; marks the card's meta with a dot in its map colour. */
     moodKey?: string | null;
-    onDelete?: () => void;
     className?: string;
 }
 
@@ -136,7 +135,6 @@ export const MediaCard = memo(function MediaCard({
     progress,
     action,
     moodKey,
-    onDelete,
     className,
 }: MediaCardProps) {
     const styles = TYPE_STYLES[type];
@@ -184,18 +182,6 @@ export const MediaCard = memo(function MediaCard({
                             />
                         </button>
                     </>
-                )}
-
-                {onDelete && (
-                    <button
-                        type="button"
-                        onClick={stop(onDelete)}
-                        aria-label={`Delete ${title}`}
-                        title={`Delete ${title}`.toLowerCase()}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/80 border border-white/20 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-danger/90 transition-opacity duration-150 touch-reveal"
-                    >
-                        <Trash2 className="w-4 h-4 text-white" />
-                    </button>
                 )}
             </div>
 

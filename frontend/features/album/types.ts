@@ -19,6 +19,8 @@ export interface Album {
     mbid?: string;
     rgMbid?: string;
     owned?: boolean;
+    /** Present on a library row; a Discover album is only ever handled in Discover. */
+    location?: "LIBRARY" | "DISCOVER";
     tracks?: Track[];
     missingTracks?: MissingTrack[];
     similarAlbums?: SimilarAlbum[];

@@ -56,3 +56,32 @@ describe("Escape and open dialogs", () => {
         expect(titles()).toEqual([]);
     });
 });
+
+describe("a confirm dialog while its action runs", () => {
+    it("ignores Escape, the backdrop and the close button until the action ends", async () => {
+        const onClose = vi.fn();
+        root = createRoot(document.body.appendChild(document.createElement("div")));
+        await act(async () =>
+            root!.render(<ConfirmDialog isOpen busy onClose={onClose} onConfirm={() => {}} title="busy" message="" />),
+        );
+        await press("Escape");
+        await act(async () => {
+            document.querySelector<HTMLElement>('[role="dialog"]')!.parentElement!.click();
+            document.querySelector<HTMLButtonElement>('button[aria-label="Close dialog"]')!.click();
+        });
+        expect(onClose).not.toHaveBeenCalled();
+        expect(titles()).toEqual(["busy"]);
+    });
+});
+
+describe("a busy confirm dialog and keyboard focus", () => {
+    it("keeps its buttons focusable, so focus stays inside it", async () => {
+        root = createRoot(document.body.appendChild(document.createElement("div")));
+        await act(async () =>
+            root!.render(<ConfirmDialog isOpen busy onClose={() => {}} onConfirm={() => {}} title="busy" message="" />),
+        );
+        const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'));
+        expect(buttons.length).toBeGreaterThan(0);
+        expect(buttons.every((b) => !b.disabled && b.getAttribute("aria-disabled") === "true")).toBe(true);
+    });
+});

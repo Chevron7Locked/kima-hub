@@ -56,14 +56,12 @@ const GridCard = memo(
         kind,
         index,
         onPlay,
-        onDelete,
         moodKey,
     }: {
         card: LibraryCard;
         kind: "album" | "artist";
         index: number;
         onPlay: (id: string) => Promise<void>;
-        onDelete?: (id: string, title: string) => void;
         moodKey?: string;
     }) {
         return (
@@ -77,7 +75,6 @@ const GridCard = memo(
                 index={index}
                 action={{ icon: Play, label: "Play", onClick: () => onPlay(card.id) }}
                 moodKey={moodKey}
-                onDelete={onDelete ? () => onDelete(card.id, card.title) : undefined}
             />
         );
     },
@@ -85,19 +82,17 @@ const GridCard = memo(
     (prev, next) => prev.card.id === next.card.id && prev.moodKey === next.moodKey,
 );
 
-/** The collection's album or artist grid: a card per item, with its play action, mood dot and (for admins) delete. */
+/** The collection's album or artist grid: a card per item, with its play action, and mood dot. */
 export function LibraryGrid({
     kind,
     cards,
     onPlay,
-    onDelete,
     moodByKey,
     isLoading = false,
 }: {
     kind: "album" | "artist";
     cards: LibraryCard[];
     onPlay: (id: string) => Promise<void>;
-    onDelete?: (id: string, title: string) => void;
     /** The mood each item shares with its tracks, from the vibe map. */
     moodByKey?: Map<string, string>;
     isLoading?: boolean;
@@ -115,7 +110,6 @@ export function LibraryGrid({
                     kind={kind}
                     index={index}
                     onPlay={onPlay}
-                    onDelete={onDelete}
                     moodKey={moodByKey?.get(card.id)}
                 />
             ))}

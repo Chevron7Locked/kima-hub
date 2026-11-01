@@ -1,4 +1,4 @@
-import { Download, ListPlus } from "lucide-react";
+import { Download, ListPlus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { MediaActionBar, MediaActionButton } from "@/components/ui/MediaActionBar";
 import type { Album, AlbumSource } from "../types";
@@ -11,6 +11,8 @@ interface AlbumActionBarProps {
     /** Absent for someone who may not start downloads: no download button then. */
     onDownloadAlbum?: () => void;
     onAddToPlaylist: () => void;
+    /** Absent unless the viewer may delete this library album: no delete button then. */
+    onDelete?: () => void;
     isPendingDownload: boolean;
     isPlaying: boolean;
     isPlayingThisAlbum: boolean;
@@ -24,6 +26,7 @@ export function AlbumActionBar({
     onShuffle,
     onDownloadAlbum,
     onAddToPlaylist,
+    onDelete,
     isPendingDownload,
     isPlaying,
     isPlayingThisAlbum,
@@ -47,6 +50,15 @@ export function AlbumActionBar({
                     icon={<ListPlus className="w-5 h-5" />}
                     label="add to playlist"
                     onClick={onAddToPlaylist}
+                />
+            )}
+
+            {isOwned && onDelete && (
+                <MediaActionButton
+                    shape="square"
+                    icon={<Trash2 className="w-5 h-5" />}
+                    label="delete album"
+                    onClick={onDelete}
                 />
             )}
 

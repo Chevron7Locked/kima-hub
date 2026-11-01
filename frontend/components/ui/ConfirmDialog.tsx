@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { useDialog } from "@/hooks/useDialog";
@@ -16,6 +16,10 @@ interface ConfirmDialogProps {
     confirmText?: string;
     cancelText?: string;
     variant?: "danger" | "warning" | "info";
+    /** A confirmed action is running: both buttons lock and the confirm button shows it. */
+    busy?: boolean;
+    /** False when the caller closes the dialog itself, e.g. only once an action succeeded. */
+    closeOnConfirm?: boolean;
 }
 
 export function ConfirmDialog({
@@ -27,11 +31,18 @@ export function ConfirmDialog({
     confirmText = "Confirm",
     cancelText = "Cancel",
     variant = "danger",
+    busy = false,
+    closeOnConfirm = true,
 }: ConfirmDialogProps) {
     const cancelRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLDivElement>(null);
 
-    useDialog(dialogRef, isOpen, onClose, cancelRef);
+    // While the confirmed action runs, nothing closes the dialog: its outcome (or a retry) lands in it. The buttons
+    // stay focusable (aria-disabled, not disabled) so keyboard focus never falls out of the dialog.
+    const dismiss = () => {
+        if (!busy) onClose();
+    };
+    useDialog(dialogRef, isOpen, dismiss, cancelRef);
 
     if (!isOpen) return null;
 
@@ -56,8 +67,9 @@ export function ConfirmDialog({
     const styles = variantStyles[variant];
 
     const handleConfirm = () => {
+        if (busy) return;
         onConfirm();
-        onClose();
+        if (closeOnConfirm) onClose();
     };
 
     // Drawn at the page's top level: inside an animated or clipped parent (a window, a panel), a fixed overlay is
@@ -65,7 +77,7 @@ export function ConfirmDialog({
     const overlay = (
         <div
             className="fixed inset-0 bg-black/75 flex items-center justify-center z-(--z-modal) p-4 transition-opacity duration-200"
-            onClick={onClose}
+            onClick={dismiss}
         >
             <div
                 ref={dialogRef}
@@ -89,9 +101,13 @@ export function ConfirmDialog({
                         <p id="confirm-dialog-message" className="text-sm text-[var(--text-secondary)]">{message}</p>
                     </div>
                     <button
-                        onClick={onClose}
+                        onClick={dismiss}
+                        aria-disabled={busy || undefined}
                         aria-label="Close dialog"
-                        className="p-1 hover:bg-white/10 rounded-full transition-colors text-[var(--text-secondary)] hover:text-white flex-shrink-0"
+                        className={cn(
+                            "p-1 rounded-full transition-colors text-[var(--text-secondary)] flex-shrink-0",
+                            busy ? "opacity-50 cursor-not-allowed" : "hover:bg-white/10 hover:text-white",
+                        )}
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -101,16 +117,20 @@ export function ConfirmDialog({
                     <Button
                         variant="secondary"
                         ref={cancelRef}
-                        onClick={onClose}
-                        className="flex-1"
+                        onClick={dismiss}
+                        aria-disabled={busy || undefined}
+                        className={cn("flex-1", busy && "opacity-50 cursor-not-allowed")}
                     >
                         {cancelText}
                     </Button>
                     <Button
                         variant="primary"
                         onClick={handleConfirm}
+                        aria-disabled={busy || undefined}
+                        aria-busy={busy || undefined}
                         className={cn("flex-1", styles.confirmButton)}
                     >
+                        {busy && <Loader2 className="w-4 h-4 animate-spin" />}
                         {confirmText}
                     </Button>
                 </div>

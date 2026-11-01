@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { usePublicConfig } from "@/hooks/useQueries";
 import {
     useAudioState,
@@ -25,6 +26,8 @@ import { PopularTracks } from "@/features/artist/components/PopularTracks";
 import { Discography } from "@/features/artist/components/Discography";
 import { AvailableAlbums } from "@/features/artist/components/AvailableAlbums";
 import { SimilarArtists } from "@/features/artist/components/SimilarArtists";
+import { DeleteLibraryItemDialog } from "@/features/library/components/DeleteLibraryItemDialog";
+import { useAuth } from "@/lib/auth-context";
 import { PageMessage } from "@/components/ui/PageMessage";
 
 export default function ArtistPage() {
@@ -49,6 +52,8 @@ export default function ArtistPage() {
     const { downloadArtist, downloadAlbum } = useDownloadActions();
     const { canAcquire } = usePublicConfig();
     const preview = usePreview();
+    const { user } = useAuth();
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
 
     const ownedAlbums = albums.filter((a) => a.owned);
     const availableAlbums = albums.filter((a) => !a.owned);
@@ -179,6 +184,7 @@ export default function ArtistPage() {
                     onShuffle={() => shufflePlay(artist, albums)}
                     onDownloadAll={canAcquire ? () => downloadArtist(artist) : undefined}
                     onStartRadio={handleStartRadio}
+                    onDelete={user?.role === "admin" && source === "library" && ownedAlbums.length > 0 ? () => setConfirmingDelete(true) : undefined}
                     isPendingDownload={isPendingByMbid(artist.mbid || "")}
                     isPlaying={isPlaying}
                     isPlayingThisArtist={
@@ -188,6 +194,14 @@ export default function ArtistPage() {
                     onPause={pause}
                 />
             </ArtistHero>
+
+            <DeleteLibraryItemDialog
+                kind="artist"
+                id={artist.id}
+                title={artist.name}
+                isOpen={confirmingDelete}
+                onClose={() => setConfirmingDelete(false)}
+            />
 
             <div className="relative min-h-[50vh] flex-1 animate-rise">
                 <div

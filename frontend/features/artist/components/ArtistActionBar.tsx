@@ -1,4 +1,4 @@
-import { Download, Radio } from "lucide-react";
+import { Download, Radio, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { MediaActionBar, MediaActionButton } from "@/components/ui/MediaActionBar";
 import type { Album, ArtistSource } from "../types";
@@ -11,6 +11,8 @@ interface ArtistActionBarProps {
     /** Absent for someone who may not start downloads: no download button then. */
     onDownloadAll?: () => void;
     onStartRadio: () => void;
+    /** Absent unless the viewer may delete this library artist: no delete button then. */
+    onDelete?: () => void;
     isPendingDownload: boolean;
     isPlaying: boolean;
     isPlayingThisArtist: boolean;
@@ -24,6 +26,7 @@ export function ArtistActionBar({
     onShuffle,
     onDownloadAll,
     onStartRadio,
+    onDelete,
     isPendingDownload,
     isPlaying,
     isPlayingThisArtist,
@@ -49,6 +52,15 @@ export function ArtistActionBar({
                     icon={<Radio className="w-5 h-5" />}
                     label="start artist radio"
                     onClick={onStartRadio}
+                />
+            )}
+
+            {onDelete && (
+                <MediaActionButton
+                    shape="square"
+                    icon={<Trash2 className="w-5 h-5" />}
+                    label="delete artist"
+                    onClick={onDelete}
                 />
             )}
 

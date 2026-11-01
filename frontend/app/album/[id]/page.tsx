@@ -18,6 +18,8 @@ import { AlbumHero } from "@/features/album/components/AlbumHero";
 import { AlbumActionBar } from "@/features/album/components/AlbumActionBar";
 import { TrackList } from "@/features/album/components/TrackList";
 import { SimilarAlbums } from "@/features/album/components/SimilarAlbums";
+import { DeleteLibraryItemDialog } from "@/features/library/components/DeleteLibraryItemDialog";
+import { useAuth } from "@/lib/auth-context";
 import { PageMessage } from "@/components/ui/PageMessage";
 
 interface AlbumPageProps {
@@ -43,6 +45,8 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         useAlbumActions();
     const { isPendingByMbid } = useDownloadContext();
     const preview = usePreview();
+    const { user } = useAuth();
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
 
     const combinedTracks = useMemo<AlbumTrack[]>(() => {
         const ownedTracks = (album?.tracks || []).map((track: AlbumTrack) => ({
@@ -192,6 +196,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     onShuffle={() => shufflePlay(album)}
                     onDownloadAlbum={canAcquire ? () => downloadAlbum(album) : undefined}
                     onAddToPlaylist={handleAddAlbumToPlaylist}
+                    onDelete={user?.role === "admin" && album.location === "LIBRARY" ? () => setConfirmingDelete(true) : undefined}
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""
                     )}
@@ -200,6 +205,14 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     onPause={pause}
                 />
             </AlbumHero>
+
+            <DeleteLibraryItemDialog
+                kind="album"
+                id={album.id}
+                title={album.title}
+                isOpen={confirmingDelete}
+                onClose={() => setConfirmingDelete(false)}
+            />
 
             <div className="relative min-h-[50vh] flex-1 animate-rise">
                 {colors && (

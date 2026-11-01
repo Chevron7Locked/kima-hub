@@ -14,6 +14,7 @@ import {
 } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { useLibraryActions } from "@/features/library/hooks/useLibraryActions";
 import { useAuth } from "@/lib/auth-context";
 import { CollectionMasthead } from "@/features/library/components/CollectionMasthead";
@@ -256,6 +257,7 @@ export default function LibraryPage() {
         }
     }, [outOfRange, activeTab, totalPages, filter, sortBy, itemsPerPage, router]);
 
+    const [deleting, setDeleting] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<DeleteDialogState>({
         isOpen: false,
         type: "track",
@@ -325,52 +327,34 @@ export default function LibraryPage() {
         }
     }, [formatTracksForAudio, playTracks]);
 
+    const closeDelete = useCallback(
+        () => setDeleteConfirm({ isOpen: false, type: "track", id: "", title: "" }),
+        [],
+    );
+
     const handleDelete = useCallback(async () => {
+        setDeleting(true);
         try {
-            switch (deleteConfirm.type) {
-                case "artist":
-                    await api.deleteArtist(deleteConfirm.id);
-                    break;
-                case "album":
-                    await api.deleteAlbum(deleteConfirm.id);
-                    break;
-                case "track":
-                    await api.deleteTrack(deleteConfirm.id);
-                    break;
-            }
-
-            // Reload data and close dialog - the item disappearing is feedback enough
-            await reloadData();
-            setDeleteConfirm({
-                isOpen: false,
-                type: "track",
-                id: "",
-                title: "",
-            });
+            await api.deleteTrack(deleteConfirm.id);
         } catch (error) {
-            console.error(`Failed to delete ${deleteConfirm.type}:`, error);
-            // Keep dialog open on error so user can retry
+            console.error("Failed to delete track:", error);
+            notify.error(`Could not delete track "${deleteConfirm.title}"`, {
+                message: error instanceof Error ? error.message : undefined,
+            });
+            // The dialog stays open so it can be retried.
+            setDeleting(false);
+            return;
         }
-    }, [deleteConfirm, reloadData]);
-
-    // Memoize delete handlers to prevent grid re-renders
-    const handleDeleteArtist = useCallback((id: string, name: string) => {
-        setDeleteConfirm({
-            isOpen: true,
-            type: "artist",
-            id,
-            title: name,
-        });
-    }, []);
-
-    const handleDeleteAlbum = useCallback((id: string, title: string) => {
-        setDeleteConfirm({
-            isOpen: true,
-            type: "album",
-            id,
-            title,
-        });
-    }, []);
+        // The track disappearing is feedback enough; the dialog closes even if the refresh fails.
+        try {
+            await reloadData();
+        } catch (error) {
+            console.error("Failed to refresh after deleting a track:", error);
+        } finally {
+            setDeleting(false);
+            closeDelete();
+        }
+    }, [deleteConfirm, reloadData, closeDelete]);
 
     const handleDeleteTrack = useCallback((id: string, title: string) => {
         setDeleteConfirm({
@@ -424,7 +408,6 @@ export default function LibraryPage() {
                             cards={artistCards}
                             isLoading={isLoading}
                             onPlay={playArtist}
-                            onDelete={isAdmin ? handleDeleteArtist : undefined}
                             moodByKey={vibe.artistMood}
                         />
                     )}
@@ -436,7 +419,6 @@ export default function LibraryPage() {
                             cards={albumCards}
                             isLoading={isLoading}
                             onPlay={playAlbum}
-                            onDelete={isAdmin ? handleDeleteAlbum : undefined}
                             moodByKey={vibe.albumMood}
                         />
                     )}
@@ -487,28 +469,12 @@ export default function LibraryPage() {
 
                 <ConfirmDialog
                     isOpen={deleteConfirm.isOpen}
-                    onClose={() =>
-                        setDeleteConfirm({
-                            isOpen: false,
-                            type: "track",
-                            id: "",
-                            title: "",
-                        })
-                    }
-                    onConfirm={handleDelete}
-                    title={`Delete ${
-                        deleteConfirm.type === "artist" ? "Artist"
-                        : deleteConfirm.type === "album" ? "Album"
-                        : "Track"
-                    }?`}
-                    message={
-                        deleteConfirm.type === "track" ?
-                            `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete the file from your system.`
-                        : deleteConfirm.type === "album" ?
-                            `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all tracks and files from your system.`
-                        :   `Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete all albums, tracks, and files from your system.`
-
-                    }
+                    onClose={closeDelete}
+                    onConfirm={() => void handleDelete()}
+                    closeOnConfirm={false}
+                    busy={deleting}
+                    title="Delete Track?"
+                    message={`Are you sure you want to delete "${deleteConfirm.title}"? This will permanently delete the file from your system.`}
                     confirmText="Delete"
                     cancelText="Cancel"
                     variant="danger"
