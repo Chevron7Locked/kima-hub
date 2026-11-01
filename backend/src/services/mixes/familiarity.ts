@@ -11,6 +11,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, topScores } from "../matching/rank";
+import { FAMILIAR_KEY_PREFIX } from "./cacheKeys";
 
 /** Only plays this recent count: a taste is read from the recent past, and the bound lets the (user, play time) index serve the scan. */
 const FAMILIAR_LOOKBACK_DAYS = 365;
@@ -42,8 +43,8 @@ export interface FamiliarBoost {
     boosts: number[];
 }
 
-export const familiarCacheKey = (userId: string) => `mixes:familiar:${userId}`;
-const familiarLockKey = (userId: string) => `mixes:familiar-lock:${userId}`;
+export const familiarCacheKey = (userId: string) => `${FAMILIAR_KEY_PREFIX}:${userId}`;
+const familiarLockKey = (userId: string) => `${FAMILIAR_KEY_PREFIX}-lock:${userId}`;
 
 interface SeedRow {
     id: string;

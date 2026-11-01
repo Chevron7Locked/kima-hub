@@ -56,6 +56,15 @@ beforeAll(async () => {
     for (const a of ["one1", "one2", "one3"]) await album(a, `${P}${a}`, 1613, 1, `${P}onebig`);
     // The 1620s and its genre: one Various Artists compilation of 400 songs, each its own artist.
     await album("comp", variousId, 1625, 400, `${P}various`);
+    // The 1630s and its genre: 400 songs by one artist, and 12 more by twelve other artists that a scan marked corrupt.
+    // Counting those, the artists could fill a mix; without them they cannot.
+    for (const g of ["badbig"]) await prisma.genre.create({ data: { id: `${P}${g}`, name: `${P}${g}` } });
+    await album("badmain", `${P}big`, 1632, 400, `${P}badbig`);
+    for (let i = 0; i < 12; i++) {
+        await prisma.artist.create({ data: { id: `${P}bad${i}`, name: `${P}bad${i}`, identityKey: `${P}bad${i}` } });
+        await album(`bad${i}`, `${P}bad${i}`, 1633, 1, `${P}badbig`);
+    }
+    await prisma.track.updateMany({ where: { id: { startsWith: `${P}trk_bad` }, NOT: { id: { startsWith: `${P}trk_badmain` } } }, data: { corrupt: true } });
 });
 
 afterAll(async () => {
@@ -76,5 +85,10 @@ describe("the decades and genres a mix may pick", () => {
     it("offers a decade and a genre of compilations, whose songs each count as their own artist", async () => {
         expect(await mixableDecades()).toContain(1620);
         expect((await mixableGenres()).map((g) => g.id)).toContain(`${P}various`);
+    });
+
+    it("does not count a song a scan marked corrupt toward a decade's or a genre's artists", async () => {
+        expect(await mixableDecades()).not.toContain(1630);
+        expect((await mixableGenres()).map((g) => g.id)).not.toContain(`${P}badbig`);
     });
 });

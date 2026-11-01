@@ -22,12 +22,12 @@ import {
     UnrankableLibraryError,
     artistSql,
     capByArtist,
-    drawMembers,
     getRecipe,
     recipeMembers,
 } from "./recipes";
 import { TRACK_LIMIT, seededOrder, weightedOrder } from "./helpers";
 import { FAMILIAR_SEEDS } from "./familiarity";
+import { ENERGY_BAND_KEY } from "./cacheKeys";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
 
 /** A play counts as night from this local hour (inclusive) ... */
@@ -67,7 +67,7 @@ export async function nightZone(requested?: string): Promise<string> {
 }
 
 /** Where the library's energy band is kept; under `mixes:` so the enrichment re-run that clears the mixes cache clears it. */
-export const ENERGY_BAND_KEY = "mixes:energy-band";
+export { ENERGY_BAND_KEY };
 const ENERGY_BAND_CACHE_SECONDS = 3 * 3600;
 /** A library with no readings yet is asked again soon, since the readings arrive with analysis. */
 const ENERGY_BAND_EMPTY_CACHE_SECONDS = 60;
@@ -195,6 +195,36 @@ function without(songs: StationSong[], have: Iterable<{ id: string }>): StationS
 }
 
 /**
+ * The songs not yet in `have`, and not another copy of one in it or of an earlier song in the list: the same title (any
+ * case) by the same artist, the one-song rule nightSongs and the recipe members use. The artist is read the same way for
+ * every source (artistSql), so a compilation's songs by no one are never copies of each other.
+ */
+async function withoutCopies(songs: StationSong[], have: StationSong[]): Promise<StationSong[]> {
+    const fresh = without(songs, have);
+    if (fresh.length === 0) return fresh;
+    const rows = await prisma.$queryRaw<Array<{ id: string; title_key: string; artist_key: string }>>`
+        SELECT t.id, lower(t.title) AS title_key, ${artistSql()} AS artist_key
+        FROM "Track" t
+        JOIN "Album" a ON a.id = t."albumId"
+        JOIN "Artist" ar ON ar.id = a."artistId"
+        WHERE t.id = ANY(${[...fresh, ...have].map((s) => s.id)})
+    `;
+    const read = new Map(rows.map((r) => [r.id, r]));
+    const keyOf = (s: StationSong) => {
+        const r = read.get(s.id);
+        return r ? `${r.title_key}\0${r.artist_key}` : s.id;
+    };
+    const taken = new Set(have.map(keyOf));
+    return fresh.flatMap((s) => {
+        const key = keyOf(s);
+        if (taken.has(key)) return [];
+        taken.add(key);
+        // The artist as the cap counts it: the same reading for every source.
+        return [{ ...s, artistId: read.get(s.id)?.artist_key ?? s.artistId }];
+    });
+}
+
+/**
  * The Late Night station's songs for this listener. With COLD_START_SONGS or more distinct night songs, those songs
  * (only the ones played at night twice or more when at least COLD_START_SONGS of them were, so a single late-night
  * song does not outweigh the habit). With fewer, their night songs plus similar songs up to STATION_FILL, and with no
@@ -250,6 +280,7 @@ export async function nightMixTracks(
             (a, b) => fit(b) - fit(a) || b.plays - a.plays || tie.get(a.id)! - tie.get(b.id)!,
         );
     }
+    const known = new Map<string, StationSong>(ordered.map((s) => [s.id, s]));
     let picked = capByArtist(ordered, limit);
     // Short of the limit (a cold start, or a few artists whose songs the cap leaves out): fill with songs that sound like
     // the listener's most-played night songs.
@@ -262,7 +293,8 @@ export async function nightMixTracks(
         } catch (error) {
             logger.debug(`[Mixes] ${spec.fallbackRecipe}: no similar songs: ${error instanceof Error ? error.message : error}`);
         }
-        const extra = without(similar, own);
+        const extra = await withoutCopies(without(similar, own), own);
+        for (const s of extra) known.set(s.id, s);
         const merged = [...have, ...extra];
         picked = capByArtist(merged, limit);
     }
@@ -272,8 +304,11 @@ export async function nightMixTracks(
             logger.debug(`[Mixes] ${spec.fallbackRecipe}: no night plays and no recipe members`);
             return null;
         }
-        const rest = without(members, picked.map((id) => ({ id })));
-        picked = [...picked, ...drawMembers(rest, seed, limit - picked.length)];
+        // The artist cap counts the picked songs and the top-up together, the picked ones first; a top-up song that is
+        // another copy of a picked song (same title, same artist) is left out.
+        const have = picked.map((id) => known.get(id)!);
+        const rest = await withoutCopies(without(members, have), have);
+        picked = capByArtist([...have, ...seededOrder(rest, seed, (m) => m.id)], limit);
     }
     return picked.length >= MIN_MIX_TRACKS ? picked : null;
 }

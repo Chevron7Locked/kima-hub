@@ -11,7 +11,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { stationPage, type StationPage, type StationRequest, type StationSong } from "./stationOrder";
-import { LIVE_MOODS, MOOD_HEADS, type Mood } from "../moods/heads";
+import { LIVE_MOODS, type Mood } from "../moods/heads";
+import { SCORED_SONGS_RULE } from "../moods/scoredSongs";
 import { READING_SQL, loadMoodState, type MoodState, type MoodStats, type Reading } from "../moods/state";
 import { TRACK_LIMIT, seededOrder } from "./helpers";
 import { MIN_MIX_TRACKS, artistSql, capByArtist } from "./artistCap";
@@ -214,8 +215,7 @@ export const SCORED_SONGS = Prisma.sql`
     JOIN "Track" t ON t.id = m.track_id
     JOIN "Album" a ON a.id = t."albumId"
     JOIN "Artist" ar ON ar.id = a."artistId"
-    WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-      AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
+    WHERE ${SCORED_SONGS_RULE}
 `;
 
 // ---- mood definitions (moodDefinitions.ts) ---------------------------------------------------------------------
@@ -613,9 +613,9 @@ export async function pickStationPage(recipe: Recipe, request: StationRequest): 
 /**
  * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
  * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
- * untagged, focus tagged by the Focus Mix recipe included, and it keeps playing them while the statistics are rebuilt,
- * as the tags are kept then. One title by one artist once, refilled as any station (stationPage); no songs before the
- * mood step has scored one.
+ * untagged (focus is tagged from its definition in moodDefinitions.json, as every defined mood is), and it keeps
+ * playing them while the statistics are rebuilt, as the tags are kept then. One title by one artist once, refilled as
+ * any station (stationPage); no songs before the mood step has scored one.
  */
 export async function pickWildcardPage(request: StationRequest): Promise<StationPage> {
     return stationPage("wildcard", async () => {

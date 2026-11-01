@@ -7,7 +7,7 @@
 import express from "express";
 import request from "supertest";
 import { parseRecipes } from "../recipes";
-import { MOOD_STATIONS, stationSubtitle } from "../stations";
+import { MOOD_STATIONS, resolveMoodStation, stationSubtitle } from "../stations";
 
 const recipe = (components: Record<string, number>) => parseRecipes({ test: { name: "Test", components } }).get("test")!;
 
@@ -75,5 +75,27 @@ describe("the shipped stations", () => {
         expect(stations[7].description).toBe("Uplifting, happy, epic");
         // Late Night plays the listener's own night plays, so it says that instead of the fallback recipe's parts.
         expect(stations[8].description).toBe("The songs you play after dark, and songs like them");
+    });
+});
+
+describe("the station an app's value names", () => {
+    it("finds a current station, in any case", () => {
+        expect(resolveMoodStation("Late-Night")).toMatchObject({ kind: "station", value: "late-night" });
+        expect(resolveMoodStation("wildcard")).toMatchObject({ kind: "station", value: "wildcard" });
+    });
+
+    it("answers an older app's focus with Focus: Calm, which Focus was split into", () => {
+        expect(resolveMoodStation("focus")).toMatchObject({ kind: "station", value: "focus-calm" });
+    });
+
+    it("calls the stations the app no longer offers retired, not unknown", () => {
+        for (const value of ["summer", "3am-thoughts", "friday-night"]) {
+            expect(resolveMoodStation(value)).toEqual({ kind: "retired", value });
+        }
+    });
+
+    it("calls anything else unknown", () => {
+        expect(resolveMoodStation("Nonsense")).toEqual({ kind: "unknown", value: "nonsense" });
+        expect(resolveMoodStation("")).toEqual({ kind: "unknown", value: "" });
     });
 });

@@ -1,6 +1,6 @@
 /**
  * The tag pass is skipped while the mood statistics row is the one it last wrote from (tags.ts), which is safe only if
- * every input the tags read changes that row. The inputs fingerprint (state.ts inputsFingerprint) covers the mood
+ * every input the tags read changes that row. The inputs fingerprint (inputsHash.ts hashInputs) covers the mood
  * scores, the eligible songs and the arousal, instrumental, acoustic, tempo, tempo confidence and key scale readings.
  * The tags read the mood scores and, for a defined mood, the parts of its definition (mixes/moodDefinitions.json):
  * every part must read only fingerprinted inputs, or a re-analysis that changed only that input would keep stale tags.
@@ -26,7 +26,7 @@ function inputsOf(part: DefinitionPart): string[] {
 }
 
 /** What inputsFingerprint hashes, read from its source so the test fails if the two drift apart. */
-const FINGERPRINT_SOURCE = fs.readFileSync(path.join(__dirname, "../state.ts"), "utf8");
+const FINGERPRINT_SOURCE = fs.readFileSync(path.join(__dirname, "../inputsHash.ts"), "utf8");
 const FINGERPRINTED = new Set<string>([
     ...MOODS.map((m) => `mood:${m}`),
     ...["arousal", "instrumental", "acoustic"],

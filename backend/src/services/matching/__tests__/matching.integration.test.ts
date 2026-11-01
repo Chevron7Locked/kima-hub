@@ -23,7 +23,7 @@ import {
 } from "../formula";
 import { updateMap } from "../map";
 import { layoutLibrary } from "../mapCompute";
-import { artistProfiles, matchingContext, scoreLibrary } from "../rank";
+import { artistProfiles, matchingContext, scoreLibrary, topScores } from "../rank";
 import { MATCHING_MODEL, buildMatching, loadMatchingState, matchingGenres, matchingProgress } from "../state";
 import { findSimilarTracks } from "../../hybridSimilarity";
 import { generateSongPath } from "../../songPath";
@@ -547,6 +547,22 @@ describe("rebuilding when the inputs change", () => {
         expect(similar.some((t) => t.id === gone)).toBe(false);
         expect(await buildMatching()).toEqual({ feelUpdated: 0, rebuilt: true });
         expect((await loadMatchingState())!.trackCount).toBe(before.trackCount - 1);
+    });
+
+    it("never offers a song a scan marked corrupt as a similar track, and offers it again once it is clean", async () => {
+        const seedId = trackId(3, 0, 0);
+        const near = (await findSimilarTracks(seedId, 30)).map((t) => t.id);
+        expect(near.length).toBeGreaterThan(3);
+        const bad = near[0];
+        await prisma.track.update({ where: { id: bad }, data: { corrupt: true } });
+        try {
+            expect((await findSimilarTracks(seedId, 30)).map((t) => t.id)).not.toContain(bad);
+            const ctx = (await matchingContext([seedId]))!;
+            expect((await topScores(ctx, [{ trackId: seedId, weight: 1 }], 200, [seedId])).map((r) => r.id)).not.toContain(bad);
+        } finally {
+            await prisma.track.update({ where: { id: bad }, data: { corrupt: false } });
+        }
+        expect((await findSimilarTracks(seedId, 30)).map((t) => t.id)).toContain(bad);
     });
 
     it("recomputes feel for a track whose sound vector changed", async () => {

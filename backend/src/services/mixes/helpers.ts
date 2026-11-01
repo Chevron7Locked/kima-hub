@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
-import { IN_LIBRARY } from "../../utils/libraryEligibility";
+import { LIBRARY_PLAYABLE } from "../../utils/libraryEligibility";
 import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 
 export interface ProgrammaticMix {
@@ -256,13 +256,17 @@ export function drawWeighted<T>(items: T[], weightOf: (item: T) => number, take:
     return weightedOrder(items, weightOf).slice(0, take);
 }
 
-/** The tracks with these ids, in the order of `ids`. */
+/**
+ * The playable library songs with these ids, in the order of `ids`: a song whose file is missing, that a scan marked
+ * corrupt or whose album is a Discover suggestion is left out (Discover songs play only in Discover, whose own
+ * playlist reads its albums directly, not through here).
+ */
 export async function tracksByIds<I extends Prisma.TrackInclude>(
     ids: string[],
     include: I
 ): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
     if (ids.length === 0) return [];
-    const rows = await prisma.track.findMany({ where: { id: { in: ids } }, include });
+    const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...LIBRARY_PLAYABLE }, include });
     const byId = new Map(rows.map((t) => [t.id, t]));
     return ids.flatMap((id) => byId.get(id) ?? []);
 }
@@ -278,7 +282,7 @@ export async function sampleTrackIds(args: {
 }): Promise<string[]> {
     assertTake(args.take);
     const rows = await prisma.track.findMany({
-        where: { AND: [args.where, IN_LIBRARY] },
+        where: { AND: [args.where, LIBRARY_PLAYABLE] },
         select: { id: true },
         orderBy: { id: "asc" },
     });
@@ -299,7 +303,7 @@ export async function seededTrackIds(where: Prisma.Sql, take: number, seed: numb
         SELECT t.id
         FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${where}
+        WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${where}
         ORDER BY ${seededKeySql(seed, Prisma.sql`t.id`)}
         LIMIT ${take}
     `;
@@ -320,7 +324,7 @@ async function seededCappedTrackIds(where: Prisma.Sql, limit: number, seed: numb
             FROM "Track" t
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${where}
+            WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${where}
         ) ranked
         WHERE n <= 3
         ORDER BY k
@@ -383,7 +387,7 @@ export async function sampledMix(
     const [{ matching }] = await prisma.$queryRaw<{ matching: number }[]>`
         SELECT count(*)::int AS matching FROM (
             SELECT 1 FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-            WHERE t."missingSince" IS NULL AND a.location = 'LIBRARY' AND ${spec.where}
+            WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${spec.where}
             LIMIT ${spec.minTracks}
         ) enough`;
     if (matching < spec.minTracks) return null;

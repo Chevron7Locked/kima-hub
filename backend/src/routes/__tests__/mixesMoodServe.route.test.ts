@@ -133,4 +133,12 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
             expect(given.has(id)).toBe(false);
         }
     });
+
+    it("answers 400, and keeps the saved mix, when none of the songs sent can be saved", async () => {
+        const before = await prisma.userMoodMix.findUnique({ where: { userId: USER_ID } });
+        const res = await request(app).post("/mixes/mood/buckets/chill/save").send({ trackIds: ["mmsr_no_such_track"] });
+        expect(res.status).toBe(400);
+        const after = await prisma.userMoodMix.findUnique({ where: { userId: USER_ID } });
+        expect(after?.trackIds).toEqual(before?.trackIds);
+    });
 });

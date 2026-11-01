@@ -140,7 +140,7 @@ function standardisedFeel(state: MatchingState): Prisma.Sql {
     return Prisma.sql`(SELECT ${v} AS v, ${a} AS a)`;
 }
 
-/** Every eligible track except `exclude`, with the `select` columns and one score per set, named by `names`. */
+/** Every eligible track (file present, not marked corrupt, in the library) except `exclude`, with the `select` columns and one score per set, named by `names`. */
 function scoreQuery(
     ctx: MatchingContext,
     sets: WeightedTrack[][],
@@ -166,7 +166,8 @@ function scoreQuery(
         JOIN "Artist" ar ON ar.id = a."artistId"
         LEFT JOIN bonus b ON b.artist_id = ar.id
         WHERE te.model_version = ${MATCHING_MODEL}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+          AND t."missingSince" IS NULL AND t.corrupt = false
+          AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
           AND te.track_id <> ALL(${exclude}::text[])
     `;
 }

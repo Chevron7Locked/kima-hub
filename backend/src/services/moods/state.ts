@@ -11,6 +11,8 @@ import { prisma } from "../../utils/db";
 import { formatEmbedding } from "../../utils/embedding";
 import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "./heads";
+import { SCORED_SONGS_RULE } from "./scoredSongs";
+import { changeSignal, hashInputs } from "./inputsHash";
 
 /** Raise when the tracks the statistics cover or a reading's transform changes, so every library rebuilds them. */
 const STATE_FORMULA_VERSION = 2;
@@ -75,21 +77,22 @@ export async function updateMoods(tx: Prisma.TransactionClient): Promise<number>
  * ones the statistics cover: current scores, a file that is there and readable, and finished analysis.
  */
 async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> {
-    const [row] = await tx.$queryRaw<Array<{ n: number; h: string }>>`
-        SELECT count(*)::int AS n,
-               COALESCE(sum(hashtextextended(
-                   m.track_id || ':' || extract(epoch FROM m.embedded_at)::text || ':' ||
-                   COALESCE(t.arousal::text, '') || ':' || COALESCE(t.instrumentalness::text, '') || ':' ||
-                   COALESCE(t.acousticness::text, '') || ':' || COALESCE(t.bpm::text, '') || ':' ||
-                   COALESCE(t."bpmConfidence"::text, '') || ':' || COALESCE(t."keyScale", ''), 0)), 0)::text AS h
-        FROM track_moods m
-        JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
-        JOIN "Track" t ON t.id = m.track_id
-        WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
-    `;
-    return crypto.createHash("sha256").update(JSON.stringify([MOOD_STATE_VERSION, row.n, row.h])).digest("hex");
+    const { n, h } = await hashInputs(tx);
+    return crypto.createHash("sha256").update(JSON.stringify([MOOD_STATE_VERSION, n, h])).digest("hex");
 }
+
+/**
+ * What this process last learned about the inputs: the change signal when it hashed them, and the fingerprint that
+ * hash gave. While the stored row still holds that fingerprint and the signal has not moved, the inputs are the ones
+ * already hashed and the full hash is skipped. A process that has not hashed yet has nothing here and hashes.
+ */
+let lastHash: { signal: string; fingerprint: string; at: number } | null = null;
+
+/**
+ * The longest a signal may stand in for the hash. The signal watches what the analysis and vector stages write, so a
+ * write that touches none of it (a hand edit of a reading) would otherwise go unseen for good.
+ */
+const HASH_AT_LEAST_EVERY_MS = 60 * 60 * 1000;
 
 type StatColumn = `${Mood | Reading}_${"mean" | "sd"}`;
 
@@ -114,8 +117,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         FROM track_moods m
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
-        WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
+        WHERE ${SCORED_SONGS_RULE}
     `;
     if (row.n === 0) return null;
     const finite = (column: StatColumn): number => {
@@ -144,13 +146,29 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
     return { track_count: row.n, ...stats };
 }
 
-/** The statistics, rebuilt when their inputs changed; true when the stored row was written or removed. */
-export async function buildMoodState(tx: Prisma.TransactionClient): Promise<boolean> {
-    const fingerprint = await inputsFingerprint(tx);
+/**
+ * The statistics, rebuilt when their inputs changed; true when the stored row was written or removed. `scored` is how
+ * many scores this same transaction just wrote: the signal is only trusted when it is 0, and a caller that does not
+ * say always hashes.
+ */
+export async function buildMoodState(tx: Prisma.TransactionClient, scored?: number): Promise<boolean> {
     const current = await tx.moodState.findUnique({
         where: { id: "default" },
         select: { version: true, fingerprint: true },
     });
+    const signal = await changeSignal(tx);
+    if (
+        scored === 0 &&
+        current?.version === MOOD_STATE_VERSION &&
+        lastHash !== null &&
+        lastHash.fingerprint === current.fingerprint &&
+        lastHash.signal === signal &&
+        Date.now() - lastHash.at < HASH_AT_LEAST_EVERY_MS
+    ) {
+        return false;
+    }
+    const fingerprint = await inputsFingerprint(tx);
+    lastHash = { signal, fingerprint, at: Date.now() };
     if (current?.version === MOOD_STATE_VERSION && current.fingerprint === fingerprint) return false;
     const state = await computeState(tx);
     if (!state) {
@@ -175,7 +193,7 @@ export async function buildMoods(): Promise<{ scored: number; stateChanged: bool
                 // The state row first, as a re-run takes it, before the score rows: one order, so neither deadlocks.
                 await tx.$queryRaw`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`;
                 const scored = await updateMoods(tx);
-                const stateChanged = await buildMoodState(tx);
+                const stateChanged = await buildMoodState(tx, scored);
                 return { scored, stateChanged };
             },
             {

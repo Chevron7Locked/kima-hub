@@ -5,7 +5,7 @@ import { normalizeArtistName } from "../artistIdentity";
 import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
 import { LIBRARY_LOCATION } from "../libraryFilters";
-import { IN_LIBRARY, NOT_MISSING } from "../../utils/libraryEligibility";
+import { IN_LIBRARY, LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -25,7 +25,7 @@ export async function generateTopTracksMix(
 ): Promise<ProgrammaticMix | null> {
     const playStats = await prisma.play.groupBy({
         by: ["trackId"],
-        where: { userId, track: { ...NOT_MISSING, ...IN_LIBRARY } },
+        where: { userId, track: LIBRARY_PLAYABLE },
         _count: { trackId: true },
         orderBy: { _count: { trackId: "desc" } },
         take: TRACK_LIMIT,
@@ -143,7 +143,7 @@ export async function generateArtistSimilarMix(
                     where: { location: LIBRARY_LOCATION },
                     include: {
                         tracks: {
-                            where: NOT_MISSING,
+                            where: PLAYABLE,
                             include: { album: MIX_SONG_ALBUM },
                         },
                     },
@@ -187,7 +187,7 @@ export async function generateRandomDiscoveryMix(
             FROM "Album" a
             JOIN "Artist" ar ON ar.id = a."artistId"
             WHERE a.location = 'LIBRARY'
-              AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL)
+              AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL AND t.corrupt = false)
         ) ranked
         WHERE n = 1
         ORDER BY k
@@ -200,7 +200,7 @@ export async function generateRandomDiscoveryMix(
         where: { id: { in: albumIds } },
         include: {
             tracks: {
-                where: NOT_MISSING,
+                where: PLAYABLE,
                 include: { album: MIX_SONG_ALBUM },
             },
         },

@@ -13,7 +13,7 @@ import { redisClient } from "../utils/redis";
 import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 import { rankForPosition } from "../utils/lexoRank";
 import { announcePlaylistChange } from "../services/playlistEvents";
-import { IN_LIBRARY } from "../utils/libraryEligibility";
+import { LIBRARY_PLAYABLE } from "../utils/libraryEligibility";
 
 const router = Router();
 
@@ -91,9 +91,9 @@ async function getMixesForUser(userId: string, requested?: string): Promise<any[
 
 /** Full track rows for the given ids, in the order the ids list them. */
 async function loadTracksInMixOrder(trackIds: string[]): Promise<any[]> {
-    // Library songs only: a mix kept from before a song's album left the library never plays it.
+    // Playable library songs only: a mix kept from before a song went corrupt or its album left the library never plays it.
     const tracks = await prisma.track.findMany({
-        where: { id: { in: trackIds }, ...IN_LIBRARY },
+        where: { id: { in: trackIds }, ...LIBRARY_PLAYABLE },
         include: {
             album: {
                 include: {
@@ -199,6 +199,11 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
             trackIds
         );
 
+        if (!savedMix && trackIds && trackIds.length > 0) {
+            return res.status(400).json({
+                error: "None of those songs can be saved: each is missing, corrupt or not in the library",
+            });
+        }
         if (!savedMix) {
             return res.status(400).json({
                 error: `Not enough tracks for mood: ${mood}`,
@@ -287,7 +292,7 @@ router.post("/:id/save", async (req, res) => {
         const mixTrackIds: string[] = [...new Set<string>(mix.trackIds)];
         const present = new Set(
             (
-                await prisma.track.findMany({ where: { id: { in: mixTrackIds }, ...IN_LIBRARY }, select: { id: true } })
+                await prisma.track.findMany({ where: { id: { in: mixTrackIds }, ...LIBRARY_PLAYABLE }, select: { id: true } })
             ).map((t) => t.id)
         );
         const trackIds = mixTrackIds.filter((id) => present.has(id));

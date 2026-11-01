@@ -134,7 +134,7 @@ describe("GET /whats-new/mood-mixes", () => {
         const res = await as(userId).get("/whats-new/mood-mixes");
         expect(res.status).toBe(200);
         expect(res.body).toEqual({
-            mix: { id: MIX_ID, name: "Your Upbeat Mix", mood: "happy", trackCount: 4, retired: false },
+            mix: { id: MIX_ID, name: "Your Upbeat Mix", mood: "happy", trackCount: 3, retired: false },
             decision: null,
             playlist: null,
         });

@@ -24,7 +24,7 @@ import {
 } from "../../services/mixes/recipes";
 import { pickNightStationPage } from "../../services/mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../../services/mixes/stationOrder";
-import { MOOD_STATIONS, moodStationList } from "../../services/mixes/stations";
+import { moodStationList, resolveMoodStation } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { IN_LIBRARY, LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
@@ -39,9 +39,6 @@ const TRACK_SORT_MAP: Record<string, any> = {
 };
 
 const router = Router();
-
-/** Mood stations that no longer exist (Summer; the 3AM Thoughts and Friday Night mixes' stations). */
-const RETIRED_MOOD_STATIONS = new Set(["summer", "3am-thoughts", "friday-night"]);
 
 router.get("/recently-listened", async (req, res) => {
   try {
@@ -820,19 +817,16 @@ router.get("/radio", async (req, res) => {
       }
 
       case "mood": {
-        let moodValue = ((value as string) || "").toLowerCase();
-        // Focus split into Focus: Calm and Focus: Energy; an older app asking for "focus" gets the calm one.
-        if (moodValue === "focus") moodValue = "focus-calm";
-        // Stations the app no longer offers answer an empty list, not an error, so an older app that still lists
-        // them shows an empty station instead of a failure.
-        if (RETIRED_MOOD_STATIONS.has(moodValue)) {
-          return res.json({ tracks: [], message: `The ${moodValue} station has been retired` });
+        const lookup = resolveMoodStation((value as string) || "");
+        // Stations the app no longer offers answer an empty list, not an error.
+        if (lookup.kind === "retired") {
+          return res.json({ tracks: [], message: `The ${lookup.value} station has been retired` });
+        }
+        if (lookup.kind === "unknown") {
+          return res.status(400).json({ error: `Unknown mood: ${lookup.value}` });
         }
         // A station with no recipe is Wildcard (pickWildcardPage).
-        const moodStation = MOOD_STATIONS.get(moodValue);
-        if (!moodStation) {
-          return res.status(400).json({ error: `Unknown mood: ${moodValue}` });
-        }
+        const moodStation = lookup.station;
         const recipe = moodStation.recipe;
         const request = parseStationRequest(req.query, limitNum, req.user?.id);
         if (!request) return res.status(400).json({ error: BAD_STATION_REQUEST });

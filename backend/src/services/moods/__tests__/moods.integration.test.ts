@@ -15,6 +15,7 @@ import { refreshMoodSnapshot } from "../../moodBucketService";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { READINGS, buildMoodState, buildMoods, loadMoodState, moodProgress, updateMoods, type Reading } from "../state";
 import { writeMoodTags } from "../tags";
+import * as inputsHash from "../inputsHash";
 import { insertEmbeddings, vectorLiteral } from "../../../__tests__/helpers/embeddingFixtures";
 import { removeMoodRows, untilWaiting } from "../../__tests__/helpers/moodRows";
 import reference from "./fixtures/shipped-reference.json";
@@ -289,6 +290,48 @@ describe("the library statistics", () => {
         expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
     });
 
+    it("an unchanged library does not run the full hash, and a changed one still does", async () => {
+        await buildMoods();
+        const hash = jest.spyOn(inputsHash, "hashInputs");
+        try {
+            expect(await buildMoods()).toEqual({ scored: 0, stateChanged: false });
+            expect(await buildMoods()).toEqual({ scored: 0, stateChanged: false });
+            expect(hash).not.toHaveBeenCalled();
+
+            // An analysis write moves the signal: the hash runs and the new reading reaches the statistics.
+            await prisma.track.update({ where: { id: trackId(5) }, data: { arousal: 0.321, analyzedAt: new Date() } });
+            expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
+            expect(hash).toHaveBeenCalledTimes(1);
+
+            // And once hashed, the next unchanged pass skips it again.
+            expect(await buildMoods()).toEqual({ scored: 0, stateChanged: false });
+            expect(hash).toHaveBeenCalledTimes(1);
+        } finally {
+            hash.mockRestore();
+        }
+    });
+
+    it("two albums swapping places between Discover and the library moves the signal", async () => {
+        const [inLib, inDiscover] = [`${P}-swap-a`, `${P}-swap-b`];
+        await prisma.album.create({ data: { id: inLib, artistId: ARTIST, rgMbid: `${P}-rg-a`, identityKey: `${P}-ik-a`, title: "Swap A", primaryType: "Album", location: "LIBRARY" } });
+        await prisma.album.create({ data: { id: inDiscover, artistId: ARTIST, rgMbid: `${P}-rg-b`, identityKey: `${P}-ik-b`, title: "Swap B", primaryType: "Album", location: "DISCOVER" } });
+        const hash = jest.spyOn(inputsHash, "hashInputs");
+        try {
+            await buildMoods();
+            hash.mockClear();
+            expect(await buildMoods()).toEqual({ scored: 0, stateChanged: false });
+            expect(hash).not.toHaveBeenCalled();
+            // Both at once: the number of library albums stays the same.
+            await prisma.album.update({ where: { id: inLib }, data: { location: "DISCOVER" } });
+            await prisma.album.update({ where: { id: inDiscover }, data: { location: "LIBRARY" } });
+            await buildMoods();
+            expect(hash).toHaveBeenCalledTimes(1);
+        } finally {
+            hash.mockRestore();
+            await prisma.album.deleteMany({ where: { id: { in: [inLib, inDiscover] } } });
+        }
+    });
+
     it("are not read back from other weights", async () => {
         await prisma.$executeRawUnsafe(`UPDATE mood_state SET version = 'older'`);
         expect(await loadMoodState()).toBeNull();
@@ -345,7 +388,7 @@ describe("a re-run that deletes a sound vector while the step scores it", () => 
 
 describe("a reading no eligible track has", () => {
     it("is stored as absent while the moods' statistics build; only the recipes that blend it refuse", async () => {
-        await prisma.$executeRawUnsafe(`UPDATE "Track" SET instrumentalness = NULL WHERE id LIKE '${P}%'`);
+        await prisma.$executeRawUnsafe(`UPDATE "Track" SET instrumentalness = NULL, "updatedAt" = now() WHERE id LIKE '${P}%'`);
         expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
         expect(logger.warn).toHaveBeenCalledWith(
             "[Moods] No eligible track has the instrumental_logit reading; recipes that blend it rank no songs",

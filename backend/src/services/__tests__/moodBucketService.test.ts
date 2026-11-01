@@ -102,7 +102,9 @@ describe("saveUserMoodMix with explicit trackIds", () => {
         // Verify track.findMany was called with the exact trackIds
         expect(prisma.track.findMany).toHaveBeenCalledTimes(1);
         const trackCall = (prisma.track.findMany as jest.Mock).mock.calls[0][0];
-        expect(trackCall.where).toEqual({ id: { in: explicitTrackIds } });
+        expect(trackCall.where).toEqual(
+            expect.objectContaining({ id: { in: explicitTrackIds }, missingSince: null, corrupt: false, album: { location: "LIBRARY" } }),
+        );
     });
 
     it("saving then reading back returns the persisted trackIds in the same order", async () => {
@@ -343,6 +345,7 @@ describe("getUserMoodMix", () => {
     });
 
     it("returns the saved mix with correct format", async () => {
+        (prisma.track.findMany as jest.Mock).mockResolvedValue(MOCK_TRACKS.slice(0, 2));
         const savedAt = new Date("2025-01-01T00:00:00.000Z");
         (prisma.userMoodMix.findUnique as jest.Mock).mockResolvedValue({
             userId: USER_ID,
@@ -359,6 +362,7 @@ describe("getUserMoodMix", () => {
         expect(result!.mood).toBe(MOOD);
         expect(result!.trackIds).toEqual(["track-1", "track-2"]);
         expect(result!.trackCount).toBe(2);
+        expect(result!.coverUrls).toEqual(["https://example.com/cover1.jpg", "https://example.com/cover2.jpg"]);
         expect(result!.id).toContain("your-mood-mix-");
     });
 

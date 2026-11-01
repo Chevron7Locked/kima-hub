@@ -4,7 +4,7 @@
  */
 import { ProgrammaticMix, albumCoverUrls, getMixColor, tracksByIds } from "./helpers";
 import { weekdayOf } from "./mixDay";
-import { pickRecipeTracks } from "./recipes";
+import { UnrankableLibraryError, pickRecipeTracks } from "./recipes";
 
 export interface RecipeMixSpec {
     /** The recipe's id in recipes.json. */
@@ -21,13 +21,19 @@ export interface RecipeMixSpec {
 }
 
 /**
- * The mix for `today`, or null on another weekday or when fewer than MIN_MIX_TRACKS songs are the recipe's members.
+ * The mix for `today`, or null on another weekday or when fewer than MIN_MIX_TRACKS songs are the recipe's members or the library cannot rank the recipe (UnrankableLibraryError).
  * `today` is the day the mix holds for, with a refresh's reroll appended, so a refresh draws again.
  */
 export async function recipeMix(spec: RecipeMixSpec, userId: string, today: string): Promise<ProgrammaticMix | null> {
     if (spec.day !== undefined && weekdayOf(today) !== spec.day) return null;
-    const mix = await pickRecipeTracks(spec.recipe, { userId, date: today });
-    return mix ? mixFromTracks(spec, today, mix.trackIds) : null;
+    try {
+        const mix = await pickRecipeTracks(spec.recipe, { userId, date: today });
+        return mix ? mixFromTracks(spec, today, mix.trackIds) : null;
+    } catch (error) {
+        // A library the recipe cannot rank has no such mix; that is a property of the library, not a fault.
+        if (error instanceof UnrankableLibraryError) return null;
+        throw error;
+    }
 }
 
 /** The mix `spec` names for `today`, holding these songs in this order. */

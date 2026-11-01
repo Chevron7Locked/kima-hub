@@ -188,14 +188,14 @@ describe.each(cases)("$name", (c) => {
     });
 
     const matching = () =>
-        rows.filter((r) => !r.missingSince && c.clause(r, mixes[0])).map((r) => r.id);
+        rows.filter((r) => playable(r) && c.clause(r, mixes[0])).map((r) => r.id);
 
     it("returns a mix of the documented size, or every match when fewer, with no repeated track", () => {
         expect(mixes).toHaveLength(callDates.length);
         for (const mix of mixes) {
             // A decade the date picks can hold fewer songs than a mix (the 1950s, from a few albums' original years); a
             // capped mix holds at most 2 per artist, rising to 3 and then no cap only while that leaves fewer than 8.
-            const match = rows.filter((r) => !r.missingSince && c.clause(r, mix));
+            const match = rows.filter((r) => playable(r) && c.clause(r, mix));
             const size = c.capped ? cappedSize(match, c.size) : Math.min(c.size, match.length);
             expect(mix.trackIds).toHaveLength(size);
             expect(new Set(mix.trackIds).size).toBe(size);
@@ -210,8 +210,8 @@ describe.each(cases)("$name", (c) => {
         expect(bad).toEqual([]);
     });
 
-    it("never returns a track whose file is missing", () => {
-        const missing = mixes.flatMap((mix) => mix.trackIds.filter((id) => byId.get(id)!.missingSince !== null));
+    it("never returns a track whose file is missing, that a scan marked corrupt, or that is a Discover song", () => {
+        const missing = mixes.flatMap((mix) => mix.trackIds.filter((id) => !playable(byId.get(id)!)));
         expect(missing).toEqual([]);
     });
 

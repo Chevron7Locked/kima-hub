@@ -84,6 +84,29 @@ function checkedStations(stations: MoodStation[]): ReadonlyMap<string, MoodStati
 
 export const MOOD_STATIONS = checkedStations(STATIONS);
 
+/** Station values that no longer exist (Summer; the 3AM Thoughts and Friday Night mixes' stations). */
+const RETIRED_STATIONS: ReadonlySet<string> = new Set(["summer", "3am-thoughts", "friday-night"]);
+/** Old values that now name another station: Focus split into Focus: Calm and Focus: Energy. */
+const STATION_ALIASES: ReadonlyMap<string, string> = new Map([["focus", "focus-calm"]]);
+
+/**
+ * What an app's station value names, as the radio route needs it. A retired station is its own answer, so the route can
+ * reply with an empty list instead of an error and an older app that still lists it shows an empty station.
+ */
+export type StationLookup =
+    | { kind: "station"; value: string; station: MoodStation }
+    | { kind: "retired"; value: string }
+    | { kind: "unknown"; value: string };
+
+/** The station an app's value names: read in lower case, with an old renamed value (focus) naming its successor. */
+export function resolveMoodStation(requested: string): StationLookup {
+    const lower = requested.toLowerCase();
+    const value = STATION_ALIASES.get(lower) ?? lower;
+    if (RETIRED_STATIONS.has(value)) return { kind: "retired", value };
+    const station = MOOD_STATIONS.get(value);
+    return station ? { kind: "station", value, station } : { kind: "unknown", value };
+}
+
 /** The stations as the apps list them, each with its generated subtitle. */
 export function moodStationList(): { value: string; name: string; description: string }[] {
     return [...MOOD_STATIONS.values()].map(({ value, name, recipe, personal }) => ({

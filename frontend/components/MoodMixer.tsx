@@ -130,7 +130,15 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
 
                 playTracks(tracks, 0);
 
-                await api.saveMoodBucketMix(mood, tracks.map((t) => t.id));
+                // The mix plays either way; only keeping it for Home can fail (the server refuses one with no playable songs).
+                try {
+                    await api.saveMoodBucketMix(mood, tracks.map((t) => t.id));
+                } catch (saveError: unknown) {
+                    notify.error("This mix could not be saved", {
+                        message: saveError instanceof Error ? saveError.message : "None of its songs can be played.",
+                    });
+                    return;
+                }
 
                 // Refetched now, not just marked stale, so the home page shows the new mix at once.
                 await queryClient.refetchQueries({ queryKey: ["mixes"] });

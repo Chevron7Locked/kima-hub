@@ -54,6 +54,7 @@ import { buildMatching, matchingProgress } from "../services/matching/state";
 import { buildMoods, moodProgress } from "../services/moods/state";
 import { writeMoodTags } from "../services/moods/tags";
 import { updateMap } from "../services/matching/map";
+import { dependsOnMoods } from "../services/mixes/cacheKeys";
 import {
     classifyFailure,
 } from "../services/enrichmentErrorCodeClassifier";
@@ -594,7 +595,9 @@ async function syncSharedValenceArousal(trackId: string): Promise<void> {
             SET valence = COALESCE(ROUND((0.7 * "deamValence" + 0.3 * "clapValenceRaw")::numeric, 3)::float8,
                                    "deamValence", "clapValenceRaw"),
                 arousal = COALESCE(ROUND((0.5 * "deamArousal" + 0.5 * "clapArousalRaw")::numeric, 3)::float8,
-                                   "deamArousal", "clapArousalRaw")
+                                   "deamArousal", "clapArousalRaw"),
+                -- Raw SQL does not move updatedAt by itself; the mood step reads it to see that a reading changed.
+                "updatedAt" = now()
           WHERE id = $1`,
         trackId,
     );
@@ -1199,15 +1202,19 @@ export async function stopUnifiedEnrichmentWorker() {
         );
 }
 
-/** Drop every cached mix so the next read rebuilds it; returns how many were dropped. */
-async function dropCachedMixes(): Promise<number> {
+/**
+ * Drop the cached mixes so the next read rebuilds them; returns how many were dropped. With `moodsOnly`, only the keys
+ * a change to the moods makes stale (services/mixes/cacheKeys.ts): the familiarity results, their locks and the energy
+ * band stay.
+ */
+async function dropCachedMixes(moodsOnly = false): Promise<number> {
     const redis = getRedis();
     const keys: string[] = [];
     let cursor = "0";
     do {
         const [next, batch] = await redis.scan(cursor, "MATCH", "mixes:*", "COUNT", 100);
         cursor = next;
-        keys.push(...batch);
+        keys.push(...(moodsOnly ? batch.filter(dependsOnMoods) : batch));
     } while (cursor !== "0");
     if (keys.length > 0) await redis.del(...keys);
     return keys.length;
@@ -2727,20 +2734,70 @@ export async function executeVibePhase(): Promise<number> {
 }
 
 /**
+ * The note in Redis that the moods changed and the cached mixes that depend on them are not dropped yet
+ * (executeMoodPhase). It is kept outside the process so a restart before the inputs settle still makes the drop, and it
+ * is not under `mixes:` so the drop never deletes it.
+ */
+const MOOD_MIXES_OWED_KEY = "enrichment:mood-mixes-owed";
+
+/**
+ * True when nothing that feeds the moods is still being answered: no analysis waiting, running or failed and due a
+ * retry, and no sound vector waiting, running or retrying. The moods are scored from both.
+ */
+function moodInputsSettled(progress: EnrichmentProgress): boolean {
+    return (
+        progress.audioAnalysis.pending === 0 &&
+        progress.audioAnalysis.processing === 0 &&
+        progress.audioAnalysis.failed === 0 &&
+        progress.clapEmbeddings.pending === 0 &&
+        progress.clapEmbeddings.processing === 0 &&
+        progress.clapEmbeddings.retrying === 0
+    );
+}
+
+/**
+ * Writes down that the moods changed (when they did) and, once the moods' inputs have settled, drops the cached mixes that
+ * depend on them. A Redis or database error is logged and goes no further: the mood tags are still written, and a note
+ * already written down stays for the next cycle.
+ */
+// A change whose note could not be written to Redis, held here until it is: the moods are already committed, so
+// the next cycle will not see the change again.
+let moodMixesOwedUnwritten = false;
+
+async function dropMoodMixesIfOwed(changed: boolean): Promise<void> {
+    if (changed) moodMixesOwedUnwritten = true;
+    try {
+        const redis = getRedis();
+        if (moodMixesOwedUnwritten) {
+            await redis.set(MOOD_MIXES_OWED_KEY, "1");
+            moodMixesOwedUnwritten = false;
+        }
+        if ((await redis.get(MOOD_MIXES_OWED_KEY)) && moodInputsSettled(await getEnrichmentProgress())) {
+            const dropped = await dropCachedMixes(true);
+            await redis.del(MOOD_MIXES_OWED_KEY);
+            if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
+        }
+    } catch (error) {
+        logger.error("[Enrichment] Could not drop the cached mood mixes; the moods changed and the drop is still owed:", error);
+    }
+}
+
+/**
  * The mood step: the learned mood scores for new or changed sound vectors and the
  * library's mood statistics when their inputs changed (services/moods/state.ts),
- * then every track's mood tags from them. Mixes are cached from the moods, so any
- * change to scores or statistics drops the cached mixes. A failure is logged, the
+ * then every track's mood tags from them. Mixes are cached from the moods, so a
+ * change to scores or statistics drops the cached mixes that depend on them, but
+ * only once the moods' inputs have settled: during a first analysis new vectors
+ * arrive every cycle and each drop would wipe lists rebuilt a moment before, so the
+ * change is written down (MOOD_MIXES_OWED_KEY) and the drop happens on the first cycle
+ * that is settled. A failure is logged, the
  * transaction it happened in writes nothing, and the cycle goes on to the similarity
  * step, which never reads the moods. Returns how many tracks were scored.
  */
 export async function executeMoodPhase(): Promise<number> {
     try {
         const { scored, stateChanged } = await buildMoods();
-        if (scored > 0 || stateChanged) {
-            const dropped = await dropCachedMixes();
-            if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
-        }
+        await dropMoodMixesIfOwed(scored > 0 || stateChanged);
         const tagged = await writeMoodTags();
         if (tagged > 0) logger.info(`[Enrichment] Mood tags changed on ${tagged} tracks`);
         return scored;
@@ -2765,14 +2822,7 @@ export async function executeSimilarityPhase(): Promise<number> {
     // The one-time layout waits for everything the formula reads: artist genres, analysis and sound
     // vectors, including answers still due a retry.
     const progress = await getEnrichmentProgress();
-    const formulaInputsSettled =
-        progress.artists.owed === 0 &&
-        progress.audioAnalysis.pending === 0 &&
-        progress.audioAnalysis.processing === 0 &&
-        progress.audioAnalysis.failed === 0 &&
-        progress.clapEmbeddings.pending === 0 &&
-        progress.clapEmbeddings.processing === 0 &&
-        progress.clapEmbeddings.retrying === 0;
+    const formulaInputsSettled = progress.artists.owed === 0 && moodInputsSettled(progress);
     const { laidOut, placed } = await updateMap(formulaInputsSettled);
     if (laidOut > 0) logger.info(`[Enrichment] Vibe map laid out: ${laidOut} tracks`);
     return feelUpdated + laidOut + placed;

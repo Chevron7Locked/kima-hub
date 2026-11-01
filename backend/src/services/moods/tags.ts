@@ -23,6 +23,7 @@ import {
 import { DEFINITIONS, type MoodDefinition } from "../mixes/moodDefinitions";
 import { LIVE_MOODS, MOOD_HEADS } from "./heads";
 import { moodStateOf } from "./state";
+import { coveredTrackSql } from "./scoredSongs";
 
 /** A song is tagged at this many library SDs above the mean of its mood's score: the recipes' own line. */
 export const TAG_LINE_Z = RECIPE_LINE;
@@ -99,9 +100,7 @@ export async function writeMoodTags(): Promise<number> {
                     SET "moodTags" = n.tags
                     FROM (
                         SELECT tr.id,
-                               CASE WHEN te.track_id IS NOT NULL
-                                         AND tr."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = tr."albumId" AND la.location = 'LIBRARY') AND tr.corrupt = false
-                                         AND tr."analysisStatus" = 'completed'
+                               CASE WHEN te.track_id IS NOT NULL AND ${coveredTrackSql("tr")}
                                     THEN ${tags} ELSE '{}'::text[] END AS tags
                         FROM "Track" tr
                         JOIN mood_state s ON s.id = 'default'

@@ -12,6 +12,7 @@ import { prisma } from "../utils/db";
 import { albumCoverUrls, getMixColor, tracksByIds } from "./mixes/helpers";
 import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
+import { SCORED_SONGS_RULE } from "./moods/scoredSongs";
 import { MOOD_STATE_VERSION, loadMoodState, type MoodStats } from "./moods/state";
 
 /**
@@ -192,8 +193,7 @@ async function buildSnapshot(signature: string, pending: number): Promise<MoodSn
         FROM track_moods m
         JOIN track_embeddings te ON te.track_id = m.track_id AND te.analyzed_at = m.embedded_at
         JOIN "Track" t ON t.id = m.track_id
-        WHERE m.weights = ${MOOD_HEADS.version} AND te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND t.corrupt = false AND t."analysisStatus" = 'completed'
+        WHERE ${SCORED_SONGS_RULE}
     `;
     const stats = Object.fromEntries(MOODS.map((m) => [m.field, state.moods[m.learned]])) as Record<MoodField, MoodStats>;
     const dist = new MoodDistribution(rows, stats);
@@ -343,8 +343,10 @@ class MoodBucketService {
     }
 
     /**
-     * Save the user's active mood mix: the given trackIds that resolve (order kept,
-     * unknown ids dropped), or a fresh mix when none are given. Returns the mix.
+     * Save the user's active mood mix: the given trackIds that are playable library songs (order kept,
+     * unknown, missing, corrupt and Discover ids dropped), or a fresh mix when none are given. Returns the mix, or null
+     * (the listener's previous mix is left as it was) when there is nothing to save: no song sent is playable, or the
+     * library has too few for a fresh mix.
      */
     async saveUserMoodMix(
         userId: string,
@@ -370,6 +372,7 @@ class MoodBucketService {
         let coverUrls: string[];
         if (trackIds && trackIds.length > 0) {
             const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
+            if (tracks.length === 0) return null;
             mixTrackIds = tracks.map((t) => t.id);
             coverUrls = albumCoverUrls(tracks);
         } else {
@@ -396,7 +399,10 @@ class MoodBucketService {
         };
     }
 
-    /** The listener's saved mood mix, for the home page. */
+    /**
+     * The listener's saved mood mix, for the home page. Its songs are read again: one deleted, corrupt, missing or moved
+     * to Discover since the mix was saved is not counted, and the covers are those of the songs left. Null when none is.
+     */
     async getUserMoodMix(userId: string): Promise<{
         id: string;
         type: string;
@@ -418,6 +424,8 @@ class MoodBucketService {
         if (!VALID_MOODS.includes(mood)) return null;
 
         const config = MOOD_BY_ID[mood];
+        const tracks = await tracksByIds(userMix.trackIds, { album: { select: { coverUrl: true } } });
+        if (tracks.length === 0) return null;
 
         return {
             id: `your-mood-mix-${userMix.generatedAt.getTime()}`,
@@ -425,9 +433,9 @@ class MoodBucketService {
             mood,
             name: `Your ${config.name} Mix`,
             description: `Based on your ${config.name.toLowerCase()} preferences`,
-            trackIds: userMix.trackIds,
-            coverUrls: userMix.coverUrls,
-            trackCount: userMix.trackIds.length,
+            trackIds: tracks.map((t) => t.id),
+            coverUrls: albumCoverUrls(tracks),
+            trackCount: tracks.length,
             color: getMixColor(mood),
         };
     }

@@ -544,6 +544,24 @@ describe("Enrichment State Machine", () => {
     });
 
     describe("the mood step", () => {
+        // The mood step reads the progress counts to see whether the moods' inputs have settled: with no tracks owing
+        // anything they have.
+        beforeEach(() => {
+            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
+            invalidateEnrichmentProgress();
+            // A small in-memory Redis for the notes the step writes; a fresh one for every test.
+            const notes = new Map<string, string>();
+            mockRedisSet.mockImplementation(async (k: string, v: string) => (notes.set(k, v), "OK"));
+            mockRedisGet.mockImplementation(async (k: string) => notes.get(k) ?? null);
+            mockRedisDel.mockImplementation(async (...ks: string[]) => ks.filter((k) => notes.delete(k)).length);
+        });
+
+        afterEach(() => {
+            mockRedisSet.mockReset().mockResolvedValue("OK");
+            mockRedisGet.mockReset().mockResolvedValue(null);
+            mockRedisDel.mockReset().mockResolvedValue(1);
+        });
+
         it("runs after the vibe sweep and before the similarity step", async () => {
             await startUnifiedEnrichmentWorker();
             mockUpdateState.mockClear();
@@ -576,6 +594,87 @@ describe("Enrichment State Machine", () => {
             expect(await executeMoodPhase()).toBe(0);
             expect(mockRedisScan).not.toHaveBeenCalled();
             expect(mockRedisDel).not.toHaveBeenCalled();
+        });
+
+        it("holds the drop while analysis is still running and makes it on the first settled cycle", async () => {
+            // Every track still owes its stage: the moods' inputs have not settled.
+            mockQueryRaw.mockImplementation(async (...args: unknown[]) =>
+                String(args[0]).includes('LEFT JOIN "TrackStage"')
+                    ? [{ total: 10n, completed: 0n, working: 0n, retryable_failed: 0n, terminal_failed: 0n, file_missing: 0n }]
+                    : [{ total: 0, completed: 0 }],
+            );
+            invalidateEnrichmentProgress();
+            mockBuildMoods.mockResolvedValue({ scored: 3, stateChanged: true });
+            expect(await executeMoodPhase()).toBe(3);
+            expect(mockRedisScan).not.toHaveBeenCalled();
+            expect(mockRedisDel).not.toHaveBeenCalled();
+
+            // A later cycle scores nothing new, but the lists dropped for the earlier change are still owed.
+            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
+            invalidateEnrichmentProgress();
+            mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
+            mockRedisScan.mockResolvedValueOnce(["0", ["mixes:u1"]]);
+            await executeMoodPhase();
+            expect(mockRedisDel).toHaveBeenCalledWith("mixes:u1");
+
+            mockRedisDel.mockClear();
+            mockRedisScan.mockClear();
+            await executeMoodPhase();
+            expect(mockRedisScan).not.toHaveBeenCalled();
+        });
+
+        it("writes down a drop it cannot make yet, and makes it after a restart once the inputs settle", async () => {
+            const OWED = "enrichment:mood-mixes-owed";
+            mockQueryRaw.mockImplementation(async (...args: unknown[]) =>
+                String(args[0]).includes('LEFT JOIN "TrackStage"')
+                    ? [{ total: 10n, completed: 0n, working: 0n, retryable_failed: 0n, terminal_failed: 0n, file_missing: 0n }]
+                    : [{ total: 0, completed: 0 }],
+            );
+            invalidateEnrichmentProgress();
+            mockBuildMoods.mockResolvedValue({ scored: 3, stateChanged: true });
+            await executeMoodPhase();
+            expect(mockRedisSet).toHaveBeenCalledWith(OWED, "1");
+            expect(mockRedisScan).not.toHaveBeenCalled();
+
+            // The server restarts: nothing is held in memory, only the note in Redis is left.
+            mockRedisGet.mockImplementation(async (key: string) => (key === OWED ? "1" : null));
+            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
+            invalidateEnrichmentProgress();
+            mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
+            mockRedisScan.mockResolvedValueOnce(["0", ["mixes:u1"]]);
+            await executeMoodPhase();
+            expect(mockRedisDel).toHaveBeenCalledWith("mixes:u1");
+            expect(mockRedisDel).toHaveBeenCalledWith(OWED);
+        });
+
+        it("still writes the mood tags when Redis fails, and logs that the drop is owed", async () => {
+            mockBuildMoods.mockResolvedValue({ scored: 2, stateChanged: true });
+            mockRedisSet.mockRejectedValue(new Error("redis down"));
+            mockWriteMoodTags.mockResolvedValue(1);
+            expect(await executeMoodPhase()).toBe(2);
+            expect(mockWriteMoodTags).toHaveBeenCalledTimes(1);
+            expect(logger.error).toHaveBeenCalledWith(
+                expect.stringContaining("the drop is still owed"),
+                expect.objectContaining({ message: "redis down" }),
+            );
+
+            // Redis is back on a cycle that changed nothing: the note that could not be written is written now.
+            mockRedisSet.mockReset();
+            mockRedisSet.mockResolvedValue("OK");
+            mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
+            await executeMoodPhase();
+            expect(mockRedisSet).toHaveBeenCalledWith("enrichment:mood-mixes-owed", "1");
+        });
+
+        it("drops only the cached mix lists, not the familiarity results, scan locks or the energy band", async () => {
+            invalidateEnrichmentProgress();
+            mockBuildMoods.mockResolvedValue({ scored: 1, stateChanged: false });
+            mockRedisScan.mockResolvedValueOnce([
+                "0",
+                ["mixes:u1", "mixes:familiar:u1", "mixes:familiar-lock:u1", "mixes:energy-band", "mixes:u2"],
+            ]);
+            await executeMoodPhase();
+            expect(mockRedisDel).toHaveBeenCalledWith("mixes:u1", "mixes:u2");
         });
 
         it("rewrites the mood tags on every pass, after the scores and statistics", async () => {
