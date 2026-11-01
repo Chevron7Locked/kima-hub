@@ -184,7 +184,7 @@ function tally(keys: string[]): { keys: string[]; counts: number[] } {
  * one place in its own album and artist. Keeping the best rows per album, then per
  * artist among those, is the same as walking the ranked list in order.
  */
-export async function capRanked(scored: Prisma.Sql, counted: Counted[], limit: number): Promise<RankedTrack[]> {
+async function capRanked(scored: Prisma.Sql, counted: Counted[], limit: number): Promise<RankedTrack[]> {
     const albums = tally(counted.map((c) => c.albumId));
     const artists = tally(counted.map((c) => c.artistId));
     return prisma.$queryRaw<RankedTrack[]>(Prisma.sql`

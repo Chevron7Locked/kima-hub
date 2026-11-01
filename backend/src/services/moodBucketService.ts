@@ -261,7 +261,7 @@ async function pageSongCount(recipe: string): Promise<number> {
 }
 
 /** A mood's mix as served. A saved mix read back also carries `type`; one just saved, `generatedAt`. */
-export interface MoodMix {
+interface MoodMix {
     id: string;
     mood: string;
     name: string;
