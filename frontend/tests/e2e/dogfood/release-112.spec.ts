@@ -1,9 +1,6 @@
 /**
- * Kima 1.12's non-podcast features, driven through the real UI and checked against the server's own answers:
- * playlist reverse order, per-step enrichment re-runs, update pings, operator-only downloads, and the
- * What's new / changelog doors; then the queue and right-hand panel, the left rail, radio stations, track details,
- * library-only collection, and re-filing albums by their tags. Every test puts back what it changed, except the
- * re-file, which is meant to stay: a second run must find nothing left to move.
+ * Kima 1.12's non-podcast features, driven through the real UI and checked against the server's own answers.
+ * Every test puts back what it changed, except the re-file, which stays: a second run must find nothing left to move.
  */
 import { test, expect, devices, Browser, BrowserContext, Page, APIRequestContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
@@ -1243,7 +1240,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             const after = await allTrackIds();
             expect(lost(after), "songs that were in the library before the re-file").toEqual([]);
             const artists = await allArtists();
-            // A tag naming two artists used to be glued into one name with a NUL or byte-order mark between them.
+            // No artist name may carry a hidden character (a NUL or byte-order mark where a tag named two artists).
             const hidden = artists.filter((a) => /[\u0000﻿​]/.test(a.name)).map((a) => JSON.stringify(a.name));
             expect(hidden, "artist names with hidden characters").toEqual([]);
             // The list holds only artists with a library album, so a count of 0 is a count the re-file left stale.

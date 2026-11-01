@@ -22,7 +22,7 @@ import {
     useBrowseAllQuery,
 } from "@/hooks/useQueries";
 
-export interface HomeSectionLoading {
+interface HomeSectionLoading {
     recentlyListened: boolean;
     recentlyAdded: boolean;
     recommended: boolean;

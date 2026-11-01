@@ -5,11 +5,9 @@ import type { BufferGeometry } from "three";
 export const sharedFullscreenGeometry = (): BufferGeometry => (Pass as unknown as { fullscreenGeometry: BufferGeometry }).fullscreenGeometry;
 
 /**
- * The post-processing library draws every full-screen pass from one triangle it creates once for the whole page.
- * Each renderer that draws it hangs a "dispose" listener on that triangle, and the listener points back at the
- * renderer. Nothing removes it unless the triangle is disposed, so every visit to the map would leave its renderer
- * (graphics context, canvas and the page elements above it) alive. Disposing it on the way out drops the listeners;
- * a renderer that draws it again simply uploads it again.
+ * The post-processing library draws every full-screen pass from one shared triangle, and each renderer that draws it
+ * adds a "dispose" listener pointing back at the renderer. Disposing the triangle on the way out drops those
+ * listeners, so a visit to the map does not keep its renderer (context, canvas, page elements) alive.
  */
 export function releaseSharedGeometry() {
     sharedFullscreenGeometry().dispose();

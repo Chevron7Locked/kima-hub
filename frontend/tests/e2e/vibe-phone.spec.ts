@@ -303,13 +303,9 @@ async function closeToPeek(page: Page): Promise<SheetState> {
 // ---------------------------------------------------------------------------
 
 /**
- * Words from the map's own titles that a search can be built from: folded the
- * way the sheet folds a query (NFD, combining marks stripped, lower-cased),
- * split on anything that is not a letter or digit, and kept at two characters
- * or more because the field needs that much to search. The sheet matches a
- * query word as a substring of "title artist" (features/vibe/librarySearch.ts,
- * searchLibrary), so a word taken from a title matches at least the track it
- * came from. Candidates are deduplicated in map order.
+ * Searchable words from the map's titles: folded the way the sheet folds a query (NFD, marks stripped, lower-case),
+ * split on non-letters/digits, two characters or more, deduplicated in map order. The sheet matches a query word as a
+ * substring of "title artist" (features/vibe/librarySearch.ts), so each word matches at least its own track.
  */
 function titleWords(tracks: MapTrack[]): string[] {
     const seen = new Set<string>();

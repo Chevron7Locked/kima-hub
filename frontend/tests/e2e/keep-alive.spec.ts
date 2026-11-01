@@ -4,11 +4,9 @@ import tls from "node:tls";
 import { requireBaseUrl } from "./fixtures/target";
 
 /**
- * The web server keeps an idle connection open longer than a reverse proxy does (nginx, when set to reuse its
- * connections to the server, closes idle ones after 60 s by default). If the server closed first, a proxy could send
- * a request down a connection the server is closing, and the listener would get a 502 for a POST, which the HTTP
- * standard forbids a proxy from resending. One raw connection, so nothing can quietly open a new one. KIMA_UI_BASE_URL
- * must reach the web server itself, not a proxy in front of it.
+ * The web server must keep an idle connection open longer than a reverse proxy does (nginx closes idle upstream
+ * connections after 60 s), or a proxy can send a POST down a connection the server is closing and answer 502. One raw
+ * connection, so nothing quietly opens a new one; KIMA_UI_BASE_URL must reach the web server itself, not a proxy.
  */
 
 const IDLE_MS = 10_000;

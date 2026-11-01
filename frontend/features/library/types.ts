@@ -45,7 +45,6 @@ export interface Track {
 
 export interface DeleteDialogState {
     isOpen: boolean;
-    type: "track";
     id: string;
     title: string;
 }

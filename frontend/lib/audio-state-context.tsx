@@ -346,6 +346,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setCurrentIndex(0);
         };
 
+        // The server remembers an item that is gone: forget it and clear what the restore put on screen.
+        const dropIfGone = (err: unknown) => {
+            if (!isGone(err)) return;
+            serverKnownRef.current = null;
+            api.clearPlaybackState().catch(() => {});
+            clearRestoredPlayback();
+        };
+
         api.getPlaybackState()
             .then((serverState) => {
                 if (!serverState) return;
@@ -365,12 +373,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentAudiobook(null);
                             setCurrentPodcast(null);
                         })
-                        .catch((err) => {
-                            if (!isGone(err)) return;
-                            serverKnownRef.current = null;
-                            api.clearPlaybackState().catch(() => {});
-                            clearRestoredPlayback();
-                        });
+                        .catch(dropIfGone);
                 } else if (
                     serverState.playbackType === "audiobook" &&
                     serverState.audiobookId
@@ -382,12 +385,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentTrack(null);
                             setCurrentPodcast(null);
                         })
-                        .catch((err) => {
-                            if (!isGone(err)) return;
-                            serverKnownRef.current = null;
-                            api.clearPlaybackState().catch(() => {});
-                            clearRestoredPlayback();
-                        });
+                        .catch(dropIfGone);
                 } else if (
                     serverState.playbackType === "podcast" &&
                     serverState.podcastId
@@ -404,13 +402,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 setCurrentAudiobook(null);
                             }
                         })
-                        .catch((err) => {
-                            // A podcast unsubscribed on another device no longer resolves.
-                            if (!isGone(err)) return;
-                            serverKnownRef.current = null;
-                            api.clearPlaybackState().catch(() => {});
-                            clearRestoredPlayback();
-                        });
+                        .catch(dropIfGone);
                 }
 
                 // A late restore must not overwrite a queue built since page load.

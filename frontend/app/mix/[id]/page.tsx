@@ -2,12 +2,12 @@
 
 import { useState, useMemo } from "react";
 import { TrackRow } from "@/components/ui/TrackRow";
-import { MediaActionButton } from "@/components/ui/MediaActionBar";
+import { MediaActionButton, PlayDisc } from "@/components/ui/MediaActionBar";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { Play, Pause, Music, Shuffle, Save, ListPlus } from "lucide-react";
+import { Music, Shuffle, Save, ListPlus } from "lucide-react";
 import { plural } from "@/lib/format";
 import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
@@ -219,17 +219,12 @@ export default function MixPage() {
             <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent page-shell py-4">
                 <div className="flex items-center gap-4">
                     {mix.tracks && mix.tracks.length > 0 && (
-                        <button
+                        <PlayDisc
+                            showPause={isThisMixPlaying && isPlaying}
                             onClick={handlePlayMix}
-                            aria-label={isThisMixPlaying && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
-                            className="h-12 w-12 rounded-full bg-brand hover:bg-brand-hover hover:scale-105 flex items-center justify-center transition-all"
-                        >
-                            {isThisMixPlaying && isPlaying ? (
-                                <Pause className="w-5 h-5 fill-current text-black" />
-                            ) : (
-                                <Play className="w-5 h-5 fill-current text-black ml-0.5" />
-                            )}
-                        </button>
+                            shape="circle"
+                            label={isThisMixPlaying && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
+                        />
                     )}
 
                     {mix.tracks && mix.tracks.length > 1 && (

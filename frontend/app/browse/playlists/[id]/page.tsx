@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { formatTime, plural } from "@/lib/format";
+import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
 import { useParams, useRouter } from "next/navigation";
 import {
     ArrowLeft,
@@ -100,13 +100,6 @@ export default function DeezerPlaylistDetailPage() {
 
     const totalDuration = playlist?.tracks.reduce((sum, track) => sum + track.durationMs, 0) || 0;
 
-    const formatTotalDuration = (ms: number) => {
-        const hours = Math.floor(ms / 3600000);
-        const mins = Math.floor((ms % 3600000) / 60000);
-        if (hours > 0) return `${hours} hr ${mins} min`;
-        return `${mins} min`;
-    };
-
     if (isLoading) {
         return <LoadingScreen />;
     }
@@ -191,7 +184,7 @@ export default function DeezerPlaylistDetailPage() {
                                     {totalDuration > 0 && (
                                         <>
                                             <span className="text-[var(--text-muted)]">|</span>
-                                            <span>{formatTotalDuration(totalDuration)}</span>
+                                            <span>{formatHoursMinutes(totalDuration / 1000)}</span>
                                         </>
                                     )}
                                 </div>

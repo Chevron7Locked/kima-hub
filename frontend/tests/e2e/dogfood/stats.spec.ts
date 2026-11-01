@@ -559,11 +559,10 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         };
 
         await session.step("plant back-dated plays from before the listen rule on three tracks, five seconds apart", async () => {
-            // Every play recorded today has passed the listen rule and is stored as heard, so no request can make a
-            // skip. The audit exists for history older versions wrote (rows not marked heard); those are planted in the
-            // stack's database. Five seconds of a track is a provable skip, so the first two give the audit something
-            // to act on; three rows on the first make one duplicate to merge. The dates sit long before any real
-            // play; a repeat run first clears what an earlier run left.
+            // Today's plays have all passed the listen rule and are stored as heard, so no request can make a skip. The audit
+            // exists for older history (rows not marked heard), so plant it in the stack's database: five seconds of a track is a
+            // provable skip, and three rows on the first make one duplicate to merge. Dates sit long before any real play; a
+            // repeat run first clears what an earlier run left.
             if (stackSql("SELECT 1") === null) {
                 session.noteNotCovered("stats 7b (merge, ignore, restore, remove play history) did not run: KIMA_CONTAINER does not name the stack's container, so no old-style history could be planted");
                 test.skip(true, "no container to plant play history in");

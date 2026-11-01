@@ -104,11 +104,9 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (!enabled || !isTV) return;
 
-        // Back returns to the tab row from anywhere in the content (TVLayout sends keys here only when the tab row is
-        // not focused), whatever the page is built of and wherever the focus fell: opening a card lands on a page with
-        // nothing focused. Decided once the key has reached every listener: something on the page that used it (a
-        // rename, a popover, a window) marks it handled, wherever its listener sits relative to this one. So Back
-        // cannot cancel Escape's own browser action; the app has none to cancel (no native dialogs or popovers).
+        // Back returns to the tab row from anywhere in the content (TVLayout sends keys here only when the tab row is not
+        // focused), even when nothing is focused. Decided after every listener has seen the key: anything that used it (a
+        // rename, a popover, a window) marks it handled, so Back never cancels Escape's own action.
         if (e.key === DPAD_KEYS.BACK) {
             if (pendingBack.current) clearTimeout(pendingBack.current);
             pendingBack.current = setTimeout(() => {

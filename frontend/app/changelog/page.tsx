@@ -9,11 +9,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Loader2 } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { shortVersion } from "@/lib/format";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/lib/cn";
+import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
 import { ReleaseLinks } from "@/components/whats-new/ReleaseLinks";
 import { WipeAction } from "@/components/whats-new/WipeAction";
@@ -75,7 +76,7 @@ export default function ChangelogPage() {
     if (!data) {
         return (
             <div className="px-5 py-10 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <GradientSpinner size="sm" />
                 Loading the changelog...
             </div>
         );

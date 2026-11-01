@@ -89,11 +89,9 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const settingsActive = showSettings && !!settingsContent;
 
     return (
-        // Only the panel slides; the frame's width, and so the page beside it, changes once: at the start of opening,
-        // so the panel slides into its space, and after closing, once the panel has slid away. A width that moved with
-        // the slide would lay the page out again every frame, and its grids would jump a column mid-slide. The frame
-        // clips the panel: closed, the panel would otherwise hang past the screen's edge as overflow the page row can
-        // be scrolled to.
+        // Only the panel slides. The frame's width (and so the page beside it) changes once, at the start of opening and
+        // after closing, because a width that moved with the slide would re-lay-out the page every frame. The frame also
+        // clips the panel, so a closed panel cannot hang past the screen edge as scrollable overflow.
         <div
             className={cn(
                 "shrink-0 h-full relative overflow-hidden z-(--z-raised)",

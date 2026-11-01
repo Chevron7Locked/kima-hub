@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Button } from "@/components/ui/Button";
@@ -44,8 +43,7 @@ export function RefileAction({ item, done, onDone }: { item: RefileItem; done: b
                         : "Albums re-filed. You can run it again from Settings, under Library Enrichment."}
                 </p>
             ) : (
-                <Button variant="primary" onClick={() => setConfirming(true)} disabled={starting} className="self-start">
-                    {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <Button variant="primary" onClick={() => setConfirming(true)} isLoading={starting} className="self-start">
                     {starting ? "Starting..." : item.cta}
                 </Button>
             )}

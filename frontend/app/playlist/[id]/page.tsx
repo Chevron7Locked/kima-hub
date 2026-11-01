@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -9,7 +9,7 @@ import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-c
 import { playlistTrackToAudio } from "@/lib/playlist-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
-import { formatTime, plural } from "@/lib/format";
+import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
 import { anchorForScreenMove, queryKeys, usePlaylistQuery, useRemoveFromPlaylistMutation, useDeletePlaylistMutation, useUpdatePlaylistMutation, useSetPlaylistReverseMutation, useMoveTrackInPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
 import { usePreview } from "@/hooks/usePreview";
 import { useLeaveDeletedPlaylist } from "@/hooks/useLeaveDeletedPlaylist";
@@ -56,6 +56,42 @@ import { PageMessage } from "@/components/ui/PageMessage";
 import { copyText } from "@/lib/clipboard";
 import { openActivityPanel } from "@/hooks/useActivityPanel";
 import { shownTitle } from "@/lib/track-title";
+
+/** A track row's small icon button; its tooltip is the label in lower case. Clicks never reach the row. */
+function RowIconButton({
+    label,
+    onClick,
+    danger = false,
+    desktopOnly = false,
+    disabled,
+    children,
+}: {
+    label: string;
+    onClick: () => void;
+    danger?: boolean;
+    desktopOnly?: boolean;
+    disabled?: boolean;
+    children: ReactNode;
+}) {
+    return (
+        <button
+            aria-label={label}
+            title={label.toLowerCase()}
+            disabled={disabled}
+            onClick={(e) => {
+                e.stopPropagation();
+                onClick();
+            }}
+            className={cn(
+                "items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] transition-all",
+                desktopOnly ? "hidden md:flex w-9 h-9" : "flex w-11 h-11 md:w-9 md:h-9",
+                danger ? "hover:text-danger-light" : "hover:text-white",
+            )}
+        >
+            {children}
+        </button>
+    );
+}
 
 interface Track {
     id: string;
@@ -366,15 +402,6 @@ export default function PlaylistDetailPage() {
         );
     }, [playlist?.items]);
 
-    const formatTotalDuration = (seconds: number) => {
-        const hours = Math.floor(seconds / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        if (hours > 0) {
-            return `${hours} hr ${mins} min`;
-        }
-        return `${mins} min`;
-    };
-
     const handlePlayPlaylist = () => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
@@ -589,22 +616,13 @@ export default function PlaylistDetailPage() {
                             </button>
                         )}
                         {playlist?.isOwner && (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRemovePendingTrack(pending.id);
-                                }}
-                                disabled={isRemoving}
-                                className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
-                                aria-label="Remove from playlist"
-                                title="remove from playlist"
-                            >
+                            <RowIconButton label="Remove from playlist" danger disabled={isRemoving} onClick={() => handleRemovePendingTrack(pending.id)}>
                                 {isRemoving ? (
                                     <GradientSpinner size="sm" />
                                 ) : (
                                     <X className="w-4 h-4" />
                                 )}
-                            </button>
+                            </RowIconButton>
                         )}
                     </div>
                 </div>
@@ -743,52 +761,20 @@ export default function PlaylistDetailPage() {
                 </span>
 
                 <div className="flex items-center justify-end gap-1">
-                    <button
-                        className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddToQueue(playlistItem.track);
-                        }}
-                        aria-label="Add to queue"
-                        title="add to queue"
-                    >
+                    <RowIconButton label="Add to queue" onClick={() => handleAddToQueue(playlistItem.track)}>
                         <ListPlus className="w-4 h-4" />
-                    </button>
+                    </RowIconButton>
                     {playlist?.isOwner && (
                         <>
-                            <button
-                                aria-label="Move up"
-                                className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMoveTrackUp(playlistItem.id);
-                                }}
-                                title="move up"
-                            >
+                            <RowIconButton label="Move up" desktopOnly onClick={() => handleMoveTrackUp(playlistItem.id)}>
                                 <ChevronUp className="w-4 h-4" />
-                            </button>
-                            <button
-                                aria-label="Move down"
-                                className="hidden md:flex w-9 h-9 items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMoveTrackDown(playlistItem.id);
-                                }}
-                                title="move down"
-                            >
+                            </RowIconButton>
+                            <RowIconButton label="Move down" desktopOnly onClick={() => handleMoveTrackDown(playlistItem.id)}>
                                 <ChevronDown className="w-4 h-4" />
-                            </button>
-                            <button
-                                className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-danger-light transition-all"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRemoveTrack(playlistItem.track.id);
-                                }}
-                                aria-label="Remove from playlist"
-                                title="remove from playlist"
-                            >
+                            </RowIconButton>
+                            <RowIconButton label="Remove from playlist" danger onClick={() => handleRemoveTrack(playlistItem.track.id)}>
                                 <X className="w-4 h-4" />
-                            </button>
+                            </RowIconButton>
                         </>
                     )}
                 </div>
@@ -934,7 +920,7 @@ export default function PlaylistDetailPage() {
                                     {totalDuration > 0 && (
                                         <>
                                             <span className="text-[var(--text-muted)]">|</span>
-                                            <span>{formatTotalDuration(totalDuration)}</span>
+                                            <span>{formatHoursMinutes(totalDuration)}</span>
                                         </>
                                     )}
                                 </div>

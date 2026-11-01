@@ -1,10 +1,10 @@
 "use client";
 
-import { memo, type CSSProperties } from "react";
+import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/cn";
+import { TileCard } from "@/components/cards/TileCard";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { useInView } from "@/hooks/useInView";
 import { RadioStation, stationCover, stationHue, stationParams } from "../radioData";
@@ -67,51 +67,41 @@ export const StationCard = memo(function StationCard({ station, onStart, busy = 
     const hue = stationHue(station);
 
     return (
-        <button
-            ref={ref}
-            type="button"
+        <TileCard
+            buttonRef={ref}
+            title={station.name}
+            subtitle={station.description}
+            hoverBorder={station.hoverBorder}
             onClick={() => onStart(station)}
+            busy={busy}
             disabled={disabled}
-            aria-busy={busy}
-            data-tv-card
-            data-tv-card-index={index}
-            style={{ "--i": index } as CSSProperties}
-            className={cn(
-                "relative group overflow-hidden text-left bg-[var(--bg-primary)] border border-white/10 rounded-lg transition-[border-color] duration-150",
-                "disabled:opacity-50 disabled:cursor-not-allowed animate-rise [animation-delay:calc(var(--i)*var(--stagger))]",
-                station.hoverBorder,
-                className,
-            )}
-        >
-            <div aria-hidden="true" className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${hue}8c, ${hue}1a)` }} />
-            {cover && (
+            index={index}
+            className={className}
+            titleClassName="text-base"
+            subtitleClassName="text-white/75"
+            background={
                 <>
-                    <CachedImage src={api.getCoverArtUrl(cover, 300)} alt="" fill sizes="(max-width: 640px) 50vw, 200px" className="object-cover cover-zoom" />
-                    {/* The cover takes on the station's colour. */}
-                    <div aria-hidden="true" className="absolute inset-0 mix-blend-color" style={{ background: hue }} />
+                    <div aria-hidden="true" className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${hue}8c, ${hue}1a)` }} />
+                    {cover && (
+                        <>
+                            <CachedImage src={api.getCoverArtUrl(cover, 300)} alt="" fill sizes="(max-width: 640px) 50vw, 200px" className="object-cover cover-zoom" />
+                            {/* The cover takes on the station's colour. */}
+                            <div aria-hidden="true" className="absolute inset-0 mix-blend-color" style={{ background: hue }} />
+                        </>
+                    )}
+                    {/* Dark toward the bottom, so the name and line read on any cover. */}
+                    <div
+                        aria-hidden="true"
+                        className="absolute inset-0"
+                        style={{ background: `linear-gradient(to top, rgb(0 0 0 / 0.9), rgb(0 0 0 / 0.4) 70%), linear-gradient(135deg, ${hue}40, transparent 60%)` }}
+                    />
                 </>
-            )}
-            {/* Dark toward the bottom, so the name and line read on any cover. */}
-            <div
-                aria-hidden="true"
-                className="absolute inset-0"
-                style={{ background: `linear-gradient(to top, rgb(0 0 0 / 0.9), rgb(0 0 0 / 0.4) 70%), linear-gradient(135deg, ${hue}40, transparent 60%)` }}
-            />
-
-            <div className="absolute inset-x-0 bottom-0 p-3">
-                <h3 className="text-base font-bold text-white truncate tracking-tight leading-tight">{station.name}</h3>
-                <p className="text-xs text-white/75 truncate">{station.description}</p>
-            </div>
-
-            {busy ? (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-(--z-raised)">
-                    <Loader2 className="w-5 h-5 text-white animate-spin" />
-                </div>
-            ) : (
+            }
+            badge={
                 <div className="absolute top-3 left-3 z-(--z-raised) w-8 h-8 rounded-full bg-brand flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-disabled:hidden transition-opacity">
                     <Play className="w-3.5 h-3.5 text-black ml-0.5" fill="currentColor" />
                 </div>
-            )}
-        </button>
+            }
+        />
     );
 });

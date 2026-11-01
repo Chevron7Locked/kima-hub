@@ -1,11 +1,9 @@
 "use client";
 
 /**
- * The library's mood picture: each mood's share of the analysed tracks for
- * the masthead band, and the mood each album and artist shares with its
- * tracks for the card dots. The server counts them (GET /vibe/mood-summary, a
- * few KB) so the page never downloads the whole vibe map. While the map is
- * still being laid out the band shows as a quiet track and no card is marked.
+ * The library's mood picture: each mood's share of the analysed tracks (masthead band) and the mood each album and
+ * artist shares with its tracks (card dots). The server counts them (GET /vibe/mood-summary) so the page never
+ * downloads the whole map; while the map is still being laid out the band is a quiet track and no card is marked.
  */
 
 import { useMemo } from "react";

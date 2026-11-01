@@ -379,14 +379,9 @@ export function WhatsNewWindow({
                     <h2 id="whats-new-title" className="text-xl sm:text-2xl font-bold tracking-tight text-white text-balance">
                         {release.title}
                     </h2>
-                    <button
-                        onClick={close}
-                        disabled={closing}
-                        aria-label="Close"
-                        className="shrink-0 w-11 h-11 -mr-2 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/5 transition-colors"
-                    >
+                    <Button variant="icon" onClick={close} disabled={closing} aria-label="Close" className="shrink-0 -mr-2">
                         {closing ? <Loader2 className="w-5 h-5 animate-spin" /> : <X className="w-5 h-5" />}
-                    </button>
+                    </Button>
                 </header>
 
                 <div className="flex-1 min-h-0 flex flex-col-reverse lg:flex-row">

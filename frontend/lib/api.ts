@@ -76,7 +76,7 @@ interface UpdateStatus {
 export interface MoodMixReleaseState {
     /**
      * The user's saved mood mix; null when they have none or cleared it.
-     * `retired`: saved under a mood 1.11 removed, so it can't be shown or kept.
+     * `retired`: saved under a mood that no longer exists, so it can't be shown or kept.
      */
     mix: { id: string; name: string; mood: string; trackCount: number; retired: boolean } | null;
     /** "rebuild" means the mix was cleared, by Rebuild or Remove. */

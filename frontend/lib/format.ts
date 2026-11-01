@@ -105,3 +105,10 @@ export function plural(n: number, word: string): string {
 export function shortVersion(version: string): string {
     return version.split(".").slice(0, 2).join(".");
 }
+
+/** A length of time as "2 hr 5 min", or "45 min" under an hour. */
+export function formatHoursMinutes(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return hours > 0 ? `${hours} hr ${mins} min` : `${mins} min`;
+}

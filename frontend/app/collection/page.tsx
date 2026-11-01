@@ -260,7 +260,6 @@ export default function LibraryPage() {
     const [deleting, setDeleting] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<DeleteDialogState>({
         isOpen: false,
-        type: "track",
         id: "",
         title: "",
     });
@@ -328,7 +327,7 @@ export default function LibraryPage() {
     }, [formatTracksForAudio, playTracks]);
 
     const closeDelete = useCallback(
-        () => setDeleteConfirm({ isOpen: false, type: "track", id: "", title: "" }),
+        () => setDeleteConfirm({ isOpen: false, id: "", title: "" }),
         [],
     );
 
@@ -359,7 +358,6 @@ export default function LibraryPage() {
     const handleDeleteTrack = useCallback((id: string, title: string) => {
         setDeleteConfirm({
             isOpen: true,
-            type: "track",
             id,
             title,
         });
