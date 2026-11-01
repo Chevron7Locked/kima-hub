@@ -2055,6 +2055,14 @@ class ApiClient {
         return this.request<{ computing: true } | { tracks: MapTrack[]; trackCount: number }>("/vibe/map");
     }
 
+    async getMoodSummary() {
+        // 202 { computing: true } until the first layout exists, like the map; the caller polls.
+        return this.request<
+            | { computing: true }
+            | { shares: Array<{ key: string; fraction: number }>; albums: Record<string, string>; artists: Record<string, string> }
+        >("/vibe/mood-summary");
+    }
+
     async getVibePath(startTrackId: string, endTrackId: string, options?: { length?: number; mode?: "smooth" | "discovery" }) {
         return this.request<{
             startTrack: VibePathTrack;

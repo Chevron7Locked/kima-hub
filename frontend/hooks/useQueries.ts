@@ -67,6 +67,8 @@ export const queryKeys = {
     libraryGenres: () => ["library", "genres"] as const,
     libraryDecades: () => ["library", "decades"] as const,
     moodStations: () => ["library", "radio", "stations"] as const,
+    // The collection page's mood band and card dots; refreshed when enrichment or a scan finishes (useEventSource)
+    libraryMoodSummary: () => ["library", "mood-summary"] as const,
 };
 
 export function useRecentlyListenedQuery(limit: number = 10) {

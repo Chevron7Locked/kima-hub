@@ -49,73 +49,8 @@ export function moodIndex(key: string): number {
     return (MOOD_KEYS as readonly string[]).indexOf(key);
 }
 
-/** One stretch of a mood band: a palette key and its share of the analysed tracks. */
+/** One stretch of a mood band: a palette key and its share of the analysed tracks (counted by the server). */
 export interface MoodShare {
     key: string;
     fraction: number;
-}
-
-/** Where a mood key sits in the legend: moods in their order, "no single mood" last. */
-function legendPosition(key: string): number {
-    const index = moodIndex(key);
-    return index >= 0 ? index : MOOD_KEYS.length;
-}
-
-/**
- * Each mood's share of the analysed tracks, biggest first, "no single mood"
- * last; equal counts keep the legend's order. Tracks not analysed yet are left
- * out of the denominator, so the band always adds up to the analysed library.
- */
-export function moodShares(tracks: readonly { dominantMood: string }[]): MoodShare[] {
-    const counts = new Map<string, number>();
-    let analysed = 0;
-    for (const track of tracks) {
-        if (!track.dominantMood || track.dominantMood === "unanalyzed") continue;
-        analysed += 1;
-        const key = isMood(track.dominantMood) ? track.dominantMood : "neutral";
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    if (analysed === 0) return [];
-    return [...counts.entries()]
-        .sort((a, b) => {
-            const posA = legendPosition(a[0]);
-            const posB = legendPosition(b[0]);
-            return b[1] !== a[1] ? b[1] - a[1] : posA - posB;
-        })
-        .map(([key, count]) => ({ key, fraction: count / analysed }));
-}
-
-/**
- * The mood a group of tracks shares: the one most of them have. No entry when
- * the winner is "no single mood" — a group that moodless is not marked.
- * Ties go to the legend's order, moods before "no single mood".
- */
-export function moodByGroup(groups: readonly { id: string; dominantMood: string }[]): Map<string, string> {
-    const tallies = new Map<string, Map<string, number>>();
-    for (const { id, dominantMood } of groups) {
-        if (!dominantMood || dominantMood === "unanalyzed") continue;
-        const key = isMood(dominantMood) ? dominantMood : "neutral";
-        let tally = tallies.get(id);
-        if (!tally) {
-            tally = new Map();
-            tallies.set(id, tally);
-        }
-        tally.set(key, (tally.get(key) ?? 0) + 1);
-    }
-    const winner = new Map<string, string>();
-    for (const [id, tally] of tallies) {
-        let bestKey: string | null = null;
-        let bestCount = -1;
-        let bestPosition = Number.MAX_SAFE_INTEGER;
-        for (const [key, count] of tally) {
-            const position = legendPosition(key);
-            if (count > bestCount || (count === bestCount && position < bestPosition)) {
-                bestKey = key;
-                bestCount = count;
-                bestPosition = position;
-            }
-        }
-        if (bestKey && bestKey !== "neutral") winner.set(id, bestKey);
-    }
-    return winner;
 }

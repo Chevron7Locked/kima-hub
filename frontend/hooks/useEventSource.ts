@@ -18,6 +18,7 @@ const STREAM_FED_QUERIES: QueryKey[] = [
     ["album"],
     ["enrichment-progress"],
     ["library", "recently-added"],
+    ["library", "mood-summary"],
     ["user-imports"],
     ["playlists"],
     ["playlist"],
@@ -105,8 +106,11 @@ export function useEventSource() {
                             );
                             queryClient.invalidateQueries({ queryKey: ["enrichment-progress"] });
                             queryClient.invalidateQueries({ queryKey: ["library", "recently-added"] });
+                            queryClient.invalidateQueries({ queryKey: ["library", "mood-summary"] });
                             break;
                         case "enrichment:progress":
+                            // Not the mood summary: this fires once a track during sound vectors, and the moods and
+                            // the map only change when their own steps finish (the summary's stale time covers that).
                             queryClient.invalidateQueries({ queryKey: ["enrichment-progress"] });
                             break;
                         case "import:progress":

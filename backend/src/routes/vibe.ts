@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { UserFacingError } from "../utils/errors";
 import { findSimilarTracks } from "../services/hybridSimilarity";
-import { getVibeMap, type MapResponse } from "../services/vibeMap";
+import { getMoodSummary, getVibeMap, type MapResponse } from "../services/vibeMap";
 import { currentMoodSnapshot, moodOutput } from "../services/moodBucketService";
 import { generateSongPath } from "../services/songPath";
 import { searchTracksByText } from "../services/textEmbeddingBridge";
@@ -61,6 +61,25 @@ router.get("/map", requireAuth, async (req, res) => {
     } catch (error) {
         logger.error("Vibe map error:", error);
         res.status(500).json({ error: "Failed to read the vibe map" });
+    }
+});
+
+/**
+ * GET /api/vibe/mood-summary: just what the collection page needs from the map: each mood's share of the analysed
+ * tracks and the mood each album and artist shares with its tracks. A few KB where the map is megabytes; 202 while
+ * the first layout is pending, like the map.
+ */
+router.get("/mood-summary", requireAuth, async (_req, res) => {
+    try {
+        const state = await getMoodSummary();
+        if (state.status === "computing") {
+            res.status(202).json({ computing: true });
+            return;
+        }
+        res.json(state.data);
+    } catch (error) {
+        logger.error("Vibe mood summary error:", error);
+        res.status(500).json({ error: "Failed to read the mood summary" });
     }
 });
 
