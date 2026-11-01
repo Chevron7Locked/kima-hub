@@ -190,51 +190,32 @@ export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavi
                 break;
             }
 
-            case DPAD_KEYS.DOWN: {
-                e.preventDefault();
-                if (sectionIndex < sections.length - 1) {
-                    focusMemory.current.set(nameOf(currentSection), column);
-
-                    const nextSectionIndex = sectionIndex + 1;
-                    const nextSection = sections[nextSectionIndex];
-                    const nextCards = getCardsInSection(nextSection);
-
-                    if (nextCards.length > 0) {
-                        // Try to restore saved position, or use current column, or clamp
-                        const savedIndex = focusMemory.current.get(nameOf(nextSection));
-                        const targetIndex = savedIndex !== undefined
-                            ? Math.min(savedIndex, nextCards.length - 1)
-                            : Math.min(column, nextCards.length - 1);
-
-                        focusCard(nextCards[targetIndex]);
-                        setFocusedSectionIndex(nextSectionIndex);
-                        setFocusedCardIndex(targetIndex);
-                    }
-                }
-                break;
-            }
-
+            case DPAD_KEYS.DOWN:
             case DPAD_KEYS.UP: {
                 e.preventDefault();
-                if (sectionIndex > 0) {
+                const step = e.key === DPAD_KEYS.DOWN ? 1 : -1;
+                // The nearest row that way with cards to focus: a row still loading has none, and is stepped over.
+                let targetSectionIndex = sectionIndex + step;
+                while (
+                    targetSectionIndex >= 0 &&
+                    targetSectionIndex < sections.length &&
+                    getCardsInSection(sections[targetSectionIndex]).length === 0
+                ) {
+                    targetSectionIndex += step;
+                }
+                if (targetSectionIndex >= 0 && targetSectionIndex < sections.length) {
                     focusMemory.current.set(nameOf(currentSection), column);
+                    const targetSection = sections[targetSectionIndex];
+                    const targetCards = getCardsInSection(targetSection);
+                    // Restore the row's saved position, or keep the current column, clamped to the row.
+                    const savedIndex = focusMemory.current.get(nameOf(targetSection));
+                    const targetIndex = Math.min(savedIndex ?? column, targetCards.length - 1);
 
-                    const prevSectionIndex = sectionIndex - 1;
-                    const prevSection = sections[prevSectionIndex];
-                    const prevCards = getCardsInSection(prevSection);
-
-                    if (prevCards.length > 0) {
-                        const savedIndex = focusMemory.current.get(nameOf(prevSection));
-                        const targetIndex = savedIndex !== undefined
-                            ? Math.min(savedIndex, prevCards.length - 1)
-                            : Math.min(column, prevCards.length - 1);
-
-                        focusCard(prevCards[targetIndex]);
-                        setFocusedSectionIndex(prevSectionIndex);
-                        setFocusedCardIndex(targetIndex);
-                    }
-                } else {
-                    // At top section, trigger onBack to return to nav
+                    focusCard(targetCards[targetIndex]);
+                    setFocusedSectionIndex(targetSectionIndex);
+                    setFocusedCardIndex(targetIndex);
+                } else if (step < 0) {
+                    // Above the top row, back to the nav.
                     onBackRef.current?.();
                     setIsContentFocused(false);
                 }
