@@ -29,7 +29,7 @@ export function useAlbumData(albumId?: string) {
         },
         enabled: !!id,
         staleTime: 10 * 60 * 1000,
-        retry: 1,
+        retry: (failures, error) => (error as { status?: number }).status !== 404 && failures < 1,
     });
 
     const source: AlbumSource | null = useMemo(() => {

@@ -726,8 +726,10 @@ class ApiClient {
         }>(`/library/scan/status/${jobId}`);
     }
 
+    // The artist and album pages fall back from the library to MusicBrainz on a 404, and show "not found" when both
+    // miss, so these four never log a 404.
     async getArtist(id: string) {
-        return this.request<ApiData>(`/library/artists/${encodeURIComponent(id)}`);
+        return this.request<ApiData>(`/library/artists/${encodeURIComponent(id)}`, { silent404: true });
     }
 
     async getAlbums(params?: {
@@ -746,7 +748,7 @@ class ApiClient {
     }
 
     async getAlbum(id: string) {
-        return this.request<ApiData>(`/library/albums/${id}`);
+        return this.request<ApiData>(`/library/albums/${id}`, { silent404: true });
     }
 
     async getTracks(params?: {
@@ -1256,13 +1258,15 @@ class ApiClient {
     // Artists (Discovery)
     async getArtistDiscovery(nameOrMbid: string) {
         return this.request<ApiData>(
-            `/artists/discover/${encodeURIComponent(nameOrMbid)}`
+            `/artists/discover/${encodeURIComponent(nameOrMbid)}`,
+            { silent404: true }
         );
     }
 
     async getAlbumDiscovery(rgMbid: string) {
         return this.request<ApiData>(
-            `/artists/album/${encodeURIComponent(rgMbid)}`
+            `/artists/album/${encodeURIComponent(rgMbid)}`,
+            { silent404: true }
         );
     }
 
