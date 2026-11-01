@@ -230,9 +230,11 @@ code {
 }
 
 /* ── The media grid ───────────────────────────────────────────────────────
- * Every wall of artwork cards and every home shelf uses one card width and
- * one gap. A wider screen shows more cards, not bigger ones; a phone fits two
- * to a row. */
+ * Every wall of artwork cards and every home shelf starts from one card width
+ * and one gap. A wider screen shows more cards; a wall's cards then stretch
+ * just enough to fill the row (less than one card's worth, shared out), so no
+ * band is left on the right. Shelves scroll and keep the exact width. A phone
+ * fits two to a row. */
 :root {
     --card-w: 11.25rem; /* 180px */
     --card-gap: clamp(0.75rem, 1.6vw, 1.25rem); /* 12px on a phone to 20px on a desktop */
@@ -246,7 +248,7 @@ code {
     }
     @media (min-width: 48rem) {
         .grid-media {
-            grid-template-columns: repeat(auto-fill, minmax(min(var(--card-w), 100%), var(--card-w)));
+            grid-template-columns: repeat(auto-fill, minmax(min(var(--card-w), 100%), 1fr));
         }
     }
 }
