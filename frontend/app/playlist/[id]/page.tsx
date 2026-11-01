@@ -842,7 +842,7 @@ export default function PlaylistDetailPage() {
                         </button>
 
                         <div className="flex items-center gap-2 mb-4">
-                            <div className="w-1.5 h-1.5 bg-brand rounded-full" />
+                            <div className="w-1.5 h-1.5 bg-type-track rounded-full" />
                             <span className="t-eyebrow">
                                 {isShared ? "Public Playlist" : "Playlist"}
                             </span>

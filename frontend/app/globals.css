@@ -38,7 +38,7 @@
     --color-type-album: oklch(0.63 0.07 195);
     --color-type-podcast: oklch(0.6 0.125 350);
     --color-type-audiobook: oklch(0.57 0.155 33);
-    --color-type-artist: #fca200;
+    --color-type-artist: oklch(0.64 0.09 245);
 
     /* Status: outcome of an action, never decoration. */
     --color-success: #22c55e;
