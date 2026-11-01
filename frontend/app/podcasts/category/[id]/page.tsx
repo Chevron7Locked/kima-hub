@@ -68,7 +68,7 @@ export default function PodcastCategoryPage() {
                 )}
             </PageHeader>
 
-            <div className="page-shell relative pb-32 pt-2 animate-rise">
+            <div className="page-shell relative page-end pt-2 animate-rise">
                 {shows.length === 0 ? (
                     <p className="py-16 text-center text-sm text-[var(--text-muted)]">apple has no chart for this category right now</p>
                 ) : (

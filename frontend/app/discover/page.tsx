@@ -191,7 +191,7 @@ export default function DiscoverWeeklyPage() {
                     onCancelGeneration={handleCancelGeneration}
                 />
 
-                <div className="page-shell pb-32">
+                <div className="page-shell page-end">
                     {playlist && playlist.tracks.length > 0 ? (
                             <div className="section-stack">
                                 <section>

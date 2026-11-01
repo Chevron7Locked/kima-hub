@@ -1127,7 +1127,7 @@ export default function PlaylistDetailPage() {
                 </div>
             </div>
 
-            <div className="relative page-shell pb-32">
+            <div className="relative page-shell page-end">
                 <div>
                     {playlist.pendingCount > 0 && (
                         <div className="mb-4 px-4 py-2 bg-danger/10 border border-danger/20 rounded-lg flex items-center justify-between">

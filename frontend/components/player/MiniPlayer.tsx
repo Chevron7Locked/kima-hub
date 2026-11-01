@@ -8,7 +8,7 @@ import {
     AlertTriangle,
 } from "lucide-react";
 import { PlayPauseButton } from "./PlayPauseButton";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { VibeToggleButton } from "./VibeToggleButton";
 import { CachedImage } from "@/components/ui/CachedImage";
 
@@ -45,6 +45,15 @@ export function MiniPlayer() {
     }
 
     const { title, subtitle, coverUrl, hasMedia } = useMediaInfo(100);
+
+    // While the player floats over the page, the page's last row needs room to scroll clear of it (.page-end).
+    const covering = hasMedia && !isDismissed;
+    useEffect(() => {
+        if (!covering) return;
+        const root = document.documentElement;
+        root.setAttribute("data-mini-player", "");
+        return () => root.removeAttribute("data-mini-player");
+    }, [covering]);
 
     // The vibe button is for music only.
     const canSkip = playbackType === "track";

@@ -199,7 +199,7 @@ export default function BrowsePlaylistsPage() {
                     className="pb-2"
                 />
 
-                <div className="relative page-shell pb-24 animate-rise">
+                <div className="relative page-shell page-end animate-rise">
                     <div className="mb-6">
                         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-type-track/5 border border-type-track/20">
                             <Info className="w-4 h-4 text-brand shrink-0 mt-0.5" />

@@ -44,7 +44,7 @@ export default function HomePage() {
             <div className="relative">
                 <HomeHero />
 
-                <div className="section-stack relative page-shell pb-32 pt-2">
+                <div className="section-stack relative page-shell page-end pt-2">
                 {/* Sections rise in staggered order on mount. Only the first 8 visible sections animate;
                     items 9+ render immediately. Animation is mount-only (CSS animation-fill-mode: both). */}
                 {(() => {

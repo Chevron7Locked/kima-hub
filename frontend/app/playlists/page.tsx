@@ -682,7 +682,7 @@ export default function PlaylistsPage() {
                 )}
             </PageHeader>
 
-            <div className="relative page-shell pb-24 animate-rise">
+            <div className="relative page-shell page-end animate-rise">
                 {showHiddenTab && (
                     <div className="mb-6 px-4 py-3 bg-white/5 rounded-lg border border-white/10">
                         <p className="text-xs text-[var(--text-muted)]">

@@ -243,7 +243,7 @@ export default function DeezerPlaylistDetailPage() {
                 </div>
             </div>
 
-            <div className="relative page-shell pb-32 animate-rise">
+            <div className="relative page-shell page-end animate-rise">
                 <div>
                     {playlist.tracks.length > 0 ? (
                         <div>

@@ -374,7 +374,7 @@ export default function LibraryPage() {
                 shares={vibe.shares}
             />
 
-            <div className="relative page-shell pb-24">
+            <div className="relative page-shell page-end">
                 {/* Tabs and refine controls share one line; on a TV each keeps a row of its own for the remote. */}
                 <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 pb-4 border-b border-white/5">
                     <LibraryTabs

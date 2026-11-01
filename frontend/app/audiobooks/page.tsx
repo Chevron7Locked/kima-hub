@@ -310,7 +310,7 @@ export default function AudiobooksPage() {
                     description="Connect Audiobookshelf to listen to your audiobooks here"
                 />
 
-                <div className="relative page-shell pb-24">
+                <div className="relative page-shell page-end">
 
                     <div className="grid md:grid-cols-3 gap-4 mb-12">
                         {[
@@ -380,7 +380,7 @@ export default function AudiobooksPage() {
                 className="pb-2"
             />
 
-            <div className="relative page-shell pb-24 animate-rise">
+            <div className="relative page-shell page-end animate-rise">
                 <div className="mb-8 space-y-3">
                     {/* First Row: Filter Pills and Shuffle */}
                     <div className="flex flex-wrap items-center gap-2">

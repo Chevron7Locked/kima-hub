@@ -146,7 +146,7 @@ export default function PodcastDetailPage() {
             <div className="relative flex-1">
                 <ColorWash colors={colors} />
 
-                <div className="relative page-shell py-8 section-stack">
+                <div className="relative page-shell pt-8 page-end section-stack">
                     {podcast && inProgressEpisodes.length > 0 && (
                         <div>
                             <ContinueListening

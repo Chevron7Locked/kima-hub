@@ -95,7 +95,7 @@ export default function ReleasesPage() {
     }
 
     return (
-        <div className="min-h-screen pb-32">
+        <div className="min-h-screen page-end">
             <PageHeader
                 title="New and upcoming"
                 description={

@@ -343,6 +343,20 @@ code {
     }
 }
 
+/* The room under a page's last row: one section beat, plus the floating mini player's height while it shows
+ * (it marks the page with data-mini-player). Pages end with .page-end instead of their own bottom padding. */
+:root {
+    --page-end: clamp(2rem, 3.5vw, 3rem);
+}
+:root[data-mini-player] {
+    --page-end: calc(var(--mini-clearance) + 1rem);
+}
+@layer components {
+    .page-end {
+        padding-bottom: var(--page-end);
+    }
+}
+
 /* A cover that fails to load leaves its placeholder background showing
  * instead of printing the alt text over it. */
 img {

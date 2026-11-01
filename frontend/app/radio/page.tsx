@@ -134,7 +134,7 @@ export default function RadioPage() {
                     }
                 />
 
-                <div className="relative page-shell pb-32 pt-2 animate-rise">
+                <div className="relative page-shell page-end pt-2 animate-rise">
                     <div className="section-stack">
                         <section>
                             <SectionHeader title="Quick Start" />

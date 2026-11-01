@@ -144,7 +144,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
                     </select>
                 </label>
             </PageHeader>
-            <div className="page-shell pb-8 flex gap-12">
+            <div className="page-shell page-end flex gap-12">
                 <SettingsSidebar
                     items={sidebarItems}
                     activeSection={activeSection}

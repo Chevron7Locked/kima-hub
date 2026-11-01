@@ -84,7 +84,7 @@ export default function ChangelogPage() {
     const openItemsList = data.releases.flatMap((r) => r.items.filter((i) => i.open).map((i) => ({ release: r, item: i })));
 
     return (
-        <div className="px-5 pb-24 max-w-3xl mx-auto">
+        <div className="px-5 page-end max-w-3xl mx-auto">
             <PageHeader className="px-0" title="Changelog" description="Every release, newest first. Notes stay, requests stay, until the server can see they're done." />
 
             {openItemsList.length > 0 && (

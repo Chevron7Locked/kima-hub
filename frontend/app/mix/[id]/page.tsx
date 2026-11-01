@@ -254,7 +254,7 @@ export default function MixPage() {
                 </div>
             </div>
 
-            <div className="page-shell pb-32">
+            <div className="page-shell page-end">
                 {mix.tracks && mix.tracks.length > 0 ? (
                     <div className="w-full">
                         <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-xs text-[var(--text-secondary)] border-b border-white/10 mb-2">

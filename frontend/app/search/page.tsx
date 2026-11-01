@@ -101,7 +101,7 @@ export default function SearchPage() {
 
     return (
         <div className="min-h-screen relative overflow-hidden">
-            <div className="relative z-(--z-raised) page-shell py-8 animate-rise">
+            <div className="relative z-(--z-raised) page-shell pt-8 page-end animate-rise">
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
                 {!hasSearched && (

@@ -163,7 +163,7 @@ export default function PodcastsPage() {
                 )}
             </PageHeader>
 
-            <div className="page-shell section-stack relative pb-32 pt-2 animate-rise">
+            <div className="page-shell section-stack relative page-end pt-2 animate-rise">
                 {inProgress.length > 0 && (
                     <section>
                         <SectionHeader type="podcast" title="continue listening" />

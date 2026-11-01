@@ -215,7 +215,7 @@ export default function ArtistPage() {
                 />
                 <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_0%,rgba(16,16,16,0.4)_100%)] pointer-events-none" />
 
-                <div className="relative page-shell py-6 space-y-8">
+                <div className="relative page-shell pt-6 page-end space-y-8">
                     {(artist.bio || artist.summary) && (
                         <ArtistBio bio={artist.bio || artist.summary || ""} />
                     )}
