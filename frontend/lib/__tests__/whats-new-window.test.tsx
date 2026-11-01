@@ -79,6 +79,13 @@ beforeEach(() => {
 });
 
 describe("WhatsNewWindow", () => {
+    it("names the release once: the window's title, not again over the list or the summary", async () => {
+        await renderWindow([R12]);
+        const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4")).map((h) => h.textContent ?? "");
+        expect(headings.filter((t) => t.includes("1.12"))).toEqual(["Kima 1.12"]);
+        expect(container.textContent).toContain("Rerun from any step and fixes.");
+    });
+
     it("stacks older unread releases as one line each under a Before-this heading", async () => {
         await renderWindow([R11, R12]);
         expect(container.textContent).toContain("Before this");

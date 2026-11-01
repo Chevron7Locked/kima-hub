@@ -143,7 +143,7 @@ export function OverlayPlayer() {
             </div>
 
             {/* Main Content - Portrait vs Landscape */}
-            <div className="flex-1 flex flex-col landscape:flex-row items-center justify-start px-6 pb-6 landscape:px-8 landscape:gap-12 overflow-hidden">
+            <div className="flex-1 flex flex-col landscape:flex-row items-center justify-start landscape:justify-center px-6 pb-6 landscape:px-8 landscape:gap-12 overflow-hidden">
                 {isLyricsActive ? (
                     <div className="w-full max-w-[min(340px,calc(100vh-26rem))] landscape:w-[min(340px,calc(100vh-9rem))] landscape:max-w-none landscape:flex-none aspect-square flex-shrink-0 relative mb-6 landscape:mb-0 rounded-2xl bg-[var(--bg-primary)]/90 border border-white/[0.06]">
                         <LyricsView variant="compact" />

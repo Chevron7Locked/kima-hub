@@ -15,7 +15,6 @@ import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { useDialog } from "@/hooks/useDialog";
 import { Button } from "@/components/ui/Button";
-import { shortVersion } from "@/lib/format";
 import { ReleaseBody } from "./ReleaseBody";
 import { ReleaseLinks } from "./ReleaseLinks";
 import { ChoiceButton } from "./ChoiceButton";
@@ -203,7 +202,7 @@ export function WhatsNewWindow({
     const list = (
         <section aria-labelledby="whats-new-list" className="flex flex-col gap-5">
             <h3 id="whats-new-list" className="text-base font-semibold text-white">
-                What&apos;s new in {shortVersion(release.version)}
+                In this release
             </h3>
             {group("whats-new-needs", "Needs you", release.items.filter(isDecision))}
             {group("whats-new-changed", "What changed", release.items.filter((i) => !isDecision(i)))}
@@ -248,10 +247,7 @@ export function WhatsNewWindow({
     );
 
     const intro = (
-        <section aria-labelledby="whats-new-intro" className="flex flex-col gap-4 max-w-prose">
-            <h3 id="whats-new-intro" className="text-base font-semibold text-white">
-                {release.title}
-            </h3>
+        <section aria-labelledby="whats-new-title" className="flex flex-col gap-4 max-w-prose">
             <p className="text-[0.9375rem] leading-relaxed text-[var(--text-secondary)]">{release.summary}</p>
             <p className="text-sm text-[var(--text-muted)]">Pick anything from the list to read it.</p>
         </section>

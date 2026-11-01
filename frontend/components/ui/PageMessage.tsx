@@ -14,7 +14,7 @@ export function PageMessage({ icon, title, description, action }: PageMessagePro
     return (
         <div className="page-shell flex min-h-[60vh] flex-col items-center justify-center py-16 text-center">
             {icon && <div className="mb-4 text-[var(--text-muted)] [&_svg]:h-10 [&_svg]:w-10">{icon}</div>}
-            <h1 className="text-xl font-bold tracking-tight text-white">{title}</h1>
+            <h1 className="t-page-title">{title}</h1>
             {description && <p className="mt-2 max-w-md text-sm text-[var(--text-muted)]">{description}</p>}
             {action &&
                 ("href" in action ? (

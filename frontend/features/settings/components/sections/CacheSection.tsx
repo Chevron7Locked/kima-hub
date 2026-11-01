@@ -1251,26 +1251,28 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
 
                     {maintenanceOpen && (
                         <div className="px-4 pt-3 pb-4 space-y-3 border-t border-white/10">
-                            <Button size="sm" onClick={handleClearCaches} disabled={clearingCaches}>
-                                {clearingCaches ? "Clearing..." : "Clear All Caches"}
-                            </Button>
-                            <Button size="sm" onClick={handleCleanupStaleJobs} disabled={cleaningStaleJobs}>
-                                {cleaningStaleJobs ? "Cleaning..." : "Cleanup Stale Jobs"}
-                            </Button>
-                            <Button size="sm" onClick={() => setConfirmTarget("refileAlbums")} disabled={refileStarting}>
-                                Re-file Albums by Tags
-                            </Button>
-                            {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
-                                <Button
-                                    size="sm"
-                                    onClick={handleRetryFailedAnalysis}
-                                    disabled={retryingFailed || isEnrichmentActive}
-                                >
-                                    {retryingFailed
-                                        ? "Retrying..."
-                                        : `Retry Failed Analysis (${(enrichmentProgress?.audioAnalysis?.failed || 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed || 0)})`}
+                            <div className="flex flex-wrap gap-2">
+                                <Button size="sm" onClick={handleClearCaches} disabled={clearingCaches}>
+                                    {clearingCaches ? "Clearing..." : "Clear All Caches"}
                                 </Button>
-                            )}
+                                <Button size="sm" onClick={handleCleanupStaleJobs} disabled={cleaningStaleJobs}>
+                                    {cleaningStaleJobs ? "Cleaning..." : "Cleanup Stale Jobs"}
+                                </Button>
+                                <Button size="sm" onClick={() => setConfirmTarget("refileAlbums")} disabled={refileStarting}>
+                                    Re-file Albums by Tags
+                                </Button>
+                                {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
+                                    <Button
+                                        size="sm"
+                                        onClick={handleRetryFailedAnalysis}
+                                        disabled={retryingFailed || isEnrichmentActive}
+                                    >
+                                        {retryingFailed
+                                            ? "Retrying..."
+                                            : `Retry Failed Analysis (${(enrichmentProgress?.audioAnalysis?.failed || 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed || 0)})`}
+                                    </Button>
+                                )}
+                            </div>
 
                             {refileStarted && (
                                 <p className="text-xs text-success">
