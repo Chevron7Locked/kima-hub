@@ -1,6 +1,5 @@
-/** Loads every Home section and refreshes the mixes. */
+/** Loads every Home section and refreshes the mixes. Each section reports its own loading state. */
 
-import { useAuth } from "@/lib/auth-context";
 import { notify } from "@/lib/notify";
 import type {
     Artist,
@@ -23,6 +22,16 @@ import {
     useBrowseAllQuery,
 } from "@/hooks/useQueries";
 
+export interface HomeSectionLoading {
+    recentlyListened: boolean;
+    recentlyAdded: boolean;
+    recommended: boolean;
+    mixes: boolean;
+    popularArtists: boolean;
+    popularPodcasts: boolean;
+    recentAudiobooks: boolean;
+}
+
 export interface UseHomeDataReturn {
     // Data sections
     recentlyListened: ListenedItem[];
@@ -34,8 +43,8 @@ export interface UseHomeDataReturn {
     recentAudiobooks: Audiobook[];
     featuredPlaylists: PlaylistPreview[];
 
-    // Loading states
-    isLoading: boolean;
+    // Loading states: each Home section is waiting on its own request, never on the others.
+    sectionLoading: HomeSectionLoading;
     isRefreshingMixes: boolean;
     isBrowseLoading: boolean;
 
@@ -45,8 +54,6 @@ export interface UseHomeDataReturn {
 
 /** Every Home section: continue listening, recently added, recommended, mixes, popular, podcasts, audiobooks. */
 export function useHomeData(): UseHomeDataReturn {
-    const { isAuthenticated } = useAuth();
-
     const { data: recentlyListenedData, isLoading: isLoadingListened } =
         useRecentlyListenedQuery(10);
     const { data: recentlyAddedData, isLoading: isLoadingAdded } =
@@ -77,15 +84,15 @@ export function useHomeData(): UseHomeDataReturn {
     // Artists, podcasts and audiobooks, in the order they were last played.
     const items = recentlyListenedData?.items || [];
 
-    const isLoading =
-        !isAuthenticated ||
-        isLoadingListened ||
-        isLoadingAdded ||
-        isLoadingRecommended ||
-        isLoadingMixes ||
-        isLoadingPopular ||
-        isLoadingPodcasts ||
-        isLoadingAudiobooks;
+    const sectionLoading: HomeSectionLoading = {
+        recentlyListened: isLoadingListened,
+        recentlyAdded: isLoadingAdded,
+        recommended: isLoadingRecommended,
+        mixes: isLoadingMixes,
+        popularArtists: isLoadingPopular,
+        popularPodcasts: isLoadingPodcasts,
+        recentAudiobooks: isLoadingAudiobooks,
+    };
 
     return {
         recentlyListened: items,
@@ -100,7 +107,7 @@ export function useHomeData(): UseHomeDataReturn {
             ? audiobooksData.slice(0, 10)
             : [],
         featuredPlaylists: browseData?.playlists || [],
-        isLoading,
+        sectionLoading,
         isRefreshingMixes,
         isBrowseLoading,
         handleRefreshMixes,

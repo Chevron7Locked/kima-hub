@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, lazy, Suspense } from "react";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { RefreshCw, AudioWaveform } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useHomeData } from "@/features/home/hooks/useHomeData";
@@ -10,7 +9,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ContinueListening } from "@/features/home/components/ContinueListening";
 import { ArtistsGrid, PopularArtistsGrid } from "@/features/home/components/ArtistsGrid";
 import { MixesGrid } from "@/features/home/components/MixesGrid";
-import { PodcastShelf } from "@/features/podcast/components/PodcastShelf";
+import { PodcastShelf, PodcastShelfPlaceholder } from "@/features/podcast/components/PodcastShelf";
 import { AudiobooksGrid } from "@/features/home/components/AudiobooksGrid";
 import { FeaturedPlaylistsGrid, FeaturedPlaylistsSkeleton } from "@/features/home/components/FeaturedPlaylistsGrid";
 import { LibraryRadioStations } from "@/features/home/components/LibraryRadioStations";
@@ -29,15 +28,15 @@ export default function HomePage() {
         popularPodcasts,
         recentAudiobooks,
         featuredPlaylists,
-        isLoading,
+        sectionLoading,
         isRefreshingMixes,
         isBrowseLoading,
         handleRefreshMixes,
     } = useHomeData();
 
-    if (isLoading) {
-        return <LoadingScreen />;
-    }
+    // A section that is still loading holds its place with a row of card-sized blanks; the page itself never waits.
+    const body = (loading: boolean, count: number, content: React.ReactNode) =>
+        loading && count === 0 ? <PodcastShelfPlaceholder /> : content;
 
     return (
         <div className="min-h-screen">
@@ -55,19 +54,19 @@ export default function HomePage() {
                                 <LibraryRadioStations />
                             </section>
                         )},
-                        { key: "continue-listening", visible: recentlyListened.length > 0, content: (
+                        { key: "continue-listening", visible: sectionLoading.recentlyListened || recentlyListened.length > 0, content: (
                             <section data-tv-section="continue-listening">
                                 <SectionHeader title="Continue Listening" showAllHref="/collection?tab=artists" type="featured" />
-                                <ContinueListening items={recentlyListened} />
+                                {body(sectionLoading.recentlyListened, recentlyListened.length, <ContinueListening items={recentlyListened} />)}
                             </section>
                         )},
-                        { key: "recently-added", visible: recentlyAdded.length > 0, content: (
+                        { key: "recently-added", visible: sectionLoading.recentlyAdded || recentlyAdded.length > 0, content: (
                             <section data-tv-section="recently-added">
                                 <SectionHeader title="Recently Added" showAllHref="/collection?tab=artists" type="artist" />
-                                <ArtistsGrid artists={recentlyAdded} />
+                                {body(sectionLoading.recentlyAdded, recentlyAdded.length, <ArtistsGrid artists={recentlyAdded} />)}
                             </section>
                         )},
-                        { key: "made-for-you", visible: mixes.length > 0, content: (
+                        { key: "made-for-you", visible: sectionLoading.mixes || mixes.length > 0, content: (
                             <section data-tv-section="made-for-you">
                                 <SectionHeader
                                     title="Made For You"
@@ -101,19 +100,19 @@ export default function HomePage() {
                                         </div>
                                     }
                                 />
-                                <MixesGrid mixes={mixes} />
+                                {body(sectionLoading.mixes, mixes.length, <MixesGrid mixes={mixes} />)}
                             </section>
                         )},
-                        { key: "recommended", visible: recommended.length > 0, content: (
+                        { key: "recommended", visible: sectionLoading.recommended || recommended.length > 0, content: (
                             <section data-tv-section="recommended">
                                 <SectionHeader title="Recommended" showAllHref="/discover" badge="Local Engine" type="artist" />
-                                <ArtistsGrid artists={recommended} />
+                                {body(sectionLoading.recommended, recommended.length, <ArtistsGrid artists={recommended} />)}
                             </section>
                         )},
-                        { key: "popular-artists", visible: popularArtists.length > 0, content: (
+                        { key: "popular-artists", visible: sectionLoading.popularArtists || popularArtists.length > 0, content: (
                             <section data-tv-section="popular-artists">
                                 <SectionHeader title="Popular Artists" badge="ListenBrainz" type="artist" />
-                                <PopularArtistsGrid artists={popularArtists} />
+                                {body(sectionLoading.popularArtists, popularArtists.length, <PopularArtistsGrid artists={popularArtists} />)}
                             </section>
                         )},
                         { key: "featured-playlists", visible: isBrowseLoading || featuredPlaylists.length > 0, content: (
@@ -126,16 +125,16 @@ export default function HomePage() {
                                 )}
                             </section>
                         )},
-                        { key: "popular-podcasts", visible: popularPodcasts.length > 0, content: (
+                        { key: "popular-podcasts", visible: sectionLoading.popularPodcasts || popularPodcasts.length > 0, content: (
                             <section data-tv-section="popular-podcasts">
                                 <SectionHeader title="Popular Podcasts" showAllHref="/podcasts" type="podcast" />
-                                <PodcastShelf podcasts={popularPodcasts} />
+                                {body(sectionLoading.popularPodcasts, popularPodcasts.length, <PodcastShelf podcasts={popularPodcasts} />)}
                             </section>
                         )},
-                        { key: "audiobooks", visible: recentAudiobooks.length > 0, content: (
+                        { key: "audiobooks", visible: sectionLoading.recentAudiobooks || recentAudiobooks.length > 0, content: (
                             <section data-tv-section="audiobooks">
                                 <SectionHeader title="Audiobooks" showAllHref="/audiobooks" type="audiobook" />
-                                <AudiobooksGrid audiobooks={recentAudiobooks} />
+                                {body(sectionLoading.recentAudiobooks, recentAudiobooks.length, <AudiobooksGrid audiobooks={recentAudiobooks} />)}
                             </section>
                         )},
                     ];
