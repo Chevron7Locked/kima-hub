@@ -221,9 +221,31 @@ async function readSheet(page: Page): Promise<SheetState> {
     return state as SheetState;
 }
 
-/** The sheet's height animates for 340 ms after a snap change; wait that out before measuring. */
+/**
+ * The sheet's height slides for 340 ms after a snap change, but under the gate's software GL frames come 150-300 ms
+ * apart and the slide took up to a second; wait until it has finished and the height holds still, not for a fixed time.
+ */
 async function waitForSheetToRest(page: Page): Promise<void> {
-    await page.waitForTimeout(600);
+    const read = () =>
+        page.evaluate(() => {
+            const el = document.querySelector('[data-testid="vibe-sheet"]');
+            if (!el) return { height: Number.NaN, sliding: false }; // never equal, so a missing sheet fails the wait
+            return {
+                height: el.getBoundingClientRect().height,
+                sliding: el.getAnimations().some((a) => a.playState === "running" || a.pending),
+            };
+        });
+    await expect
+        .poll(
+            async () => {
+                const first = await read();
+                await page.waitForTimeout(150);
+                const second = await read();
+                return !first.sliding && !second.sliding && first.height === second.height;
+            },
+            { timeout: 10_000, message: "the sheet never came to rest" },
+        )
+        .toBe(true);
 }
 
 /** The part of the sheet that is inside the page content. */
