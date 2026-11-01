@@ -44,7 +44,7 @@ export function SearchFilters({
     if (soulseekEnabled) {
         filters.push({
             id: "soulseek",
-            label: "P2P Network",
+            label: "Soulseek",
             icon: <Download className="w-4 h-4" />,
             count: soulseekResultCount,
         });

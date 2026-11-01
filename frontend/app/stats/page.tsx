@@ -489,8 +489,7 @@ function Frame({
 }) {
     return (
         <div className="page-shell relative flex h-full flex-col pt-6 pb-[var(--stats-under)] compact:pt-1">
-            <div className="compact:hidden flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 pb-3">
-                <p className="t-eyebrow">your listening</p>
+            <div className="compact:hidden flex flex-wrap items-baseline gap-x-6 gap-y-2 pb-3">
                 <div className="flex items-baseline gap-4">{controls}</div>
             </div>
             {status}

@@ -225,8 +225,6 @@ export default function DiscoverWeeklyPage() {
                         ) : (
                             <div className="max-w-3xl mx-auto py-16">
                                 <div className="relative overflow-hidden rounded-lg border-2 border-white/10 bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] p-12">
-                                    <div className="absolute top-0 left-0 w-1 h-full bg-brand" />
-
                                     <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                                         <div className="w-2 h-2 bg-[var(--color-brand)]" />
                                         <span className="text-xs tabular-nums text-[var(--text-secondary)]">
@@ -234,44 +232,28 @@ export default function DiscoverWeeklyPage() {
                                         </span>
                                     </div>
 
-                                    <h3 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-4 leading-none">
-                                        This week&apos;s<br/>
-                                        <span className="text-[var(--color-brand)]">playlist</span>
-                                    </h3>
+                                    <h2 className="text-xl font-bold tracking-tight text-white mb-3">
+                                        This week&apos;s playlist
+                                    </h2>
 
                                     <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
                                         Kima finds artists similar to ones you already love, picks a representative track
                                         from each, then builds your weekly playlist.
                                     </p>
 
-                                    {/* What this does -- disk disclosure, visible before generating */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+                                    {/* What building it does, including the downloads, shown before it starts. */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
                                             <div className="text-xs text-[var(--text-muted)] mb-1">Finds</div>
-                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Similar artists via ListenBrainz + local similarity, grouped by similarity tier</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Artists similar to the ones you play, from close matches to wild cards</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
                                             <div className="text-xs text-[var(--text-muted)] mb-1">Downloads</div>
-                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Full albums to <span className="text-[var(--text-muted)]">/music/discovery</span> on your server</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Whole albums through Lidarr or Soulseek, kept apart from your library</div>
                                         </div>
                                         <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02]">
                                             <div className="text-xs text-[var(--text-muted)] mb-1">Cleans up</div>
-                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Unliked albums are removed at week&apos;s end -- liked ones stay forever</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-3 gap-4 mb-8">
-                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-bold text-white mb-1">--</div>
-                                            <div className="text-xs text-[var(--text-muted)]">Tracks</div>
-                                        </div>
-                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-bold text-white mb-1">--</div>
-                                            <div className="text-xs text-[var(--text-muted)]">Duration</div>
-                                        </div>
-                                        <div className="border border-white/10 rounded-lg p-4 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                                            <div className="text-2xl font-bold text-white mb-1">--</div>
-                                            <div className="text-xs text-[var(--text-muted)]">Artists</div>
+                                            <div className="text-xs text-[var(--text-secondary)] leading-snug">Unliked albums are removed at the end of the week; like a song to keep its album</div>
                                         </div>
                                     </div>
 

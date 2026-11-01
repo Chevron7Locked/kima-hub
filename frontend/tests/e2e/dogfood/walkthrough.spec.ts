@@ -1792,8 +1792,8 @@ test.describe("Dogfood walkthrough", () => {
             return { noCrash: true, stackRendered: (await stack.count()) > 0 };
         });
 
-        await session.step("the P2P tab, if this instance has the integration", async () => {
-            const p2p = page.getByRole("button", { name: "P2P Network" });
+        await session.step("the Soulseek tab, if this instance has the integration", async () => {
+            const p2p = page.getByRole("button", { name: "Soulseek" });
             if ((await p2p.count()) === 0) {
                 session.noteNotCovered("soulseek/P2P search: the tab is absent, so the integration is not configured");
                 return { p2p: false };

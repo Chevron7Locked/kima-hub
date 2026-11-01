@@ -132,7 +132,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         await session.step("the stats page loads", async () => {
             await page.goto("/stats");
             await settle(page);
-            await expect(page.getByText(/your listening/i).first()).toBeVisible();
+            await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
         });
 
         session.assertClean("1. Arrive");

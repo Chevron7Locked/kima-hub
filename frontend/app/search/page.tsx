@@ -105,18 +105,10 @@ export default function SearchPage() {
                 <TVSearchInput initialQuery={query} onSearch={handleTVSearch} />
 
                 {!hasSearched && (
-                    <div className="mb-12 text-center animate-rise">
-                        <div className="inline-flex items-center gap-3 mb-4 text-brand">
-                            <span className="text-sm font-semibold">
-                                Discovery Engine
-                            </span>
-                        </div>
-                        <h1 className="t-page-title mb-4">
-                            Find Your Sound
-                        </h1>
-                        <p className="text-lg text-[var(--text-secondary)] max-w-2xl mx-auto">
-                            Search your library, discover new artists, or tap
-                            into the P2P network for rare tracks
+                    <div className="mb-8">
+                        <h1 className="t-page-title">Search</h1>
+                        <p className="mt-2 text-sm text-[var(--text-muted)]">
+                            Your library, artists you don&apos;t have yet, and Soulseek when it&apos;s connected
                         </p>
                     </div>
                 )}
@@ -291,7 +283,7 @@ export default function SearchPage() {
                             description="Try a different search term or check your spelling"
                         >
                             <p className="text-sm text-[var(--text-muted)]">
-                                Tip: Enable Soulseek to search the P2P network
+                                Connect Soulseek in Settings to also search music other people share
                             </p>
                         </EmptyState>
                     )}
