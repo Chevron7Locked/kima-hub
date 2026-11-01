@@ -1,9 +1,7 @@
 /**
- * A track's moods from five of the learned moods: happy (Upbeat), sad (Melancholic), calm (Calm), aggressive (Intense),
- * party (Energetic). A track has a mood when its score sits at least RECIPE_LINE standard deviations above the
- * library's mean for that mood, by the statistics the mood step keeps (the same line the mixes use); its library rank
- * picks the dominant label. The snapshot of these decisions rebuilds when those statistics change. Each mood page's mix
- * draws from that mood's page recipe, and the page's preset counts that recipe's songs, the ones it plays.
+ * A track's moods from five learned moods: happy (Upbeat), sad (Melancholic), calm (Calm), aggressive (Intense), party
+ * (Energetic). A track has a mood at RECIPE_LINE SD above the library's mean (as the mixes do); its library rank picks
+ * the dominant label. The snapshot rebuilds when the statistics change. Each mood page's mix draws from its page recipe.
  */
 
 import { Prisma } from "@prisma/client";
@@ -262,6 +260,18 @@ async function pageSongCount(recipe: string): Promise<number> {
     }
 }
 
+/** A mood's mix as served. A saved mix read back also carries `type`; one just saved, `generatedAt`. */
+export interface MoodMix {
+    id: string;
+    mood: string;
+    name: string;
+    description: string;
+    trackIds: string[];
+    coverUrls: string[];
+    trackCount: number;
+    color: string;
+}
+
 /** The mood pages' mixes, and each listener's saved one. */
 class MoodBucketService {
     /**
@@ -298,16 +308,7 @@ class MoodBucketService {
         mood: MoodType,
         limit: number = 15,
         excludeTrackIds: string[] = []
-    ): Promise<{
-        id: string;
-        mood: string;
-        name: string;
-        description: string;
-        trackIds: string[];
-        coverUrls: string[];
-        trackCount: number;
-        color: string;
-    } | null> {
+    ): Promise<MoodMix | null> {
         if (!VALID_MOODS.includes(mood)) {
             throw new Error(`Invalid mood: ${mood}`);
         }
@@ -353,17 +354,7 @@ class MoodBucketService {
         mood: MoodType,
         limit: number = 15,
         trackIds?: string[]
-    ): Promise<{
-        id: string;
-        mood: string;
-        name: string;
-        description: string;
-        trackIds: string[];
-        coverUrls: string[];
-        trackCount: number;
-        color: string;
-        generatedAt: string;
-    } | null> {
+    ): Promise<(MoodMix & { generatedAt: string }) | null> {
         const config = MOOD_BY_ID[mood];
         const generatedAt = new Date();
 
@@ -403,17 +394,7 @@ class MoodBucketService {
      * The listener's saved mood mix, for the home page. Its songs are read again: one deleted, corrupt, missing or moved
      * to Discover since the mix was saved is not counted, and the covers are those of the songs left. Null when none is.
      */
-    async getUserMoodMix(userId: string): Promise<{
-        id: string;
-        type: string;
-        mood: string;
-        name: string;
-        description: string;
-        trackIds: string[];
-        coverUrls: string[];
-        trackCount: number;
-        color: string;
-    } | null> {
+    async getUserMoodMix(userId: string): Promise<(MoodMix & { type: string }) | null> {
         const userMix = await prisma.userMoodMix.findUnique({
             where: { userId },
         });

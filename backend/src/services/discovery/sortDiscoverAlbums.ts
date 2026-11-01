@@ -1,10 +1,8 @@
 /**
- * The one-time sort of albums the old scanner filed by guesswork. An album filed as Discover stays there only on a
- * Discover download record (discoverEvidence; a suggestion alone says nothing); every other goes to the library as the
- * listener's. A library album a Discover download asked for goes back unless its listeners made it theirs: a liked song,
- * a song in a playlist, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another album by the artist they got
- * themselves, or a second library copy. Lidarr's Discover tag is no evidence: it marks an artist, and a listener can add
- * their own albums to a tagged artist in Lidarr.
+ * The one-time sort of albums the old scanner filed by guesswork. An album stays Discover only on a Discover download
+ * record (discoverEvidence); a library album a download asked for goes back unless the listener made it theirs: a liked or
+ * playlisted song, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another own album by the artist, or a second copy.
+ * Lidarr's Discover tag marks an artist and is no evidence.
  */
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";

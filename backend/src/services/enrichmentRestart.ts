@@ -1,12 +1,8 @@
 /**
- * Re-run the enrichment from any of its six steps: identification (which
- * recording each track is), artists, audio analysis, sound vectors, the
- * learned moods (scores and statistics), or the similarity step (feel,
- * statistics and the vibe map). A re-run redoes its step and everything that
- * depends on it; nothing the engine worked out is frozen across a run, and
- * every step but the moods lays the vibe map out again. Answers a person set
- * aside or closed stay as they left them, and everything people made -- the
- * library, playlists, plays, likes, edits and artist images -- stays.
+ * Re-run the enrichment from any of its six steps: identification, artists, audio analysis, sound vectors, the learned
+ * moods, or the similarity step (feel, statistics, vibe map). A re-run redoes its step and everything downstream, and
+ * every step but the moods lays the vibe map out again. Answers a person set aside or closed stay, as do the library,
+ * playlists, plays, likes, edits and artist images.
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
@@ -26,12 +22,9 @@ export interface EnrichmentWipe {
 }
 
 /**
- * What each step's re-run clears, in the order the resets share a transaction.
- * The moods are scored from sound vectors and their statistics read the
- * analysis' arousal and CLAP's readings, so every step that clears either
- * clears them too. Every step but the moods clears the similarity state and
- * the map, because the formula reads artist genres, analysis and sound vectors
- * and never the moods.
+ * What each step's re-run clears, in the order the resets share a transaction. Moods read sound vectors and the
+ * analysis' arousal, so every step that clears either clears them too. Every step but the moods clears the similarity
+ * state and the map, because the formula reads artist genres, analysis and sound vectors, never the moods.
  */
 const STEP_CLEARS: Record<RerunStep, {
     similarity: boolean;

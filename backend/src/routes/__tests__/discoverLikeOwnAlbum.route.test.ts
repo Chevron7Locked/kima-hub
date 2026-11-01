@@ -1,6 +1,6 @@
 /**
- * Candidate 6, on the real test database with the real router: a like on a suggestion whose release-group id is a
- * listener's own LIBRARY album. Only auth, queues, Lidarr and the enrichment wake-up are stood in.
+ * A like on a suggestion whose release-group id is a listener's own LIBRARY album, on the real test database with the
+ * real router. Only auth, queues, Lidarr and the enrichment wake-up are stood in.
  */
 jest.mock("../../utils/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
 jest.mock("../../middleware/auth", () => ({
@@ -73,7 +73,7 @@ async function seed(owned: "native_scan" | null) {
 const source = async () => (await prisma.ownedAlbum.findFirst({ where: { rgMbid: `${P}rg` } }))?.source ?? null;
 const location = async () => (await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location;
 
-describe("cand 6: like then unlike on a suggestion that names the listener's own library album", () => {
+describe("like then unlike on a suggestion that names the listener's own library album", () => {
     it("an album with the scanner's ownership row: the like leaves its mark alone and unlike leaves it in the library", async () => {
         await seed("native_scan");
         expect((await request(app).post("/discover/like").send({ albumId: `${P}rg` })).status).toBe(200);
@@ -82,11 +82,9 @@ describe("cand 6: like then unlike on a suggestion that names the listener's own
         expect(await location()).toBe("LIBRARY");
     });
 
-    it("an album with no ownership row (cand 3's state): unlike must not send it to Discover", async () => {
+    it("an album with no ownership row unlike must not send it to Discover", async () => {
         await seed(null);
         await request(app).post("/discover/like").send({ albumId: `${P}rg` });
-        // eslint-disable-next-line no-console
-        console.log("source after like:", await source());
         await request(app).delete("/discover/unlike").send({ albumId: `${P}rg` });
         expect(await location()).toBe("LIBRARY");
     });

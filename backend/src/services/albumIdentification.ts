@@ -179,11 +179,9 @@ function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): 
 }
 
 /**
- * Give untagged LIBRARY albums their MusicBrainz album id from their songs' AcoustID answers:
- * the albums of the songs about to be handed out first, in the order they go out, then the
- * backlog (songs already identified never come round again). Holds its caller for about
- * ROUND_BUDGET_MS plus the album in hand. Returns the ids of the albums given one. One album's
- * failure never stops the round; a paused MusicBrainz waits for the next round.
+ * Give untagged LIBRARY albums their MusicBrainz album id from their songs' AcoustID answers: first the albums of songs
+ * about to go out, then the backlog. Holds its caller for about ROUND_BUDGET_MS plus the album in hand. One album's
+ * failure never stops the round; a paused MusicBrainz waits for the next. Returns the ids of the albums given one.
  */
 export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<string[]> {
     if (await sourcePauseController.isPaused("musicbrainz")) return [];
@@ -264,11 +262,9 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         return "decided-none";
     }
 
-    // Every fingerprinted song needs a saved reply; the missing ones are asked in batches, and an
-    // album still missing one waits for a later round with no verdict.
-    // Each song is asked about with the fingerprints identification itself uses (the file's tag, then the
-    // stored one when AcoustID had nothing for the tag), so one saved reply serves both. The files are read
-    // here, after the memo check: a remembered album opens none, and an unchanged file is read once.
+    // Every fingerprinted song needs a saved reply; missing ones are asked in batches, and an album still missing one waits
+    // for a later round. Songs are asked with the fingerprints identification itself uses, so one reply serves both. Files
+    // are read after the memo check, so a remembered album opens none.
     const songs: { title: string; duration: number; options: FingerprintQuestion[] }[] = [];
     for (const t of tracks) {
         const options = fingerprintsToAsk(await readIdentityTagsOnce(t), t.acoustidFingerprint, t.duration);

@@ -90,7 +90,7 @@ export async function requestScan(req: ScanRequest): Promise<ScanRequestResult> 
     return { queued: true, jobId };
 }
 
-export const REFILE_JOB_ID = "refile-albums";
+const REFILE_JOB_ID = "refile-albums";
 
 /**
  * Queue the album re-file (albumRefile.ts) on the scan queue, whose one-at-a-time worker keeps it from running beside

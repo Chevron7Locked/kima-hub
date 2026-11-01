@@ -324,17 +324,21 @@ function suggestionSong(
     };
 }
 
+/** The week the listener's Discover page shows, from the calendar week and their latest completed batch. */
+async function viewWeekFor(userId: string) {
+    const latestBatch = await prisma.discoveryBatch.findFirst({
+        where: { userId, status: "completed" },
+        orderBy: { createdAt: "desc" },
+        select: { weekStart: true },
+    });
+    return resolveViewWeek(startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON }), latestBatch?.weekStart ?? null);
+}
+
 router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
-        const latestBatch = await prisma.discoveryBatch.findFirst({
-            where: { userId, status: "completed" },
-            orderBy: { createdAt: "desc" },
-            select: { weekStart: true },
-        });
-        const view = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null);
+        const view = await viewWeekFor(userId);
         const weekStart = view.weekStart;
         const weekEnd = endOfWeek(view.weekOf, { weekStartsOn: WEEK_STARTS_ON });
 
@@ -627,13 +631,7 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
     try {
         const userId = req.user!.id;
 
-        const calendarWeekStart = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
-        const latestBatch = await prisma.discoveryBatch.findFirst({
-            where: { userId, status: "completed" },
-            orderBy: { createdAt: "desc" },
-            select: { weekStart: true },
-        });
-        const weekStart = resolveViewWeek(calendarWeekStart, latestBatch?.weekStart ?? null).weekStart;
+        const weekStart = (await viewWeekFor(userId)).weekStart;
 
         const activeBatch = await prisma.discoveryBatch.findFirst({
             where: {

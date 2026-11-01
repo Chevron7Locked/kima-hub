@@ -52,11 +52,9 @@ class DiscoveryAlbumLifecycle {
     }
 
     /**
-     * Clears this listener's Discover down to what they liked, so each week starts clean: liked albums move to the
-     * library, every other suggestion is cleared (clearSuggestion), then the Discover downloads no suggestion names, the
-     * Discover albums nothing covers, the unavailable list, failed Discover downloads, suggestion records past their 30
-     * days, and the artists Lidarr holds under the Discover tag that nothing keeps. An album Lidarr did not delete stays
-     * and is reported; `lidarrFailed` holds this listener's, `unnamedFailed` the orphans no record names.
+     * Clears this listener's Discover down to what they liked: liked albums move to the library, every other suggestion is
+     * cleared, then the downloads, albums, unavailable list, failed downloads, 30-day-old records and Lidarr artists nothing
+     * keeps. An album Lidarr did not delete stays and is reported (`lidarrFailed`; `unnamedFailed` for orphans no record names).
      */
     async clearDiscover(userId: string): Promise<{
         moved: number;
@@ -182,13 +180,10 @@ export async function returnToDiscover(
         where: { rgMbid: { in: [...new Set([album.rgMbid, suggestedAs])] }, status: { in: ['LIKED', 'MOVED'] } },
     });
     if (likedElsewhere > 0) return false;
-    // The same evidence rule the scanner and the integrity check use: a listener's own download request, or a
-    // like on any of the album's suggestions, makes the album theirs, so undoing a Discover like does not take
-    // it back. The evidence matches by artist+title as well as by release-group id, so a LIKED suggestion
-    // recorded under a different id keeps the album too. Checked under both ids the album is recorded by: its
-    // own release-group id and the one the suggestion carried. Null evidence is not enough to keep it: a
-    // Discover download record is deleted after 30 days, and an unliked album with no record goes back by its
-    // origin.
+    // Same evidence rule as the scanner and the integrity check: the listener's own download request, or a like on any
+    // of the album's suggestions (matched by artist+title as well as release-group id, under both ids the album is
+    // recorded by), makes the album theirs. Null evidence is not enough to keep it: Discover download records go after
+    // 30 days, and an unliked album with no record goes back by its origin.
     const recorded = await prisma.album.findUnique({
         where: { id: album.id },
         select: { title: true, artist: { select: { name: true } } },

@@ -1,10 +1,7 @@
 /**
- * Whether an album came from Discover, decided from Discover's own records and nothing looser. The scanner (when it
- * creates an album), the daily integrity check and the one-time sort all ask this, so they cannot disagree. A shared
- * title with another artist's album, or an artist Discover once suggested, is no evidence: those guesses filed
- * listeners' own albums as Discover.
- *
- * An album matches a record by release-group id, or by exactly its artist (or the credit's primary artist) and title.
+ * Whether an album came from Discover, decided from Discover's own records and nothing looser, so the scanner, the daily
+ * integrity check and the one-time sort cannot disagree. A shared title or a once-suggested artist is no evidence. An
+ * album matches a record by release-group id, or by exactly its (primary) artist and title.
  */
 import { prisma } from "../../utils/db";
 import { parseCredit } from "../artistIdentity";
@@ -19,11 +16,10 @@ interface Mark {
 }
 
 /**
- * Discover's records and the listeners' own download requests, keyed for lookup: by release-group id, and by artist
- * and title (nameKey). Suggestions in every status; Discover download jobs waiting, running or finished, of each
- * listener's current week (an earlier week's albums were cleared when the next began, so a listener's own later copy
- * is theirs) or, for the one-time sort only, of every week kept (finished jobs go after 30 days); the listeners' own
- * requests, which make an album theirs whatever Discover suggested.
+ * Discover's records and the listeners' own download requests, keyed by release-group id and by artist and title
+ * (nameKey): suggestions of every status; download jobs waiting, running or finished, from each listener's newest batch,
+ * a batch still running, or no batch (an earlier week's albums were cleared, so a later copy is theirs; the one-time sort
+ * reads every kept week); and their own requests, which make an album theirs whatever Discover suggested.
  */
 export interface DiscoverRecords {
     byId: Map<string, Mark>;

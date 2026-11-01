@@ -8,7 +8,7 @@ jest.mock("../../services/artistCountsService", () => ({ ...require("./helpers/s
 jest.mock("../../services/imageStorage", () => require("./helpers/scannerMocks").imageStorageMock());
 jest.mock("../../routes/library/trackPath", () => ({
     ...jest.requireActual("../../routes/library/trackPath"),
-    resolveWithinMusicRoot: (...s: string[]) => require("path").resolve(process.env.CAND_MUSIC_DIR as string, ...s),
+    resolveWithinMusicRoot: (...s: string[]) => require("path").resolve(process.env.OWN_MUSIC_DIR as string, ...s),
 }));
 
 import fs from "fs";
@@ -28,19 +28,19 @@ jest.setTimeout(60_000);
  * album in the music folder (not through a Kima request). And a Discover album cleared this week takes its download
  * record with it, so a copy added afterwards is theirs too.
  */
-const P = "cand";
+const P = "own";
 const USER = `${P}_user`;
-const NAMES = ["One", "Two", "Three"].map((n) => ({ artist: `Cand Artist ${n}`, album: `Cand Album ${n}` }));
-const CLEARED = { artist: "Cand Artist Four", album: "Cand Album Four" };
+const NAMES = ["One", "Two", "Three"].map((n) => ({ artist: `Own Artist ${n}`, album: `Own Album ${n}` }));
+const CLEARED = { artist: "Own Artist Four", album: "Own Album Four" };
 let currentBatch: string;
 let musicDir: string;
 const files = new Map<string, { artist: string; album: string; no: number }>();
 
 async function wipe() {
-    await prisma.$executeRawUnsafe(`DELETE FROM "OwnedAlbum" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Cand %')`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "albumId" IN (SELECT a.id FROM "Album" a JOIN "Artist" ar ON ar.id = a."artistId" WHERE ar.name LIKE 'Cand %')`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Cand %')`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name LIKE 'Cand %'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "OwnedAlbum" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Own %')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "albumId" IN (SELECT a.id FROM "Album" a JOIN "Artist" ar ON ar.id = a."artistId" WHERE ar.name LIKE 'Own %')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE "artistId" IN (SELECT id FROM "Artist" WHERE name LIKE 'Own %')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name LIKE 'Own %'`);
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.user.deleteMany({ where: { id: USER } });
@@ -69,7 +69,7 @@ beforeAll(async () => {
         });
     }
     musicDir = fs.mkdtempSync(path.join(os.tmpdir(), `${P}-`));
-    process.env.CAND_MUSIC_DIR = musicDir;
+    process.env.OWN_MUSIC_DIR = musicDir;
     for (const n of NAMES) {
         for (const no of [1, 2]) {
             const file = path.join(musicDir, n.artist, n.album, `0${no}.flac`);
@@ -107,7 +107,7 @@ const locationOf = async (title: string) => (await prisma.album.findFirst({ wher
 describe("a listener's own copy of an album Discover once downloaded", () => {
     it("is filed in the library when the download was an earlier week's", async () => {
         await new MusicScannerService().scanLibrary(musicDir);
-        const rows = await prisma.album.findMany({ where: { artist: { name: { startsWith: "Cand " } } }, select: { location: true } });
+        const rows = await prisma.album.findMany({ where: { artist: { name: { startsWith: "Own " } } }, select: { location: true } });
         expect(rows.map((r) => r.location)).toEqual(["LIBRARY", "LIBRARY", "LIBRARY"]);
     });
 

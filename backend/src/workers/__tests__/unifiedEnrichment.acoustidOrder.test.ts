@@ -1,11 +1,8 @@
 /**
- * enrichSingleTrack identifies a recording in this order: the file's recording id
- * tag (no network), AcoustID by the sound, the album's MusicBrainz tracklist (the
- * album row's own, else the album AcoustID lists under this album's title), the
- * file's ISRC, then the name search; the fingerprint is stored even on a no-match.
- * Every MusicBrainz candidate must be this track before it is accepted. The
- * identification services are mocked; the order, the fallbacks and the agreement
- * check are tested.
+ * enrichSingleTrack identifies a recording in this order: the file's recording id tag, AcoustID by the sound, the album's
+ * MusicBrainz tracklist (the album row's own, else the one AcoustID lists), the ISRC, then the name search; the
+ * fingerprint is stored even on a no-match, and every MusicBrainz candidate must agree it is this track.
+ * The identification services are mocked.
  */
 
 // ── Mocks ───────────────────────────────────────────────────────────

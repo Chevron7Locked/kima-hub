@@ -1,9 +1,8 @@
 /**
- * The tag pass is skipped while the mood statistics row is the one it last wrote from (tags.ts), which is safe only if
- * every input the tags read changes that row. The inputs fingerprint (inputsHash.ts hashInputs) covers the mood
- * scores, the eligible songs and the arousal, instrumental, acoustic, tempo, tempo confidence and key scale readings.
- * The tags read the mood scores and, for a defined mood, the parts of its definition (mixes/moodDefinitions.json):
- * every part must read only fingerprinted inputs, or a re-analysis that changed only that input would keep stale tags.
+ * The tag pass is skipped while the mood statistics row is the one it last wrote from (tags.ts), safe only if every
+ * input the tags read changes that row. The inputs fingerprint (inputsHash.ts hashInputs) covers the mood scores, the
+ * eligible songs and the arousal, instrumental, acoustic, tempo, tempo confidence and key scale readings; every part of
+ * a mood definition (mixes/moodDefinitions.json) must read only those, or a re-analysis would keep stale tags.
  */
 import { LIVE_MOODS, MOODS, RETIRED_MOODS } from "../heads";
 import { DEFINITIONS, parseDefinitions, type DefinitionPart } from "../../mixes/moodDefinitions";

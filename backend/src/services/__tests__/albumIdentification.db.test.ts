@@ -1,9 +1,8 @@
 /**
- * identifyAlbumsBySound on the real database and Redis, with AcoustID answering from the recorded
- * replies for all 13 songs of "Dangerous Days" (fixtures/acoustid/album-dangerous-days.json). The
- * MusicBrainz tracklist and the cover lookup are stubbed. An untagged LIBRARY album gets its
- * MusicBrainz id, its year/label/genres, a cover, its ownership kept and its unmatched songs
- * reopened; Discover albums, albums still being fingerprinted, a taken id and failures are left alone.
+ * identifyAlbumsBySound on the real database and Redis, with AcoustID answering from the recorded replies for the 13
+ * songs of "Dangerous Days"; the MusicBrainz tracklist and cover lookup are stubbed. An untagged LIBRARY album gets its
+ * id, year/label/genres, cover, kept ownership and reopened unmatched songs; Discover albums, albums still being
+ * fingerprinted, a taken id and failures are left alone.
  */
 
 import fs from "fs";

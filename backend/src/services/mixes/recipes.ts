@@ -1,10 +1,8 @@
 /**
- * The recipe engine behind the mood mixes, mood stations and mood pages. A recipe (recipes.json) blends learned moods
- * and readings into one score per song: each component's z-score against the library statistics the mood step keeps,
- * weighted, a "low:" component counted negatively, over the sum of the weights' sizes. That score is standardised
- * again within the library, and a song is a member of the recipe when it sits at least RECIPE_LINE standard deviations
- * above the library's average and passes the recipe's literal filters. Mixes draw evenly from the members with a seed
- * per recipe, day and user; stations play every member, in an order that spreads each artist's songs.
+ * The recipe engine behind mood mixes, stations and pages. A recipe (recipes.json) blends moods and readings into one
+ * score per song (weighted library z-scores, a "low:" component negative), standardised again; a member sits at least
+ * RECIPE_LINE SD above the library average and passes the literal filters. Mixes draw evenly from members with a seed
+ * per recipe, day and user; stations play every member, spreading each artist's songs.
  */
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
@@ -264,12 +262,10 @@ export function definitionInputs(definitions: readonly MoodDefinition[]): Prisma
 const scoreColumn = (mood: Mood) => `dscore_${mood}`;
 
 /**
- * The defined moods' scores as CTEs over `source` (a relation with the definitionInputs columns): `pace_scale` when a
- * definition reads pace, then `defined`, each source row with a `dscore_<mood>`: the weights times the parts' library
- * z-scores, over the sum of the weights' sizes, NULL for a song missing a reading it reads. A part's z-score is
- * against the statistics of `state`, the pace's against the library's own (a library whose songs all have the same
- * pace, as one with no tempo readings, reads every pace as the average). `extra` is more columns for `defined`.
- * Throws UnrankableLibraryError for a part without a usable scale.
+ * The defined moods' scores as CTEs over `source`: `pace_scale` when a definition reads pace, then `defined`, with a
+ * `dscore_<mood>` per row (weighted parts' z-scores, NULL when a reading is missing). A part's z-score is against `state`,
+ * the pace's against the library's own. `extra` is more columns for `defined`. Throws UnrankableLibraryError for a part
+ * without a usable scale.
  */
 export function definedCtes(
     recipeId: string,
@@ -327,18 +323,10 @@ export function definedZSql(mood: Mood, row = "l"): string {
 }
 
 /**
- * The recipe's score for every song it ranks, against `state`, as the common table expressions of a WITH clause:
- * `library` (the songs the statistics cover: current scores, a present readable file, finished analysis), `defined`
- * (the library with the scores of the defined moods the recipe reads, and, with a familiarity `boost`, each song's
- * boost, 0 for a song it does not list), `key_scale`, `eligible` (the library songs with every reading the recipe's
- * components and filters use; a song missing one is left out of this recipe only), `spread`, `ranked`, each eligible
- * song with `recipe_z`, its score standardised over the eligible songs (null when they all score the same), and
- * `placed`, each ranked song with its arousal percentile among them and `in_filters`, whether it passes the recipe's
- * literal filters. A component whose mood has a definition reads the defined score, standardised over the library
- * songs that have one like a raw score is. The key's scale has no stored statistics, so its mean and spread are taken
- * here, over the library songs with a key reading. The one-row aggregates are materialized, so they are computed once
- * even where a query reads them once and the planner would otherwise recompute them for every song. A component that
- * is absent or has no spread in `state` cannot be scored against: UnrankableLibraryError.
+ * The recipe's score for every song it ranks, as CTEs of a WITH clause over `state`: `library`, `defined` (plus any
+ * familiarity `boost`), `key_scale`, `eligible`, `spread`, `ranked` (`recipe_z`) and `placed` (arousal percentile,
+ * `in_filters`). The key's scale is computed here, and the one-row aggregates are MATERIALIZED. A component missing from
+ * `state` or with no spread throws UnrankableLibraryError.
  */
 export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: FamiliarBoost | null): Prisma.Sql {
     const { components, filters } = recipe;
@@ -612,10 +600,9 @@ export async function pickStationPage(recipe: Recipe, request: StationRequest): 
 
 /**
  * The Wildcard station's refill: the songs without a single mood tag, from the same songs every recipe draws from. It
- * reads the tags the mood step wrote (tags.ts) instead of repeating their rule, so it is always the songs shown
- * untagged (focus is tagged from its definition in moodDefinitions.json, as every defined mood is), and it keeps
- * playing them while the statistics are rebuilt, as the tags are kept then. One title by one artist once, refilled as
- * any station (stationPage); no songs before the mood step has scored one.
+ * reads the tags the mood step wrote (tags.ts) rather than repeating their rule, and keeps playing them while the
+ * statistics are rebuilt. One title by one artist once, refilled as any station (stationPage); no songs before the mood
+ * step has scored one.
  */
 export async function pickWildcardPage(request: StationRequest): Promise<StationPage> {
     return stationPage("wildcard", async () => {

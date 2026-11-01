@@ -1,9 +1,8 @@
 /**
- * The album vote against AcoustID replies: a rejected fingerprint, a song on several recordings, and
- * albums with a remembered verdict. AcoustID is emulated from its server source
- * (acoustid-server, api/v2/__init__.py LookupHandlerParams.parse): in a batch an invalid fingerprint
- * is skipped silently (its index is simply absent from the reply); only when no valid entry was
- * collected and the last one is invalid does the whole request fail (HTTP 400, error code 3).
+ * The album vote against AcoustID replies: a rejected fingerprint, a song on several recordings, and remembered verdicts.
+ * AcoustID is emulated from its server source: in a batch an invalid fingerprint is skipped silently (its index is
+ * absent from the reply); only when no valid entry was collected and the last is invalid does the whole request fail
+ * (HTTP 400, code 3).
  */
 import fs from "fs";
 import path from "path";

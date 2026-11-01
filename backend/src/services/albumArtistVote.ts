@@ -1,12 +1,8 @@
 /**
- * Which artist an album is filed under, decided once per album rather than per song.
- *
- * Each file names a candidate: its album artist, else its track artist, else its folder. One album is the songs of
- * one album folder (disc subfolders such as "CD 2" belong to their album's folder) under one album tag; a song with
- * no album tag is an album of its own. The most common candidate wins when it covers every song, or more than one song
- * and at least a quarter of them (beets' rule). With no winner each song keeps its own artist, unless the album is
- * tagged a compilation: then it is Various Artists, as is a compilation whose songs carry no album artist
- * (Navidrome's rule). So one song tagged with a guest as album artist no longer becomes its own album.
+ * Which artist an album is filed under, decided once per album. Each file names a candidate: album artist, else track
+ * artist, else folder. The most common wins when it covers every song, or more than one and a quarter of them (beets').
+ * A compilation (most songs flagged, more than one artist) is Various Artists when no song has an album artist or no
+ * artist leads; any other album with no leader keeps each song's own artist. A song with no album tag is its own album.
  */
 import path from "path";
 import type { ICommonTagsResult } from "music-metadata";
@@ -19,7 +15,7 @@ import {
     sanitizeTagString,
 } from "../utils/artistNormalization";
 
-export const VARIOUS_ARTISTS = "Various Artists";
+const VARIOUS_ARTISTS = "Various Artists";
 
 /** The quarter of an album's songs its most common artist must cover (beets' SINGLE_ARTIST_THRESH). */
 const LEAD_SHARE = 0.25;
@@ -36,7 +32,7 @@ export interface ArtistCandidate {
 }
 
 export interface FileCredit {
-    /** The album folder plus the album title: the songs that are one album. */
+    /** The songs that are one album: the album folder (a disc subfolder counts as its parent) plus the album tag's identity key; a song with no album tag is its own. */
     groupKey: string;
     albumTitle: string;
     candidate: ArtistCandidate;
@@ -49,7 +45,7 @@ export interface FileCredit {
  * The names an artist tag carries. A multi-valued tag gives several; one ID3 frame can hold several too, separated by
  * NUL, and the tag reader hands those over as one string, so it is split here before anything strips the NUL.
  */
-export function tagValues(single: string | undefined, multi: readonly string[] | undefined): string[] {
+function tagValues(single: string | undefined, multi: readonly string[] | undefined): string[] {
     const raw = multi && multi.length > 1 ? multi : single != null ? [single] : multi ?? [];
     return raw
         .flatMap((value) => String(value).split("\0"))
@@ -86,7 +82,7 @@ export function albumFolder(relativePath: string): string {
     return DISC_FOLDER.test(path.basename(dir)) ? path.dirname(dir) : dir;
 }
 
-export function albumTitleOf(common: ICommonTagsResult, relativePath: string): string {
+function albumTitleOf(common: ICommonTagsResult, relativePath: string): string {
     return sanitizeTagString(common.album) || extractAlbumFromRelativePath(relativePath) || "Unknown Album";
 }
 

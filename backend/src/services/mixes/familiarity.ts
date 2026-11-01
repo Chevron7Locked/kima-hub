@@ -1,10 +1,8 @@
 /**
- * "More like what this listener already plays", for recipes with a familiarity share. The listener's most-heard
- * recent songs are the seeds; the songs the matching engine finds closest to them get a boost from 1 down to just
- * above 0, added after the recipe standardises its scores, so it only lifts songs and no plays means no change. The
- * scan is kept in Redis under a `mixes:` key (an enrichment re-run clears it) while the seed set is unchanged;
- * overlapping callers share one scan, in-process by a shared promise, across processes by a short lock. A boost is
- * an extra: a failed scan gives none and never fails the mix.
+ * "More like what this listener already plays", for recipes with a familiarity share: the matching engine's closest songs
+ * to the listener's most-heard recent songs get a boost from 1 down to just above 0, added after the recipe standardises,
+ * so it only lifts. The scan is cached in Redis (`mixes:` key) while the seeds are unchanged, shared by overlapping
+ * callers; a failed scan gives no boost and never fails the mix.
  */
 import crypto from "crypto";
 import { prisma } from "../../utils/db";

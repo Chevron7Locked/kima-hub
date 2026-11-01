@@ -118,11 +118,9 @@ export async function readIdentityTags(
 }
 
 /**
- * AcoustID for a track whose tags do not name its recording, using the tagged or
- * stored (`Track.acoustidFingerprint`) fingerprint; a reply saved by
- * `prefetchAcoustidReplies` answers without a request. `tags` is the caller's read of them (null: unreadable), so
- * the file is read only when it is left out. `permanent` means no fingerprint or no client key; the stage gate
- * normally keeps the question open until a fingerprint exists.
+ * AcoustID for a track whose tags do not name its recording, from the tagged or stored fingerprint; a reply saved by
+ * `prefetchAcoustidReplies` answers without a request. `tags` is the caller's read (null: unreadable); the file is read
+ * only when it is left out. `permanent` means no fingerprint or no client key.
  */
 export async function identifyTrackByAcoustid(
     track: IdentifiableTrack,
@@ -256,11 +254,9 @@ export async function persistAcoustidFingerprint(
 const namedByTags = new Map<string, number>();
 
 /**
- * Ask AcoustID about a batch of songs before their identification jobs run, so each job
- * answers from the saved reply instead of a request of its own. Uses the fingerprint and
- * length `identifyTrackByAcoustid` will use (the file's fingerprint tag, else the stored
- * one). A song with a saved reply, or whose tags name its recording, is not asked about;
- * an unchanged file that names its recording is not read again. Returns how many were asked.
+ * Ask AcoustID about a batch of songs before their jobs run, so each job answers from the saved reply, using the
+ * fingerprint and length `identifyTrackByAcoustid` will use. Songs with a saved reply or whose tags name their recording
+ * are skipped, and an unchanged file that names its recording is not read again. Returns how many were asked.
  */
 export async function prefetchAcoustidReplies(
     tracks: Array<IdentifiableTrack & { acoustidFingerprint: string | null; fileModified: Date }>

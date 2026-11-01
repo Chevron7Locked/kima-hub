@@ -204,18 +204,14 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
 export async function vectorsInFlight(): Promise<boolean> {
     if (await bothAtOnce()) return false;
     if (!(await featureDetection.clapRunning())) return false;
-    // The count the CLAP worker publishes the moment a job starts and ends. A
-    // re-run resets the embedding stage rows to pending while CLAP is still
-    // computing the batch it already took, so the rows cannot show that work;
-    // the published count can, and it is current within a second of the batch
-    // starting. A key the worker never wrote counts as nothing running.
+    // The count the CLAP worker publishes as a job starts and ends. A re-run resets the embedding stage rows to pending
+    // while CLAP is still computing its batch, so only the published count shows that work. A key the worker never wrote
+    // counts as nothing running.
     const inflight = await getRedis().get("clap:worker:inflight");
     if (inflight !== null && Number(inflight) > 0) return true;
-    // A dispatched job whose CLAP worker has not started running yet is counted
-    // by neither check above (the count starts when the job runs): its stage
-    // row is claimed with a live lease, so it keeps analysis waiting through
-    // the handoff. One whose lease ran out is an attempt that died; it holds
-    // nothing, and the embedding stage re-offers it once analysis is done.
+    // A dispatched job whose CLAP worker has not started is counted by neither check above, but its stage row holds a live
+    // lease, so it keeps analysis waiting through the handoff. One whose lease ran out died and holds nothing; the embedding
+    // stage re-offers it once analysis is done.
     const [row] = await prisma.$queryRaw<Array<{ busy: boolean }>>`
         SELECT EXISTS (
             SELECT 1 FROM "TrackStage"
@@ -2755,15 +2751,15 @@ function moodInputsSettled(progress: EnrichmentProgress): boolean {
     );
 }
 
+// A change whose note could not be written to Redis, held here until it is: the moods are already committed, so
+// the next cycle will not see the change again.
+let moodMixesOwedUnwritten = false;
+
 /**
  * Writes down that the moods changed (when they did) and, once the moods' inputs have settled, drops the cached mixes that
  * depend on them. A Redis or database error is logged and goes no further: the mood tags are still written, and a note
  * already written down stays for the next cycle.
  */
-// A change whose note could not be written to Redis, held here until it is: the moods are already committed, so
-// the next cycle will not see the change again.
-let moodMixesOwedUnwritten = false;
-
 async function dropMoodMixesIfOwed(changed: boolean): Promise<void> {
     if (changed) moodMixesOwedUnwritten = true;
     try {
@@ -2783,16 +2779,10 @@ async function dropMoodMixesIfOwed(changed: boolean): Promise<void> {
 }
 
 /**
- * The mood step: the learned mood scores for new or changed sound vectors and the
- * library's mood statistics when their inputs changed (services/moods/state.ts),
- * then every track's mood tags from them. Mixes are cached from the moods, so a
- * change to scores or statistics drops the cached mixes that depend on them, but
- * only once the moods' inputs have settled: during a first analysis new vectors
- * arrive every cycle and each drop would wipe lists rebuilt a moment before, so the
- * change is written down (MOOD_MIXES_OWED_KEY) and the drop happens on the first cycle
- * that is settled. A failure is logged, the
- * transaction it happened in writes nothing, and the cycle goes on to the similarity
- * step, which never reads the moods. Returns how many tracks were scored.
+ * The mood step: mood scores for new or changed sound vectors, the mood statistics when their inputs changed, then every
+ * track's tags. A change drops the cached mood mixes only once the inputs have settled (dropMoodMixesIfOwed): during a
+ * first analysis vectors arrive every cycle and each drop would wipe lists rebuilt a moment before. A failure is logged and
+ * stops the step (scores already committed stay); the cycle goes on to similarity. Returns how many tracks were scored.
  */
 export async function executeMoodPhase(): Promise<number> {
     try {

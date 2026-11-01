@@ -1,12 +1,8 @@
 /**
- * Night is a person's own habit, not a sound the mood heads can learn, so the Late Night station and mix and the
- * Midnight Drive mix play from this listener's finished listens (`Play.heard`) between NIGHT_START_HOUR and
- * NIGHT_END_HOUR in their own time zone, whatever the songs' moods. The `night` mood is retired (moods/heads.ts).
- *
- * Under COLD_START_SONGS distinct night songs the list is filled with songs that sound like their night plays (the
- * matching engine, weighted by plays); with no night plays or no similarity data, with the fallback recipe (calm, low
- * energy, groovy, sexy; driving for Midnight Drive). Before the library has mood statistics that recipe has no songs,
- * so a listener with no night plays gets none.
+ * Night is a person's habit, not a sound the mood heads can learn, so the Late Night station and the Late Night and
+ * Midnight Drive mixes play from the listener's finished listens between NIGHT_START_HOUR and NIGHT_END_HOUR in their
+ * time zone. Short of COLD_START_SONGS night songs it is topped up with songs like their night plays, then, still under
+ * MIN_MIX_TRACKS, the fallback recipe, which is empty before the library has mood statistics: no night plays, no list.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
@@ -250,14 +246,9 @@ export async function nightStationPool(
 type NightRanking = "plays" | "drive";
 
 /**
- * The songs a night mix plays, in order. With COLD_START_SONGS or more night songs the mix is a fresh draw each day
- * (seeded by mix, day and user, as every recipe mix is): every night song can appear, and a song comes up more often
- * the more it was played at night. "drive" also favours fit (a steady beat at a middle pace, 0 to 1, plus middle
- * energy, 0 to 1): a song's weight is its night plays times (1 + fit). The artist cap (2 per artist, relaxing as in
- * drawMembers) applies to the drawn order. Under COLD_START_SONGS night songs there is too little to draw from: the
- * listener's songs come first (for "drive" by fit, then plays; ties by the day's seeded order). Either way a list still
- * short of the limit (a cold start, or few artists whose songs the cap leaves out) is filled with songs that sound like
- * the most-played night songs, and with too few the fallback recipe's draw.
+ * The songs a night mix plays. From COLD_START_SONGS night songs up, a seeded daily draw weighted by night plays (times
+ * 1 + fit for "drive"), under the artist cap. Below that, the listener's songs come first ("drive" by fit, then plays).
+ * A list still short is topped up with songs like the most-played night songs, then the fallback recipe's draw.
  */
 export async function nightMixTracks(
     spec: { fallbackRecipe: string; ranking: NightRanking },

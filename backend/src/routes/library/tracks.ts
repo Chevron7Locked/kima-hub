@@ -40,6 +40,11 @@ const TRACK_SORT_MAP: Record<string, any> = {
 
 const router = Router();
 
+/** A track with its album and that album's artist. */
+const WITH_ALBUM_ARTIST = {
+  album: { include: { artist: { select: { id: true, name: true } } } },
+} satisfies Prisma.TrackInclude;
+
 router.get("/recently-listened", async (req, res) => {
   try {
     const userId = req.user!.id;
@@ -287,18 +292,7 @@ router.get("/tracks", async (req, res) => {
         skip: offset,
         take: limit,
         orderBy: [orderBy, { id: "asc" }],
-        include: {
-          album: {
-            include: {
-              artist: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
+        include: WITH_ALBUM_ARTIST,
       }),
       prisma.track.count({ where }),
     ]);
@@ -333,18 +327,7 @@ router.get("/tracks/shuffle", async (req, res) => {
     if (totalTracks <= limit) {
       tracksData = await prisma.track.findMany({
         where: LIBRARY_PLAYABLE,
-        include: {
-          album: {
-            include: {
-              artist: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
+        include: WITH_ALBUM_ARTIST,
       });
       tracksData = shuffleArray(tracksData);
     } else {
@@ -361,18 +344,7 @@ router.get("/tracks/shuffle", async (req, res) => {
         where: {
           id: { in: randomIds.map((r) => r.id) },
         },
-        include: {
-          album: {
-            include: {
-              artist: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
+        include: WITH_ALBUM_ARTIST,
       });
 
       tracksData = shuffleArray(tracksData);
@@ -1062,11 +1034,9 @@ router.get("/radio", async (req, res) => {
           0,
           originalCount,
         );
-        // Tracks with a closeness score are drawn in proportion to it. Tracks
-        // without one (no artist sound to compare with) are drawn uniformly, and
-        // get the share of the slots that their share of the candidates is, rounded
-        // to a whole track. A track scoring exactly 0 has no weight, so it is
-        // taken only when too few weighted tracks are left to fill the slots.
+        // Tracks with a closeness score are drawn in proportion to it. Those without one are drawn uniformly, with the share of
+        // slots their share of the candidates is, rounded to a whole track. A track scoring exactly 0 has no weight and is taken
+        // only when too few weighted tracks are left.
         let selectedSimilar: typeof similarTracks = [];
         if (similarCount >= 1) {
           const scoreOf = (t: unknown) => (t as { vibeScore?: number }).vibeScore;

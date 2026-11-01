@@ -1,10 +1,8 @@
 /**
- * An album is Discover's only on Kima's own Discover records, and Discover never deletes files without one: Lidarr's
- * Discover tag marks an artist, and a listener can add their own album to a tagged artist in Lidarr. Against the real
- * test database and the recorded Lidarr (discover-sort.json), where Lidarr holds files only for Brad Sucks' "Guess Who's
- * a Mess". Where a test needs Lidarr to hold the listener's "Out of It" too, the recorded album list is edited
- * (trackFileCount) and the calls the weekly sweep would make about it are synthesised from the recorded records, marked
- * in the code.
+ * An album is Discover's only on Kima's own Discover records, and Discover never deletes files without one: Lidarr's tag
+ * marks an artist, and a listener can add their own album to a tagged artist. Real test database and the recorded
+ * Lidarr (discover-sort.json); where a test needs Lidarr to hold "Out of It" too, the recorded list is edited and the
+ * sweep's calls about it are synthesised from the recorded records, marked in the code.
  */
 jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 jest.mock("../artistCountsService", () => ({ ...jest.requireActual("../artistCountsService"), updateArtistCounts: jest.fn().mockResolvedValue(undefined) }));

@@ -473,11 +473,9 @@ async function returnToLibrary(albumId: string): Promise<boolean> {
 }
 
 /**
- * DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build, cleared the same way as any
- * other: Lidarr's are deleted by Lidarr or kept and reported, the rest lose their files and rows. One that no Discover
- * record names at all was never shown to be Discover's, so it goes back to the library instead; nothing of it is
- * deleted. An album whose batch is still downloading is left alone. Each failure carries the listeners whose records
- * name the album.
+ * DISCOVER albums no suggestion covers (failed downloads or playlist builds) are cleared like any other: Lidarr's are
+ * deleted by Lidarr or kept and reported, the rest lose files and rows. One no Discover record names goes back to the
+ * library undeleted; one whose batch is still downloading is left alone.
  */
 export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; returned: number; failures: OrphanFailure[] }> {
     const albums = await prisma.album.findMany({

@@ -1,10 +1,8 @@
 /**
  * Song mood tags, written by the mood step after the scores and statistics (state.ts). A song is tagged with each live
- * mood it sits at least TAG_LINE_Z standard deviations above the library's mean in, so tags are relative to the library
- * and move with it. A mood with a definition (mixes/moodDefinitions.json) is tagged by its defined score, standardised
- * over the library songs that have one, the same score the recipes read, so a tag and a recipe cannot disagree about
- * what the mood means. A retired mood (night) has no tag. Every copy of a title is tagged: a tag describes the song,
- * and an untagged second copy of a tagged song would play on the Wildcard station.
+ * mood it sits at least TAG_LINE_Z SD above the library's mean in; a defined mood uses its defined score, the one the
+ * recipes read. A retired mood (night) has no tag. Every copy of a title is tagged, or an untagged copy would play on
+ * the Wildcard station.
  */
 import { Prisma } from "@prisma/client";
 import { logger } from "../../utils/logger";
@@ -42,15 +40,10 @@ const SIGNATURE = Prisma.sql`
 `;
 
 /**
- * Every track's mood tags, in the moods' order. A defined mood is tagged when the song's defined score, standardised
- * over the library songs that have one, reaches the line: a song missing a reading the definition reads has no tag of
- * that mood, a definition the library cannot score (a reading no song has, or one with no spread) tags no song, and
- * no song is tagged a defined mood while the library holds fewer than MIN_MIX_TRACKS songs. Tags are
- * relative to the library, so they are set from the current scores and statistics; a track the statistics leave out
- * has none, and only tracks whose tags differ are written. A pass over the statistics the last one wrote from is
- * skipped: a song going missing or corrupt, finishing or restarting analysis, or a re-run clearing tags changes them.
- * Without statistics for these weights (a rescore or a re-run cleared them, or no track is eligible) nothing is written
- * and every track keeps its tags until a pass has statistics again. Returns how many tracks' tags changed.
+ * Every track's mood tags, in the moods' order. A song missing a reading has no tag of that mood, an unscorable
+ * definition tags no song, and no defined mood is tagged while the library holds fewer than MIN_MIX_TRACKS songs. Only
+ * changed tracks are written, and a pass over the statistics the last one used is skipped. With no statistics tags stay.
+ * Returns how many tracks' tags changed.
  */
 export async function writeMoodTags(): Promise<number> {
     const [current] = await prisma.$queryRaw<Array<{ signature: string }>>(SIGNATURE);

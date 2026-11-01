@@ -1,11 +1,8 @@
 /**
- * Which artist an album is filed under. A tag naming several artists names the first (an ID3 frame's values are
- * NUL-separated, each may start with a byte-order mark), paired with that tag's id by position. One album is one
- * artist: the songs of an album folder (disc subfolders included) under one album tag vote with their album artist
- * (their track artist when they have none), and the most common one wins when it covers every song, or more than one
- * song and a quarter of them. With no leader each song keeps its own artist, unless the album is tagged a compilation:
- * then it is Various Artists. Songs with no album tag do not vote.
- * Real scanner, temp directory and test database.
+ * Which artist an album is filed under, by the real scanner on a temp directory and test database. A tag naming several
+ * artists names the first, paired with that tag's id by position. One album is one artist: the most common album artist
+ * wins when it covers every song, or more than one and a quarter of them; otherwise each song keeps its own, except a
+ * compilation (Various Artists). Songs with no album tag do not vote.
  */
 
 jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());

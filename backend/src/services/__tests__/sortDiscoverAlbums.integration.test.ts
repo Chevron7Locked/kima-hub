@@ -1,9 +1,8 @@
 /**
- * The one-time sort of albums the scanner filed by guesswork, on the real test database. Discover downloaded Brad
- * Sucks' Guess Who’s a Mess; the files spell the title with a straight apostrophe, so the scanner filed the download as
- * a library album and marked it as the listener's. Only Discover's own records (a suggestion, or a download job in a
- * Discover batch, which the real flow always writes) say an album is Discover's; Lidarr's Discover tag marks an artist
- * and is no evidence, so the sort must never ask Lidarr (a replayed Lidarr is up to prove it).
+ * The one-time sort of albums the scanner filed by guesswork, on the real test database: a Discover download whose files
+ * spell the title with a straight apostrophe was filed as the listener's library album. Only a Discover download job
+ * says an album is Discover's (a suggestion alone says nothing), and Lidarr's tag is no evidence, so the sort must never
+ * ask Lidarr.
  */
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";

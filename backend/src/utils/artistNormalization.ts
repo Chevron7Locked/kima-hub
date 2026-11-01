@@ -13,11 +13,8 @@ export function isPlaceholderArtistName(name: string): boolean {
 }
 
 /**
- * Check if an artist name is a variation of "Various Artists"
- * and return the canonical form if so.
- *
- * Uses regex for flexible matching instead of exhaustive list.
- * Covers: VA, V.A., V/A, V.A, Various, Various Artist(s), <Various Artists>, etc.
+ * Returns the canonical "Various Artists" if the name is a variation of it, by regex: VA, V.A., V/A, Various,
+ * Various Artist(s), <Various Artists>, etc.
  */
 export function canonicalizeVariousArtists(name: string): string {
     const cleaned = name.trim().replace(/^<|>$/g, '');
@@ -58,11 +55,8 @@ function isEditionMarker(text: string): boolean {
 }
 
 /**
- * Strip edition markers from an album title, keeping anything that names a
- * different recording:
- * "In A Time Lapse (Deluxe Edition)" -> "In A Time Lapse",
- * "Abbey Road - 2019 Remaster" -> "Abbey Road",
- * "Get Born (Live)" stays "Get Born (Live)".
+ * Strips edition markers from an album title, keeping anything that names a different recording:
+ * "Abbey Road - 2019 Remaster" -> "Abbey Road"; "Get Born (Live)" stays.
  */
 export function stripAlbumEdition(title: string): string {
     // Guard against ReDoS - skip regex for excessively long inputs

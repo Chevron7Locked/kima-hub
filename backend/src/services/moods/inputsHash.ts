@@ -25,11 +25,10 @@ export async function hashInputs(tx: Prisma.TransactionClient): Promise<{ n: num
 }
 
 /**
- * Moves when a track is added, removed, rewritten, marked corrupt or missing, finishes analysis, or moves between
- * Discover and the library (the album ids are summed as well as counted, so two albums swapping places is seen; albums
- * have no update time), or when a sound vector or its scores are written: the analyzer sets `analyzedAt` with the
- * readings it writes, the vector writer sets the vector's `analyzed_at`, the scores carry `embedded_at`, and the
- * application's own writes move `updatedAt`. Each part reads one table, so none joins or hashes a row.
+ * Moves when a track is added, removed, rewritten, marked corrupt or missing, or finishes analysis; when an album moves
+ * between Discover and the library; or when a sound vector or its scores are written. Reads Track's `updatedAt`,
+ * `analyzedAt`, `analysisStatus`, `missingSince`, `corrupt`; the vectors' `analyzed_at`; the scores' `embedded_at`; and a
+ * count and `hashtext(id)` sum of LIBRARY albums (albums have no update time). Each part reads one table, none joins.
  */
 export async function changeSignal(tx: Prisma.TransactionClient): Promise<string> {
     const [row] = await tx.$queryRaw<Array<{ s: string }>>`

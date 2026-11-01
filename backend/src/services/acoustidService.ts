@@ -1,12 +1,8 @@
 /**
- * AcoustID lookup client. The POST body is form-encoded with `meta` as
- * "recordings%20releasegroups" (the server does not decode '+'), and the length
- * goes in `duration`. Results without a `recordings` array are skipped.
- * Failures come back as `Outcome` kinds, never as a null that means "nothing".
- *
- * AcoustID's rate limit is per app key, shared by every install on the same key, so
- * identification asks for many fingerprints per request (`lookupMany`) and keeps each
- * reply: a song is asked once, and `lookup` answers from the saved reply.
+ * AcoustID lookup client. The POST body is form-encoded with `meta` as "recordings%20releasegroups" (the server does
+ * not decode '+') and the length in `duration`; results without a `recordings` array are skipped. Failures come back
+ * as `Outcome` kinds, never a null meaning "nothing". The rate limit is per app key, shared by every install, so
+ * `lookupMany` asks for many fingerprints per request and each reply is kept: a song is asked once.
  */
 import axios, { AxiosInstance } from "axios";
 import { createHash } from "crypto";
@@ -76,11 +72,10 @@ const UNMATCHED_TTL = 7 * 24 * 3600;
 const REJECTED_TTL = 24 * 3600;
 
 /**
- * AcoustID answers HTTP 400 when a request's own input is refused: code 3 (invalid fingerprint, when the request
- * holds no valid one; in a batch with a valid entry the invalid ones are skipped silently instead), code 8
- * (invalid duration) and code 2 (missing parameter, which is what a duration of 0 gets). Asking again can never
- * help, so these are not failures of the source. Other 400s (bad key, too many requests...) are not listed here.
- * Codes from acoustid-server, acoustid/api/errors.py.
+ * AcoustID answers HTTP 400 when the request's own input is refused: code 3 (invalid fingerprint, when none in the
+ * request is valid), 8 (invalid duration), 2 (missing parameter, which a duration of 0 gets). Asking again can never
+ * help, so these are not source failures. Other 400s (bad key, too many requests) are not listed. Codes: acoustid-server
+ * acoustid/api/errors.py.
  */
 const REFUSED_INPUT_CODES = [2, 3, 8];
 function refusedInputReply(error: any): boolean {
@@ -393,11 +388,9 @@ class AcoustIDService {
     }
 
     /**
-     * The first result above the confidence floor with a recording of this track's
-     * length (`lengthsAgree`; AcoustID gives no length for the result, so it is the
-     * recording's). Among those, recordings whose title is the track's come first
-     * (only they, when there are any), then by closest length: those are the
-     * candidates, and the first is the pick. Results with no recording are skipped.
+     * The first result at or above the confidence floor with a recording whose length does not disagree with the track's
+     * (`lengthsAgree`; a recording with no length passes); results with no such recording are skipped. Recordings with the
+     * track's title and version come first (only they, when there are any), then by closest length, unknown last.
      */
     private pickFingerprintMatch(
         results: AcoustIDResultRaw[],

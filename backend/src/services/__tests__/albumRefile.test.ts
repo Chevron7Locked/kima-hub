@@ -1,8 +1,7 @@
 /**
- * The admin re-file: every library album is filed again by its files' own tags, by the scanner's album vote
- * (albumArtistVote.ts). An album under the wrong artist moves to the right one, and onto that artist's copy of it
- * when there is one, its ownership records with it; an artist left with nothing goes. Albums a person edited and
- * Discover albums are left alone. An artist that gains albums is asked again of MusicBrainz.
+ * The admin re-file, by the scanner's album vote (albumArtistVote.ts): an album under the wrong artist moves to the
+ * right one (onto that artist's copy of it when there is one, ownership with it) and an artist left with nothing goes.
+ * Edited albums and Discover albums are left alone; an artist that gains albums is asked again of MusicBrainz.
  * Real database, temp music folder, stand-in tags.
  */
 

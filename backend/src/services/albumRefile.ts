@@ -1,17 +1,8 @@
 /**
- * The admin re-file: every library album filed again by its files' own tags.
- *
- * Kima keeps album rows, so an album filed under the wrong artist stays there: rescans reuse the row and skip
- * unchanged files. Older versions misfiled albums (names cut at "and"/"&"/"with" before 1.10, one song split off its
- * album by a guest's album-artist tag, names glued from multi-valued tags). This reads every library file's tags,
- * elects each album's artist as the scanner does (albumArtistVote.ts), and moves the songs that sit under another
- * artist: onto that artist's own copy of the album when it has one, else onto a row of theirs that moves whole, else
- * onto a new row. Only those songs move. A row they leave empty goes, its cover and details passed on when the
- * survivor lacks them, and every record keyed on its release-group id (ownership, Discover) moves to the survivor.
- * An artist row holding the files' MusicBrainz id under a name the old splitter cut gets the full name back first.
- * Artists left with nothing go. Albums or artists a person edited, Discover's albums, and albums with a song whose
- * tags cannot be read are left alone. It runs on the scan queue (workers/processors/refileProcessor.ts), so never
- * beside a scan.
+ * The admin re-file: every library album filed again by its files' own tags, as the scanner's vote elects the artist
+ * (albumArtistVote.ts). Songs under another artist move to that artist's copy, else a row that moves whole, else a new
+ * row; an emptied row passes on its cover and details and an artist left with nothing goes. Albums with unreadable tags,
+ * edited albums and artists, and Discover albums are left alone. Runs on the scan queue, never beside a scan.
  */
 import path from "path";
 import { parseFile } from "music-metadata";
@@ -172,11 +163,10 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
 }
 
 /**
- * The artist row holding a MusicBrainz id whose name the old splitter cut gets its full name back, in MusicBrainz's
- * spelling, once MusicBrainz confirms the files' name is that id's (a wrong tag must not rename a real artist). A row
- * under the full name with no id of its own is folded into it first, its albums and ownership with it (a copy both
- * hold becomes one, unless the holder's copy was edited or is Discover's: then nothing is renamed). Nothing else is
- * renamed: a name that differs any other way (a translation, a spelling) is the row's.
+ * Restores an artist's full name where the old splitter cut it, once MusicBrainz confirms the files' name is that id's
+ * (a wrong tag must not rename a real artist). A row already under the full name with no id is folded in first; if
+ * both hold a copy of an album and either was edited or is Discover's, nothing is renamed. Other name differences
+ * (translation, spelling) are the row's own.
  */
 async function restoreCutName(mbid: string, filesName: string): Promise<boolean> {
     const holder = await prisma.artist.findUnique({ where: { mbid }, select: { name: true, identityKey: true, hasUserOverrides: true } });

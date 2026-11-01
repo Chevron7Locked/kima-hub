@@ -2,7 +2,7 @@
  * A Home mix drawn by the recipe engine: the mix's own id, title, description and colour around the songs the engine
  * draws from its recipe for this day and this user.
  */
-import { ProgrammaticMix, albumCoverUrls, getMixColor, tracksByIds } from "./helpers";
+import { ProgrammaticMix, mixOf, tracksByIds } from "./helpers";
 import { weekdayOf } from "./mixDay";
 import { UnrankableLibraryError, pickRecipeTracks } from "./recipes";
 
@@ -39,16 +39,7 @@ export async function recipeMix(spec: RecipeMixSpec, userId: string, today: stri
 /** The mix `spec` names for `today`, holding these songs in this order. */
 export async function mixFromTracks(spec: RecipeMixSpec, today: string, trackIds: string[]): Promise<ProgrammaticMix> {
     const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
-    return {
-        id: `${spec.id}-${today}`,
-        type: spec.type,
-        name: spec.name,
-        description: spec.description,
-        trackIds: tracks.map((t) => t.id),
-        coverUrls: albumCoverUrls(tracks),
-        trackCount: tracks.length,
-        color: getMixColor(spec.colorType),
-    };
+    return mixOf({ ...spec, id: `${spec.id}-${today}` }, tracks);
 }
 
 /** A generator for the daily rotation: `recipeMix` with its spec bound. */

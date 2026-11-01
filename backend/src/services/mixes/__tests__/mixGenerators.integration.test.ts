@@ -1,16 +1,8 @@
 /**
- * Every exported mix generator, run against a real Postgres holding a 3,000-track synthetic library
- * (src/__tests__/fixtures/syntheticLibrary.ts) with learned mood scores and the library's mood statistics.
- *
- * Mixes drawn from a recipe are checked against the recipe engine: each is the engine's draw for its recipe, day and
- * user, on its weekday only, and a refresh's reroll or another user draws again.
- *
- * Every other generator is run over 40 dates (160 for the decade and genre mixes) and checked for: size (the
- * documented count, no repeats), clause (every track satisfies the generator's `where`, re-written here by hand),
- * files (no missing file), spread (the calls reach the first and last third of the matching ids) and repeat (a seeded
- * mix repeats for the same date and differs for another date or a reroll; an unseeded one varies).
- *
- * Only the similar-artist lookup, a network call, is faked.
+ * Every exported mix generator, run against a real Postgres holding a 3,000-track synthetic library with mood scores
+ * and statistics. Recipe mixes are checked against the recipe engine (its draw for recipe, day and user, on its weekday
+ * only). Other generators run over 40 dates (160 for decade and genre) and are checked for size, clause, files, spread
+ * and repeat; only the similar-artist lookup is faked.
  */
 import { prisma } from "../../../utils/db";
 import { consecutiveDates, datesOn } from "./helpers/dates";

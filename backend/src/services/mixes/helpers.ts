@@ -143,11 +143,13 @@ export function seededKeySql(seed: number | string, id: Prisma.Sql): Prisma.Sql 
     return Prisma.sql`md5(${String(seed)} || ':' || ${id}) COLLATE "C"`;
 }
 
+const byKey = (a: { key: string }, b: { key: string }) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+
 /** `items` in the order of their seededKey. For short lists; a draw of the first few is seededTake. */
 export function seededOrder<T>(items: T[], seed: number | string, idOf: (item: T) => string): T[] {
     return items
         .map((item) => ({ item, key: seededKey(seed, idOf(item)) }))
-        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        .sort(byKey)
         .map((ranked) => ranked.item);
 }
 
@@ -179,7 +181,7 @@ export function seededTake<T>(items: T[], seed: number | string, idOf: (item: T)
             }
         }
     }
-    return heap.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).map((ranked) => ranked.item);
+    return heap.sort(byKey).map((ranked) => ranked.item);
 }
 
 interface MixSpec {
@@ -348,12 +350,9 @@ export async function seededTracks<I extends Prisma.TrackInclude>(args: {
 }
 
 /**
- * Ids of every library song no user has played, in id order. Written as an anti-join
- * because Prisma's `plays: { none: {} }` becomes `id NOT IN (SELECT trackId
- * FROM Play)`, which Postgres runs as a rescan of Play for every track once
- * Play is too large to hash (about a minute and a half at 50,000 tracks and
- * 105,000 plays). `excludeMissing` leaves out tracks whose file is missing and
- * `excludeCorrupt` tracks marked corrupt; both together are the PLAYABLE rule.
+ * Ids of every library song no user has played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
+ * `NOT IN (SELECT ...)`, which Postgres rescans per track once Play is too large to hash (1.5 minutes at 105,000 plays).
+ * `excludeMissing` and `excludeCorrupt` together are the PLAYABLE rule.
  */
 export async function unplayedTrackIds(
     args: { excludeMissing?: boolean; excludeCorrupt?: boolean } = {}
@@ -395,7 +394,7 @@ export async function sampledMix(
 }
 
 /** A mix of `tracks`, in that order. */
-function mixOf(spec: MixSpec, tracks: { id: string; album: { coverUrl: string | null } }[]): ProgrammaticMix {
+export function mixOf(spec: MixSpec, tracks: { id: string; album: { coverUrl: string | null } }[]): ProgrammaticMix {
     return {
         id: spec.id,
         type: spec.type,
