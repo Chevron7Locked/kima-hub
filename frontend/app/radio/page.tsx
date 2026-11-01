@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useLibraryDecadesQuery, useLibraryGenresQuery } from "@/hooks/useQueries";
+import { useLibraryDecadesQuery, useLibraryGenresQuery, useStationCovers } from "@/hooks/useQueries";
 import { StationCard } from "@/features/home/components/StationCard";
 import {
     RadioStation,
@@ -31,17 +31,19 @@ function SectionSkeleton() {
 
 interface StationGridProps {
     stations: RadioStation[];
+    covers?: Map<string, string | null>;
     loadingStation: string | null;
     onStart: (station: RadioStation) => void;
 }
 
-function StationGrid({ stations, loadingStation, onStart }: StationGridProps) {
+function StationGrid({ stations, covers, loadingStation, onStart }: StationGridProps) {
     return (
         <div className="grid-media">
             {stations.map((station, i) => (
                 <StationCard
                     key={station.id}
                     station={station}
+                    cover={covers?.get(station.id)}
                     onStart={onStart}
                     busy={loadingStation === station.id}
                     disabled={loadingStation !== null}
@@ -122,6 +124,16 @@ export default function RadioPage() {
     );
     const decadeStations = useMemo(() => buildDecadeStations(decadesReply?.decades ?? []), [decadesReply]);
 
+    // One request for every tile's cover on the page, once all of them are known.
+    const allStations = useMemo(
+        () => [...quickStations, ...moodStations, ...genreStations, ...decadeStations],
+        [quickStations, moodStations, genreStations, decadeStations],
+    );
+    const { data: covers } = useStationCovers(
+        allStations,
+        !isLoading && !featuresLoading && !moodLoading,
+    );
+
     return (
         <div className="min-h-screen">
             <div className="relative">
@@ -142,7 +154,7 @@ export default function RadioPage() {
                             {featuresLoading ? (
                                 <SectionSkeleton />
                             ) : (
-                                <StationGrid stations={quickStations} loadingStation={loadingStation} onStart={startRadio} />
+                                <StationGrid stations={quickStations} covers={covers} loadingStation={loadingStation} onStart={startRadio} />
                             )}
                         </section>
 
@@ -159,6 +171,7 @@ export default function RadioPage() {
                             isLoading={featuresLoading || moodLoading}
                             isError={moodError}
                             onRetry={() => refetchMoods()}
+                            covers={covers}
                             loadingStation={loadingStation}
                             onStart={startRadio}
                         />
@@ -171,6 +184,7 @@ export default function RadioPage() {
                             isLoading={isLoading}
                             isError={genresError}
                             onRetry={() => refetchGenres()}
+                            covers={covers}
                             loadingStation={loadingStation}
                             onStart={startRadio}
                         />
@@ -183,6 +197,7 @@ export default function RadioPage() {
                             isLoading={isLoading}
                             isError={decadesError}
                             onRetry={() => refetchDecades()}
+                            covers={covers}
                             loadingStation={loadingStation}
                             onStart={startRadio}
                         />

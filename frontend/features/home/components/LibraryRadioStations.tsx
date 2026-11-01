@@ -7,7 +7,7 @@ import { HorizontalCarousel } from "@/components/ui/HorizontalCarousel";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { cascadeStyle } from "@/lib/motion";
-import { useLibraryGenresQuery, useLibraryDecadesQuery, useMoodStationsQuery } from "@/hooks/useQueries";
+import { useLibraryGenresQuery, useLibraryDecadesQuery, useMoodStationsQuery, useStationCovers } from "@/hooks/useQueries";
 import { useFeatures } from "@/lib/features-context";
 import {
     DEFAULT_STYLE,
@@ -70,6 +70,13 @@ export function LibraryRadioStations() {
         ];
     }, [genres, decades, vibeEmbeddings, featuresLoading, moodLoading, moodError, moodData]);
 
+    // One request for every tile's cover, once the row's stations are all known (mood stations not still loading).
+    const stations = useMemo(
+        () => allItems.flatMap((item) => (item.kind === "station" ? [item.station] : [])),
+        [allItems],
+    );
+    const { data: covers } = useStationCovers(stations, !isLoading && !(vibeEmbeddings && moodLoading));
+
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
     const isMobile = useIsMobile();
@@ -107,6 +114,7 @@ export function LibraryRadioStations() {
         <StationCard
             key={station.id}
             station={station}
+            cover={covers?.get(station.id)}
             onStart={startRadio}
             busy={loadingStation === station.id}
             disabled={loadingStation !== null}

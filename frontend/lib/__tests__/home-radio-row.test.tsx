@@ -11,13 +11,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const mood = { data: undefined as unknown, isLoading: false, isError: false, isFetching: false, refetch: vi.fn() };
 
 const get = vi.fn();
-vi.mock("@/lib/api", () => ({ api: { get: (url: string) => get(url), getCoverArtUrl: (id: string) => `/cover/${id}` } }));
+const getRadioCovers = vi.fn();
+vi.mock("@/lib/api", () => ({
+    api: { get: (url: string) => get(url), getRadioCovers: (...args: unknown[]) => getRadioCovers(...args), getCoverArtUrl: (id: string) => `/cover/${id}` },
+}));
 vi.mock("@/lib/audio-controls-context", () => ({ useAudioControls: () => ({ playStation: vi.fn() }) }));
 vi.mock("@/lib/features-context", () => ({ useFeatures: () => ({ vibeEmbeddings: true, loading: false }) }));
-// The test page has no layout, so nothing ever scrolls into view: every tile counts as on screen.
-vi.mock("@/hooks/useInView", () => ({ useInView: () => ({ ref: { current: null }, shown: true }) }));
 vi.mock("@/hooks/useMediaQuery", () => ({ useIsMobile: () => false, useIsTablet: () => false }));
-vi.mock("@/hooks/useQueries", () => ({
+vi.mock("@/hooks/useQueries", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/hooks/useQueries")>()),
     useLibraryGenresQuery: () => ({ data: { genres: [{ genre: "rock", count: 40 }] }, isLoading: false }),
     useLibraryDecadesQuery: () => ({ data: { decades: [{ decade: 1990, count: 30 }] }, isLoading: false }),
     useMoodStationsQuery: () => mood,
@@ -38,7 +40,8 @@ beforeEach(() => {
     Object.assign(mood, { data: undefined, isLoading: false, isError: false, isFetching: false });
     mood.refetch.mockReset();
     get.mockReset();
-    get.mockResolvedValue({ tracks: [] });
+    getRadioCovers.mockReset();
+    getRadioCovers.mockResolvedValue({ covers: [] });
 });
 
 afterEach(() => {
@@ -82,42 +85,78 @@ describe("the home radio row", () => {
         expect(titles()).toEqual(["Shuffle All", "Workout", "Discovery", "Favorites", "Calm", "rock", "90s"]);
     });
 
-    it("shows each station's cover from a song it would play, and no line that just says radio", async () => {
-        get.mockImplementation(async (url: string) =>
-            url.includes("type=all")
-                ? { tracks: [{ album: {} }, { album: { coverArt: "a" } }, { album: { coverArt: "b" } }] }
-                : { tracks: [] },
-        );
+    it("shows each station's cover from the one reply, and no line that just says radio", async () => {
+        getRadioCovers.mockResolvedValue({
+            covers: [
+                { type: "all", value: null, cover: "a" },
+                { type: "workout", value: null, cover: null },
+                { type: "genre", value: "rock", cover: "r" },
+            ],
+        });
         mood.data = { stations: [] };
         await render();
-        const shuffle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Shuffle All"))!;
-        const srcs = () => Array.from(shuffle.querySelectorAll("img")).map((img) => new URL(img.getAttribute("src")!, "http://x").pathname);
+        const tile = (name: string) => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes(name))!;
+        const srcs = (name: string) => Array.from(tile(name).querySelectorAll("img")).map((img) => new URL(img.getAttribute("src")!, "http://x").pathname);
         await vi.waitFor(async () => {
             await act(async () => {});
-            expect(srcs()).toEqual(["/cover/a"]);
+            expect(srcs("Shuffle All")).toEqual(["/cover/a"]);
         });
-        expect(get).toHaveBeenCalledWith(expect.stringContaining("/library/radio?type=all&limit=5"));
+        expect(srcs("rock")).toEqual(["/cover/r"]);
         // A station with no cover is a fade of its own colour (Workout's red), not a dark tile.
-        const workout = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Workout"))!;
+        const workout = tile("Workout");
         expect(workout.querySelector("img")).toBeNull();
         expect(Array.from(workout.querySelectorAll<HTMLElement>("[aria-hidden]")).map((el) => el.style.background).join(" ")).toMatch(/#ef44448c|239, 68, 68, 0\.55/i);
         const texts = Array.from(container.querySelectorAll("button *")).map((el) => el.textContent?.trim().toLowerCase());
         expect(texts).not.toContain("radio");
     });
 
-    it("asks for at most four stations' covers at once", async () => {
-        const pending: (() => void)[] = [];
-        get.mockImplementation(() => new Promise((done) => pending.push(() => done({ tracks: [] }))));
-        mood.data = { stations: [] };
+    it("asks for every tile's cover in one request, and never calls a station for one", async () => {
+        mood.data = { stations: [{ value: "calm", name: "Calm", description: "" }] };
         await render();
         await act(async () => {});
-        expect(get).toHaveBeenCalledTimes(4);
-        await act(async () => pending.shift()!());
-        await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(5));
-        // Let every request finish, so the next test starts with none in flight.
-        while (get.mock.calls.length < 6 || pending.length) {
-            await act(async () => pending.shift()?.());
-        }
-        expect(get).toHaveBeenCalledTimes(6);
+        expect(getRadioCovers).toHaveBeenCalledTimes(1);
+        const [stations] = getRadioCovers.mock.calls[0];
+        expect(stations).toEqual([
+            { type: "all" },
+            { type: "workout" },
+            { type: "discovery" },
+            { type: "favorites" },
+            { type: "mood", value: "calm" },
+            { type: "genre", value: "rock" },
+            { type: "decade", value: "1990" },
+        ]);
+        expect(get).not.toHaveBeenCalled();
+    });
+
+    it("waits for the mood list before asking, so the row's covers are one request", async () => {
+        mood.isLoading = true;
+        await render();
+        await act(async () => {});
+        expect(getRadioCovers).not.toHaveBeenCalled();
+    });
+
+    it("keeps the tiles' covers while a changed station list waits for its answer", async () => {
+        getRadioCovers.mockResolvedValueOnce({ covers: [{ type: "all", value: null, cover: "a" }] });
+        // The second list (the mood stations arrive) is asked for and never answered during the test.
+        getRadioCovers.mockImplementationOnce(() => new Promise(() => {}));
+        mood.data = { stations: [] };
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        const tree = () => (
+            <QueryClientProvider client={client}>
+                <LibraryRadioStations />
+            </QueryClientProvider>
+        );
+        await act(async () => root.render(tree()));
+        const shuffle = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Shuffle All"))!;
+        const srcs = () => Array.from(shuffle().querySelectorAll("img")).map((img) => new URL(img.getAttribute("src")!, "http://x").pathname);
+        await vi.waitFor(async () => {
+            await act(async () => {});
+            expect(srcs()).toEqual(["/cover/a"]);
+        });
+        mood.data = { stations: [{ value: "calm", name: "Calm", description: "" }] };
+        await act(async () => root.render(tree()));
+        await vi.waitFor(() => expect(getRadioCovers).toHaveBeenCalledTimes(2));
+        expect(titles()).toContain("Calm");
+        expect(srcs()).toEqual(["/cover/a"]);
     });
 });

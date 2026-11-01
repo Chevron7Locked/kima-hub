@@ -207,9 +207,21 @@ export function stationParams(station: RadioStation, limit: number): URLSearchPa
     return params;
 }
 
-/** The cover a station's tile shows: the first among its songs, in the order it would play them. */
-export function stationCover(tracks: { album?: { coverArt?: string | null } | null }[]): string | null {
-    return tracks.find((track) => track.album?.coverArt)?.album?.coverArt ?? null;
+/** How the server and the page name a station when matching covers to tiles. */
+const coverKey = (type: string, value?: string | null) => `${type}:${value ?? ""}`;
+
+/** The stations a page shows, as the cover request lists them. */
+export function coverRequest(stations: RadioStation[]): { type: string; value?: string }[] {
+    return stations.map((station) => ({ type: station.filter.type, ...(station.filter.value ? { value: station.filter.value } : {}) }));
+}
+
+/** Each station's cover from the server's reply, by station id; a station the reply does not mention has none. */
+export function coversByStation(
+    stations: RadioStation[],
+    reply: { covers: { type: string; value: string | null; cover: string | null }[] },
+): Map<string, string | null> {
+    const byKey = new Map(reply.covers.map((c) => [coverKey(c.type, c.value), c.cover]));
+    return new Map(stations.map((s) => [s.id, byKey.get(coverKey(s.filter.type, s.filter.value)) ?? null]));
 }
 
 /** A station's colour: the first in its accent (every style above writes it as `from-[#hex] to-[#hex]`). */

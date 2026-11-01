@@ -859,6 +859,17 @@ class ApiClient {
         return null;
     }
 
+    /**
+     * The cover each radio station tile shows, for all the tiles a page has in one request. The server picks each
+     * listener's cover once per local day, so the same image address comes back all day.
+     */
+    async getRadioCovers(
+        stations: { type: string; value?: string }[],
+        tz: string
+    ): Promise<{ covers: { type: string; value: string | null; cover: string | null }[] }> {
+        return this.post("/library/radio/covers", { stations, tz });
+    }
+
     /** Cover art URL for an id, URL or path; the token lets a canvas read its pixels for colour extraction. */
     getCoverArtUrl(coverId: string, size?: number, includeToken = true): string {
         const baseUrl = getApiBaseUrl();

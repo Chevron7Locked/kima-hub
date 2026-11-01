@@ -1,55 +1,16 @@
 "use client";
 
 import { memo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { api } from "@/lib/api";
 import { TileCard } from "@/components/cards/TileCard";
 import { CachedImage } from "@/components/ui/CachedImage";
-import { useInView } from "@/hooks/useInView";
-import { RadioStation, stationCover, stationHue, stationParams } from "../radioData";
-
-/** Songs asked for to find a station's cover: a few, in case the first have none. */
-const COVER_SAMPLE = 5;
-
-/** Cover requests in flight at once, so scrolling past a long page of stations does not ask for all of them together. */
-const MAX_COVER_REQUESTS = 4;
-let inFlight = 0;
-const waiting: (() => void)[] = [];
-
-/** Runs `work` once a place is free. A finished request hands its place straight to the longest waiting one. */
-export async function oneAtATurn<T>(work: () => Promise<T>): Promise<T> {
-    if (inFlight < MAX_COVER_REQUESTS) inFlight++;
-    else await new Promise<void>((go) => waiting.push(go));
-    try {
-        return await work();
-    } finally {
-        const next = waiting.shift();
-        if (next) next();
-        else inFlight--;
-    }
-}
-
-/** The cover of a song this station would play, asked for once the tile is near the screen and kept for half an hour. */
-function useStationCover(station: RadioStation, enabled: boolean) {
-    return useQuery({
-        queryKey: ["library", "radio", "cover", station.id],
-        queryFn: async () => {
-            const reply = await oneAtATurn(() =>
-                api.get<{ tracks?: { album?: { coverArt?: string | null } | null }[] }>(
-                    `/library/radio?${stationParams(station, COVER_SAMPLE)}`,
-                ),
-            );
-            return stationCover(reply.tracks ?? []);
-        },
-        enabled,
-        staleTime: 30 * 60 * 1000,
-        retry: false,
-    });
-}
+import { RadioStation, stationHue } from "../radioData";
 
 interface StationCardProps {
     station: RadioStation;
+    /** The cover the server picked for today; none until the page's request answers, or when the station has none. */
+    cover?: string | null;
     onStart: (station: RadioStation) => void;
     busy?: boolean;
     disabled?: boolean;
@@ -59,16 +20,13 @@ interface StationCardProps {
 
 /**
  * A radio station: the cover of a song it plays, washed in the station's colour, with its name and line over the
- * bottom. Until a cover arrives, or when the station has none, the tile is a fade of its colour.
+ * bottom. The image loads only once the tile is near the screen (CachedImage is lazy). Until a cover arrives, or when the station has none, the tile is a fade of its colour.
  */
-export const StationCard = memo(function StationCard({ station, onStart, busy = false, disabled = false, index = 0, className }: StationCardProps) {
-    const { ref, shown } = useInView<HTMLButtonElement>({ withinMain: true, rootMargin: "200px", threshold: 0 });
-    const { data: cover } = useStationCover(station, shown);
+export const StationCard = memo(function StationCard({ station, cover, onStart, busy = false, disabled = false, index = 0, className }: StationCardProps) {
     const hue = stationHue(station);
 
     return (
         <TileCard
-            buttonRef={ref}
             title={station.name}
             subtitle={station.description}
             hoverBorder={station.hoverBorder}

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { PlaylistPreview } from "@/features/home/types";
-import type { DecadeCount, GenreCount } from "@/features/home/radioData";
+import { coverRequest, coversByStation, type DecadeCount, type GenreCount, type RadioStation } from "@/features/home/radioData";
 
 export const queryKeys = {
     artist: (id: string) => ["artist", id] as const,
@@ -67,6 +67,7 @@ export const queryKeys = {
     libraryGenres: () => ["library", "genres"] as const,
     libraryDecades: () => ["library", "decades"] as const,
     moodStations: () => ["library", "radio", "stations"] as const,
+    radioCovers: (day: string, stationIds: string[]) => ["library", "radio", "covers", day, ...stationIds] as const,
     // The collection page's mood band and card dots; refreshed when enrichment or a scan finishes (useEventSource)
     libraryMoodSummary: () => ["library", "mood-summary"] as const,
 };
@@ -720,6 +721,25 @@ export function useMoodStationsQuery(enabled: boolean) {
         enabled,
         // A list that failed keeps being asked for, so the tiles come back on their own.
         refetchInterval: (query) => (query.state.status === "error" ? 30_000 : false),
+    });
+}
+
+/**
+ * The cover of every station tile a page shows, in one request. The server picks each cover once per local day, so the
+ * request is keyed by the day and the station list and kept all day; `enabled` holds it back until the list is whole.
+ */
+export function useStationCovers(stations: RadioStation[], enabled: boolean) {
+    const day = new Date().toLocaleDateString("en-CA");
+    const ids = stations.map((s) => s.id);
+    return useQuery({
+        queryKey: queryKeys.radioCovers(day, ids),
+        queryFn: async () =>
+            coversByStation(stations, await api.getRadioCovers(coverRequest(stations), Intl.DateTimeFormat().resolvedOptions().timeZone)),
+        enabled: enabled && stations.length > 0,
+        // When the station list changes (a genre appears, the moods reload) the tiles keep their covers until the new answer.
+        placeholderData: keepPreviousData,
+        staleTime: 6 * 60 * 60 * 1000,
+        retry: false,
     });
 }
 
