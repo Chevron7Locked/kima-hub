@@ -1793,7 +1793,8 @@ test.describe("Dogfood walkthrough", () => {
         });
 
         await session.step("the Soulseek tab, if this instance has the integration", async () => {
-            const p2p = page.getByRole("button", { name: "Soulseek" });
+            // The tab, not the rows' "download from soulseek" buttons; its name grows a result count once results arrive.
+            const p2p = page.locator('[data-tv-section="search-filters"]').getByRole("button", { name: /^soulseek/i });
             if ((await p2p.count()) === 0) {
                 session.noteNotCovered("soulseek/P2P search: the tab is absent, so the integration is not configured");
                 return { p2p: false };
