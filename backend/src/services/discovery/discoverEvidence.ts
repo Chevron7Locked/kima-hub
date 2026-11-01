@@ -20,8 +20,10 @@ interface Mark {
 
 /**
  * Discover's records and the listeners' own download requests, keyed for lookup: by release-group id, and by artist
- * and title (nameKey). Suggestions in every status; Discover download jobs waiting, running or finished (finished ones
- * go after 30 days); the listeners' own requests, which make an album theirs whatever Discover suggested.
+ * and title (nameKey). Suggestions in every status; Discover download jobs waiting, running or finished, of each
+ * listener's current week (an earlier week's albums were cleared when the next began, so a listener's own later copy
+ * is theirs) or, for the one-time sort only, of every week kept (finished jobs go after 30 days); the listeners' own
+ * requests, which make an album theirs whatever Discover suggested.
  */
 export interface DiscoverRecords {
     byId: Map<string, Mark>;
@@ -47,14 +49,30 @@ const albumNameKey = (artist: string, title: string) => {
 /** An artist and title as one lookup key; a name with no letters or digits keys on its exact text. */
 export const lookupKey = (artist: string, title: string) => albumNameKey(artist, title) ?? `exact\u0000${artist}\u0000${title}`;
 
-export async function loadDiscoverRecords(): Promise<DiscoverRecords> {
-    const [suggestions, jobs] = await Promise.all([
+export async function loadDiscoverRecords(options: { everyWeek?: boolean } = {}): Promise<DiscoverRecords> {
+    const [suggestions, allJobs, batches] = await Promise.all([
         prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, albumTitle: true, status: true } }),
         prisma.downloadJob.findMany({
             where: { status: { in: ["pending", "processing", "completed"] } },
             select: { targetMbid: true, metadata: true, discoveryBatchId: true },
         }),
+        options.everyWeek
+            ? Promise.resolve([])
+            : prisma.discoveryBatch.findMany({ select: { id: true, userId: true, createdAt: true, status: true } }),
     ]);
+    const current = new Set<string>();
+    if (!options.everyWeek) {
+        const newest = new Map<string, { id: string; createdAt: Date }>();
+        for (const b of batches) {
+            if (RUNNING_BATCH.includes(b.status)) current.add(b.id);
+            const seen = newest.get(b.userId);
+            if (!seen || b.createdAt > seen.createdAt) newest.set(b.userId, b);
+        }
+        for (const b of newest.values()) current.add(b.id);
+    }
+    const jobs = options.everyWeek
+        ? allJobs
+        : allJobs.filter((j) => j.discoveryBatchId === null || current.has(j.discoveryBatchId));
     const records: DiscoverRecords = { byId: new Map(), byName: new Map() };
     const mark = (id: string | null, artist: string, title: string, apply: (m: Mark) => void) => {
         const name = albumNameKey(artist, title);

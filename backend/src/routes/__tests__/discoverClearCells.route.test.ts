@@ -69,6 +69,7 @@ async function cleanup() {
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.notification.deleteMany({ where: { userId: OWNER } });
     await prisma.downloadJob.deleteMany({ where: { userId: OWNER } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: OWNER } });
     await prisma.user.deleteMany({ where: { id: { in: [USER, OWNER] } } });
 }
 
@@ -127,16 +128,17 @@ async function addAlbum(spec: AlbumSpec) {
     return { albumId, trackId, file, dir: path.dirname(file), suggestionId };
 }
 
-/** The record that shows an album's files came from Soulseek: a completed job whose last attempt was Soulseek. */
+/**
+ * Discover's own download record of an album, as createDiscoveryDownloadJob writes it (a job in a Discover batch): a
+ * completed job whose last attempt was Soulseek unless said otherwise. Without a Discover record Kima deletes nothing.
+ */
 async function addSoulseekJob(rg: string, title: string, extra: { lidarrAlbumId?: number | null; currentSource?: string; batchStatus?: string } = {}) {
-    const batch = extra.batchStatus
-        ? await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: extra.batchStatus } })
-        : null;
+    const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: extra.batchStatus ?? "completed" } });
     await prisma.downloadJob.create({
         data: {
-            discoveryBatchId: batch?.id,
+            discoveryBatchId: batch.id,
             userId: USER, subject: `${ARTIST} - ${title}`, type: "album", targetMbid: rg, status: "completed",
-            lidarrAlbumId: extra.lidarrAlbumId ?? null, metadata: { artistName: ARTIST, albumTitle: title, currentSource: extra.currentSource ?? "soulseek" },
+            lidarrAlbumId: extra.lidarrAlbumId ?? null, metadata: { downloadType: "discovery", artistName: ARTIST, albumTitle: title, currentSource: extra.currentSource ?? "soulseek" },
             completedAt: new Date(),
         },
     });
@@ -268,6 +270,8 @@ describe("DISCOVER albums no suggestion covers", () => {
 
     it("keeps an album Lidarr cannot be asked about, and says so in the tray", async () => {
         const orphan = await addAlbum({ key: "lid", rg: RG_ORPHAN });
+        // Discover's own finished download of it, last fetched through Lidarr: the record that makes it Discover's to clear.
+        await addSoulseekJob(RG_ORPHAN, "Album lid", { currentSource: "lidarr" });
         const port = await deadPort();
         await useLidarr(`http://127.0.0.1:${port}`);
 
@@ -278,10 +282,23 @@ describe("DISCOVER albums no suggestion covers", () => {
         expect(res.body.lidarrFailed[0].reason).toContain("Lidarr could not be reached or answered with an error");
         expect(fs.existsSync(orphan.file)).toBe(true);
         expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(1);
-        // No record names the album, so the admins are told (this listener is one), not in the listener's own row.
+        // This listener's own Discover record names the album, so it is in the listener's own tray row.
+        expect((await trayRow())!.message).toContain("Lidarr could not be reached");
+    });
+
+    it("returns an album no Discover record names to the library, files kept, as the listener's own", async () => {
+        const orphan = await addAlbum({ key: "norec", rg: RG_ORPHAN });
+        await useLidarr(`http://127.0.0.1:${await deadPort()}`);
+
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.status).toBe(200);
+        expect(res.body.orphanedAlbumsDeleted).toBe(0);
+        expect(res.body.lidarrFailed).toEqual([]);
+        expect(fs.existsSync(orphan.file)).toBe(true);
+        expect(await prisma.track.count({ where: { id: orphan.trackId } })).toBe(1);
+        expect((await prisma.album.findUnique({ where: { id: orphan.albumId } }))?.location).toBe("LIBRARY");
+        expect(await prisma.ownedAlbum.count({ where: { rgMbid: RG_ORPHAN, source: "native_scan" } })).toBe(1);
         expect(await trayRow()).toBeNull();
-        const admin = await prisma.notification.findUnique({ where: { userId_groupKey: { userId: USER, groupKey: "discover-clear-orphans" } } });
-        expect(admin!.message).toContain("Lidarr could not be reached");
     });
 
     it("keeps the Lidarr-held album a clear just kept, though its suggestion has another id and letter case", async () => {
@@ -416,6 +433,8 @@ describe("which albums Kima deletes files of", () => {
 
     it("keeps an album no suggestion covers and no download record shows is Soulseek's", async () => {
         const album = await addAlbum({ key: "nojob2", rg: `${P}_rg_nojob2` });
+        // A Discover record of another source: without any Discover record the album would go to the library instead.
+        await addSoulseekJob(`${P}_rg_nojob2`, "Album nojob2", { currentSource: "lidarr" });
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.orphanedAlbumsDeleted).toBe(0);
         expect(res.body.lidarrFailed[0].reason).toBe(UNKNOWN);
@@ -563,8 +582,10 @@ describe("an error while clearing one album", () => {
 describe("an orphan album that was not deleted", () => {
     it("is reported to the listener whose record names it, not to the listener who cleared", async () => {
         const orphan = await addAlbum({ key: "theirs", rg: `${P}_rg_theirs` });
+        // The other listener's own failed Discover download names the album (it is not USER's to be wiped by this clear).
+        const batch = await prisma.discoveryBatch.create({ data: { userId: OWNER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
         await prisma.downloadJob.create({
-            data: { userId: OWNER, subject: `${ARTIST} - Album theirs`, type: "album", targetMbid: `${P}_rg_theirs`, status: "failed" },
+            data: { userId: OWNER, subject: `${ARTIST} - Album theirs`, type: "album", targetMbid: `${P}_rg_theirs`, status: "failed", discoveryBatchId: batch.id },
         });
 
         const res = await request(discoverApp()).delete("/discover/clear");

@@ -1,8 +1,9 @@
 /**
- * The one-time sort of albums the scanner filed by guesswork, on the real test database, against what a real Lidarr
- * said (fixtures/lidarr/discover-sort.json): Discover downloaded Brad Sucks' Guess Who’s a Mess through Lidarr 3.1,
- * which tagged the artist as Discover's and holds that album's 11 files and no others. The files spell the title with
- * a straight apostrophe, so the scanner filed the download as a library album and marked it as the listener's.
+ * The one-time sort of albums the scanner filed by guesswork, on the real test database. Discover downloaded Brad
+ * Sucks' Guess Who’s a Mess; the files spell the title with a straight apostrophe, so the scanner filed the download as
+ * a library album and marked it as the listener's. Only Discover's own records (a suggestion, or a download job in a
+ * Discover batch, which the real flow always writes) say an album is Discover's; Lidarr's Discover tag marks an artist
+ * and is no evidence, so the sort must never ask Lidarr (a replayed Lidarr is up to prove it).
  */
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
@@ -69,6 +70,17 @@ async function albums(specs: Record<string, AlbumSpec>) {
     }
 }
 
+/** Discover's own download record of an album, as createDiscoveryDownloadJob writes it (a job in a Discover batch). */
+async function discoverRecord(key: string, spec: AlbumSpec) {
+    const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: new Date(Date.UTC(2026, 9, 19)), targetSongCount: 1, status: "completed" } });
+    await prisma.downloadJob.create({
+        data: {
+            userId: USER, subject: `${spec.artist.name} - ${spec.title}`, type: "album", status: "completed", targetMbid: `${P}rg_${key}`,
+            discoveryBatchId: batch.id, metadata: { downloadType: "discovery", artistName: spec.artist.name, albumTitle: spec.title },
+        },
+    });
+}
+
 const discoverDownload: AlbumSpec = { artist: BRAD, title: "Guess Who's a Mess", location: "LIBRARY", owned: true };
 const ownRecord: AlbumSpec = { artist: { name: "Sda Own Artist", mbid: null }, title: "Own Record", location: "LIBRARY", owned: true };
 
@@ -114,16 +126,15 @@ afterAll(async () => {
 describe("Discover downloads filed in the library", () => {
     it("go back to Discover when nothing says a listener made them theirs, and stop being anyone's", async () => {
         await albums({ gwam: discoverDownload, own: ownRecord });
+        await discoverRecord("gwam", discoverDownload);
         const result = await sortDiscoverAlbums();
-        expect(result).toMatchObject({ toDiscover: 1, keptByActivity: 0, lidarr: "read" });
+        expect(result).toMatchObject({ toDiscover: 1, keptByActivity: 0 });
         expect(await location("gwam")).toBe("DISCOVER");
         expect(await owned("gwam")).toBe(0);
         expect(await location("own")).toBe("LIBRARY");
         expect(await owned("own")).toBe(1);
-        // Asked Lidarr which artists carry the Discover tag, and what it holds for them.
-        expect(lidarr.asked.map((a) => `${a.method} ${a.path}`)).toEqual(
-            expect.arrayContaining(["GET /api/v1/tag", "GET /api/v1/artist", "GET /api/v1/album?artistId=65"]),
-        );
+        // Lidarr's tag is no evidence, so the sort never asks Lidarr anything.
+        expect(lidarr.asked).toEqual([]);
     });
 
     it("stay when a listener has another album by the artist, got themselves", async () => {
@@ -131,12 +142,16 @@ describe("Discover downloads filed in the library", () => {
             gwam: discoverDownload,
             outOfIt: { artist: BRAD, title: "Out of It", location: "LIBRARY", owned: true },
         });
+        await discoverRecord("gwam", discoverDownload);
         expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 0, keptByActivity: 1 });
         expect(await location("gwam")).toBe("LIBRARY");
     });
 
     it("stay, both of them, when the library holds two copies of the album", async () => {
-        await albums({ gwam: discoverDownload, gwamToo: { ...discoverDownload, title: "Guess Who’s a Mess" } });
+        const curly = { ...discoverDownload, title: "Guess Who’s a Mess" };
+        await albums({ gwam: discoverDownload, gwamToo: curly });
+        await discoverRecord("gwam", discoverDownload);
+        await discoverRecord("gwamToo", curly);
         expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 0, keptByActivity: 2 });
         expect([await location("gwam"), await location("gwamToo")]).toEqual(["LIBRARY", "LIBRARY"]);
     });
@@ -161,6 +176,7 @@ describe("Discover downloads filed in the library", () => {
 
     it("stay when played 3 times across 3 songs, not 3 plays of one song", async () => {
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await plays("gwam", [0, 1, 2]);
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
         expect(await location("gwam")).toBe("LIBRARY");
@@ -168,6 +184,7 @@ describe("Discover downloads filed in the library", () => {
 
     it("go when the plays are all one song", async () => {
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await plays("gwam", [0, 0, 0, 0]);
         expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 1 });
         expect(await location("gwam")).toBe("DISCOVER");
@@ -175,11 +192,13 @@ describe("Discover downloads filed in the library", () => {
 
     it("stay when a song is liked, a song is in a playlist, or the album was edited", async () => {
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await prisma.likedTrack.create({ data: { userId: USER, trackId: songId("gwam", 3) } });
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
 
         await resetRun();
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await prisma.playlist.create({
             data: { userId: USER, name: "mine", items: { create: { trackId: songId("gwam", 1), sort: 0 } } },
         });
@@ -187,23 +206,42 @@ describe("Discover downloads filed in the library", () => {
 
         await resetRun();
         await albums({ gwam: { ...discoverDownload, edited: true } });
+        await discoverRecord("gwam", discoverDownload);
         expect(await sortDiscoverAlbums()).toMatchObject({ keptByActivity: 1 });
         expect(await location("gwam")).toBe("LIBRARY");
     });
 });
 
 describe("albums filed as Discover", () => {
-    it("stay when Lidarr downloaded them for Discover, and stop being anyone's; the listener's own go to the library", async () => {
+    it("stay on Discover's download record, and stop being anyone's; one no record names goes to the library as the listener's", async () => {
+        const filed: AlbumSpec = { ...discoverDownload, location: "DISCOVER", owned: true };
         await albums({
             // Filed as Discover, the album was marked as the listener's too.
-            gwam: { ...discoverDownload, location: "DISCOVER", owned: true },
-            // Lidarr knows this album but downloaded none of it: the listener got it some other way.
+            gwam: filed,
+            // Lidarr tags this artist as Discover's, but no Discover record names this album: the listener's own.
             outOfIt: { artist: BRAD, title: "Out of It", location: "DISCOVER" },
         });
-        expect(await sortDiscoverAlbums()).toMatchObject({ toLibrary: 1, keptByLidarr: 1 });
+        await discoverRecord("gwam", filed);
+        expect(await sortDiscoverAlbums()).toMatchObject({ toLibrary: 1, keptByRecords: 1 });
         expect(await location("gwam")).toBe("DISCOVER");
         expect(await owned("gwam")).toBe(0);
         expect(await location("outOfIt")).toBe("LIBRARY");
+        expect(await owned("outOfIt")).toBe(1);
+        expect(lidarr.asked).toEqual([]);
+    });
+
+    it("count a Discover download record from any week kept, not only the current one", async () => {
+        await albums({ old: { ...discoverDownload, location: "DISCOVER", owned: false } });
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: new Date(Date.UTC(2026, 8, 7)), targetSongCount: 1, status: "completed" } });
+        await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: new Date(Date.UTC(2026, 9, 26)), targetSongCount: 1, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: `${BRAD.name} - ${discoverDownload.title}`, type: "album", status: "completed", targetMbid: `${P}rg_old`,
+                discoveryBatchId: batch.id, metadata: { downloadType: "discovery", artistName: BRAD.name, albumTitle: discoverDownload.title },
+            },
+        });
+        expect(await sortDiscoverAlbums()).toMatchObject({ toLibrary: 0, keptByRecords: 1 });
+        expect(await location("old")).toBe("DISCOVER");
     });
 
     it("follow Discover's download records while they exist; a suggestion alone says nothing", async () => {
@@ -263,20 +301,20 @@ describe("the sort itself", () => {
         expect(await location("gwam")).toBe("LIBRARY");
     });
 
-    it("without Lidarr, Lidarr says nothing: the download stays where it is", async () => {
+    it("needs no Lidarr: with Lidarr turned off the sort still follows Discover's records", async () => {
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await useLidarr(lidarr.url, { lidarrEnabled: false });
-        expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 0, lidarr: "not set up" });
-        expect(await location("gwam")).toBe("LIBRARY");
+        expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 1 });
+        expect(await location("gwam")).toBe("DISCOVER");
     });
 
-    it("when Lidarr does not answer, moves nothing and tries again at the next start", async () => {
+    it("is not held up by a Lidarr that does not answer: it never asks", async () => {
         await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
         await lidarr.close();
-        expect(await sortDiscoverAlbums()).toBeNull();
-        expect(await location("gwam")).toBe("LIBRARY");
-        lidarr = await startLidarrReplay(loadScenario("discover-sort"));
-        await useLidarr(lidarr.url);
         expect(await sortDiscoverAlbums()).toMatchObject({ toDiscover: 1 });
+        expect(await location("gwam")).toBe("DISCOVER");
+        lidarr = await startLidarrReplay(loadScenario("discover-sort"));
     });
 });

@@ -14,7 +14,7 @@ import { lidarrService } from "../services/lidarr";
 import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
-import { findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
+import { findDiscoverAlbum, findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
 import { lookupKey, relocateDiscoverAlbums, sameName } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
@@ -557,7 +557,9 @@ router.post("/like", async (req, res) => {
             }
         }
 
-        const dbAlbum = await findScannedAlbum(discoveryAlbum, "DISCOVER");
+        // Only Discover's copy: a listener's own library album of the same name must not take the like's mark, or an
+        // unlike would send it to Discover.
+        const dbAlbum = await findDiscoverAlbum(discoveryAlbum);
 
         if (dbAlbum) {
             await takeIntoLibrary(dbAlbum);
@@ -1003,7 +1005,7 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
             }
             try {
                 const removable = dryRun
-                    ? (await discoveryArtistVerdict(lidarrArtist)) === "delete"
+                    ? ["delete", "forget"].includes(await discoveryArtistVerdict(lidarrArtist))
                     : await removeDiscoveryArtist(lidarrArtist);
                 if (removable) artistsRemoved.push(artistName);
                 else artistsKept.push(`${artistName} (library, liked, in a current Discover week, or files Discover did not fetch)`);

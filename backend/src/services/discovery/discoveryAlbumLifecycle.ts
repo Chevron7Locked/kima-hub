@@ -102,10 +102,11 @@ class DiscoveryAlbumLifecycle {
         // Albums Lidarr fetched that no suggestion names (they missed the final playlist).
         lidarrFailed.push(...(await clearUnsuggestedDownloads(userId)));
         await prisma.unavailableAlbum.deleteMany({ where: { userId } });
-        await prisma.downloadJob.deleteMany({ where: { userId, discoveryBatchId: { not: null }, status: 'failed' } });
 
-        // DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build.
+        // DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build. Before the failed
+        // download records go: they are what shows such an album is Discover's.
         const orphans = await clearOrphanedDiscoverAlbums();
+        await prisma.downloadJob.deleteMany({ where: { userId, discoveryBatchId: { not: null }, status: 'failed' } });
         const strip = ({ userIds: _named, ...f }: (typeof orphans.failures)[number]): ClearFailure => f;
         lidarrFailed.push(...orphans.failures.filter((f) => f.userIds.includes(userId)).map(strip));
         const unnamedFailed = orphans.failures.filter((f) => f.userIds.length === 0).map(strip);

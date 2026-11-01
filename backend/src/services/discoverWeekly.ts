@@ -10,6 +10,7 @@ import { titlesAgree } from "./albumIdentity";
 import { nameWords } from "./nameFold";
 import type { SeedArtist } from "./discovery/discoverySeeding";
 import { prisma } from "../utils/db";
+import { LIBRARY_LOCATION } from "./libraryFilters";
 import { removeFailedDownload } from "./lidarrFailures";
 import {
     getSimilarArtists,
@@ -1456,7 +1457,7 @@ class DiscoverWeeklyService {
         if (isMbid(artistMbid)) {
             const byMbid = await prisma.artist.findFirst({
                 where: { mbid: artistMbid },
-                include: { albums: { take: 1 } },
+                include: { albums: { where: { location: LIBRARY_LOCATION }, take: 1 } },
             });
             if (byMbid && byMbid.albums.length > 0) {
                 logger.debug(
@@ -1466,9 +1467,10 @@ class DiscoverWeeklyService {
             }
         }
 
+        // Library albums only: an album in someone's Discover does not make the artist known.
         const byName = await prisma.artist.findFirst({
             where: artistNamed(artistName),
-            include: { albums: { take: 1 } },
+            include: { albums: { where: { location: LIBRARY_LOCATION }, take: 1 } },
         });
 
         if (byName !== null && byName.albums.length > 0) {

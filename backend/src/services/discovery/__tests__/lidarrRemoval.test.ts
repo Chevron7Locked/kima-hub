@@ -81,6 +81,7 @@ const inLibrary = async (rgMbid: string) => {
 
 describe("removeDiscoveryAlbum", () => {
     it("deletes the files of the album Discover asked for", async () => {
+        await discovered("rg-asked", "DELETED");
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
 
         const outcome = await removeDiscoveryAlbum(7, "rg-asked");
@@ -97,6 +98,31 @@ describe("removeDiscoveryAlbum", () => {
         expect(kept.reason).toBe("Lidarr's record is not the album Discover fetched");
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
         expect(lidarr.unmonitorAlbum).toHaveBeenCalledWith(7);
+    });
+
+    it("keeps (unmonitors, never deletes) an album under a tagged artist when no Discover record names it", async () => {
+        // The tag marks the artist; a listener can add their own album to a tagged artist in Lidarr.
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(kept.reason).toBe("Lidarr's record is not the album Discover fetched");
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+        expect(lidarr.unmonitorAlbum).toHaveBeenCalledWith(7);
+    });
+
+    it("deletes the files when only a Discover download job (no suggestion) names the album", async () => {
+        const batch = await prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-26"), targetSongCount: 10, status: "completed" },
+        });
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - Album", type: "album", status: "completed", targetMbid: "rg-asked", artistMbid: "artist-mbid", discoveryBatchId: batch.id },
+        });
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const outcome = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(outcome.removed).toBe(true);
+        expect(lidarr.deleteAlbumById).toHaveBeenCalledWith(7, true);
     });
 
     it("keeps the files of an artist without the Discover tag", async () => {
@@ -252,5 +278,69 @@ describe("removeDiscoveryArtist", () => {
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+
+    it("lets Lidarr forget an artist with no files without deleting its folder", async () => {
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-empty", 0)]);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(true);
+        expect(lidarr.deleteArtistById).toHaveBeenCalledWith(5, false);
+    });
+
+    it("keeps an artist whose album with files the listener asked for themselves", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - rg-1", type: "album", status: "completed", targetMbid: "rg-1", metadata: {} },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+
+    it("keeps an artist whose album with files is marked as a listener's", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.artist.create({
+            data: { id: ARTIST, name: "Interpol", mbid: null, identityKey: artistIdentityKey("Interpol") },
+        });
+        await prisma.ownedAlbum.create({ data: { artistId: ARTIST, rgMbid: "rg-1", source: "native_scan" } });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+        await prisma.ownedAlbum.deleteMany({ where: { artistId: ARTIST } });
+    });
+});
+
+describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
+    it("keeps an artist Lidarr gives no file count for", async () => {
+        lidarr.getAlbumsByArtistId.mockResolvedValue([{ id: 7, artistId: 5, title: "Album", foreignAlbumId: "rg-1" }] as any);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+
+    it("keeps an artist with no files while a listener's own request for it is open", async () => {
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - Next", type: "album", status: "pending", artistMbid: "artist-mbid", metadata: {} },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-next", 0)]);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+});
+
+describe("removeDiscoveryAlbum and a listener's own claim", () => {
+    it("keeps an album the listener asked for themselves, Discover's record or not", async () => {
+        await discovered("rg-asked");
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - Album", type: "album", status: "processing", targetMbid: "rg-asked", metadata: {} },
+        });
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked");
+        expect(kept.removed).toBe(false);
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
     });
 });

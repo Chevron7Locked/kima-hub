@@ -13,6 +13,7 @@ const WEEK = new Date(Date.UTC(2026, 9, 19));
 
 async function cleanup() {
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.discoveryTrack.deleteMany({ where: { discoveryAlbum: { userId: USER } } });
     await prisma.discoveryAlbum.deleteMany({ where: { userId: USER } });
     await prisma.ownedAlbum.deleteMany({ where: { artistId: { startsWith: P } } });
@@ -27,8 +28,10 @@ async function discoverAlbum() {
     await prisma.album.create({
         data: { id: `${P}_alb`, rgMbid: `${P}_rg`, artistId: `${P}_art`, identityKey: `${P}_ak`, title: `${P} Album`, primaryType: "Album", year: 2024, location: "DISCOVER" },
     });
+    // Discover's own download record, as createDiscoveryDownloadJob writes it: without it the album is not Discover's to delete.
+    const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
     await prisma.downloadJob.create({
-        data: { userId: USER, subject: `${P} artist - ${P} Album`, type: "album", targetMbid: `${P}_rg`, status: "completed", metadata: { currentSource: "soulseek" } },
+        data: { userId: USER, subject: `${P} artist - ${P} Album`, type: "album", targetMbid: `${P}_rg`, status: "completed", discoveryBatchId: batch.id, metadata: { currentSource: "soulseek", downloadType: "discovery", artistName: `${P} artist`, albumTitle: `${P} Album` } },
     });
     // The song's file is outside the music root, so a clear refuses to touch it.
     await prisma.track.create({

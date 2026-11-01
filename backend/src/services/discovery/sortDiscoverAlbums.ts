@@ -1,15 +1,14 @@
 /**
- * The one-time sort of albums the old scanner filed by guesswork. An album filed as Discover stays there only on
- * evidence: a Discover download record (discoverEvidence; a suggestion alone says nothing), or Lidarr holding its files
- * for an artist that still carries Kima's Discover tag. A library album that came from Discover goes back unless its
- * listeners made it theirs: a liked song, a song in a playlist, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another
- * album by the artist they got themselves, or a second library copy. Without Lidarr only the records count; a Lidarr
- * that does not answer defers the sort.
+ * The one-time sort of albums the old scanner filed by guesswork. An album filed as Discover stays there only on a
+ * Discover download record (discoverEvidence; a suggestion alone says nothing); every other goes to the library as the
+ * listener's. A library album a Discover download asked for goes back unless its listeners made it theirs: a liked song,
+ * a song in a playlist, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another album by the artist they got
+ * themselves, or a second library copy. Lidarr's Discover tag is no evidence: it marks an artist, and a listener can add
+ * their own albums to a tagged artist in Lidarr.
  */
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { lidarrService } from "../lidarr";
 import { updateArtistCounts } from "../artistCountsService";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import {
@@ -27,32 +26,8 @@ const KEEP_SONGS = 3;
 export interface DiscoverSortResult {
     toLibrary: number;
     keptByRecords: number;
-    keptByLidarr: number;
     toDiscover: number;
     keptByActivity: number;
-    lidarr: "read" | "not set up";
-}
-
-/** For each Discover-tagged Lidarr artist, the albums Lidarr holds files for, keyed by release-group id and title. */
-async function lidarrDiscoverAlbums() {
-    const tagged = await lidarrService.readDiscoveryTaggedArtists();
-    if (tagged === null) return null;
-    return Promise.all(
-        tagged.map(async (artist) => {
-            const albums = (await lidarrService.getAlbumsByArtistId(artist.id)) as Array<{
-                foreignAlbumId?: string;
-                title?: string;
-                statistics?: { trackFileCount?: number };
-            }>;
-            const held = albums.filter((a) => (a.statistics?.trackFileCount ?? 0) > 0);
-            return {
-                mbid: artist.foreignArtistId || null,
-                name: nameKey(artist.artistName),
-                rgMbids: new Set(held.map((a) => a.foreignAlbumId).filter((id): id is string => !!id)),
-                titles: new Set(held.map((a) => nameKey(a.title)).filter(Boolean)),
-            };
-        }),
-    );
 }
 
 type SortedAlbum = {
@@ -85,25 +60,8 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     // No settings row yet is a new install: nothing was filed by the old guesses.
     if (!settings || settings.discoverAlbumsSortedAt) return null;
 
-    let lidarr: Awaited<ReturnType<typeof lidarrDiscoverAlbums>>;
-    try {
-        lidarr = await lidarrDiscoverAlbums();
-    } catch (error) {
-        logger.warn("[Discover sort] Lidarr did not answer; the albums are sorted at the next start:", error);
-        return null;
-    }
-    const heldByLidarr = (album: SortedAlbum) => {
-        const artistName = nameKey(album.artist.name);
-        const title = nameKey(album.title);
-        return (lidarr ?? []).some(
-            (artist) =>
-                // The same artist: by MusicBrainz id when both have one, by name only when one does not.
-                (artist.mbid && album.artist.mbid ? artist.mbid === album.artist.mbid : !!artistName && artist.name === artistName) &&
-                (artist.rgMbids.has(album.rgMbid) || (!!title && artist.titles.has(title))),
-        );
-    };
-
-    const records = await loadDiscoverRecords();
+    // Every week kept: the old scanner filed downloads from weeks long cleared.
+    const records = await loadDiscoverRecords({ everyWeek: true });
     const albums: (SortedAlbum & { location: string })[] = await prisma.album.findMany({
         select: {
             id: true,
@@ -120,11 +78,9 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     // Albums filed as Discover: they stay only on evidence.
     const toLibrary: SortedAlbum[] = [];
     let keptByRecords = 0;
-    let keptByLidarr = 0;
     for (const album of albums.filter((a) => a.location === "DISCOVER")) {
         const evidence = discoverEvidence(named(album), records);
         if (evidence !== null && isDiscoverEvidence(evidence)) keptByRecords++;
-        else if (evidence === null && heldByLidarr(album)) keptByLidarr++;
         else toLibrary.push(album);
     }
 
@@ -133,7 +89,7 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     const fromDiscover = library.filter((album) => {
         const evidence = discoverEvidence(named(album), records);
         if (evidence === "liked" || evidence === "requested") return false;
-        return discoverDownloaded(named(album), records) || heldByLidarr(album);
+        return discoverDownloaded(named(album), records);
     });
     const fromDiscoverIds = new Set(fromDiscover.map((a) => a.id));
     // Artists with an album a listener got themselves: a library album not from Discover, or one this sort returns there.
@@ -171,6 +127,11 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
             where: { id: { in: toLibrary.map((a) => a.id) }, location: "DISCOVER" },
             data: { location: LIBRARY_LOCATION },
         });
+        // A library album is the listener's, as the scanner marks every one it files there.
+        await tx.ownedAlbum.createMany({
+            data: toLibrary.map((a) => ({ artistId: a.artistId, rgMbid: a.rgMbid, source: "native_scan" })),
+            skipDuplicates: true,
+        });
         await tx.album.updateMany({
             where: { id: { in: toDiscover.map((a) => a.id) }, location: LIBRARY_LOCATION },
             data: { location: "DISCOVER" },
@@ -188,15 +149,13 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     const result: DiscoverSortResult = {
         toLibrary: toLibrary.length,
         keptByRecords,
-        keptByLidarr,
         toDiscover: toDiscover.length,
         keptByActivity,
-        lidarr: lidarr === null ? "not set up" : "read",
     };
     logger.info(
         `[Discover sort] Filed as Discover: ${result.toLibrary} are the library's, ${keptByRecords} stay by Discover's ` +
-            `records and ${keptByLidarr} by Lidarr's Discover tag. In the library from Discover: ${result.toDiscover} ` +
-            `go back to Discover, ${keptByActivity} stay as their listeners' (Lidarr ${result.lidarr})`,
+            `records. In the library from Discover: ${result.toDiscover} go back to Discover, ${keptByActivity} stay as ` +
+            `their listeners'`,
     );
     return result;
 }

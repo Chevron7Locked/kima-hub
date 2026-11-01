@@ -163,6 +163,7 @@ async function cleanup() {
     await prisma.discoveryAlbum.deleteMany({ where: { userId: USER } });
     await prisma.unavailableAlbum.deleteMany({ where: { userId: USER } });
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
     await prisma.ownedAlbum.deleteMany({ where: { artistId: { startsWith: P } } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
@@ -222,12 +223,14 @@ async function buildFixture() {
             fileSize: 1000,
         })),
     });
-    // Soulseek's completed download records, which are what show those albums' files are Kima's to delete.
+    // Discover's own completed Soulseek download records (jobs in a Discover batch, as createDiscoveryDownloadJob writes
+    // them), which are what show those albums' files are Kima's to delete.
+    const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
     for (const album of ALBUMS.filter((a) => a.location === "DISCOVER" && a.lidarrAlbumId === null && a.status !== "LIKED")) {
         await prisma.downloadJob.create({
             data: {
-                userId: USER, subject: `${ARTIST_NAME} - ${album.title}`, type: "album", targetMbid: album.rg, status: "completed",
-                metadata: { artistName: ARTIST_NAME, albumTitle: album.title, currentSource: "soulseek" }, completedAt: new Date(),
+                userId: USER, subject: `${ARTIST_NAME} - ${album.title}`, type: "album", targetMbid: album.rg, status: "completed", discoveryBatchId: batch.id,
+                metadata: { downloadType: "discovery", artistName: ARTIST_NAME, albumTitle: album.title, currentSource: "soulseek" }, completedAt: new Date(),
             },
         });
     }

@@ -36,6 +36,7 @@ app.use("/discover", discoverRoutes);
 
 async function cleanup(): Promise<void> {
     await prisma.downloadJob.deleteMany({ where: { user: { username: { startsWith: MARK } } } });
+    await prisma.discoveryBatch.deleteMany({ where: { user: { username: { startsWith: MARK } } } });
     await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
     await prisma.track.deleteMany({ where: { title: { startsWith: MARK } } });
     await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
@@ -51,8 +52,13 @@ async function discoverAlbum(tag: string, opts: { orphan?: boolean } = {}) {
     const track = await prisma.track.create({
         data: { title: `${MARK} ${tag} song`, albumId: album.id, trackNo: 1, duration: 100, filePath: `/${MARK}-outside/${tag}.flac`, fileModified: new Date(), fileSize: 1000 },
     });
+    // Discover's own download record, as createDiscoveryDownloadJob writes it: the proof the files are Discover's to delete.
+    const batch = await prisma.discoveryBatch.create({ data: { userId: listener, weekStart: new Date(), targetSongCount: 10, status: "completed" } });
     await prisma.downloadJob.create({
-        data: { userId: listener, subject: `${artist.name} - ${album.title}`, type: "album", targetMbid: album.rgMbid, status: "completed", metadata: { currentSource: "soulseek" } },
+        data: {
+            userId: listener, subject: `${artist.name} - ${album.title}`, type: "album", targetMbid: album.rgMbid, status: "completed", discoveryBatchId: batch.id,
+            metadata: { currentSource: "soulseek", downloadType: "discovery", artistName: artist.name, albumTitle: album.title, albumMbid: album.rgMbid },
+        },
     });
     const record = opts.orphan
         ? null

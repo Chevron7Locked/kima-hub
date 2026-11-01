@@ -205,11 +205,12 @@ const UNKNOWN_SOURCE =
     "Kima can't tell where this album's files came from, so it left them; delete them in Lidarr or by hand";
 
 /**
- * Whether a completed download job naming the album (by id, or artist and title) last fetched it from Soulseek; any
- * job for the album that touched Lidarr says no.
+ * Whether a completed Discover download job naming the album (by id, or artist and title) last fetched it from
+ * Soulseek; any job for the album that touched Lidarr says no. A listener's own download is never Discover's to delete.
  */
 async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<boolean> {
     const candidates = await prisma.downloadJob.findMany({
+        where: { discoveryBatchId: { not: null } },
         select: { status: true, lidarrAlbumId: true, metadata: true, targetMbid: true, subject: true },
     });
     const wanted = `${ref.artistName} ${ref.albumTitle}`;
@@ -219,6 +220,28 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
     const source = (j: (typeof jobs)[number]) => (j.metadata as { currentSource?: string } | null)?.currentSource;
     if (jobs.some((j) => j.lidarrAlbumId !== null || source(j) === "lidarr")) return false;
     return jobs.some((j) => j.status === "completed" && source(j) === "soulseek");
+}
+
+/**
+ * Discover's finished download records for an album it has cleared. Gone with the album, they no longer say the album
+ * is Discover's, so a copy the listener adds later is theirs.
+ */
+async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promise<void> {
+    const jobs = await prisma.downloadJob.findMany({
+        where: { discoveryBatchId: { not: null }, status: { notIn: ["pending", "processing"] } },
+        select: { id: true, targetMbid: true, subject: true, metadata: true },
+    });
+    const wanted = `${ref.artistName} ${ref.albumTitle}`;
+    // A job that names a release group is this album's only by that id: another album of the same name keeps its own.
+    const naming = jobs.filter((j) => {
+        if (j.targetMbid !== null) return rgMbids.includes(j.targetMbid);
+        const meta = j.metadata as { artistName?: string; albumTitle?: string } | null;
+        return (
+            sameName(j.subject, wanted) ||
+            (!!meta?.artistName && !!meta?.albumTitle && sameName(`${meta.artistName} ${meta.albumTitle}`, wanted))
+        );
+    });
+    if (naming.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: naming.map((j) => j.id) } } });
 }
 
 /** One Discover album to clear: its names, the Lidarr album id if known, and the suggestion row it belongs to if any. */
@@ -236,11 +259,12 @@ type ClearResult = { cleared: true } | { cleared: false; reason: string };
  */
 export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResult> {
     const album = await findScannedAlbum(target, "DISCOVER");
+    const rgMbids = [...new Set([target.rgMbid, ...(album ? [album.rgMbid] : [])])];
     if (album?.location === "LIBRARY") {
         await deleteAlbumRows(null, target.suggestionId);
+        await forgetDiscoverDownloads(target, rgMbids);
         return { cleared: true };
     }
-    const rgMbids = [...new Set([target.rgMbid, ...(album ? [album.rgMbid] : [])])];
     const holding = await lidarrHolding(target, rgMbids);
     if ("unknown" in holding) return { cleared: false, reason: holding.unknown };
 
@@ -257,6 +281,7 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
         if (failure) return { cleared: false, reason: failure.failed };
     }
     await deleteAlbumRows(album?.id ?? null, target.suggestionId);
+    await forgetDiscoverDownloads(target, rgMbids);
     return { cleared: true };
 }
 
@@ -411,11 +436,50 @@ async function listenersNaming(ref: AlbumRef): Promise<string[]> {
 }
 
 /**
- * DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build, cleared the same way as any
- * other: Lidarr's are deleted by Lidarr or kept and reported, the rest lose their files and rows. An album whose batch is
- * still downloading is left alone. Each failure carries the listeners whose records name the album.
+ * Whether any Discover record names the album: a suggestion in any status, or a Discover download job (by release-group
+ * id, or artist and title).
  */
-export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; failures: OrphanFailure[] }> {
+async function discoverRecordNames(ref: AlbumRef): Promise<boolean> {
+    const [suggestions, jobs] = await Promise.all([
+        prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, albumTitle: true } }),
+        prisma.downloadJob.findMany({
+            where: { discoveryBatchId: { not: null } },
+            select: { targetMbid: true, subject: true },
+        }),
+    ]);
+    const wanted = `${ref.artistName} ${ref.albumTitle}`;
+    return (
+        suggestions.some((s) => s.rgMbid === ref.rgMbid || namesRecord(s, ref)) ||
+        jobs.some((j) => j.targetMbid === ref.rgMbid || sameName(j.subject, wanted))
+    );
+}
+
+/** Files an album no Discover record names back in the library, as the listener's. */
+async function returnToLibrary(albumId: string): Promise<boolean> {
+    const album = await prisma.$transaction(async (tx) => {
+        const moved = await tx.album.updateMany({ where: { id: albumId, location: "DISCOVER" }, data: { location: "LIBRARY" } });
+        if (moved.count === 0) return null;
+        const row = await tx.album.findUniqueOrThrow({ where: { id: albumId }, select: { artistId: true, rgMbid: true } });
+        await tx.ownedAlbum.createMany({ data: [{ artistId: row.artistId, rgMbid: row.rgMbid, source: "native_scan" }], skipDuplicates: true });
+        return row;
+    });
+    // The album is back either way; a recount that fails is caught up by the next scan's.
+    if (album) {
+        await updateArtistCounts(album.artistId).catch((error) =>
+            logger.warn("[DiscoverClear] Artist counts not updated after returning an album to the library:", error),
+        );
+    }
+    return album !== null;
+}
+
+/**
+ * DISCOVER albums no suggestion covers, left by failed downloads or a failed playlist build, cleared the same way as any
+ * other: Lidarr's are deleted by Lidarr or kept and reported, the rest lose their files and rows. One that no Discover
+ * record names at all was never shown to be Discover's, so it goes back to the library instead; nothing of it is
+ * deleted. An album whose batch is still downloading is left alone. Each failure carries the listeners whose records
+ * name the album.
+ */
+export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; returned: number; failures: OrphanFailure[] }> {
     const albums = await prisma.album.findMany({
         where: { location: "DISCOVER" },
         select: { id: true, rgMbid: true, title: true, artist: { select: { name: true } } },
@@ -431,16 +495,22 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
     };
 
     let cleared = 0;
+    let returned = 0;
     const failures: OrphanFailure[] = [];
     for (const album of albums) {
         if (running.ids.has(album.rgMbid) || running.names.has(lookupKey(album.artist.name, album.title))) continue;
         if (await discoverAlbumIsCovered(album, suggested)) continue;
         const ref = { rgMbid: album.rgMbid, artistName: album.artist.name, albumTitle: album.title };
+        if (!(await discoverRecordNames(ref))) {
+            if (await returnToLibrary(album.id)) returned++;
+            continue;
+        }
         const result = await clearOrReport({ ...ref, lidarrAlbumId: null, suggestionId: null });
         if (result.cleared) cleared++;
         else failures.push({ artistName: ref.artistName, albumTitle: ref.albumTitle, reason: result.reason, userIds: await listenersNaming(ref) });
     }
-    return { cleared, failures };
+    if (returned > 0) logger.info(`[DiscoverClear] ${returned} album(s) filed as Discover with no Discover record went back to the library`);
+    return { cleared, returned, failures };
 }
 
 const orphanFailureGroupKey = "discover-clear-orphans";

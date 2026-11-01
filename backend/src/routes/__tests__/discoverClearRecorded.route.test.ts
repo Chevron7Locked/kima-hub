@@ -73,6 +73,7 @@ async function cleanup() {
     await prisma.discoveryTrack.deleteMany({ where: { trackId: { startsWith: P } } });
     await prisma.discoveryAlbum.deleteMany({ where: { userId: USER } });
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
@@ -204,10 +205,34 @@ describe("Lidarr has no album for a release-group id (recorded empty lookup)", (
         expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(1);
         expect(fs.existsSync(orphan.file)).toBe(true);
 
+        // Discover's own finished download of it (not from Soulseek, so Lidarr is asked) is the record that makes the album Discover's to clear (as
+        // createDiscoveryDownloadJob writes it); an album no Discover record names goes back to the library instead.
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: `${ARTIST} - Moon Music`, type: "album", status: "completed", targetMbid: NO_SUCH_RG, discoveryBatchId: batch.id,
+                metadata: { downloadType: "discovery", artistName: ARTIST, albumTitle: "Moon Music", albumMbid: NO_SUCH_RG },
+            },
+        });
+
         const res = await request(app()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toHaveLength(1);
-        // No record names the album, so it is reported to the admins (this listener is one).
-        const admin = await prisma.notification.findUnique({ where: { userId_groupKey: { userId: USER, groupKey: "discover-clear-orphans" } } });
-        expect(admin!.message).toContain("Moon Music");
+        // The listener's own Discover record names the album, so it is reported to that listener.
+        expect((await trayRow())!.message).toContain("Moon Music");
+    });
+});
+
+describe("a DISCOVER album no Discover record names", () => {
+    it("goes back to the library with its files; nothing is deleted and Lidarr is not asked to delete", async () => {
+        await startReplay("album-lookup-none", 3);
+        const orphan = await addAlbum("norecord", "Moon Music", NO_SUCH_RG);
+
+        const res = await request(app()).delete("/discover/clear");
+
+        expect(res.body.lidarrFailed).toEqual([]);
+        expect((await prisma.album.findUnique({ where: { id: orphan.albumId } }))?.location).toBe("LIBRARY");
+        expect(await prisma.track.count({ where: { id: orphan.trackId } })).toBe(1);
+        expect(fs.existsSync(orphan.file)).toBe(true);
+        expect(lidarr!.asked.filter((a) => a.method === "DELETE")).toEqual([]);
     });
 });
