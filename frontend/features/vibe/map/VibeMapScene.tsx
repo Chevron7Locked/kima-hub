@@ -19,6 +19,7 @@ import { buildQueueChart, CHART_RINGED, createChartMaterial, tickChart, type Cha
 import { buildSkyField } from "./skyField";
 import { computeMoodAnchors } from "./moodAnchors";
 import { ScreenPicker } from "./screenPick";
+import { releaseSharedGeometry } from "./releaseSharedGeometry";
 import { createRingMaterial, fitRing, ringRadius, screenOf, type RingStar } from "./ringMark";
 
 export interface VibeMapSceneProps {
@@ -468,6 +469,8 @@ function Scene(props: VibeMapSceneProps & { apiRef: MutableRefObject<SceneApi | 
         };
         return () => { apiRef.current = null; };
     }, [apiRef, picker, camera, size.width, size.height, tracks, clock]);
+
+    useEffect(() => releaseSharedGeometry, []);
 
     // ── overlays ──
     const starU = trackStars.uniforms;
