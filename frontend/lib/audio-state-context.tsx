@@ -142,6 +142,35 @@ function isGone(err: unknown): boolean {
     return (err as { status?: number } | null)?.status === 404;
 }
 
+/**
+ * What a saved playback state says, as a string to compare: the item, the queue (cut to the server's limit, as a save
+ * cuts it, and compared whole so an edited title still saves), the position in it and shuffle. Equal keys mean saving
+ * would change nothing.
+ */
+function playbackKey(
+    state: {
+        playbackType?: string | null;
+        trackId?: string | null;
+        audiobookId?: string | null;
+        podcastId?: string | null;
+        queue?: Array<{ id: string }> | null;
+        currentIndex?: number | null;
+        isShuffle?: boolean | null;
+    },
+    queueLimit: number,
+): string {
+    const queue = (state.queue ?? []).slice(0, queueLimit);
+    return JSON.stringify([
+        state.playbackType ?? null,
+        state.trackId ?? null,
+        state.audiobookId ?? null,
+        state.podcastId ?? null,
+        queue,
+        Math.min(state.currentIndex ?? 0, (queue.length || 1) - 1),
+        !!state.isShuffle,
+    ]);
+}
+
 /** Forget a stored item that the server no longer has. */
 function forgetStorage(key: string): void {
     if (typeof window === "undefined") return;
@@ -209,6 +238,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         () => readStorage(STORAGE_KEYS.IS_MUTED) === "true"
     );
     const [lastServerSync, setLastServerSync] = useState<Date | null>(null);
+    // What the server is known to hold, as a playbackKey. Restoring or adopting the server's state is not a change,
+    // so the save effect skips a state equal to it instead of writing it straight back.
+    const serverKnownRef = useRef<string | null>(null);
+    // Saves wait until the page-load restore has finished, so none goes out half-restored (the song still on its way).
+    const [restoreSettled, setRestoreSettled] = useState(false);
 
     // Refs for polling effect to avoid restarting the interval on every state change
     const lastServerSyncRef = useRef(lastServerSync);
@@ -316,11 +350,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             .then((serverState) => {
                 if (!serverState) return;
 
+                serverKnownRef.current = playbackKey(serverState, queueLimitRef.current);
+                if (serverState.updatedAt) setLastServerSync(new Date(serverState.updatedAt));
+
+                let restoringMedia: Promise<unknown> = Promise.resolve();
                 if (
                     serverState.playbackType === "track" &&
                     serverState.trackId
                 ) {
-                    api.getTrack(serverState.trackId)
+                    restoringMedia = api.getTrack(serverState.trackId)
                         .then((track) => {
                             setCurrentTrack(track);
                             setPlaybackType("track");
@@ -329,6 +367,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         })
                         .catch((err) => {
                             if (!isGone(err)) return;
+                            serverKnownRef.current = null;
                             api.clearPlaybackState().catch(() => {});
                             clearRestoredPlayback();
                         });
@@ -336,7 +375,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.playbackType === "audiobook" &&
                     serverState.audiobookId
                 ) {
-                    api.getAudiobook(serverState.audiobookId)
+                    restoringMedia = api.getAudiobook(serverState.audiobookId)
                         .then((audiobook) => {
                             setCurrentAudiobook(audiobook);
                             setPlaybackType("audiobook");
@@ -345,6 +384,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         })
                         .catch((err) => {
                             if (!isGone(err)) return;
+                            serverKnownRef.current = null;
                             api.clearPlaybackState().catch(() => {});
                             clearRestoredPlayback();
                         });
@@ -354,7 +394,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 ) {
                     const [podcastId, episodeId] =
                         serverState.podcastId.split(":");
-                    api.getPodcast(podcastId)
+                    restoringMedia = api.getPodcast(podcastId)
                         .then((podcast: ShowWithEpisodes) => {
                             const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                             if (episode) {
@@ -367,6 +407,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         .catch((err) => {
                             // A podcast unsubscribed on another device no longer resolves.
                             if (!isGone(err)) return;
+                            serverKnownRef.current = null;
                             api.clearPlaybackState().catch(() => {});
                             clearRestoredPlayback();
                         });
@@ -387,10 +428,12 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 }
                 if (serverState.isShuffle !== undefined)
                     setIsShuffle(serverState.isShuffle);
+                return restoringMedia;
             })
             .catch(() => {
                 // No server state available - this is expected on first load
-            });
+            })
+            .finally(() => setRestoreSettled(true));
     }, []);
 
     // Save state to localStorage whenever it changes (debounced)
@@ -450,23 +493,26 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     ]);
 
     useEffect(() => {
-        if (!playbackType) return;
+        if (!playbackType || !restoreSettled) return;
 
         const saveToServer = async () => {
+            // Sliced to the server's queue limit, fetched once and remembered.
+            const limitedQueue = queue.slice(0, queueLimitRef.current);
+            const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
+            const state = {
+                playbackType,
+                trackId: currentTrack?.id,
+                audiobookId: currentAudiobook?.id,
+                podcastId: currentPodcast?.id,
+                queue: limitedQueue,
+                currentIndex: adjustedIndex,
+                isShuffle,
+            };
+            const key = playbackKey(state, queueLimitRef.current);
+            if (key === serverKnownRef.current) return;
             try {
-                // Sliced to the server's queue limit, fetched once and remembered.
-                const limitedQueue = queue.slice(0, queueLimitRef.current);
-                const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
-
-                const result = await api.savePlaybackState({
-                    playbackType,
-                    trackId: currentTrack?.id,
-                    audiobookId: currentAudiobook?.id,
-                    podcastId: currentPodcast?.id,
-                    queue: limitedQueue,
-                    currentIndex: adjustedIndex,
-                    isShuffle,
-                });
+                const result = await api.savePlaybackState(state);
+                serverKnownRef.current = key;
                 setLastServerSync(new Date(result.updatedAt));
             } catch (err: unknown) {
                 if (err instanceof Error && err.message !== "Not authenticated") {
@@ -481,6 +527,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const timeoutId = setTimeout(saveToServer, 1000);
         return () => clearTimeout(timeoutId);
     }, [
+        restoreSettled,
         playbackType,
         currentTrack?.id,
         currentAudiobook?.id,
@@ -552,7 +599,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             }
                         } catch (err) {
                             // The server remembers a track that is gone; what plays here stays.
-                            if (mounted && isGone(err)) await api.clearPlaybackState().catch(() => {});
+                            if (mounted && isGone(err)) {
+                                serverKnownRef.current = null;
+                                await api.clearPlaybackState().catch(() => {});
+                            }
                             return;
                         }
                     } else if (
@@ -600,6 +650,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         setIsShuffle(serverState.isShuffle || false);
                     }
 
+                    serverKnownRef.current = playbackKey(serverState, queueLimitRef.current);
                     setLastServerSync(serverUpdatedAt);
                 }
             } catch (err: unknown) {
