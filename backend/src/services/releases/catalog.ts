@@ -292,7 +292,7 @@ export const RELEASES: Release[] = [
                     "- Playlists stay current on all your open devices, and quick edits no longer undo each other on screen\n" +
                     "- Song previews play again, and artist photos and related artists come from the right artist\n" +
                     "- Untagged albums are identified from their songs' audio fingerprints, so they get real covers and MusicBrainz ids\n" +
-                    "- An album is filed under the artist its songs name together: one song tagged with a guest no longer splits off under that guest, and a tag naming two artists is no longer glued into one made-up artist\n" +
+                    "- An album is filed under the artist its songs name together: one song tagged with a guest no longer splits off under that guest, and a tag naming two artists is no longer glued into one made-up artist, and a credit like Michael Jackson & The Jackson 5 goes under Michael Jackson when he is already in your library and MusicBrainz is sure the pair is not an artist of its own\n" +
                     "- Artist and album pages no longer show a stray 0, and an artist's top songs list each title once\n" +
                     "- Favorites, discovery and Deep Cuts count only your own plays; recently added and recently listened leave out Various Artists and Unknown Artist\n" +
                     "- Mixes offer only songs that can play, and night mixes keep their two-songs-per-artist cap\n" +
