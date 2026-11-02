@@ -44,7 +44,7 @@ When you save, Lidarr sends a test event. If it cannot reach Kima, admins get a 
 Open **Settings > Sources > Soulseek** and choose a connection mode:
 
 - **Built-in (P2P):** Kima connects to the network itself. Enter your Soulseek username and password; you can create an account at slsknet.org.
-- **slskd (external):** Kima uses your own [slskd](https://github.com/slskd/slskd) server. Enter its URL, such as `http://slskd:5030`, and its API key if you set one. Your Soulseek credentials stay in slskd.
+- **slskd (external):** Kima uses your own [slskd](https://github.com/slskd/slskd) server. Enter its URL, such as `http://slskd:5030`, and its API key if you set one. Your Soulseek credentials stay in slskd. Kima finds slskd's finished downloads in **slskd download folder**: the folder you mounted from slskd into Kima's container, `/soulseek-downloads` when left empty.
 
 Soulseek results appear next to your library results when you search. Downloaded tracks are saved in your music folder under `Singles/<artist>/<album>/`, so the normal library scan picks them up.
 

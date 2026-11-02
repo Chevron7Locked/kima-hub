@@ -78,13 +78,14 @@ export function TrackRow({
                 >
                     <span
                         className={cn(
-                            "text-sm group-hover:hidden group-focus-visible/play:hidden",
+                            // Only a screen that can hover swaps the number for a play icon; a tap would leave it stuck.
+                            "text-sm can-hover:group-hover:hidden group-focus-visible/play:hidden",
                             current ? "text-brand" : "text-[var(--text-secondary)]",
                         )}
                     >
                         {showsPause ? <Music className="w-4 h-4 text-brand animate-pulse" /> : index + 1}
                     </span>
-                    <Play className="w-4 h-4 text-white hidden group-hover:block group-focus-visible/play:block" />
+                    <Play className="w-4 h-4 text-white hidden can-hover:group-hover:block group-focus-visible/play:block" />
                 </button>
             </div>
 

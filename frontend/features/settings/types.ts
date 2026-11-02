@@ -34,6 +34,8 @@ export interface SystemSettings {
     soulseekMode: "p2p" | "slskd";
     slskdUrl: string | null;
     slskdApiKey: string | null;
+    /** slskd's download folder as Kima's container sees it; empty uses SLSKD_DOWNLOADS or /soulseek-downloads. */
+    soulseekDownloadPath?: string | null;
     // Storage
     musicPath: string;
     /** The server's MUSIC_PATH fixes the music folder, so it cannot be changed here. */

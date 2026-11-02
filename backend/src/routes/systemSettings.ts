@@ -196,13 +196,14 @@ router.post("/", async (req, res) => {
     if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
 
     // Reconnect Soulseek only when a connection setting actually changed: the P2P
-    // credentials or the slskd backend (mode, URL, API key).
+    // credentials or the slskd backend (mode, URL, API key, download folder).
     if (
       data.soulseekUsername !== undefined ||
       data.soulseekPassword !== undefined ||
       data.soulseekMode !== undefined ||
       data.slskdUrl !== undefined ||
-      data.slskdApiKey !== undefined
+      data.slskdApiKey !== undefined ||
+      data.soulseekDownloadPath !== undefined
     ) {
       try {
         const oldUsername = existingSettings?.soulseekUsername || "";
@@ -215,6 +216,8 @@ router.post("/", async (req, res) => {
         const oldSlskdUrl = existingSettings?.slskdUrl || "";
         const newSlskdUrl = (data.slskdUrl !== undefined ? data.slskdUrl : oldSlskdUrl) || "";
         const oldSlskdApiKey = decryptOrNull("slskdApiKey", existingSettings?.slskdApiKey) ?? "";
+        const oldDownloads = existingSettings?.soulseekDownloadPath || "";
+        const newDownloads = (data.soulseekDownloadPath !== undefined ? data.soulseekDownloadPath : oldDownloads) || "";
         const newSlskdApiKey = (data.slskdApiKey !== undefined ? data.slskdApiKey : oldSlskdApiKey) || "";
 
         const changed =
@@ -222,7 +225,8 @@ router.post("/", async (req, res) => {
           newPassword !== oldPassword ||
           newMode !== oldMode ||
           newSlskdUrl !== oldSlskdUrl ||
-          newSlskdApiKey !== oldSlskdApiKey;
+          newSlskdApiKey !== oldSlskdApiKey ||
+          newDownloads !== oldDownloads;
 
         if (changed) {
           const { soulseekService } = await import("../services/soulseek");

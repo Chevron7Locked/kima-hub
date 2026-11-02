@@ -308,6 +308,8 @@ export const RELEASES: Release[] = [
                     "- The collection's Refine panel fits the screen at every size\n" +
                     "- Settings is five pages: you, and for admins library, sources, server and people; re-filing albums is a button that stays\n" +
                     "- Shuffle All draws from your whole library, not the same first few hundred songs\n" +
+                    "- With an external slskd, its download folder can be set in Settings, so finished downloads are found\n" +
+                    "- On touch screens, a song preview playing shows on its row, and its number stops it\n" +
                     "- Touch screens: controls that appear on hover now show on tap too\n" +
                     "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
                     "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library\n" +

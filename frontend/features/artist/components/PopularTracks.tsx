@@ -69,8 +69,9 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                             onTouchEnd={onTouchEnd}
                             columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(80px,1fr)_80px]"
                             index={index}
-                            current={isPlaying}
-                            playing={isPlaying}
+                            // A preview playing shows like a library song playing (#228): touch screens have no hover to show it.
+                            current={isPlaying || isPreviewPlaying}
+                            playing={isPlaying || isPreviewPlaying}
                             onPlay={() => activate(track)}
                             title={shownTitle(track)}
                             subtitle={artist.name}

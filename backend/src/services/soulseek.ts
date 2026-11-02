@@ -256,7 +256,7 @@ class SoulseekService {
                 enabled: process.env.SOULSEEK_ENABLED === 'true' || !!slskdUrl,
                 username: process.env.SOULSEEK_USERNAME,
                 password: process.env.SOULSEEK_PASSWORD,
-                downloadPath: process.env.SOULSEEK_DOWNLOAD_PATH,
+                slskdDownloads: null,
             };
         }
 
@@ -282,7 +282,8 @@ class SoulseekService {
             enabled: settings.soulseekEnabled ?? (isSlskd ? true : !!(username && password)),
             username,
             password,
-            downloadPath: settings.soulseekDownloadPath || process.env.SOULSEEK_DOWNLOAD_PATH,
+            // slskd's download folder as this container sees it (Settings), for finding finished downloads.
+            slskdDownloads: settings.soulseekDownloadPath?.trim() || null,
         };
     }
 
@@ -297,7 +298,12 @@ class SoulseekService {
 
         if (isSlskd) {
             // slskd carries its own Soulseek account — Kima needs no credentials.
-            configureSlskd({ url: settings.slskdUrl, apiKey: settings.slskdApiKey });
+            // A cleared folder goes back to the default rather than keeping the last one set.
+            configureSlskd({
+                url: settings.slskdUrl,
+                apiKey: settings.slskdApiKey,
+                downloads: settings.slskdDownloads || process.env.SLSKD_DOWNLOADS || "/soulseek-downloads",
+            });
             sessionLog("SOULSEEK", `Using slskd backend at ${settings.slskdUrl}...`);
         } else {
             if (!settings.username || !settings.password) {

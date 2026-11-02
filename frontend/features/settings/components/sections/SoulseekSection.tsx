@@ -115,6 +115,18 @@ export function SoulseekSection({ settings, onUpdate, onTest, isTesting }: Souls
                             className="w-64"
                         />
                     </SettingsRow>
+
+                    <SettingsRow
+                        label="slskd download folder"
+                        description="Where slskd's finished downloads appear inside Kima's container: the folder you mounted from slskd. Leave empty for /soulseek-downloads."
+                    >
+                        <SettingsInput
+                            value={settings.soulseekDownloadPath || ""}
+                            onChange={(v) => onUpdate({ soulseekDownloadPath: v })}
+                            placeholder="/soulseek-downloads"
+                            className="w-64"
+                        />
+                    </SettingsRow>
                 </>
             )}
 
