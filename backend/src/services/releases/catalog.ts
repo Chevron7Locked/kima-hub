@@ -131,8 +131,8 @@ export const RELEASES: Release[] = [
                     "fill in as songs are done. Everything else stays as it is: your music, playlists, plays, likes, edits, " +
                     "identification and artists.\n\n" +
                     "How long it takes depends on your library and hardware: just under two hours for 9,176 songs with a " +
-                    "GPU, and longer without one. Settings, under Library Enrichment, shows the progress.",
-                links: [{ label: "See progress in Settings", href: "/settings#cache" }],
+                    "GPU, and longer without one. Settings, under Library, shows the progress.",
+                links: [{ label: "See progress in Settings", href: "/settings/library" }],
                 olderLibraryOnly: true,
             },
             {
@@ -151,7 +151,7 @@ export const RELEASES: Release[] = [
                     "stay where they are, and nothing is merged into them. Plays, likes and playlists stay with their " +
                     "songs. It takes a few minutes on a " +
                     "large library, and the result shows in your notifications. You can also run it any time from " +
-                    "Settings, under Library Enrichment.",
+                    "Settings, under Library.",
                 cta: "Re-file albums",
                 run: "refileAlbums",
                 confirmTitle: "Re-file albums by their tags?",
@@ -175,7 +175,7 @@ export const RELEASES: Release[] = [
                     "A song counts as a mood when it scores well above what is usual for your library, so \"calm\" means " +
                     "calm for your music. Mood tags, mood mixes, mood stations and the vibe map's mood view all use the " +
                     "same scores and the same line.\n\n" +
-                    "Moods are their own step in Library Enrichment, after sound vectors, and you can re-run them there.",
+                    "Moods are their own step in Settings, under Library, after sound vectors, and you can re-run them there.",
                 links: [{ label: "Open radio", href: "/radio" }],
             },
             {
@@ -254,7 +254,7 @@ export const RELEASES: Release[] = [
                     "across the whole song.\n\n" +
                     "Songs analysed by an earlier version are analysed again in the background after the update, so every song " +
                     "gets the new reading.",
-                links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
+                links: [{ label: "Open library settings", href: "/settings/library" }],
             },
             {
                 kind: "note",
@@ -265,7 +265,7 @@ export const RELEASES: Release[] = [
                     "Settings let you re-run enrichment from whichever step you choose: identification, artists, audio " +
                     "analysis, sound vectors, moods, or similarity and the map. Each clears only itself and what depends on " +
                     "it, and every re-run lays out a fresh vibe map. The full wipe is still there too.",
-                links: [{ label: "Open Library Enrichment settings", href: "/settings#cache" }],
+                links: [{ label: "Open library settings", href: "/settings/library" }],
             },
             {
                 kind: "note",
@@ -285,7 +285,7 @@ export const RELEASES: Release[] = [
                 body:
                     "- Security: Next.js 16.4.1 closes two critical holes that let anyone, signed in or not, run code on the server (image optimisation and the cache); Node 24.22.1 closes the Brotli decompression flaw known as Node2Shell; DOMPurify, body-parser, multer, follow-redirects, undici and zod are updated; three high-severity flaws in the CLAP stack's model loading are closed\n" +
                     "- Feeds and links that redirect are checked at every step, so none can point Kima at your own network\n" +
-                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Download Preferences; a member's playlist import no longer downloads either\n" +
+                    "- Only operators can start downloads unless they turn on Member Downloads in Settings → Sources → Downloads; a member's playlist import no longer downloads either\n" +
                     "- Signing out clears what the app remembered, so the next person on that screen sees only their own\n" +
                     "- Search only finds the shows you follow; it used to list shows other people follow\n" +
                     "- Playlists can play in reverse order: a toggle beside shuffle, remembered per playlist\n" +
@@ -306,9 +306,10 @@ export const RELEASES: Release[] = [
                     "- Every release's note stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n" +
                     "- When a podcast episode ends, the show's next episode plays; an episode you've heard 95% of counts as finished, and a finished one stays finished\n" +
                     "- The collection's Refine panel fits the screen at every size\n" +
+                    "- Settings is five pages: you, and for admins library, sources, server and people; re-filing albums is a button that stays\n" +
                     "- Touch screens: controls that appear on hover now show on tap too\n" +
                     "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
-                    "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library Enrichment\n" +
+                    "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library\n" +
                     "- Subsonic apps that search with search2 or an empty search3 get results again\n" +
                     "- An ordered play queue for iOS that doesn't drag the full artist payload",
             },

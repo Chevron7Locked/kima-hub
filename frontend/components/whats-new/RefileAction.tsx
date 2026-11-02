@@ -9,8 +9,9 @@ import type { ReleaseItem } from "./types";
 type RefileItem = Extract<ReleaseItem, { kind: "action" }>;
 
 /**
- * The re-file item's control, wherever a release is read: it asks first, queues the re-file (the server runs one at a
- * time, after any scan), then says where the result shows. When the server already reports it done, it says so instead. The same as Settings' "Re-file Albums by Tags".
+ * The re-file item's control, wherever a release is read: a button that is always there, since a re-file can be run
+ * again any time. It asks first, queues the re-file (the server runs one at a time, after any scan), then says where
+ * the result shows. The same as the re-file row in Settings, under Library.
  */
 export function RefileAction({ item, done, onDone }: { item: RefileItem; done: boolean; onDone: () => void }) {
     const [confirming, setConfirming] = useState(false);
@@ -28,7 +29,7 @@ export function RefileAction({ item, done, onDone }: { item: RefileItem; done: b
             setStarted(true);
             onDone();
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Couldn't start it. Try again, or use Settings, under Library Enrichment.");
+            setError(err instanceof Error ? err.message : "Couldn't start it. Try again, or use Settings, under Library.");
         } finally {
             setStarting(false);
         }
@@ -36,16 +37,13 @@ export function RefileAction({ item, done, onDone }: { item: RefileItem; done: b
 
     return (
         <div className="flex flex-col gap-2">
-            {done ? (
-                <p className="text-sm text-success">
-                    {started
-                        ? "Re-filing albums. The result will show in your notifications."
-                        : "Albums re-filed. You can run it again from Settings, under Library Enrichment."}
-                </p>
+            <Button variant="primary" onClick={() => setConfirming(true)} isLoading={starting} className="self-start">
+                {starting ? "Starting..." : item.cta}
+            </Button>
+            {started ? (
+                <p className="text-sm text-success">Re-filing albums. The result will show in your notifications.</p>
             ) : (
-                <Button variant="primary" onClick={() => setConfirming(true)} isLoading={starting} className="self-start">
-                    {starting ? "Starting..." : item.cta}
-                </Button>
+                done && <p className="text-sm text-[var(--text-secondary)]">Albums were re-filed before. Running it again is safe.</p>
             )}
             {error && <p className="text-sm text-danger-light">{error}</p>}
             {confirming && (

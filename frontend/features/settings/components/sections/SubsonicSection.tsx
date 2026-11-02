@@ -89,7 +89,7 @@ export function SubsonicSection() {
     };
 
     return (
-        <SettingsSection id="subsonic" title="Native Apps">
+        <SettingsSection id="subsonic" title="Apps">
             <SettingsRow
                 label="Kima app"
                 description="Sign the Kima phone app in with a QR code or a six-digit code, and see the devices already linked"
@@ -100,7 +100,7 @@ export function SubsonicSection() {
             </SettingsRow>
             <SettingsRow
                 label="Server URL"
-                description="Enter this in your Subsonic-compatible client. Admins can set a persistent URL in Storage settings."
+                description="Enter this in your Subsonic-compatible client. Admins can set a persistent URL in Settings, under Server."
             >
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-white bg-white/5 border border-white/10 px-3 py-2 rounded-lg tabular-nums break-all flex-1 min-w-0">

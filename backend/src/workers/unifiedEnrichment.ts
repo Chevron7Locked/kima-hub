@@ -166,7 +166,7 @@ const STAGE_CLAIM_LEASE_MS = 15 * 60 * 1000;
  * poison file cannot loop forever. */
 const STAGE_REDELIVERY_CAP = 3;
 
-/** An admin chose to run both heavy models side by side, accepting the load (Settings, Library Enrichment). */
+/** An admin chose to run both heavy models side by side, accepting the load (Settings, under Library). */
 async function bothAtOnce(): Promise<boolean> {
     return (await getSystemSettings())?.analysisAndVectorsTogether === true;
 }
@@ -1560,7 +1560,7 @@ export async function syncEnrichmentFailureAlert(): Promise<void> {
         type: "error",
         title: "Enrichment failures",
         message: `${count(failureCounts.total, "item", "items")} could not be enriched: ${parts.join(", ")}.`,
-        metadata: { href: "/settings#enrichment-failures" },
+        metadata: { href: "/settings/library#enrichment-failures" },
         groupKey: ENRICHMENT_FAILURES_KEY,
     });
 }

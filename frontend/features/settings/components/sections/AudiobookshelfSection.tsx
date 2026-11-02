@@ -17,7 +17,7 @@ export function AudiobookshelfSection({ settings, onUpdate, onTest, isTesting }:
     return (
         <SettingsSection
             id="audiobookshelf"
-            title="Media Servers"
+            title="Audiobookshelf"
             description="Connect to external media servers for audiobooks and podcasts"
         >
             <SettingsRow

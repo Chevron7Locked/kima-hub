@@ -4,22 +4,27 @@ Most of Kima is configured in the web app, under **Settings**. Environment varia
 
 ## Settings in the web app
 
-| Section | What it holds | Who sees it |
+Settings has five pages. Everyone sees **You**; the other four are for administrators.
+
+| Page | Section | What it holds |
 | --- | --- | --- |
-| Account | Password, two-factor authentication | Everyone |
-| Native Apps | Subsonic-client tokens and the server address to give a client | Everyone |
-| Playback | Streaming quality, track title format, queue limit | Everyone |
-| Scrobbling | A ListenBrainz user token, to record your plays there | Everyone |
-| Download Preferences | Primary download source, Soulseek concurrent downloads, and Member Downloads (off by default: only admins can start downloads unless it is on) | Admins |
-| Podcasts | The country whose Apple Podcasts charts drive podcast discovery (default United States) | Admins |
-| Download Services | Lidarr | Admins |
-| Media Servers | Audiobookshelf | Admins |
-| P2P Networks | Soulseek | Admins |
-| Artwork | Fanart.tv and AcoustID keys | Admins |
-| Storage | The music library path, the server address, and Check for updates (a daily look at GitHub for a newer release) | Admins |
-| Library Enrichment | The six enrichment steps and the fingerprints, worker counts, caches, the NVIDIA GPU switches (Linux on x86-64 only), re-run from a chosen step, wipe and re-run, re-file albums by tags | Admins |
-| Corrupt Tracks | Files that could not be read | Admins |
-| Users | Create and delete accounts, set roles | Admins |
+| You | Account | Password, two-factor authentication |
+| You | Apps | Linking the phone app, Subsonic-client tokens and the server address to give a client |
+| You | Playback | Streaming quality, track title format, and (admins) the queue limit |
+| You | Scrobbling | A ListenBrainz user token, to record your plays there |
+| Library | Status | The six enrichment steps and the fingerprints, with what failed |
+| Library | Actions | Sync new, retry what didn't work, re-run from a chosen step, re-file albums by tags, clear caches, clean up stale jobs |
+| Library | Corrupt tracks | Files that could not be read |
+| Library | Performance | Transcode cache size, auto sync, metadata fetch speed, worker counts, and the NVIDIA GPU switches (Linux on x86-64 only) |
+| Library | Start over | Start over on everything, and wipe and re-run |
+| Sources | Downloads | Primary download source, Soulseek concurrent downloads, and Member Downloads (off by default: only admins can start downloads unless it is on) |
+| Sources | Lidarr | Connection and profiles |
+| Sources | Soulseek | Connection |
+| Sources | Audiobookshelf | Connection |
+| Sources | Podcasts | The country whose Apple Podcasts charts drive podcast discovery (default United States) |
+| Server | Address and storage | The server address, the music library path, and Check for updates (a daily look at GitHub for a newer release) |
+| Server | Artwork | Fanart.tv and AcoustID keys |
+| People | Users | Create and delete accounts, set roles, and whether people can sign up |
 
 Streaming quality is Original (lossless), 320 kbps, 192 kbps or 128 kbps. Anything below Original is transcoded on the fly, and the transcoded files are cached.
 
@@ -73,7 +78,7 @@ With the split stack (`docker-compose.yml`), set both in a `.env` file next to t
 
 ### Audio analysis (split stack)
 
-These are read by `docker-compose.yml`. In the all-in-one image the analyzers use the image's own settings, and you change worker counts in Settings under Library Enrichment.
+These are read by `docker-compose.yml`. In the all-in-one image the analyzers use the image's own settings, and you change worker counts in Settings, under Library > Performance.
 
 | Variable | Default | What it does |
 | --- | --- | --- |

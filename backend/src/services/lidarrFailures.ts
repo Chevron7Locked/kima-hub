@@ -163,7 +163,7 @@ export async function rejectSingleTrackPost(downloadId: string, releaseTitle?: s
     return true;
 }
 
-/** Whether Kima removes junk downloads itself (Settings > Lidarr), or leaves them to the user's own setup. */
+/** Whether Kima removes junk downloads itself (Settings, under Sources > Lidarr), or leaves them to the user's own setup. */
 async function removesJunk(): Promise<boolean> {
     return (await getSystemSettings())?.lidarrRemoveJunk ?? true;
 }

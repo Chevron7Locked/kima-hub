@@ -6,6 +6,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { SettingsLayout } from "@/features/settings/components/ui/SettingsLayout";
 import { createRoot, type Root } from "react-dom/client";
+import type { SettingsPage } from "@/features/settings/pages";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,6 +17,7 @@ const items = [
     { id: "corrupt", label: "Corrupt tracks" },
     { id: "users", label: "Users" },
 ];
+const page: SettingsPage = { slug: "you", label: "You", href: "/settings", description: "", adminOnly: false, sections: items };
 
 // Section tops relative to the scroll container's top (0); 150 px down counts as "being read".
 let tops: Record<string, number>;
@@ -81,7 +85,7 @@ describe("settings menu", () => {
         root = createRoot(inner);
         act(() =>
             root.render(
-                <SettingsLayout sidebarItems={items} isAdmin={false}>
+                <SettingsLayout page={page} isAdmin={false}>
                     {items.map((i) => (
                         <section key={i.id} id={i.id} />
                     ))}
@@ -139,7 +143,7 @@ describe("settings menu on a page too short to scroll", () => {
         const root = createRoot(inner);
         act(() =>
             root.render(
-                <SettingsLayout sidebarItems={items} isAdmin={false}>
+                <SettingsLayout page={page} isAdmin={false}>
                     {items.map((i) => (
                         <section key={i.id} id={i.id} />
                     ))}

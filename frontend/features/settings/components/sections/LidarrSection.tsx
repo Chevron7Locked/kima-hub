@@ -45,7 +45,7 @@ export function LidarrSection({ settings, onUpdate, onTest, isTesting }: LidarrS
     return (
         <SettingsSection
             id="lidarr"
-            title="Download Services"
+            title="Lidarr"
             description="Automate music downloads and library management"
         >
             <SettingsRow

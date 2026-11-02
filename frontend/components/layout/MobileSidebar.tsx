@@ -148,8 +148,8 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
                         <Link
                             href="/settings"
-                            aria-current={pathname === "/settings" ? "page" : undefined}
-                            className={linkClass(pathname === "/settings")}
+                            aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+                            className={linkClass(pathname.startsWith("/settings"))}
                         >
                             <Settings className="w-5 h-5" />
                             <span className="text-sm font-medium">

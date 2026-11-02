@@ -4,7 +4,7 @@ Kima speaks the [OpenSubsonic](https://opensubsonic.netlify.app/) API at `/rest`
 
 ## Connect a client
 
-1. In Kima, open **Settings > Native Apps**.
+1. In Kima, open **Settings > You > Apps**.
 2. Type a name for the client, such as "Phone", and choose **Generate Token**.
 3. Copy the token. It is shown once.
 4. In the client, enter:

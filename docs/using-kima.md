@@ -4,7 +4,7 @@ A tour of the web app once it is running. Setup is in [install.md](install.md).
 
 ## First start
 
-The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: six steps that identify each song, work out its sound, feel, moods and genres, and then build the map. The vibe map and the match data appear when enrichment has finished, which can take a couple of hours for a large library (see [How songs are analysed](../README.md#how-songs-are-analysed)). Progress is shown in **Settings > Library Enrichment** (see [administration.md](administration.md)).
+The first account you create becomes the administrator. When setup finishes, Kima scans your music folder and starts enrichment in the background: six steps that identify each song, work out its sound, feel, moods and genres, and then build the map. The vibe map and the match data appear when enrichment has finished, which can take a couple of hours for a large library (see [How songs are analysed](../README.md#how-songs-are-analysed)). Progress is shown in **Settings > Library** (see [administration.md](administration.md)).
 
 ## Home
 
@@ -70,7 +70,7 @@ The Stats page shows what you replay most, which artists make up most of your li
 
 ## Playback
 
-Streaming quality is set in **Settings > Playback**: Original, 320, 192 or 128 kbps. See [configuration.md](configuration.md).
+Streaming quality is set in **Settings > You > Playback**: Original, 320, 192 or 128 kbps. See [configuration.md](configuration.md).
 
 Keyboard shortcuts in the web app:
 

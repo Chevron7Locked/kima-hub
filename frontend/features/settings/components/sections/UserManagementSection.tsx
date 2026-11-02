@@ -114,7 +114,7 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
         <>
             <SettingsSection
                 id="users"
-                title="User Management"
+                title="Users"
                 description="Manage users who can access this instance"
                 showSeparator={false}
             >

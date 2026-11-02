@@ -26,7 +26,7 @@ Credentials saved in Settings are encrypted with XChaCha20-Poly1305. API keys yo
 
 ## API keys and client tokens
 
-Scripts and other programs can sign in with an API key sent in an `X-API-Key` header. Create and revoke keys in Settings under Native Apps. Subsonic clients can use one as well; see [subsonic.md](subsonic.md).
+Scripts and other programs can sign in with an API key sent in an `X-API-Key` header. Create and revoke keys in Settings, under You > Apps. Subsonic clients can use one as well; see [subsonic.md](subsonic.md).
 
 Audio streams that a player has to open by address use a short-lived ticket that works only for streaming, so the main login token does not have to appear in the address.
 

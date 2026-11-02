@@ -10,11 +10,7 @@ test.describe("Integrations", () => {
         skipIfNoEnv("KIMA_TEST_ABS_URL", testInfo);
         skipIfNoEnv("KIMA_TEST_ABS_API_KEY", testInfo);
 
-        await page.goto("/settings");
-
-        const mediaServersLink = page.locator("text=Media Servers").first();
-        await expect(mediaServersLink).toBeVisible({ timeout: 5000 });
-        await mediaServersLink.click();
+        await page.goto("/settings/sources");
 
         const absContainer = page.locator('#audiobookshelf');
         await expect(absContainer).toBeVisible({ timeout: 5000 });
@@ -52,7 +48,7 @@ test.describe("Integrations", () => {
         skipIfNoEnv("KIMA_TEST_LIDARR_URL", testInfo);
         skipIfNoEnv("KIMA_TEST_LIDARR_API_KEY", testInfo);
 
-        await page.goto("/settings");
+        await page.goto("/settings/sources");
 
         const lidarrContainer = page.locator('#lidarr');
         await expect(lidarrContainer).toBeVisible({ timeout: 5000 });
@@ -82,7 +78,7 @@ test.describe("Integrations", () => {
         skipIfNoEnv("KIMA_TEST_SOULSEEK_USER", testInfo);
         skipIfNoEnv("KIMA_TEST_SOULSEEK_PASS", testInfo);
 
-        await page.goto("/settings");
+        await page.goto("/settings/sources");
 
         const soulseekContainer = page.locator('#soulseek');
         await expect(soulseekContainer).toBeVisible({ timeout: 5000 });

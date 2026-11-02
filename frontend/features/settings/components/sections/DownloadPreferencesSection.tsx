@@ -39,7 +39,7 @@ export function DownloadPreferencesSection({
     return (
         <SettingsSection
             id="download-preferences"
-            title="Download Preferences"
+            title="Downloads"
             description="Configure how music is downloaded for playlists and discovery"
         >
             <SettingsRow

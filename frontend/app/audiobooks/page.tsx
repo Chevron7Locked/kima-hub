@@ -343,7 +343,7 @@ export default function AudiobooksPage() {
                         <Button
                             variant="primary"
                             size="lg"
-                            onClick={() => router.push("/settings#audiobookshelf")}
+                            onClick={() => router.push("/settings/sources#audiobookshelf")}
                             className="flex-1"
                         >
                             Configure Audiobookshelf

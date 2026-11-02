@@ -122,7 +122,7 @@ async function checkLidarrReachesKima(lidarr: AxiosInstance, webhook: unknown, w
             type: "error",
             title: "Lidarr cannot reach Kima",
             message: `Lidarr could not send its test event to ${webhookUrl} (${reason}). Until it can, Kima only notices finished downloads on its two-minute check. Set KIMA_CALLBACK_URL to an address Lidarr can reach, restart Kima and save the Lidarr settings again.`,
-            metadata: { href: "/settings#lidarr" },
+            metadata: { href: "/settings/sources#lidarr" },
             groupKey: UNREACHABLE_KEY,
         });
         return;

@@ -353,6 +353,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
 
         await session.step("vibe embeddings and audio analysis both run on the GPU", async () => {
             await navigateByClick(page, "/settings");
+            await navigateByClick(page, "/settings/library");
             await settle(page, 1500);
             await page.locator("#gpu-onnx-toggle").scrollIntoViewIfNeeded();
             const state = await gpu();

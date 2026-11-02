@@ -59,14 +59,15 @@ describe("the re-file release item", () => {
         const confirm = Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent === "Re-file albums") as HTMLButtonElement;
         await act(async () => confirm.click());
         expect(container.textContent).toContain("Re-filing albums. The result will show in your notifications.");
-        expect(button("Re-file albums")).toBeUndefined();
+        // The button stays: a re-file can be run again any time.
+        expect(button("Re-file albums")).toBeDefined();
     });
 
-    it("says it was done, not that it is running, when the server already reports it done", async () => {
+    it("keeps its button when the server already reports it done, and says it ran before", async () => {
         await act(async () => root.render(<RefileAction item={item} done={true} onDone={() => {}} />));
-        expect(container.textContent).toContain("Albums re-filed. You can run it again from Settings, under Library Enrichment.");
+        expect(container.textContent).toContain("Albums were re-filed before. Running it again is safe.");
         expect(container.textContent).not.toContain("Re-filing albums");
-        expect(button("Re-file albums")).toBeUndefined();
+        expect(button("Re-file albums")).toBeDefined();
     });
 
     it("shows the server's reason when it is refused", async () => {

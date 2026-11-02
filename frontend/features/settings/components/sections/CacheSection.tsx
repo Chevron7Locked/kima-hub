@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { SettingsSection, SettingsRow, SettingsToggle } from "../ui";
 import { SystemSettings } from "../../types";
 import {
@@ -10,7 +10,6 @@ import {
     type GpuRuntimeStatus,
 } from "@/lib/api";
 import { useWorkerSetting } from "../../hooks/useWorkerSetting";
-import { useAuth } from "@/lib/auth-context";
 import { useFeatures } from "@/lib/features-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BothAtOnceSwitch, BOTH_AT_ONCE_DESCRIPTION, BOTH_AT_ONCE_LABEL } from "@/components/enrichment/BothAtOnceSwitch";
@@ -42,6 +41,8 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 interface CacheSectionProps {
     settings: SystemSettings;
     onUpdate: (updates: Partial<SystemSettings>) => void;
+    /** Shown between the actions and the performance settings (the corrupt tracks list). */
+    children?: ReactNode;
 }
 
 function ProgressBar({
@@ -469,9 +470,8 @@ export function gpuStatusText(g: GpuRuntimeStatus, on: boolean, effective: boole
         : "Waiting for the vibe embeddings analyzer, which does the download";
 }
 
-export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
+export function CacheSection({ settings, onUpdate, children }: CacheSectionProps) {
     const { musicCNN, vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const { user: currentUser } = useAuth();
     const [syncing, setSyncing] = useState(false);
     const [clearingCaches, setClearingCaches] = useState(false);
     const [clearCachesResult, setClearCachesResult] = useState<string | null>(null);
@@ -488,7 +488,6 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const [rerunStep, setRerunStep] = useState<EnrichmentRerunStep>("similarity");
     const [rerunConfirmStep, setRerunConfirmStep] = useState<EnrichmentRerunStep | null>(null);
     const [rerunningStep, setRerunningStep] = useState(false);
-    const [maintenanceOpen, setMaintenanceOpen] = useState(false);
     const [cleanupResult, setCleanupResult] = useState<{
         totalCleaned: number;
         cleaned: {
@@ -779,10 +778,11 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
         enrichmentState?.status === "running" ||
         enrichmentState?.status === "paused";
     const totalFailures = failureCounts?.total || 0;
+    const analysisFailures = (enrichmentProgress?.audioAnalysis?.failed ?? 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0);
 
     return (
         <>
-            <SettingsSection id="cache" title="Library Enrichment">
+            <SettingsSection id="cache" title="Status" description="What Kima has worked out about your music so far, step by step.">
                 {isProgressPending ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2">
                         <GradientSpinner size="sm" />
@@ -797,10 +797,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     </div>
                 ) : enrichmentProgress ? (
                     <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-medium text-white">
-                                Enrichment Status
-                            </h3>
+                        <div className="flex items-center justify-end mb-4 empty:hidden">
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
                                     <span className="text-xs tabular-nums text-brand flex items-center gap-1">
@@ -937,101 +934,37 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             ) : null}
                         </div>
 
-                        <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-white/10">
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={handleSyncAndEnrich}
-                                disabled={
-                                    syncing || isEnrichmentActive
-                                }
-                            >
-                                {syncing ? "Syncing..." : "Sync New"}
-                            </Button>
-                            <Button
-                                size="sm"
-                                onClick={() => setConfirmTarget("retryFailedAndBlocked")}
-                                disabled={retryingAll || syncing || isEnrichmentActive}
-                            >
-                                {retryingAll ? "Queuing..." : "Retry what didn't work"}
-                            </Button>
-                            {currentUser?.role === "admin" && (
-                                <Button
-                                    size="sm"
-                                    onClick={() => setConfirmTarget("redecideEverything")}
-                                    disabled={redeciding || syncing || isEnrichmentActive}
-                                >
-                                    {redeciding ? "Queuing..." : "Start over on everything"}
-                                </Button>
-                            )}
-                            {currentUser?.role === "admin" && (
-                                <Button
-                                    size="sm"
-                                    onClick={() => setConfirmTarget("wipeAndRerun")}
-                                    disabled={wiping}
-                                    data-testid="enrichment-wipe"
-                                >
-                                    {wiping ? "Wiping..." : "Wipe and re-run"}
-                                </Button>
-                            )}
-                            {currentUser?.role === "admin" && (
-                                <span className="flex items-center gap-2">
-                                    <label htmlFor="enrichment-rerun-step" className="sr-only">
-                                        Step to re-run from
-                                    </label>
-                                    <select
-                                        id="enrichment-rerun-step"
-                                        value={rerunStep}
-                                        onChange={(e) => setRerunStep(e.target.value as EnrichmentRerunStep)}
-                                        disabled={rerunningStep}
-                                        className="h-9 rounded-lg border border-white/10 bg-surface px-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
-                                        data-testid="enrichment-rerun-select"
-                                    >
-                                        {RERUN_ORDER.map((step) => (
-                                            <option key={step} value={step}>
-                                                {RERUN_STEPS[step].label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <Button
-                                        size="sm"
-                                        onClick={() => setRerunConfirmStep(rerunStep)}
-                                        disabled={rerunningStep || wiping}
-                                        data-testid="enrichment-rerun"
-                                    >
-                                        {rerunningStep ? "Starting..." : "Re-run from"}
-                                    </Button>
-                                </span>
-                            )}
-                            {queueResult !== null && (
-                                <span className="self-center text-xs text-success" data-testid="enrichment-queue-result">
-                                    {queueResult === "wipe" ? "Wiped. Re-running." : "Queued"}
-                                </span>
-                            )}
-
-                            {isEnrichmentActive && (
-                                <>
-                                    {enrichmentState?.status === "running" ? (
-                                        <Button size="sm" onClick={handlePause}>
-                                            <Pause className="w-3 h-3" />
-                                            Pause
+                        {(isEnrichmentActive || queueResult !== null) && (
+                            <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-white/10">
+                                {queueResult !== null && (
+                                    <span className="text-xs text-success" data-testid="enrichment-queue-result">
+                                        {queueResult === "wipe" ? "Wiped. Re-running." : "Queued"}
+                                    </span>
+                                )}
+                                {isEnrichmentActive && (
+                                    <>
+                                        {enrichmentState?.status === "running" ? (
+                                            <Button size="sm" onClick={handlePause}>
+                                                <Pause className="w-3 h-3" />
+                                                Pause
+                                            </Button>
+                                        ) : (
+                                            <Button size="sm" onClick={handleResume}>
+                                                <Play className="w-3 h-3" />
+                                                Resume
+                                            </Button>
+                                        )}
+                                        <Button size="sm" variant="danger" onClick={handleStop}>
+                                            <StopCircle className="w-3 h-3" />
+                                            Stop
                                         </Button>
-                                    ) : (
-                                        <Button size="sm" onClick={handleResume}>
-                                            <Play className="w-3 h-3" />
-                                            Resume
-                                        </Button>
-                                    )}
-                                    <Button size="sm" variant="danger" onClick={handleStop}>
-                                        <StopCircle className="w-3 h-3" />
-                                        Stop
-                                    </Button>
-                                </>
-                            )}
-                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
 
                         {totalFailures > 0 && (
-                            <div className="mt-4 pt-3 border-t border-white/10">
+                            <div id="enrichment-failures" className="mt-4 pt-3 border-t border-white/10 scroll-mt-24">
                                 <button
                                     onClick={() => setFailuresToggle(!showInlineFailures)}
                                     className="flex items-center gap-2 text-xs tabular-nums text-danger-light/70 hover:brightness-125 transition-colors"
@@ -1100,6 +1033,110 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     </div>
                 ) : null}
 
+            </SettingsSection>
+
+            <SettingsSection id="library-actions" title="Actions">
+                <SettingsRow
+                    label="Sync new"
+                    description="Starts enrichment now for anything not yet worked out, instead of waiting for its next run, and syncs Audiobookshelf when it is connected."
+                >
+                    <Button variant="primary" size="sm" onClick={handleSyncAndEnrich} disabled={syncing || isEnrichmentActive}>
+                        {syncing ? "Syncing..." : "Sync new"}
+                    </Button>
+                </SettingsRow>
+                <SettingsRow
+                    label="Retry what didn't work"
+                    description="Runs every step again for the songs that did not finish one. Finished songs are skipped."
+                >
+                    <Button
+                        size="sm"
+                        onClick={() => setConfirmTarget("retryFailedAndBlocked")}
+                        disabled={retryingAll || syncing || isEnrichmentActive}
+                    >
+                        {retryingAll ? "Queuing..." : "Retry"}
+                    </Button>
+                </SettingsRow>
+                {analysisFailures > 0 && (
+                    <SettingsRow
+                        label="Retry failed analysis"
+                        description={retryResult ? `Reset ${retryResult.reset} failed songs to pending.` : `${analysisFailures} songs whose audio analysis failed go back in line.`}
+                    >
+                        <Button size="sm" onClick={handleRetryFailedAnalysis} disabled={retryingFailed || isEnrichmentActive}>
+                            {retryingFailed ? "Retrying..." : "Retry"}
+                        </Button>
+                    </SettingsRow>
+                )}
+                <SettingsRow
+                    label="Re-run from a step"
+                    description="Does one step again for every song, and every step after it."
+                    htmlFor="enrichment-rerun-step"
+                >
+                    <span className="flex items-center gap-2">
+                        <select
+                            id="enrichment-rerun-step"
+                            value={rerunStep}
+                            onChange={(e) => setRerunStep(e.target.value as EnrichmentRerunStep)}
+                            disabled={rerunningStep}
+                            className="h-9 rounded-lg border border-white/10 bg-surface px-2 text-xs text-[var(--text-primary)] focus:border-[var(--color-brand)] focus:outline-none"
+                            data-testid="enrichment-rerun-select"
+                        >
+                            {RERUN_ORDER.map((step) => (
+                                <option key={step} value={step}>
+                                    {RERUN_STEPS[step].label}
+                                </option>
+                            ))}
+                        </select>
+                        <Button
+                            size="sm"
+                            onClick={() => setRerunConfirmStep(rerunStep)}
+                            disabled={rerunningStep || wiping}
+                            data-testid="enrichment-rerun"
+                        >
+                            {rerunningStep ? "Starting..." : "Re-run"}
+                        </Button>
+                    </span>
+                </SettingsRow>
+                <SettingsRow
+                    label="Re-file albums by tags"
+                    description={
+                        refileStarted
+                            ? "Re-filing albums. The result will show in your notifications."
+                            : "Reads every song's tags again and files each album under the artist its songs name. Run it any time."
+                    }
+                >
+                    <Button size="sm" onClick={() => setConfirmTarget("refileAlbums")} disabled={refileStarting}>
+                        {refileStarting ? "Starting..." : "Re-file albums"}
+                    </Button>
+                </SettingsRow>
+                <SettingsRow
+                    label="Clear caches"
+                    description={clearCachesResult ?? "Empties what the server saved to answer faster (lookups, covers picked for the day). Sign-ins and running work are kept; the rest is worked out again as needed."}
+                >
+                    <Button size="sm" onClick={handleClearCaches} disabled={clearingCaches}>
+                        {clearingCaches ? "Clearing..." : "Clear"}
+                    </Button>
+                </SettingsRow>
+                <SettingsRow
+                    label="Clean up stale jobs"
+                    description={
+                        cleanupResult
+                            ? cleanupResult.totalCleaned > 0
+                                ? `Cleaned ${cleanupResult.cleaned.discoveryBatches.cleaned} batches, ${cleanupResult.cleaned.downloadJobs.cleaned} downloads, ${cleanupResult.cleaned.spotifyImportJobs.cleaned} imports, ${cleanupResult.cleaned.bullQueues.cleaned} queue jobs.`
+                                : "No stale jobs found."
+                            : "Clears downloads, imports and queued work that stopped without finishing."
+                    }
+                >
+                    <Button size="sm" onClick={handleCleanupStaleJobs} disabled={cleaningStaleJobs}>
+                        {cleaningStaleJobs ? "Cleaning..." : "Clean up"}
+                    </Button>
+                </SettingsRow>
+                {/* Every action on this page reports here. */}
+                {error && <p role="alert" className="px-1 text-xs tabular-nums text-danger-light">{error}</p>}
+            </SettingsSection>
+
+            {children}
+
+            <SettingsSection id="library-performance" title="Performance" description="How hard Kima works this machine while it enriches the library.">
                 <SettingsRow
                     label="Transcode cache size"
                     description="The most disk space transcoded copies may use. Applies when saved."
@@ -1230,87 +1267,30 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     />
                 )}
 
-                <div className="mt-6 rounded-lg border border-white/10 overflow-hidden">
-                    <button
-                        onClick={() => setMaintenanceOpen((o) => !o)}
-                        aria-expanded={maintenanceOpen}
-                        className="w-full flex items-center justify-between px-4 py-3 bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left"
-                    >
-                        <div>
-                            <span className="text-xs text-[var(--text-secondary)]">
-                                Maintenance Operations
-                            </span>
-                            <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                                Cache clearing, stale job cleanup, failed-analysis retry, re-filing albums
-                            </p>
-                        </div>
-                        <ChevronDown
-                            className={`w-4 h-4 text-[var(--text-muted)] transition-transform shrink-0 ${maintenanceOpen ? "rotate-180" : ""}`}
-                        />
-                    </button>
+            </SettingsSection>
 
-                    {maintenanceOpen && (
-                        <div className="px-4 pt-3 pb-4 space-y-3 border-t border-white/10">
-                            <div className="flex flex-wrap gap-2">
-                                <Button size="sm" onClick={handleClearCaches} disabled={clearingCaches}>
-                                    {clearingCaches ? "Clearing..." : "Clear All Caches"}
-                                </Button>
-                                <Button size="sm" onClick={handleCleanupStaleJobs} disabled={cleaningStaleJobs}>
-                                    {cleaningStaleJobs ? "Cleaning..." : "Cleanup Stale Jobs"}
-                                </Button>
-                                <Button size="sm" onClick={() => setConfirmTarget("refileAlbums")} disabled={refileStarting}>
-                                    Re-file Albums by Tags
-                                </Button>
-                                {((enrichmentProgress?.audioAnalysis?.failed ?? 0) > 0 || (enrichmentProgress?.audioAnalysis?.permanentlyFailed ?? 0) > 0) && (
-                                    <Button
-                                        size="sm"
-                                        onClick={handleRetryFailedAnalysis}
-                                        disabled={retryingFailed || isEnrichmentActive}
-                                    >
-                                        {retryingFailed
-                                            ? "Retrying..."
-                                            : `Retry Failed Analysis (${(enrichmentProgress?.audioAnalysis?.failed || 0) + (enrichmentProgress?.audioAnalysis?.permanentlyFailed || 0)})`}
-                                    </Button>
-                                )}
-                            </div>
-
-                            {refileStarted && (
-                                <p className="text-xs text-success">
-                                    Re-filing albums. The result will show in your notifications.
-                                </p>
-                            )}
-                            {retryResult && (
-                                <p className="text-xs tabular-nums text-success">
-                                    Reset {retryResult.reset} failed tracks to pending
-                                </p>
-                            )}
-                            {clearCachesResult && (
-                                <p className="text-xs tabular-nums text-success">
-                                    {clearCachesResult}
-                                </p>
-                            )}
-                            {cleanupResult && cleanupResult.totalCleaned > 0 && (
-                                <p className="text-xs tabular-nums text-success">
-                                    Cleaned:{" "}
-                                    {cleanupResult.cleaned.discoveryBatches.cleaned}{" "}
-                                    batches,{" "}
-                                    {cleanupResult.cleaned.downloadJobs.cleaned}{" "}
-                                    downloads,{" "}
-                                    {cleanupResult.cleaned.spotifyImportJobs.cleaned}{" "}
-                                    imports, {cleanupResult.cleaned.bullQueues.cleaned}{" "}
-                                    queue jobs
-                                </p>
-                            )}
-                            {cleanupResult && cleanupResult.totalCleaned === 0 && (
-                                <p className="text-xs text-[var(--text-muted)]">
-                                    No stale jobs found
-                                </p>
-                            )}
-                        </div>
-                    )}
-                </div>
-                {/* Outside the collapsible: every action in this section reports here. */}
-                {error && <p role="alert" className="mt-2 px-1 text-xs tabular-nums text-danger-light">{error}</p>}
+            <SettingsSection
+                id="library-start-over"
+                title="Start over"
+                description="These redo work Kima has already finished, for the whole library. Your music, playlists, plays, likes and edits stay."
+                showSeparator={false}
+            >
+                <SettingsRow
+                    label="Start over on everything"
+                    description="Works every step out again for every song, keeping the matches it has. Takes hours on a large library."
+                >
+                    <Button size="sm" variant="danger" onClick={() => setConfirmTarget("redecideEverything")} disabled={redeciding || syncing || isEnrichmentActive}>
+                        {redeciding ? "Queuing..." : "Start over"}
+                    </Button>
+                </SettingsRow>
+                <SettingsRow
+                    label="Wipe and re-run"
+                    description="Clears everything Kima worked out about your music, then works it all out again. Takes a few hours on a large library."
+                >
+                    <Button size="sm" variant="danger" onClick={() => setConfirmTarget("wipeAndRerun")} disabled={wiping} data-testid="enrichment-wipe">
+                        {wiping ? "Wiping..." : "Wipe and re-run"}
+                    </Button>
+                </SettingsRow>
             </SettingsSection>
 
             {confirmTarget && (

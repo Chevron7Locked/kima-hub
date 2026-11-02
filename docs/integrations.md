@@ -8,7 +8,7 @@ Kima needs none of these. Each service below is optional and set up in **Setting
 
 ### Set up
 
-1. Open **Settings > Download Services**.
+1. Open **Settings > Sources > Lidarr**.
 2. Turn on **Enable Lidarr**.
 3. Enter the Lidarr URL, such as `http://localhost:8686`, and the API key from Lidarr's own settings.
 4. Choose **Test Connection**, then save.
@@ -29,7 +29,7 @@ When you save, Lidarr sends a test event. If it cannot reach Kima, admins get a 
 
 - Kima asks Lidarr for the exact album by its MusicBrainz id. It does not look an album up by title, and it does not swap in a deluxe edition or another album by the same artist.
 - Kima counts a request as done when Lidarr holds the whole album you asked for.
-- Only administrators can start downloads unless **Member Downloads** is on in **Settings > Download Preferences**. Deleting stays administrator-only either way.
+- Only administrators can start downloads unless **Member Downloads** is on in **Settings > Sources > Downloads**. Deleting stays administrator-only either way.
 - If Lidarr parks a download because some tracks are missing, Kima leaves it for you to handle in Lidarr.
 - **Remove junk downloads** (on by default) lets Kima remove a download with no usable music, or the wrong album, so Lidarr tries the next release. Turn it off if your own Lidarr setup already handles this.
 
@@ -41,14 +41,14 @@ When you save, Lidarr sends a test event. If it cannot reach Kima, admins get a 
 
 [Soulseek](https://www.slsknet.org/) is a peer-to-peer network where people share music. Kima can search it and download from it, which helps with rare tracks that Lidarr cannot find.
 
-Open **Settings > P2P Networks** and choose a connection mode:
+Open **Settings > Sources > Soulseek** and choose a connection mode:
 
 - **Built-in (P2P):** Kima connects to the network itself. Enter your Soulseek username and password; you can create an account at slsknet.org.
 - **slskd (external):** Kima uses your own [slskd](https://github.com/slskd/slskd) server. Enter its URL, such as `http://slskd:5030`, and its API key if you set one. Your Soulseek credentials stay in slskd.
 
 Soulseek results appear next to your library results when you search. Downloaded tracks are saved in your music folder under `Singles/<artist>/<album>/`, so the normal library scan picks them up.
 
-Under **Settings > Download Preferences** you choose the primary download source for playlist imports and weekly discovery (Soulseek for single tracks, or Lidarr for whole albums) and how many Soulseek downloads run at once (1 to 10).
+Under **Settings > Sources > Downloads** you choose the primary download source for playlist imports and weekly discovery (Soulseek for single tracks, or Lidarr for whole albums) and how many Soulseek downloads run at once (1 to 10).
 
 Download speed and availability depend on the people sharing. Not every track will be found.
 
@@ -56,7 +56,7 @@ Download speed and availability depend on the people sharing. Not every track wi
 
 [Audiobookshelf](https://www.audiobookshelf.org/) manages audiobooks and podcasts. Kima reads its library and plays the audio.
 
-1. Open **Settings > Media Servers**.
+1. Open **Settings > Sources > Audiobookshelf**.
 2. Turn on **Enable Audiobookshelf**.
 3. Enter the server URL, such as `http://localhost:13378`, and an API key from your Audiobookshelf account.
 4. Test the connection and save.
@@ -69,7 +69,7 @@ Your listening position is saved back to Audiobookshelf as you listen.
 
 - **Similar artists:** Kima asks ListenBrainz for artists similar to the ones you play, and uses Deezer when ListenBrainz has too few. This needs no account.
 - **Popular songs:** an artist page's popular songs come from ListenBrainz only for accounts that saved a ListenBrainz token under Scrobbling, because ListenBrainz gives that data only to token holders. Everyone else gets Deezer's list instead. Token holders also fall back to Deezer when ListenBrainz has nothing for the artist, and then to the songs of that artist you play most.
-- **Scrobbling (optional):** under **Settings > Scrobbling**, enter your ListenBrainz user token and Kima records your plays to your own account. You can remove the token at any time.
+- **Scrobbling (optional):** under **Settings > You > Scrobbling**, enter your ListenBrainz user token and Kima records your plays to your own account. You can remove the token at any time.
 
 ## Importing playlists
 
@@ -85,11 +85,11 @@ Spotify playlists are read from their public pages, so you do not need to connec
 
 ## Artwork and identification keys
 
-Under **Settings > Artwork**:
+Under **Settings > Server > Artwork**:
 
 - **Fanart.tv** supplies extra artist artwork. Turn it on and add a key from fanart.tv.
 - **AcoustID** identifies files that have missing tags, by audio fingerprint. Kima has a shared key built in. You can add your own to avoid the shared key's rate limit.
 
 ## Podcasts
 
-Browse and follow podcasts from the Podcasts page. Discovery comes from Apple Podcasts: its top charts and categories (in the country set under **Settings > Podcasts**), and shows like the ones you follow by their categories. Searching for new shows uses Apple's iTunes Search service; searching your own shows finds their episodes too. Episodes stream from the feeds the shows publish, and a show you have not followed can play its first episode before you decide.
+Browse and follow podcasts from the Podcasts page. Discovery comes from Apple Podcasts: its top charts and categories (in the country set under **Settings > Sources > Podcasts**), and shows like the ones you follow by their categories. Searching for new shows uses Apple's iTunes Search service; searching your own shows finds their episodes too. Episodes stream from the feeds the shows publish, and a show you have not followed can play its first episode before you decide.

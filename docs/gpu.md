@@ -46,7 +46,7 @@ To check that the container sees the card, run `docker exec kima nvidia-smi`. It
 
 ## Turn it on
 
-Seeing the card is not enough. An administrator chooses what uses it. Open **Settings > Library Enrichment** and use the two switches:
+Seeing the card is not enough. An administrator chooses what uses it. Open **Settings > Library**, under **Performance**, and use the two switches:
 
 - **NVIDIA GPU for vibe embeddings**
 - **NVIDIA GPU for audio analysis**

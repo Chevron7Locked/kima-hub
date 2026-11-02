@@ -1842,12 +1842,13 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("open settings", async () => {
             await navigateByClick(page, "/settings");
+            await navigateByClick(page, "/settings/server");
             await settle(page, 1500);
             return { url: new URL(page.url()).pathname };
         });
 
         // Settings save only on Save Changes, so the test changes, saves, returns and checks. The Fanart.tv switch
-        // is always on an admin's settings screen, and the finally block puts it back.
+        // is always on an admin's server settings page, and the finally block puts it back.
         const TOGGLE = "#fanart-enabled";
 
         await session.step("change a setting, save it, and come back", async () => {
@@ -1898,6 +1899,8 @@ test.describe("Dogfood walkthrough", () => {
 
         await session.step("open settings and find user management", async () => {
             await navigateByClick(page, "/settings");
+            const people = page.locator('a[href="/settings/people"]').first();
+            if (await people.isVisible({ timeout: 5_000 }).catch(() => false)) await navigateByClick(page, "/settings/people");
             await settle(page, 2000);
             const heading = page.getByRole("heading", { name: /user management|users/i }).first();
             if (!(await heading.isVisible({ timeout: 5_000 }).catch(() => false))) {

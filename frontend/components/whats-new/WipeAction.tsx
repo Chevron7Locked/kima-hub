@@ -15,7 +15,7 @@ type WipeItem = Extract<ReleaseItem, { kind: "action" }>;
 // The request in flight, shared by every copy of the control: one closed and opened again while it runs shows it
 // running instead of offering a second wipe, and learns how it ended. It never rejects: true when the wipe started.
 let inFlight: Promise<boolean> | null = null;
-const FAILED = "Couldn't start it. Try again, or use Settings, under Library Enrichment.";
+const FAILED = "Couldn't start it. Try again, or use Settings, under Library.";
 
 /**
  * The wipe-and-re-run item's control, wherever a release is read: it asks first, starts the run, then says it is

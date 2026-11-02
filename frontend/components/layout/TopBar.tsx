@@ -302,7 +302,7 @@ export function TopBar() {
                             href="/settings"
                             className={cn(
                                 "w-11 h-11 rounded-full flex items-center justify-center transition-all duration-200",
-                                pathname === "/settings"
+                                pathname.startsWith("/settings")
                                     ? "bg-white text-black"
                                     : "text-[var(--text-secondary)] hover:text-white"
                             )}

@@ -240,13 +240,13 @@ test.describe("Release 1.12 (non-podcast)", () => {
         });
 
         await session.step("pick 'similarity + map' in the step picker and confirm", async () => {
-            await page.goto("/settings");
+            await page.goto("/settings/library");
             await settle(page, 1500);
             const picker = page.locator("#enrichment-rerun-step");
             await picker.scrollIntoViewIfNeeded();
             await expect(picker).toBeVisible({ timeout: 15_000 });
             await picker.selectOption("similarity");
-            await page.getByRole("button", { name: "Re-run from", exact: true }).click();
+            await page.getByRole("button", { name: "Re-run", exact: true }).click();
             const dialog = page.getByRole("dialog");
             await expect(dialog).toBeVisible();
             const started = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/api/enrichment/rerun"));
@@ -306,7 +306,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
                 hasUpdate: boolean;
             };
         const openSettings = async () => {
-            await page.goto("/settings");
+            await page.goto("/settings/server");
             await settle(page, 1500);
             await expect(page.locator(TOGGLE)).toHaveCount(1, { timeout: 15_000 });
         };
@@ -382,7 +382,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
         const readAllow = async () =>
             (await (await api.get("/api/system-settings", { headers: bearer(token) })).json()).allowMemberAcquire === true;
         const setAllow = async (want: boolean) => {
-            await page.goto("/settings");
+            await page.goto("/settings/sources");
             await settle(page, 1500);
             const sw = page.locator(ALLOW);
             await sw.scrollIntoViewIfNeeded();
@@ -399,7 +399,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
 
             await session.step("make sure Member Downloads is off, then create a member through the admin UI", async () => {
                 await setAllow(false);
-                await page.goto("/settings");
+                await page.goto("/settings/people");
                 await settle(page, 2000);
                 const heading = page.getByRole("heading", { name: /user management|users/i }).first();
                 await expect(heading).toBeVisible({ timeout: 15_000 });
@@ -516,7 +516,7 @@ test.describe("Release 1.12 (non-podcast)", () => {
             await memberCtx?.close().catch(() => {});
             if (originalAllow !== null && (await readAllow()) !== originalAllow) await setAllow(originalAllow);
             if (created) {
-                await page.goto("/settings");
+                await page.goto("/settings/people");
                 await settle(page, 2000);
                 const del = page.locator("main").getByRole("button", { name: `delete ${memberName}`, exact: true });
                 if (await del.count()) {
@@ -1205,20 +1205,17 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
 
         let firstStamp: string | null = null;
         await session.step("Settings: the re-file button asks first, then starts it", async () => {
-            await page.goto("/settings");
+            await page.goto("/settings/library");
             await settle(page, 1500);
-            // The button sits in the folded "Maintenance Operations" part of Library Enrichment.
-            const maintenance = page.getByRole("button", { name: /maintenance operations/i });
-            await expect(maintenance).toBeVisible({ timeout: 15_000 });
-            const button = page.getByRole("button", { name: "Re-file Albums by Tags" });
-            // A click before the page has hydrated is lost, so open the section until the button shows.
-            await expect(async () => {
-                if ((await maintenance.getAttribute("aria-expanded")) !== "true") await maintenance.click();
-                await expect(button).toBeVisible({ timeout: 2000 });
-            }).toPass({ timeout: 20_000 });
-            await button.click();
+            // The re-file is a row of its own under Actions, always there.
+            const button = page.getByRole("button", { name: "Re-file albums", exact: true });
+            await expect(button).toBeVisible({ timeout: 15_000 });
             const dialog = page.getByRole("dialog");
-            await expect(dialog).toBeVisible();
+            // A click before the page has hydrated is lost, so press until the dialog opens.
+            await expect(async () => {
+                if (!(await dialog.isVisible())) await button.click();
+                await expect(dialog).toBeVisible({ timeout: 2000 });
+            }).toPass({ timeout: 20_000 });
             await expect(dialog).toContainText(/re-file albums by their tags/i);
             firstStamp = await stampOf();
             const started = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/api/library/refile"));

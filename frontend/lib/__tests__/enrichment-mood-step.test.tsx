@@ -132,16 +132,12 @@ describe("the enrichment steps", () => {
 });
 
 describe("re-filing albums", () => {
-    const openMaintenance = async () => {
-        const toggle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Maintenance Operations"))!;
-        await act(async () => toggle.click());
-    };
-    const refileButton = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Re-file Albums by Tags");
+    // The re-file is a row of its own under Actions, always there: nothing to unfold first.
+    const refileButton = () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Re-file albums");
 
     it("asks first, then starts the re-file and says where the result will appear", async () => {
         refile.mockResolvedValue({ message: "Re-filing albums by their tags" });
         await render();
-        await openMaintenance();
         await act(async () => refileButton()!.click());
         expect(document.body.textContent).toContain("Albums you edited and Discover's albums stay where they are.");
         expect(refile).not.toHaveBeenCalled();
@@ -156,7 +152,6 @@ describe("re-filing albums", () => {
     it("says so when a re-file is already running", async () => {
         refile.mockRejectedValue(new Error("Albums are already being re-filed"));
         await render();
-        await openMaintenance();
         await act(async () => refileButton()!.click());
         const confirm = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Re-file Albums")!;
         await act(async () => confirm.click());

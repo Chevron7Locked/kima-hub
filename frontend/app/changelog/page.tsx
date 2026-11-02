@@ -152,7 +152,7 @@ export default function ChangelogPage() {
                                         <div className="pl-0 sm:pl-1 pb-2 flex flex-col gap-3">
                                             <ReleaseBody size="page" text={item.body} />
                                             {item.kind === "choice" && !item.answer && <p className="text-xs text-[var(--text-muted)]">You haven&apos;t answered. It stays off.</p>}
-                                            {item.kind === "action" && item.open && (
+                                            {item.kind === "action" && (item.open || item.run === "refileAlbums") && (
                                                 <div className="flex flex-col gap-2">
                                                     {item.run === "wipeEnrichment" && (
                                                         <WipeAction

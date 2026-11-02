@@ -146,7 +146,7 @@ class LidarrHealthMonitor {
             type: "error",
             title: "Lidarr is unhealthy",
             message: `${reason}. Downloads are paused and resume when Lidarr recovers.`,
-            metadata: { href: "/settings#lidarr" },
+            metadata: { href: "/settings/sources#lidarr" },
             groupKey: ALERT_KEY,
         });
     }

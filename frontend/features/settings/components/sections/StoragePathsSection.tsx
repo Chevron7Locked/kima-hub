@@ -12,8 +12,8 @@ export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionP
     return (
         <SettingsSection
             id="storage"
-            title="Storage"
-            description="Configure storage paths for your music library"
+            title="Address and storage"
+            description="Where Kima is reached, where your music lives, and whether Kima checks for updates"
         >
             <SettingsRow
                 label="Server URL"

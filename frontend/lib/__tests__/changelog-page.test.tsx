@@ -21,7 +21,10 @@ const changelog = {
             summary: "Rerun from any step and fixes.",
             date: "2026-10-13",
             dismissed: false,
-            items: [{ key: "enrichment.rerun", kind: "note", title: "Rerun from any step", summary: "Redo a step, get a fresh map.", body: "Each rerun makes a fresh map." }],
+            items: [
+                { key: "enrichment.rerun", kind: "note", title: "Rerun from any step", summary: "Redo a step, get a fresh map.", body: "Each rerun makes a fresh map." },
+                { key: "albums.refile", kind: "action", title: "Re-file albums by their tags", summary: "Puts albums back.", body: "Reads every song's tags again.", cta: "Re-file albums", run: "refileAlbums", open: false, done: true },
+            ],
         },
         {
             version: "1.11.0",
@@ -40,7 +43,7 @@ const changelog = {
 };
 
 vi.mock("@/lib/api", () => ({
-    api: { get: vi.fn(async () => changelog), post: vi.fn(async () => ({})), wipeAndRerunEnrichment: vi.fn(async () => ({})), getAnalysisTogether: vi.fn(async () => ({ together: false })), setAnalysisTogether: vi.fn() },
+    api: { get: vi.fn(async () => changelog), post: vi.fn(async () => ({})), refileAlbums: vi.fn(async () => ({})), wipeAndRerunEnrichment: vi.fn(async () => ({})), getAnalysisTogether: vi.fn(async () => ({ together: false })), setAnalysisTogether: vi.fn() },
 }));
 
 import ChangelogPage from "@/app/changelog/page";
@@ -102,6 +105,16 @@ describe("/changelog", () => {
         // An unanswered dismissal reads as silence, not consent.
         const toggle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("NVIDIA"))!;
         expect(toggle.textContent).toContain("off, unanswered");
+    });
+
+    it("keeps the re-file's button after it has run: it can be run again any time", async () => {
+        await render();
+        const toggle = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Re-file albums by their tags"))!;
+        await act(async () => {
+            toggle.click();
+        });
+        expect(buttonNamed("Re-file albums")).toBeTruthy();
+        expect(container.textContent).toContain("Albums were re-filed before. Running it again is safe.");
     });
 
     it("expands an item to its full body and its run control", async () => {
