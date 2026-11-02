@@ -1240,7 +1240,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
             expect(first.message ?? "", "some albums could not be re-filed").not.toMatch(/could not be re-filed/);
             await page.reload();
             await settle(page, 1500);
-            // A folded panel still counts as visible (it is slid off the edge), so open it by its handle.
+            // A folded panel still counts as visible (a narrow box with its handle), so open it by its handle.
             const handle = page.getByRole("button", { name: "open panel" });
             if (await handle.isVisible().catch(() => false)) await handle.click();
             await page.getByRole("tablist", { name: "panel", exact: true }).getByRole("tab", { name: /^activity/ }).click({ timeout: 15_000 });

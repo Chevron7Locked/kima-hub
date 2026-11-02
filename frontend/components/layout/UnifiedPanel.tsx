@@ -108,25 +108,15 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const settingsActive = showSettings && !!settingsContent;
 
     return (
-        // Only the panel slides. The frame's width (and so the page beside it) changes once, at the start of opening and
-        // after closing, because a width that moved with the slide would re-lay-out the page every frame. The frame also
-        // clips the panel, so a closed panel cannot hang past the screen edge as scrollable overflow.
-        <div
-            className={cn(
-                "shrink-0 h-full relative overflow-hidden z-(--z-raised)",
-                isOpen ? "[transition:width_0s]" : "[transition:width_0s_300ms]",
-            )}
-            style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
-        >
+        // The frame's width, and so the page beside it, changes once, the moment the panel opens or closes; a width that
+        // moved with the slide would re-lay-out the page every frame. The box slides over the page from the frame's
+        // right edge, as the left library's does, so it never hangs past the screen as scrollable overflow.
+        <div className="shrink-0 h-full relative z-(--z-scene-panel)" style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}>
             <aside
                 id="activity-panel"
                 aria-label="listening and activity"
-                className="absolute inset-y-0 right-0 flex flex-col overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
-                style={{
-                    width: OPEN_WIDTH,
-                    transform: isOpen ? "translateX(0)" : `translateX(${OPEN_WIDTH - CLOSED_WIDTH}px)`,
-                    willChange: "transform",
-                }}
+                className="absolute inset-y-0 right-0 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
             >
                 {/* Closed, the panel is a handle, like the left library's. */}
                 <button
@@ -149,11 +139,12 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                     {hasActivity && <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 rounded-full bg-brand" />}
                 </button>
 
-                {/* Expanded content; inert while collapsed so its controls can't take focus. */}
+                {/* Expanded content, at its full width from the box's left edge so it travels with it; inert while collapsed. */}
                 <div
                     inert={!isOpen}
+                    style={{ width: OPEN_WIDTH - 2 }}
                     className={cn(
-                        "flex h-full min-h-0 flex-col transition-opacity duration-300",
+                        "absolute inset-y-0 left-0 flex min-h-0 flex-col transition-opacity duration-300",
                         isOpen ? "opacity-100" : "pointer-events-none opacity-0",
                     )}
                 >

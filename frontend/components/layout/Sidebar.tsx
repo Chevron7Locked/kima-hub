@@ -682,17 +682,10 @@ export function Sidebar() {
 
             {!isMobileOrTablet && (
                 <div
-                    // The page beside the sidebar is laid out once, by this placeholder's width: at the END of opening
-                    // (the box slides over the page, then the page settles) and at the START of closing (the page
-                    // widens under the box as it shrinks, so the strip it uncovers is already page, never a gap). The
-                    // visible box below is out of flow, so animating it never lays the page out. It sits above the page's own raised
-                    // content (carousel arrows, sticky bars) and under the top bar, so nothing paints over it mid-slide.
-                    className={cn(
-                        "relative z-(--z-scene-panel) shrink-0",
-                        collapsed
-                            ? "[transition:width_0s]"
-                            : "[transition:width_0s_300ms] motion-reduce:[transition:width_0s]"
-                    )}
+                    // The page beside the sidebar is laid out once, by this placeholder's width, the moment the sidebar
+                    // opens or closes. The visible box below is out of flow and slides over the page, so animating it
+                    // never lays the page out; it sits above the page's raised content and under the top bar.
+                    className="relative z-(--z-scene-panel) shrink-0"
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
                     <aside
