@@ -12,10 +12,10 @@ export const MIN_MIX_TRACKS = 8;
 export const ARTIST_CAPS = [2, 3, Infinity];
 
 /**
- * The identity keys of the album artist rows that name no one (artistSql). Worked out per call, not at load, so the
- * module still loads where artistIdentity is only partly stubbed.
+ * The identity keys of the album artist rows that name no one: Various Artists and Unknown Artist. Worked out per call,
+ * not at load, so the module still loads where artistIdentity is only partly stubbed.
  */
-function noOneKeys(): string[] {
+export function noOneKeys(): string[] {
     return [artistIdentityKey(VARIOUS_ARTISTS_CANONICAL), artistIdentityKey(UNKNOWN_ARTIST)];
 }
 

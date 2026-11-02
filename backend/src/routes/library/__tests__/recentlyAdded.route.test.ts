@@ -6,6 +6,8 @@ import request from "supertest";
 import { prisma } from "../../../utils/db";
 import tracksRouter from "../tracks";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { artistIdentityKey } from "../../../services/artistIdentity";
+import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
 
 const P = "zz-recent-added";
 const app = () =>
@@ -15,10 +17,11 @@ const app = () =>
 
 const at = (minutesAgo: number) => new Date(Date.UTC(2031, 0, 1) - minutesAgo * 60_000);
 
-async function album(artist: number, n: number, minutesAgo: number) {
+async function album(artist: number | string, n: number, minutesAgo: number) {
     const id = `${P}-al-${artist}-${n}`;
+    const artistId = typeof artist === "number" ? `${P}-ar-${artist}` : artist;
     await prisma.album.create({
-        data: { id, rgMbid: `${id}-rg`, artistId: `${P}-ar-${artist}`, identityKey: `${id}-ik`, title: id, primaryType: "Album", location: "LIBRARY", lastSynced: at(minutesAgo) },
+        data: { id, rgMbid: `${id}-rg`, artistId, identityKey: `${id}-ik`, title: id, primaryType: "Album", location: "LIBRARY", lastSynced: at(minutesAgo) },
     });
     await prisma.track.create({
         data: { id: `${id}-t`, albumId: id, title: id, trackNo: 1, duration: 100, filePath: `${id}.flac`, fileModified: new Date(), fileSize: 1 },
@@ -34,9 +37,21 @@ beforeAll(async () => {
     for (let a = 1; a < 4; a++) await album(a, 0, 100 + a);
 });
 
+/** The placeholder rows (Various Artists, Unknown Artist): the database's own if it has them, else made here. */
+const placeholders: { id: string; made: boolean }[] = [];
+async function placeholder(name: string) {
+    const identityKey = artistIdentityKey(name);
+    const found = await prisma.artist.findUnique({ where: { identityKey }, select: { id: true } });
+    const id = found?.id ?? `${P}-ph-${placeholders.length}`;
+    if (!found) await prisma.artist.create({ data: { id, name, normalizedName: name.toLowerCase(), identityKey } });
+    placeholders.push({ id, made: !found });
+    return id;
+}
+
 afterAll(async () => {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { in: placeholders.filter((p) => p.made).map((p) => p.id) } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
     await closeEngineConnections();
 });
@@ -56,4 +71,11 @@ it("a bad or negative limit falls back to a sane page", async () => {
 it("each artist carries its library album count", async () => {
     const res = await request(app()).get("/library/recently-added?limit=2");
     expect(res.body.artists.map((a: { albumCount: number }) => a.albumCount)).toEqual([25, 1]);
+});
+
+it("leaves out Various Artists and Unknown Artist, which name no one", async () => {
+    // Compilations and untagged albums added after everything else: newest, yet not shown.
+    await album(await placeholder(VARIOUS_ARTISTS_CANONICAL), 0, -10);
+    await album(await placeholder(UNKNOWN_ARTIST), 0, -20);
+    expect(await names("?limit=4")).toEqual([`${P} 0`, `${P} 1`, `${P} 2`, `${P} 3`]);
 });

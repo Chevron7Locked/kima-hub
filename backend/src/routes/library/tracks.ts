@@ -20,6 +20,7 @@ import {
   type CoverStation,
 } from "../../services/mixes/stationCovers";
 import { songArtistKey } from "../../services/mixes/recipes";
+import { noOneKeys } from "../../services/mixes/artistCap";
 import { selectRadioTracks, stillPlayable } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
@@ -218,10 +219,11 @@ router.get("/recently-added", async (req, res) => {
   try {
     const limitNum = parseLimit(req.query.limit, 10, 100);
 
-    // Artists ordered by their newest library album with songs, one row each.
+    // Artists ordered by their newest library album with songs, one row each; Various Artists and Unknown Artist name
+    // no one, so they are left out.
     const newest = await prisma.album.groupBy({
       by: ["artistId"],
-      where: { location: LIBRARY_LOCATION, tracks: { some: {} } },
+      where: { location: LIBRARY_LOCATION, tracks: { some: {} }, artist: { identityKey: { notIn: noOneKeys() } } },
       _max: { lastSynced: true },
       orderBy: { _max: { lastSynced: "desc" } },
       take: limitNum,
