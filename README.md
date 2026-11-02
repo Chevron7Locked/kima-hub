@@ -6,6 +6,7 @@
   <a href="https://hub.docker.com/r/chevron7locked/kima"><img src="https://img.shields.io/docker/v/chevron7locked/kima?label=Docker&sort=semver" alt="Docker image"></a>
   <a href="https://github.com/Chevron7Locked/kima-hub/releases"><img src="https://img.shields.io/github/v/release/Chevron7Locked/kima-hub?label=Release" alt="Latest release"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3"></a>
+  <a href="https://kima-hub.dev"><img src="https://img.shields.io/badge/Live_demo-kima--hub.dev-fca200" alt="Live demo: kima-hub.dev"></a>
 </p>
 
 Kima is a music server you run yourself. Point it at a folder of music and it gives you a web app to play it from, on a computer or a phone, along with podcasts and audiobooks. It also works out how each song sounds and feels, so it can find songs that match and lay your whole library out as a map.
