@@ -20,7 +20,8 @@ interface StationCardProps {
 
 /**
  * A radio station: the cover of a song it plays, washed in the station's colour, with its name and line over the
- * bottom. The image loads only once the tile is near the screen (CachedImage is lazy). Until a cover arrives, or when the station has none, the tile is a fade of its colour.
+ * bottom. Until a cover arrives, or when the station has none, the tile is a fade of its colour. The cover loads at once:
+ * it arrives after the tile is already on screen, and Chrome held such lazy images up to 3 s before fetching them.
  */
 export const StationCard = memo(function StationCard({ station, cover, onStart, busy = false, disabled = false, index = 0, className }: StationCardProps) {
     const hue = stationHue(station);
@@ -42,7 +43,7 @@ export const StationCard = memo(function StationCard({ station, cover, onStart, 
                     <div aria-hidden="true" className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${hue}8c, ${hue}1a)` }} />
                     {cover && (
                         <>
-                            <CachedImage src={api.getCoverArtUrl(cover, 300)} alt="" fill sizes="(max-width: 640px) 50vw, 200px" className="object-cover cover-zoom" />
+                            <CachedImage src={api.getCoverArtUrl(cover, 300)} alt="" fill sizes="(max-width: 640px) 50vw, 200px" loading="eager" className="object-cover cover-zoom" />
                             {/* The cover takes on the station's colour. */}
                             <div aria-hidden="true" className="absolute inset-0 mix-blend-color" style={{ background: hue }} />
                         </>

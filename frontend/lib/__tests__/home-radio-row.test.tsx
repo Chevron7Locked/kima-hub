@@ -102,6 +102,8 @@ describe("the home radio row", () => {
             expect(srcs("Shuffle All")).toEqual(["/cover/a"]);
         });
         expect(srcs("rock")).toEqual(["/cover/r"]);
+        // A cover arrives after its tile is on screen; a lazy image there waited up to 3 s for the browser to fetch it.
+        expect(tile("Shuffle All").querySelector("img")!.getAttribute("loading")).toBe("eager");
         // A station with no cover is a fade of its own colour (Workout's red), not a dark tile.
         const workout = tile("Workout");
         expect(workout.querySelector("img")).toBeNull();
