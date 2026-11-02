@@ -190,7 +190,7 @@ export const RELEASES: Release[] = [
                     "Late Night is yours alone: it starts from the songs you actually play between 10pm and 4am, then " +
                     "songs like them. Wildcard plays the songs no mood claims. Genre stations now count each genre once, " +
                     "however it is spelled, and play only your library. Each station's tile shows a cover from its own " +
-                    "songs, and every genre station has a colour of its own.",
+                    "songs, the same one all day, and every genre station has a colour of its own.",
                 links: [{ label: "Open radio", href: "/radio" }],
             },
             {
@@ -213,19 +213,21 @@ export const RELEASES: Release[] = [
                     "Albums from Discover Weekly are for trying out, so they now show and play only on that page: not in " +
                     "your collection, radio, mixes, search or the vibe map. Like a song and its whole album joins your " +
                     "library.\n\n" +
-                    "Kima also stopped mistaking albums you got yourself for suggestions.",
+                    "Kima also stopped mistaking albums you got yourself for suggestions, and Discover now deletes an album only " +
+                    "when its own records show it fetched that album and nobody has made it theirs.",
                 links: [{ label: "Open Discover", href: "/discover" }],
             },
             {
                 kind: "note",
                 key: "panel.redesign",
                 title: "A new side panel",
-                summary: "The right-hand panel shows what's playing and up next above, and everything Kima is doing below. The queue lives there now.",
+                summary: "The right-hand panel has two tabs: what's playing and up next, and everything Kima is doing. The queue lives there now.",
                 body:
-                    "The right-hand panel is two halves. Listening shows the song that's playing, then what's up next, " +
-                    "its lyrics or its artist. Activity shows everything Kima is doing in one list, newest first, or just " +
-                    "alerts, downloads, imports or history. The queue page is gone: the panel's up next list moves, " +
-                    "removes and clears songs.\n\n" +
+                    "The right-hand panel is two tabs, each with the whole panel. Listening, which it opens on, shows the " +
+                    "song that's playing, then what's up next, its lyrics or its artist. Activity shows everything Kima is " +
+                    "doing in one list, newest first, or just alerts, downloads, imports or history; the bell opens it, and " +
+                    "its tab carries the count of unread notices and running downloads. The queue page is gone: the panel's " +
+                    "up next list moves, removes and clears songs.\n\n" +
                     "The sidebar's mixes show their covers, and the release radar, new and upcoming albums from artists " +
                     "you follow, has a place in the sidebar. Both panels slide open and closed smoothly, and covers are " +
                     "one size on every page.",
@@ -292,6 +294,14 @@ export const RELEASES: Release[] = [
                     "- Untagged albums are identified from their songs' audio fingerprints, so they get real covers and MusicBrainz ids\n" +
                     "- An album is filed under the artist its songs name together: one song tagged with a guest no longer splits off under that guest, and a tag naming two artists is no longer glued into one made-up artist\n" +
                     "- Artist and album pages no longer show a stray 0, and an artist's top songs list each title once\n" +
+                    "- Favorites, discovery and Deep Cuts count only your own plays; recently added and recently listened leave out Various Artists and Unknown Artist\n" +
+                    "- Mixes offer only songs that can play, and night mixes keep their two-songs-per-artist cap\n" +
+                    "- Identification asks AcoustID first, and a fingerprint it refuses no longer holds up its album\n" +
+                    "- Delete for an artist or album is on its own page, for admins, not on every card of the collection\n" +
+                    "- The phone layout no longer slides under the top bar when the browser's toolbar moves\n" +
+                    "- Covers are sharp on high-density screens, card grids fill the row, home shows each row as it loads, and the collection's mood band loads without the whole vibe map\n" +
+                    "- Artists have their own colour (amber now marks only what you can press), the settings menu marks the section you picked, and search, stats and Discover use plainer words\n" +
+                    "- The container's health check covers the whole stack: web app, backend with its database and Redis, and the analyzers this server runs\n" +
                     "- Your library follows your disk: a song whose file two scans in a row can't find is removed, and logged first; if a whole drive drops out, nothing is removed\n" +
                     "- Every release's note stays on the changelog page, newest first; anything a release still needs from you stays listed there until it's done\n" +
                     "- When a podcast episode ends, the show's next episode plays; an episode you've heard 95% of counts as finished, and a finished one stays finished\n" +
