@@ -223,14 +223,14 @@ export const RELEASES: Release[] = [
                 title: "A new side panel",
                 summary: "The right-hand panel has two tabs: what's playing and up next, and everything Kima is doing. The queue lives there now.",
                 body:
-                    "The right-hand panel is two tabs, each with the whole panel. Listening, which it opens on, shows the " +
+                    "The right-hand panel is two tabs, each with the whole panel. Listening, where it opens unless something asks for activity, shows the " +
                     "song that's playing, then what's up next, its lyrics or its artist. Activity shows everything Kima is " +
                     "doing in one list, newest first, or just alerts, downloads, imports or history; the bell opens it, and " +
                     "its tab carries the count of unread notices and running downloads. The queue page is gone: the panel's " +
                     "up next list moves, removes and clears songs.\n\n" +
                     "The sidebar's mixes show their covers, and the release radar, new and upcoming albums from artists " +
                     "you follow, has a place in the sidebar. Both panels slide open and closed smoothly, and covers are " +
-                    "one size on every page.",
+                    "one size across pages.",
             },
             {
                 kind: "note",
