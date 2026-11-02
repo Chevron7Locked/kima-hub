@@ -29,6 +29,11 @@ function queueMock() {
     };
 }
 
+/** No library scan is running, so an enrichment cycle goes ahead (workers/scanActivity). */
+export const scanActivityMock = {
+    libraryScanRunning: jest.fn().mockResolvedValue(false),
+};
+
 export const enrichmentQueuesMock = {
     QUEUE_NAMES: {
         ARTISTS: "enrichment-artists",

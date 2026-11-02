@@ -15,6 +15,7 @@ import { withTimeout } from "../utils/timeout";
 import { spotifyImportService } from "../services/spotifyImport";
 import {
     startUnifiedEnrichmentWorker,
+    triggerEnrichmentNow,
     stopUnifiedEnrichmentWorker,
 } from "./unifiedEnrichment";
 import {
@@ -85,6 +86,11 @@ scanWorker.on("completed", (job, result) => {
     logger.debug(
         `Scan job ${job.id} completed: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} removed:${result.tracksRemoved}`
     );
+    // Enrichment waits while a scan runs (scanActivity.ts); new songs start it now, not at the next timed cycle. Only then:
+    // a trigger also runs one cycle past an operator's stop.
+    if (result.tracksAdded > 0) {
+        triggerEnrichmentNow().catch((err) => logger.error("Failed to start enrichment after the scan:", err));
+    }
 });
 
 scanWorker.on("failed", (job, err) => {

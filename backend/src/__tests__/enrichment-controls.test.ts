@@ -12,6 +12,8 @@ const mockQueueClean = jest.fn().mockResolvedValue([]);
 const mockQueueGetJob = jest.fn().mockResolvedValue(null);
 const mockQueueResume = jest.fn().mockResolvedValue(undefined);
 
+// No library scan is running: the retry offers its work now.
+jest.mock("../workers/scanActivity", () => ({ libraryScanRunning: jest.fn().mockResolvedValue(false) }));
 jest.mock("../workers/enrichmentQueues", () => ({
     QUEUE_NAMES: {
         ARTISTS: "enrichment-artists",

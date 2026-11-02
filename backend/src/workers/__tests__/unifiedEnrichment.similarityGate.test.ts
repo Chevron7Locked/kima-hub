@@ -1,6 +1,6 @@
 /**
- * The map's one-time layout waits until every input of the matching formula is settled:
- * artist genres, analysis and sound vectors, including answers still due a retry.
+ * Similarity waits until analysis and sound vectors are settled for the whole library, including answers
+ * still due a retry; the map's one-time layout also waits for the artist genres.
  */
 
 jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
@@ -23,8 +23,9 @@ const mockUpdateMap = jest.fn().mockResolvedValue({ laidOut: 0, placed: 0 });
 jest.mock("../../services/matching/map", () => ({
     updateMap: (settled: boolean) => mockUpdateMap(settled),
 }));
+const mockBuildMatching = jest.fn().mockResolvedValue({ feelUpdated: 0 });
 jest.mock("../../services/matching/state", () => ({
-    buildMatching: jest.fn().mockResolvedValue({ feelUpdated: 0 }),
+    buildMatching: () => mockBuildMatching(),
     matchingProgress: jest.fn().mockResolvedValue({ total: 0, completed: 0 }),
 }));
 
@@ -80,10 +81,16 @@ describe("the map's first layout waits for the formula's inputs", () => {
         expect(mockUpdateMap).toHaveBeenCalledWith(false);
     });
 
-    it("waits while a sound vector is due a retry", async () => {
-        await putStage(id("t"), "embedding", "failed", true);
-        await executeSimilarityPhase();
-        expect(mockUpdateMap).toHaveBeenCalledWith(false);
+    it.each([
+        ["an analysis is waiting", "analysis", "pending"],
+        ["an analysis is in flight", "analysis", "working"],
+        ["a sound vector is waiting", "embedding", "pending"],
+        ["a sound vector is due a retry", "embedding", "failed"],
+    ])("builds nothing while %s: similarity comes after the moods", async (_what, stage, status) => {
+        await putStage(id("t"), stage, status, true);
+        expect(await executeSimilarityPhase()).toBe(0);
+        expect(mockBuildMatching).not.toHaveBeenCalled();
+        expect(mockUpdateMap).not.toHaveBeenCalled();
     });
 
     it("does not wait on an analysis a person set aside", async () => {

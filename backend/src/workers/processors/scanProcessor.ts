@@ -223,38 +223,6 @@ export async function processScan(
             }
         }
 
-        // New files are owed every stage's answer; trigger the next cycle now rather
-        // than after the 30 s wait.
-        if (result.tracksAdded > 0) {
-            try {
-                logger.debug(
-                    `[ScanJob ${job.id}] ${result.tracksAdded} new track(s) added; starting an enrichment cycle`
-                );
-                const { triggerEnrichmentNow } = await import(
-                    "../unifiedEnrichment"
-                );
-                triggerEnrichmentNow()
-                    .then((result) => {
-                        if (result.tracks > 0) {
-                            logger.debug(
-                                `[ScanJob ${job.id}] Enrichment after scan completed: ${result.tracks} tracks`
-                            );
-                        }
-                    })
-                    .catch((err) => {
-                        logger.error(
-                            `[ScanJob ${job.id}] Enrichment for new tracks failed:`,
-                            err
-                        );
-                    });
-            } catch (error) {
-                logger.error(
-                    `[ScanJob ${job.id}] Failed to trigger enrichment:`,
-                    error
-                );
-            }
-        }
-
         return result;
     } catch (error: any) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);

@@ -89,6 +89,11 @@ jest.mock("../../services/moods/tags", () => ({
     writeMoodTags: () => mockWriteMoodTags(),
 }));
 
+const mockLibraryScanRunning = jest.fn().mockResolvedValue(false);
+jest.mock("../scanActivity", () => ({
+    libraryScanRunning: () => mockLibraryScanRunning(),
+}));
+
 jest.mock("../../config", () => ({
     config: { redisUrl: "redis://localhost:6379" },
 }));
@@ -316,6 +321,27 @@ describe("Enrichment State Machine", () => {
             await triggerEnrichmentNow();
 
             expect(mockDetectHang).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("the scan goes first", () => {
+        it("hands out no work at all while a library scan is running, and runs once it is done", async () => {
+            await startUnifiedEnrichmentWorker();
+            mockQueueAdd.mockClear();
+            mockRedisRpush.mockClear();
+            mockUpdateState.mockClear();
+            mockLibraryScanRunning.mockResolvedValueOnce(true);
+
+            const held = await triggerEnrichmentNow();
+
+            expect(held).toEqual(expect.objectContaining({ declined: "scan-running" }));
+            expect(mockQueueAdd).not.toHaveBeenCalled();
+            expect(mockRedisRpush).not.toHaveBeenCalled();
+            expect(mockBuildMoods).not.toHaveBeenCalled();
+            expect(mockUpdateState).not.toHaveBeenCalledWith(expect.objectContaining({ currentPhase: expect.any(String) }));
+
+            await triggerEnrichmentNow();
+            expect(mockUpdateState).toHaveBeenCalledWith(expect.objectContaining({ currentPhase: "artists" }));
         });
     });
 
@@ -596,7 +622,7 @@ describe("Enrichment State Machine", () => {
             expect(mockRedisDel).not.toHaveBeenCalled();
         });
 
-        it("holds the drop while analysis is still running and makes it on the first settled cycle", async () => {
+        it("scores nothing and writes no tags while analysis or sound vectors are still being made", async () => {
             // Every track still owes its stage: the moods' inputs have not settled.
             mockQueryRaw.mockImplementation(async (...args: unknown[]) =>
                 String(args[0]).includes('LEFT JOIN "TrackStage"')
@@ -604,37 +630,19 @@ describe("Enrichment State Machine", () => {
                     : [{ total: 0, completed: 0 }],
             );
             invalidateEnrichmentProgress();
-            mockBuildMoods.mockResolvedValue({ scored: 3, stateChanged: true });
-            expect(await executeMoodPhase()).toBe(3);
-            expect(mockRedisScan).not.toHaveBeenCalled();
-            expect(mockRedisDel).not.toHaveBeenCalled();
-
-            // A later cycle scores nothing new, but the lists dropped for the earlier change are still owed.
-            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
-            invalidateEnrichmentProgress();
-            mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
-            mockRedisScan.mockResolvedValueOnce(["0", ["mixes:u1"]]);
-            await executeMoodPhase();
-            expect(mockRedisDel).toHaveBeenCalledWith("mixes:u1");
-
-            mockRedisDel.mockClear();
-            mockRedisScan.mockClear();
-            await executeMoodPhase();
+            expect(await executeMoodPhase()).toBe(0);
+            expect(mockBuildMoods).not.toHaveBeenCalled();
+            expect(mockWriteMoodTags).not.toHaveBeenCalled();
             expect(mockRedisScan).not.toHaveBeenCalled();
         });
 
-        it("writes down a drop it cannot make yet, and makes it after a restart once the inputs settle", async () => {
+        it("writes down a drop it cannot make, and makes it after a restart", async () => {
             const OWED = "enrichment:mood-mixes-owed";
-            mockQueryRaw.mockImplementation(async (...args: unknown[]) =>
-                String(args[0]).includes('LEFT JOIN "TrackStage"')
-                    ? [{ total: 10n, completed: 0n, working: 0n, retryable_failed: 0n, terminal_failed: 0n, file_missing: 0n }]
-                    : [{ total: 0, completed: 0 }],
-            );
-            invalidateEnrichmentProgress();
             mockBuildMoods.mockResolvedValue({ scored: 3, stateChanged: true });
+            mockRedisScan.mockRejectedValueOnce(new Error("redis busy"));
             await executeMoodPhase();
             expect(mockRedisSet).toHaveBeenCalledWith(OWED, "1");
-            expect(mockRedisScan).not.toHaveBeenCalled();
+            expect(mockRedisDel).not.toHaveBeenCalledWith(OWED);
 
             // The server restarts: nothing is held in memory, only the note in Redis is left.
             mockRedisGet.mockImplementation(async (key: string) => (key === OWED ? "1" : null));

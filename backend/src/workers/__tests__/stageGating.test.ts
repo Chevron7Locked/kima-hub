@@ -6,6 +6,7 @@
 
 jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
 jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
+jest.mock("../../workers/scanActivity", () => require("../../__tests__/helpers/enrichmentMocks").scanActivityMock);
 jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
 jest.mock("../../utils/logger", () => require("../../__tests__/helpers/enrichmentMocks").loggerMock);
 jest.mock("../../services/enrichmentState", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);

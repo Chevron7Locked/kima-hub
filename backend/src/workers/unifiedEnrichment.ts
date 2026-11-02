@@ -36,6 +36,7 @@ import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "./stageRetry";
 import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { featureDetection } from "../services/featureDetection";
+import { libraryScanRunning } from "./scanActivity";
 import { musicBrainzService, type AlbumCatalogue } from "../services/musicbrainz";
 import { topVoted } from "../utils/votes";
 import { trackIdentityService } from "../services/trackIdentity";
@@ -172,9 +173,46 @@ async function bothAtOnce(): Promise<boolean> {
 }
 
 /**
+ * Which heavy model has the current run: "analysis" (MusiCNN) or "embedding" (CLAP), written each time one is handed
+ * songs. The one that has it finishes every song it owes before the other starts, so a song added mid-run waits.
+ */
+const HEAVY_RUN_KEY = "enrichment:heavy-run";
+
+async function takeHeavyRun(stage: "analysis" | "embedding"): Promise<void> {
+    await getRedis().set(HEAVY_RUN_KEY, stage);
+}
+
+/**
+ * CLAP has the run and still has a library track's vector in flight or due by the same rule the offer uses (getNextWork).
+ * A CLAP that is not running or is paused holds nothing, nor does a vector waiting out a retry delay.
+ */
+async function clapHasTheRun(now: Date): Promise<boolean> {
+    if (await bothAtOnce()) return false;
+    if ((await getRedis().get(HEAVY_RUN_KEY)) !== "embedding") return false;
+    if (await sourcePauseController.isPaused(STAGE_SOURCE.embedding, now)) return false;
+    if (!(await featureDetection.clapRunning())) return false;
+    const [row] = await prisma.$queryRaw<Array<{ owed: boolean }>>`
+        SELECT EXISTS (
+            SELECT 1 FROM "Track" t
+              JOIN "TrackStage" an ON an."trackId" = t.id AND an.stage = 'analysis' AND an.status = 'done'
+              LEFT JOIN "TrackStage" ts ON ts."trackId" = t.id AND ts.stage = 'embedding'
+             WHERE t."missingSince" IS NULL
+               AND t."filePath" IS NOT NULL
+               AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+               AND (ts.id IS NULL
+                    OR ts.status = 'working'
+                    OR (ts.status IN ('pending', 'failed') AND ts.retryable = true
+                        AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= ${now})))
+        ) AS owed
+    `;
+    return row.owed;
+}
+
+/**
  * MusiCNN and CLAP run one at a time across the library, never side by side, so each has the machine (CPU and
- * GPU) to itself. Sound vectors start once no track's analysis is owed, due a retry or in flight; an analyzer that
- * is paused or not running holds nothing back, and an analysis waiting out a retry delay does not hold the vectors.
+ * GPU) to itself. Sound vectors start once no track's analysis is owed, due a retry or in flight (unless CLAP
+ * already has the run: clapHasTheRun); an analyzer that is paused or not running holds nothing back, and an
+ * analysis waiting out a retry delay does not hold the vectors.
  */
 export async function analysisStillRunning(now: Date): Promise<boolean> {
     if (await bothAtOnce()) return false;
@@ -198,12 +236,13 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
 
 /**
  * The other half of one at a time: analysis that comes due while sound vectors are being made (songs added
- * mid-run, a retry whose delay ran out) waits while CLAP is working, then analysis goes first again. A
+ * mid-run, a retry whose delay ran out) waits until CLAP has finished its run, not just its current batch. A
  * CLAP analyzer that is not running holds nothing back.
  */
-export async function vectorsInFlight(): Promise<boolean> {
+export async function vectorsInFlight(now = new Date()): Promise<boolean> {
     if (await bothAtOnce()) return false;
     if (!(await featureDetection.clapRunning())) return false;
+    if (await clapHasTheRun(now)) return true;
     // The count the CLAP worker publishes as a job starts and ends. A re-run resets the embedding stage rows to pending
     // while CLAP is still computing its batch, so only the published count shows that work. A key the worker never wrote
     // counts as nothing running.
@@ -261,11 +300,11 @@ export async function getNextWork(
             continue;
         }
 
-        if (stage === "embedding" && (await analysisStillRunning(now))) {
+        if (stage === "embedding" && !(await clapHasTheRun(now)) && (await analysisStillRunning(now))) {
             logger.debug("[Enrichment] 'embedding' waits: audio analysis has tracks left");
             continue;
         }
-        if (stage === "analysis" && (await vectorsInFlight())) {
+        if (stage === "analysis" && (await vectorsInFlight(now))) {
             logger.debug("[Enrichment] 'analysis' waits: sound vectors are being made");
             continue;
         }
@@ -1457,6 +1496,8 @@ async function reopenRecordingThatNeverAskedAcoustid(trackId: string): Promise<v
 export async function retryFailedAndBlocked(
     limit = TRACK_BATCH_SIZE,
 ): Promise<StageWork[]> {
+    // The scan goes first; the next cycle after it offers the same work.
+    if (await libraryScanRunning()) return [];
     // Each stage gets its own window, so one press reopens every owed question.
     const work: StageWork[] = [];
     for (const stage of STAGE_ORDER) {
@@ -1577,7 +1618,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
      * Set when the cycle declined to run, as opposed to running and finding nothing.
      * An empty cycle backs off; a declined one should come back promptly.
      */
-    declined?: "already-running" | "too-soon";
+    declined?: "already-running" | "too-soon" | "scan-running";
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
@@ -1640,6 +1681,12 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     // Never allow concurrent runs
     if (isRunning) {
         return { ...emptyResult, declined: "already-running" };
+    }
+
+    // The scan goes first: every step starts from the whole library, never the part scanned so far.
+    if (await libraryScanRunning()) {
+        logger.debug("[Enrichment] Waiting: a library scan is still adding songs");
+        return { ...emptyResult, declined: "scan-running" };
     }
 
     // Enforce minimum interval (unless full mode or immediate request)
@@ -2647,6 +2694,7 @@ async function dispatchStageWork(
 
     if (queued > 0) {
         logger.debug(`[Enrichment] Queued ${queued} tracks for ${stage}`);
+        if (stage === "analysis" || stage === "embedding") await takeHeavyRun(stage);
     }
     return queued;
 }
@@ -2779,12 +2827,17 @@ async function dropMoodMixesIfOwed(changed: boolean): Promise<void> {
 }
 
 /**
- * The mood step: mood scores for new or changed sound vectors, the mood statistics when their inputs changed, then every
- * track's tags. A change drops the cached mood mixes only once the inputs have settled (dropMoodMixesIfOwed): during a
- * first analysis vectors arrive every cycle and each drop would wipe lists rebuilt a moment before. A failure is logged and
- * stops the step (scores already committed stay); the cycle goes on to similarity. Returns how many tracks were scored.
+ * The mood step, once analysis and sound vectors have finished for the whole library (the moods read the vectors, and
+ * their statistics the whole library): mood scores for new or changed vectors, the mood statistics when their inputs
+ * changed, then every track's tags. A change drops the cached mood mixes (dropMoodMixesIfOwed, which keeps the drop owed
+ * across a Redis failure or a restart). A failure is logged and stops the step (scores already committed stay); the
+ * cycle goes on to similarity. Returns how many tracks were scored.
  */
 export async function executeMoodPhase(): Promise<number> {
+    if (!moodInputsSettled(await getEnrichmentProgress())) {
+        logger.debug("[Enrichment] Moods wait: analysis or sound vectors are still being made");
+        return 0;
+    }
     try {
         const { scored, stateChanged } = await buildMoods();
         await dropMoodMixesIfOwed(scored > 0 || stateChanged);
@@ -2798,22 +2851,25 @@ export async function executeMoodPhase(): Promise<number> {
 }
 
 /**
- * The similarity step: feel for new sound vectors and the library's matching
- * state when its inputs changed (services/matching/state.ts), then the vibe map:
- * laid out or extended with new tracks (services/matching/map.ts). Returns how
- * many tracks got feel or a map position.
+ * The similarity step, after the moods: feel for new sound vectors and the
+ * library's matching state when its inputs changed (services/matching/state.ts),
+ * then the vibe map: laid out or extended with new tracks (services/matching/map.ts).
+ * Returns how many tracks got feel or a map position.
  */
 export async function executeSimilarityPhase(): Promise<number> {
     const features = await featureDetection.getFeatures();
     if (!features.vibeEmbeddings) {
         return 0;
     }
-    const { feelUpdated } = await buildMatching();
-    // The one-time layout waits for everything the formula reads: artist genres, analysis and sound
-    // vectors, including answers still due a retry.
+    // Similarity comes after the moods: it waits for the same settled analysis and sound vectors.
     const progress = await getEnrichmentProgress();
-    const formulaInputsSettled = progress.artists.owed === 0 && moodInputsSettled(progress);
-    const { laidOut, placed } = await updateMap(formulaInputsSettled);
+    if (!moodInputsSettled(progress)) {
+        logger.debug("[Enrichment] Similarity waits: analysis or sound vectors are still being made");
+        return 0;
+    }
+    const { feelUpdated } = await buildMatching();
+    // The one-time layout also waits for the artist genres the formula reads.
+    const { laidOut, placed } = await updateMap(progress.artists.owed === 0);
     if (laidOut > 0) logger.info(`[Enrichment] Vibe map laid out: ${laidOut} tracks`);
     return feelUpdated + laidOut + placed;
 }

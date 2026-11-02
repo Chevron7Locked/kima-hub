@@ -6,6 +6,8 @@
 
 // ── Queues + Redis + network services: observe, never hit the wire ──────
 
+// No library scan is running: the retry offers its work now.
+jest.mock("../scanActivity", () => ({ libraryScanRunning: jest.fn().mockResolvedValue(false) }));
 jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
 jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
 jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
@@ -28,6 +30,7 @@ jest.mock("../../workers/podcastEnrichmentWorker", () => require("../../__tests_
 import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import { mockQueueAdd, mockQueueGetJob, mockRedis } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
+import { libraryScanRunning } from "../scanActivity";
 import {
     waitForFingerprintWork,
     getNextWork,
@@ -95,6 +98,14 @@ afterAll(async () => {
 });
 
 describe("retryFailedAndBlocked — the queue-based path", () => {
+    it("hands out nothing while a library scan is running", async () => {
+        await seedTrack(id("scanning"), { recording: "pending", analysis: "pending", embedding: "pending" });
+        await putStage(id("scanning"), "fingerprint", "done");
+        (libraryScanRunning as jest.Mock).mockResolvedValueOnce(true);
+        expect(await retryFailedAndBlocked()).toEqual([]);
+        expect(mockQueueAdd).not.toHaveBeenCalled();
+    });
+
     it("offers only the records that are genuinely due, and dispatching claims them", async () => {
         // A retryable failure whose backoff has elapsed — genuinely owed.
         await seedTrack(id("due"), {

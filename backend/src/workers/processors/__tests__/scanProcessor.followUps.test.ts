@@ -15,7 +15,6 @@ jest.mock("../../../services/discoverWeekly", () => ({
     discoverWeeklyService: { reconcileDiscoveryTracks: () => mockDiscover(), buildFinalPlaylist: jest.fn() },
 }));
 jest.mock("../../../jobs/queueCleaner", () => ({ queueCleaner: { reconcileWithLocalLibrary: jest.fn().mockResolvedValue(undefined) } }));
-jest.mock("../../unifiedEnrichment", () => ({ triggerEnrichmentNow: jest.fn().mockResolvedValue({ tracks: 0 }) }));
 jest.mock("../../../services/eventBus", () => ({ eventBus: { emit: jest.fn() } }));
 jest.mock("../../../services/notificationService", () => ({ notificationService: { create: jest.fn().mockResolvedValue(undefined) } }));
 jest.mock("../../../utils/logger", () => ({ logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() } }));

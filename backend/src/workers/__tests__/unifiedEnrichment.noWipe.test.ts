@@ -2,6 +2,8 @@
 
 // ── Queues + Redis + network services: observe, never hit the wire ──────
 
+// No library scan is running: the retry offers its work now.
+jest.mock("../scanActivity", () => ({ libraryScanRunning: jest.fn().mockResolvedValue(false) }));
 jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
 jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
 jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);

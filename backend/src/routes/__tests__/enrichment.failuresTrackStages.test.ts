@@ -4,6 +4,8 @@
  * kind of failure and resolves the ones whose subject is gone.
  */
 
+// No library scan is running: the retry offers its work now.
+jest.mock("../../workers/scanActivity", () => ({ libraryScanRunning: jest.fn().mockResolvedValue(false) }));
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
     requireAdmin: (_req: unknown, _res: unknown, next: () => void) => next(),
