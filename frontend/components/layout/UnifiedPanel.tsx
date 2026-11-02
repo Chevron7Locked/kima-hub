@@ -115,7 +115,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             <aside
                 id="activity-panel"
                 aria-label="listening and activity"
-                className="absolute inset-y-0 right-0 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                className="absolute inset-y-0 right-0 overflow-hidden rounded-lg border border-[var(--border-chrome)] bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
                 style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
             >
                 {/* Closed, the panel is a handle, like the left library's. */}
@@ -160,12 +160,13 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                                     value={main}
                                     onChange={setMain}
                                     className="min-w-0 flex-1"
+                                    prominent
                                     options={[
                                         { key: "listening", label: "listening" },
                                         { key: "activity", label: "activity", count: unread + downloads, urgent: true },
                                     ]}
                                 />
-                                <div className="flex items-center border-b border-white/[0.05] pr-1.5">
+                                <div className="flex items-center border-b border-[var(--border-chrome)] pr-1.5">
                                     <button
                                         ref={hideRef}
                                         type="button"

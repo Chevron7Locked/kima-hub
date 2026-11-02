@@ -273,7 +273,7 @@ export function Sidebar() {
                         "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] transition-colors duration-150",
                         isActive
                             ? "font-medium text-brand"
-                            : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+                            : "text-[var(--text-primary)]"
                     )}
                 >
                     {playlist.name}
@@ -293,8 +293,8 @@ export function Sidebar() {
     };
 
     const sectionLabel = (label: string, count: number, action?: ReactNode) => (
-        <h2 className="sticky top-0 z-[2] flex items-center justify-between gap-2 bg-[var(--bg-secondary)] px-2 pb-1 pt-2.5 text-micro font-normal text-[var(--text-muted)]">
-            <span className="tracking-[0.06em]">{label}</span>
+        <h2 className="sticky top-0 z-[2] flex items-center justify-between gap-2 bg-[var(--bg-chrome)] px-2 pb-1 pt-3 text-micro font-medium text-[var(--text-secondary)]">
+            <span className="tracking-[0.02em]">{label}</span>
             <span className="flex items-center gap-1.5">
                 {action}
                 <span className="tabular-nums">{count}</span>
@@ -395,7 +395,7 @@ export function Sidebar() {
             {/* The rail: surfaces at the top, the four corners of the library at
                 the foot. */}
             <nav
-                className="relative z-[1] flex w-14 shrink-0 flex-col items-center justify-between border-r border-white/[0.05] bg-[#070707] py-2.5"
+                className="relative z-[1] flex w-14 shrink-0 flex-col items-center justify-between border-r border-[var(--border-chrome)] bg-[var(--bg-chrome)] py-2.5"
                 aria-label="main navigation"
             >
                 <div className="flex flex-col items-center gap-1">
@@ -410,15 +410,15 @@ export function Sidebar() {
                 place. */}
             <div
                 className={cn(
-                    "flex shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
+                    "flex shrink-0 flex-col overflow-hidden bg-[var(--bg-chrome)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
                     collapsed && "pointer-events-none absolute inset-y-0 left-14 opacity-0"
                 )}
                 style={{ width: PANEL_WIDTH, transform: collapsed ? `translateX(-${PANEL_WIDTH - HANDLE_WIDTH}px)` : "none" }}
                 inert={collapsed}
                 aria-hidden={collapsed || undefined}
             >
-                <div className="flex h-11 shrink-0 items-center justify-between pl-2.5 pr-1.5">
-                    <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)]">
+                <div className="flex h-11 shrink-0 items-center justify-between pl-3 pr-1.5">
+                    <span className="truncate text-sm font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
                         library
                     </span>
                     <span className="flex items-center gap-0.5">
@@ -634,7 +634,7 @@ export function Sidebar() {
                     )}
                 </nav>
 
-                <div className="flex h-9 shrink-0 items-center justify-between border-t border-white/[0.05] px-3 text-xs text-[var(--text-muted)]">
+                <div className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--border-chrome)] px-3 text-xs text-[var(--text-secondary)]">
                     <Link
                         href="/playlists"
                         prefetch={false}
@@ -660,7 +660,7 @@ export function Sidebar() {
                     }}
                     aria-label="show library"
                     title="show library"
-                    className="group flex w-4 shrink-0 flex-col items-center border-l border-white/[0.05] bg-[#0b0b0b] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
+                    className="group flex w-4 shrink-0 flex-col items-center border-l border-[var(--border-chrome)] bg-[var(--bg-chrome)] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
                 >
                     <ChevronRight
                         aria-hidden="true"
@@ -689,7 +689,7 @@ export function Sidebar() {
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
                     <aside
-                        className="absolute inset-y-0 left-0 flex overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                        className="absolute inset-y-0 left-0 flex overflow-hidden rounded-lg border border-[var(--border-chrome)] bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
                         style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                     >
                         {sidebarContent}

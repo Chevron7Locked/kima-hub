@@ -21,7 +21,7 @@ export function PanelHeading({
 }) {
     return (
         <div className={cn("flex h-11 shrink-0 items-center justify-between gap-2 pl-3 pr-1.5", className)}>
-            <h2 className="flex min-w-0 items-baseline gap-2 truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)]">
+            <h2 className="flex min-w-0 items-baseline gap-2 truncate text-sm font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
                 {label}
                 {count !== undefined && (
                     <span className="text-[11px] font-normal tabular-nums text-[var(--text-muted)]">{count}</span>
@@ -58,6 +58,7 @@ export function PanelOptions<K extends string>({
     label,
     controls,
     className,
+    prominent = false,
 }: {
     options: PanelOption<K>[];
     /** The chosen option; null while the region shows something none of them names (a page's settings). */
@@ -67,13 +68,15 @@ export function PanelOptions<K extends string>({
     /** The id of the region the options switch, for aria-controls. */
     controls: string;
     className?: string;
+    /** The panel's own top level: the size of a panel heading, as the left panel's "library" is. */
+    prominent?: boolean;
 }) {
     return (
         <div
             role="tablist"
             aria-label={label}
             onKeyDown={(e) => tabListKeyDown(e, options.map((o) => o.key), value ?? options[0]?.key ?? ("" as K), onChange)}
-            className={cn("flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-white/[0.05] px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
+            className={cn("flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-[var(--border-chrome)] px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
         >
             {options.map((option, i) => {
                 const current = option.key === value;
@@ -90,7 +93,8 @@ export function PanelOptions<K extends string>({
                         tabIndex={tabStop ? 0 : -1}
                         onClick={() => onChange(option.key)}
                         className={cn(
-                            "flex h-8 shrink-0 items-center gap-1 text-xs outline-none transition-colors duration-150",
+                            "flex shrink-0 items-center gap-1 outline-none transition-colors duration-150",
+                            prominent ? "h-11 text-sm font-medium" : "h-8 text-xs",
                             "focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-brand/60",
                             current
                                 ? "text-[var(--text-primary)]"

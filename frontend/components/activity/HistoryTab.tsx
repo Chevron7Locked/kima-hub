@@ -131,7 +131,7 @@ export function HistoryTab() {
 function Section({ label, count, children }: { label: string; count: number; children: ReactNode }) {
     return (
         <section className="pb-2">
-            <h3 className="sticky top-0 z-10 flex items-baseline gap-2 bg-[var(--bg-secondary)]/95 px-4 py-2 backdrop-blur-sm">
+            <h3 className="sticky top-0 z-10 flex items-baseline gap-2 bg-[var(--bg-chrome)]/95 px-4 py-2 backdrop-blur-sm">
                 <span className="text-[0.6875rem] tracking-[0.12em] text-[var(--text-muted)]">{label}</span>
                 <span className="text-[0.6875rem] tabular-nums text-[var(--text-muted)] opacity-60">{count}</span>
             </h3>
