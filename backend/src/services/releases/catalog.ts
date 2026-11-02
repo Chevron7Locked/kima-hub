@@ -115,7 +115,7 @@ export const RELEASES: Release[] = [
         title: "Kima 1.12",
         summary:
             "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
-        date: "2026-10-30",
+        date: "2026-11-02",
         items: [
             {
                 kind: "note",
