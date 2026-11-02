@@ -307,6 +307,7 @@ export const RELEASES: Release[] = [
                     "- When a podcast episode ends, the show's next episode plays; an episode you've heard 95% of counts as finished, and a finished one stays finished\n" +
                     "- The collection's Refine panel fits the screen at every size\n" +
                     "- Settings is five pages: you, and for admins library, sources, server and people; re-filing albums is a button that stays\n" +
+                    "- Shuffle All draws from your whole library, not the same first few hundred songs\n" +
                     "- Touch screens: controls that appear on hover now show on tap too\n" +
                     "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
                     "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library\n" +
