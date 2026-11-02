@@ -49,9 +49,9 @@ interface Playlist {
 
 const COLLAPSE_KEY = "kima:library-collapsed";
 const OPEN_WIDTH = 256;
-const CLOSED_WIDTH = 74;
-/** The collapsed handle's width (its `w-4`); the panel slides to exactly this far from the rail so its edge travels with the box's. */
-const HANDLE_WIDTH = 16;
+const CLOSED_WIDTH = 82;
+/** The collapsed handle's width (its `w-6`); the panel slides to exactly this far from the rail so its edge travels with the box's. */
+const HANDLE_WIDTH = 24;
 /** The library panel's own width beside the 56px rail, inside the 1px border: fixed, so a slide never squeezes it. */
 const PANEL_WIDTH = OPEN_WIDTH - 56 - 2;
 
@@ -660,7 +660,7 @@ export function Sidebar() {
                     }}
                     aria-label="show library"
                     title="show library"
-                    className="group flex w-4 shrink-0 flex-col items-center border-l border-[var(--border-chrome)] bg-[var(--bg-chrome)] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
+                    className="group flex w-6 shrink-0 flex-col items-center border-l border-[var(--border-chrome)] bg-[var(--bg-chrome)] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
                 >
                     <ChevronRight
                         aria-hidden="true"

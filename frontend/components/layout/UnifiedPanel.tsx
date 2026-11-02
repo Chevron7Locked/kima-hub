@@ -26,7 +26,7 @@ type Listening = "up-next" | "lyrics" | "about";
 type Main = "listening" | "activity";
 
 const OPEN_WIDTH = 380;
-const CLOSED_WIDTH = 16;
+const CLOSED_WIDTH = 24;
 // The tab not showing stays laid out under the other, so its scroll position and row sizes survive; inert and
 // invisible keep it out of the tab order and the accessibility tree.
 const pane = "flex min-h-0 flex-1 flex-col";
@@ -131,7 +131,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                     aria-label="open panel"
                     title="open panel"
                     className={cn(
-                        "group absolute inset-y-0 left-0 z-(--z-raised) flex w-4 flex-col items-center pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60",
+                        "group absolute inset-y-0 left-0 z-(--z-raised) flex w-6 flex-col items-center pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60",
                         isOpen && "pointer-events-none opacity-0",
                     )}
                 >
