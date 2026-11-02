@@ -29,7 +29,8 @@ import router from "../tracks";
 jest.setTimeout(600_000);
 
 const PREFIX = "rad_";
-const LISTENER = `${PREFIX}listener`;
+// The synthetic library's first listener: the one with plays (seedSyntheticLibrary), whose own plays favorites and discovery read.
+const LISTENER = `${PREFIX}user1`;
 const LIMIT = 20;
 const CALLS = 10;
 
@@ -70,6 +71,13 @@ beforeAll(async () => {
     lib = await seedSyntheticLibrary(PREFIX);
     await seedSyntheticMoods(PREFIX);
     await prisma.$transaction((tx) => buildMoodState(tx));
+    // The fixture writes a song's plays all at one instant, which the listen rule counts as one listen. Spread them a
+    // day apart so the plays the fixture says a listener has are that many listens.
+    await prisma.$executeRaw`
+        UPDATE "Play" p SET "playedAt" = now() - n.k * interval '1 day'
+        FROM (SELECT id, row_number() OVER (PARTITION BY "userId", "trackId" ORDER BY id) AS k FROM "Play"
+              WHERE "userId" LIKE ${PREFIX + "%"}) n
+        WHERE p.id = n.id`;
     rows = await loadRows(PREFIX, lib.user1);
     byId = new Map(rows.map((r) => [r.id, r]));
     for (const [, recipe] of STATIONS) members.set(recipe, new Set(await pickRecipeStation(recipe, { limit: 100_000 })));
@@ -129,8 +137,8 @@ interface Branch {
 }
 
 const branches: Branch[] = [
-    { name: "discovery", query: { type: "discovery" }, clause: (r) => r.plays === 0 },
-    { name: "favorites", query: { type: "favorites" }, clause: (r) => r.plays > 0 },
+    { name: "discovery", query: { type: "discovery" }, clause: (r) => r.playsUser1 === 0 },
+    { name: "favorites", query: { type: "favorites" }, clause: (r) => r.playsUser1 > 0 },
     { name: "decade 1990", query: { type: "decade", value: 1990 },
       clause: (r) => year(r) !== null && year(r)! >= 1990 && year(r)! < 2000 },
     { name: "decade 1970", query: { type: "decade", value: 1970 },
@@ -192,11 +200,11 @@ describe.each(branches)("radio: $name", (b) => {
 describe("radio: favorites weighting", () => {
     it("leans toward tracks played more, without being limited to the top few", async () => {
         const results = (await calls({ type: "favorites", limit: LIMIT }, 15)).flat();
-        const played = rows.filter((r) => playable(r) && r.plays > 0);
-        const meanAll = played.reduce((s, r) => s + r.plays, 0) / played.length;
-        const meanReturned = results.reduce((s, t) => s + byId.get(t.id)!.plays, 0) / results.length;
+        const played = rows.filter((r) => playable(r) && r.playsUser1 > 0);
+        const meanAll = played.reduce((s, r) => s + r.playsUser1, 0) / played.length;
+        const meanReturned = results.reduce((s, t) => s + byId.get(t.id)!.playsUser1, 0) / results.length;
         expect(meanReturned).toBeGreaterThan(meanAll);
-        const topTen = new Set([...played].sort((a, b) => b.plays - a.plays).slice(0, 10).map((r) => r.id));
+        const topTen = new Set([...played].sort((a, b) => b.playsUser1 - a.playsUser1).slice(0, 10).map((r) => r.id));
         const distinct = new Set(results.map((t) => t.id));
         expect([...distinct].filter((id) => !topTen.has(id)).length).toBeGreaterThan(100);
     });
@@ -528,24 +536,24 @@ describe("radio: bad requests", () => {
 describe("radio: discovery falls back to the least-played tracks when fewer than `limit` are unplayed", () => {
     const BIG = 50;
     beforeAll(async () => {
-        const unplayed = rows.filter((r) => r.plays === 0).map((r) => r.id);
+        const unplayed = rows.filter((r) => r.playsUser1 === 0).map((r) => r.id);
         // Leave 30 tracks unplayed (fewer than the 50 asked for); everything else unplayed gets one play.
         const giveOne = unplayed.slice(30);
-        await prisma.play.createMany({ data: giveOne.map((trackId) => ({ userId: lib.user2, trackId })) });
-        for (const id of giveOne) byId.get(id)!.plays = 1;
+        await prisma.play.createMany({ data: giveOne.map((trackId) => ({ userId: lib.user1, trackId })) });
+        for (const id of giveOne) byId.get(id)!.playsUser1 = 1;
         rows = [...byId.values()];
     });
 
     it("returns the limit, only from the tracks with the fewest plays, from across the library", async () => {
         const results = await calls({ type: "discovery", limit: BIG });
-        const fewest = rows.filter((r) => playable(r) && r.plays <= 1);
+        const fewest = rows.filter((r) => playable(r) && r.playsUser1 <= 1);
         expect(fewest.length).toBeGreaterThan(BIG * 10);
         for (const tracks of results) {
             expect(tracks).toHaveLength(BIG);
             expect(new Set(tracks.map((t) => t.id)).size).toBe(BIG);
         }
         const ids = results.flat().map((t) => t.id);
-        expect(ids.filter((id) => byId.get(id)!.plays > 1)).toEqual([]);
+        expect(ids.filter((id) => byId.get(id)!.playsUser1 > 1)).toEqual([]);
         const span = spanOf(ids, fewest.map((r) => r.id));
         expect(span.distinct).toBeGreaterThan(BIG * 3);
         expect(span.lowest).toBeLessThan(1 / 3);
@@ -556,7 +564,7 @@ describe("radio: discovery falls back to the least-played tracks when fewer than
 describe("radio: favorites with no plays at all returns random tracks", () => {
     beforeAll(async () => {
         await prisma.play.deleteMany({ where: { userId: { startsWith: PREFIX } } });
-        for (const r of rows) r.plays = 0;
+        for (const r of rows) r.playsUser1 = 0;
     });
 
     it("returns the limit of playable tracks drawn from the whole library", async () => {

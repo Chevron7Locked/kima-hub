@@ -13,6 +13,7 @@ const TRACKS = 20_000;
 const PLAYED = 10_000;
 const PLAYS_PER_PLAYED = 30;
 const MISSING_FROM = 15_000; // tracks 15000.. have a missing file
+const USER = `${PREFIX}user`;
 const id = (i: number) => `${PREFIX}trk_${String(i).padStart(6, "0")}`;
 
 async function cleanup() {
@@ -51,7 +52,7 @@ afterAll(async () => {
 describe("unplayedTrackIds on a bulk-written, never-analysed table", () => {
     it("returns every unplayed track, in id order, in seconds", async () => {
         const t0 = Date.now();
-        const ids = await unplayedTrackIds();
+        const ids = await unplayedTrackIds({ userId: USER });
         const ms = Date.now() - t0;
         expect(ids).toEqual(Array.from({ length: TRACKS - PLAYED }, (_, k) => id(PLAYED + k)));
         expect(ms).toBeLessThan(5_000);
@@ -59,17 +60,20 @@ describe("unplayedTrackIds on a bulk-written, never-analysed table", () => {
 
     it("leaves out tracks whose file is missing when asked", async () => {
         const t0 = Date.now();
-        const ids = await unplayedTrackIds({ excludeMissing: true });
+        const ids = await unplayedTrackIds({ userId: USER, excludeMissing: true });
         const ms = Date.now() - t0;
         expect(ids).toEqual(Array.from({ length: MISSING_FROM - PLAYED }, (_, k) => id(PLAYED + k)));
         expect(ms).toBeLessThan(5_000);
     });
 
-    it("counts a play by any user", async () => {
+    it("counts only this listener's plays: another user's play of a song leaves it unplayed", async () => {
         await prisma.user.create({ data: { id: `${PREFIX}user2`, username: `${PREFIX}user2`, passwordHash: "x" } });
         await prisma.play.create({ data: { id: `${PREFIX}extra`, userId: `${PREFIX}user2`, trackId: id(PLAYED) } });
-        const ids = await unplayedTrackIds();
-        expect(ids[0]).toBe(id(PLAYED + 1));
-        expect(ids).toHaveLength(TRACKS - PLAYED - 1);
+        const mine = await unplayedTrackIds({ userId: USER });
+        expect(mine[0]).toBe(id(PLAYED));
+        expect(mine).toHaveLength(TRACKS - PLAYED);
+        const theirs = await unplayedTrackIds({ userId: `${PREFIX}user2` });
+        expect(theirs).not.toContain(id(PLAYED));
+        expect(theirs).toHaveLength(TRACKS - 1);
     });
 });

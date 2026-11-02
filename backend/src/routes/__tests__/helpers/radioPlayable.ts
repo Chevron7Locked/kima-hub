@@ -2,10 +2,14 @@ import express from "express";
 import { prisma } from "../../../utils/db";
 import router from "../../library/tracks";
 
-/** The tracks router mounted at "/", as the radio playable tests call it. */
-export function radioApp() {
+/** The tracks router mounted at "/", as the radio playable tests call it, with `userId` as the signed-in listener. */
+export function radioApp(userId?: string) {
     const app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+        if (userId) req.user = { id: userId, username: userId, role: "user" } as typeof req.user;
+        next();
+    });
     app.use("/", router);
     return app;
 }

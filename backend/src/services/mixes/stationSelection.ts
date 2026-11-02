@@ -2,6 +2,7 @@
  * Which songs a radio station plays: the one selection both GET /library/radio and the station tiles' covers
  * (POST /library/radio/covers) read, so a tile's cover is the cover of a song the station itself would play.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { getMergedGenres } from "../../utils/metadataOverrides";
@@ -19,6 +20,7 @@ import {
 import { pickNightStationPage } from "../mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../mixes/stationOrder";
 import { resolveMoodStation } from "../mixes/stations";
+import { listenRows } from "../stats/listens";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
 
@@ -57,6 +59,22 @@ function parseStationRequest(query: Record<string, unknown>, limit: number, list
 }
 
 
+/** The reply for a listener-only station asked without a listener: there is no one whose plays to read. */
+const SIGN_IN_REQUIRED: RadioReply = { status: 401, body: { error: "This station is built from your own plays; sign in to use it" } };
+
+/**
+ * How many listens this listener has of each of these songs (stats/listens.ts: the app's one definition, which folds
+ * repeated rows of one listen into a single count). Songs they never listened to are absent.
+ */
+async function listensOf(userId: string, trackIds: string[]): Promise<Map<string, number>> {
+  const rows = await prisma.$queryRaw<{ trackId: string; n: number }[]>(Prisma.sql`
+    ${listenRows(userId)}
+    SELECT p."trackId" AS "trackId", count(*)::int AS n FROM p
+    WHERE p."trackId" = ANY(${trackIds}::text[])
+    GROUP BY p."trackId"`);
+  return new Map(rows.map((r) => [r.trackId, r.n]));
+}
+
 /** A selection that ends the request with this reply instead of songs. */
 export interface RadioReply {
   status: number;
@@ -81,15 +99,16 @@ export async function selectRadioTracks(
 
   switch (type) {
     case "discovery": {
+      if (!listener) return { reply: SIGN_IN_REQUIRED };
       const unplayed = drawIds(
-        await unplayedTrackIds({ excludeMissing: true, excludeCorrupt: true }),
+        await unplayedTrackIds({ userId: listener, excludeMissing: true, excludeCorrupt: true }),
         limitNum * 2,
       );
 
       if (unplayed.length >= limitNum) {
         trackIds = unplayed;
       } else {
-        // The least played of every unplayed track and a random draw of the
+        // The least played (by this listener) of every unplayed track and a random draw of the
         // others, so plays are counted for that draw, not the whole library.
         const candidates = [
           ...new Set([
@@ -97,12 +116,7 @@ export async function selectRadioTracks(
             ...(await sampleTrackIds({ where: PLAYABLE, take: limitNum * 10 })),
           ]),
         ];
-        const playCounts = await prisma.play.groupBy({
-          by: ["trackId"],
-          where: { trackId: { in: candidates } },
-          _count: { trackId: true },
-        });
-        const playsOf = new Map(playCounts.map((p) => [p.trackId, p._count.trackId]));
+        const playsOf = await listensOf(listener, candidates);
         trackIds = candidates
           .sort((a, b) => (playsOf.get(a) ?? 0) - (playsOf.get(b) ?? 0))
           .slice(0, limitNum * 2);
@@ -111,25 +125,24 @@ export async function selectRadioTracks(
     }
 
     case "favorites": {
-      const mostPlayedTracks = await prisma.$queryRaw<
-        { id: string; play_count: bigint }[]
-      >`
-                  SELECT t.id, COUNT(p.id) as play_count
-                  FROM "Track" t
-                  JOIN "Album" a ON a.id = t."albumId"
-                  LEFT JOIN "Play" p ON p."trackId" = t.id
-                  WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
-                  GROUP BY t.id
-                  HAVING COUNT(p.id) > 0
-                  ORDER BY -LN(1 - random()) / COUNT(p.id) ASC
-                  LIMIT ${limitNum * 2}
-              `;
+      if (!listener) return { reply: SIGN_IN_REQUIRED };
+      // This listener's own listens, drawn in proportion to how many each song has.
+      const mostPlayedTracks = await prisma.$queryRaw<{ id: string; play_count: number }[]>(Prisma.sql`
+        ${listenRows(listener)}
+        SELECT t.id, count(*)::int AS play_count
+        FROM p
+        JOIN "Track" t ON t.id = p."trackId"
+        JOIN "Album" a ON a.id = t."albumId"
+        WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+        GROUP BY t.id
+        ORDER BY -LN(1 - random()) / count(*) ASC
+        LIMIT ${limitNum * 2}`);
 
       if (mostPlayedTracks.length > 0) {
         trackIds = mostPlayedTracks.map((t) => t.id);
       } else {
         logger.debug(
-          "[Radio:favorites] No play data found, returning random tracks",
+          "[Radio:favorites] No plays by this listener, returning random tracks",
         );
         trackIds = await sampleTrackIds({
           where: {},

@@ -123,7 +123,7 @@ function cappedSize(match: Row[], limit: number): number {
 const cases: Case[] = [
     // ---- weekly mixes (20 tracks) ----
     { name: "Deep Cuts", size: 20, seeded: true, run: (d) => mood.generateDeepCuts(lib.user1, d),
-      clause: (r) => r.plays === 0 },
+      clause: (r) => r.playsUser1 === 0 },
     { name: "Key Journey", size: 20, seeded: true, run: (d) => mood.generateKeyJourney(lib.user1, d),
       clause: (r) => done(r) && r.key !== null },
     { name: "Tempo Flow", size: 20, seeded: true, run: (d) => mood.generateTempoFlow(lib.user1, d),
@@ -563,17 +563,17 @@ describe("Genre mix", () => {
 });
 
 describe("a day's draw when one song leaves the candidates", () => {
-    it("Deep Cuts keeps its other 19 songs when someone plays one of them", async () => {
+    it("Deep Cuts keeps its other 19 songs when the listener plays one of them", async () => {
         const before = (await mood.generateDeepCuts(lib.user1, dates[0]))!;
         const played = before.trackIds[5];
-        await prisma.play.create({ data: { userId: lib.user2, trackId: played } });
+        await prisma.play.create({ data: { userId: lib.user1, trackId: played } });
         try {
             const after = (await mood.generateDeepCuts(lib.user1, dates[0]))!;
             expect(after.trackIds).toHaveLength(20);
             expect(after.trackIds).not.toContain(played);
             expect(after.trackIds.filter((id) => before.trackIds.includes(id))).toHaveLength(19);
         } finally {
-            await prisma.play.deleteMany({ where: { userId: lib.user2, trackId: played } });
+            await prisma.play.deleteMany({ where: { userId: lib.user1, trackId: played } });
         }
     });
 

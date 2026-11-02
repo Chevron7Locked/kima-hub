@@ -14,6 +14,7 @@ import { recipeMixGenerator } from "./recipeMix";
 import { weekdayOf } from "./mixDay";
 import { STEADY_BEAT } from "./recipes";
 import { spellingsOf } from "../stats/playable";
+import { listenRows } from "../stats/listens";
 
 const WEEKLY_TRACK_LIMIT = 20;
 
@@ -156,7 +157,7 @@ export const generateNostalgicMix = recipeMixGenerator({
 });
 
 export async function generateDeepCuts(
-    _userId: string,
+    userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
     const spec = {
@@ -169,12 +170,18 @@ export async function generateDeepCuts(
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
     };
-    // Songs nobody has played; when fewer than 15 are, songs played three times or fewer.
+    // Songs this listener has not played; when fewer than 15 are, songs they have listened to three times or fewer
+    // (listens as stats/listens.ts counts them, as the favorites station does).
     return (
-        (await sampledMix({ ...spec, where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)` })) ??
+        (await sampledMix({
+            ...spec,
+            where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${userId})`,
+        })) ??
         sampledMix({
             ...spec,
-            where: Prisma.sql`t.id NOT IN (SELECT p."trackId" FROM "Play" p GROUP BY p."trackId" HAVING count(*) > 3)`,
+            where: Prisma.sql`t.id NOT IN (
+                ${listenRows(userId)}
+                SELECT p."trackId" FROM p GROUP BY p."trackId" HAVING count(*) > 3)`,
         })
     );
 }

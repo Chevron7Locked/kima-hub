@@ -350,17 +350,17 @@ export async function seededTracks<I extends Prisma.TrackInclude>(args: {
 }
 
 /**
- * Ids of every library song no user has played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
+ * Ids of every library song this listener has not played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
  * `NOT IN (SELECT ...)`, which Postgres rescans per track once Play is too large to hash (1.5 minutes at 105,000 plays).
  * `excludeMissing` and `excludeCorrupt` together are the PLAYABLE rule.
  */
 export async function unplayedTrackIds(
-    args: { excludeMissing?: boolean; excludeCorrupt?: boolean } = {}
+    args: { userId: string; excludeMissing?: boolean; excludeCorrupt?: boolean }
 ): Promise<string[]> {
     const rows = await prisma.$queryRaw<{ id: string }[]>`
         SELECT t.id
         FROM "Track" t
-        WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id)
+        WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${args.userId})
           AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
           AND (${!args.excludeMissing} OR t."missingSince" IS NULL)
           AND (${!args.excludeCorrupt} OR t.corrupt = false)

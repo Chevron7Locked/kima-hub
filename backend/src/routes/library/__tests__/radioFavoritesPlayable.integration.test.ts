@@ -12,10 +12,10 @@ jest.setTimeout(120_000);
 
 const P = "rfp_";
 const LIMIT = 20;
-const app = radioApp();
+const app = radioApp(`${P}user`);
 
-// Track groups, by number: 0-29 missing file, 10 plays each; 30-39 corrupt, 10 plays each;
-// 40-99 playable, 1 play each; 100-119 playable, never played.
+// Track groups, by number: 0-29 missing file and 30-39 corrupt, each with 10 play rows at one instant (one listen);
+// 40-99 playable, 1 play each; 100-119 playable, never played. Weighting is tested in radio.integration.
 beforeAll(async () => {
     await seedPlayableLibrary(P, { label: "Fav", trackCount: 120, missing: [0, 29], corrupt: [30, 39] });
     await prisma.$executeRaw`

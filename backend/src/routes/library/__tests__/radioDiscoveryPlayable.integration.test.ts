@@ -12,7 +12,7 @@ jest.setTimeout(120_000);
 
 const P = "rdp_";
 const LIMIT = 20;
-const app = radioApp();
+const app = radioApp(`${P}user`);
 
 // Track groups, by number: 0-1 playable and unplayed; 2-29 unplayed with a missing file;
 // 30-39 unplayed and corrupt; 40-79 playable and played once.

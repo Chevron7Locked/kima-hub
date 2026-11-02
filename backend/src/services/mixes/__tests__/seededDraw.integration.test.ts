@@ -9,7 +9,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import { getEffectiveDecadeWhereClause } from "../../../utils/dateFilters";
 import { NOT_MISSING } from "../../../utils/libraryEligibility";
-import { drawIds, getSeededRandom, sampledMix, seededOrder, seededTrackIds, unplayedTrackIds } from "../helpers";
+import { drawIds, getSeededRandom, sampledMix, seededOrder, seededTrackIds } from "../helpers";
 import { generateRandomDiscoveryMix, generateRediscoverMix } from "../discoveryMixes";
 import {
     generateDeepCuts,
@@ -191,15 +191,28 @@ describe("each mix that draws in the database picks what its Prisma filter picks
 
     it("Deep Cuts: songs nobody has played, and songs played three times or fewer when too few are", async () => {
         const seed = seedOf(`deep-cuts-${DAY}`);
-        const unplayed = (await unplayedTrackIds({ excludeMissing: true })).filter((id) => id.startsWith(PREFIX));
+        // Deep Cuts is the listener's own: songs USER has not played.
+        const unplayed = (
+            await prisma.track.findMany({
+                where: { ...NOT_MISSING, id: { startsWith: PREFIX }, album: { location: "LIBRARY" }, plays: { none: { userId: USER } } },
+                select: { id: true },
+                orderBy: { id: "asc" },
+            })
+        ).map((t) => t.id);
         expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(await capped(drawIds(unplayed, unplayed.length, seed)));
 
-        // Everyone has played every song once more: nobody's songs are unplayed, the low-play songs are drawn.
-        await prisma.play.createMany({ data: unplayed.map((id) => ({ id: `${PREFIX}x_${id}`, userId: OTHER, trackId: id })) });
+        // The fixture writes a song's plays at one instant, which the listen rule counts as one listen: spread USER's
+        // plays a day apart so the rows counted below are that many listens.
+        await prisma.$executeRaw`
+            UPDATE "Play" p SET "playedAt" = now() - n.k * interval '1 day'
+            FROM (SELECT id, row_number() OVER (PARTITION BY "trackId" ORDER BY id) AS k FROM "Play" WHERE "userId" = ${USER}) n
+            WHERE p.id = n.id`;
+        // USER has now played every song once more: none is unplayed for them, the low-play songs are drawn.
+        await prisma.play.createMany({ data: unplayed.map((id) => ({ id: `${PREFIX}x_${id}`, userId: USER, trackId: id })) });
         try {
             const counts = await prisma.track.findMany({
                 where: { ...NOT_MISSING, id: { startsWith: PREFIX }, album: { location: "LIBRARY" } },
-                select: { id: true, _count: { select: { plays: true } } },
+                select: { id: true, _count: { select: { plays: { where: { userId: USER } } } } },
             });
             const lowPlay = counts.filter((t) => t._count.plays <= 3).map((t) => t.id);
             expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(await capped(drawIds(lowPlay, lowPlay.length, seed)));

@@ -69,7 +69,7 @@ beforeAll(async () => {
     for (const u of ["a", "b"]) await prisma.user.create({ data: { id: `${P}${u}`, username: `${P}${u}`, passwordHash: "x" } });
     for (let n = 0; n < LIBRARY_ALBUMS; n++) await addAlbum(n, "LIBRARY", TRACKS_PER_ALBUM, coverOf(n), 1990);
     await addAlbum(100, "DISCOVER", DISCOVER_TRACKS, DISCOVER_COVER, 1990);
-    // Everyone's plays make Favorites: library songs of albums 0-5, and some Discover ones that must never count.
+    // Favorites are the listener's own plays (a's): library songs of albums 0-5, and some Discover ones that must never count.
     await prisma.$executeRaw`
         INSERT INTO "Play" (id, "userId", "trackId")
         SELECT ${P + "fav_"} || n || '_' || i, ${P + "a"}, ${P + "trk_"} || n || '_' || lpad(i::text, 3, '0')
