@@ -10,9 +10,27 @@ import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { Button } from "@/components/ui/Button";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { copyText } from "@/lib/clipboard";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export function AccountSection() {
-    const { user } = useAuth();
+    const { user, deleteAccount } = useAuth();
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
+
+    // Signs the person out on success (deleteAccount); a refusal, such as for the last admin, shows on the row.
+    const handleDeleteAccount = async () => {
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+            await deleteAccount();
+            // Stays busy while the sign-in page loads, so the account can't be asked to go twice.
+        } catch (error) {
+            setDeleteError(error instanceof Error ? error.message : "Couldn't delete the account");
+            setConfirmingDelete(false);
+            setDeleting(false);
+        }
+    };
 
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
@@ -301,7 +319,31 @@ export function AccountSection() {
                         </div>
                     </div>
                 )}
+                <SettingsRow
+                    label="Delete account"
+                    description={deleteError ?? "Deletes your account and everything that is yours here: playlists, plays, likes and settings."}
+                >
+                    <button
+                        onClick={() => setConfirmingDelete(true)}
+                        className="text-xs text-danger-light hover:brightness-125 transition-colors"
+                    >
+                        Delete
+                    </button>
+                </SettingsRow>
             </SettingsSection>
+
+            <ConfirmDialog
+                isOpen={confirmingDelete}
+                onClose={() => setConfirmingDelete(false)}
+                onConfirm={() => void handleDeleteAccount()}
+                title="Delete your account?"
+                message="Your account, playlists, plays, likes and settings are deleted. This can't be undone."
+                confirmText="Delete account"
+                cancelText="Keep it"
+                variant="danger"
+                busy={deleting}
+                closeOnConfirm={false}
+            />
 
             <Modal isOpen={showRecoveryCodes} onClose={closeRecoveryCodes} title="Recovery Codes">
                 <div className="space-y-4">

@@ -667,6 +667,12 @@ class ApiClient {
         this.clearToken();
     }
 
+    /** Deletes the signed-in person's own account and everything that is theirs; the last admin is refused (409). */
+    async deleteAccount() {
+        await this.request<{ deleted: boolean }>("/auth/account", { method: "DELETE" });
+        this.clearToken();
+    }
+
     async getCurrentUser() {
         return this.request<{
             id: string;

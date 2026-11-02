@@ -50,6 +50,8 @@ Older versions could file an album under the wrong artist: a band name cut at "a
 
 **Settings > People** creates accounts with a username, a password of at least 6 characters and a role of User or Admin, and deletes them. Administrators see the server-wide settings; users see only their own. Each account has its own plays, playlists and Subsonic tokens.
 
+Anyone can delete their own account under **Settings > You > Account > Delete account**: it asks first, deletes the account with its playlists, plays, likes and settings, and signs them out. The server's only administrator can't delete their own account.
+
 If you are locked out of every administrator account, see `ADMIN_RESET_PASSWORD` in [configuration.md](configuration.md#common-options).
 
 ## Job queues
