@@ -54,9 +54,11 @@ router.get("/recently-listened", async (req, res) => {
           where: {
             userId,
             source: { in: ["LIBRARY", "DISCOVERY_KEPT"] },
+            // Various Artists and Unknown Artist name no one, so their plays give no artist card.
             track: {
               album: {
                 location: LIBRARY_LOCATION,
+                artist: { identityKey: { notIn: noOneKeys() } },
               },
             },
           },
