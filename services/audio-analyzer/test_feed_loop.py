@@ -11,29 +11,82 @@ import analyzer
 
 
 class FakeRedis:
+    """The queue is `queue`; every other list (the processing lists) is in `lists`."""
+
     def __init__(self, jobs):
         self.queue = [json.dumps(j) for j in jobs]
+        self.lists = {}
+        self.values = {}
         self.published = []
         self.lock = threading.Lock()
 
-    def blpop(self, _key, timeout=0):
-        with self.lock:
-            return (b"q", self.queue.pop(0)) if self.queue else None
+    def _list(self, key):
+        return self.queue if key == analyzer.ANALYSIS_QUEUE else self.lists.setdefault(key, [])
 
-    def lpop(self, _key):
+    def lmove(self, src, dst, wherefrom, whereto):
         with self.lock:
-            return self.queue.pop(0) if self.queue else None
+            source = self._list(src)
+            if not source:
+                return None
+            value = source.pop(0 if wherefrom == "LEFT" else -1)
+            target = self._list(dst)
+            target.insert(0 if whereto == "LEFT" else len(target), value)
+            return value
 
-    def lpush(self, _key, *values):
+    def blmove(self, src, dst, _timeout, wherefrom, whereto):
+        return self.lmove(src, dst, wherefrom, whereto)
+
+    def lrem(self, key, _count, value):
+        with self.lock:
+            items = self._list(key)
+            if value in items:
+                items.remove(value)
+                return 1
+            return 0
+
+    def lrange(self, key, _start, _end):
+        with self.lock:
+            return list(self._list(key))
+
+    def lpush(self, key, *values):
         with self.lock:
             for value in values:
-                self.queue.insert(0, value)
+                self._list(key).insert(0, value)
+
+    def pipeline(self):
+        return FakePipeline(self)
 
     def get(self, _key):
         return None
 
+    def set(self, key, value, ex=None):
+        self.values[key] = value
+
+    def exists(self, key):
+        return int(key in self.values)
+
+    def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
+
+    def scan_iter(self, match=None):
+        prefix = (match or "").rstrip("*")
+        return [k for k in list(self.lists) if k.startswith(prefix)]
+
     def publish(self, _channel, message):
         self.published.append(json.loads(message))
+
+
+class FakePipeline:
+    def __init__(self, r):
+        self.r, self.calls = r, []
+
+    def __getattr__(self, name):
+        return lambda *a: self.calls.append((name, a))
+
+    def execute(self):
+        for name, args in self.calls:
+            getattr(self.r, name)(*args)
 
 
 class FakeCursor:
@@ -92,6 +145,9 @@ def make_worker(jobs, workers, monkeypatch, run):
     monkeypatch.setattr(analyzer, "_analyze_track_in_process", run)
     w = analyzer.AnalysisWorker.__new__(analyzer.AnalysisWorker)
     w.redis = FakeRedis(jobs)
+    w.instance = "this-process"
+    w.processing_key = analyzer.PROCESSING_PREFIX + w.instance
+    w._last_recover = 0.0
     w.db = FakeDb({j["trackId"]: claim(j["jobId"]) for j in jobs if j.get("jobId")})
     w.executor = None
     w.pool_active = False
@@ -200,6 +256,7 @@ def test_a_failed_claim_lookup_puts_the_jobs_back_in_order(monkeypatch):
     with pytest.raises(RuntimeError):
         w._fill()
     assert [json.loads(x)["trackId"] for x in w.redis.queue] == ["a", "b", "c"]
+    assert w.redis.lists[w.processing_key] == [], "a job put back stayed on the processing list"
 
 
 def test_a_changed_gpu_switch_finishes_the_running_track_takes_nothing_new_and_stops(monkeypatch):
@@ -213,7 +270,7 @@ def test_a_changed_gpu_switch_finishes_the_running_track_takes_nothing_new_and_s
     jobs = [{"trackId": f"t{i}", "filePath": f"/m/{i}", "jobId": f"t{i}-1-r0"} for i in range(4)]
     w = make_worker(jobs, 1, monkeypatch, run)
     beats = []
-    w.redis.set = lambda key, value: beats.append((key, time.time()))
+    w.redis.set = lambda key, value, ex=None: beats.append((key, time.time()))
     w.db.connect = w.db.close = lambda: None
     w._check_control_signals = w._apply_pending_resize = lambda: None
     w._is_gate_closed = lambda: False
@@ -235,6 +292,83 @@ def test_a_changed_gpu_switch_finishes_the_running_track_takes_nothing_new_and_s
     assert not loop.is_alive(), "the worker kept running after the switch changed"
     assert [e["trackId"] for e in w.redis.published] == ["t0"]
     assert len(w.redis.queue) == 3, "it took new tracks after the switch changed"
+
+
+def test_a_job_stays_on_the_processing_list_until_it_is_answered(monkeypatch):
+    held = []
+
+    def run(args):
+        held.append([json.loads(x)["trackId"] for x in w.redis.lists.get(w.processing_key, [])])
+        time.sleep(0.05)
+        return args[0], args[1], dict(FEATURES)
+
+    jobs = [{"trackId": f"t{i}", "filePath": f"/m/{i}", "jobId": f"t{i}-1-r0"} for i in range(3)]
+    w = make_worker(jobs, 3, monkeypatch, run)
+    drain(w)
+    assert any(set(h) == {"t0", "t1", "t2"} for h in held), "the running jobs were not on the processing list"
+    assert w.redis.lists[w.processing_key] == [], "answered jobs were left on the processing list"
+
+
+def test_a_job_whose_claim_was_reissued_leaves_the_processing_list(monkeypatch):
+    jobs = [{"trackId": "a", "filePath": "/m/a", "jobId": "a-1-r0"}]
+    w = make_worker(jobs, 1, monkeypatch, lambda args: (args[0], args[1], dict(FEATURES)))
+    w.db.open_claims = {"a": (1, 1)}
+    w._fill()
+    assert w.redis.lists[w.processing_key] == []
+
+
+def test_a_job_whose_save_fails_still_leaves_the_processing_list(monkeypatch):
+    jobs = [{"trackId": "a", "filePath": "/m/a", "jobId": "a-1-r0"}]
+    w = make_worker(jobs, 1, monkeypatch, lambda args: (args[0], args[1], dict(FEATURES)))
+
+    def broken_save(_future, _job):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(w, "_finish", broken_save)
+    w._fill()
+    with pytest.raises(RuntimeError):
+        for _ in range(50):
+            w._collect(timeout=0.05)
+    assert w.redis.lists[w.processing_key] == []
+
+
+def test_an_entry_that_is_not_a_job_is_dropped_and_the_rest_are_taken(monkeypatch):
+    w = make_worker([{"trackId": "a", "filePath": "/m/a", "jobId": "a-1-r0"}], 2, monkeypatch, lambda args: None)
+    w.redis.queue.insert(0, "not json")
+    jobs = w._take_jobs(2, block=False)
+    assert [j["trackId"] for j in jobs] == ["a"]
+    assert [json.loads(x)["trackId"] for x in w.redis.lists[w.processing_key]] == ["a"]
+
+
+def test_a_failure_partway_through_taking_puts_the_taken_jobs_back(monkeypatch):
+    jobs = [{"trackId": t, "filePath": f"/m/{t}", "jobId": f"{t}-1-r0"} for t in ("a", "b", "c")]
+    w = make_worker(jobs, 3, monkeypatch, lambda args: None)
+    real, calls = w.redis.lmove, [0]
+
+    def flaky(*args):
+        calls[0] += 1
+        moved = real(*args)
+        if calls[0] == 2:
+            raise ConnectionError("socket timeout after the move")
+        return moved
+
+    w.redis.lmove = flaky
+    with pytest.raises(ConnectionError):
+        w._take_jobs(3, block=False)
+    assert [json.loads(x)["trackId"] for x in w.redis.queue] == ["a", "b", "c"]
+    assert w.redis.lists[w.processing_key] == []
+
+
+def test_the_loop_puts_a_stopped_process_jobs_back(monkeypatch):
+    w = make_worker([], 1, monkeypatch, lambda args: None)
+    w.redis.lists[analyzer.PROCESSING_PREFIX + "stopped"] = [json.dumps({"trackId": "x", "jobId": "x-1-r0"})]
+    w.db.connect = w.db.close = lambda: None
+    w.is_paused, w.pubsub, w._restarting, w.consecutive_errors = False, None, False, 0
+    w._last_work_time = time.time()
+    monkeypatch.setattr(analyzer.gpu_switch, "restart_needed", lambda switch: True)
+    w.start()
+    assert [json.loads(x)["trackId"] for x in w.redis.queue] == ["x"]
+    assert ("audio:analysis:alive:this-process" not in w.redis.values), "a stopped process kept its alive key"
 
 
 def test_setting_the_running_count_withdraws_a_queued_resize(monkeypatch):

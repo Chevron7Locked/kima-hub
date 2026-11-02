@@ -18,6 +18,7 @@ os.environ['MKL_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
 
 import json
+import uuid
 import re
 import time
 import logging
@@ -223,6 +224,13 @@ def map_va(axis: str, raw: float) -> float:
 DECODE_TIMEOUT = int(os.getenv('DECODE_TIMEOUT', '120'))
 
 ANALYSIS_QUEUE = 'audio:analysis:queue'
+# Each process moves the jobs it takes onto its own processing list and takes each off once answered, so a restart
+# or crash loses none: a list whose process stopped checking in goes back to the head of the queue, unchanged, and
+# the same claim is analysed by the next process instead of waiting out its lease on the server.
+PROCESSING_PREFIX = 'audio:analysis:processing:'
+ALIVE_PREFIX = 'audio:analysis:alive:'
+ALIVE_TTL_S = max(60, 6 * BRPOP_TIMEOUT)
+RECOVER_EVERY_S = 30
 
 # Control channel for enrichment coordination
 CONTROL_CHANNEL = 'audio:analysis:control'
@@ -719,6 +727,9 @@ class AnalysisWorker:
         self._pending_resize: int | None = None
         self._pending_resize_time: float = 0.0
         self._in_flight: Dict[Any, Tuple[Dict[str, Any], float]] = {}
+        self.instance = uuid.uuid4().hex
+        self.processing_key = PROCESSING_PREFIX + self.instance
+        self._last_recover = 0.0
         self._gpu_server = None
         self.musicnn_server = self._start_musicnn_server()
         self._setup_control_channel()
@@ -968,6 +979,10 @@ class AnalysisWorker:
                 try:
                     try:
                         self.redis.set("audio:worker:heartbeat", str(int(time.time() * 1000)))
+                        self._mark_alive()
+                        if time.time() - self._last_recover >= RECOVER_EVERY_S:
+                            self._last_recover = time.time()
+                            self._recover_stopped_processes()
                     except Exception:  # the next pass sets it again
                         pass
 
@@ -1035,28 +1050,98 @@ class AnalysisWorker:
                     time.sleep(BRPOP_TIMEOUT)
         finally:
             self._shutdown_pool()
+            # A stopping process holds nothing (what it was running is answered or put back by the next one).
+            try:
+                self.redis.delete(ALIVE_PREFIX + self.instance)
+            except Exception:
+                pass
             if self.pubsub:
                 self.pubsub.close()
                 logger.info("Control channel closed")
             self.db.close()
             logger.info("Worker stopped")
 
+    def _recover_stopped_processes(self) -> int:
+        """Put the jobs of every process that stopped checking in back at the head of the queue, in their order."""
+        moved = 0
+        for key in self.redis.scan_iter(match=PROCESSING_PREFIX + '*'):
+            key = key.decode() if isinstance(key, bytes) else key
+            instance = key[len(PROCESSING_PREFIX):]
+            if instance == self.instance or self.redis.exists(ALIVE_PREFIX + instance):
+                continue
+            while self.redis.lmove(key, ANALYSIS_QUEUE, 'RIGHT', 'LEFT') is not None:
+                moved += 1
+        if moved:
+            logger.info(f"Put {moved} job(s) of a stopped analyzer process back in the queue")
+        return moved
+
     def _take_jobs(self, room: int, block: bool) -> List[Dict[str, Any]]:
-        """Up to `room` jobs, oldest first; waits up to BRPOP_TIMEOUT for the first only when `block`."""
+        """Up to `room` jobs, oldest first, each moved onto this process's processing list as it is taken; waits up
+        to BRPOP_TIMEOUT for the first only when `block`."""
         jobs: List[Dict[str, Any]] = []
         if room <= 0 or self._is_gate_closed():
             return jobs
-        if block:
-            result = self.redis.blpop(ANALYSIS_QUEUE, timeout=BRPOP_TIMEOUT)
-            if result is None:
-                return jobs
-            jobs.append(json.loads(result[1]))
-        while len(jobs) < room:
-            data = self.redis.lpop(ANALYSIS_QUEUE)
-            if not data:
-                break
-            jobs.append(json.loads(data))
+        try:
+            if block:
+                data = self.redis.blmove(ANALYSIS_QUEUE, self.processing_key, BRPOP_TIMEOUT, 'LEFT', 'RIGHT')
+                if data is None:
+                    return jobs
+                self._parse_into(jobs, data)
+            while len(jobs) < room:
+                data = self.redis.lmove(ANALYSIS_QUEUE, self.processing_key, 'LEFT', 'RIGHT')
+                if not data:
+                    break
+                self._parse_into(jobs, data)
+        except Exception:
+            # Whatever was taken goes back to the head of the queue, so a failure partway loses no job, even one
+            # Redis moved before the reply was lost.
+            self._put_back_all_but_running()
+            raise
         return jobs
+
+    def _parse_into(self, jobs: List[Dict[str, Any]], data) -> None:
+        """Add a queue entry as a job, carrying the entry itself so it can be taken off the processing list. An entry
+        that is not a job is dropped, so it never comes back."""
+        try:
+            job = json.loads(data)
+            job['trackId']
+        except Exception:
+            logger.error(f"Dropped a queue entry that is not a job: {data[:200]!r}")
+            self.redis.lrem(self.processing_key, 1, data)
+            return
+        job['_entry'] = data
+        jobs.append(job)
+
+    def _mark_alive(self) -> None:
+        """Tell other analyzer processes this one is running, so its processing list is left alone."""
+        self.redis.set(ALIVE_PREFIX + self.instance, "1", ex=ALIVE_TTL_S)
+
+    def _done_with(self, job: Dict[str, Any]) -> None:
+        """Take an answered or dropped job off this process's processing list; a missed write is put back in the
+        queue by the next process, whose claim check drops it."""
+        try:
+            self.redis.lrem(self.processing_key, 1, job['_entry'])
+        except Exception:
+            pass
+
+    def _put_back_all_but_running(self) -> None:
+        """Every entry on this process's processing list that is not running here goes back to the head of the queue."""
+        running = [job['_entry'] for job, _ in self._in_flight.values()]
+        waiting = []
+        for entry in self.redis.lrange(self.processing_key, 0, -1):
+            if entry in running:
+                running.remove(entry)
+            else:
+                waiting.append({'_entry': entry})
+        self._put_back(waiting)
+
+    def _put_back(self, jobs: List[Dict[str, Any]]) -> None:
+        """Jobs back to the head of the queue in their order, off the processing list."""
+        for job in reversed(jobs):
+            pipe = self.redis.pipeline()
+            pipe.lrem(self.processing_key, 1, job['_entry'])
+            pipe.lpush(ANALYSIS_QUEUE, job['_entry'])
+            pipe.execute()
 
     def _current_claims(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """The jobs whose claim is still their record's open one. A job whose claim was re-issued (a lease
@@ -1094,14 +1179,22 @@ class AnalysisWorker:
         if not jobs:
             return False
         try:
-            jobs = self._current_claims(jobs)
+            current = self._current_claims(jobs)
         except Exception:
             # Back to the head of the list in their order, so a failed lookup loses no job.
-            self.redis.lpush(ANALYSIS_QUEUE, *[json.dumps(job) for job in reversed(jobs)])
+            self._put_back(jobs)
             raise
+        for job in jobs:
+            if not any(job is kept for kept in current):
+                self._done_with(job)
+        jobs = current
         if not jobs:
             return True
         self._ensure_pool()
+        try:  # starting the pool can take a while; the next pass refreshes it otherwise
+            self._mark_alive()
+        except Exception:
+            pass
         for job in jobs:
             future = self.executor.submit(_analyze_track_in_process, (job['trackId'], job.get('filePath', '')))
             self._in_flight[future] = (job, time.time())
@@ -1116,13 +1209,17 @@ class AnalysisWorker:
         broken = False
         for future in done:
             job, _ = self._in_flight.pop(future)
-            broken = self._finish(future, job) or broken
+            try:
+                broken = self._finish(future, job) or broken
+            finally:
+                self._done_with(job)
         now = time.time()
         stuck = any(now - started > JOB_TIMEOUT_S for _, started in self._in_flight.values())
         if broken or stuck:
             for future, (job, _) in self._in_flight.items():
                 future.cancel()
                 logger.error(f"✗ {'Pool crash' if broken else 'Stuck worker'} (no penalty): {job.get('filePath', '')}")
+                self._done_with(job)
             self._in_flight.clear()
             self._drop_pool()
 
