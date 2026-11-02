@@ -50,6 +50,8 @@ interface Playlist {
 const COLLAPSE_KEY = "kima:library-collapsed";
 const OPEN_WIDTH = 256;
 const CLOSED_WIDTH = 74;
+/** The collapsed handle's width (its `w-4`); the panel slides to exactly this far from the rail so its edge travels with the box's. */
+const HANDLE_WIDTH = 16;
 /** The library panel's own width beside the 56px rail, inside the 1px border: fixed, so a slide never squeezes it. */
 const PANEL_WIDTH = OPEN_WIDTH - 56 - 2;
 
@@ -408,10 +410,10 @@ export function Sidebar() {
                 place. */}
             <div
                 className={cn(
-                    "flex shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]",
+                    "flex shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
                     collapsed && "pointer-events-none absolute inset-y-0 left-14 opacity-0"
                 )}
-                style={{ width: PANEL_WIDTH, transform: collapsed ? "translateX(-100%)" : "none" }}
+                style={{ width: PANEL_WIDTH, transform: collapsed ? `translateX(-${PANEL_WIDTH - HANDLE_WIDTH}px)` : "none" }}
                 inert={collapsed}
                 aria-hidden={collapsed || undefined}
             >
@@ -679,18 +681,27 @@ export function Sidebar() {
             )}
 
             {!isMobileOrTablet && (
-                <aside
-                    // Only the library panel slides; the sidebar's width, and so the page beside it, changes once: at the
-                    // start of opening and after closing. A width that moved with the slide would lay the page out again
-                    // every frame, and its grids would jump a column mid-slide.
+                <div
+                    // The page beside the sidebar is laid out once, by this placeholder's width: at the END of opening
+                    // (the box slides over the page, then the page settles) and at the START of closing (the page
+                    // widens under the box as it shrinks, so the strip it uncovers is already page, never a gap). The
+                    // visible box below is out of flow, so animating it never lays the page out. It sits above the page's own raised
+                    // content (carousel arrows, sticky bars) and under the top bar, so nothing paints over it mid-slide.
                     className={cn(
-                        "relative z-(--z-raised) flex shrink-0 overflow-hidden rounded-lg border border-[var(--border-subtle)]",
-                        collapsed ? "[transition:width_0s_300ms]" : "[transition:width_0s]"
+                        "relative z-(--z-scene-panel) shrink-0",
+                        collapsed
+                            ? "[transition:width_0s]"
+                            : "[transition:width_0s_300ms] motion-reduce:[transition:width_0s]"
                     )}
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
-                    {sidebarContent}
-                </aside>
+                    <aside
+                        className="absolute inset-y-0 left-0 flex overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                        style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
+                    >
+                        {sidebarContent}
+                    </aside>
+                </div>
             )}
         </>
     );
