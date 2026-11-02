@@ -1,6 +1,7 @@
 import type { MapTrack } from "@/features/vibe/types";
 import type { DiscoveryPodcast, ForYouRow, ListeningRow, PodcastCategory } from "@/features/podcast/types";
 import type { Mix } from "@/features/home/types";
+import type { RadioRowEntry } from "@/features/home/radioData";
 import type { DiscoverConfig } from "@/features/discover/types";
 import { backendUrl } from "@/lib/backend-url";
 
@@ -860,14 +861,11 @@ class ApiClient {
     }
 
     /**
-     * The cover each radio station tile shows, for all the tiles a page has in one request. The server picks each
-     * listener's cover once per local day, so the same image address comes back all day.
+     * A page's radio stations and each one's cover, in one reply: scope "home" (the home row) or "all" (the radio
+     * page). The server picks each listener's cover once per local day, so the same image address comes back all day.
      */
-    async getRadioCovers(
-        stations: { type: string; value?: string }[],
-        tz: string
-    ): Promise<{ covers: { type: string; value: string | null; cover: string | null }[] }> {
-        return this.post("/library/radio/covers", { stations, tz });
+    async getRadioRow(scope: "home" | "all", tz: string): Promise<{ stations: RadioRowEntry[] }> {
+        return this.get(`/library/radio/row?${new URLSearchParams({ scope, tz })}`);
     }
 
     /** Cover art URL for an id, URL or path; the token lets a canvas read its pixels for colour extraction. */

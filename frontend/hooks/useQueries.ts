@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { PlaylistPreview } from "@/features/home/types";
-import { coverRequest, coversByStation, type DecadeCount, type GenreCount, type RadioStation } from "@/features/home/radioData";
+import { buildRadioRow } from "@/features/home/radioData";
 
 export const queryKeys = {
     artist: (id: string) => ["artist", id] as const,
@@ -64,10 +64,7 @@ export const queryKeys = {
     browseAll: () => ["browse", "all"] as const,
 
     // Library radio data
-    libraryGenres: () => ["library", "genres"] as const,
-    libraryDecades: () => ["library", "decades"] as const,
-    moodStations: () => ["library", "radio", "stations"] as const,
-    radioCovers: (day: string, stationIds: string[]) => ["library", "radio", "covers", day, ...stationIds] as const,
+    radioRow: (scope: string, day: string) => ["library", "radio", "row", scope, day] as const,
     // The collection page's mood band and card dots; refreshed when enrichment or a scan finishes (useEventSource)
     libraryMoodSummary: () => ["library", "mood-summary"] as const,
 };
@@ -701,54 +698,18 @@ export function useBrowseAllQuery() {
     });
 }
 
-export function useLibraryGenresQuery() {
-    return useQuery({
-        queryKey: queryKeys.libraryGenres(),
-        queryFn: async () => {
-            return api.get<{ genres: GenreCount[] }>("/library/genres");
-        },
-        staleTime: 10 * 60 * 1000,
-    });
-}
-
-/** The mood stations and their generated subtitles; asked only where they can play (`enabled`). */
-export function useMoodStationsQuery(enabled: boolean) {
-    return useQuery({
-        queryKey: queryKeys.moodStations(),
-        queryFn: () =>
-            api.get<{ stations: Array<{ value: string; name: string; description: string }> }>("/library/radio/stations"),
-        staleTime: 10 * 60 * 1000,
-        enabled,
-        // A list that failed keeps being asked for, so the tiles come back on their own.
-        refetchInterval: (query) => (query.state.status === "error" ? 30_000 : false),
-    });
-}
-
 /**
- * The cover of every station tile a page shows, in one request. The server picks each cover once per local day, so the
- * request is keyed by the day and the station list and kept all day; `enabled` holds it back until the list is whole.
+ * A page's radio stations with their covers, in one request. The server picks each cover once per local day, so the
+ * reply is kept by day; a failed one is asked again on its own, so the tiles come back.
  */
-export function useStationCovers(stations: RadioStation[], enabled: boolean) {
+export function useRadioRow(scope: "home" | "all") {
     const day = new Date().toLocaleDateString("en-CA");
-    const ids = stations.map((s) => s.id);
     return useQuery({
-        queryKey: queryKeys.radioCovers(day, ids),
-        queryFn: async () =>
-            coversByStation(stations, await api.getRadioCovers(coverRequest(stations), Intl.DateTimeFormat().resolvedOptions().timeZone)),
-        enabled: enabled && stations.length > 0,
-        // When the station list changes (a genre appears, the moods reload) the tiles keep their covers until the new answer.
-        placeholderData: keepPreviousData,
-        staleTime: 6 * 60 * 60 * 1000,
-        retry: false,
-    });
-}
-
-export function useLibraryDecadesQuery() {
-    return useQuery({
-        queryKey: queryKeys.libraryDecades(),
-        queryFn: async () => {
-            return api.get<{ decades: DecadeCount[] }>("/library/decades");
-        },
+        queryKey: queryKeys.radioRow(scope, day),
+        queryFn: async () => buildRadioRow((await api.getRadioRow(scope, Intl.DateTimeFormat().resolvedOptions().timeZone)).stations),
+        // Across a day change the tiles keep their covers until the new day's answer; another page's row is never shown.
+        placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[3] === scope ? previous : undefined),
         staleTime: 10 * 60 * 1000,
+        refetchInterval: (query) => (query.state.status === "error" ? 30_000 : false),
     });
 }

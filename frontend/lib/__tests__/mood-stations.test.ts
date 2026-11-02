@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({ api: {} }));
 vi.mock("@/lib/audio-controls-context", () => ({ useAudioControls: () => ({}) }));
 
-import { STATIC_STATIONS, buildMoodStations, playableStations } from "@/features/home/radioData";
+import { STATIC_STATIONS, buildMoodStations } from "@/features/home/radioData";
 
 const server = [
     { value: "calm", name: "Calm", description: "Calm, dreamy, low energy" },
@@ -63,13 +63,5 @@ describe("the mood stations", () => {
         for (const station of [...buildMoodStations(server), STATIC_STATIONS.find((s) => s.id === "workout")!]) {
             expect(station.minTracks).toBe(1);
         }
-    });
-
-    it("and the workout station are left out where the vibe analyzer does not run; the rest stay", () => {
-        const tiles = buildMoodStations(server);
-        expect(playableStations(tiles, false)).toEqual([]);
-        expect(playableStations(tiles, true)).toEqual(tiles);
-        expect(playableStations(STATIC_STATIONS, false).map((s) => s.id)).toEqual(["all", "discovery", "favorites"]);
-        expect(playableStations(STATIC_STATIONS, true)).toEqual(STATIC_STATIONS);
     });
 });

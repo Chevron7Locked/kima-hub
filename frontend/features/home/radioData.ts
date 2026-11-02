@@ -18,8 +18,6 @@ export interface RadioStation {
         value?: string;
     };
     minTracks: number;
-    /** Plays from the learned moods, which are scored from sound vectors: nothing to play without the vibe analyzer. */
-    needsMoods?: boolean;
 }
 
 export interface GenreCount {
@@ -58,7 +56,6 @@ export const STATIC_STATIONS: RadioStation[] = [
         accentGradient: "from-[#ef4444] to-[#f97316]",
         filter: { type: "workout" },
         minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
     },
     {
         id: "discovery",
@@ -82,7 +79,7 @@ export const STATIC_STATIONS: RadioStation[] = [
     },
 ];
 
-/** One mood station as the server lists it (GET /library/radio/stations): its subtitle is generated from its recipe. */
+/** One mood station as the server lists it: its subtitle is generated from its recipe. */
 export interface MoodStationInfo {
     value: string;
     name: string;
@@ -119,7 +116,6 @@ export function buildMoodStations(stations: MoodStationInfo[]): RadioStation[] {
         ...(MOOD_STATION_STYLES[value] ?? DEFAULT_STYLE),
         filter: { type: "mood" as const, value },
         minTracks: STATION_MIN_TRACKS,
-        needsMoods: true,
     }));
 }
 
@@ -207,21 +203,24 @@ export function stationParams(station: RadioStation, limit: number): URLSearchPa
     return params;
 }
 
-/** How the server and the page name a station when matching covers to tiles. */
-const coverKey = (type: string, value?: string | null) => `${type}:${value ?? ""}`;
+/** One station in the server's reply for a page (GET /library/radio/row), with this listener's cover for it today. */
+export type RadioRowEntry =
+    | { type: "all" | "workout" | "discovery" | "favorites"; value: null; cover: string | null }
+    | { type: "mood"; value: string; name: string; description: string; cover: string | null }
+    | { type: "genre" | "decade"; value: string; count: number; cover: string | null };
 
-/** The stations a page shows, as the cover request lists them. */
-export function coverRequest(stations: RadioStation[]): { type: string; value?: string }[] {
-    return stations.map((station) => ({ type: station.filter.type, ...(station.filter.value ? { value: station.filter.value } : {}) }));
-}
-
-/** Each station's cover from the server's reply, by station id; a station the reply does not mention has none. */
-export function coversByStation(
-    stations: RadioStation[],
-    reply: { covers: { type: string; value: string | null; cover: string | null }[] },
-): Map<string, string | null> {
-    const byKey = new Map(reply.covers.map((c) => [coverKey(c.type, c.value), c.cover]));
-    return new Map(stations.map((s) => [s.id, byKey.get(coverKey(s.filter.type, s.filter.value)) ?? null]));
+/** A page's tiles by section, from the server's reply, with each tile's cover by station id. */
+export function buildRadioRow(entries: RadioRowEntry[]) {
+    const listed = new Set(entries.map((e) => e.type));
+    const quick = STATIC_STATIONS.filter((s) => listed.has(s.filter.type));
+    const moods = buildMoodStations(entries.flatMap((e) => (e.type === "mood" ? [{ value: e.value, name: e.name, description: e.description }] : [])));
+    const genres = buildGenreStations(entries.flatMap((e) => (e.type === "genre" ? [{ genre: e.value, count: e.count }] : [])));
+    const decades = buildDecadeStations(entries.flatMap((e) => (e.type === "decade" ? [{ decade: Number(e.value), count: e.count }] : [])));
+    const coverOf = new Map(entries.map((e) => [`${e.type}:${e.value ?? ""}`, e.cover]));
+    const covers = new Map(
+        [...quick, ...moods, ...genres, ...decades].map((s) => [s.id, coverOf.get(`${s.filter.type}:${s.filter.value ?? ""}`) ?? null]),
+    );
+    return { quick, moods, genres, decades, covers };
 }
 
 /** A station's colour: the first in its accent (every style above writes it as `from-[#hex] to-[#hex]`). */
@@ -266,11 +265,6 @@ export function useRadioPlayer() {
     };
 
     return { loadingStation, startRadio };
-}
-
-/** The stations this server can play: the mood-built ones only where the vibe analyzer runs. */
-export function playableStations(stations: RadioStation[], moodsAvailable: boolean): RadioStation[] {
-    return moodsAvailable ? stations : stations.filter((station) => !station.needsMoods);
 }
 
 export function buildGenreStations(genres: GenreCount[]): RadioStation[] {

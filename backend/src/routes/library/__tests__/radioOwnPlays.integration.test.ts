@@ -1,7 +1,7 @@
 /**
  * The favorites and discovery radio stations are the listener's own: favorites are the songs this listener plays most,
  * discovery the songs this listener has never played. Another user's plays change neither. Real router, real test
- * database and Redis; the covers case reads the same selection through POST /radio/covers.
+ * database and Redis; the covers case reads the same selection through GET /radio/row.
  *
  * Library: songs 0-1 have a missing file, 2-3 are corrupt, 4-39 play. User A played songs 10 and 11 (and, as bait, a
  * missing, a corrupt and a Discover song), user B played song 20 on another album, user C played nothing.
@@ -191,9 +191,9 @@ describe("a request with no listener", () => {
 
 describe("station covers follow the listener", () => {
     const cover = async (user: string, type: string) => {
-        const res = await request(appFor(user)).post("/radio/covers").send({ stations: [{ type }], tz: "UTC" });
+        const res = await request(appFor(user)).get("/radio/row").query({ scope: "home", tz: "UTC" });
         expect(res.status).toBe(200);
-        return res.body.covers[0].cover as string | null;
+        return (res.body.stations as { type: string; cover: string | null }[]).find((s) => s.type === type)!.cover;
     };
 
     it("favorites tiles differ per listener and come from that listener's own songs", async () => {

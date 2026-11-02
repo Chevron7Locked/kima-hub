@@ -1,6 +1,6 @@
 /**
  * Which songs a radio station plays: the one selection both GET /library/radio and the station tiles' covers
- * (POST /library/radio/covers) read, so a tile's cover is the cover of a song the station itself would play.
+ * (GET /library/radio/row) read, so a tile's cover is the cover of a song the station itself would play.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";

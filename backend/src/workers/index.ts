@@ -38,6 +38,7 @@ import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { sweepFailedDownloads } from "../services/lidarrFailures";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { enrichmentStateService } from "../services/enrichmentState";
+import { warmRadioCovers } from "../services/mixes/radioRow";
 
 // One pending timer per self-rescheduling cycle, so handles never pile up; shutdown clears them.
 const timers = new Map<string, NodeJS.Timeout>();
@@ -172,6 +173,22 @@ async function runDataIntegrityCycle() {
 
 // First run 10 seconds after startup
 schedule("data-integrity", runDataIntegrityCycle, 10000);
+
+// Each listener's radio covers are picked as their day begins, so their first visit reads them (radioRow.ts).
+let radioCoversRunning = false;
+async function runRadioCoversCycle() {
+    if (radioCoversRunning) return;
+    radioCoversRunning = true;
+    try {
+        await warmRadioCovers();
+    } catch (err) {
+        logger.error("Picking radio covers ahead failed:", err);
+    } finally {
+        radioCoversRunning = false;
+        schedule("radio-covers", runRadioCoversCycle, 5 * 60 * 1000);
+    }
+}
+schedule("radio-covers", runRadioCoversCycle, 60 * 1000);
 logger.debug("Data integrity check scheduled (every 24 hours, self-rescheduling)");
 
 // The one place downloads move outside webhooks. Each cycle reads Lidarr once,

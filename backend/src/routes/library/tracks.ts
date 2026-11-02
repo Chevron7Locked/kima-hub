@@ -5,20 +5,14 @@ import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
 import { rateLimiter } from "../../services/rateLimiter";
-import { computeGenreTotals } from "../../utils/genreSql";
-import {
-  getEffectiveYear,
-  getDecadeFromYear,
-} from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import {
-  COVER_STATION_TYPES,
-  STATION_TYPES_WITH_VALUE,
-  MAX_COVER_STATIONS,
-  MAX_COVER_VALUE_LENGTH,
-  stationCovers,
-  type CoverStation,
-} from "../../services/mixes/stationCovers";
+  RADIO_ROW_SCOPES,
+  libraryDecades,
+  libraryGenres,
+  radioRow,
+  type RadioRowScope,
+} from "../../services/mixes/radioRow";
 import { songArtistKey } from "../../services/mixes/recipes";
 import { noOneKeys } from "../../services/mixes/artistCap";
 import { selectRadioTracks, stillPlayable } from "../../services/mixes/stationSelection";
@@ -574,32 +568,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
 
 router.get("/genres", async (_req, res) => {
   try {
-    const minTracks = 15;
-    // Library songs only, tallied by the shared rule (computeGenreTotals). The web's own choices on top: lowercase
-    // spelling, a 15-song minimum, twenty genres at most.
-    const artists = await prisma.$queryRaw<
-      { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; n: bigint }[]
-    >`
-            SELECT ar.name, ar."normalizedName", ar.genres, ar."userGenres", COUNT(t.id)::bigint AS n
-            FROM "Artist" ar
-            JOIN "Album" a ON a."artistId" = ar.id
-            JOIN "Track" t ON t."albumId" = a.id
-            WHERE a.location = 'LIBRARY' AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
-            GROUP BY ar.id
-        `;
-    const genres = computeGenreTotals(
-      artists.map((a) => ({ ...a, songs: Number(a.n), albums: 0 })),
-    )
-      .filter((g) => g.songs >= minTracks)
-      .map((g) => ({ genre: g.name.toLowerCase(), count: g.songs }))
-      .sort((x, y) => y.count - x.count || (x.genre < y.genre ? -1 : x.genre > y.genre ? 1 : 0))
-      .slice(0, 20);
-
-    logger.debug(
-      `[Genres] Found ${genres.length} genres from Artist.genres (min ${minTracks} tracks)`,
-    );
-
-    res.json({ genres });
+    res.json({ genres: await libraryGenres() });
   } catch (error) {
     logger.error("Genres endpoint error:", error);
     res.status(500).json({ error: "Failed to get genres" });
@@ -608,35 +577,7 @@ router.get("/genres", async (_req, res) => {
 
 router.get("/decades", async (_req, res) => {
   try {
-    const albums = await prisma.album.findMany({
-      where: { location: LIBRARY_LOCATION },
-      select: {
-        year: true,
-        originalYear: true,
-        displayYear: true,
-        _count: { select: { tracks: true } },
-      },
-    });
-
-    const decadeMap = new Map<number, number>();
-
-    for (const album of albums) {
-      const effectiveYear = getEffectiveYear(album);
-      if (effectiveYear) {
-        const decadeStart = getDecadeFromYear(effectiveYear);
-        decadeMap.set(
-          decadeStart,
-          (decadeMap.get(decadeStart) || 0) + album._count.tracks,
-        );
-      }
-    }
-
-    const decades = Array.from(decadeMap.entries())
-      .map(([decade, count]) => ({ decade, count }))
-      .filter((d) => d.count >= 15)
-      .sort((a, b) => b.decade - a.decade);
-
-    res.json({ decades });
+    res.json({ decades: await libraryDecades() });
   } catch (error) {
     logger.error("Decades endpoint error:", error);
     res.status(500).json({ error: "Failed to get decades" });
@@ -649,33 +590,19 @@ router.get("/radio/stations", (_req, res) => {
 });
 
 /**
- * The cover for each station tile a page shows, in one request: { stations: [{ type, value? }], tz? }. Each cover is
- * that listener's pick for the local day (stationCovers.ts), so it does not change between visits.
+ * A page's radio stations with each one's cover, in one reply: ?scope=home (the home row) or all (the radio page), and
+ * tz, the listener's zone. Each cover is that listener's pick for the local day (stationCovers.ts).
  */
-router.post("/radio/covers", async (req, res) => {
+router.get("/radio/row", async (req, res) => {
   try {
-    const { stations, tz } = req.body ?? {};
-    if (!Array.isArray(stations) || stations.length > MAX_COVER_STATIONS) {
-      return res.status(400).json({ error: `stations must be a list of at most ${MAX_COVER_STATIONS}` });
+    const scope = req.query.scope ?? "home";
+    if (!RADIO_ROW_SCOPES.includes(scope as RadioRowScope)) {
+      return res.status(400).json({ error: "scope must be home or all" });
     }
-    const asked: CoverStation[] = [];
-    for (const entry of stations) {
-      const type = entry?.type;
-      const value = entry?.value;
-      if (!COVER_STATION_TYPES.includes(type)) {
-        return res.status(400).json({ error: "Unknown station type" });
-      }
-      if (value !== undefined && (typeof value !== "string" || value.length > MAX_COVER_VALUE_LENGTH)) {
-        return res.status(400).json({ error: "A station's value must be a short string" });
-      }
-      // Only mood, genre and decade stations read a value; for the others it is dropped, so junk cannot make a pick each.
-      asked.push({ type, value: STATION_TYPES_WITH_VALUE.includes(type) ? value : undefined });
-    }
-    const covers = await stationCovers(asked, req.user!.id, tz);
-    res.json({ covers: asked.map((s, i) => ({ type: s.type, value: s.value ?? null, cover: covers[i] })) });
+    res.json({ stations: await radioRow(req.user!.id, req.query.tz, scope as RadioRowScope) });
   } catch (error) {
-    logger.error("Radio covers endpoint error:", error);
-    res.status(500).json({ error: "Failed to get radio covers" });
+    logger.error("Radio row endpoint error:", error);
+    res.status(500).json({ error: "Failed to get radio stations" });
   }
 });
 

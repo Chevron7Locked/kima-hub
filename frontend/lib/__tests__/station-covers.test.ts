@@ -1,6 +1,6 @@
 /**
- * A station tile shows the cover the server picked for it today, washed in the station's colour. A page asks for all
- * its tiles' covers in one request (coverRequest / coversByStation) rather than calling each station.
+ * A station tile shows the cover the server picked for it today, washed in the station's colour. A page's stations and
+ * their covers come in one reply (GET /library/radio/row), which buildRadioRow turns into tiles.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -9,43 +9,37 @@ import {
     buildDecadeStations,
     buildGenreStations,
     buildMoodStations,
-    coverRequest,
-    coversByStation,
+    buildRadioRow,
     stationHue,
     stationParams,
 } from "@/features/home/radioData";
 
 const calm = buildMoodStations([{ value: "calm", name: "Calm", description: "" }])[0];
 
-describe("coverRequest", () => {
-    it("lists each station's type and, when it has one, its value, in the page's order", () => {
-        const stations = [STATIC_STATIONS[0], calm, ...buildGenreStations([{ genre: "rock", count: 20 }]), ...buildDecadeStations([{ decade: 1990, count: 30 }])];
-        expect(coverRequest(stations)).toEqual([
-            { type: "all" },
-            { type: "mood", value: "calm" },
-            { type: "genre", value: "rock" },
-            { type: "decade", value: "1990" },
-        ]);
-    });
-});
+describe("buildRadioRow", () => {
+    const reply = [
+        { type: "favorites" as const, value: null, cover: "f" },
+        { type: "all" as const, value: null, cover: "a" },
+        { type: "mood" as const, value: "calm", name: "Calm", description: "Calm, dreamy", cover: null },
+        { type: "genre" as const, value: "rock", count: 20, cover: "r" },
+        { type: "decade" as const, value: "1990", count: 30, cover: "n" },
+    ];
 
-describe("coversByStation", () => {
-    it("matches each cover to its station by type and value", () => {
-        const rock = buildGenreStations([{ genre: "rock", count: 20 }])[0];
-        const covers = coversByStation([STATIC_STATIONS[0], calm, rock], {
-            covers: [
-                { type: "genre", value: "rock", cover: "r" },
-                { type: "all", value: null, cover: "a" },
-                { type: "mood", value: "calm", cover: null },
-            ],
-        });
+    it("builds each section's tiles, the quick ones in their usual order", () => {
+        const row = buildRadioRow(reply);
+        expect(row.quick.map((s) => s.id)).toEqual(["all", "favorites"]);
+        expect(row.moods.map((s) => [s.id, s.name, s.description])).toEqual([["mood-calm", "Calm", "Calm, dreamy"]]);
+        expect(row.genres).toEqual(buildGenreStations([{ genre: "rock", count: 20 }]));
+        expect(row.decades).toEqual(buildDecadeStations([{ decade: 1990, count: 30 }]));
+    });
+
+    it("matches each cover to its tile", () => {
+        const { covers } = buildRadioRow(reply);
         expect(covers.get("all")).toBe("a");
+        expect(covers.get("favorites")).toBe("f");
         expect(covers.get("mood-calm")).toBeNull();
         expect(covers.get("genre-rock")).toBe("r");
-    });
-
-    it("gives a station the reply leaves out no cover", () => {
-        expect(coversByStation([calm], { covers: [] }).get("mood-calm")).toBeNull();
+        expect(covers.get("decade-1990")).toBe("n");
     });
 });
 

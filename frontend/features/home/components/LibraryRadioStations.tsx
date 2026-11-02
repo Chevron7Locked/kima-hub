@@ -7,75 +7,22 @@ import { HorizontalCarousel } from "@/components/ui/HorizontalCarousel";
 import { cn } from "@/lib/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { cascadeStyle } from "@/lib/motion";
-import { useLibraryGenresQuery, useLibraryDecadesQuery, useMoodStationsQuery, useStationCovers } from "@/hooks/useQueries";
-import { useFeatures } from "@/lib/features-context";
-import {
-    DEFAULT_STYLE,
-    RadioStation,
-    STATIC_STATIONS,
-    buildMoodStations,
-    buildGenreStations,
-    playableStations,
-    buildDecadeStations,
-    useRadioPlayer,
-} from "../radioData";
+import { useRadioRow } from "@/hooks/useQueries";
+import { DEFAULT_STYLE, RadioStation, useRadioPlayer } from "../radioData";
 
-/** A tile in the row: a station, a mood station still loading, or the mood list's retry. */
-type RowItem = { kind: "station"; station: RadioStation } | { kind: "placeholder"; key: string } | { kind: "retry" };
-
-/** Tiles the mood stations hold while their list loads. */
-const MOOD_PLACEHOLDERS = 4;
+/** A tile in the row: a station, or the retry for a row that did not load. */
+type RowItem = { kind: "station"; station: RadioStation } | { kind: "retry" };
 
 export function LibraryRadioStations() {
     const { loadingStation, startRadio } = useRadioPlayer();
-    const { data: genresData, isLoading: genresLoading } = useLibraryGenresQuery();
-    const { data: decadesData, isLoading: decadesLoading } = useLibraryDecadesQuery();
-    const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const {
-        data: moodData,
-        isLoading: moodLoading,
-        isError: moodError,
-        isFetching: moodFetching,
-        refetch: refetchMoods,
-    } = useMoodStationsQuery(!featuresLoading && vibeEmbeddings);
-
-    // Until the feature check answers, which stations can play is unknown: the row waits rather than letting
-    // Workout pop in among tiles already shown. The mood stations' own list does not hold the row up.
-    const isLoading = genresLoading || decadesLoading || featuresLoading;
-    const genres = useMemo(
-        () => (genresData?.genres || []).filter((g) => g.count >= 15).slice(0, 6),
-        [genresData],
-    );
-    const decades = useMemo(
-        () => (decadesData?.decades || []).slice(0, 4),
-        [decadesData],
-    );
+    // One reply names the stations and carries their covers, so the tiles draw once, covers in place.
+    const { data: row, isLoading, isError, isFetching, refetch } = useRadioRow("home");
 
     const allItems = useMemo((): RowItem[] => {
-        if (featuresLoading) return [];
-        const station = (s: RadioStation): RowItem => ({ kind: "station", station: s });
-        // The mood stations hold their place while their list loads, and a list that failed says so there.
-        const moods: RowItem[] = !vibeEmbeddings
-            ? []
-            : moodLoading
-              ? Array.from({ length: MOOD_PLACEHOLDERS }, (_, i) => ({ kind: "placeholder" as const, key: `mood-wait-${i}` }))
-              : moodError
-                ? [{ kind: "retry" }]
-                : buildMoodStations(moodData?.stations ?? []).map(station);
-        return [
-            ...playableStations(STATIC_STATIONS, vibeEmbeddings).map(station),
-            ...moods,
-            ...buildGenreStations(genres).map(station),
-            ...buildDecadeStations(decades).map(station),
-        ];
-    }, [genres, decades, vibeEmbeddings, featuresLoading, moodLoading, moodError, moodData]);
-
-    // One request for every tile's cover, once the row's stations are all known (mood stations not still loading).
-    const stations = useMemo(
-        () => allItems.flatMap((item) => (item.kind === "station" ? [item.station] : [])),
-        [allItems],
-    );
-    const { data: covers } = useStationCovers(stations, !isLoading && !(vibeEmbeddings && moodLoading));
+        if (!row) return isError ? [{ kind: "retry" }] : [];
+        return [...row.quick, ...row.moods, ...row.genres, ...row.decades].map((station) => ({ kind: "station", station }));
+    }, [row, isError]);
+    const covers = row?.covers;
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
@@ -125,24 +72,16 @@ export function LibraryRadioStations() {
 
     const renderItem = (item: RowItem, compact: boolean, delayIdx: number) => {
         if (item.kind === "station") return renderCard(item.station, compact, delayIdx);
-        if (item.kind === "placeholder") {
-            return (
-                <div
-                    key={item.key}
-                    className={cn(tileSize(compact), "rounded-lg bg-[var(--bg-primary)] border border-white/10 animate-pulse")}
-                />
-            );
-        }
         return (
             <TileCard
-                key="mood-retry"
-                title="Mood stations"
+                key="row-retry"
+                title="Radio stations"
                 subtitle="Didn't load. Try again"
                 tint={DEFAULT_STYLE.color}
                 hoverBorder={DEFAULT_STYLE.hoverBorder}
                 accent={DEFAULT_STYLE.accentGradient}
-                onClick={() => void refetchMoods()}
-                busy={moodFetching}
+                onClick={() => void refetch()}
+                busy={isFetching}
                 index={delayIdx}
                 className={tileSize(compact)}
             />

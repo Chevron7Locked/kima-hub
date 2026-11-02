@@ -11,22 +11,15 @@ import { IN_LIBRARY } from "../../utils/libraryEligibility";
 import { nightZone } from "./nightPlays";
 import { selectRadioTracks, stillPlayable } from "./stationSelection";
 
-/** The tiles the pages build (radioData.ts); anything else is refused. */
+/** The station types that have tiles (radioRow.ts lists them). */
 export const COVER_STATION_TYPES = ["all", "workout", "discovery", "favorites", "mood", "genre", "decade"] as const;
 export type CoverStationType = (typeof COVER_STATION_TYPES)[number];
-
-/** The station types that read a value; the others ignore it. */
-export const STATION_TYPES_WITH_VALUE: readonly string[] = ["mood", "genre", "decade"];
 
 export interface CoverStation {
   type: CoverStationType;
   value?: string;
 }
 
-/** Most stations one request may ask about. */
-export const MAX_COVER_STATIONS = 64;
-/** Longest station value (a genre name) accepted. */
-export const MAX_COVER_VALUE_LENGTH = 200;
 /**
  * Songs a station is asked for when looking for one with a cover. Twenty rather than five: the cover lookup is one
  * query on those ids, so a station whose first songs have no art costs almost nothing more to get past them.
