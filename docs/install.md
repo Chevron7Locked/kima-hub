@@ -93,7 +93,7 @@ Stable releases are published to Docker Hub and to GitHub's container registry w
 ```bash
 docker pull chevron7locked/kima:latest
 # or one version
-docker pull chevron7locked/kima:v1.12.0
+docker pull chevron7locked/kima:v1.12.1
 ```
 
 ### Pre-release

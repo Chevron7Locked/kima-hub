@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.12.1] - 2026-11-02
+
+A hotfix for 1.12.0. Nothing to do when upgrading: enrichment and your library carry on as they are.
+
 ### Fixed
 
 - **Only the newest release's "what's new" window.** A new account, or someone who skipped versions, was shown every release's window one after another (1.10, then 1.11, then 1.12). Now the window shows only the newest release. What an older release still asks of you (1.11's "wipe and re-run" for libraries enriched before it, and its saved mood mix question) is counted on the version number as open and can be done from the changelog page, which now also has the mood mix choice.
