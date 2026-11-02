@@ -13,6 +13,10 @@ jest.mock("../../services/coverArtExtractor", () => require("./helpers/scannerMo
 jest.mock("../../services/artwork", () => require("./helpers/scannerMocks").artworkMock());
 jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
 jest.mock("../../services/imageStorage", () => require("./helpers/scannerMocks").imageStorageMock());
+// Not about joint credits: MusicBrainz does not answer that question here, so such names stay whole.
+jest.mock("../../services/musicbrainz", () => ({
+    musicBrainzService: { searchArtist: async () => ({ kind: "transient", error: { code: "test", message: "unreachable" } }) },
+}));
 
 import fs from "fs";
 import os from "os";

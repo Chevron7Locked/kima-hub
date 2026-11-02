@@ -273,9 +273,9 @@ class MusicBrainzService {
                 );
                 const artists: any[] = response.data.artists || [];
                 if (artists.length === 0) {
-                    return absent({ query, limit, hits: 0 });
+                    return absent({ query, limit, hits: 0, count: response.data.count });
                 }
-                return answered(artists, { query, limit, hits: artists.length });
+                return answered(artists, { query, limit, hits: artists.length, count: response.data.count });
             } catch (err: any) {
                 return this.classifyError(err, false);
             }

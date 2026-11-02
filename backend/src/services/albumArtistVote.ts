@@ -7,7 +7,7 @@
 import path from "path";
 import type { ICommonTagsResult } from "music-metadata";
 import { albumIdentityKey } from "./albumIdentity";
-import { artistIdentityKey, parseCredit } from "./artistIdentity";
+import { artistIdentityKey, isMbid, parseCredit } from "./artistIdentity";
 import {
     canonicalizeVariousArtists,
     extractAlbumFromRelativePath,
@@ -35,6 +35,8 @@ export interface FileCredit {
     /** The songs that are one album: the album folder (a disc subfolder counts as its parent) plus the album tag's identity key; a song with no album tag is its own. */
     groupKey: string;
     albumTitle: string;
+    /** The release-group id the file's tags carry, or null. */
+    rgMbid: string | null;
     candidate: ArtistCandidate;
     /** Whether the candidate came from an album-artist tag. */
     fromAlbumArtist: boolean;
@@ -74,7 +76,7 @@ function firstCredited(names: string[], ids: readonly string[] | undefined): Art
 }
 
 /** How a joint credit joins its artists' names. Used only when the tag's ids show how many artists it names. */
-const JOINT_CREDIT = /\s*,\s*|\s*;\s*|\s+\/\s+|\s+(?:&|and|x|with|vs\.?|feat\.?|ft\.?|featuring)\s+/i;
+export const JOINT_CREDIT = /\s*,\s*|\s*;\s*|\s+\/\s+|\s+(?:&|\+|and|x|with|vs\.?|feat\.?|ft\.?|featuring)\s+/i;
 
 /** The album folder a file belongs to: its own folder, or the one above when its own is a disc subfolder. */
 export function albumFolder(relativePath: string): string {
@@ -106,6 +108,7 @@ export function fileCredit(common: ICommonTagsResult, relativePath: string): Fil
         // A song with no album tag shares no album with its neighbours, which may be any loose files.
         groupKey: albumTag ? `${albumFolder(relativePath)}\n${albumIdentityKey(albumTag)}` : `file\n${relativePath}`,
         albumTitle,
+        rgMbid: isMbid(common.musicbrainz_releasegroupid?.trim()) ? common.musicbrainz_releasegroupid!.trim() : null,
         candidate,
         fromAlbumArtist: albumArtist !== null,
         // Under Singles/ the folder names the artist, compilation tags or not (the override above).
@@ -125,26 +128,6 @@ const OLD_CUTS = [" & ", " and ", " with ", ", "];
 export function isOldCut(name: string, full: string): boolean {
     const lower = full.toLowerCase();
     return OLD_CUTS.some((sep) => lower.startsWith(name.toLowerCase() + sep));
-}
-
-/** The identity keys of the names an old cut of `full` could have left ("A & B and C" gives A's and "A & B"'s). */
-export function leadNameKeys(full: string): string[] {
-    const keys = new Set<string>();
-    const lower = full.toLowerCase();
-    for (const sep of OLD_CUTS) {
-        for (let at = lower.indexOf(sep); at > 0; at = lower.indexOf(sep, at + 1)) keys.add(artistIdentityKey(full.slice(0, at)));
-    }
-    return [...keys].filter(Boolean);
-}
-
-/**
- * Whether an album under `artist` stays there when its files name `candidate`: the artist has a MusicBrainz id, the
- * files name a joint credit with no id, and the artist's name is that credit's first words. Nothing in the tags says
- * the credit is a band, and moving the album would trade the lead's photo and id for neither. The re-file and the
- * scanner both ask this, so they agree on where such an album sits.
- */
-export function keepsLeadArtist(artist: { name: string; mbid: string | null }, candidate: ArtistCandidate): boolean {
-    return Boolean(artist.mbid) && !candidate.mbid && isOldCut(artist.name, candidate.name);
 }
 
 /**

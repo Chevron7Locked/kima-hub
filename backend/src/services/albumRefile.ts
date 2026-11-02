@@ -12,11 +12,13 @@ import { logger } from "../utils/logger";
 import { canonicalizeVariousArtists, isPlaceholderArtistName } from "../utils/artistNormalization";
 import { albumIdentityKey } from "./albumIdentity";
 import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist } from "./artistIdentity";
-import { albumFolder, electAlbumArtist, fileCredit, isOldCut, keepsLeadArtist, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
+import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { musicBrainzService } from "./musicbrainz";
+import { JointCreditFiler, type JointFiling } from "./jointCredit";
+import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
 export interface RefileResult {
     songsRead: number;
@@ -113,12 +115,44 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
         else albums.set(song.credit.groupKey, [song]);
     }
 
+    // A joint credit is filed by one rule (jointCredit.ts), decided once per distinct name in this run. An album whose
+    // name MusicBrainz could not be asked about stays where it is; the next re-file asks again.
+    const filer = new JointCreditFiler();
+    const judged = new Map<string, Promise<JointFiling>>();
+    const judge = (candidate: ArtistCandidate) => {
+        const id = candidate.mbid ?? artistIdentityKey(canonicalizeVariousArtists(candidate.name));
+        let filing = judged.get(id);
+        if (!filing) judged.set(id, (filing = filer.file(candidate)));
+        return filing;
+    };
+    // An album Discover holds keeps its credit whole, and MusicBrainz is not asked about it: one with songs outside the
+    // library (as the scanner treats it), or one Discover's records say is Discover's.
+    const heldBy = new Set(
+        (
+            await prisma.track.findMany({
+                where: { album: { location: { not: "LIBRARY" } } },
+                select: { filePath: true, album: { select: { identityKey: true } } },
+            })
+        ).map((t) => `${albumFolder(t.filePath)}\n${t.album.identityKey}`),
+    );
+    const discoverRecords = await loadDiscoverRecords();
     const filings: { candidate: ArtistCandidate; songs: Song[] }[] = [];
-    for (const group of albums.values()) {
+    for (const [groupKey, group] of albums) {
         const elected = electAlbumArtist(group.map((s) => s.credit!));
+        const discovers =
+            heldBy.has(groupKey) ||
+            isDiscoverEvidence(
+                discoverEvidence(
+                    { artistName: (elected ?? group[0].credit!.candidate).name, title: group[0].credit!.albumTitle, rgMbid: group[0].credit!.rgMbid },
+                    discoverRecords,
+                ),
+            );
         const byTarget = new Map<string, { candidate: ArtistCandidate; songs: Song[] }>();
         for (const song of group) {
-            const candidate = elected ?? song.credit!.candidate;
+            const credited = elected ?? song.credit!.candidate;
+            const filed: JointFiling = discovers ? { status: "whole", candidate: credited } : await judge(credited);
+            if (filed.status === "unknown") continue;
+            const candidate = filed.candidate;
             const key = candidate.mbid ?? artistIdentityKey(canonicalizeVariousArtists(candidate.name));
             const entry = byTarget.get(key);
             if (entry) entry.songs.push(song);
@@ -232,11 +266,8 @@ class KeptAsItIs extends Error {}
  * album re-filed just before is seen as it is now.
  */
 async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"settled" | "edited" | "moved" | "merged"> {
-    // An album under its lead artist (with a MusicBrainz id) stays when the files name a joint credit with no id:
-    // nothing in the tags says it is not a band, and moving it would trade the lead's photo and id for neither.
-    const underLead = (artist: AlbumRow["artist"]) => keepsLeadArtist(artist, candidate);
     const holder = candidate.mbid ? await prisma.artist.findUnique({ where: { mbid: candidate.mbid }, select: { id: true } }) : null;
-    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row, candidate, holder?.id ?? null) && !underLead(row.artist);
+    const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row, candidate, holder?.id ?? null);
     const peek = await prisma.track.findMany({ where: { id: { in: songs.map((s) => s.id) } }, select: { album: { select: ALBUM_FIELDS } } });
     if (!peek.some((t) => isMisfiled(t.album))) return "settled";
 
@@ -251,7 +282,7 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 where: { id: { in: songs.map((s) => s.id) } },
                 select: { id: true, album: { select: ALBUM_FIELDS } },
             });
-            const misfiled = tracks.filter((t) => t.album.location === "LIBRARY" && t.album.artistId !== target.id && !underLead(t.album.artist));
+            const misfiled = tracks.filter((t) => t.album.location === "LIBRARY" && t.album.artistId !== target.id);
             if (misfiled.length === 0) return "settled";
             const involved = [...new Map(misfiled.map((t) => [t.album.id, t.album])).values()];
             if (involved.some((row) => row.hasUserOverrides || row.artist.hasUserOverrides)) return "edited";

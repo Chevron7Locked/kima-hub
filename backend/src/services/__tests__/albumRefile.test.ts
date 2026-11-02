@@ -8,7 +8,10 @@
 jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 jest.mock("../../services/artistCountsService", () => require("./helpers/scannerMocks").artistCountsServiceMock());
 const mockGetArtist = jest.fn();
-jest.mock("../../services/musicbrainz", () => ({ musicBrainzService: { getArtist: (...a: unknown[]) => mockGetArtist(...a) } }));
+const mockSearchArtist = jest.fn();
+jest.mock("../../services/musicbrainz", () => ({
+    musicBrainzService: { getArtist: (...a: unknown[]) => mockGetArtist(...a), searchArtist: (...a: unknown[]) => mockSearchArtist(...a) },
+}));
 
 import fs from "fs";
 import os from "os";
@@ -43,6 +46,9 @@ beforeEach(async () => {
     tags = new Map();
     mockGetArtist.mockReset();
     mockGetArtist.mockResolvedValue({ kind: "absent", evidence: {} });
+    // These tests are not about joint credits: MusicBrainz does not answer the question, so such names stay whole.
+    mockSearchArtist.mockReset();
+    mockSearchArtist.mockResolvedValue({ kind: "transient", error: { code: "test", message: "unreachable" } });
     (parseFile as jest.Mock).mockReset();
     (parseFile as jest.Mock).mockImplementation(async (file: string) => {
         const found = tags.get(file);
@@ -193,6 +199,8 @@ describe("re-filing albums by their tags", () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { enrichmentStatus: "unresolvable", enrichmentFailures: 3 });
         const a = await album(cut.id, "Refile Gain");
+        // MusicBrainz knows the band by its full name, so the name stays whole.
+        mockSearchArtist.mockResolvedValue({ kind: "answered", value: [{ name: "Refile Cut and Band" }], evidence: {} });
         await song(a.id, "Refile Cut and Band/Refile Gain/01.flac", { album: "Refile Gain", albumartist: "Refile Cut and Band" });
 
         await refileLibrary(musicDir);

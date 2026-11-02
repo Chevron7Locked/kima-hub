@@ -8,8 +8,9 @@ import PQueue from "p-queue";
 import { CoverArtExtractor } from "./coverArtExtractor";
 import { findAlbumArtwork } from "./artwork";
 import { isPlaceholderArtistName, sanitizeTagString } from "../utils/artistNormalization";
-import { isMbid, resolveArtist } from "./artistIdentity";
-import { albumFolder, electAlbumArtist, fileCredit, keepsLeadArtist, leadNameKeys, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
+import { artistIdentityKey, isMbid, resolveArtist } from "./artistIdentity";
+import { JointCreditFiler, leadingParts } from "./jointCredit";
+import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -138,6 +139,9 @@ export class MusicScannerService {
      */
     async scanLibrary(musicPath: string): Promise<ScanResult> {
         const startTime = Date.now();
+        // What a scan decided about a joint credit holds for that scan only: the next asks again.
+        this.groupFilings = new Map();
+        this.jointFiler = new JointCreditFiler();
         const result: ScanResult = {
             tracksAdded: 0,
             tracksUpdated: 0,
@@ -480,30 +484,59 @@ export class MusicScannerService {
         }
     }
 
+    /** Where each album group's joint credit is filed, decided once per group per scan (see filedCredit). */
+    private groupFilings = new Map<string, Promise<ArtistCandidate>>();
+    private jointFiler = new JointCreditFiler();
+
     /**
-     * The lead artist an album stays under when the files name a joint credit with no id (keepsLeadArtist): one whose
-     * copy of this album already holds a song of the same album folder, as the re-file requires.
+     * The artist an album group's credit is filed under, decided once for the group so its songs never split between
+     * two artists. A credit that is not a joint one is filed as it is. For a joint credit: an album Discover holds is
+     * left alone; an album that already has songs keeps them together where they sit, the joint-credit artist or the
+     * first artist (the re-file moves a whole album when the rule says it belongs elsewhere); a new album takes the
+     * joint-credit rule (jointCredit.ts), except one Discover's records say is Discover's, which keeps its credit.
      */
-    private async findLeadArtist(chosen: ArtistCandidate, albumTitle: string, relativePath: string) {
-        const folder = albumFolder(relativePath);
-        const keys = leadNameKeys(chosen.name);
-        if (folder === "." || keys.length === 0) return undefined;
-        const leads = await prisma.artist.findMany({
-            where: { identityKey: { in: keys }, mbid: { not: null } },
-            select: { id: true, name: true, mbid: true },
-            orderBy: { id: "asc" },
-        });
-        const identityKey = albumIdentityKey(albumTitle);
-        for (const lead of leads) {
-            if (!keepsLeadArtist(lead, chosen)) continue;
-            const held = await prisma.album.findUnique({
-                where: { artistId_identityKey: { artistId: lead.id, identityKey } },
-                select: { id: true, location: true },
-            });
-            if (!held || held.location !== "LIBRARY") continue;
-            if ((await prisma.track.count({ where: { albumId: held.id, filePath: { startsWith: `${folder}/` } } })) > 0) return lead;
+    private filedCredit(groupKey: string, chosen: ArtistCandidate, albumTitle: string, rgMbid: string | null): Promise<ArtistCandidate> {
+        const memo = `${groupKey}\n${chosen.mbid ?? artistIdentityKey(chosen.name)}`;
+        let filed = this.groupFilings.get(memo);
+        if (!filed) {
+            filed = this.decideFiling(groupKey, chosen, albumTitle, rgMbid);
+            this.groupFilings.set(memo, filed);
         }
-        return undefined;
+        return filed;
+    }
+
+    private async decideFiling(groupKey: string, chosen: ArtistCandidate, albumTitle: string, rgMbid: string | null): Promise<ArtistCandidate> {
+        const leads = chosen.mbid ? [] : leadingParts(chosen.name);
+        if (!leads.length) return chosen;
+
+        const [folder, ...rest] = groupKey.split("\n");
+        const sameAlbum: Prisma.TrackWhereInput =
+            folder === "file"
+                ? { filePath: rest.join("\n") }
+                : {
+                      filePath: folder === "." ? { not: { contains: "/" } } : { startsWith: `${folder}/` },
+                      album: { identityKey: albumIdentityKey(albumTitle) },
+                  };
+        const whole = artistIdentityKey(chosen.name);
+        const leadKeys = leads.map(artistIdentityKey);
+        // Loose files in the music root are one group by album title whoever made them, so only the songs this credit
+        // could have been filed with count as this album's.
+        const sitting = (
+            await prisma.track.findMany({
+                where: sameAlbum,
+                select: { album: { select: { location: true, artist: { select: { identityKey: true, name: true, mbid: true } } } } },
+            })
+        ).filter((t) => folder !== "." || t.album.artist.identityKey === whole || leadKeys.includes(t.album.artist.identityKey));
+        if (sitting.some((t) => t.album.location !== "LIBRARY")) return chosen;
+        if (sitting.some((t) => t.album.artist.identityKey === whole)) return chosen;
+        for (const key of leadKeys) {
+            const lead = sitting.map((t) => t.album.artist).find((a) => a.identityKey === key);
+            if (lead) return lead.mbid ? { name: lead.name, mbid: lead.mbid } : { name: lead.name };
+        }
+
+        const evidence = discoverEvidence({ artistName: chosen.name, title: albumTitle, rgMbid }, await loadDiscoverRecords());
+        if (isDiscoverEvidence(evidence)) return chosen;
+        return (await this.jointFiler.file(chosen)).candidate;
     }
 
     private async processAudioFile(
@@ -538,15 +571,20 @@ export class MusicScannerService {
         // The album's artist is elected from all of its songs before any is filed (albumArtistVote.ts); with no
         // leader the song keeps its own.
         const credit = fileCredit(metadata.common, relativePath);
-        const chosen = elected.get(credit.groupKey) ?? credit.candidate;
+        const credited = elected.get(credit.groupKey) ?? credit.candidate;
         const albumTitle = credit.albumTitle;
         const year = metadata.common.year || null;
+        // The file's release-group tag names the album; an untagged album keeps a placeholder id until identification
+        // names it (albumIdentification.ts), and a tag later replaces that id, never the reverse. resolveAlbum matches
+        // by id before title and retries on a unique violation.
+        const taggedRgMbid = metadata.common.musicbrainz_releasegroupid?.trim();
+        const tagged = isMbid(taggedRgMbid) ? taggedRgMbid : null;
 
-        // An album already under its lead artist stays there when the files name a joint credit with no id
-        // (albumArtistVote.ts keepsLeadArtist), as the re-file leaves it.
-        const lead = chosen.mbid ? undefined : await this.findLeadArtist(chosen, albumTitle, relativePath);
-        const artistName = lead?.name ?? chosen.name;
-        const artistMbid = lead?.mbid ?? chosen.mbid;
+        // A joint credit with no ids may be filed under its first artist (jointCredit.ts); Discover's records still
+        // match the credit as the files give it.
+        const chosen = await this.filedCredit(credit.groupKey, credited, albumTitle, tagged);
+        const artistName = chosen.name;
+        const artistMbid = chosen.mbid;
 
         let artist = await resolveArtist(prisma, {
             name: artistName,
@@ -580,22 +618,17 @@ export class MusicScannerService {
             }
         }
 
-        // The file's release-group tag names the album; an untagged album keeps a placeholder id until identification
-        // names it (albumIdentification.ts), and a tag later replaces that id, never the reverse. resolveAlbum matches
-        // by id before title and retries on a unique violation.
-        const taggedRgMbid = metadata.common.musicbrainz_releasegroupid?.trim();
-
         const album = await resolveAlbum(prisma, {
             artistId: artist.id,
             title: albumTitle,
-            rgMbid: isMbid(taggedRgMbid) ? taggedRgMbid : null,
+            rgMbid: tagged,
             year,
             isCompilation: Boolean(metadata.common.compilation),
             // Only for a new row: the checks cost several queries. Discover's records say whether it is Discover's (it
             // has no folder of its own); read fresh, as Discover writes its download record before the download starts.
             createData: async () => {
                 const evidence = discoverEvidence(
-                    { artistName, title: albumTitle, rgMbid: isMbid(taggedRgMbid) ? taggedRgMbid : null },
+                    { artistName: credited.name, title: albumTitle, rgMbid: tagged },
                     await loadDiscoverRecords(),
                 );
                 return { primaryType: "Album", location: isDiscoverEvidence(evidence) ? "DISCOVER" : "LIBRARY" };
