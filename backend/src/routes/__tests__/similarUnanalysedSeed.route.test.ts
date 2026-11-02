@@ -120,6 +120,8 @@ afterAll(async () => {
     await prisma.artist.deleteMany({
         where: { id: { in: ALL_TRACK_IDS.map((id) => `cart_${id}`) } },
     });
+    // buildMatching() above wrote the library's one shared matching state; leaving it makes later files see a library that has one.
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
 });
 
 describe("similar tracks for an unanalysed seed", () => {

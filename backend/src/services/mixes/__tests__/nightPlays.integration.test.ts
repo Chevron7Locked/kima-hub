@@ -55,6 +55,8 @@ const clearPlays = () => prisma.play.deleteMany({ where: { userId: { startsWith:
 
 beforeAll(async () => {
     await waitForRedisReady();
+    // The tests below assume the library has no matching state unless they build one; a file on this worker may have left one.
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     lib = await seedSyntheticLibrary(PREFIX);
     await seedSyntheticMoods(PREFIX);
     await prisma.$transaction((tx) => buildMoodState(tx));

@@ -148,6 +148,7 @@ describe("library eligibility at the read side", () => {
     // other files' queue sweeps see eleven extra due embeddings.
     afterAll(async () => {
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+        await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE $1`, "trk\\_elig\\_%");
         for (const [table, pattern] of [
             ["Track", "trk\\_elig\\_%"],

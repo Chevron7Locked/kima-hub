@@ -115,6 +115,10 @@ const bestFirst = (rows: Array<{ distance: number }>) =>
 
 beforeAll(async () => {
     await prisma.$executeRawUnsafe(`DELETE FROM "Track"`);
+    // Earlier files on this worker leave deleted vectors in the index, which can trap the one walk below; start from an
+    // index of this file's vectors only, so the dead entries the tests rely on are their own.
+    await prisma.$executeRawUnsafe(`VACUUM track_embeddings`);
+    await prisma.$executeRawUnsafe(`REINDEX INDEX track_embeddings_embedding_idx`);
     await prisma.artist.create({ data: { id: "cart_exact", name: "Exact Artist", identityKey: "a_exact" } });
     await prisma.album.create({
         data: { id: "calb_exact", rgMbid: "rg_exact", artistId: "cart_exact", title: "Exact", primaryType: "Album" },

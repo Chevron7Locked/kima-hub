@@ -161,6 +161,8 @@ afterAll(async () => {
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, "trk\\_cap\\_%");
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE $1`, "alb\\_cap\\_%");
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE $1`, `art\\_cap\\_%`);
+    // buildMatching() wrote the library's one shared matching state; leaving it makes later files see a library that has one.
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     await prisma.$disconnect();
 });
 

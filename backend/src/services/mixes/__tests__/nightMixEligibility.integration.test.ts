@@ -36,6 +36,7 @@ beforeAll(async () => {
 afterAll(async () => {
     await removeSyntheticLibrary(PREFIX);
     await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     await prisma.$disconnect();
 });
 beforeEach(async () => {
