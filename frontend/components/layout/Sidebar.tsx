@@ -682,10 +682,10 @@ export function Sidebar() {
 
             {!isMobileOrTablet && (
                 <div
-                    // The page beside the sidebar is laid out once, by this placeholder's width, the moment the sidebar
-                    // opens or closes. The visible box below is out of flow and slides over the page, so animating it
-                    // never lays the page out; it sits above the page's raised content and under the top bar.
-                    className="relative z-(--z-scene-panel) shrink-0"
+                    // This placeholder's width pushes and pulls the page beside the sidebar, on the same curve and timing as
+                    // the visible box below, so the page follows the slide; the box sits above the page's raised content
+                    // and under the top bar.
+                    className="relative z-(--z-scene-panel) shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
                     <aside

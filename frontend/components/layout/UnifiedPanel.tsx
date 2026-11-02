@@ -108,10 +108,13 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const settingsActive = showSettings && !!settingsContent;
 
     return (
-        // The frame's width, and so the page beside it, changes once, the moment the panel opens or closes; a width that
-        // moved with the slide would re-lay-out the page every frame. The box slides over the page from the frame's
-        // right edge, as the left library's does, so it never hangs past the screen as scrollable overflow.
-        <div className="shrink-0 h-full relative z-(--z-scene-panel)" style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}>
+        // The frame's width pushes and pulls the page beside it, on the same curve and timing as the box, so the page
+        // follows the slide. The box grows from the frame's right edge, as the left library's does, so it never hangs
+        // past the screen as scrollable overflow.
+        <div
+            className="shrink-0 h-full relative z-(--z-scene-panel) transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+            style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
+        >
             <aside
                 id="activity-panel"
                 aria-label="listening and activity"
