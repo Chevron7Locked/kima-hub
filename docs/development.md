@@ -19,7 +19,7 @@ Backend code is organised as `routes/` (one Express router per area), `services/
 
 ## Run it locally
 
-You need Docker (for Postgres and Redis), Node.js (CI uses Node 24), and a folder with some music.
+You need Docker (for Postgres and Redis), Node.js 24 with npm, and a folder with some music. Kima uses npm only: `backend/` and `frontend/` each have their own `package-lock.json`, and CI installs with `npm ci`.
 
 1. Start Postgres and Redis. The ports are 5455 and 6390 so they can run beside other instances.
 

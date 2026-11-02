@@ -27,7 +27,9 @@ When you save, Lidarr sends a test event. If it cannot reach Kima, admins get a 
 
 ### How Kima treats a request
 
+- Kima asks Lidarr for the exact album by its MusicBrainz id. It does not look an album up by title, and it does not swap in a deluxe edition or another album by the same artist.
 - Kima counts a request as done when Lidarr holds the whole album you asked for.
+- Only administrators can start downloads unless **Member Downloads** is on in **Settings > Download Preferences**. Deleting stays administrator-only either way.
 - If Lidarr parks a download because some tracks are missing, Kima leaves it for you to handle in Lidarr.
 - **Remove junk downloads** (on by default) lets Kima remove a download with no usable music, or the wrong album, so Lidarr tries the next release. Turn it off if your own Lidarr setup already handles this.
 
@@ -66,6 +68,7 @@ Your listening position is saved back to Audiobookshelf as you listen.
 [ListenBrainz](https://listenbrainz.org/) is an open listening history.
 
 - **Similar artists:** Kima asks ListenBrainz for artists similar to the ones you play, and uses Deezer when ListenBrainz has too few. This needs no account.
+- **Popular songs:** an artist page's popular songs come from ListenBrainz only for accounts that saved a ListenBrainz token under Scrobbling, because ListenBrainz gives that data only to token holders. Everyone else gets Deezer's list instead. Token holders also fall back to Deezer when ListenBrainz has nothing for the artist, and then to the songs of that artist you play most.
 - **Scrobbling (optional):** under **Settings > Scrobbling**, enter your ListenBrainz user token and Kima records your plays to your own account. You can remove the token at any time.
 
 ## Importing playlists

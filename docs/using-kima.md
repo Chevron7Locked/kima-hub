@@ -10,7 +10,7 @@ The first account you create becomes the administrator. When setup finishes, Kim
 
 The home page shows the sections that have something to show:
 
-- **Library Radio:** one-click stations. Shuffle All, Workout (high energy), Discovery (lesser-played) and Favorites (most played), plus stations for your common genres and decades, and the 14 mood stations, such as Calm, Road Trip, Wildcard and Late Night.
+- **Library Radio:** one-click stations. Shuffle All, Workout (high energy), Discovery (songs you have not played, or played least) and Favorites (the songs you play most), both counted from your own plays, plus stations for your common genres and decades, and the 14 mood stations, such as Calm, Road Trip, Wildcard and Late Night.
 - **Continue Listening** and **Recently Added.**
 - **Made For You:** generated mixes. The **Mood Mixer** button beside it makes a playlist from one of the five moods: Upbeat, Melancholic, Calm, Intense or Energetic.
 - **Recommended:** artists picked from your listening.
@@ -38,9 +38,19 @@ Pick a start and an end, either a song, an artist or a sound, and choose **Gener
 
 Add songs to **More Like** and, if you want, songs to **Less Like.** Kima finds the songs that match the first group and not the second, and builds a playlist from them.
 
+## Discover
+
+Discover Weekly is a weekly playlist of music you do not own, built from artists similar to the ones you play and downloaded for you. Its songs are for trying out, so they play only in Discover. They stay out of radio, mixes, search, artist pages, recommendations and the vibe map, and Kima does not analyse them.
+
+Keep a song with the heart on a Discover track: the whole album moves into your library and is analysed like the rest. Unliking it sends the album back to Discover, unless it was already yours before the like, another listener's like keeps it, or you put one of its songs in a playlist. Each week's run clears the previous week's suggestions.
+
+Discover deletes an album only if it is still in Discover and its own records show it downloaded that album. Anything it cannot prove is left alone and reported in the notification tray. An album filed as Discover that none of Discover's records names goes back to your library, and nothing is deleted. Members can have Discover Weekly only when an administrator turns on Member Downloads (see [configuration.md](configuration.md#settings-in-the-web-app)).
+
+**Releases** in the sidebar lists new and upcoming albums from artists you follow.
+
 ## Searching
 
-The search page has the tabs **All Results**, **Library** and **Discover**. Library results are your artists, albums, tracks, podcasts and audiobooks. Discover finds music and podcasts you do not own. When Soulseek is connected, a **P2P Network** tab appears; see [integrations](integrations.md#soulseek).
+The search page has the tabs **All Results**, **Library** and **Discover**. Library results are your artists, albums, tracks, podcasts and audiobooks. Discover finds music and podcasts you do not own. When Soulseek is connected, a **Soulseek** tab appears; see [integrations](integrations.md#soulseek).
 
 ## Playlists
 

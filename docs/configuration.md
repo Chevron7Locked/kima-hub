@@ -17,7 +17,7 @@ Most of Kima is configured in the web app, under **Settings**. Environment varia
 | P2P Networks | Soulseek | Admins |
 | Artwork | Fanart.tv and AcoustID keys | Admins |
 | Storage | The music library path, the server address, and Check for updates (a daily look at GitHub for a newer release) | Admins |
-| Library Enrichment | The six enrichment steps and the fingerprints, worker counts, caches, the NVIDIA GPU switches, re-run from a chosen step, wipe and re-run | Admins |
+| Library Enrichment | The six enrichment steps and the fingerprints, worker counts, caches, the NVIDIA GPU switches (Linux on x86-64 only), re-run from a chosen step, wipe and re-run, re-file albums by tags | Admins |
 | Corrupt Tracks | Files that could not be read | Admins |
 | Users | Create and delete accounts, set roles | Admins |
 
@@ -39,7 +39,7 @@ Generate the two secrets with `openssl rand -base64 32`.
 
 In the all-in-one image you set neither. On first start the image creates both and stores them in `/data/secrets/`. Values you pass in as `SESSION_SECRET` or `SETTINGS_ENCRYPTION_KEY` are ignored there. This is why `/data` needs a backup: without `/data/secrets/encryption_key` the stored credentials cannot be decrypted.
 
-With the split stack (`docker-compose.yml`), set both in a `.env` file next to the Compose file.
+With the split stack (`docker-compose.yml`), set both in a `.env` file next to the Compose file. Kima refuses to start without `SETTINGS_ENCRYPTION_KEY` (or with the placeholder `default-encryption-key-change-me`). The older name `ENCRYPTION_KEY` is still read when `SETTINGS_ENCRYPTION_KEY` is unset. Do not change it on an install that already has saved credentials: they could not be read again.
 
 ### Common options
 
@@ -53,7 +53,9 @@ With the split stack (`docker-compose.yml`), set both in a `.env` file next to t
 | `TRANSCODE_CACHE_MAX_GB` | `10` | Size limit for cached transcoded audio. |
 | `MUSICBRAINZ_BASE_URL` | `https://musicbrainz.org/ws/2` | Point Kima at your own MusicBrainz mirror. |
 | `ACOUSTID_CLIENT_KEY` | a shared key | Your own AcoustID key, if you want to lift the shared key's rate limit. Also settable in Settings under Artwork. |
-| `DISABLE_CLAP` | unset | Set to `true` to stop the vibe analyzer from starting in the all-in-one image. Without it there are no sound vectors, so the vibe features do not work. |
+| `DISABLE_CLAP` | unset | Set to `true` or `1` to stop the vibe analyzer from starting in the all-in-one image. Without it there are no sound vectors, so the vibe features do not work. The container health check then stops expecting it. |
+| `ACOUSTID_DISABLED` | unset | Set to `true` to turn off AcoustID fingerprint identification, as if the fingerprinting program AcoustID uses (`fpcalc`) were not installed. |
+| `DATABASE_POOL_SIZE` | `20` | The most database connections the API server keeps open. `DATABASE_POOL_TIMEOUT` (default `30`) is how many seconds a request waits for one. |
 | `ADMIN_RESET_PASSWORD` | unset | Set it and restart to reset the password of one administrator account (with several, Kima picks one). Remove it afterwards, or the password resets again on every start. The reset signs that account out everywhere. |
 | `RECONCILE_MODE` | `delete` | What the scan does with tracks whose files are gone, so the library follows the disk. `delete` (default) retires tracks **confirmed gone by two consecutive scans**: the first scan flags, the next scan that still cannot find the file deletes the track and everything hanging off it (plays, likes, playlist items, stages, embeddings), and `RemovalLog` records what left. Admins can read it at `GET /api/library/removals`. There is no time limit: if a mount drops mid-scan, the tracks are flagged, the files are found again on the next scan, and nothing is lost. A track replaced by another copy of the same song on the same album (same disc, track number and title) hands its plays, likes, playlist places and bookmarks to that copy first. An empty music folder marks nothing missing. `flag` only flags them and never deletes anything. Any other value stops Kima from starting. |
 | mass-missing guard | on | If ten or more tracks AND more than 10% of the library are absent at once, nothing is retired in that scan. That pattern is a dropped mount or a failing sync, not you cleaning up. The scan logs why nothing was retired. |

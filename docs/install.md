@@ -71,6 +71,8 @@ If the startup log reports a permission error, change the owner of the host fold
 
 A process supervisor starts Postgres, Redis, the API server, the web app and the two analyzers. Only port 3030 is exposed. The API server listens on 3006 and Postgres and Redis on their usual ports, all inside the container.
 
+Docker's health check for the container covers all of it: the web app, the API server's `/health` (which checks Postgres and Redis), the audio analyzer and the sound-vector analyzer (not checked when `DISABLE_CLAP` is `true` or `1`). The container gets 300 seconds to start before failures count. If your own Compose file has a `healthcheck:` block, see [administration.md](administration.md#health-check).
+
 ## Updating
 
 ```bash
@@ -80,7 +82,7 @@ docker compose up -d
 
 With plain `docker run`, pull the image, remove the container and run the same command again. Your data stays in `/data`.
 
-Every update runs any new database migrations when the container starts. Migrations do not roll back, so take a copy of the `/data` volume before a major update if you might want to go back.
+Every update runs any new database migrations when the container starts. Updating from 1.11 to 1.12 also redoes your library's enrichment in the background: the update removes the old sound vectors and analyses every song again, then works out new sound vectors and moods. Your music, playlists, plays, likes, edits, identification and artists stay. Similar tracks, the vibe map, search by sound and the mood stations fill in as songs are done; see the [README](../README.md#how-songs-are-analysed) for timings. From 1.10 or earlier, read the 1.11.0 entry in [CHANGELOG.md](../CHANGELOG.md) first. Migrations do not roll back, so take a copy of the `/data` volume before a major update if you might want to go back.
 
 ## Release channels
 
