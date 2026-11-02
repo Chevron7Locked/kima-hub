@@ -16,7 +16,7 @@ Kima is a music server you run yourself. Point it at a folder of music and it gi
 
 > [!CAUTION]
 > ### Upgrading from 1.11 to 1.12 redoes your library's enrichment
-> 1.12 replaces the sound model with a music-tuned one that runs on ONNX Runtime, and adds moods from scorers trained on that model. So the update deletes your library's old sound vectors, then analyses every song again and works out its sound vector and moods in the background. Until it finishes, similar tracks, the vibe map, search by sound and the mood stations fill in as songs are done. Your music, playlists, plays, likes, edits, identification and artists stay. It took just under two hours for 9,176 songs with a GPU, and takes longer without one. See the [1.12 release notes](https://github.com/Chevron7Locked/kima-hub/releases).
+> 1.12 replaces the sound model with a music-tuned one that runs on ONNX Runtime, and adds moods from scorers trained on that model. So the update deletes your library's old sound vectors, then analyses every song again and works out its sound vector and moods in the background. Search by sound fills in as songs are done; similar tracks, the vibe map and the mood stations come back once every song has its new sound vector. Your music, playlists, plays, likes, edits, identification and artists stay. It took just under two hours for 9,176 songs with a GPU, and takes longer without one. See the [1.12 release notes](https://github.com/Chevron7Locked/kima-hub/releases).
 
 <p align="center">
   <img src="assets/screenshots/mobile-home.png" alt="The home page on a phone" width="22%">

@@ -127,8 +127,8 @@ export const RELEASES: Release[] = [
                     "This update replaces the sound vectors your library got in 1.11 with ones from the music-tuned sound " +
                     "model. It also analyses every song again, because analysis now reads the middle of each song and works out feel differently. Both " +
                     "run in the background; you don't need to start anything.\n\n" +
-                    "Until it finishes, similar tracks, the vibe map, search by sound, and the new mood stations and mixes " +
-                    "fill in as songs are done. Everything else stays as it is: your music, playlists, plays, likes, edits, " +
+                    "Similar tracks, the vibe map, and the new mood stations and mixes come back once every song has its new " +
+                    "sound vector, and search by sound fills in as songs are done. Everything else stays as it is: your music, playlists, plays, likes, edits, " +
                     "identification and artists.\n\n" +
                     "How long it takes depends on your library and hardware: just under two hours for 9,176 songs with a " +
                     "GPU, and longer without one. Settings, under Library, shows the progress.",
@@ -313,7 +313,7 @@ export const RELEASES: Release[] = [
                     "- You can delete your own account in Settings, under You\n" +
                     "- Touch screens: controls that appear on hover now show on tap too\n" +
                     "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
-                    "- Audio analysis and sound vectors take turns by default; an admin can let them run at once in Settings, under Library\n" +
+                    "- Audio analysis finishes every song before sound vectors start, so the two never run at the same time; an admin can let them run at once in Settings, under Library\n" +
                     "- Subsonic apps that search with search2 or an empty search3 get results again\n" +
                     "- An ordered play queue for iOS that doesn't drag the full artist payload\n\n" +
                     "1.12.1: enrichment waits for the library scan to finish, then works through the whole library in order: audio analysis, then sound vectors, then moods and similarity. Audio analysis and sound vectors never run at the same time unless you turn that on, and songs added partway through wait their turn.",
