@@ -39,7 +39,7 @@ async function cleanup() {
 }
 
 /** A user with three real tracks and a saved Upbeat mix over them (plus one dangling id). */
-async function fixture(opts: { withMix?: boolean; mood?: string } = {}) {
+async function fixture(opts: { withMix?: boolean; mood?: string; savedAt?: Date } = {}) {
     const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const user = await prisma.user.create({
         data: { username: `${PREFIX}-${tag}`, passwordHash: "x", role: "user" },
@@ -82,6 +82,8 @@ async function fixture(opts: { withMix?: boolean; mood?: string } = {}) {
                 trackIds: [...trackIds, "no-such-track"],
                 coverUrls: [],
                 generatedAt: GENERATED_AT,
+                // Saved before 1.11 shipped, unless the test says when.
+                createdAt: opts.savedAt ?? new Date("2026-09-01T00:00:00Z"),
             },
         });
     }
@@ -99,30 +101,35 @@ beforeAll(cleanup);
 afterAll(cleanup);
 beforeEach(() => jest.clearAllMocks());
 
-describe("GET /whats-new/pending — who is asked", () => {
-    const has = (releases: any[]) =>
-        releases.some((r) => r.items.some((i: any) => i.key === "moods.mixes"));
+/** 1.11 as this user sees it on the changelog, where older releases' questions live (the window shows only the newest). */
+const release111 = async (userId: string) =>
+    (await as(userId).get("/whats-new/changelog")).body.releases.find((r: any) => r.version === "1.11.0");
+const item111 = async (userId: string, key: string) => (await release111(userId)).items.find((i: any) => i.key === key);
 
+describe("GET /whats-new/changelog — who is asked", () => {
     it("asks a user who has a saved mood mix", async () => {
         const { userId } = await fixture();
-        const res = await as(userId).get("/whats-new/pending");
-        expect(res.status).toBe(200);
-        expect(has(res.body.releases)).toBe(true);
+        expect(await item111(userId, "moods.mixes")).toMatchObject({ open: true, requires: "savedMoodMix" });
     });
 
     it("does not ask a user with no mood mix, and keeps the rest of the release", async () => {
         const { userId } = await fixture({ withMix: false });
-        const res = await as(userId).get("/whats-new/pending");
-        expect(res.status).toBe(200);
-        expect(has(res.body.releases)).toBe(false);
-        const r111 = res.body.releases.find((r: any) => r.version === "1.11.0");
-        expect(r111.items.map((i: any) => i.key)).toContain("stats.page");
+        const keys = (await release111(userId)).items.map((i: any) => i.key);
+        expect(keys).not.toContain("moods.mixes");
+        expect(keys).toContain("stats.page");
+    });
+
+    it("does not ask about a mix saved after 1.11 shipped: the question was never theirs", async () => {
+        const { userId } = await fixture({ savedAt: new Date("2026-10-20T00:00:00Z") });
+        const keys = (await release111(userId)).items.map((i: any) => i.key);
+        expect(keys).not.toContain("moods.mixes");
+        expect(keys).not.toContain("moods.mixes.retired");
+        expect((await as(userId).get("/whats-new/open")).body.count).toBe(0);
     });
 
     it("asks a user whose mix is under a removed mood the save/remove question instead", async () => {
         const { userId } = await fixture({ mood: "focus" });
-        const res = await as(userId).get("/whats-new/pending");
-        const keys = res.body.releases.flatMap((r: any) => r.items.map((i: any) => i.key));
+        const keys = (await release111(userId)).items.map((i: any) => i.key);
         expect(keys).toContain("moods.mixes.retired");
         expect(keys).not.toContain("moods.mixes");
     });
@@ -278,12 +285,6 @@ describe("save as playlist", () => {
 });
 
 describe("a mix under a mood 1.11 removed", () => {
-    const pendingKeys = async (userId: string) =>
-        (await as(userId).get("/whats-new/pending")).body.releases.map((r: any) => ({
-            version: r.version,
-            keys: r.items.map((i: any) => i.key),
-        }));
-
     it("is described with its old mood's name and marked retired", async () => {
         const { userId } = await fixture({ mood: "melancholy" });
         const res = await as(userId).get("/whats-new/mood-mixes");
@@ -336,32 +337,27 @@ describe("a mix under a mood 1.11 removed", () => {
         expect(await prisma.releaseChoice.count({ where: { userId } })).toBe(0);
     });
 
-    it("survives closing the window, and is asked about again until saved", async () => {
+    it("survives closing the window, and stays open on the changelog until saved", async () => {
         const { userId } = await fixture({ mood: "focus" });
         expect((await as(userId).post("/whats-new/1.11.0/dismiss")).status).toBe(200);
         expect(await prisma.userMoodMix.count({ where: { userId } })).toBe(1);
-
-        const next = (await pendingKeys(userId)).find((r: any) => r.version === "1.11.0");
-        expect(next).toEqual({ version: "1.11.0", keys: ["moods.mixes.retired"] });
-
-        // Closing the re-ask changes nothing either.
-        await as(userId).post("/whats-new/1.11.0/dismiss");
-        expect(await prisma.userMoodMix.count({ where: { userId } })).toBe(1);
+        expect(await item111(userId, "moods.mixes.retired")).toMatchObject({ open: true });
 
         await as(userId).post("/whats-new/mood-mixes/save", { mixId: MIX_ID });
-        expect((await pendingKeys(userId)).find((r: any) => r.version === "1.11.0")).toBeUndefined();
+        expect(await item111(userId, "moods.mixes.retired")).toMatchObject({ open: false, done: true });
     });
 
-    it("is not asked again once removed", async () => {
+    it("is not asked again once removed: with no mix left, the question is gone", async () => {
         const { userId } = await fixture({ mood: "focus" });
         await as(userId).post("/whats-new/1.11.0/dismiss");
         await as(userId).post("/whats-new/mood-mixes/decision", { decision: "remove" });
-        expect((await pendingKeys(userId)).find((r: any) => r.version === "1.11.0")).toBeUndefined();
+        expect(await item111(userId, "moods.mixes.retired")).toBeUndefined();
+        expect((await as(userId).get("/whats-new/open")).body.count).toBe(0);
     });
 });
 
 describe("a current mix after the window is closed", () => {
-    it("is kept, and not asked about again", async () => {
+    it("is kept, and the window never brings 1.11 back", async () => {
         const { userId } = await fixture();
         await as(userId).post("/whats-new/1.11.0/dismiss");
         expect(await prisma.userMoodMix.count({ where: { userId } })).toBe(1);
@@ -384,10 +380,7 @@ describe("POST /whats-new/:version/choice — only what the window asked", () =>
         expect(res.status).toBe(400);
         expect(await prisma.releaseChoice.count({ where: { userId } })).toBe(0);
         expect(await prisma.userMoodMix.count({ where: { userId } })).toBe(1);
-        const next = (await as(userId).get("/whats-new/pending")).body.releases.find(
-            (r: any) => r.version === "1.11.0",
-        );
-        expect(next.items.map((i: any) => i.key)).toEqual(["moods.mixes.retired"]);
+        expect(await item111(userId, "moods.mixes.retired")).toMatchObject({ open: true });
     });
 
     it("refuses a key nobody asked about", async () => {

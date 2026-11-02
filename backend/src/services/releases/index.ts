@@ -10,7 +10,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { GPU_CHOICE_KEY, RELEASES, choicesIn, findRelease, isMoodMixItem, type Release, type ReleaseItem } from "./catalog";
 import { gpuSupported } from "../gpuRuntime";
-import { MOOD_MIX_RELEASE, moodMixState, type MoodMixState } from "./moodMixes";
+import { moodMixState, type MoodMixState } from "./moodMixes";
 
 export { findRelease, GPU_CHOICE_KEY } from "./catalog";
 
@@ -40,39 +40,20 @@ async function libraryEnrichedBefore(date: string): Promise<boolean> {
     return row?.older === true;
 }
 
-/** Releases this user has not yet closed, oldest first, so someone away for three versions reads them in order and
- * answers older consent questions before newer ones that may depend on them. */
+/**
+ * The release this user is shown on their next visit: the newest one, until they close it. Older releases are never
+ * shown in the window, closed or not, so a new user or someone who skipped versions sees only the newest; the older
+ * ones, with their questions and actions, stay on the changelog page (changelogFor).
+ */
 export async function pendingReleases(userId: string): Promise<Release[]> {
-    const acked = await prisma.releaseAcknowledgement.findMany({
-        where: { userId },
-        select: { version: true },
-    });
-    const seen = new Set(acked.map((a) => a.version));
-    const pending = RELEASES.filter((r) => !seen.has(r.version)).sort(byDate);
+    const newest = [...RELEASES].sort(byDate).at(-1);
+    if (!newest) return [];
+    const closed = await prisma.releaseAcknowledgement.findFirst({ where: { userId, version: newest.version }, select: { version: true } });
+    if (closed) return [];
+    const [release] = await forUser(userId, [newest]);
     // The window asks only what is still owed: the re-file is not, once a clean run is recorded.
-    const refiled = await albumsRefiled();
-    const out = (await forUser(userId, pending)).map((r) =>
-        refiled ? { ...r, items: r.items.filter((i) => !(i.kind === "action" && i.run === "refileAlbums")) } : r,
-    );
-
-    // A mix under a mood 1.11 removed cannot be shown, so closing the window
-    // must not be the last word on it: until the user saves or removes it,
-    // the question comes back on the next visit, on its own.
-    if (seen.has(MOOD_MIX_RELEASE)) {
-        const release = findRelease(MOOD_MIX_RELEASE);
-        const retired = release?.items.find((i) => i.kind === "action" && i.requires === "retiredMoodMix");
-        const s = retired ? await moodMixState(userId) : undefined;
-        if (release && retired && s?.mix?.retired && s.decision === null && s.playlist === null) {
-            out.push({
-                ...release,
-                note: undefined,
-                title: "One thing left from 1.11",
-                summary: "Your old mood mix is still waiting for an answer.",
-                items: [retired],
-            });
-        }
-    }
-    return out;
+    if (!(await albumsRefiled())) return [release];
+    return [{ ...release, items: release.items.filter((i) => !(i.kind === "action" && i.run === "refileAlbums")) }];
 }
 
 const byDate = (a: Release, b: Release) =>
@@ -116,6 +97,14 @@ async function forUser(
     // worse. The user's role is only read when an item needs it.
     let state: MoodMixState | undefined;
     const mixState = async () => (state ??= await moodMixState(userId));
+    // A release's mood-mix question is about a mix that existed when it shipped, never one saved since.
+    let savedAt: Date | null | undefined;
+    const mixSavedBefore = async (date: string) => {
+        if (savedAt === undefined) {
+            savedAt = (await prisma.userMoodMix.findUnique({ where: { userId }, select: { createdAt: true } }))?.createdAt ?? null;
+        }
+        return savedAt !== null && savedAt < new Date(date);
+    };
     let roleChecked: boolean | undefined;
     const isAdmin = async () => (roleChecked ??= await isAdminUser(userId));
     let setUpAt: Date | null | undefined;
@@ -135,7 +124,8 @@ async function forUser(
         if (item.requires === "admin") return isAdmin();
         if (item.kind !== "action") return true;
         const { mix } = await mixState();
-        return item.requires === "retiredMoodMix" ? mix?.retired === true : mix?.retired === false;
+        if (!mix || !(await mixSavedBefore(release.date))) return false;
+        return item.requires === "retiredMoodMix" ? mix.retired : !mix.retired;
     };
 
     const out: Release[] = [];
@@ -156,6 +146,8 @@ interface ChangelogItem {
     body: string;
     cta?: string;
     run?: "wipeEnrichment" | "refileAlbums";
+    /** Who an action is for; the page shows the mood-mix choice for the two mood-mix actions. */
+    requires?: string;
     confirmTitle?: string;
     confirmMessage?: string;
     confirmLabel?: string;
@@ -225,6 +217,10 @@ export async function changelogFor(userId: string): Promise<{ releases: Changelo
         forUser(userId, [...RELEASES].sort(byDate).reverse(), enrichedBefore),
     ]);
     const seen = new Set(acks.map((a) => a.version));
+    // The window shows only the newest release (pendingReleases), so an older one counts as shown whether or not it was
+    // closed: what it still asks of this user is open here, and counted on the version number.
+    const newest = filtered[0]?.version;
+    const shown = (version: string) => seen.has(version) || version !== newest;
     const answers = new Map(choices.map((c) => [c.key, c]));
     if (answers.has(GPU_CHOICE_KEY)) answers.get(GPU_CHOICE_KEY)!.enabled = await gpuChoiceAnswer();
     let openCount = 0;
@@ -242,6 +238,7 @@ export async function changelogFor(userId: string): Promise<{ releases: Changelo
                             ? {
                                   cta: i.cta,
                                   run: i.run,
+                                  requires: i.requires,
                                   confirmTitle: i.confirmTitle,
                                   confirmMessage: i.confirmMessage,
                                   confirmLabel: i.confirmLabel,
@@ -256,7 +253,7 @@ export async function changelogFor(userId: string): Promise<{ releases: Changelo
                         const a = answers.get(i.key);
                         if (a) out.answer = { enabled: a.enabled, decidedBy: a.decidedBy };
                     }
-                    if (seen.has(r.version)) {
+                    if (shown(r.version)) {
                         const settled = await actionSettled(userId, i, r.date, enrichedBefore);
                         if (settled !== undefined) {
                             out.done = settled;

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Only the newest release's "what's new" window.** A new account, or someone who skipped versions, was shown every release's window one after another (1.10, then 1.11, then 1.12). Now the window shows only the newest release. What an older release still asks of you (1.11's "wipe and re-run" for libraries enriched before it, and its saved mood mix question) is counted on the version number as open and can be done from the changelog page, which now also has the mood mix choice.
 - **Enrichment runs in order on a fresh install.** Enrichment used to start on the songs a library scan had added so far, so on a new server audio analysis and sound vectors took turns batch by batch while the scan was still running, and the moods and similarity were rebuilt from part of the library every few seconds. Now enrichment waits until the scan has finished. Identification, artist metadata and audio analysis run side by side, then the sound vectors for every song, then the moods, then similarity. Audio analysis and sound vectors each finish every song they owe before the other starts, unless "Run audio analysis and sound vectors at the same time" is on; a song added in the meantime waits its turn. Mood tags, mood mixes and stations, and similarity now appear once the sound vectors are done for the whole library, not song by song.
 
 ## [1.12.0] - 2026-11-02

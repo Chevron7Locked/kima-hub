@@ -133,15 +133,16 @@ describe("GET /whats-new/pending — audience filtering", () => {
         const admin = await makeUser("admin");
         const plain = await makeUser("user");
 
+        // 1.11's question is read on the changelog: the window shows only the newest release.
         const asAdmin = await request(makeApp())
-            .get("/whats-new/pending")
+            .get("/whats-new/changelog")
             .set("x-test-user", admin.id)
             .set("x-test-role", "admin");
         const adminRelease = asAdmin.body.releases.find((r: any) => r.version === "1.11.0");
         expect(adminRelease.items.some((i: any) => i.key === GPU_CHOICE_KEY)).toBe(true);
 
         const asPlain = await request(makeApp())
-            .get("/whats-new/pending")
+            .get("/whats-new/changelog")
             .set("x-test-user", plain.id);
         const plainRelease = asPlain.body.releases.find((r: any) => r.version === "1.11.0");
         expect(plainRelease.items.some((i: any) => i.key === GPU_CHOICE_KEY)).toBe(false);

@@ -31,7 +31,7 @@ import {
 const router = Router();
 router.use(requireAuth);
 
-/** GET /whats-new/pending — what this user still needs shown, oldest first. */
+/** GET /whats-new/pending — the newest release, until this user closes it; older ones live on the changelog. */
 router.get("/pending", async (req, res) => {
     try {
         res.json({ releases: await pendingReleases(req.user!.id) });

@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Shows every release the user has not closed in one window, the newest note first and every pending item oldest
- * first. The version number beside the logo opens it while something is unread, and the changelog otherwise. The
- * server decides what is pending; nothing is recorded locally, so a second device still asks.
+ * Shows the newest release until the user closes it; older releases are never shown here, and what they still ask
+ * of this user is open on the changelog page instead. The version number beside the logo opens the window while it is
+ * unread, and the changelog otherwise. The server decides what is pending; nothing is recorded locally, so a second
+ * device still asks.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -107,7 +108,6 @@ export function WhatsNewGate() {
                 setDeferredNow((n) => n + 1);
                 setAnswered(current.answers);
                 setDone((d) => [...new Set([...d, ...current.done])]);
-                // Older releases still unread stay ahead of it.
                 setQueue((q) => (q.some((r) => r.version === current.release.version) ? q : [...q, current.release]));
             } catch {
                 notify.error("Couldn't open what's new");
@@ -120,8 +120,7 @@ export function WhatsNewGate() {
     }, [deferKey]);
 
     if (queue.length === 0 || deferred) return null;
-    // Done closes every pending release in the queue, not just the heading's:
-    // a window that shows two releases must record both closings.
+    // Done closes what the window showed: the newest release, and the current one if it was reopened.
     const dismissAll = async () => {
         for (const r of queue) await api.post(`/whats-new/${r.version}/dismiss`, {});
     };

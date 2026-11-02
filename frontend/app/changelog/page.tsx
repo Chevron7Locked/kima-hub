@@ -19,6 +19,7 @@ import { ReleaseBody } from "@/components/whats-new/ReleaseBody";
 import { ReleaseLinks } from "@/components/whats-new/ReleaseLinks";
 import { WipeAction } from "@/components/whats-new/WipeAction";
 import { RefileAction } from "@/components/whats-new/RefileAction";
+import { MoodMixChoice } from "@/components/whats-new/MoodMixChoice";
 import { CHANGELOG } from "@/components/whats-new/useVersionChip";
 import type { Release, ReleaseItem } from "@/components/whats-new/types";
 
@@ -91,7 +92,7 @@ export default function ChangelogPage() {
             {openItemsList.length > 0 && (
                 <section aria-label="Still open" className="mt-6 flex flex-col gap-1 rounded-xl border border-brand/30 bg-brand/[0.05] p-4">
                     <h2 className="text-sm font-semibold text-brand">{openItemsList.length === 1 ? "One thing is still open" : `${openItemsList.length} things are still open`}</h2>
-                    <p className="text-xs text-[var(--text-muted)]">From releases you already read. They close themselves when they truly happen.</p>
+                    <p className="text-xs text-[var(--text-muted)]">Things a release asked of you that are not done yet. They close themselves when they truly happen.</p>
                     <ul className="mt-1 flex flex-col">
                         {openItemsList.map(({ release, item }) => (
                             <li key={`${release.version}:${item.key}`}>
@@ -119,7 +120,7 @@ export default function ChangelogPage() {
                             </h2>
                             <p className="text-xs text-[var(--text-muted)]">
                                 {niceDate(r.date)}
-                                {r.dismissed ? "" : " · you haven't read it yet"}
+                                {r.dismissed || r.version !== data.releases[0]?.version ? "" : " · you haven't read it yet"}
                             </p>
                         </header>
                         <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">{r.summary}</p>
@@ -161,6 +162,7 @@ export default function ChangelogPage() {
                                                             onDone={() => setDoneKeys((d) => new Set([...d, item.key]))}
                                                         />
                                                     )}
+                                                    {(item.requires === "savedMoodMix" || item.requires === "retiredMoodMix") && <MoodMixChoice />}
                                                     {item.run === "refileAlbums" && (
                                                         <RefileAction
                                                             item={item}

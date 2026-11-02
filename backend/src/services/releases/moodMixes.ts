@@ -1,8 +1,8 @@
 /**
  * The mood-mix question after the mood heads were fixed: rebuild (clear the
  * saved mix), keep, or save it as a playlist first. A mix under a mood that no
- * longer exists is "retired" and offers only save or remove; unanswered, it is
- * asked again. Answers are ReleaseChoice rows; every endpoint is repeatable.
+ * longer exists is "retired" and offers only save or remove; unanswered, it stays
+ * open on the changelog. Answers are ReleaseChoice rows; every endpoint is repeatable.
  */
 
 import { ChoiceDecidedBy } from "@prisma/client";

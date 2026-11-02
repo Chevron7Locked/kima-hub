@@ -411,7 +411,7 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
         session.assertClean("Journey 5 (GPU)");
     });
 
-    test("6. release window: a new admin answers every release", async () => {
+    test("6. release window: a new admin sees only the newest release", async () => {
         test.setTimeout(5 * 60_000);
         session.setJourney("6. Release window");
 
@@ -460,94 +460,34 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 return { mood: mood!.id };
             });
 
-            await session.step("the window opens on the newest release, with the older ones before it", async () => {
+            await session.step("the window shows only the newest release, none of the older ones", async () => {
                 await expect(dialog).toBeVisible({ timeout: 15_000 });
                 await expect(heading).toHaveText(NEWEST.heading);
                 for (const key of NEWEST.items) {
                     await expect(dialog.locator(`[data-item="${key}"]`)).toBeVisible();
                 }
-                await expect(dialog.locator('[data-release="1.11.0"]')).toContainText("a note from Kevin");
-                await expect(dialog.locator('[data-release="1.10.1"]')).toBeVisible();
+                await expect(dialog.locator('[data-release="1.11.0"]')).toHaveCount(0);
+                await expect(dialog.locator('[data-release="1.10.1"]')).toHaveCount(0);
             });
 
-            await session.step("an older release opens as its own page, and its items come back to it", async () => {
-                await dialog.locator('[data-release="1.10.1"]').click();
-                for (const title of ["A play means you listened", "Clean up old play counts"]) {
-                    await expect(dialog.locator("[data-item]").filter({ hasText: title }).first()).toBeVisible();
-                }
-                await dialog.locator('[data-item="plays.repair"]').click();
-                await expect(dialog.getByRole("link", { name: /Open the cleanup/ })).toHaveAttribute("href", "/stats#false-starts");
-                await dialog.locator("[data-back]").click();
-                await expect(dialog.locator('[data-item="plays.repair"]')).toBeFocused();
-                await dialog.locator("[data-back]").click();
-                await expect(dialog.locator('[data-release="1.10.1"]')).toBeFocused();
-
-                await dialog.locator('[data-release="1.11.0"]').click();
-                await expect(dialog.getByRole("heading", { name: "A note from Kevin" })).toBeVisible();
-                for (const title of ["The new vibe engine", "The new vibe map"]) {
-                    await expect(dialog.locator("[data-item]").filter({ hasText: title }).first()).toBeVisible();
-                }
-                // The wipe is offered only to a library enriched before 1.11.
-                const wipe = dialog.locator('[data-item="engine.wipe"]');
-                if (await wipe.count()) {
-                    await wipe.click();
-                    await expect(fp.getByTestId("wipe-run")).toBeVisible();
-                    await dialog.locator("[data-back]").click();
-                    await expect(wipe).toBeFocused();
-                } else {
-                    session.noteNotCovered("release window: the wipe item, since this library was enriched by 1.11 already");
-                }
-            });
-
-            await session.step("the mood mix is saved as a playlist, then rebuilt", async () => {
-                await dialog.locator('[data-item="moods.mixes"]').click();
-                await expect(fp.getByTestId("moodmix-name")).toBeVisible({ timeout: 10_000 });
-                const savedResponse = fp.waitForResponse((r) => r.url().includes("/whats-new/mood-mixes/save"));
-                await fp.getByTestId("moodmix-save").click();
-                const saved = (await (await savedResponse).json()) as { id: string; trackCount: number };
-                await expect(fp.getByTestId("moodmix-saved")).toBeVisible({ timeout: 15_000 });
-                await fp.getByTestId("moodmix-rebuild").click();
-                await expect(fp.getByTestId("moodmix-cleared")).toBeVisible({ timeout: 15_000 });
-                const state = await freshGet<{ mix: unknown }>("/whats-new/mood-mixes");
-                expect(state.mix, "the rebuilt mix should be gone").toBeNull();
-                // The rebuild clears the mix status, so read the playlist directly.
-                const playlist = await freshGet<{ id: string; items: unknown[] }>(`/playlists/${saved.id}`);
-                expect(playlist.items, "the saved playlist should keep its tracks").toHaveLength(saved.trackCount);
-                await dialog.locator("[data-back]").click();
-                await expect(dialog.locator("#whats-new-release")).toHaveText("Kima 1.11");
-            });
-
-            await session.step("the GPU answer is kept through closing, and every release closes", async () => {
-                // The GPU question is asked exactly where the server says the GPU runtime can run (linux on x64).
-                const gpuItem = dialog.locator('[data-item="gpu.accelerate"]');
-                const gpuAsked = (await getJson<{ supported: boolean }>("/system-settings/gpu")).supported;
-                await expect(gpuItem, gpuAsked ? "this host supports the GPU but the release never asks" : "this host cannot run the GPU but the release asks").toHaveCount(gpuAsked ? 1 : 0);
-                if (gpuAsked) {
-                    await gpuItem.click();
-                    const answered = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/choice"));
-                    await dialog.getByRole("button", { name: "Turn it on", exact: true }).click();
-                    expect((await answered).status()).toBe(200);
-                    await expect(dialog.getByRole("button", { name: "Turn it on", exact: true })).toHaveAttribute("aria-pressed", "true");
-                } else {
-                    session.noteNotCovered("release window: answering the GPU question, which this host rightly does not ask (not linux on x64)");
-                }
-                const older = fp.waitForResponse((r) => r.url().includes("/whats-new/1.10.1/dismiss"));
-                const dismissed = fp.waitForResponse((r) => r.url().includes("/whats-new/1.11.0/dismiss"));
+            await session.step("closing it closes only the newest, and no older release comes back", async () => {
                 const newest = fp.waitForResponse((r) => r.url().includes(`/whats-new/${NEWEST.version}/dismiss`));
                 await fp.getByTestId("whatsnew-done").click();
-                expect((await older).status()).toBe(200);
                 expect((await newest).status()).toBe(200);
-                const body = (await (await dismissed).json()) as { recordedDefaults: unknown[] };
-                if (gpuAsked) {
-                    expect(JSON.stringify(body.recordedDefaults), "an explicit answer must not be overwritten").not.toContain("gpu.accelerate");
-                    expect((await getJson<{ enabled: boolean }>("/system-settings/gpu")).enabled).toBe(true);
-                }
                 await expect(dialog).toBeHidden({ timeout: 10_000 });
                 const pending = await freshGet<{ releases: unknown[] }>("/whats-new/pending");
                 expect(pending.releases).toHaveLength(0);
                 await fp.reload();
                 await settle(fp, 2500);
                 await expect(dialog).toBeHidden();
+            });
+
+            await session.step("a mood mix saved on this release raises no 1.11 question", async () => {
+                // 1.11 asked about mixes saved before it shipped; this one was saved just now.
+                const open = await freshGet<{ items: Array<{ key: string }> }>("/whats-new/open");
+                expect(open.items.map((i) => i.key)).not.toContain("moods.mixes");
+                expect(open.items.map((i) => i.key)).not.toContain("moods.mixes.retired");
+                session.noteNotCovered("release window: answering 1.11's mood-mix question on the changelog page needs a mix saved before 1.11 (route tests cover it)");
             });
 
             await session.step("with everything read, the version number opens the changelog", async () => {

@@ -4,7 +4,7 @@
  */
 
 import { ChoiceDecidedBy } from "@prisma/client";
-import { UnknownChoiceError, dismissRelease, pendingReleases, setChoice } from "../releases";
+import { UnknownChoiceError, changelogFor, dismissRelease, pendingReleases, setChoice } from "../releases";
 import { GPU_CHOICE_KEY } from "../releases/catalog";
 import * as catalog from "../releases/catalog";
 
@@ -15,11 +15,13 @@ jest.mock("../../utils/db", () => {
     };
     return {
         prisma: {
-            releaseAcknowledgement: { findMany: jest.fn(), upsert: tx.releaseAcknowledgement.upsert },
-            releaseChoice: { findUnique: jest.fn(), upsert: jest.fn() },
+            releaseAcknowledgement: { findMany: jest.fn(), findFirst: jest.fn(), upsert: tx.releaseAcknowledgement.upsert },
+            releaseChoice: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn() },
             // pendingReleases reads the role only for items that require an
             // admin; the shipped catalog has one, so these tests answer as one.
             user: { findUnique: jest.fn().mockResolvedValue({ role: "admin" }) },
+            // When the user's saved mood mix was first saved: before 1.11, so 1.11's question is theirs.
+            userMoodMix: { findUnique: jest.fn().mockResolvedValue({ createdAt: new Date("2026-09-01T00:00:00Z") }) },
             // When this server was set up: before every release, so it reads as an upgrade.
             systemSettings: { findUnique: jest.fn().mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") }) },
             // Whether the library has enrichment from before a release's date.
@@ -73,8 +75,13 @@ beforeEach(() => {
     jest.spyOn(catalog, "findRelease").mockReturnValue(ASKING);
     tx.releaseChoice.findUnique.mockResolvedValue(null);
     prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
+    prisma.releaseAcknowledgement.findFirst.mockResolvedValue(null);
     moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
 });
+
+/** One release's items as this user is shown them on the changelog page, where every release stays. */
+const keysIn = async (version: string) =>
+    (await changelogFor("u1")).releases.find((r) => r.version === version)!.items.map((i) => i.key);
 
 describe("dismissRelease", () => {
     it("records a decision for every unanswered choice, not an absence", async () => {
@@ -161,22 +168,78 @@ describe("setChoice", () => {
     });
 });
 
-describe("pendingReleases", () => {
-    it("hides what the user has already closed", async () => {
-        jest.restoreAllMocks();
-        const real = catalog.RELEASES[0].version;
-        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: real }]);
-        expect((await pendingReleases("u1")).map((r) => r.version)).not.toContain(real);
+describe("pendingReleases: only the newest release", () => {
+    const newest = () => [...catalog.RELEASES].sort((x, y) => (x.date < y.date ? -1 : 1)).at(-1)!.version;
+
+    beforeEach(() => jest.restoreAllMocks());
+
+    it("shows a new user only the newest release, not every one before it", async () => {
+        expect((await pendingReleases("u1")).map((r) => r.version)).toEqual([newest()]);
+    });
+
+    it("shows someone who skipped versions only the newest", async () => {
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.10.1" }]);
+        expect((await pendingReleases("u1")).map((r) => r.version)).toEqual([newest()]);
+    });
+
+    it("shows nothing once the newest is closed, even with older ones never closed", async () => {
+        prisma.releaseAcknowledgement.findFirst.mockResolvedValue({ version: newest() });
+        expect(await pendingReleases("u1")).toEqual([]);
+    });
+
+    it("never brings back 1.11's unanswered retired mix question in the window; the changelog keeps it", async () => {
+        prisma.releaseAcknowledgement.findFirst.mockResolvedValue({ version: newest() });
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
+        moodMixState.mockResolvedValue({
+            mix: { id: "m", name: "Your Focus Mode Mix", mood: "focus", trackCount: 3, retired: true },
+            decision: null,
+            playlist: null,
+        });
+        expect(await pendingReleases("u1")).toEqual([]);
+        expect(await keysIn("1.11.0")).toContain("moods.mixes.retired");
     });
 });
 
-describe("pendingReleases — the 1.11 mood-mix items", () => {
+describe("an older release's unfinished work is open on the changelog, skipped or not", () => {
+    const item = async (version: string, key: string) =>
+        (await changelogFor("u1")).releases.find((r) => r.version === version)!.items.find((i) => i.key === key)!;
+
+    beforeEach(() => {
+        jest.restoreAllMocks();
+        prisma.user.findUnique.mockResolvedValue({ role: "admin" });
+        prisma.$queryRaw.mockResolvedValue([{ older: true }]);
+    });
+
+    it("counts a skipped 1.11's wipe as open for an admin upgrading from 1.10", async () => {
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.10.1" }]);
+        expect(await item("1.11.0", "engine.wipe")).toMatchObject({ open: true, done: false, requires: "admin" });
+        expect((await changelogFor("u1")).openCount).toBeGreaterThan(0);
+    });
+
+    it("counts an unanswered mood-mix question as open and says who it is for", async () => {
+        moodMixState.mockResolvedValue({
+            mix: { id: "m", name: "Your Focus Mode Mix", mood: "focus", trackCount: 3, retired: true },
+            decision: null,
+            playlist: null,
+        });
+        expect(await item("1.11.0", "moods.mixes.retired")).toMatchObject({ open: true, requires: "retiredMoodMix" });
+    });
+
+    it("leaves the newest release's actions to its window until it is closed", async () => {
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
+        expect((await item("1.12.0", "albums.refile")).open).toBeUndefined();
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.12.0" }]);
+        expect((await item("1.12.0", "albums.refile")).open).toBe(true);
+        prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") });
+    });
+});
+
+describe("the 1.11 mood-mix items, on the changelog", () => {
     const mixState = (mix: object | null, extra: object = {}) =>
         moodMixState.mockResolvedValue({ mix, decision: null, playlist: null, ...extra });
     const CURRENT = { id: "m", name: "Your Upbeat Mix", mood: "happy", trackCount: 3, retired: false };
     const RETIRED = { id: "m", name: "Your Focus Mode Mix", mood: "focus", trackCount: 3, retired: true };
-    const keysOf111 = async () =>
-        (await pendingReleases("u1")).find((r) => r.version === "1.11.0")?.items.map((i) => i.key);
+    const keysOf111 = () => keysIn("1.11.0");
 
     beforeEach(() => {
         jest.restoreAllMocks();
@@ -197,6 +260,14 @@ describe("pendingReleases — the 1.11 mood-mix items", () => {
         expect(keys).not.toContain("moods.mixes");
     });
 
+    it("drops both for a mix saved after 1.11 shipped", async () => {
+        mixState(CURRENT);
+        prisma.userMoodMix.findUnique.mockResolvedValueOnce({ createdAt: new Date("2026-10-20T00:00:00Z") });
+        const keys = await keysOf111();
+        expect(keys).not.toContain("moods.mixes");
+        expect(keys).not.toContain("moods.mixes.retired");
+    });
+
     it("drops both for a user without a mix, leaving the rest of the release", async () => {
         mixState(null);
         const keys = await keysOf111();
@@ -207,34 +278,6 @@ describe("pendingReleases — the 1.11 mood-mix items", () => {
         expect(catalog.RELEASES.find((r) => r.version === "1.11.0")!.items.map((i) => i.key)).toEqual(
             expect.arrayContaining(["moods.mixes", "moods.mixes.retired"]),
         );
-    });
-
-    describe("after 1.11 was closed", () => {
-        beforeEach(() => {
-            prisma.releaseAcknowledgement.findMany.mockResolvedValue(
-                ["1.10.1", "1.11.0", "1.12.0"].map((version) => ({ version })),
-            );
-        });
-
-        it("asks again about an unanswered retired mix, and only that", async () => {
-            mixState(RETIRED);
-            const out = await pendingReleases("u1");
-            expect(out).toHaveLength(1);
-            expect(out[0].version).toBe("1.11.0");
-            expect(out[0].items.map((i) => i.key)).toEqual(["moods.mixes.retired"]);
-        });
-
-        it("stops asking once the retired mix is saved or answered", async () => {
-            mixState(RETIRED, { playlist: { id: "p", name: "x" } });
-            expect(await pendingReleases("u1")).toEqual([]);
-            mixState(RETIRED, { decision: "rebuild" });
-            expect(await pendingReleases("u1")).toEqual([]);
-        });
-
-        it("never re-asks about a current mix: closing meant keep", async () => {
-            mixState(CURRENT);
-            expect(await pendingReleases("u1")).toEqual([]);
-        });
     });
 });
 
@@ -303,7 +346,7 @@ describe("catalog", () => {
         prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
         prisma.user.findUnique.mockResolvedValue({ role: "admin" });
         moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
-        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.11.0")!.items.map((i) => i.key);
+        const keys = () => keysIn("1.11.0");
         prisma.$queryRaw.mockResolvedValue([{ older: true }]);
         expect(await keys()).toContain("engine.wipe");
         prisma.$queryRaw.mockResolvedValue([{ older: false }]);
@@ -318,7 +361,7 @@ describe("catalog", () => {
         }
     });
 
-    it("asks about play repair in 1.10.1 only — the window oldest-first already reaches it", () => {
+    it("asks about play repair in 1.10.1 only", () => {
         const keysOf = (v: string) =>
             catalog.RELEASES.find((r) => r.version === v)!.items.map((i) => i.key);
         expect(keysOf("1.10.1")).toContain("plays.repair");
@@ -341,11 +384,11 @@ describe("catalog", () => {
         prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.10.1" }]);
         prisma.user.findUnique.mockResolvedValue({ role: "admin" });
         moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
-        const adminKeys = (await pendingReleases("u1")).find((r) => r.version === "1.11.0")!.items.map((i) => i.key);
+        const adminKeys = await keysIn("1.11.0");
         expect(adminKeys).toContain(GPU_CHOICE_KEY);
 
         prisma.user.findUnique.mockResolvedValue({ role: "user" });
-        const userKeys = (await pendingReleases("u1")).find((r) => r.version === "1.11.0")!.items.map((i) => i.key);
+        const userKeys = await keysIn("1.11.0");
         expect(userKeys).not.toContain(GPU_CHOICE_KEY);
     });
 });
