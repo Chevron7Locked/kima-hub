@@ -114,7 +114,9 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
             return (
                 <>
                     <SkipLink />
-                    <div className="h-dvh bg-black overflow-hidden flex flex-col">
+                    {/* Fixed to the screen like the top bar and tab bar, so the three can never drift apart when
+                        iOS Safari scrolls or resizes the document behind them. */}
+                    <div className="fixed inset-0 bg-black overflow-hidden flex flex-col">
                         <MediaControlsHandler />
                         <WhatsNewGate />
                         <TopBar />
