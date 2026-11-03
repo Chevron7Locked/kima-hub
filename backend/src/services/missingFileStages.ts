@@ -1,4 +1,13 @@
+import * as fs from "fs/promises";
+import * as path from "path";
 import type { Prisma } from "@prisma/client";
+import { config } from "../config";
+import { prisma } from "../utils/db";
+import { logger } from "../utils/logger";
+import { redisClient } from "../utils/redis";
+
+/** A scan was asked for while one ran: the scan that ran started before the flag, so another follows it (workers/index.ts). */
+export const SCAN_AGAIN_KEY = "scan:again-after-vanished-file";
 
 /**
  * Close every open stage record of a flagged-missing track as FILE_MISSING, so
@@ -60,4 +69,39 @@ export function reopenable(alias: string): string {
         AND ${alias}."failureClass" IS DISTINCT FROM 'FILE_MISSING'
         AND NOT EXISTS (SELECT 1 FROM "Track" gone
                          WHERE gone.id = ${alias}."trackId" AND gone."missingSince" IS NOT NULL)`;
+}
+
+/**
+ * An analyzer found no file for this track. It is flagged missing now and its stage records close (the reporting one
+ * too), so nothing waits on it, and a library scan is asked for: the scan removes the song (and an album or artist it
+ * empties) when it confirms the file is gone, or clears the flag and re-opens its records when the file is there.
+ * Scans resolve paths the way the song was added and stand down when much of the library vanishes at once.
+ * Gone means "no such file" here, as the scanner counts it; any other error reading it (permissions, I/O) is another
+ * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). Returns whether it
+ * flagged the track.
+ */
+export async function flagVanishedTrack(trackId: string, stage: string): Promise<boolean> {
+    const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
+    if (!track?.filePath) return false;
+    const root = config.music.musicPath;
+    if ((await fs.readdir(root).catch(() => [])).length === 0) return false;
+    const file = path.isAbsolute(track.filePath) ? track.filePath : path.join(root, track.filePath);
+    const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+    if (!gone) return false;
+
+    await prisma.$transaction(async (tx) => {
+        await tx.track.updateMany({ where: { id: trackId, missingSince: null }, data: { missingSince: new Date() } });
+        // The reporting record is in flight; as pending it is closed with the rest, its Track column mirrored.
+        await tx.trackStage.updateMany({ where: { trackId, stage }, data: { status: "pending", nextRetryAt: null } });
+        await closeStagesForMissingTracks(tx);
+    });
+    logger.info(`[Enrichment] ${track.filePath}: no file found; flagged missing and a library scan asked for`);
+    const { requestScan } = await import("../workers/scanRequest");
+    try {
+        // A scan already running started before this flag and cannot confirm it, so the next one is noted for after it.
+        if (!(await requestScan({ source: "vanished-file" })).queued) await redisClient.set(SCAN_AGAIN_KEY, "1");
+    } catch (err) {
+        logger.warn(`[Enrichment] Could not ask for a library scan: ${(err as Error).message}`);
+    }
+    return true;
 }

@@ -7,6 +7,9 @@ import {
     importQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
+import { requestScan } from "./scanRequest";
+import { redisClient } from "../utils/redis";
+import { SCAN_AGAIN_KEY } from "../services/missingFileStages";
 import { processRefile } from "./processors/refileProcessor";
 import { processDiscoverWeekly } from "./processors/discoverProcessor";
 import { processImportJob } from "./processors/importProcessor";
@@ -91,6 +94,11 @@ scanWorker.on("completed", (job, result) => {
     if (result.tracksAdded > 0) {
         triggerEnrichmentNow().catch((err) => logger.error("Failed to start enrichment after the scan:", err));
     }
+    // A song flagged missing while this scan ran is confirmed (and removed) by the next one.
+    redisClient
+        .getdel(SCAN_AGAIN_KEY)
+        .then((again) => (again ? requestScan({ source: "vanished-file" }) : undefined))
+        .catch((err) => logger.error("Failed to queue the scan after a vanished file:", err));
 });
 
 scanWorker.on("failed", (job, err) => {

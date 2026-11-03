@@ -8,7 +8,7 @@
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { prisma } from "../utils/db";
-import { closeStagesForMissingTracks } from "../services/missingFileStages";
+import { closeStagesForMissingTracks, flagVanishedTrack } from "../services/missingFileStages";
 import Redis from "ioredis";
 import { config } from "../config";
 import os from "os";
@@ -728,6 +728,9 @@ async function parkOnRateLimit(
  * with its class and a retry time, and closes the record at STAGE_RETRY_CAP.
  * A closed record is never reopened here.
  */
+/** What the analyzers and fpcalc say when a track's file is not on disk. */
+const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
+
 export async function recordStageFailure(
     trackId: string,
     stage: StageName,
@@ -739,6 +742,9 @@ export async function recordStageFailure(
     const message = err instanceof Error ? err.message : String(err);
     const open = await failureMaySettle(trackId, stage, jobId);
     if (!open) return;
+    // A file an analyzer could not find: the song is flagged missing and a scan asked for, which removes it once it
+    // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure.
+    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage))) return;
     const { current, writeGuard } = open;
 
     if (await sourcePauseController.handleRateLimit(source, err, evidence)) {

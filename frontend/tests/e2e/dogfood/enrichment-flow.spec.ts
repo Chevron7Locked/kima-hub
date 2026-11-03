@@ -79,6 +79,10 @@ test.describe.configure({ mode: "serial" });
 
 test("enrichment: scan first, one heavy model at a time, each song once, moods and map last", async ({ playwright }) => {
     test.skip(!container, "KIMA_CONTAINER is not set: this re-runs enrichment and changes /music, so only on a named throwaway stack");
+    // Checked before anything changes: a read-only music folder (a stack that mounts someone's own music) cannot take
+    // the added albums, and the re-run must not start without them.
+    const writable = container ? inStack(`test -w /music && echo yes || echo no`) === "yes" : false;
+    test.skip(!writable, "the stack's /music is read-only, so no album can be added mid-run");
     expect(username && password, "KIMA_TEST_USERNAME and KIMA_TEST_PASSWORD must be set").toBeTruthy();
     test.setTimeout(240 * 60_000);
 

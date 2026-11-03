@@ -1068,14 +1068,21 @@ test.describe("Dogfood walkthrough", () => {
         // own ways to fail. Asking for it explicitly is what turns "the embeddings exist"
         // into "the user can see them".
         await session.step("the map is built from the new embeddings", async () => {
-            const res = await page.request.get("/api/vibe/map", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
+            // The map is laid out after the moods, once every sound vector is in: until then the server answers 202
+            // ("computing"), so wait for the map itself.
+            let res = await page.request.get("/api/vibe/map", { headers: { Authorization: `Bearer ${token}` } });
+            const deadline = Date.now() + 5 * 60_000;
+            while (res.status() === 202 && Date.now() < deadline) {
+                await page.waitForTimeout(5_000);
+                res = await page.request.get("/api/vibe/map", { headers: { Authorization: `Bearer ${token}` } });
+            }
             expect(
-                res.ok(),
-                `the vibe map returned ${res.status()} even though the embeddings are present ` +
-                    `-- the projection step is broken, not the embedder`,
-            ).toBeTruthy();
+                res.status(),
+                res.status() === 202
+                    ? "the vibe map was still being laid out 5 minutes after the embeddings were done"
+                    : `the vibe map returned ${res.status()} even though the embeddings are present ` +
+                          `-- the projection step is broken, not the embedder`,
+            ).toBe(200);
             const body = await res.json();
             const mapped = body.tracks;
             expect(mapped.length, "the map projected no tracks").toBeGreaterThan(0);
