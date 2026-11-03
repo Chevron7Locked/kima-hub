@@ -119,6 +119,17 @@ export const RELEASES: Release[] = [
         items: [
             {
                 kind: "note",
+                key: "hotfix.1121",
+                title: "1.12.1, and the iPhone app",
+                summary: "A hotfix for enrichment, and the iPhone app.",
+                body:
+                    "1.12.1 fixes enrichment on new libraries: the scanner was sending songs to the engine as it found them " +
+                    "instead of waiting for the scan to finish.\n\n" +
+                    "The iPhone app is with Apple for testing. With an Apple developer account you can build it now: " +
+                    "github.com/Chevron7Locked/kima-ios",
+            },
+            {
+                kind: "note",
                 key: "sound.rebuild",
                 title: "Your sound features are rebuilt after this update",
                 summary:
@@ -315,8 +326,7 @@ export const RELEASES: Release[] = [
                     "- TV mode: Back works on every page, including the Fire TV remote's Back button\n" +
                     "- Audio analysis finishes every song before sound vectors start, so the two never run at the same time; an admin can let them run at once in Settings, under Library\n" +
                     "- Subsonic apps that search with search2 or an empty search3 get results again\n" +
-                    "- An ordered play queue for iOS that doesn't drag the full artist payload\n\n" +
-                    "1.12.1: enrichment waits for the library scan to finish, then works through the whole library in order: audio analysis, then sound vectors, then moods and similarity. Audio analysis and sound vectors never run at the same time unless you turn that on, and songs added partway through wait their turn.",
+                    "- An ordered play queue for iOS that doesn't drag the full artist payload",
             },
         ],
     },

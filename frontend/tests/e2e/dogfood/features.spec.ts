@@ -29,7 +29,7 @@ const NEWEST = {
     heading: "Kima 1.12",
     // A fresh library: "sound.rebuild" is only for libraries upgraded from 1.11.
     items: [
-        "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
+        "hotfix.1121", "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
         "podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12",
     ],
     changelogText: /podcast browser/i,
