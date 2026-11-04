@@ -137,8 +137,8 @@ const HIDE_INDICATORS = 'button[aria-label="Toggle activity panel"] > span.absol
 async function shot(page, name) {
     await guard(page, name);
     await page.addStyleTag({ content: HIDE_INDICATORS });
-    // Park the pointer on empty sidebar so no card shows its hover state.
-    if (page.viewportSize().width > 800) await page.mouse.move(130, 770);
+    // Park the pointer on the rail's empty middle so no row or card shows its hover state.
+    if (page.viewportSize().width > 800) await page.mouse.move(28, 500);
     await page.waitForTimeout(400);
     const file = path.join(OUT_DIR, `${name}.png`);
     await page.screenshot({ path: file, fullPage: false });
@@ -391,6 +391,9 @@ async function takeDesktopShots(browser) {
     const artistPath = await findArtistPath(p);
     if (!albumPath) throw new Error("the picked album was not found in the library");
     await startPlaying(p, albumPath);
+    // The right sidebar shows what is playing; every desktop shot keeps it open.
+    const openPanel = p.getByRole("button", { name: "open panel" });
+    if (await openPanel.isVisible().catch(() => false)) await openPanel.click();
 
     await attempt("desktop-home", async () => {
         await nav(p, "/");
