@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.12.3] - 2026-11-04
+
 ### Fixed
 
-- **Linked songs and folders show up in your library.** A library scan skipped symbolic links without saying so. It now follows them, keeps a song that two paths reach as one song, stops at loops, and logs any link it can't follow. Songs behind a broken link count as missing, like any other missing file: two scans remove them and their plays, unless a large part of the library vanished at once, and they are scanned again as new if the target comes back. Deleting a linked song in Kima removes only the link. Kima won't delete music inside a linked folder that leads out of your music folder; it says so, and you remove the link instead. The linked files must be reachable inside every Kima container.
-- **A song whose file has gone says it isn't available.** Between the file going and the next library scan, playing it gave a server error, and a Subsonic app was shown the file's location on disk.
-- **A cleared queue stays cleared, on every device.** Since 1.10, the last song came back after clearing the queue and reloading the page. Clearing it now also stops any other open Kima web tab or device, which would otherwise have put the song back.
-- **Resetting an audiobook's progress stops it for good.** It no longer came back on the next page load.
-- **A server hiccup while a page loads can't overwrite what another device was playing.**
+- **Linked songs and folders scan.** Scans follow symbolic links ([#248](https://github.com/Chevron7Locked/kima-hub/issues/248)). A broken link's songs go like any missing file, and Kima won't delete music in a linked folder outside your music folder. The linked files must be reachable inside the container.
+- **A cleared queue stays cleared.** The last song no longer returns after a reload, and clearing stops your other devices too.
+- **A song whose file is gone says it isn't available,** instead of a server error.
+- **Resetting an audiobook's progress** no longer brings it back on reload.
+- **A server hiccup while a page loads** can't overwrite what another device was playing.
 
 ### Changed
 
-- **The public library feed carries play counts.** Each song in `/api/public/vibe/library` now has `plays`, the public user's listens from every source, counted the way the stats page counts them and refreshed once a day, and 0 while that user has "share what I'm playing" off. The feed's `version` is now 2.
+- **The public library feed carries play counts.** Each song has `plays`, refreshed daily, and 0 while "share what I'm playing" is off. The feed is now `version` 2.
 
 ## [1.12.2] - 2026-11-03
 

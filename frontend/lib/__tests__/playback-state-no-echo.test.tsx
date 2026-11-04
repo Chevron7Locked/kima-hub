@@ -210,6 +210,7 @@ describe("another device clears the queue", () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
+        await wait(5); // A clear in the same millisecond as the restore is not newer than it.
         server.state = cleared(0);
         await wait(5);
         await pollNow(tick());
@@ -224,6 +225,7 @@ describe("another device clears the queue", () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
+        await wait(5); // A clear in the same millisecond as the restore is not newer than it.
         server.state = cleared(0);
         await wait(5);
         await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
@@ -236,6 +238,7 @@ describe("another device clears the queue", () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
+        await wait(5); // A clear in the same millisecond as the restore is not newer than it.
         server.state = cleared(0);
         await wait(5);
         await act(async () => {
@@ -251,6 +254,7 @@ describe("another device clears the queue", () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
+        await wait(5);
         server.state = { ...cleared(0), queue: [t("a"), t("b")] };
         await wait(5);
         await pollNow(tick());

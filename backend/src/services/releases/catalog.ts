@@ -111,13 +111,23 @@ const KEVIN_1_11 = [
 
 export const RELEASES: Release[] = [
     {
-        // 1.12, 1.12.1 and 1.12.2 share one window. The date stays 1.12's: it decides who counts as upgrading from 1.11.
-        version: "1.12.2",
+        // 1.12 and its fixes share one window. The date stays 1.12's: it decides who counts as upgrading from 1.11.
+        version: "1.12.3",
         title: "Kima 1.12",
         summary:
             "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
         date: "2026-11-02",
         items: [
+            {
+                kind: "note",
+                key: "hotfix.1123",
+                title: "1.12.3: linked music, and small fixes",
+                summary: "Linked songs and folders now scan, and a cleared queue stays cleared.",
+                body:
+                    "Library scans now follow linked songs and folders.\n\n" +
+                    "A cleared queue stays cleared after a reload, a song whose file has gone says so instead of failing, " +
+                    "and resetting an audiobook no longer brings it back.",
+            },
             {
                 kind: "note",
                 key: "hotfix.1122",

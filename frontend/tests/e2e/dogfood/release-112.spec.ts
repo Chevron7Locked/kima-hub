@@ -550,13 +550,13 @@ test.describe("Release 1.12 (non-podcast)", () => {
             return { unread: pending.length };
         });
 
-        await session.step("/changelog lists 1.12.2 newest-first, matching the server", async () => {
+        await session.step("/changelog lists 1.12.3 newest-first, matching the server", async () => {
             const served = (await (await api.get("/api/whats-new/changelog", { headers: bearer(token) })).json()).releases as Array<{ version: string; title: string; items: unknown[] }>;
-            const entry = served.find((r) => r.version === "1.12.2");
-            expect(entry, "the server's changelog has no 1.12.2 entry").toBeTruthy();
+            const entry = served.find((r) => r.version === "1.12.3");
+            expect(entry, "the server's changelog has no 1.12.3 entry").toBeTruthy();
             expect(entry!.items.length).toBeGreaterThan(0);
             await page.goto("/changelog");
-            const section = page.locator('section[id="1.12.2"]');
+            const section = page.locator('section[id="1.12.3"]');
             await expect(section).toBeVisible({ timeout: 15_000 });
             await expect(section.getByRole("heading", { level: 2 })).toHaveText(entry!.title, { ignoreCase: true });
             const ids = await page.locator("main section[id]").evaluateAll((els) => els.map((e) => e.id));
@@ -564,9 +564,9 @@ test.describe("Release 1.12 (non-podcast)", () => {
             return { releases: ids.length };
         });
 
-        await session.step("a deep link lands on 1.12.2", async () => {
-            await page.goto("/changelog#1.12.2");
-            await expect(page.locator('section[id="1.12.2"]')).toBeInViewport({ timeout: 15_000 });
+        await session.step("a deep link lands on 1.12.3", async () => {
+            await page.goto("/changelog#1.12.3");
+            await expect(page.locator('section[id="1.12.3"]')).toBeInViewport({ timeout: 15_000 });
         });
 
         session.assertClean("Journey 5 (what's new / changelog)");
@@ -1286,7 +1286,7 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
                 const pending = (await (await api.get("/api/whats-new/pending", { headers: bearer(token) })).json()) as {
                     releases: Array<{ version: string; items: Array<{ key: string }> }>;
                 };
-                const unread = pending.releases.find((r) => r.version === "1.12.2");
+                const unread = pending.releases.find((r) => r.version === "1.12.3");
                 if (unread) {
                     expect(unread.items.map((i) => i.key), "the window still asks for the re-file").not.toContain("albums.refile");
                 } else {
