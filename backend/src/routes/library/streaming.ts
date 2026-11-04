@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { isFileGone } from "../../utils/errors";
 import { config } from "../../config";
 import { getAudioStreamingService, isQuality } from "../../services/audioStreaming";
 import { resolveWithinMusicRoot } from "./trackPath";
@@ -129,15 +130,17 @@ router.get("/tracks/:id/stream", async (req, res) => {
           await resolveAndStream(streamableTrack, "original", req, res);
           return;
         }
-
-        logger.error("[STREAM] Native streaming failed:", err.message);
-        return res.status(500).json({ error: "Failed to stream track" });
+        throw err;
       }
     }
 
     logger.debug("[STREAM] Track has no file path - unavailable");
     return res.status(404).json({ error: "Track not available" });
   } catch (error) {
+    // The file went between the last scan and this request; the next scan flags it.
+    if (isFileGone(error)) {
+      return res.status(404).json({ error: "Track not available" });
+    }
     logger.error("Stream track error:", error);
     res.status(500).json({ error: "Failed to stream track" });
   }

@@ -4,6 +4,7 @@ import path from "path";
 import { ListenSource, Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { isFileGone } from "../../utils/errors";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
@@ -42,14 +43,19 @@ async function streamTrackById(
         config.music.transcodeCacheMaxGb,
     );
 
-    const pick = await choose(track, absolutePath);
-    const { filePath, mimeType } = pick === "direct"
-        ? await streamingService.getStreamFilePath(track.id, "original", track.fileModified, absolutePath)
-        : await streamingService.getStreamFilePath(track.id, pick.quality, track.fileModified, absolutePath, 0, {
-              mp3Only: pick.mp3Only,
-              keepUnderKbps: pick.capKbps ?? undefined,
-          });
-    await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+    try {
+        const pick = await choose(track, absolutePath);
+        const { filePath, mimeType } = pick === "direct"
+            ? await streamingService.getStreamFilePath(track.id, "original", track.fileModified, absolutePath)
+            : await streamingService.getStreamFilePath(track.id, pick.quality, track.fileModified, absolutePath, 0, {
+                  mp3Only: pick.mp3Only,
+                  keepUnderKbps: pick.capKbps ?? undefined,
+              });
+        await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+    } catch (err) {
+        if (!isFileGone(err) || res.headersSent) throw err;
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
+    }
 }
 
 // ===================== NOW PLAYING =====================

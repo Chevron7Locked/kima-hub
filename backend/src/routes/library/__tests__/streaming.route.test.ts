@@ -212,6 +212,45 @@ describe('the stream endpoint records no plays', () => {
 // ── A track the scan flagged missing is not streamable ───────────────────────
 // It answers not-found instead of failing on the file open.
 
+describe('a file gone from disk before a scan has flagged it', () => {
+    const gone = Object.assign(new Error("ENOENT: no such file or directory, stat '/music/x.mp3'"), { code: 'ENOENT' });
+    let app: express.Application;
+
+    beforeAll(() => {
+        app = makeApp();
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue(TRACK);
+        (prisma.userSettings.findUnique as jest.Mock).mockResolvedValue(null);
+    });
+
+    it('is not available, not a server error', async () => {
+        (getAudioStreamingService as jest.Mock).mockReturnValue({ getStreamFilePath: jest.fn().mockRejectedValue(gone) });
+        const res = await request(app).get(`/tracks/${TRACK.id}/stream`);
+        expect(res.status).toBe(404);
+        expect(res.body.error).toBe('Track not available');
+    });
+
+    it('is not available when the fallback to the original finds it gone too', async () => {
+        const noFfmpeg = Object.assign(new Error('no ffmpeg'), { code: 'FFMPEG_NOT_FOUND' });
+        (getAudioStreamingService as jest.Mock).mockReturnValue({
+            getStreamFilePath: jest.fn().mockRejectedValueOnce(noFfmpeg).mockRejectedValueOnce(gone),
+        });
+        const res = await request(app).get(`/tracks/${TRACK.id}/stream?quality=low`);
+        expect(res.status).toBe(404);
+    });
+
+    it('stays a server error for anything else', async () => {
+        (getAudioStreamingService as jest.Mock).mockReturnValue({
+            getStreamFilePath: jest.fn().mockRejectedValue(Object.assign(new Error('nope'), { code: 'EACCES' })),
+        });
+        const res = await request(app).get(`/tracks/${TRACK.id}/stream`);
+        expect(res.status).toBe(500);
+    });
+});
+
 describe('a track flagged missing from disk', () => {
     let app: express.Application;
 

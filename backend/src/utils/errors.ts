@@ -106,4 +106,8 @@ export class ConfigurationError extends Error {
   }
 }
 
-
+/** Whether a filesystem error means the file is not there to read, rather than that reading it failed. */
+export function isFileGone(err: unknown): boolean {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP";
+}

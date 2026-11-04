@@ -257,6 +257,56 @@ describe("parseRangeHeader", () => {
 // streamFileWithRangeSupport -- range matrix
 // ---------------------------------------------------------------------------
 
+describe("getStreamFilePath for a file that is gone", () => {
+    it.each(["original", "low"] as const)("says so at %s quality, the same way each time", async (quality) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gone-source-"));
+        const svc = new AudioStreamingService(dir, 10);
+        try {
+            await expect(
+                svc.getStreamFilePath("t1", quality, new Date(), path.join(dir, "nothing.flac")),
+            ).rejects.toMatchObject({ code: "ENOENT" });
+        } finally {
+            svc.destroy();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("streamFileWithRangeSupport for a file that is gone", () => {
+    it("answers not available, and a real failure stays a server error", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gone-range-"));
+        const svc = new AudioStreamingService(dir, 10);
+        const answer = () => {
+            const res: any = { headersSent: false, statusCode: 0, body: undefined };
+            res.status = (code: number) => ((res.statusCode = code), res);
+            res.json = (body: unknown) => ((res.body = body), res);
+            res.end = () => res;
+            return res;
+        };
+        try {
+            const gone = answer();
+            await svc.streamFileWithRangeSupport({ headers: {} } as any, gone, path.join(dir, "nothing.flac"), "audio/flac");
+            expect(gone.statusCode).toBe(404);
+            expect(gone.body).toEqual({ error: "Track not available" });
+
+            const empty = answer();
+            const emptyFile = path.join(dir, "empty.flac");
+            fs.writeFileSync(emptyFile, "");
+            await svc.streamFileWithRangeSupport({ headers: {} } as any, empty, emptyFile, "audio/flac");
+            expect(empty.statusCode).toBe(404);
+
+            const denied = answer();
+            jest.spyOn(fs.promises, "stat").mockRejectedValueOnce(Object.assign(new Error("no"), { code: "EACCES" }));
+            await svc.streamFileWithRangeSupport({ headers: {} } as any, denied, path.join(dir, "locked.flac"), "audio/flac");
+            expect(denied.statusCode).toBe(500);
+        } finally {
+            jest.restoreAllMocks();
+            svc.destroy();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
 describe("streamFileWithRangeSupport range matrix", () => {
     let tmpDir: string;
     let svc: AudioStreamingService;

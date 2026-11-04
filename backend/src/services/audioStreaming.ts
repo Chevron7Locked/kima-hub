@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { promises as fsPromises } from "fs";
+import type { FileHandle } from "fs/promises";
 import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
@@ -8,7 +9,7 @@ import { prisma } from "../utils/db";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import PQueue from "p-queue";
-import { AppError, ErrorCode, ErrorCategory } from "../utils/errors";
+import { AppError, ErrorCode, ErrorCategory, isFileGone } from "../utils/errors";
 import { parseRangeHeader } from "../utils/rangeParser";
 import { parseFile } from "music-metadata";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -156,6 +157,9 @@ export class AudioStreamingService {
     ): Promise<StreamFileInfo> {
         logger.debug(`[AudioStreaming] Request: trackId=${trackId}, quality=${quality}, source=${path.basename(sourceAbsolutePath)}`);
         const original = () => ({ filePath: sourceAbsolutePath, mimeType: this.getMimeType(sourceAbsolutePath) });
+
+        // A file gone from disk fails here at every quality, the same way, before anything starts a transcode of it.
+        await fsPromises.stat(sourceAbsolutePath);
 
         // A Subsonic answer (an MP3 promised, or a client's cap) is planned before the cache, so a transcode cached
         // for another request never stands in for the file the decision said it would get.
@@ -517,6 +521,7 @@ export class AudioStreamingService {
         filePath: string,
         mimeType: string
     ): Promise<void> {
+        let handle: FileHandle | undefined;
         try {
             // Get file stats for size
             const stats = await fsPromises.stat(filePath);
@@ -596,6 +601,20 @@ export class AudioStreamingService {
                 headers["Access-Control-Allow-Credentials"] = "true";
             }
 
+            // An empty file has nothing to play, and no byte range to read.
+            if (fileSize === 0) {
+                res.status(404).json({ error: "Track not available" });
+                return;
+            }
+
+            // Opened before any header is set, so a file gone by now is still a plain not-found.
+            handle = await fsPromises.open(filePath, "r");
+            // A listener who left during the open is past the close event the stream would be destroyed on.
+            if (res.destroyed) {
+                await handle.close();
+                return;
+            }
+
             // Set status and range-specific headers
             if (isRangeRequest) {
                 res.status(206);
@@ -607,7 +626,7 @@ export class AudioStreamingService {
             res.set(headers);
 
             // Create read stream with range
-            const stream = fs.createReadStream(filePath, { start, end });
+            const stream = handle.createReadStream({ start, end });
 
             // Handle stream errors
             stream.on("error", (err) => {
@@ -625,6 +644,11 @@ export class AudioStreamingService {
             // Pipe stream to response
             stream.pipe(res);
         } catch (err) {
+            await handle?.close().catch(() => {});
+            if (isFileGone(err)) {
+                if (!res.headersSent) res.status(404).json({ error: "Track not available" });
+                return;
+            }
             logger.error(`[AudioStreaming] Failed to stream ${filePath}:`, err);
             if (!res.headersSent) {
                 res.status(500).end();
