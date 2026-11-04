@@ -107,13 +107,16 @@ jobs:
                   cache-to: type=gha,mode=max
                   platforms: linux/amd64
 
+            # The scan only reports, so a scanner outage never stops a release.
             - name: Install Trivy
+              continue-on-error: true
               uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
               with:
                   version: v0.76.1
                   cache: true
 
             - name: Scan the image (report only)
+              continue-on-error: true
               if: always()
               run: |
                   {
