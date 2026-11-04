@@ -75,10 +75,6 @@ After a scan has finished, Kima runs six enrichment steps in the background: son
 
 After each update, Kima shows a short list of what changed, sometimes with a note from Kevin. Each item opens a page with more detail and any buttons or links it needs.
 
-<p align="center">
-  <img src="assets/screenshots/whats-new.png" alt="The update window" width="800">
-</p>
-
 ### Your library
 
 - **Your files.** Reads MP3, FLAC, M4A, AAC, OGG, Opus, WAV, WMA, APE and WV files, and identifies them with MusicBrainz: first by a MusicBrainz tag in the file, then by an AcoustID audio fingerprint, then by the album's track list, the recording's standard code (ISRC) and a search by name that checks the title.

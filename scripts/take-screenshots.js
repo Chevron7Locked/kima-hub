@@ -11,9 +11,6 @@
  *
  * Override the album, artist and song it shows with KIMA_SHOT_ALBUM, KIMA_SHOT_ALBUM_ARTIST, KIMA_SHOT_ARTIST and
  * KIMA_SHOT_TRACK. KIMA_SHOT_DIR saves somewhere other than assets/screenshots, for a trial run.
- *
- * The update window (whats-new) is taken only when it opens by itself after signing in, so sign in with an account
- * that has not answered the newest release yet.
  */
 
 const { execFileSync } = require("child_process");
@@ -377,13 +374,6 @@ async function takeDesktopShots(browser) {
     currentPage = p;
     await login(p);
 
-    await attempt("whats-new", async () => {
-        const modal = p.locator('div[role="dialog"][aria-labelledby="whats-new-title"]');
-        await modal.waitFor({ timeout: 15_000 });
-        await settle(p, 2500);
-        await shot(p, "whats-new");
-    });
-
     await dismissWhatsNew(p);
     await p.waitForTimeout(3000);
 
@@ -540,7 +530,7 @@ async function main() {
     });
 
     try {
-        const desktop = ["whats-new", "desktop-home", "desktop-library", "desktop-radio", "desktop-album", "desktop-artist", "desktop-stats", "mood-mixer", "desktop-podcasts", "desktop-audiobooks", "vibe-map", "vibe-track", "vibe-search", "vibe-blend", "vibe-songpath"];
+        const desktop = ["desktop-home", "desktop-library", "desktop-radio", "desktop-album", "desktop-artist", "desktop-stats", "mood-mixer", "desktop-podcasts", "desktop-audiobooks", "vibe-map", "vibe-track", "vibe-search", "vibe-blend", "vibe-songpath"];
         const phone = ["mobile-home", "mobile-library", "mobile-vibe", "mobile-player"];
         if (desktop.some(want)) await takeDesktopShots(browser);
         if (phone.some(want)) await takePhoneShots(browser);
