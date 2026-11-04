@@ -15,7 +15,7 @@ import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
-import { closeStagesForMissingTracks, fileIsGone } from "./missingFileStages";
+import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { askedAgain } from "./stageReopen";
@@ -304,7 +304,14 @@ export class MusicScannerService {
         const existChecks = await Promise.all(
             pathCandidates.map(async (t) => {
                 const fullPath = path.join(musicPath, t.filePath);
-                return { track: t, exists: !(await fileIsGone(musicPath, fullPath)) };
+                try {
+                    await fs.promises.access(fullPath);
+                    return { track: t, exists: true };
+                } catch (err) {
+                    // Only "no such file" is gone. Anything else (no permission, an I/O error, a stale network
+                    // share) says nothing about the file, so it is not flagged.
+                    return { track: t, exists: (err as NodeJS.ErrnoException).code !== "ENOENT" };
+                }
             })
         );
         const onDisk = new Set(existChecks.filter((c) => c.exists).map((c) => c.track.id));

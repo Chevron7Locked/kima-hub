@@ -1,6 +1,6 @@
 /**
  * Links in the music folder: a linked song or folder is scanned where the link stands, one real file is one song
- * however many paths reach it, a loop ends, and a link whose target is unavailable is not a deletion.
+ * however many paths reach it, a loop ends, and a link with nothing behind it goes the way of any missing file.
  * Real scanner, real links in temp directories, test database.
  */
 
@@ -20,7 +20,6 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { MusicScannerService } from "../musicScanner";
-import { flagVanishedTrack } from "../missingFileStages";
 import { isBehindLinkOut } from "../../routes/library/trackPath";
 
 jest.setTimeout(60_000);
@@ -180,7 +179,7 @@ describe("links in the music folder", () => {
         }
     });
 
-    it("keeps songs behind a link whose target went away, and flags them once the link itself is gone", async () => {
+    it("retires songs behind a broken link like any missing file, and scans them again when the target returns", async () => {
         const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
         song(path.join(music, "Real", "zero.flac"));
         const share = path.join(outside, "share");
@@ -193,19 +192,17 @@ describe("links in the music folder", () => {
         const paths = [path.join("Real", "zero.flac"), ...linked].sort();
         expect(await storedPaths()).toEqual(paths);
 
-        // The drive behind both links drops: the links stand and say nothing about the songs.
         const parked = path.join(root, "parked");
         fs.renameSync(outside, parked);
         await scan();
-        await scan();
-        expect(await missingPaths()).toEqual([]);
-        expect(await storedPaths()).toEqual(paths);
-
-        // Someone took the links out: that is a deletion.
-        fs.unlinkSync(path.join(music, "share"));
-        fs.unlinkSync(path.join(music, "two.flac"));
-        await scan();
         expect(await missingPaths()).toEqual(linked);
+        await scan();
+        expect(await storedPaths()).toEqual([path.join("Real", "zero.flac")]);
+
+        fs.renameSync(parked, outside);
+        await scan();
+        expect(await storedPaths()).toEqual(paths);
+        expect(await missingPaths()).toEqual([]);
         spy.mockRestore();
     });
 
@@ -216,18 +213,6 @@ describe("links in the music folder", () => {
         fs.unlinkSync(one);
         await scan();
         expect(await missingPaths()).toEqual([path.join("Linked", "one.flac")]);
-    });
-
-    it("does not let an analyzer's failed read flag a song behind a broken link", async () => {
-        const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, musicPath: music });
-        link(song(path.join(outside, "one.flac")), path.join(music, "one.flac"));
-        await scan();
-        const track = await prisma.track.findFirstOrThrow({ where: { album: { artist: { name: ARTIST } } } });
-
-        fs.unlinkSync(path.join(outside, "one.flac"));
-        expect(await flagVanishedTrack(track.id, "audio")).toBe(false);
-        expect(await missingPaths()).toEqual([]);
-        spy.mockRestore();
     });
 
     it("never deletes through a linked folder that leads out of the music folder", () => {

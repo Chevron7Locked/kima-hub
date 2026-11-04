@@ -72,33 +72,13 @@ export function reopenable(alias: string): string {
 }
 
 /**
- * Whether a song's file is really gone, not just out of reach: "no such file", with no link on its way there whose
- * target is what went missing. A link still standing with nothing behind it is a drive not mounted or a share that
- * dropped, which says nothing about the song. Any other error reading it says nothing either.
- */
-export async function fileIsGone(root: string, file: string): Promise<boolean> {
-    const unavailable = await fs.access(file).then(
-        () => false,
-        (err: NodeJS.ErrnoException) => err.code === "ENOENT",
-    );
-    if (!unavailable) return false;
-    const top = path.resolve(root) + path.sep;
-    for (let at = path.resolve(file); at.startsWith(top); at = path.dirname(at)) {
-        // The deepest thing still there ends the walk: everything above it resolves.
-        if (await fs.stat(at).then(() => true, () => false)) return true;
-        const standing = await fs.lstat(at).then((s) => s.isSymbolicLink(), () => false);
-        if (standing) return false;
-    }
-    return true;
-}
-
-/**
  * An analyzer found no file for this track. It is flagged missing now and its stage records close (the reporting one
  * too), so nothing waits on it, and a library scan is asked for: the scan removes the song (and an album or artist it
  * empties) when it confirms the file is gone, or clears the flag and re-opens its records when the file is there.
  * Scans resolve paths the way the song was added and stand down when much of the library vanishes at once.
- * Gone means what `fileIsGone` says, as the scanner counts it; anything else is another kind of failure, and so is an
- * empty or unreadable music folder (a drive that is not mounted). Returns whether it flagged the track.
+ * Gone means "no such file" here, as the scanner counts it; any other error reading it (permissions, I/O) is another
+ * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). Returns whether it
+ * flagged the track.
  */
 export async function flagVanishedTrack(trackId: string, stage: string): Promise<boolean> {
     const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
@@ -106,7 +86,8 @@ export async function flagVanishedTrack(trackId: string, stage: string): Promise
     const root = config.music.musicPath;
     if ((await fs.readdir(root).catch(() => [])).length === 0) return false;
     const file = path.isAbsolute(track.filePath) ? track.filePath : path.join(root, track.filePath);
-    if (!(await fileIsGone(root, file))) return false;
+    const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+    if (!gone) return false;
 
     await prisma.$transaction(async (tx) => {
         await tx.track.updateMany({ where: { id: trackId, missingSince: null }, data: { missingSince: new Date() } });

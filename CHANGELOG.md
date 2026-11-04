@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Linked songs and folders show up in your library.** A library scan skipped symbolic links without saying so. It now follows them, keeps a song that two paths reach as one song, stops at loops, and logs any link it can't follow. If a link's target is unavailable, for example a drive that isn't mounted, its songs stay in your library until the link itself is removed. Deleting a linked song in Kima removes only the link. Kima won't delete music inside a linked folder that leads out of your music folder; it says so, and you remove the link instead. The linked files must be reachable inside every Kima container.
+- **Linked songs and folders show up in your library.** A library scan skipped symbolic links without saying so. It now follows them, keeps a song that two paths reach as one song, stops at loops, and logs any link it can't follow. Songs behind a broken link count as missing, like any other missing file: two scans remove them and their plays, unless a large part of the library vanished at once, and they are scanned again as new if the target comes back. Deleting a linked song in Kima removes only the link. Kima won't delete music inside a linked folder that leads out of your music folder; it says so, and you remove the link instead. The linked files must be reachable inside every Kima container.
 
 ### Changed
 
