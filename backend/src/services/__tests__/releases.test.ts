@@ -227,9 +227,9 @@ describe("an older release's unfinished work is open on the changelog, skipped o
 
     it("leaves the newest release's actions to its window until it is closed", async () => {
         prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
-        expect((await item("1.12.0", "albums.refile")).open).toBeUndefined();
-        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.12.0" }]);
-        expect((await item("1.12.0", "albums.refile")).open).toBe(true);
+        expect((await item("1.12.2", "albums.refile")).open).toBeUndefined();
+        prisma.releaseAcknowledgement.findMany.mockResolvedValue([{ version: "1.12.2" }]);
+        expect((await item("1.12.2", "albums.refile")).open).toBe(true);
         prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z") });
     });
 });
@@ -306,14 +306,14 @@ describe("catalog", () => {
         expect(catalog.RELEASES.find((r) => r.version === "1.10.1")!.items.some((i) => i.key === "engine.wipe")).toBe(false);
     });
 
-    it("offers admins of an upgraded library to re-file their albums in 1.12.0, and no one else", async () => {
-        const refile = catalog.RELEASES.find((r) => r.version === "1.12.0")!.items.find((i) => i.key === "albums.refile");
+    it("offers admins of an upgraded library to re-file their albums in 1.12.2, and no one else", async () => {
+        const refile = catalog.RELEASES.find((r) => r.version === "1.12.2")!.items.find((i) => i.key === "albums.refile");
         expect(refile).toMatchObject({ kind: "action", run: "refileAlbums", requires: "admin", installedBeforeOnly: true });
 
         jest.restoreAllMocks();
         prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
         moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
-        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.0")!.items.map((i) => i.key);
+        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.2")!.items.map((i) => i.key);
         prisma.user.findUnique.mockResolvedValue({ role: "admin" });
         // Still offered once the upgrade's re-analysis leaves no song analysed before the release.
         prisma.$queryRaw.mockResolvedValue([{ older: false }]);
@@ -333,7 +333,7 @@ describe("catalog", () => {
         prisma.releaseAcknowledgement.findMany.mockResolvedValue([]);
         prisma.user.findUnique.mockResolvedValue({ role: "admin" });
         moodMixState.mockResolvedValue({ mix: null, decision: null, playlist: null });
-        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.0")!.items.map((i) => i.key);
+        const keys = async () => (await pendingReleases("u1")).find((r) => r.version === "1.12.2")!.items.map((i) => i.key);
         prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
         expect(await keys()).toContain("albums.refile");
         prisma.systemSettings.findUnique.mockResolvedValue({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: new Date() });

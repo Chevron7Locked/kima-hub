@@ -111,12 +111,23 @@ const KEVIN_1_11 = [
 
 export const RELEASES: Release[] = [
     {
-        version: "1.12.0",
+        // 1.12, 1.12.1 and 1.12.2 share one window. The date stays 1.12's: it decides who counts as upgrading from 1.11.
+        version: "1.12.2",
         title: "Kima 1.12",
         summary:
             "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
         date: "2026-11-02",
         items: [
+            {
+                kind: "note",
+                key: "hotfix.1122",
+                title: "1.12.2: new sidebars, and first episodes on iPhone",
+                summary: "The sidebars now match the rest of the app, and a show's first episode plays in the iPhone app.",
+                body:
+                    "1.12.2 redraws both sidebars to match the rest of the app: bold headings, bigger artwork and one amber " +
+                    "mark for where you are. The right panel leads with what's playing, and activity moved to its foot.\n\n" +
+                    "It also fixes the play first episode button in the iPhone app, which the server was refusing.",
+            },
             {
                 kind: "note",
                 key: "hotfix.1121",
@@ -234,7 +245,7 @@ export const RELEASES: Release[] = [
                 title: "A new side panel",
                 summary: "The right-hand panel has two tabs: what's playing and up next, and everything Kima is doing. The queue lives there now.",
                 body:
-                    "The right-hand panel is two tabs, each with the whole panel. Listening, where it opens unless something asks for activity, shows the " +
+                    "The right-hand panel has two sides, each with the whole panel. Listening, where it opens when something is playing, shows the " +
                     "song that's playing, then what's up next, its lyrics or its artist. Activity shows everything Kima is " +
                     "doing in one list, newest first, or just alerts, downloads, imports or history; the bell opens it, and " +
                     "its tab carries the count of unread notices and running downloads. The queue page is gone: the panel's " +

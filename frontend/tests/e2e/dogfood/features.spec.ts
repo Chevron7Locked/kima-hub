@@ -25,11 +25,11 @@ const GPU_INSTALL_MS = 25 * 60_000;
  * word for word, so this block is updated with each release; the older releases stay, since the changelog keeps them.
  */
 const NEWEST = {
-    version: "1.12.0",
+    version: "1.12.2",
     heading: "Kima 1.12",
     // A fresh library: "sound.rebuild" is only for libraries upgraded from 1.11.
     items: [
-        "hotfix.1121", "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
+        "hotfix.1122", "hotfix.1121", "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
         "podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12",
     ],
     changelogText: /podcast browser/i,

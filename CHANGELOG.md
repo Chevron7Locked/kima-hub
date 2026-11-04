@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.12.2] - 2026-11-03
+
 ### Fixed
 
 - **A show's first episode plays in the iPhone app.** The server refused the app's stream ticket on the sample, so a show you hadn't followed yet could not be played. The website was not affected.
+
+### Changed
+
+- **The sidebars match the rest of the app.** They sit on the app's black with the page's bold headings, bigger artwork and one amber mark for where you are. The right panel leads with what's playing; activity moved to its foot, and it opens on activity when nothing is playing.
 
 ## [1.12.1] - 2026-11-02
 
