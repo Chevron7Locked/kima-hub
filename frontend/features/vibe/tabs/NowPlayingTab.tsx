@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { queryKeys } from "@/hooks/useQueries";
+import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { shownTitle } from "@/lib/track-title";
 
@@ -112,58 +113,66 @@ function ArtistBio({ bio, artistId }: { bio: string; artistId?: string }) {
     );
 }
 
-/** The playing song as one compact row: cover, title, artist and album, and play or pause. */
-export function NowPlayingStrip() {
-    const { currentTrack } = useAudioState();
+/**
+ * What is playing, led by its artwork with the title laid over it, as the page's radio tiles do. `compact` gives the
+ * lyrics and the artist's story the room; the artwork narrows to a band.
+ */
+export function NowPlayingHero({ compact = false }: { compact?: boolean }) {
+    const { title, subtitle, coverUrl, mediaLink, hasMedia } = useMediaInfo(640);
     const { isPlaying } = useAudioPlayback();
     const { pause, resumeWithGesture } = useAudioControls();
 
-    if (!currentTrack) {
+    if (!hasMedia) {
         return (
-            <div className="flex h-[68px] shrink-0 items-center gap-3 px-3">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-white/[0.04]">
-                    <Music aria-hidden="true" className="h-4 w-4 text-[var(--text-muted)]" />
-                </span>
-                <p className="text-xs text-[var(--text-muted)]">nothing playing yet</p>
+            <div className="flex h-12 shrink-0 items-center pl-3 pr-10">
+                <p className="t-body">nothing playing yet</p>
             </div>
         );
     }
 
-    const cover = currentTrack.album?.coverArt;
     return (
-        <div data-queue-now className="flex h-[68px] shrink-0 items-center gap-3 px-3">
-            <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-white/[0.04] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-                {cover ? (
-                    <CachedImage src={api.getCoverArtUrl(cover, 120)} alt="" fill sizes="48px" className="object-cover" />
-                ) : (
-                    <Music aria-hidden="true" className="absolute inset-0 m-auto h-4 w-4 text-[var(--text-muted)]" />
-                )}
-            </span>
-            <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-medium tracking-[-0.01em] text-[var(--text-primary)]">
-                    {shownTitle(currentTrack)}
-                </p>
-                <p className="truncate text-xs text-[var(--text-secondary)]">
-                    {[currentTrack.artist?.name, currentTrack.album?.title].filter(Boolean).join(" · ")}
-                </p>
+        <div
+            data-queue-now
+            className={cn(
+                "relative shrink-0 overflow-hidden rounded-lg bg-[var(--bg-secondary)] transition-[height] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
+                compact ? "h-[88px]" : "h-[min(380px,40dvh)]",
+            )}
+        >
+            {coverUrl ? (
+                <CachedImage src={coverUrl} alt="" fill sizes="380px" className="object-cover" />
+            ) : (
+                <Music aria-hidden="true" className="absolute inset-0 m-auto h-12 w-12 text-white/10" />
+            )}
+            <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-3/5 min-h-[88px] bg-gradient-to-t from-black via-black/70 to-transparent" />
+            {/* Compact, the play button steps left of the panel's hide button. */}
+            <div className={cn("absolute inset-x-0 bottom-0 flex items-end gap-3 p-3", compact && "pr-11")}>
+                <div className="min-w-0 flex-1">
+                    {mediaLink ? (
+                        <Link
+                            href={mediaLink}
+                            prefetch={false}
+                            className="block truncate rounded text-xl font-bold tracking-tight text-white outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand/60"
+                        >
+                            {title}
+                        </Link>
+                    ) : (
+                        <p className="truncate text-xl font-bold tracking-tight text-white">{title}</p>
+                    )}
+                    <p className="truncate text-sm text-white/75">{subtitle}</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => (isPlaying ? pause() : resumeWithGesture())}
+                    aria-label={isPlaying ? "pause" : "play"}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-[var(--color-on-brand)] outline-none transition-colors duration-150 hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-white/80"
+                >
+                    {isPlaying ? (
+                        <Pause aria-hidden="true" className="h-4 w-4 fill-current" />
+                    ) : (
+                        <Play aria-hidden="true" className="ml-0.5 h-4 w-4 fill-current" />
+                    )}
+                </button>
             </div>
-            <button
-                type="button"
-                onClick={() => (isPlaying ? pause() : resumeWithGesture())}
-                aria-label={isPlaying ? "pause" : "play"}
-                className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-brand/60",
-                    isPlaying
-                        ? "bg-brand text-black hover:bg-brand/90"
-                        : "bg-white/[0.08] text-[var(--text-primary)] hover:bg-white/[0.12]",
-                )}
-            >
-                {isPlaying ? (
-                    <Pause aria-hidden="true" className="h-3.5 w-3.5 fill-current" />
-                ) : (
-                    <Play aria-hidden="true" className="ml-0.5 h-3.5 w-3.5 fill-current" />
-                )}
-            </button>
         </div>
     );
 }
@@ -176,7 +185,7 @@ export function ArtistAbout() {
     if (!currentTrack) return <p className="px-3 py-4 text-xs text-[var(--text-muted)]">play something to see its artist here</p>;
     return (
         <div className="px-3 py-3">
-            <p className="mb-1.5 text-xs font-medium text-[var(--text-primary)]">{currentTrack.artist?.name}</p>
+            <p className="mb-1.5 text-sm font-bold tracking-tight text-white">{currentTrack.artist?.name}</p>
             {bio ? (
                 <ArtistBio bio={bio} artistId={artistId} />
             ) : (

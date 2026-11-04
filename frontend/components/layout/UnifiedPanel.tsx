@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
 import { useAudioState } from "@/lib/audio-state-context";
 import { QueueTab } from "@/features/vibe/tabs/QueueTab";
-import { ArtistAbout, NowPlayingStrip } from "@/features/vibe/tabs/NowPlayingTab";
+import { ArtistAbout, NowPlayingHero } from "@/features/vibe/tabs/NowPlayingTab";
 import { LyricsView } from "@/components/lyrics/LyricsView";
 import {
     ActivityOptions,
@@ -15,7 +15,8 @@ import {
     useActivityCounts,
     type ActivityView,
 } from "@/components/activity/ActivityBody";
-import { PanelOptions, panelIconButton, panelTabId } from "./panelChrome";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { PanelOptions, panelTabId } from "./panelChrome";
 
 interface UnifiedPanelProps {
     isOpen: boolean;
@@ -33,20 +34,22 @@ const pane = "flex min-h-0 flex-1 flex-col";
 const paneAway = "invisible pointer-events-none absolute inset-0";
 
 /**
- * The desktop panel on the right, in two tabs with one grammar, the same as the left library panel's: listening (the
- * playing song, then what is next, its lyrics or its artist) and activity (everything Kima is doing, or one kind of
- * it). The chosen tab has the whole panel and the other stays mounted and laid out, out of sight; each opening starts on listening unless activity was asked for. Pages can hand it settings to show instead (Discover's, the lyrics'), which take the panel whole.
+ * The desktop panel on the right. Listening leads with what is playing, then what is next, its lyrics or its artist;
+ * activity is everything Kima is doing. The foot switches them, and the other stays mounted out of sight. Each opening
+ * starts on listening, or on activity when asked for or when nothing is playing. Pages can put their settings here.
  */
 export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [listening, setListening] = useState<Listening>("up-next");
-    const [main, setMain] = useState<Main>("listening");
+    // Null until someone chooses: the panel then follows whether anything is playing, and audio state that arrives
+    // after the first render never flips a choice.
+    const [chosen, setChosen] = useState<Main | null>(null);
     // Each opening decides its tab: activity when a request for it came in since the last opening, else listening.
     // Deciding at the opening, not the closing, keeps the fade-out from flashing and a request made while closed.
     const [asked, setAsked] = useState(false);
     const [wasOpen, setWasOpen] = useState(isOpen);
     if (wasOpen !== isOpen) {
         setWasOpen(isOpen);
-        if (isOpen) setMain(asked ? "activity" : "listening");
+        if (isOpen) setChosen(asked ? "activity" : null);
         setAsked(false);
     }
     const [activity, setActivity] = useState<ActivityView>("all");
@@ -55,7 +58,11 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [showSettings, setShowSettings] = useState(false);
     const { settingsContent } = useActivityPanelSettings();
     const { any: hasActivity, unread, downloads } = useActivityCounts();
-    const { queue, currentIndex } = useAudioState();
+    const { queue, currentIndex, currentTrack, currentAudiobook, currentPodcast } = useAudioState();
+    const playing = !!(currentTrack || currentAudiobook || currentPodcast);
+    // Something starting settles this opening on listening, so clearing the queue leaves the panel where it is.
+    if (chosen === null && playing) setChosen("listening");
+    const main: Main = chosen ?? (playing ? "listening" : "activity");
     const upNext = Math.max(0, queue.length - currentIndex - 1);
 
     // Focus follows the panel, as it does for the left library: closing lands on the handle that reopens it, and
@@ -72,7 +79,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
         // whole page left for a frame as the panel opens.
         (isOpen ? hideRef : handleRef).current?.focus({ preventScroll: true });
     }, [isOpen]);
-    // Closing leaves a page's settings, so reopening shows the halves.
+    // Closing leaves a page's settings, so reopening shows the panel's own content.
     const handleCollapse = () => {
         setShowSettings(false);
         focusAfterToggle.current = true;
@@ -90,11 +97,11 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             setShowSettings(false);
             if (isActivityView(tab)) {
                 setActivity(tab);
-                setMain("activity");
+                setChosen("activity");
                 setAsked(true);
             }
         };
-        // Leaving a page's settings returns to the halves as they were.
+        // Leaving a page's settings returns to the panel as it was.
         const handleLeave = () => setShowSettings(false);
         window.addEventListener("set-activity-panel-tab", handleSetTab);
         window.addEventListener("leave-activity-panel-settings", handleLeave);
@@ -104,7 +111,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
         };
     }, []);
 
-    // A page that unmounts takes its settings with it, and the halves show again.
+    // A page that unmounts takes its settings with it, and the panel's own content shows again.
     const settingsActive = showSettings && !!settingsContent;
 
     return (
@@ -118,7 +125,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
             <aside
                 id="activity-panel"
                 aria-label="listening and activity"
-                className="absolute inset-y-0 right-0 overflow-hidden rounded-lg border border-[var(--border-chrome)] bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                className="absolute inset-y-0 right-0 overflow-hidden bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
                 style={{ width: isOpen ? OPEN_WIDTH : CLOSED_WIDTH }}
             >
                 {/* Closed, the panel is a handle, like the left library's. */}
@@ -137,7 +144,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 >
                     <ChevronLeft
                         aria-hidden="true"
-                        className="h-3.5 w-3.5 text-[var(--text-muted)] transition-colors duration-150 group-hover:text-brand"
+                        className="h-3.5 w-3.5 text-[var(--text-secondary)] transition-colors duration-150 group-hover:text-white"
                     />
                     {hasActivity && <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 rounded-full bg-brand" />}
                 </button>
@@ -145,7 +152,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                 {/* Expanded content, at its full width from the box's left edge so it travels with it; inert while collapsed. */}
                 <div
                     inert={!isOpen}
-                    style={{ width: OPEN_WIDTH - 2 }}
+                    style={{ width: OPEN_WIDTH }}
                     className={cn(
                         "absolute inset-y-0 left-0 flex min-h-0 flex-col transition-opacity duration-300",
                         isOpen ? "opacity-100" : "pointer-events-none opacity-0",
@@ -156,32 +163,17 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                         <div className="flex-1 min-h-0 overflow-hidden">{settingsContent}</div>
                     ) : (
                         <>
-                            <div className="flex shrink-0 items-stretch">
-                                <PanelOptions<Main>
-                                    label="panel"
-                                    controls="panel-main"
-                                    value={main}
-                                    onChange={setMain}
-                                    className="min-w-0 flex-1"
-                                    prominent
-                                    options={[
-                                        { key: "listening", label: "listening" },
-                                        { key: "activity", label: "activity", count: unread + downloads, urgent: true },
-                                    ]}
-                                />
-                                <div className="flex items-center border-b border-[var(--border-chrome)] pr-1.5">
-                                    <button
-                                        ref={hideRef}
-                                        type="button"
-                                        onClick={handleCollapse}
-                                        aria-label="hide panel"
-                                        title="hide panel"
-                                        className={panelIconButton}
-                                    >
-                                        <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            </div>
+                            {/* Over the artwork or the activity heading, so it stays in one place. */}
+                            <button
+                                ref={hideRef}
+                                type="button"
+                                onClick={handleCollapse}
+                                aria-label="hide panel"
+                                title="hide panel"
+                                className="absolute right-2 top-2 z-(--z-raised) flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white/85 outline-none transition-colors duration-150 hover:text-white focus-visible:ring-2 focus-visible:ring-brand/60"
+                            >
+                                <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                            </button>
 
                             <div
                                 id="panel-main"
@@ -190,7 +182,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                                 className="relative flex min-h-0 flex-1 flex-col"
                             >
                                 <div inert={main !== "listening"} className={cn(pane, main !== "listening" && paneAway)}>
-                                    <NowPlayingStrip />
+                                    <NowPlayingHero compact={listening !== "up-next"} />
                                     <PanelOptions<Listening>
                                         label="listening"
                                         controls="panel-listening"
@@ -217,6 +209,7 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                                     </div>
                                 </div>
                                 <div inert={main !== "activity"} className={cn(pane, main !== "activity" && paneAway)}>
+                                    <SectionHeader size="xs" title="activity" className="mb-0 h-11 pl-3 pr-10" />
                                     <ActivityOptions controls="panel-activity" value={activity} onChange={setActivity} />
                                     <div
                                         id="panel-activity"
@@ -227,6 +220,18 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
                                     </div>
                                 </div>
                             </div>
+
+                            <PanelOptions<Main>
+                                label="panel"
+                                controls="panel-main"
+                                value={main}
+                                onChange={setChosen}
+                                quiet
+                                options={[
+                                    { key: "listening", label: "listening" },
+                                    { key: "activity", label: "activity", count: unread + downloads, urgent: true },
+                                ]}
+                            />
                         </>
                     )}
                 </div>

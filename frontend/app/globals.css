@@ -106,11 +106,10 @@
     --bg-secondary: #0f0f0f; /* Cards, panels */
     --bg-tertiary: #141414; /* Nested content, wells */
     --bg-hover: #1a1a1a; /* Modals, dropdowns, hover */
-    --bg-chrome: #0b0b0b; /* The icon rail and both side panels: one surface */
+    --bg-chrome: #000000; /* The icon rail and both side panels sit on the app's black; the page is the one lifted surface */
 
     /* Borders */
     --border-subtle: #1c1c1c; /* Subtle borders (default) */
-    --border-chrome: #181818; /* The side panels' edges and dividers */
     --border-interactive: #262626; /* Interactive elements */
     --border-focus: #333333; /* Focus, selected states */
 

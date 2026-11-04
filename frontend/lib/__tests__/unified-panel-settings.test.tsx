@@ -20,7 +20,7 @@ vi.mock("@/components/activity/ActiveDownloadsTab", () => ({ ActiveDownloadsTab:
 vi.mock("@/components/activity/ImportsTab", () => ({ ImportsTab: list("imports") }));
 vi.mock("@/components/activity/HistoryTab", () => ({ HistoryTab: list("history") }));
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => <div>queue</div> }));
-vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({ ArtistAbout: () => null, NowPlayingStrip: () => null }));
+vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({ ArtistAbout: () => null, NowPlayingHero: () => null }));
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => null }));
 vi.mock("@/components/activity/ActivityFeed", () => ({ ActivityFeed: () => <div>feed</div> }));
 

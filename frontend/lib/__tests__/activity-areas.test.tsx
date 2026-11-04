@@ -22,7 +22,7 @@ vi.mock("@/components/activity/ActivityFeed", () => ({ ActivityFeed: list("all")
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => <div>queue</div> }));
 vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({
     ArtistAbout: () => null,
-    NowPlayingStrip: () => null,
+    NowPlayingHero: () => null,
     NowPlayingTab: () => <div>now playing</div>,
 }));
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => null }));

@@ -1,40 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { tabListKeyDown } from "@/lib/tabListKeys";
 
 /**
- * The side panels' shared grammar, as the left library panel draws it: a quiet heading with a count and room for an
- * action, and a strip of text options where amber marks the current one.
+ * The side panels' shared parts: a round control, the "you are here" mark, and a strip of text options where amber
+ * marks the current one.
  */
-export function PanelHeading({
-    label,
-    count,
-    actions,
-    className,
-}: {
-    label: string;
-    count?: number;
-    actions?: ReactNode;
-    className?: string;
-}) {
-    return (
-        <div className={cn("flex h-11 shrink-0 items-center justify-between gap-2 pl-3 pr-1.5", className)}>
-            <h2 className="flex min-w-0 items-baseline gap-2 truncate text-sm font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
-                {label}
-                {count !== undefined && (
-                    <span className="text-[11px] font-normal tabular-nums text-[var(--text-muted)]">{count}</span>
-                )}
-            </h2>
-            {actions && <span className="flex shrink-0 items-center gap-0.5">{actions}</span>}
-        </div>
-    );
-}
-
-/** A small square control for a panel heading: same size, ring and hover as the left panel's. */
+/** A small round control for a panel heading, like the top bar's: it brightens on hover and carries no box. */
 export const panelIconButton =
-    "flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] outline-none transition-colors duration-150 hover:bg-white/[0.06] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-brand/60 disabled:pointer-events-none disabled:opacity-40";
+    "flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-secondary)] outline-none transition-colors duration-150 hover:text-white focus-visible:ring-2 focus-visible:ring-brand/60 disabled:pointer-events-none disabled:opacity-40";
+
+/** The one "you are here" mark, as on a playing song's row: a short amber bar at the panel's edge. The parent sets the amber text. */
+export const panelCurrentBar =
+    "relative before:absolute before:-left-2 before:inset-y-2.5 before:w-[3px] before:rounded-full before:bg-brand";
 
 export interface PanelOption<K extends string> {
     key: K;
@@ -48,8 +27,8 @@ export interface PanelOption<K extends string> {
 export const panelTabId = (controls: string, key: string) => `${controls}-tab-${key}`;
 
 /**
- * Text options that switch what a panel half shows. They are tabs to assistive technology; to the eye, words with a
- * short amber underline under the current one.
+ * Text options that switch what a panel half shows. They are tabs to assistive technology; to the eye, words, the current one
+ * in amber.
  */
 export function PanelOptions<K extends string>({
     options,
@@ -58,7 +37,7 @@ export function PanelOptions<K extends string>({
     label,
     controls,
     className,
-    prominent = false,
+    quiet = false,
 }: {
     options: PanelOption<K>[];
     /** The chosen option; null while the region shows something none of them names (a page's settings). */
@@ -68,15 +47,15 @@ export function PanelOptions<K extends string>({
     /** The id of the region the options switch, for aria-controls. */
     controls: string;
     className?: string;
-    /** The panel's own top level: the size of a panel heading, as the left panel's "library" is. */
-    prominent?: boolean;
+    /** A secondary strip, such as the panel's foot: smaller than the options that switch the content. */
+    quiet?: boolean;
 }) {
     return (
         <div
             role="tablist"
             aria-label={label}
             onKeyDown={(e) => tabListKeyDown(e, options.map((o) => o.key), value ?? options[0]?.key ?? ("" as K), onChange)}
-            className={cn("flex shrink-0 items-center gap-3.5 overflow-x-auto border-b border-[var(--border-chrome)] px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
+            className={cn("flex shrink-0 items-center gap-4 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
         >
             {options.map((option, i) => {
                 const current = option.key === value;
@@ -94,22 +73,14 @@ export function PanelOptions<K extends string>({
                         onClick={() => onChange(option.key)}
                         className={cn(
                             "flex shrink-0 items-center gap-1 outline-none transition-colors duration-150",
-                            prominent ? "h-11 text-sm font-medium" : "h-8 text-xs",
+                            quiet ? "h-9 text-xs font-medium" : "h-10 text-sm font-medium",
                             "focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-brand/60",
                             current
-                                ? "text-[var(--text-primary)]"
-                                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
+                                ? "text-brand"
+                                : "text-[var(--text-secondary)] hover:text-white",
                         )}
                     >
-                        {/* The underline sits under the word: a touch screen widens the button to its minimum size. */}
-                        <span
-                            className={cn(
-                                "relative self-stretch flex items-center after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:rounded-full after:transition-colors",
-                                current ? "after:bg-brand" : "after:bg-transparent",
-                            )}
-                        >
-                            {option.label}
-                        </span>
+                        <span>{option.label}</span>
                         {!!option.count && (
                             <span
                                 className={cn(

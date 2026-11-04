@@ -19,7 +19,7 @@ vi.mock("@/components/activity/ActivityBody", () => ({
     useActivityCounts: () => ({ unread: 0, downloads: 0, any: false }),
 }));
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => null }));
-vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({ ArtistAbout: () => null, NowPlayingStrip: () => null }));
+vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({ ArtistAbout: () => null, NowPlayingHero: () => null }));
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => null }));
 
 import { UnifiedPanel } from "@/components/layout/UnifiedPanel";

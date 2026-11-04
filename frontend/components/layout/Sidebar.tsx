@@ -26,10 +26,12 @@ import { notify } from "@/lib/notify";
 import { useFeatures } from "@/lib/features-context";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { CachedImage } from "@/components/ui/CachedImage";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SideTooltip } from "@/components/ui/SideTooltip";
 import { CoverArt } from "@/components/cards/MediaCard";
 import { MobileSidebar } from "./MobileSidebar";
 import { NAV, isCurrentNav, type NavItem } from "./navItems";
+import { panelCurrentBar, panelIconButton } from "./panelChrome";
 import type { Mix } from "@/features/home/types";
 
 const primaryNavigation: NavItem[] = [NAV.collection, NAV.radio, NAV.discover, NAV.releases, NAV.vibe];
@@ -47,13 +49,17 @@ interface Playlist {
     }[];
 }
 
+/** A next step the empty library offers. */
+const libraryAction =
+    "rounded text-sm font-medium text-brand outline-none transition-colors duration-150 hover:text-brand-hover focus-visible:ring-2 focus-visible:ring-brand/60 disabled:opacity-60";
+
 const COLLAPSE_KEY = "kima:library-collapsed";
-const OPEN_WIDTH = 256;
-const CLOSED_WIDTH = 82;
+const OPEN_WIDTH = 280;
+const CLOSED_WIDTH = 80;
 /** The collapsed handle's width (its `w-6`); the panel slides to exactly this far from the rail so its edge travels with the box's. */
 const HANDLE_WIDTH = 24;
-/** The library panel's own width beside the 56px rail, inside the 1px border: fixed, so a slide never squeezes it. */
-const PANEL_WIDTH = OPEN_WIDTH - 56 - 2;
+/** The library panel's own width beside the 56px rail: fixed, so a slide never squeezes it. */
+const PANEL_WIDTH = OPEN_WIDTH - 56;
 
 // The stored choice is read before the first paint: the server has no
 // localStorage, so the server snapshot is the open shelf and the client snapshot
@@ -141,6 +147,14 @@ export function Sidebar() {
     const shownOwn = ownPlaylists.filter((p) => matches(p.name));
     const shownShared = sharedPlaylists.filter((p) => matches(p.name));
     const shownMixes = mixes.filter((m) => matches(m.name));
+    // Nothing to show at all: one line and what to do about it, not one empty message per section.
+    const libraryEmpty =
+        query.length === 0 &&
+        visiblePlaylists.length === 0 &&
+        mixes.length === 0 &&
+        !isLoadingMixes &&
+        !isErrorPlaylists &&
+        !isErrorMixes;
     const nothingMatches =
         query.length > 0 &&
         shownOwn.length === 0 &&
@@ -245,20 +259,18 @@ export function Sidebar() {
                 }${shared ? `, shared by ${playlist.user?.username || "someone else"}` : ""}`}
                 title={playlist.name}
                 className={cn(
-                    "group flex h-10 items-center gap-2 rounded-[9px] px-2 outline-none transition-colors duration-150",
+                    "group flex h-12 items-center gap-2.5 rounded-lg px-2 outline-none",
                     "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60",
-                    isActive
-                        ? "bg-brand/[0.08]"
-                        : "hover:bg-white/[0.055]"
+                    isActive && panelCurrentBar
                 )}
             >
-                <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md bg-white/[0.05]">
+                <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-white/[0.05] transition-[filter] duration-150 group-hover:brightness-110">
                     {cover ? (
                         <CachedImage
                             src={api.getCoverArtUrl(cover, 96)}
                             alt=""
                             fill
-                            sizes="28px"
+                            sizes="40px"
                             className="object-cover"
                         />
                     ) : (
@@ -270,20 +282,20 @@ export function Sidebar() {
                 </span>
                 <span
                     className={cn(
-                        "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] transition-colors duration-150",
+                        "min-w-0 flex-1 truncate text-sm font-medium tracking-tight transition-colors duration-150",
                         isActive
-                            ? "font-medium text-brand"
-                            : "text-[var(--text-primary)]"
+                            ? "text-brand"
+                            : "text-[var(--text-primary)] group-hover:text-white"
                     )}
                 >
                     {playlist.name}
                 </span>
                 <span
                     className={cn(
-                        "shrink-0 text-[11px] tabular-nums transition-colors duration-150",
+                        "t-meta shrink-0 transition-colors duration-150",
                         isActive
-                            ? "text-brand/70"
-                            : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"
+                            ? "text-brand/80"
+                            : "group-hover:text-[var(--text-secondary)]"
                     )}
                 >
                     {playlist.trackCount}
@@ -293,13 +305,26 @@ export function Sidebar() {
     };
 
     const sectionLabel = (label: string, count: number, action?: ReactNode) => (
-        <h2 className="sticky top-0 z-[2] flex items-center justify-between gap-2 bg-[var(--bg-chrome)] px-2 pb-1 pt-3 text-micro font-medium text-[var(--text-secondary)]">
-            <span className="tracking-[0.02em]">{label}</span>
-            <span className="flex items-center gap-1.5">
-                {action}
-                <span className="tabular-nums">{count}</span>
-            </span>
-        </h2>
+        <SectionHeader
+            size="xs"
+            type="track"
+            title={label}
+            count={count}
+            action={action}
+            className="sticky top-0 z-[2] bg-[var(--bg-chrome)] px-2 pb-1 pt-4"
+        />
+    );
+
+    const allPlaylistsLink = (
+        <Link
+            href="/playlists"
+            prefetch={false}
+            aria-label="all playlists"
+            className="flex items-center gap-0.5 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors duration-150 hover:text-white focus-visible:ring-2 focus-visible:ring-brand/60"
+        >
+            show all
+            <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+        </Link>
     );
 
     const refreshMixesButton = (
@@ -308,7 +333,7 @@ export function Sidebar() {
             onClick={() => refreshMixes()}
             disabled={isRefreshingMixes}
             aria-label="refresh today's mixes"
-            className="-my-1 flex h-6 w-6 items-center justify-center rounded-md outline-none transition-colors duration-150 hover:bg-white/[0.06] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-brand/60 disabled:pointer-events-none"
+            className={cn(panelIconButton, "-my-1 h-6 w-6")}
         >
             <RefreshCw
                 aria-hidden="true"
@@ -333,8 +358,7 @@ export function Sidebar() {
                     >
                         <span
                             className={cn(
-                                "relative flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-white/[0.04] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
-                                isActive && "ring-2 ring-brand/70"
+                                "relative flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-white/[0.04] transition-[filter] duration-150 group-hover:brightness-110",
                             )}
                         >
                             <CoverArt
@@ -347,10 +371,10 @@ export function Sidebar() {
                         </span>
                         <span
                             className={cn(
-                                "mt-1 line-clamp-2 text-[11px] leading-[1.25] transition-colors duration-150",
+                                "mt-1.5 line-clamp-2 text-xs font-medium leading-[1.25] transition-colors duration-150",
                                 isActive
                                     ? "text-brand"
-                                    : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+                                    : "text-[var(--text-secondary)] group-hover:text-white"
                             )}
                         >
                             {mix.name}
@@ -372,11 +396,11 @@ export function Sidebar() {
                     aria-current={isActive ? "page" : undefined}
                     aria-label={item.name}
                     className={cn(
-                        "group flex h-10 w-10 items-center justify-center rounded-xl outline-none transition-[background-color,color,box-shadow] duration-150",
+                        "group flex h-10 w-10 items-center justify-center rounded-full outline-none transition-colors duration-150",
                         "focus-visible:ring-2 focus-visible:ring-brand/60",
                         isActive
-                            ? "bg-[linear-gradient(100deg,rgba(252,162,0,0.16),rgba(252,162,0,0.04))] text-brand shadow-[inset_0_0_0_1px_rgba(252,162,0,0.2)]"
-                            : "text-[var(--text-muted)] hover:bg-white/[0.05] hover:text-[var(--text-secondary)]"
+                            ? cn("text-brand", panelCurrentBar)
+                            : "text-[var(--text-secondary)] hover:text-white"
                     )}
                 >
                     <Icon
@@ -395,7 +419,7 @@ export function Sidebar() {
             {/* The rail: surfaces at the top, the four corners of the library at
                 the foot. */}
             <nav
-                className="relative z-[1] flex w-14 shrink-0 flex-col items-center justify-between border-r border-[var(--border-chrome)] bg-[var(--bg-chrome)] py-2.5"
+                className="relative z-[1] flex w-14 shrink-0 flex-col items-center justify-between bg-[var(--bg-chrome)] py-2.5"
                 aria-label="main navigation"
             >
                 <div className="flex flex-col items-center gap-1">
@@ -417,8 +441,8 @@ export function Sidebar() {
                 inert={collapsed}
                 aria-hidden={collapsed || undefined}
             >
-                <div className="flex h-11 shrink-0 items-center justify-between pl-3 pr-1.5">
-                    <span className="truncate text-sm font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
+                <div className="flex h-12 shrink-0 items-center justify-between pl-3 pr-1.5">
+                    <span className="truncate text-lg font-bold tracking-tight text-white">
                         library
                     </span>
                     <span className="flex items-center gap-0.5">
@@ -432,12 +456,7 @@ export function Sidebar() {
                             aria-label="create playlist"
                             aria-expanded={showCreatePlaylist}
                             title="create playlist"
-                            className={cn(
-                                "flex h-6 w-6 items-center justify-center rounded-md outline-none transition-colors duration-150",
-                                "text-[var(--text-muted)] hover:bg-white/[0.06] hover:text-brand",
-                                "focus-visible:ring-2 focus-visible:ring-brand/60",
-                                showCreatePlaylist && "text-brand"
-                            )}
+                            className={cn(panelIconButton, showCreatePlaylist && "text-brand hover:text-brand")}
                         >
                             <Plus
                                 aria-hidden="true"
@@ -454,7 +473,7 @@ export function Sidebar() {
                             onClick={collapse}
                             aria-label="hide library"
                             title="hide library"
-                            className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] outline-none transition-colors duration-150 hover:bg-white/[0.06] hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                            className={panelIconButton}
                         >
                             <ChevronLeft
                                 aria-hidden="true"
@@ -464,11 +483,11 @@ export function Sidebar() {
                     </span>
                 </div>
 
-                <div className="mx-2 mb-1 flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.05] bg-white/[0.035] px-2 text-[var(--text-muted)] focus-within:border-brand/45 focus-within:bg-white/[0.05]">
+                <div className="mx-2 mb-1 flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--bg-hover)] px-3 text-[var(--text-secondary)] focus-within:ring-2 focus-within:ring-brand/60">
                     <svg
                         aria-hidden="true"
                         viewBox="0 0 24 24"
-                        className="h-3 w-3 shrink-0"
+                        className="h-3.5 w-3.5 shrink-0"
                         fill="none"
                         stroke="currentColor"
                         strokeWidth={1.8}
@@ -483,7 +502,7 @@ export function Sidebar() {
                         onChange={(e) => setFilter(e.target.value)}
                         placeholder="filter library"
                         aria-label="filter library"
-                        className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
                     />
                 </div>
 
@@ -517,18 +536,41 @@ export function Sidebar() {
                             {[1, 2, 3].map((i) => (
                                 <div
                                     key={i}
-                                    className="flex h-10 animate-pulse items-center gap-2 rounded-[9px] px-2"
+                                    className="flex h-12 animate-pulse items-center gap-2.5 rounded-lg px-2"
                                 >
-                                    <div className="h-7 w-7 rounded-md bg-white/[0.05]" />
+                                    <div className="h-10 w-10 rounded-md bg-white/[0.05]" />
                                     <div className="h-2.5 flex-1 rounded bg-white/[0.05]" />
                                 </div>
                             ))}
                         </div>
                     ) : (
                         <>
-                            {(query.length === 0 || shownOwn.length > 0 || isErrorPlaylists) && (
+                            {libraryEmpty && (
+                                <div className="px-2 pt-4">
+                                    <p className="t-body">your playlists and daily mixes will show up here.</p>
+                                    <div className="mt-2 flex flex-col items-start gap-1.5">
+                                        {[
+                                            { label: "make a playlist", run: () => { setShowCreatePlaylist(true); setNewPlaylistName(""); } },
+                                            { label: "make today's mixes", run: () => refreshMixes(), busy: isRefreshingMixes },
+                                        ].map(({ label, run, busy }) => (
+                                            <button
+                                                key={label}
+                                                type="button"
+                                                onClick={run}
+                                                disabled={busy}
+                                                className={libraryAction}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                        {playlists.length > 0 && allPlaylistsLink}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!libraryEmpty && (query.length === 0 || shownOwn.length > 0 || isErrorPlaylists) && (
                                 <section>
-                                    {sectionLabel("playlists", shownOwn.length)}
+                                    {sectionLabel("playlists", shownOwn.length, allPlaylistsLink)}
                                     {isErrorPlaylists ? (
                                         <div className="px-2 py-3">
                                             <p className="text-xs text-[var(--text-muted)]">
@@ -546,43 +588,32 @@ export function Sidebar() {
                                         shownOwn.map(playlistRow)
                                     ) : query.length === 0 ? (
                                         <div className="px-2 py-2">
-                                            <p className="text-xs text-[var(--text-muted)]">
-                                                none of your own yet
-                                            </p>
                                             <button
                                                 type="button"
                                                 onClick={() => {
                                                     setShowCreatePlaylist(true);
                                                     setNewPlaylistName("");
                                                 }}
-                                                className="mt-1 rounded text-xs text-[var(--text-secondary)] outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+                                                className={libraryAction}
                                             >
-                                                make the first one
+                                                make your first playlist
                                             </button>
                                         </div>
                                     ) : null}
                                 </section>
                             )}
 
-                            {(shownShared.length > 0 ||
-                                (query.length === 0 &&
-                                    sharedPlaylists.length === 0)) && (
+                            {shownShared.length > 0 && (
                                 <section>
                                     {sectionLabel(
                                         "shared",
                                         shownShared.length
                                     )}
-                                    {shownShared.length > 0 ? (
-                                        shownShared.map(playlistRow)
-                                    ) : (
-                                        <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
-                                            nothing shared with you yet
-                                        </p>
-                                    )}
+                                    {shownShared.map(playlistRow)}
                                 </section>
                             )}
 
-                            {(shownMixes.length > 0 ||
+                            {!libraryEmpty && (shownMixes.length > 0 ||
                                 (query.length === 0 &&
                                     (isLoadingMixes ||
                                         isErrorMixes ||
@@ -619,7 +650,7 @@ export function Sidebar() {
                                         mixTiles(shownMixes)
                                     ) : (
                                         <p className="px-2 py-2 text-xs text-[var(--text-muted)]">
-                                            no mixes yet: refresh to make today&apos;s
+                                            refresh to make today&apos;s mixes
                                         </p>
                                     )}
                                 </section>
@@ -633,19 +664,6 @@ export function Sidebar() {
                         </>
                     )}
                 </nav>
-
-                <div className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--border-chrome)] px-3 text-xs text-[var(--text-secondary)]">
-                    <Link
-                        href="/playlists"
-                        prefetch={false}
-                        className="rounded outline-none transition-colors duration-150 hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-brand/60"
-                    >
-                        all playlists
-                    </Link>
-                    <span className="text-[11px] tabular-nums">
-                        {visiblePlaylists.length}
-                    </span>
-                </div>
             </div>
 
             {collapsed && (
@@ -660,11 +678,11 @@ export function Sidebar() {
                     }}
                     aria-label="show library"
                     title="show library"
-                    className="group flex w-6 shrink-0 flex-col items-center border-l border-[var(--border-chrome)] bg-[var(--bg-chrome)] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
+                    className="group flex w-6 shrink-0 flex-col items-center bg-[var(--bg-chrome)] pt-3 outline-none transition-colors duration-150 hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60 animate-fade-soft"
                 >
                     <ChevronRight
                         aria-hidden="true"
-                        className="h-3.5 w-3.5 text-[var(--text-muted)] transition-colors duration-150 group-hover:text-brand"
+                        className="h-3.5 w-3.5 text-[var(--text-secondary)] transition-colors duration-150 group-hover:text-white"
                     />
                 </button>
             )}
@@ -689,7 +707,7 @@ export function Sidebar() {
                     style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                 >
                     <aside
-                        className="absolute inset-y-0 left-0 flex overflow-hidden rounded-lg border border-[var(--border-chrome)] bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
+                        className="absolute inset-y-0 left-0 flex overflow-hidden bg-[var(--bg-chrome)] transition-[width] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none"
                         style={{ width: collapsed ? CLOSED_WIDTH : OPEN_WIDTH }}
                     >
                         {sidebarContent}

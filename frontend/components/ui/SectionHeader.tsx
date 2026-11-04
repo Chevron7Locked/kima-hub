@@ -22,7 +22,7 @@ interface SectionHeaderProps {
     badge?: string;
     showAllHref?: string;
     action?: ReactNode;
-    size?: "md" | "sm";
+    size?: "md" | "sm" | "xs";
     className?: string;
 }
 
@@ -37,12 +37,12 @@ export const SectionHeader = memo(function SectionHeader({
     className,
 }: SectionHeaderProps) {
     return (
-        <div className={cn("flex items-center gap-3", size === "md" ? "mb-4" : "mb-3", className)}>
+        <div className={cn("flex items-center", size === "xs" ? "mb-1 gap-2" : "gap-3", size === "md" && "mb-4", size === "sm" && "mb-3", className)}>
             <span
                 aria-hidden="true"
-                className={cn("w-1 rounded-full shrink-0", size === "md" ? "h-7" : "h-6", BAR[type])}
+                className={cn("w-1 rounded-full shrink-0", size === "md" ? "h-7" : size === "sm" ? "h-6" : "h-3.5", BAR[type])}
             />
-            <h2 className={cn("font-bold tracking-tight text-white", size === "md" ? "text-xl" : "text-lg")}>
+            <h2 className={cn("font-bold tracking-tight text-white", size === "md" ? "text-xl" : size === "sm" ? "text-lg" : "text-sm")}>
                 {title}
             </h2>
             {count !== undefined && <span className="t-meta">{count}</span>}

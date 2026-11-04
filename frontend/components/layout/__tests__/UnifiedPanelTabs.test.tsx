@@ -7,11 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 
+const audio = vi.hoisted(() => ({ queue: [], currentIndex: 0, currentTrack: { id: "t1" } as { id: string } | null }));
+
 vi.mock("@/lib/activity-panel-settings-context", () => ({ useActivityPanelSettings: () => ({ settingsContent: null }) }));
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ queue: [], currentIndex: 0 }) }));
+vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => audio }));
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => <div data-testid="queue">queue</div> }));
 vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({
-    NowPlayingStrip: () => <div data-testid="strip" />,
+    NowPlayingHero: () => <div data-testid="strip" />,
     ArtistAbout: () => <div>about</div>,
 }));
 vi.mock("@/components/lyrics/LyricsView", () => ({ LyricsView: () => <div>lyrics</div> }));
@@ -35,6 +37,10 @@ const show = async (isOpen = true) => {
         root.render(<UnifiedPanel isOpen={isOpen} onToggle={() => {}} />);
     });
 };
+const startSong = async () => {
+    audio.currentTrack = { id: "t1" };
+    await show();
+};
 const tab = (name: string) => host.querySelector<HTMLElement>(`[role="tab"][data-tab-key="${name}"]`)!;
 const has = (id: string) => !!host.querySelector(`[data-testid="${id}"]`);
 const key = async (el: HTMLElement, k: string) => {
@@ -44,6 +50,7 @@ const key = async (el: HTMLElement, k: string) => {
 };
 
 beforeEach(() => {
+    audio.currentTrack = { id: "t1" };
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -60,6 +67,30 @@ describe("UnifiedPanel tabs", () => {
         expect(tab("activity").getAttribute("aria-selected")).toBe("false");
         expect(has("queue")).toBe(true);
         expect(host.querySelector('[data-testid="notifications"]')!.closest("[inert]")).not.toBeNull();
+    });
+
+    it("opens on activity when nothing is playing, and follows the song when one starts", async () => {
+        audio.currentTrack = null;
+        await show();
+        expect(tab("activity").getAttribute("aria-selected")).toBe("true");
+        await startSong();
+        expect(tab("listening").getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("stays on listening when the song stops", async () => {
+        await show();
+        audio.currentTrack = null;
+        await show();
+        expect(tab("listening").getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("keeps a choice when a song starts", async () => {
+        audio.currentTrack = null;
+        await show();
+        await act(async () => tab("listening").click());
+        await act(async () => tab("activity").click());
+        await startSong();
+        expect(tab("activity").getAttribute("aria-selected")).toBe("true");
     });
 
     it("shows unread alerts and downloads as a count on the activity tab", async () => {
