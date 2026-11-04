@@ -18,6 +18,8 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { MusicScannerService } from "../musicScanner";
 import { clearOrphanedDiscoverAlbums } from "../discovery/discoverClearing";
+import { LINKED_OUT_REFUSAL } from "../../routes/library/trackPath";
+import { config } from "../../config";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 
 jest.setTimeout(60_000);
@@ -136,5 +138,36 @@ describe("a listener's own copy of an album Discover once downloaded", () => {
         writeAlbum(CLEARED);
         await new MusicScannerService().scanLibrary(musicDir);
         expect(await locationOf(CLEARED.album)).toBe("LIBRARY");
+    });
+
+    it("leaves a Discover album in a linked folder leading out of the music folder, and says why", async () => {
+        const LINKED = { artist: "Own Artist Five", album: "Own Album Five" };
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), `${P}-outside-`));
+        const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, musicPath: musicDir });
+        try {
+            await prisma.downloadJob.create({
+                data: {
+                    userId: USER, subject: `${LINKED.artist} - ${LINKED.album}`, type: "album", status: "completed", completedAt: new Date(),
+                    discoveryBatchId: currentBatch,
+                    metadata: { downloadType: "discovery", currentSource: "soulseek", artistName: LINKED.artist, albumTitle: LINKED.album },
+                },
+            });
+            writeAlbum(LINKED);
+            const real = path.join(outside, LINKED.artist);
+            fs.renameSync(path.join(musicDir, LINKED.artist), real);
+            fs.symlinkSync(real, path.join(musicDir, LINKED.artist));
+            await new MusicScannerService().scanLibrary(musicDir);
+            expect(await locationOf(LINKED.album)).toBe("DISCOVER");
+
+            const { failures } = await clearOrphanedDiscoverAlbums();
+
+            expect(failures.map((f) => f.reason)).toEqual([LINKED_OUT_REFUSAL]);
+            expect(fs.existsSync(path.join(real, LINKED.album, "01.flac"))).toBe(true);
+            expect(await locationOf(LINKED.album)).toBe("DISCOVER");
+        } finally {
+            spy.mockRestore();
+            fs.unlinkSync(path.join(musicDir, LINKED.artist));
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
     });
 });

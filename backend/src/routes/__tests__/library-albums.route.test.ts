@@ -75,6 +75,7 @@ jest.mock('fs', () => ({
     unlinkSync: jest.fn(),
     readdirSync: jest.fn().mockReturnValue([]),
     rmdirSync: jest.fn(),
+    realpathSync: jest.fn((p: string) => p),
 }));
 
 import express from 'express';

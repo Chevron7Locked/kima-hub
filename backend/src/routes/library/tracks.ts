@@ -21,7 +21,7 @@ import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { IN_LIBRARY, LIBRARY_PLAYABLE } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
-import { resolveWithinMusicRoot } from "./trackPath";
+import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
 import fs from "fs";
 
@@ -531,6 +531,10 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
 
     if (!track) {
       return res.status(404).json({ error: "Track not found" });
+    }
+
+    if (track.filePath && isBehindLinkOut(track.filePath)) {
+      return res.status(409).json({ error: LINKED_OUT_REFUSAL });
     }
 
     if (track.filePath) {

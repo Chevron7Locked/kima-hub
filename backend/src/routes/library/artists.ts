@@ -27,7 +27,7 @@ import { safeError } from "../../utils/errors";
 import { failureCause } from "../../utils/outcome";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
-import { resolveWithinMusicRoot } from "./trackPath";
+import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { config } from "../../config";
 import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
@@ -917,6 +917,10 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
 
     if (!artist) {
       return res.status(404).json({ error: "Artist not found" });
+    }
+
+    if (artist.albums.some((a) => a.tracks.some((t) => t.filePath && isBehindLinkOut(t.filePath)))) {
+      return res.status(409).json({ error: LINKED_OUT_REFUSAL });
     }
 
     let deletedFiles = 0;

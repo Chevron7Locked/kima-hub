@@ -50,6 +50,7 @@ jest.mock('fs', () => ({
     rmdirSync: jest.fn(),
     readdirSync: jest.fn().mockReturnValue([]),
     statSync: jest.fn().mockReturnValue({ isDirectory: () => false }),
+    realpathSync: jest.fn((p: string) => p.replace('/music/Linked', '/nas/Album')),
 }));
 
 import express from 'express';
@@ -103,6 +104,25 @@ describe('library delete routes stay inside the music root', () => {
             expect(p.startsWith(ROOT + '/')).toBe(true);
         }
         expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /tracks/:id refuses a song behind a link leading out, keeping file and row', async () => {
+        (prisma.track.findUnique as jest.Mock).mockResolvedValue({ id: 't1', title: 'T', filePath: 'Linked/one.flac' });
+        const res = await request(app).delete('/tracks/t1');
+        expect(res.status).toBe(409);
+        expect(fs.unlinkSync).not.toHaveBeenCalled();
+        expect(prisma.track.delete).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /artists/:id refuses when any song is behind a link leading out, before touching anything', async () => {
+        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({
+            id: 'a1', name: 'A', mbid: null,
+            albums: [{ tracks: [{ filePath: 'A/Album/ok.flac' }, { filePath: 'Linked/one.flac' }] }],
+        });
+        const res = await request(app).delete('/artists/a1');
+        expect(res.status).toBe(409);
+        expect(fs.unlinkSync).not.toHaveBeenCalled();
+        expect(prisma.artist.delete).not.toHaveBeenCalled();
     });
 
     it('DELETE /artists/:id refuses a tag-derived name that escapes the root', async () => {

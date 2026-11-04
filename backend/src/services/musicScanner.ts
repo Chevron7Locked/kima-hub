@@ -15,7 +15,7 @@ import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
-import { closeStagesForMissingTracks } from "./missingFileStages";
+import { closeStagesForMissingTracks, fileIsGone } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { askedAgain } from "./stageReopen";
@@ -154,9 +154,6 @@ export class MusicScannerService {
 
         logger.debug(`Starting library scan: ${musicPath}`);
 
-        const audioFiles = await this.findAudioFiles(musicPath);
-        logger.debug(`Found ${audioFiles.length} audio files`);
-
         const existingTracks = await prisma.track.findMany({
             select: {
                 id: true,
@@ -165,6 +162,9 @@ export class MusicScannerService {
                 missingSince: true,
             },
         });
+
+        const audioFiles = await this.findAudioFiles(musicPath, existingTracks.map((t) => t.filePath));
+        logger.debug(`Found ${audioFiles.length} audio files`);
 
         const tracksByPath = new Map(
             existingTracks.map((t) => [t.filePath, t])
@@ -296,22 +296,15 @@ export class MusicScannerService {
             audioFiles.map((f) => path.relative(musicPath, f))
         );
 
-        // The walk lists regular files only, so a file it did not list may still be on
-        // disk (a symlink, a path that normalises differently): those are checked there.
+        // A file the walk did not list may still be on disk (a second path to a song it
+        // listed, a path that normalises differently): those are checked there.
         const pathCandidates = existingTracks.filter(
             (t) => !scannedPaths.has(t.filePath)
         );
         const existChecks = await Promise.all(
             pathCandidates.map(async (t) => {
                 const fullPath = path.join(musicPath, t.filePath);
-                try {
-                    await fs.promises.access(fullPath);
-                    return { track: t, exists: true };
-                } catch (err) {
-                    // Only "no such file" is gone. Anything else (no permission, an I/O error, a stale network
-                    // share) says nothing about the file, so it is not flagged.
-                    return { track: t, exists: (err as NodeJS.ErrnoException).code !== "ENOENT" };
-                }
+                return { track: t, exists: !(await fileIsGone(musicPath, fullPath)) };
             })
         );
         const onDisk = new Set(existChecks.filter((c) => c.exists).map((c) => c.track.id));
@@ -398,31 +391,94 @@ export class MusicScannerService {
     }
 
     /**
-     * Recursively find all audio files in a directory
+     * Every audio file under the music folder, following links. A linked song is listed where the link stands, so
+     * it moves with the link and not with its target. One real file is one song, however many paths reach it: real
+     * paths come first, then links, the ones already holding a recorded song before the rest, so a new link never
+     * takes a song from the path it is filed under. A link that cannot be followed is skipped and logged, never fatal;
+     * a real folder that cannot be read still stops the scan, since nothing it holds could be told from gone.
      */
-    private async findAudioFiles(dirPath: string): Promise<string[]> {
+    private async findAudioFiles(dirPath: string, recordedPaths: string[]): Promise<string[]> {
+        const realRoot = await fs.promises.realpath(dirPath);
         const files: string[] = [];
+        const walkedFolders = new Set<string>();
+        const takenFiles = new Set<string>();
+        const links: string[] = [];
+        const skipped: string[] = [];
 
-        async function walk(dir: string) {
-            const entries = await fs.promises.readdir(dir, {
-                withFileTypes: true,
-            });
+        // `real` is `dir` with its links resolved. Below it nothing is a link until one is queued, so real paths are
+        // joined, not asked of the disk: a library with no links pays nothing.
+        async function walk(dir: string, real: string, viaLink: boolean) {
+            if (walkedFolders.has(real)) return;
+            walkedFolders.add(real);
+
+            let entries: fs.Dirent[];
+            try {
+                entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            } catch (err) {
+                if (!viaLink) throw err;
+                skipped.push(`${dir}: ${(err as Error).message}`);
+                return;
+            }
 
             for (const entry of entries) {
                 const fullPath = path.join(dir, entry.name);
+                const realPath = path.join(real, entry.name);
 
                 if (entry.isDirectory()) {
-                    await walk(fullPath);
-                } else if (entry.isFile()) {
-                    const ext = path.extname(entry.name).toLowerCase();
-                    if (AUDIO_EXTENSIONS.has(ext)) {
-                        files.push(fullPath);
-                    }
+                    await walk(fullPath, realPath, viaLink);
+                } else if (entry.isSymbolicLink()) {
+                    links.push(fullPath);
+                } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+                    if (takenFiles.has(realPath)) continue;
+                    takenFiles.add(realPath);
+                    files.push(fullPath);
                 }
             }
         }
 
-        await walk(dirPath);
+        async function follow(link: string) {
+            let target: string;
+            let stats: fs.Stats;
+            try {
+                target = await fs.promises.realpath(link);
+                stats = await fs.promises.stat(target);
+            } catch (err) {
+                skipped.push(`${link}: ${(err as Error).message}`);
+                return;
+            }
+            if (stats.isDirectory()) {
+                // The folder holding the music folder is a loop by another name, and could be the whole disk.
+                if (realRoot.startsWith(target.endsWith(path.sep) ? target : target + path.sep)) {
+                    skipped.push(`${link}: it points above the music folder`);
+                    return;
+                }
+                await walk(link, target, true);
+            } else if (stats.isFile() && AUDIO_EXTENSIONS.has(path.extname(link).toLowerCase())) {
+                if (takenFiles.has(target)) return;
+                takenFiles.add(target);
+                files.push(link);
+            }
+        }
+
+        await walk(dirPath, realRoot, false);
+
+        if (links.length > 0) {
+            // Each recorded song's path and every folder on the way to it.
+            const recorded = new Set<string>();
+            for (const recordedPath of recordedPaths) {
+                for (let at = recordedPath; path.dirname(at) !== at; at = path.dirname(at)) recorded.add(at);
+            }
+            const order = (link: string) => (recorded.has(path.relative(dirPath, link)) ? 0 : 1);
+            // A followed folder can hold more links, which are a round of their own.
+            while (links.length > 0) {
+                const round = links.splice(0).sort((a, b) => order(a) - order(b) || a.localeCompare(b));
+                for (const link of round) await follow(link);
+            }
+        }
+
+        if (skipped.length > 0) {
+            logger.warn(`[Scanner] ${skipped.length} link(s) could not be followed, first: ${skipped[0]}`);
+        }
         return files;
     }
 

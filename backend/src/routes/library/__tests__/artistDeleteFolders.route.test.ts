@@ -171,11 +171,13 @@ describe("deleting an artist", () => {
             fs.mkdirSync(path.join(outside, "Album"));
             fs.writeFileSync(path.join(outside, "Album", "cover.jpg"), "x");
             fs.symlinkSync(outside, path.join(MUSIC, "Linked"));
+            fs.writeFileSync(path.join(outside, "Album", "01.flac"), "x");
             const a = await artistWith("Band A", ["Linked/Album/01.flac"]);
 
-            await del(a);
+            await request(app()).delete(`/artists/${a}`).expect(409);
 
             expect(fs.existsSync(path.join(outside, "Album", "cover.jpg"))).toBe(true);
+            expect(fs.existsSync(path.join(outside, "Album", "01.flac"))).toBe(true);
         } finally {
             fs.rmSync(outside, { recursive: true, force: true });
         }

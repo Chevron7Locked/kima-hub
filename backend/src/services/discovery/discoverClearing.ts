@@ -13,7 +13,7 @@ import { artistNamed, isMbid } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
 import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
-import { resolveWithinMusicRoot } from "../../routes/library/trackPath";
+import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
 import { RUNNING_BATCH, lookupKey, sameName } from "./discoverEvidence";
 
@@ -108,6 +108,7 @@ function fileFailureReason(error: NodeJS.ErrnoException): string {
  */
 async function deleteAlbumFiles(albumId: string): Promise<{ failed: string } | null> {
     const tracks = await prisma.track.findMany({ where: { albumId }, select: { filePath: true } });
+    if (tracks.some((t) => t.filePath && isBehindLinkOut(t.filePath))) return { failed: LINKED_OUT_REFUSAL };
     const albumDirs = new Set<string>();
     const reasons = new Set<string>();
     let deleted = 0;

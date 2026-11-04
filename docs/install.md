@@ -32,7 +32,7 @@ Open `http://localhost:3030` and create your account. The first account you crea
 
 Two folders matter:
 
-- `/music` is your library.
+- `/music` is your library. Symbolic links in it are followed, so a linked song or folder scans like any other, as long as its target is mounted in the container too.
 - `/data` holds the database, the caches and the secrets Kima generates on first start. Back it up. If you lose it you lose your users, playlists and play history, and the stored credentials can no longer be read.
 
 ### With Docker Compose
