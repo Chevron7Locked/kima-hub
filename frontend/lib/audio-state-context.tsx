@@ -493,9 +493,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
             const state = {
                 playbackType,
-                trackId: currentTrack?.id,
-                audiobookId: currentAudiobook?.id,
-                podcastId: currentPodcast?.id,
+                // Null, never omitted: the server leaves a field it was not sent alone, so a song cleared here would stay.
+                trackId: currentTrack?.id ?? null,
+                audiobookId: currentAudiobook?.id ?? null,
+                podcastId: currentPodcast?.id ?? null,
                 queue: limitedQueue,
                 currentIndex: adjustedIndex,
                 isShuffle,

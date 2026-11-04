@@ -156,4 +156,14 @@ describe("restoring what was playing", () => {
         expect(server.saves).toHaveLength(1);
         expect(server.saves[0]).toMatchObject({ playbackType: "track", trackId: "a", isShuffle: true });
     });
+
+    it("says outright that nothing is loaded once the queue is cleared, so the server forgets the song", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.clearQueue());
+        await wait(1500);
+        expect(server.saves).toHaveLength(1);
+        // Over the wire a missing field means "leave it alone", so the empty value has to survive JSON.
+        expect(JSON.parse(JSON.stringify(server.saves[0]))).toMatchObject({ trackId: null, audiobookId: null, podcastId: null, queue: [] });
+    });
 });

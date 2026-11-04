@@ -1479,9 +1479,9 @@ class ApiClient {
 
     async savePlaybackState(state: {
         playbackType: string;
-        trackId?: string;
-        audiobookId?: string;
-        podcastId?: string;
+        trackId?: string | null;
+        audiobookId?: string | null;
+        podcastId?: string | null;
         queue?: ApiData[];
         currentIndex?: number;
         isShuffle?: boolean;
