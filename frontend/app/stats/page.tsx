@@ -320,9 +320,9 @@ function Overview({
                     hours of music{window ? ` ${window}` : ""}
                 </h1>
 
-                {/* The hours are an estimate and say so; these four counts are exact.
-                    Under 480px four columns cannot hold their labels, so phones get two. */}
-                <dl className="grid grid-cols-2 min-[480px]:grid-cols-4 gap-x-4 gap-y-6 sm:gap-x-8 lg:max-w-[42rem]">
+                {/* The hours are an estimate and say so; these four counts are exact. The columns follow the
+                    room this block has, not the screen: open sidebars can leave it narrow on a wide one. */}
+                <dl className="grid grid-cols-2 min-[480px]:grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-x-4 gap-y-6 sm:gap-x-8 lg:max-w-[42rem]">
                     <Reading value={listening.plays.toLocaleString()} label="plays" />
                     <Reading value={listening.distinctArtists.toLocaleString()} label="artists" />
                     <Reading value={listening.distinctAlbums.toLocaleString()} label="albums" />

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A show's first episode plays in the iPhone app.** The server refused the app's stream ticket on the sample, so a show you hadn't followed yet could not be played. The website was not affected.
+- **The stats page's numbers no longer overlap.** With both sidebars open, the plays, artists, albums and library counts ran into each other.
 
 ### Changed
 
