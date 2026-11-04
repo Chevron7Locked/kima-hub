@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Linked songs and folders show up in your library.** A library scan skipped symbolic links without saying so. It now follows them, keeps a song that two paths reach as one song, stops at loops, and logs any link it can't follow. If a link's target is unavailable, for example a drive that isn't mounted, its songs stay in your library until the link itself is removed. Deleting a linked song in Kima removes only the link. Kima won't delete music inside a linked folder that leads out of your music folder; it says so, and you remove the link instead. The linked files must be reachable inside every Kima container.
 
+### Changed
+
+- **The public library feed carries play counts.** Each song in `/api/public/vibe/library` now has `plays`, the public user's listens from every source, counted the way the stats page counts them and refreshed once a day, and 0 while that user has "share what I'm playing" off. The feed's `version` is now 2.
+
 ## [1.12.2] - 2026-11-03
 
 ### Fixed

@@ -1,8 +1,9 @@
 /**
  * The owned library as one gzipped JSON document for the public vibe site: every present
  * track with a map position, its raw 3-axis position, moods, energy, valence and
- * its nearest tracks by the matching formula. Rebuilt only when the library's
- * fingerprint changes, in the background; the fingerprint doubles as the ETag.
+ * its nearest tracks by the matching formula and how many times the public user
+ * has listened to it. Rebuilt only when the library's fingerprint changes, in the
+ * background; the fingerprint doubles as the ETag.
  */
 import crypto from "crypto";
 import { promisify } from "util";
@@ -11,19 +12,22 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { getLiveState, publicUserId } from "./liveListening";
 import { MOODS, NEUTRAL, UNANALYZED, refreshMoodSnapshot } from "./moodBucketService";
 import { SELF_SCORE } from "./matching/formula";
 import { neighbourListsInWorker } from "./matching/neighbours";
 import { matchingContext } from "./matching/rank";
+import { listenRows } from "./stats/listens";
 
 const gzip = promisify(zlib.gzip);
 
-const EXPORT_VERSION = 1;
+const EXPORT_VERSION = 2;
 const NEIGHBOURS = 8;
 
 export interface LibraryExport {
     etag: string;
     gzipped: Buffer;
+    hasPlays: boolean;
 }
 
 interface TrackRow {
@@ -68,7 +72,35 @@ interface Build {
 let cached: LibraryExport | null = null;
 let building: Build | null = null;
 
+/** Plays before today (UTC). A rebuild scores every pair of tracks, far too much to run after each song, so a listen reaches the export once its day has ended. */
+const SETTLED = Prisma.sql`"playedAt" < date_trunc('day', now() AT TIME ZONE 'UTC')`;
+
+/** The user whose plays the export carries: none when they have turned off sharing what they play. */
+async function sharingUserId(): Promise<string | null> {
+    const userId = await publicUserId();
+    return userId && getLiveState().status !== "hidden" ? userId : null;
+}
+
+async function settledPlays(): Promise<number> {
+    const userId = await sharingUserId();
+    if (!userId) return 0;
+    const [{ plays }] = await prisma.$queryRaw<Array<{ plays: number }>>`
+        SELECT COUNT(*)::int AS plays FROM "Play" WHERE "userId" = ${userId} AND ${SETTLED}
+    `;
+    return plays;
+}
+
+/** Listens per track by the stats page's rule, across every source: one song heard through once counts once. */
+async function listensByTrack(): Promise<Map<string, number>> {
+    const userId = await sharingUserId();
+    if (!userId) return new Map();
+    const rows = await prisma.$queryRaw<Array<{ trackId: string; plays: number }>>(Prisma.sql`${listenRows(userId)}
+        SELECT p."trackId", COUNT(*)::int AS plays FROM p WHERE p.${SETTLED} GROUP BY 1`);
+    return new Map(rows.map((r) => [r.trackId, r.plays]));
+}
+
 async function fingerprint(moodSignature: string): Promise<string> {
+    const plays = await settledPlays();
     const [row] = await prisma.$queryRaw<Array<Record<string, unknown>>>`
         SELECT
             COUNT(*) AS n,
@@ -81,7 +113,7 @@ async function fingerprint(moodSignature: string): Promise<string> {
             (SELECT "builtAt" FROM matching_state WHERE id = 'default') AS matching
         ${MAPPED}
     `;
-    const raw = JSON.stringify([EXPORT_VERSION, row, moodSignature], (_k, v) =>
+    const raw = JSON.stringify([EXPORT_VERSION, row, moodSignature, plays], (_k, v) =>
         typeof v === "bigint" ? v.toString() : v
     );
     return '"' + crypto.createHash("sha256").update(raw).digest("hex").slice(0, 32) + '"';
@@ -131,6 +163,7 @@ async function build(etag: string): Promise<LibraryExport> {
         WHERE "analysisVersion" IS NOT NULL
     `;
     const neighbours = await nearestNeighbours(rows.map((r) => r.id));
+    const listens = await listensByTrack();
 
     const artists = new Map<string, { id: string; name: string }>();
     const albums = new Map<string, { id: string; artistId: string; title: string; year: number | null }>();
@@ -153,6 +186,7 @@ async function build(etag: string): Promise<LibraryExport> {
             energy: r.energy === null ? null : round(r.energy, 3),
             valence: r.valence === null ? null : round(r.valence, 3),
             neighbours: neighbours.get(r.id) ?? [],
+            plays: listens.get(r.id) ?? 0,
         };
     });
 
@@ -174,7 +208,7 @@ async function build(etag: string): Promise<LibraryExport> {
     logger.info(
         `[PUBLIC-VIBE] library export: ${tracks.length} tracks, ${body.length} bytes, ${gzipped.length} gzipped, ${Date.now() - started}ms`
     );
-    return { etag, gzipped };
+    return { etag, gzipped, hasPlays: listens.size > 0 };
 }
 
 /**
@@ -215,5 +249,7 @@ export function latestLibraryExport(): LibraryExport | null {
     refreshLibraryExport().catch((err) => {
         logger.error(`[PUBLIC-VIBE] library export failed: ${(err as Error).message}`);
     });
+    // Built before sharing was turned off: its play counts are no longer anyone's to read, so it waits for the rebuild.
+    if (cached?.hasPlays && getLiveState().status === "hidden") return null;
     return cached;
 }

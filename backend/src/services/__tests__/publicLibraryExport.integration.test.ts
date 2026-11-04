@@ -7,6 +7,7 @@
 import zlib from "zlib";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
+import { setLiveHidden } from "../liveListening";
 import { latestLibraryExport, refreshLibraryExport } from "../publicLibraryExport";
 import { SELF_SCORE, pairScore } from "../matching/formula";
 import * as neighbours from "../matching/neighbours";
@@ -64,6 +65,8 @@ const original = config.publicVibe;
 
 beforeAll(async () => {
     config.publicVibe = { token: "t".repeat(32), username: "Vibe Tester" };
+    await prisma.user.create({ data: { id: "usr_pub", username: "Vibe Tester", passwordHash: "x" } });
+    await prisma.user.create({ data: { id: "usr_other", username: "Someone Else", passwordHash: "x" } });
     await prisma.artist.create({ data: { id: "art_pub", name: "Pub Artist", identityKey: "a_pub" } });
     await prisma.album.create({
         data: { id: "alb_pub", rgMbid: "rg_pub", artistId: "art_pub", title: "Pub Album", year: 2001, primaryType: "Album" },
@@ -95,6 +98,7 @@ afterAll(async () => {
     );
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id = ANY($1)`, ["alb_pub", "alb_disc"]);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id = $1`, "art_pub");
+    await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id = ANY($1)`, ["usr_pub", "usr_other"]);
     await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
 });
 
@@ -112,7 +116,7 @@ describe("public library export", () => {
 
     it("lists the mapped tracks with their nearest mapped tracks", async () => {
         const doc = unpack((await refreshLibraryExport()).gzipped);
-        expect(doc.version).toBe(1);
+        expect(doc.version).toBe(2);
         expect(doc.library).toEqual({ id: "vibe-tester", name: "Vibe Tester", engine: { analyzer: null, embedding: MATCHING_MODEL } });
         expect(doc.artists).toEqual([{ id: "art_pub", name: "Pub Artist" }]);
         expect(doc.albums).toEqual([{ id: "alb_pub", artistId: "art_pub", title: "Pub Album", year: 2001 }]);
@@ -124,6 +128,51 @@ describe("public library export", () => {
         // trk_a's album also holds trk_b and trk_c; with trk_a counted it has room for one.
         expect(a.neighbours.map(([id]: [string]) => id)).toEqual(["trk_b"]);
         expect(Math.abs(a.neighbours[0][1] - (await formulaMatch("trk_a", "trk_b")))).toBeLessThanOrEqual(5e-5);
+    });
+
+    it("counts the public user's listens per track, by the stats page's rule, from every source", async () => {
+        const dayAgo = (hours: number) => new Date(Date.now() - 86_400_000 * 2 - hours * 3_600_000);
+        await prisma.play.createMany({
+            data: [
+                // Two rows inside one song's length are one listen.
+                { id: "ply_1", userId: "usr_pub", trackId: "trk_a", playedAt: dayAgo(5), heard: true },
+                { id: "ply_2", userId: "usr_pub", trackId: "trk_a", playedAt: new Date(dayAgo(5).getTime() + 10_000), heard: true },
+                { id: "ply_3", userId: "usr_pub", trackId: "trk_a", playedAt: dayAgo(3), source: "SUBSONIC" },
+                { id: "ply_4", userId: "usr_other", trackId: "trk_a", playedAt: dayAgo(4), heard: true },
+                { id: "ply_5", userId: "usr_other", trackId: "trk_b", playedAt: dayAgo(4), heard: true },
+            ],
+        });
+        const doc = unpack((await refreshLibraryExport()).gzipped);
+        expect(Object.fromEntries(doc.tracks.map((t: any) => [t.id, t.plays]))).toEqual({ trk_a: 2, trk_b: 0, trk_c: 0 });
+    });
+
+    it("waits for the day to turn before a new listen rebuilds it, and takes it in then", async () => {
+        const before = await refreshLibraryExport();
+        await prisma.play.create({ data: { id: "ply_today", userId: "usr_pub", trackId: "trk_c", playedAt: new Date(), heard: true } });
+        expect(await refreshLibraryExport()).toBe(before);
+
+        const startOfToday = new Date();
+        startOfToday.setUTCHours(0, 0, 0, 0);
+        await prisma.play.update({
+            where: { id: "ply_today" },
+            data: { playedAt: new Date(startOfToday.getTime() - 60_000) },
+        });
+        const next = await refreshLibraryExport();
+        expect(next.etag).not.toBe(before.etag);
+        expect(unpack(next.gzipped).tracks.find((t: any) => t.id === "trk_c").plays).toBe(1);
+    });
+
+    it("carries no plays while the public user has turned off sharing what they play", async () => {
+        setLiveHidden(true);
+        // The export built before the switch is not served, not even for the length of the rebuild.
+        expect(latestLibraryExport()).toBeNull();
+        const hidden = unpack((await refreshLibraryExport()).gzipped);
+        expect(latestLibraryExport()).not.toBeNull();
+        expect(hidden.tracks.every((t: any) => t.plays === 0)).toBe(true);
+
+        setLiveHidden(false);
+        const shown = unpack((await refreshLibraryExport()).gzipped);
+        expect(shown.tracks.find((t: any) => t.id === "trk_a").plays).toBe(2);
     });
 
     it("keeps its ETag and its bytes while nothing changes", async () => {
