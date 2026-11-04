@@ -160,8 +160,8 @@ async function authenticateToken(
         // preview snippet), whether sent in the query string or as a Bearer
         // credential. Unscoped tokens are valid everywhere.
         const isStreamScoped = decoded.scope === "stream";
-        const isStreamPath = req.path.endsWith("/stream") || PODCAST_SNIPPET_PATH.test(req.path);
-        if (!isStreamScoped || isStreamPath) {
+        const isAudioPath = req.path.endsWith("/stream") || PODCAST_SNIPPET_PATH.test(req.path);
+        if (!isStreamScoped || isAudioPath) {
             const user = await loadUser(decoded.userId);
             if (user) {
                 // Reject if the password was changed since the token was issued
