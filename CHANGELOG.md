@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Fixed
+
+- **A show's first episode plays in the iPhone app.** The server refused the app's stream ticket on the sample, so a show you hadn't followed yet could not be played. The website was not affected.
+
 ## [1.12.1] - 2026-11-02
 
 A hotfix for 1.12.0. Nothing to do when upgrading: enrichment and your library carry on as they are.

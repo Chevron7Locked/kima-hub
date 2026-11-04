@@ -328,6 +328,47 @@ describe('requireAuthOrToken', () => {
         expect(status).toHaveBeenCalledWith(401);
         expect(next).not.toHaveBeenCalled();
     });
+
+    describe('stream-scoped tickets', () => {
+        const ticket = () => jwt.sign(
+            { userId: 'user-123', username: 'testuser', role: 'user', tokenVersion: 1, scope: 'stream' },
+            TEST_SECRET,
+            { expiresIn: '5m' }
+        );
+
+        it.each([
+            '/tracks/t1/stream',
+            '/preview/123456/snippet',
+        ])('accepts a ticket on the audio route %s', async (path) => {
+            (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+            const req = mockReq({ path, query: { token: ticket() } });
+            const { res } = mockRes();
+            const next = mockNext();
+
+            await requireAuthOrToken(req, res, next);
+
+            expect(next).toHaveBeenCalledTimes(1);
+            expect(req.user?.id).toBe('user-123');
+        });
+
+        it.each([
+            '/preview/123456',
+            '/preview/123456/similar',
+            '/preview/123456/snippet/extra',
+            '/snippet',
+            '/preview/a/b/snippet',
+        ])('refuses a ticket on the non-audio route %s', async (path) => {
+            (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+            const req = mockReq({ path, query: { token: ticket() } });
+            const { res, status } = mockRes();
+            const next = mockNext();
+
+            await requireAuthOrToken(req, res, next);
+
+            expect(status).toHaveBeenCalledWith(401);
+            expect(next).not.toHaveBeenCalled();
+        });
+    });
 });
 
 // ── user cache ────────────────────────────────────────────────────────────────

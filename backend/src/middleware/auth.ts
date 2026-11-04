@@ -136,6 +136,9 @@ async function loadUser(userId: string): Promise<CachedUser | null> {
 
 type AuthUser = { id: string; username: string; role: string };
 
+/** A podcast's preview sample: the one audio route not ending in /stream (path relative to /podcasts). */
+const PODCAST_SNIPPET_PATH = /^\/preview\/[^/]+\/snippet$/;
+
 /**
  * Check a JWT. Returns the user when it is valid, null when it is refused
  * outright, and undefined when it proves nothing and the next method may try.
@@ -153,10 +156,11 @@ async function authenticateToken(
             return null;
         }
         // Stream-scoped tickets are leak-prone URL tokens: they are valid only
-        // when /stream is the final path segment, whether sent in the query
-        // string or as a Bearer credential. Unscoped tokens are valid everywhere.
+        // on audio routes (/stream as the final path segment, or a podcast's
+        // preview snippet), whether sent in the query string or as a Bearer
+        // credential. Unscoped tokens are valid everywhere.
         const isStreamScoped = decoded.scope === "stream";
-        const isStreamPath = req.path.endsWith("/stream");
+        const isStreamPath = req.path.endsWith("/stream") || PODCAST_SNIPPET_PATH.test(req.path);
         if (!isStreamScoped || isStreamPath) {
             const user = await loadUser(decoded.userId);
             if (user) {
