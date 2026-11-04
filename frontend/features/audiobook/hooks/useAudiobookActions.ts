@@ -25,7 +25,7 @@ export function useAudiobookActions(
     seek,
   } = useAudio();
   const { playAudiobookAt } = useAudioControls();
-  const { setCurrentAudiobook, setPlaybackType } = useAudioState();
+  const { setCurrentAudiobook } = useAudioState();
 
   const isThisBookPlaying =
     currentAudiobook?.id === audiobookId && playbackType === "audiobook";
@@ -104,8 +104,8 @@ export function useAudiobookActions(
       await api.deleteAudiobookProgress(audiobookId);
 
       if (currentAudiobook?.id === audiobookId) {
+        // The type stays, as a cleared queue's does: it carries the save that tells the server the book is gone.
         setCurrentAudiobook(null);
-        setPlaybackType(null);
         updateCurrentTime(0);
       }
 
@@ -121,7 +121,6 @@ export function useAudiobookActions(
     isPlaying,
     pause,
     setCurrentAudiobook,
-    setPlaybackType,
     updateCurrentTime,
     refetch,
   ]);

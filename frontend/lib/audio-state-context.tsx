@@ -13,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import { episodeForPlayer, type ShowWithEpisodes } from "./podcast-episode";
 import { STORAGE_KEYS } from "./storage-keys";
+import { useAudioController } from "./audio-controller-context";
 
 
 /** A song as the player holds it. */
@@ -178,6 +179,7 @@ function forgetStorage(key: string): void {
 }
 
 export function AudioStateProvider({ children }: { children: ReactNode }) {
+    const controller = useAudioController();
     // Don't restore currentTrack from localStorage. The server state API is the
     // source of truth for what was playing. This prevents ghost tracks appearing
     // in the player when the track is no longer available or queued.
@@ -241,6 +243,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     // What the server is known to hold, as a playbackKey. Restoring or adopting the server's state is not a change,
     // so the save effect skips a state equal to it instead of writing it straight back.
     const serverKnownRef = useRef<string | null>(null);
+    // A restore that failed left this page without what the server holds, so its first state is no listener's choice.
+    const restoreFailedRef = useRef(false);
+    const storedMediaRef = useRef<string | null>(currentAudiobook?.id ?? currentPodcast?.id ?? null);
     // Saves wait until the page-load restore has finished, so none goes out half-restored (the song still on its way).
     const [restoreSettled, setRestoreSettled] = useState(false);
 
@@ -250,11 +255,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const queueRef = useRef(queue);
     // When the queue last changed on THIS device. The cross-device poller needs it to tell
     // "another device changed the queue" from "my own change has not been uploaded yet".
-    const localQueueChangedAtRef = useRef<Date>(new Date(0));
+    const localChangedAtRef = useRef<Date>(new Date(0));
     useEffect(() => {
         queueRef.current = queue;
-        localQueueChangedAtRef.current = new Date();
+        localChangedAtRef.current = new Date();
     }, [queue]);
+    useEffect(() => {
+        localChangedAtRef.current = new Date();
+    }, [currentTrack?.id, currentAudiobook?.id, currentPodcast?.id]);
     const currentIndexRef = useRef(currentIndex);
     useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
     const isShuffleRef = useRef(isShuffle);
@@ -289,6 +297,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         if (isGone(err)) {
                             forgetStorage(STORAGE_KEYS.CURRENT_AUDIOBOOK);
                             setCurrentAudiobook(null);
+                            setPlaybackType((type) => (type === "audiobook" ? null : type));
                             return;
                         }
                         console.error(
@@ -323,6 +332,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             if (isGone(err)) {
                                 forgetStorage(STORAGE_KEYS.CURRENT_PODCAST);
                                 setCurrentPodcast(null);
+                                setPlaybackType((type) => (type === "podcast" ? null : type));
                                 return;
                             }
                             console.error(
@@ -348,7 +358,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
         // The server remembers an item that is gone: forget it and clear what the restore put on screen.
         const dropIfGone = (err: unknown) => {
-            if (!isGone(err)) return;
+            if (!isGone(err)) {
+                restoreFailedRef.current = true;
+                return;
+            }
             serverKnownRef.current = null;
             api.clearPlaybackState().catch(() => {});
             clearRestoredPlayback();
@@ -423,7 +436,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 return restoringMedia;
             })
             .catch(() => {
-                // No server state available - this is expected on first load
+                // The server could not be asked; what it holds is unknown.
+                restoreFailedRef.current = true;
             })
             .finally(() => setRestoreSettled(true));
     }, []);
@@ -485,23 +499,30 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     ]);
 
     useEffect(() => {
-        if (!playbackType || !restoreSettled) return;
+        if (!restoreSettled) return;
+        const failedRestore = restoreFailedRef.current;
+        restoreFailedRef.current = false;
+        if (!playbackType) return;
+        const listenerChose = (currentTrack?.id ?? currentAudiobook?.id ?? currentPodcast?.id ?? null) !== storedMediaRef.current;
+
+        // Sliced to the server's queue limit, fetched once and remembered.
+        const limitedQueue = queue.slice(0, queueLimitRef.current);
+        const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
+        const state = {
+            playbackType,
+            // Null, never omitted: the server leaves a field it was not sent alone, so a song cleared here would stay.
+            trackId: currentTrack?.id ?? null,
+            audiobookId: currentAudiobook?.id ?? null,
+            podcastId: currentPodcast?.id ?? null,
+            queue: limitedQueue,
+            currentIndex: adjustedIndex,
+            isShuffle,
+        };
+        const key = playbackKey(state, queueLimitRef.current);
+        // Written back, it would replace what another device saved; the listener's next change saves as usual.
+        if (failedRestore && !listenerChose) serverKnownRef.current = key;
 
         const saveToServer = async () => {
-            // Sliced to the server's queue limit, fetched once and remembered.
-            const limitedQueue = queue.slice(0, queueLimitRef.current);
-            const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
-            const state = {
-                playbackType,
-                // Null, never omitted: the server leaves a field it was not sent alone, so a song cleared here would stay.
-                trackId: currentTrack?.id ?? null,
-                audiobookId: currentAudiobook?.id ?? null,
-                podcastId: currentPodcast?.id ?? null,
-                queue: limitedQueue,
-                currentIndex: adjustedIndex,
-                isShuffle,
-            };
-            const key = playbackKey(state, queueLimitRef.current);
             if (key === serverKnownRef.current) return;
             try {
                 const result = await api.savePlaybackState(state);
@@ -556,6 +577,12 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     return;
                 }
 
+                // Adopt the server's queue only when it is newer than the local one.
+                // Saves are debounced, so right after play the server still holds
+                // the previous queue, which differs but is older.
+                const serverIsNewer =
+                    serverUpdatedAt.getTime() > localChangedAtRef.current.getTime();
+
                 const serverMediaId =
                     serverState.trackId ||
                     serverState.audiobookId ||
@@ -564,6 +591,21 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     currentTrack?.id ||
                     currentAudiobook?.id ||
                     currentPodcast?.id;
+
+                // Cleared on another device: the newest word wins here as it does for a song change. Playing on would
+                // write the cleared song straight back.
+                if (!serverMediaId && !serverState.queue?.length && currentMediaId && serverIsNewer) {
+                    setCurrentTrack(null);
+                    setCurrentAudiobook(null);
+                    setCurrentPodcast(null);
+                    setPlaybackType(null);
+                    setQueue([]);
+                    setCurrentIndex(0);
+                    controller?.pause();
+                    serverKnownRef.current = playbackKey(serverState, queueLimitRef.current);
+                    setLastServerSync(serverUpdatedAt);
+                    return;
+                }
 
                 if (
                     serverMediaId !== currentMediaId ||
@@ -628,11 +670,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     }
 
                     if (!mounted) return;
-                    // Adopt the server's queue only when it is newer than the local one.
-                    // Saves are debounced, so right after play the server still holds
-                    // the previous queue, which differs but is older.
-                    const serverIsNewer =
-                        serverUpdatedAt.getTime() > localQueueChangedAtRef.current.getTime();
                     if (
                         serverIsNewer &&
                         JSON.stringify(serverState.queue) !==
@@ -663,6 +700,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             clearInterval(pollInterval);
         };
     }, [
+        controller,
         playbackType,
         currentTrack?.id,
         currentAudiobook?.id,

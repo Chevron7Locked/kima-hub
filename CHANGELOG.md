@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Linked songs and folders show up in your library.** A library scan skipped symbolic links without saying so. It now follows them, keeps a song that two paths reach as one song, stops at loops, and logs any link it can't follow. Songs behind a broken link count as missing, like any other missing file: two scans remove them and their plays, unless a large part of the library vanished at once, and they are scanned again as new if the target comes back. Deleting a linked song in Kima removes only the link. Kima won't delete music inside a linked folder that leads out of your music folder; it says so, and you remove the link instead. The linked files must be reachable inside every Kima container.
 - **A song whose file has gone says it isn't available.** Between the file going and the next library scan, playing it gave a server error, and a Subsonic app was shown the file's location on disk.
-- **A cleared queue stays cleared.** Since 1.10, the last song came back after clearing the queue and reloading the page.
+- **A cleared queue stays cleared, on every device.** Since 1.10, the last song came back after clearing the queue and reloading the page. Clearing it now also stops any other open Kima web tab or device, which would otherwise have put the song back.
+- **Resetting an audiobook's progress stops it for good.** It no longer came back on the next page load.
+- **A server hiccup while a page loads can't overwrite what another device was playing.**
 
 ### Changed
 
