@@ -7,12 +7,13 @@
   <a href="https://github.com/Chevron7Locked/kima-hub/releases"><img src="https://img.shields.io/github/v/release/Chevron7Locked/kima-hub?label=Release" alt="Latest release"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3"></a>
   <a href="https://kima-hub.dev"><img src="https://img.shields.io/badge/Live_demo-kima--hub.dev-fca200" alt="Live demo: kima-hub.dev"></a>
+  <a href="https://apps.apple.com/app/id6789728815"><img src="https://img.shields.io/badge/App%20Store-download-0d96f6?logo=apple" alt="Download on the App Store"></a>
 </p>
 
 Kima is a music server you run yourself. Point it at a folder of music and it gives you a web app to play it from, on a computer or a phone, along with podcasts and audiobooks. It also works out how each song sounds and feels, so it can find songs that match and lay your whole library out as a map.
 
 **Web app:** any modern browser, and it installs to your home screen as an app.
-**iOS app:** coming soon to the App Store.
+**iOS app:** [download it on the App Store](https://apps.apple.com/app/id6789728815).
 
 > [!CAUTION]
 > ### Upgrading from 1.11 to 1.12 redoes your library's enrichment
