@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 it("creates the webhook with a new secret and saves it once Lidarr keeps it", async () => {
-    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: null });
+    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: null, unreadableFields: [] });
     lidarr.post.mockImplementation(echo);
 
     await configureLidarrWebhook("http://lidarr", "key");
@@ -50,7 +50,7 @@ it("creates the webhook with a new secret and saves it once Lidarr keeps it", as
 });
 
 it("reuses the stored secret on the existing webhook without saving again", async () => {
-    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: "kept" });
+    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: "kept", unreadableFields: [] });
     lidarr.get.mockResolvedValue({ data: [{ id: 3, name: "Kima", implementation: "Webhook", fields: [] }] });
     lidarr.put.mockImplementation(echo);
 
@@ -62,7 +62,7 @@ it("reuses the stored secret on the existing webhook without saving again", asyn
 });
 
 it("does not save a secret Lidarr dropped", async () => {
-    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: null });
+    (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: null, unreadableFields: [] });
     lidarr.post.mockImplementation((_url: string, body: any) =>
         Promise.resolve({ data: { ...body, fields: body.fields.filter((f: any) => f.name !== "headers") } })
     );
@@ -74,7 +74,7 @@ it("does not save a secret Lidarr dropped", async () => {
 
 describe("Lidarr's test event", () => {
     beforeEach(() => {
-        (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: "kept" });
+        (getSystemSettings as jest.Mock).mockResolvedValue({ lidarrWebhookSecret: "kept", unreadableFields: [] });
     });
 
     it("is sent with the saved webhook and clears the alert when it arrives", async () => {

@@ -1,11 +1,11 @@
 /**
  * The one list of SystemSettings fields stored encrypted, with decrypt-on-read
- * (`resolveEncryptedSettings`) and encrypt-on-write (`encryptSettings`). A value
- * that no longer decrypts is reset to null and admins are notified: an
- * unreadable credential is never used as if it were one.
+ * (`resolveEncryptedSettings`) and encrypt-on-write (`encryptSettings`). A stored
+ * value that cannot be decrypted is an unreadable credential: it is kept, and
+ * reads as null, so a key restored later brings it back and ciphertext is never
+ * handed to an integration as if it were a key.
  */
 import { decrypt, encrypt, isEncryptedFormat } from "./encryption";
-import { prisma } from "./db";
 import { logger } from "./logger";
 import { notificationService } from "../services/notificationService";
 
@@ -24,105 +24,117 @@ export type EncryptedField = keyof typeof ENCRYPTED_FIELDS;
 /** The `SystemSettings` shape with every encrypted field as plaintext. */
 export type ResolvedSystemSettings<S> = S & {
     [K in EncryptedField]: string | null;
+} & {
+    /** The fields held as unreadable: stored, but null above. */
+    unreadableFields: EncryptedField[];
 };
 
 function encryptedFields(): EncryptedField[] {
     return Object.keys(ENCRYPTED_FIELDS) as EncryptedField[];
 }
 
-/** Decrypt a single listed field without re-seeding (comparison sites). */
+/** The plaintext of a stored value, or null when this server cannot read it. */
+function readStored(stored: string): string | null {
+    try {
+        const plain = decrypt(stored);
+        // Decrypting produced another ciphertext: whatever wrote this value
+        // encrypted it twice, and the inner blob is not a key.
+        return isEncryptedFormat(plain) ? null : plain;
+    } catch {
+        return null;
+    }
+}
+
+function isUnreadable(stored: unknown): boolean {
+    return typeof stored === "string" && stored !== "" && readStored(stored) === null;
+}
+
+/** Decrypt a single listed field, with no notice (comparison sites). */
 export function decryptOrNull(
     field: EncryptedField,
     value: string | null | undefined,
 ): string | null {
     if (!value) return null;
-    try {
-        const plain = decrypt(value);
-        return isEncryptedFormat(plain) ? null : plain;
-    } catch (error) {
-        logger.warn(`[Settings] ${ENCRYPTED_FIELDS[field]} could not be decrypted`, error);
-        return null;
-    }
+    const plain = readStored(value);
+    if (plain === null) logger.warn(`[Settings] ${ENCRYPTED_FIELDS[field]} could not be decrypted`);
+    return plain;
 }
 
 /**
  * Read a settings row into usable values: every `ENCRYPTED_FIELDS` entry
- * decrypted, or `null` plus a re-seed when it cannot be decrypted.
+ * decrypted, or `null` when it is unset or unreadable. Never writes to the row.
+ * Admins hear about every unreadable field but a webhook secret Kima can replace
+ * by itself, which needs only a readable Lidarr API key.
  */
 export async function resolveEncryptedSettings<S extends Record<string, unknown>>(
     settings: S,
 ): Promise<ResolvedSystemSettings<S>> {
     const resolved = { ...settings } as Record<string, unknown>;
+    const unreadableFields: EncryptedField[] = [];
     for (const field of encryptedFields()) {
         const stored = settings[field];
-        if (typeof stored !== "string" || stored === "") {
-            resolved[field] = null;
-            continue;
-        }
-        let plain: string;
-        try {
-            plain = decrypt(stored);
-        } catch {
-            await reseedUnreadableField(field);
-            resolved[field] = null;
-            continue;
-        }
-        if (isEncryptedFormat(plain)) {
-            // Decrypting produced another ciphertext — whatever wrote this
-            // value encrypted it twice, and the inner blob is not a key.
-            await reseedUnreadableField(field);
-            resolved[field] = null;
-            continue;
-        }
+        const held = typeof stored === "string" && stored !== "";
+        const plain = held ? readStored(stored) : null;
         resolved[field] = plain;
+        if (held && plain === null) unreadableFields.push(field);
+    }
+    resolved.unreadableFields = unreadableFields;
+    for (const field of encryptedFields()) {
+        const repairable = field === "lidarrWebhookSecret" && resolved.lidarrApiKey !== null;
+        await noteReadability(field, !unreadableFields.includes(field) || repairable);
     }
     return resolved as ResolvedSystemSettings<S>;
 }
 
 /**
- * Prepare a submitted payload for storage: every supplied
- * `ENCRYPTED_FIELDS` entry encrypted, untouched entries left as submitted.
+ * Prepare a submitted payload for storage: every supplied `ENCRYPTED_FIELDS`
+ * entry encrypted, or null when blank; other entries left as submitted. A blank
+ * for a field `current` holds as unreadable is dropped, so the value stays: the
+ * settings page sends every field back, and an unreadable one comes back blank.
  */
 export function encryptSettings<S extends Record<string, unknown>>(
     settings: S,
+    current?: Record<string, unknown> | null,
 ): Record<string, unknown> {
     const stored = { ...settings } as Record<string, unknown>;
     for (const field of encryptedFields()) {
         const value = settings[field];
-        if (typeof value === "string" && value !== "") {
+        if (value === undefined) continue;
+        if (typeof value === "string" && value.trim() !== "") {
             stored[field] = encrypt(value);
+        } else if (isUnreadable(current?.[field])) {
+            delete stored[field];
+        } else {
+            stored[field] = null;
         }
     }
     return stored;
 }
 
-// One "needs re-entry" notification per field per process; the clearing
-// itself is idempotent, and the log line repeats so a quiet process does
-// not hide a broken key from whoever reads logs.
-const notifiedReEntry = new Set<EncryptedField>();
+// Each field's last known state in this process, so one notice per field per
+// process, and a field that reads again (right key restored, new value saved)
+// takes its notice away.
+const lastReadable = new Map<EncryptedField, boolean>();
 
-async function reseedUnreadableField(field: EncryptedField): Promise<void> {
+async function noteReadability(field: EncryptedField, readable: boolean): Promise<void> {
+    if (lastReadable.get(field) === readable) return;
+    lastReadable.set(field, readable);
+    const groupKey = `unreadable-credential:${field}`;
     try {
-        await prisma.systemSettings.update({
-            where: { id: "default" },
-            data: { [field]: null },
-        });
-        logger.warn(
-            `[Settings] ${ENCRYPTED_FIELDS[field]} could not be decrypted; cleared — re-entry needed`,
-        );
-    } catch (error) {
-        logger.warn(`[Settings] Could not clear unreadable ${field}:`, error);
-        return;
-    }
-    if (notifiedReEntry.has(field)) return;
-    notifiedReEntry.add(field);
-    try {
+        if (readable) {
+            await notificationService.resolve(groupKey);
+            return;
+        }
+        logger.warn(`[Settings] ${ENCRYPTED_FIELDS[field]} could not be decrypted; kept, and treated as not set`);
         await notificationService.notifyAdmins({
             type: "system",
-            title: `${ENCRYPTED_FIELDS[field]} needs re-entry`,
-            message: "The stored value could not be decrypted, so it has been cleared; enter it again in Settings.",
+            title: `${ENCRYPTED_FIELDS[field]} cannot be read`,
+            message:
+                "The stored value could not be decrypted, so it counts as not set. Restore the server's SETTINGS_ENCRYPTION_KEY, or enter the value again in Settings.",
+            groupKey,
+            renotify: true,
         });
     } catch (error) {
-        logger.warn(`[Settings] Could not notify admins about ${field}:`, error);
+        logger.warn(`[Settings] Could not update the admin notice about ${field}:`, error);
     }
 }

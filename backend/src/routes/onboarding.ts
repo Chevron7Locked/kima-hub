@@ -6,6 +6,7 @@ import { z } from "zod";
 import axios from "axios";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { encryptField } from "../utils/encryption";
+import { encryptSettings } from "../utils/encryptedFields";
 import { generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { createLidarrClient } from "../services/lidarrClient";
@@ -41,6 +42,8 @@ async function registrationOpen(): Promise<boolean> {
     return settings?.registrationOpen ?? false;
 }
 
+const settingsRow = () => prisma.systemSettings.findUnique({ where: { id: "default" } });
+
 type ServiceFields = { enabled: string; url: string; apiKey: string };
 
 /**
@@ -52,11 +55,14 @@ function serviceStep(name: string, fields: ServiceFields, connects: (url: string
         try {
             const config = serviceConfigSchema.parse(req.body);
             const data = config.enabled
-                ? {
-                      [fields.enabled]: true,
-                      [fields.url]: config.url || null,
-                      [fields.apiKey]: encryptField(config.apiKey),
-                  }
+                ? encryptSettings(
+                      {
+                          [fields.enabled]: true,
+                          [fields.url]: config.url || null,
+                          [fields.apiKey]: config.apiKey ?? null,
+                      },
+                      await settingsRow(),
+                  )
                 : { [fields.enabled]: false };
             const tested = config.enabled && !!config.url && !!config.apiKey
                 ? await connects(config.url!, config.apiKey!).catch((error) => {
@@ -198,17 +204,11 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
         const config = soulseekConfigSchema.parse(req.body);
 
         if (!config.enabled) {
+            const soulseekOff = encryptSettings({ soulseekUsername: null, soulseekPassword: null }, await settingsRow());
             await prisma.systemSettings.upsert({
                 where: { id: "default" },
-                create: {
-                    id: "default",
-                    soulseekUsername: null,
-                    soulseekPassword: null,
-                },
-                update: {
-                    soulseekUsername: null,
-                    soulseekPassword: null,
-                },
+                create: { id: "default", ...soulseekOff },
+                update: soulseekOff,
             });
             invalidateSystemSettingsCache();
             return res.json({ success: true, tested: false });

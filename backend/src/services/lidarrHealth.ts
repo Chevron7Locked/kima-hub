@@ -3,6 +3,7 @@
  * database is corrupt, so this reads its status and its error log instead.
  * While Lidarr is unhealthy the "lidarr" source is paused: downloads wait and
  * the queue sweeps stand still. Admins get one alert, cleared on recovery.
+ * A healthy check also repairs the webhook link when its secret is unreadable.
  */
 
 import { logger } from "../utils/logger";
@@ -10,9 +11,11 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { sourcePauseController } from "./sourcePauseController";
 import { notificationService } from "./notificationService";
 import { createLidarrClient, isLidarrConfigured } from "./lidarrClient";
+import { configureLidarrWebhook } from "./lidarrWebhookSetup";
 
 const LIDARR_UNHEALTHY = "LIDARR_UNHEALTHY";
 const ALERT_KEY = "lidarr-health";
+const SECRET_REFUSED_KEY = "lidarr-secret-refused";
 const CHECK_INTERVAL_MS = 60_000;
 const BACKOFF_MS = [1, 2, 5, 15].map((minutes) => minutes * 60_000);
 // Backoff starts over once Lidarr has stayed healthy this long.
@@ -39,6 +42,8 @@ class LidarrHealthMonitor {
     private healthySince?: number;
     private logSeenUntil = Date.now() - CHECK_INTERVAL_MS * 10;
     private state: LidarrHealthState = { status: "off", since: new Date() };
+    // This Lidarr did not keep a new secret, so asking it again each check would change nothing.
+    private secretRefused = false;
 
     start(): void {
         if (this.started) return;
@@ -80,6 +85,7 @@ class LidarrHealthMonitor {
                 await this.recover("ok");
                 const { simpleDownloadManager } = await import("./simpleDownloadManager");
                 await simpleDownloadManager.resumeHeldDownloads();
+                await this.repairWebhook(settings);
             }
         } catch (error: any) {
             logger.error("[LIDARR-HEALTH] Check failed:", error.message);
@@ -88,6 +94,39 @@ class LidarrHealthMonitor {
             if (this.started) this.schedule(delay);
         }
         return delay;
+    }
+
+    /** Gives Lidarr a new secret when Kima can no longer read the stored one. A failure waits for a later check. */
+    private async repairWebhook(settings: {
+        lidarrUrl: string;
+        lidarrApiKey: string;
+        unreadableFields: string[];
+    }): Promise<void> {
+        if (!settings.unreadableFields.includes("lidarrWebhookSecret")) {
+            if (this.secretRefused) await notificationService.resolve(SECRET_REFUSED_KEY);
+            this.secretRefused = false;
+            return;
+        }
+        if (this.secretRefused) return;
+        try {
+            if (await configureLidarrWebhook(settings.lidarrUrl, settings.lidarrApiKey)) {
+                logger.info("[LIDARR-HEALTH] Webhook secret could not be read, so Lidarr has a new one");
+                await notificationService.resolve(SECRET_REFUSED_KEY);
+                return;
+            }
+            this.secretRefused = true;
+            await notificationService.notifyAdmins({
+                type: "error",
+                title: "Lidarr did not keep its webhook secret",
+                message:
+                    "Kima could not read the old secret and Lidarr would not keep a new one, so Lidarr's events are refused. Finished downloads are still noticed on the two-minute check. Update Lidarr, then save the Lidarr settings.",
+                metadata: { href: "/settings/sources#lidarr" },
+                groupKey: SECRET_REFUSED_KEY,
+                renotify: true,
+            });
+        } catch (error: any) {
+            logger.warn(`[LIDARR-HEALTH] Could not give Lidarr a new webhook secret: ${error.message}`);
+        }
     }
 
     /** Why Lidarr is unhealthy, or null when it is fine. */

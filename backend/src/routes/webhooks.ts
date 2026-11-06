@@ -58,7 +58,8 @@ router.post("/lidarr", async (req, res) => {
             });
         }
 
-        if (settings.lidarrWebhookSecret) {
+        // An unreadable secret is still a stored one: nothing can match it until Kima replaces it.
+        if (settings.lidarrWebhookSecret || settings.unreadableFields.includes("lidarrWebhookSecret")) {
             if (!res.locals.webhookVerified) {
                 logger.debug("[WEBHOOK] Lidarr webhook received with invalid or missing secret");
                 return res.status(401).json({

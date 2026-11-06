@@ -40,7 +40,18 @@ const EVENTS = {
     includeHealthWarnings: false,
 };
 
-export async function configureLidarrWebhook(lidarrUrl: string, apiKey: string): Promise<void> {
+// One at a time: a settings save and a repair running together would each make a secret, and could leave Lidarr
+// holding one and Kima the other.
+let lastSetup: Promise<unknown> = Promise.resolve();
+
+/** Links Lidarr to Kima, and answers whether Lidarr kept the secret. */
+export function configureLidarrWebhook(lidarrUrl: string, apiKey: string): Promise<boolean> {
+    const setup = lastSetup.then(() => linkLidarr(lidarrUrl, apiKey));
+    lastSetup = setup.catch(() => undefined);
+    return setup;
+}
+
+async function linkLidarr(lidarrUrl: string, apiKey: string): Promise<boolean> {
     const lidarr = createLidarrClient(lidarrUrl, apiKey, 10_000);
     const callbackHost = process.env.KIMA_CALLBACK_URL || DEFAULT_CALLBACK_URL;
     const webhookUrl = `${callbackHost}/api/webhooks/lidarr`;
@@ -64,7 +75,9 @@ export async function configureLidarrWebhook(lidarrUrl: string, apiKey: string):
         throw new Error(`Lidarr webhook "${existing.name}" has no id; not creating a second one`);
     }
 
-    const storedSecret = (await getSystemSettings())?.lidarrWebhookSecret;
+    const settings = await getSystemSettings();
+    const storedSecret = settings?.lidarrWebhookSecret;
+    const secretRequired = !!storedSecret || !!settings?.unreadableFields.includes("lidarrWebhookSecret");
     const secret = storedSecret || crypto.randomBytes(32).toString("hex");
     const config = {
         ...EVENTS,
@@ -95,7 +108,7 @@ export async function configureLidarrWebhook(lidarrUrl: string, apiKey: string):
     if (!kept) {
         logger.warn(
             `[LIDARR] Lidarr did not keep the ${WEBHOOK_SECRET_HEADER} header (webhook headers need a newer Lidarr), so its webhooks stay rate-limited` +
-                (storedSecret ? " and are refused until it sends the secret" : "")
+                (secretRequired ? " and are refused until it sends the secret" : "")
         );
     } else if (secret !== storedSecret) {
         await prisma.systemSettings.update({
@@ -106,6 +119,7 @@ export async function configureLidarrWebhook(lidarrUrl: string, apiKey: string):
     }
 
     await checkLidarrReachesKima(lidarr, saved, webhookUrl);
+    return kept;
 }
 
 async function checkLidarrReachesKima(lidarr: AxiosInstance, webhook: unknown, webhookUrl: string): Promise<void> {

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Security
+
+- **A wrong encryption key no longer destroys stored credentials.** Kima keeps a credential it cannot read and treats it as not set, so restoring the right key brings it back, and saving other settings in the meantime loses nothing.
+- **A Lidarr webhook secret Kima can no longer read now refuses unsigned events,** and Kima gives Lidarr a new secret by itself on its next health check.
+
 ## [1.12.3] - 2026-11-04
 
 ### Fixed

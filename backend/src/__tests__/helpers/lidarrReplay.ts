@@ -52,7 +52,10 @@ export interface LidarrReplay {
     close: () => Promise<void>;
 }
 
-export async function startLidarrReplay(scenario: LidarrScenario): Promise<LidarrReplay> {
+/** Changes a recorded reply before it goes out, for a value the recording could not know, such as a random secret. */
+type ReplyChange = (response: unknown, requestBody: unknown) => unknown;
+
+export async function startLidarrReplay(scenario: LidarrScenario, change?: ReplyChange): Promise<LidarrReplay> {
     const byKey = new Map<string, Exchange[]>();
     for (const e of [...scenario.exchanges].sort((a, b) => a.seq - b.seq)) {
         const k = key(e.method, e.path);
@@ -89,7 +92,8 @@ export async function startLidarrReplay(scenario: LidarrScenario): Promise<Lidar
         for await (const chunk of req) chunks.push(chunk as Buffer);
         const text = Buffer.concat(chunks).toString("utf8");
         const url = req.url ?? "";
-        lidarr.asked.push({ method: req.method ?? "", path: url, body: text ? JSON.parse(text) : null });
+        const body = text ? JSON.parse(text) : null;
+        lidarr.asked.push({ method: req.method ?? "", path: url, body });
 
         const reply = pick(key(req.method ?? "", url));
         if (!reply) {
@@ -98,7 +102,8 @@ export async function startLidarrReplay(scenario: LidarrScenario): Promise<Lidar
             return;
         }
         res.writeHead(reply.status, { "content-type": "application/json" });
-        res.end(reply.response === null ? "" : JSON.stringify(reply.response));
+        const response = change ? change(reply.response, body) : reply.response;
+        res.end(response === null ? "" : JSON.stringify(response));
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     lidarr.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

@@ -10,7 +10,7 @@ jest.mock("../lidarrClient", () => ({
     createLidarrClient: () => lidarr,
 }));
 jest.mock("../../utils/systemSettings", () => ({
-    getSystemSettings: jest.fn().mockResolvedValue({ lidarrEnabled: true, lidarrUrl: "http://lidarr", lidarrApiKey: "key" }),
+    getSystemSettings: jest.fn().mockResolvedValue({ lidarrEnabled: true, lidarrUrl: "http://lidarr", lidarrApiKey: "key", unreadableFields: [] }),
 }));
 jest.mock("../sourcePauseController", () => ({
     sourcePauseController: { pause: jest.fn(), release: jest.fn() },
