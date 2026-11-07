@@ -56,6 +56,7 @@ import { requireAuth, requireAdmin, invalidateUserCache } from "./middleware/aut
 import {
     authLimiter,
     apiLimiter,
+    trustOneProxyHop,
 } from "./middleware/rateLimiter";
 const app = express();
 
@@ -111,9 +112,7 @@ app.use((req, res, next) => {
 });
 
 // Session
-// Trust proxy for reverse proxy setups (nginx, traefik, etc.)
-// Set to true to trust all proxies in the chain (common in Docker/Portainer setups)
-app.set("trust proxy", true);
+trustOneProxyHop(app);
 
 app.use(
     session({

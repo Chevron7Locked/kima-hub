@@ -1,13 +1,20 @@
+import type { Express } from "express";
 import rateLimit, { Options } from "express-rate-limit";
 
-// Every limiter is built here. The app trusts its proxy chain
-// (app.set("trust proxy", true)) because it runs behind Next.js and usually a
-// reverse proxy, so express-rate-limit's warning about that setting is off.
+/**
+ * One hop: the web app, or a reverse proxy directly in front of the backend. Next.js passes the client's forwarded
+ * address through and adds none, so no hop count protects direct access, where a client can claim any address. The
+ * per-address limits are runaway limits only; guess limits protect the secrets.
+ */
+export function trustOneProxyHop(app: Express): void {
+    app.set("trust proxy", 1);
+}
+
+// Every limiter is built here. These count per address: a runaway limit, never protection for a secret.
 export function createRateLimiter(options: Partial<Options>) {
     return rateLimit({
         standardHeaders: true,
         legacyHeaders: false,
-        validate: { trustProxy: false },
         ...options,
     });
 }
@@ -38,7 +45,7 @@ export const apiLimiter = createRateLimiter({
     },
 });
 
-// 20 failed logins per 15 minutes per IP; successful logins are not counted.
+// A runaway limit: 20 failed logins per 15 minutes per address, not counting successful ones. Guess limits protect passwords.
 export const authLimiter = createRateLimiter({
     windowMs: 15 * 60 * 1000,
     max: 20,

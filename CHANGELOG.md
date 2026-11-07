@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A wrong encryption key no longer destroys stored credentials.** Kima keeps a credential it cannot read and treats it as not set, so restoring the right key brings it back, and saving other settings in the meantime loses nothing.
 - **A Lidarr webhook secret Kima can no longer read now refuses unsigned events,** and Kima gives Lidarr a new secret by itself on its next health check.
+- **Password guessing is capped whatever address a client claims.** Web login and Subsonic each allow 20 wrong passwords per 15 minutes per username, counted separately. App keys and signed-in sessions keep working on a locked account.
 - **Linking a device now needs your approval.** A right code no longer hands a device its key by itself: the device waits while you approve or deny it on the link page, which shows its name. A guessed code gets nothing.
 
 ## [1.12.3] - 2026-11-04

@@ -4,6 +4,7 @@ import { NO_ACCOUNT_PASSWORD_HASH } from "../services/users/credentials";
 import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
+import { subsonicGuesses } from "../services/users/guessLimits";
 
 declare global {
     // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -90,12 +91,24 @@ export async function subsonicAuth(
                 select: { id: true, username: true, role: true, passwordHash: true, twoFactorEnabled: true },
             });
 
+            // Subsonic reports failures inside HTTP 200 replies, so this is counted here, not from a status code.
+            if (!subsonicGuesses.take(username)) {
+                subsonicError(
+                    req,
+                    res,
+                    SubsonicError.WRONG_CREDENTIALS,
+                    "Too many wrong passwords. Try again in 15 minutes, or use an app key.",
+                );
+                return;
+            }
+
             const valid = await bcrypt.compare(plainPassword, user?.passwordHash ?? NO_ACCOUNT_PASSWORD_HASH);
 
             if (!user || !valid) {
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
+            subsonicGuesses.giveBack(username);
 
             // Subsonic cannot ask for a second factor, so a 2FA account cannot log in
             // with its password here; it must use an API key. The message says so, since

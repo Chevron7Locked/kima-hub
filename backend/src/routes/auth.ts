@@ -20,6 +20,7 @@ import {
     invalidateUserCache,
 } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimiter";
+import { webLoginGuesses } from "../services/users/guessLimits";
 import { encrypt, decrypt } from "../utils/encryption";
 
 const router = Router();
@@ -38,6 +39,10 @@ router.post("/login", async (req, res) => {
 
         const user = await prisma.user.findUnique({ where: { username } });
 
+        if (!webLoginGuesses.take(username)) {
+            return res.status(429).json({ error: "Too many login attempts, please try again in 15 minutes." });
+        }
+
         const valid = await bcrypt.compare(password, user?.passwordHash ?? NO_ACCOUNT_PASSWORD_HASH);
         if (!user || !valid) {
             return res.status(401).json({ error: "Invalid credentials" });
@@ -46,6 +51,7 @@ router.post("/login", async (req, res) => {
         // Check if 2FA is enabled
         if (user.twoFactorEnabled && user.twoFactorSecret) {
             if (!token) {
+                webLoginGuesses.giveBack(username);
                 return res.status(200).json({
                     requires2FA: true,
                     message: "2FA token required",
@@ -87,6 +93,8 @@ router.post("/login", async (req, res) => {
                 }
             }
         }
+
+        webLoginGuesses.giveBack(username);
 
         // Generate JWT tokens
         const jwtToken = generateToken({

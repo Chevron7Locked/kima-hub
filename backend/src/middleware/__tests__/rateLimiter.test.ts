@@ -1,4 +1,4 @@
-import { apiLimiter } from '../rateLimiter';
+import { apiLimiter, createRateLimiter, trustOneProxyHop } from '../rateLimiter';
 import express from 'express';
 import request from 'supertest';
 
@@ -43,21 +43,26 @@ describe('apiLimiter skip predicate', () => {
     });
 });
 
-describe('createRateLimiter', () => {
-    it('raises no proxy-trust warning behind the trusted proxy chain', async () => {
-        const { createRateLimiter } = await import('../rateLimiter');
+describe('the proxy setting', () => {
+    async function warningsFor(setUp: (app: express.Express) => void) {
         const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
         const app = express();
-        app.set('trust proxy', true);
+        setUp(app);
         app.use(createRateLimiter({ windowMs: 60 * 1000, max: 10 }));
         app.get('*', (_req, res) => res.status(200).json({ ok: true }));
 
-        await request(app).get('/rest/ping.view').set('X-Forwarded-For', '10.0.0.5').expect(200);
+        await request(app).get('/rest/ping.view').set('X-Forwarded-For', '203.0.113.9').expect(200);
 
-        const warned = errors.mock.calls.some((args) =>
-            args.some((a) => String((a as Error)?.message ?? a).includes('ERR_ERL_PERMISSIVE_TRUST_PROXY') ||
-                (a as { code?: string })?.code === 'ERR_ERL_PERMISSIVE_TRUST_PROXY'));
+        const warned = errors.mock.calls.flat().some((a) => (a as { code?: string })?.code === 'ERR_ERL_PERMISSIVE_TRUST_PROXY');
         errors.mockRestore();
-        expect(warned).toBe(false);
+        return warned;
+    }
+
+    it('lets the limiter\'s own warning speak: trusting every hop raises it', async () => {
+        expect(await warningsFor((app) => app.set('trust proxy', true))).toBe(true);
+    });
+
+    it('raises no warning with the production setting, one trusted hop', async () => {
+        expect(await warningsFor((app) => trustOneProxyHop(app))).toBe(false);
     });
 });

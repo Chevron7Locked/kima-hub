@@ -21,6 +21,7 @@ Credentials saved in Settings are encrypted with XChaCha20-Poly1305. API keys yo
 - The session cookie is `httpOnly` and `sameSite=lax`. It is marked `secure` only when `SECURE_COOKIES=true`, so set that when you serve Kima over HTTPS. A session lasts 7 days.
 - Changing a password signs that account out everywhere else.
 - Failed logins are limited to 20 per 15 minutes per address. Successful logins are not counted.
+- Wrong passwords are also capped per username: 20 per 15 minutes, counted separately for web login and Subsonic.
 - An account can turn on two-factor authentication with an authenticator app. Kima shows 10 recovery codes once, when it is turned on.
 - An administrator who is locked out can set `ADMIN_RESET_PASSWORD` and restart. See [configuration.md](configuration.md#common-options).
 
@@ -33,6 +34,10 @@ Audio streams that a player has to open by address use a short-lived ticket that
 ## Webhooks
 
 Lidarr tells Kima when a download finishes by calling a webhook. Kima gives Lidarr a secret when you save the Lidarr settings and refuses webhook calls that do not carry it. Without a secret, webhook calls are accepted but rate-limited.
+
+## Address limits
+
+A direct LAN address gets no per-person address limits, because every visitor reaches the backend through the web app; wrong passwords are capped either way, and a device-link code gives a device nothing until its owner approves it on the link page.
 
 ## Admin tools
 
