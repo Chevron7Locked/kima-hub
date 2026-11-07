@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linking a device now needs your approval.** A right code no longer hands a device its key by itself: the device waits while you approve or deny it on the link page, which shows its name. A guessed code gets nothing.
 - **A shared link now shows only what the share page needs.** Playlist and track shares used to return whole database rows, including server file paths and analysis errors. They now return a short, named list of fields.
 - **A pasted music link must really be on the music site.** Kima used to accept any address that contained a site's name anywhere in it, so a look-alike address could make Kima fetch from somewhere else on its own network. Links now have to be http or https on a supported site or one of its subdomains, on every import path, and the downloader's catch-all fallback is off.
+- **A Soulseek file name can no longer point outside the downloads folder.** With slskd, Kima used to join the name a peer sent onto the downloads folder without checking it, so a crafted name could make Kima copy another file from the server. Such a name now fails that download, which names the peer, and Kima tries the next source.
 
 ### Removed
 

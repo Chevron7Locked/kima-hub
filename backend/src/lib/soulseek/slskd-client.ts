@@ -8,8 +8,8 @@ import { PassThrough } from 'stream'
 import http from 'http'
 import https from 'https'
 import fs from 'fs'
-import path from 'path'
 
+import { findFinishedFile } from './finishedFile'
 import type { Download, SlskDownloadEventEmitter } from './downloads'
 import type { FileSearchResponse } from './messages/from/peer'
 import type { FileAttribute } from './messages/common'
@@ -421,32 +421,20 @@ export class SlskdClient extends EventEmitter {
   }
 
   private async _pipeCompletedFile(dl: Download, filename: string): Promise<void> {
-    const parts = filename.replace(/\\/g, '/').split('/')
+    const found = await findFinishedFile(SLSKD_DOWNLOADS, filename)
 
-    let filePath: string | null = null
-    for (let i = 0; i < parts.length; i++) {
-      const candidate = path.join(SLSKD_DOWNLOADS, ...parts.slice(i))
-      try {
-        await fs.promises.access(candidate, fs.constants.R_OK)
-        filePath = candidate
-        break
-      } catch {
-        continue
-      }
-    }
-
-    if (!filePath) {
-      const basename = parts[parts.length - 1]
-      filePath = await this._findFileRecursive(SLSKD_DOWNLOADS, basename)
-    }
-
-    if (!filePath) {
+    if (!found.found) {
       dl.events.emit(
         'error',
-        new Error('Completed file not found under ' + SLSKD_DOWNLOADS + ' for ' + filename)
+        new Error(
+          found.reason === 'outside'
+            ? 'Soulseek peer ' + dl.username + ' sent a file name outside the downloads folder: ' + filename
+            : 'Completed file not found under ' + SLSKD_DOWNLOADS + ' for ' + filename
+        )
       )
       return
     }
+    const filePath = found.path
 
     const stats = await fs.promises.stat(filePath)
     ;(dl as any).totalBytes = BigInt(stats.size)
@@ -469,23 +457,6 @@ export class SlskdClient extends EventEmitter {
       dl.receivedBytes = (dl as any).totalBytes
       dl.events.emit('complete', dl.receivedBytes)
     })
-  }
-
-  private async _findFileRecursive(dir: string, basename: string): Promise<string | null> {
-    try {
-      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
-      for (const e of entries) {
-        const full = path.join(dir, e.name)
-        if (e.isFile() && e.name === basename) return full
-        if (e.isDirectory()) {
-          const found = await this._findFileRecursive(full, basename)
-          if (found) return found
-        }
-      }
-    } catch {
-      /* permission errors, etc */
-    }
-    return null
   }
 
   removeDownload(dl: Download): void {
