@@ -124,12 +124,15 @@ export const RELEASES: Release[] = [
                 title: "1.12.4: the official iPhone app",
                 summary: "The official Kima iPhone app is on the App Store. Also: security fixes, an approval step when linking a device, and Bandcamp import is gone.",
                 body:
-                    "The official Kima iPhone app is now available on the App Store.\n\n" +
+                    "The official Kima iPhone app is now available on the App Store. Its source code is on GitHub.\n\n" +
                     "1.12.4 also fixes several security problems.\n\n" +
                     "Linking a device now needs your approval: after the code is entered, the link page shows the device's name " +
                     "and you approve or deny it.\n\n" +
                     "Bandcamp links can no longer be imported, because the downloader can't read Bandcamp pages any more.",
-                links: [{ label: "Get the iPhone app", href: "https://apps.apple.com/app/id6789728815" }],
+                links: [
+                    { label: "Get the iPhone app", href: "https://apps.apple.com/app/id6789728815" },
+                    { label: "iPhone app source code", href: "https://github.com/Chevron7Locked/kima-ios" },
+                ],
             },
             {
                 kind: "note",
