@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { createShareLink, ShareError } from "../services/shareService";
+import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack } from "../services/publicShare";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
@@ -101,63 +102,14 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
         const shareLink = await loadUsableShareLink(req.params.token, res);
         if (!shareLink) return;
 
-        let entity: any = null;
+        let entity: object | null = null;
 
         if (shareLink.entityType === "playlist") {
-            entity = await prisma.playlist.findUnique({
-                where: { id: shareLink.entityId },
-                include: {
-                    items: {
-                        include: {
-                            track: {
-                                include: {
-                                    album: {
-                                        include: {
-                                            artist: {
-                                                select: { id: true, name: true },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        orderBy: { sort: "asc" },
-                    },
-                    user: { select: { username: true } },
-                },
-            });
+            entity = await loadPublicPlaylist(shareLink.entityId);
         } else if (shareLink.entityType === "track") {
-            entity = await prisma.track.findUnique({
-                where: { id: shareLink.entityId },
-                include: {
-                    album: {
-                        include: {
-                            artist: { select: { id: true, name: true } },
-                        },
-                    },
-                },
-            });
+            entity = await loadPublicTrack(shareLink.entityId);
         } else if (shareLink.entityType === "album") {
-            entity = await prisma.album.findUnique({
-                where: { id: shareLink.entityId },
-                include: {
-                    artist: { select: { id: true, name: true } },
-                    tracks: {
-                        orderBy: [
-                            { discNumber: { sort: "asc", nulls: "first" } },
-                            { trackNo: "asc" },
-                        ],
-                        select: {
-                            id: true,
-                            title: true,
-                            trackNo: true,
-                            discNumber: true,
-                            discSubtitle: true,
-                            duration: true,
-                        },
-                    },
-                },
-            });
+            entity = await loadPublicAlbum(shareLink.entityId);
         }
 
         if (!entity) {

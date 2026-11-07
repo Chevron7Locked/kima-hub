@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A Lidarr webhook secret Kima can no longer read now refuses unsigned events,** and Kima gives Lidarr a new secret by itself on its next health check.
 - **Password guessing is capped whatever address a client claims.** Web login and Subsonic each allow 20 wrong passwords per 15 minutes per username, counted separately. App keys and signed-in sessions keep working on a locked account.
 - **Linking a device now needs your approval.** A right code no longer hands a device its key by itself: the device waits while you approve or deny it on the link page, which shows its name. A guessed code gets nothing.
+- **A shared link now shows only what the share page needs.** Playlist and track shares used to return whole database rows, including server file paths and analysis errors. They now return a short, named list of fields.
 
 ## [1.12.3] - 2026-11-04
 

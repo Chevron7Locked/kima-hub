@@ -1,5 +1,5 @@
 /**
- * GET /share/:token (public) and POST /share (authenticated). Streaming and cover
+ * POST /share and DELETE /share/:token (authenticated); the cover route. GET /share/:token is in publicShare.route.test.ts. Streaming and cover
  * routes need real files and are left out; their path guard is tested directly.
  */
 
@@ -17,10 +17,7 @@ jest.mock('../../utils/db', () => ({
             delete: jest.fn(),
             count: jest.fn(),
         },
-        playlist: { findUnique: jest.fn() },
         track: { findUnique: jest.fn(), findFirst: jest.fn() },
-        album: { findUnique: jest.fn() },
-        playlistItem: { findFirst: jest.fn() },
         $transaction: jest.fn(),
         $executeRaw: jest.fn(),
     },
@@ -92,121 +89,6 @@ const BASE_SHARE_LINK = {
     playCount: 0,
     createdAt: new Date(),
 };
-
-describe('GET /share/:token -- resolve share link', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
-
-    it('returns 404 when token does not exist', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(null);
-
-        const res = await request(app).get('/share/nonexistent-token');
-        expect(res.status).toBe(404);
-        expect(res.body.error).toBe('Share link not found');
-    });
-
-    it('returns 410 when share link is expired', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue({
-            ...BASE_SHARE_LINK,
-            expiresAt: new Date(Date.now() - 1000), // 1 second in the past
-        });
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(410);
-        expect(res.body.error).toBe('Share link has expired');
-    });
-
-    it('returns 410 when play limit has been reached', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue({
-            ...BASE_SHARE_LINK,
-            maxPlays: 5,
-            playCount: 5,
-        });
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(410);
-        expect(res.body.error).toBe('Share link play limit reached');
-    });
-
-    it('returns 404 when the referenced track no longer exists', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(null);
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(404);
-        expect(res.body.error).toBe('Shared content no longer exists');
-    });
-
-    it('returns 200 with entity data for a valid track share', async () => {
-        const mockTrack = {
-            id: 'track-id-1',
-            title: 'Karma Police',
-            duration: 261,
-            album: {
-                title: 'OK Computer',
-                artist: { id: 'artist-1', name: 'Radiohead' },
-            },
-        };
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(mockTrack);
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(200);
-        expect(res.body.entityType).toBe('track');
-        expect(res.body.entity).toBeDefined();
-        expect(res.body.entity.title).toBe('Karma Police');
-        expect(res.body.createdAt).toBeDefined();
-    });
-
-    it('returns 200 with playlist entity for playlist share', async () => {
-        const playlistLink = { ...BASE_SHARE_LINK, entityType: 'playlist', entityId: 'playlist-1' };
-        const mockPlaylist = {
-            id: 'playlist-1',
-            title: 'My Mix',
-            items: [],
-            user: { username: 'testuser' },
-        };
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(playlistLink);
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(mockPlaylist);
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(200);
-        expect(res.body.entityType).toBe('playlist');
-        expect(res.body.entity.title).toBe('My Mix');
-    });
-
-    it('returns 200 for album share', async () => {
-        const albumLink = { ...BASE_SHARE_LINK, entityType: 'album', entityId: 'album-1' };
-        const mockAlbum = {
-            id: 'album-1',
-            title: 'OK Computer',
-            artist: { id: 'artist-1', name: 'Radiohead' },
-            tracks: [{ id: 'track-1', title: 'Airbag', trackNo: 1, duration: 231 }],
-        };
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(albumLink);
-        (prisma.album.findUnique as jest.Mock).mockResolvedValue(mockAlbum);
-
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(200);
-        expect(res.body.entity.title).toBe('OK Computer');
-    });
-
-    it('does not require authentication (no Authorization header needed)', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            id: 'track-id-1',
-            title: 'Karma Police',
-            duration: 261,
-            album: { title: 'OK Computer', artist: { id: 'a1', name: 'Radiohead' } },
-        });
-
-        // Deliberately no Authorization header
-        const res = await request(app).get('/share/valid-token-abc');
-        expect(res.status).toBe(200);
-    });
-});
 
 describe('POST /share -- create share link', () => {
     let app: express.Application;
