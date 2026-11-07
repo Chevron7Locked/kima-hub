@@ -112,12 +112,25 @@ const KEVIN_1_11 = [
 export const RELEASES: Release[] = [
     {
         // 1.12 and its fixes share one window. The date stays 1.12's: it decides who counts as upgrading from 1.11.
-        version: "1.12.3",
+        version: "1.12.4",
         title: "Kima 1.12",
         summary:
             "Moods that come from listening, 14 mood stations and new daily mixes, Discover kept to Discover, a podcast browser, a new side panel, and security fixes.",
         date: "2026-11-02",
         items: [
+            {
+                kind: "note",
+                key: "hotfix.1124",
+                title: "1.12.4: the official iPhone app",
+                summary: "The official Kima iPhone app is on the App Store. Also: security fixes, an approval step when linking a device, and Bandcamp import is gone.",
+                body:
+                    "The official Kima iPhone app is now available on the App Store.\n\n" +
+                    "1.12.4 also fixes several security problems.\n\n" +
+                    "Linking a device now needs your approval: after the code is entered, the link page shows the device's name " +
+                    "and you approve or deny it.\n\n" +
+                    "Bandcamp links can no longer be imported, because the downloader can't read Bandcamp pages any more.",
+                links: [{ label: "Get the iPhone app", href: "https://apps.apple.com/app/id6789728815" }],
+            },
             {
                 kind: "note",
                 key: "hotfix.1123",

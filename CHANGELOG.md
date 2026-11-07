@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+## [1.12.4] - 2026-11-07
+
 ### Security
 
 - **A wrong encryption key no longer destroys stored credentials.** Kima keeps a credential it cannot read and treats it as not set, so restoring the right key brings it back, and saving other settings in the meantime loses nothing.
