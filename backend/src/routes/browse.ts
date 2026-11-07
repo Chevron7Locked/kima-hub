@@ -6,6 +6,7 @@ import { safeError } from "../utils/errors";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview } from "../services/deezer";
 import { parseLimit } from "./library/paging";
+import { recogniseMusicLink } from "../services/musicLink";
 
 const router = Router();
 
@@ -141,49 +142,40 @@ router.post("/playlists/parse", async (req, res) => {
             return res.status(400).json({ error: "URL is required" });
         }
 
-        // Try Deezer first (our primary source)
-        const deezerParsed = deezerService.parseUrl(url);
-        if (deezerParsed && deezerParsed.type === "playlist") {
-            return res.json({
-                source: "deezer",
-                type: "playlist",
-                id: deezerParsed.id,
-                url: `https://www.deezer.com/playlist/${deezerParsed.id}`,
-            });
-        }
+        const link = recogniseMusicLink(url);
+        if (link) {
+            // The readers below only pull the id out of an address already known to be on the site.
+            const deezerParsed = link.platform === "deezer" ? deezerService.parseUrl(link.url) : null;
+            if (deezerParsed && deezerParsed.type === "playlist") {
+                return res.json({
+                    source: "deezer",
+                    type: "playlist",
+                    id: deezerParsed.id,
+                    url: `https://www.deezer.com/playlist/${deezerParsed.id}`,
+                });
+            }
 
-        // Try Spotify (still supported for URL imports)
-        const spotifyParsed = spotifyService.parseUrl(url);
-        if (spotifyParsed && spotifyParsed.type === "playlist") {
-            return res.json({
-                source: "spotify",
-                type: "playlist",
-                id: spotifyParsed.id,
-                url: `https://open.spotify.com/playlist/${spotifyParsed.id}`,
-            });
-        }
+            const spotifyParsed = link.platform === "spotify" ? spotifyService.parseUrl(link.url) : null;
+            if (spotifyParsed && spotifyParsed.type === "playlist") {
+                return res.json({
+                    source: "spotify",
+                    type: "playlist",
+                    id: spotifyParsed.id,
+                    url: `https://open.spotify.com/playlist/${spotifyParsed.id}`,
+                });
+            }
 
-        // Try YouTube / YouTube Music -- extract list= query param as playlist ID
-        try {
-            const parsed = new URL(url);
-            const hostname = parsed.hostname.toLowerCase();
-            const isYouTube =
-                hostname.includes("youtube.com") ||
-                hostname.includes("youtu.be") ||
-                hostname.includes("music.youtube.com");
-            if (isYouTube) {
-                const listId = parsed.searchParams.get("list");
+            if (link.platform === "youtube" || link.platform === "youtubeMusic") {
+                const listId = new URL(link.url).searchParams.get("list");
                 if (listId) {
                     return res.json({
                         source: "youtube",
                         type: "playlist",
                         id: listId,
-                        url,
+                        url: link.url,
                     });
                 }
             }
-        } catch {
-            // Invalid URL -- fall through to error
         }
 
         return res.status(400).json({

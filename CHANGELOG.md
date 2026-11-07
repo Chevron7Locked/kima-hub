@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Password guessing is capped whatever address a client claims.** Web login and Subsonic each allow 20 wrong passwords per 15 minutes per username, counted separately. App keys and signed-in sessions keep working on a locked account.
 - **Linking a device now needs your approval.** A right code no longer hands a device its key by itself: the device waits while you approve or deny it on the link page, which shows its name. A guessed code gets nothing.
 - **A shared link now shows only what the share page needs.** Playlist and track shares used to return whole database rows, including server file paths and analysis errors. They now return a short, named list of fields.
+- **A pasted music link must really be on the music site.** Kima used to accept any address that contained a site's name anywhere in it, so a look-alike address could make Kima fetch from somewhere else on its own network. Links now have to be http or https on a supported site or one of its subdomains, on every import path, and the downloader's catch-all fallback is off.
+
+### Removed
+
+- **Bandcamp links can't be imported any more.** The downloader stopped being able to read Bandcamp pages, so these imports were failing anyway.
 
 ## [1.12.3] - 2026-11-04
 

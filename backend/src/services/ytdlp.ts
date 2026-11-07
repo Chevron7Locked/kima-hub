@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { logger } from "../utils/logger";
-import { songLinkService } from "./songlink";
+import { recogniseMusicLink, MusicPlatform } from "./musicLink";
 
 interface YtDlpTrack {
   id: string;
@@ -38,17 +38,15 @@ function parseArtistTitle(
   return { artist, title: rawTitle.trim() };
 }
 
-const PLATFORM_LABELS: Record<string, string> = {
+const PLATFORM_LABELS: Partial<Record<MusicPlatform, string>> = {
   youtubeMusic: "YouTube Music",
   youtube: "YouTube",
   soundcloud: "SoundCloud",
-  bandcamp: "Bandcamp",
   mixcloud: "Mixcloud",
 };
 
-function detectPlatformFromUrl(url: string): string {
-  const platform = songLinkService.detectPlatform(url);
-  return (platform && PLATFORM_LABELS[platform]) || "External";
+function platformLabel(platform: MusicPlatform): string {
+  return PLATFORM_LABELS[platform] || "External";
 }
 
 function runYtDlp(args: string[], timeoutMs = 300_000): Promise<string> {
@@ -68,14 +66,28 @@ function runYtDlp(args: string[], timeoutMs = 300_000): Promise<string> {
   });
 }
 
-export async function extractPlaylist(url: string): Promise<YtDlpPlaylist> {
-  const stdout = await runYtDlp([
+/**
+ * `--ies default,-generic` turns off yt-dlp's catch-all extractor, which would otherwise fetch any address it is given;
+ * `--` makes the address a positional argument whatever it starts with.
+ */
+export function playlistArgs(url: string): string[] {
+  return [
     "--flat-playlist",
     "--dump-json",
     "--no-warnings",
     "--extractor-args", "youtube:lang=en",
+    "--ies", "default,-generic",
+    "--",
     url,
-  ]);
+  ];
+}
+
+export async function extractPlaylist(address: string): Promise<YtDlpPlaylist> {
+  const link = recogniseMusicLink(address);
+  if (!link) {
+    throw new Error("Not a link to a supported music site");
+  }
+  const stdout = await runYtDlp(playlistArgs(link.url));
 
   const lines = stdout.trim().split("\n").filter(Boolean);
   if (lines.length === 0) {
@@ -91,14 +103,14 @@ export async function extractPlaylist(url: string): Promise<YtDlpPlaylist> {
     firstEntry._playlist_title ||
     firstEntry.playlist_title ||
     firstEntry.playlist ||
-    detectPlatformFromUrl(url) + " Playlist";
+    platformLabel(link.platform) + " Playlist";
 
   const playlistId =
     firstEntry._playlist_id ||
     firstEntry.playlist_id ||
     `ytdlp-${Date.now()}`;
 
-  const platform = detectPlatformFromUrl(url);
+  const platform = platformLabel(link.platform);
 
   const tracks: YtDlpTrack[] = entries.map((entry: any) => {
     const rawTitle = entry.title || entry.fulltitle || "Unknown";

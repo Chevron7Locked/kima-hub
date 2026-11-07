@@ -22,8 +22,6 @@ const mockService = {
     cancelJob: jest.fn(),
     generatePreview: jest.fn(),
     generatePreviewFromDeezer: jest.fn(),
-    generatePreviewFromExternalPlatform: jest.fn(),
-    isExternalPlatformUrl: jest.fn(),
     importFromM3U: jest.fn(),
 };
 const mockGetImportJob = jest.fn();
@@ -60,6 +58,115 @@ describe("a bad body", () => {
         const res = await request(app).post(path).send(body);
         expect(res.status).toBe(400);
         expect(res.body.error).toBe("Invalid request body");
+    });
+});
+
+const NOT_MUSIC_LINKS = [
+    "https://youtube.com.evil.invalid/playlist?list=x",
+    "https://notyoutube.com/watch?v=abc",
+    "https://music.youtube.com.evil.invalid/playlist?list=x",
+    "https://youtube.com@evil.invalid/",
+    "https://evil.invalid/?u=youtube.com",
+    "https://evil.invalid/spotify.com/playlist/x",
+    "https://evil.invalid/deezer.com/playlist/1",
+    "file:///etc/passwd",
+    "ftp://youtube.com/x",
+    "javascript:alert(1)",
+    "https://",
+];
+const INVALID_URL = "Invalid URL. Supported: Spotify, Deezer, YouTube, SoundCloud, Mixcloud.";
+
+describe("POST /spotify/preview/start", () => {
+    it.each(NOT_MUSIC_LINKS)("refuses %s without starting a job", async (url) => {
+        const res = await request(app).post("/spotify/preview/start").send({ url });
+        expect(res.status).toBe(400);
+        expect(mockService.startPreviewJob).not.toHaveBeenCalled();
+    });
+
+    it("answers a refused address with the invalid-URL text", async () => {
+        const res = await request(app).post("/spotify/preview/start").send({ url: "https://youtube.com.evil.invalid/playlist?list=x" });
+        expect(res.body).toEqual({ error: INVALID_URL });
+    });
+});
+
+describe("POST /spotify/import/quick refuses what is not a music link", () => {
+    it.each(NOT_MUSIC_LINKS)("%s", async (url) => {
+        const res = await request(app).post("/spotify/import/quick").send({ url });
+        expect(res.status).toBe(400);
+        expect(mockService.quickImport).not.toHaveBeenCalled();
+    });
+
+    it("with the invalid-URL text", async () => {
+        const res = await request(app).post("/spotify/import/quick").send({ url: "https://youtube.com.evil.invalid/playlist?list=x" });
+        expect(res.body).toEqual({ error: INVALID_URL });
+    });
+});
+
+describe("a music link on a site nothing imports from", () => {
+    it.each([
+        "https://music.apple.com/us/playlist/x/pl.123",
+        "https://tidal.com/browse/playlist/abc",
+        "https://artist.bandcamp.com/album/x",
+        "https://artist.bandcamp.com/track/x",
+    ])("%s is refused on both routes", async (url) => {
+        expect((await request(app).post("/spotify/preview/start").send({ url })).status).toBe(400);
+        expect((await request(app).post("/spotify/import/quick").send({ url })).status).toBe(400);
+        expect(mockService.startPreviewJob).not.toHaveBeenCalled();
+        expect(mockService.quickImport).not.toHaveBeenCalled();
+    });
+});
+
+describe("POST /spotify/preview/start takes each site it imports from", () => {
+    it.each([
+        "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+        "https://www.deezer.com/en/playlist/1313621735",
+        "https://www.youtube.com/playlist?list=PL123",
+        "https://music.youtube.com/playlist?list=OLAK5",
+        "https://youtu.be/abc",
+        "https://on.soundcloud.com/abc123",
+        "https://www.mixcloud.com/someone/playlists/mix/",
+    ])("%s", async (url) => {
+        await request(app).post("/spotify/preview/start").send({ url }).expect(200);
+        expect(mockService.startPreviewJob).toHaveBeenCalledWith(url, "me");
+    });
+});
+
+describe("POST /spotify/import/quick address shapes", () => {
+    it.each([
+        "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+        "https://www.deezer.com/playlist/1313621735",
+        "https://www.youtube.com/playlist?list=PL123",
+        "https://www.youtube.com/watch?v=abc&list=PL123",
+        "https://m.youtube.com/watch?v=abc",
+        "https://music.youtube.com/playlist?list=OLAK5",
+        "https://youtu.be/abc",
+        "https://soundcloud.com/artist/sets/mix",
+        "https://on.soundcloud.com/abc123",
+        "https://www.mixcloud.com/someone/playlists/mix/",
+    ])("takes %s", async (url) => {
+        await request(app).post("/spotify/import/quick").send({ url }).expect(200);
+        expect(mockService.quickImport).toHaveBeenCalledWith(url, "me", undefined);
+    });
+
+    it.each([
+        "https://open.spotify.com/album/abc",
+        "https://open.spotify.com/track/abc",
+        "https://www.deezer.com/en/playlist/1313621735",
+        "https://www.deezer.com/album/1",
+        "https://www.youtube.com/channel/abc",
+        "https://www.youtube.com/?next=/playlist",
+    ])("refuses %s", async (url) => {
+        expect((await request(app).post("/spotify/import/quick").send({ url })).status).toBe(400);
+        expect(mockService.quickImport).not.toHaveBeenCalled();
+    });
+});
+
+describe("the address the import service is given", () => {
+    it("is the parsed one, on both routes", async () => {
+        await request(app).post("/spotify/preview/start").send({ url: "https://youtu.be\\@evil.invalid/abc" }).expect(200);
+        expect(mockService.startPreviewJob).toHaveBeenCalledWith("https://youtu.be/@evil.invalid/abc", "me");
+        await request(app).post("/spotify/import/quick").send({ url: "https://youtu.be\\@evil.invalid/abc" }).expect(200);
+        expect(mockService.quickImport).toHaveBeenCalledWith("https://youtu.be/@evil.invalid/abc", "me", undefined);
     });
 });
 

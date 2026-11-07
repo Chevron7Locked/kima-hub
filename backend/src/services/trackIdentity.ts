@@ -1,6 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { songLinkService, SongLinkResult } from "./songlink";
+import { recogniseMusicLink } from "./musicLink";
 import { musicBrainzService } from "./musicbrainz";
 import { topVoted } from "../utils/votes";
 import { pickRecording } from "./recordingMatch";
@@ -22,7 +23,7 @@ interface ResolvedTrack {
 
 class TrackIdentityService {
     async resolveUrl(url: string): Promise<ResolvedTrack | null> {
-        const platform = songLinkService.detectPlatform(url);
+        const platform = recogniseMusicLink(url)?.platform ?? null;
 
         const songLinkData = await songLinkService.resolve(url);
         if (!songLinkData) return null;

@@ -24,7 +24,7 @@ Kima reaches out to third-party services for features you use, the same way your
 | Apple Podcasts (iTunes) | Podcast search, charts, categories, show details and their artwork | Your search text; the chart country set in Settings; the Apple ids of shows Kima lists for you, opens or you follow |
 | Deezer | Similar artists when ListenBrainz has none, artwork, playlist browsing and previews | Artist and album names, and the playlists you open |
 | Fanart.tv | Artist images, only if you turn it on and enter a key | Artist MBIDs |
-| Spotify, Deezer, YouTube, YouTube Music, SoundCloud, Bandcamp, Mixcloud, Odesli (song.link), MusicBrainz | Playlist import | The playlist and song links you paste, then each track's links to song.link and its ISRC to MusicBrainz to match it to your library. No account is needed |
+| Spotify, Deezer, YouTube, YouTube Music, SoundCloud, Mixcloud, Odesli (song.link), MusicBrainz | Playlist import | The playlist and song links you paste, then each track's links to song.link and its ISRC to MusicBrainz to match it to your library. No account is needed |
 | Podcast feeds | The shows you follow | Requests for each show's feed and episodes, to the host that publishes it |
 | Lidarr, Audiobookshelf | Downloads and audiobooks | Your own servers, your own network |
 | Soulseek | Searching and downloading, if you set it up | Your searches and downloads, on the public Soulseek network, through Kima's own connection or your slskd |

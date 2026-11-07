@@ -34,7 +34,7 @@ import { trackIdentityService } from "./trackIdentity";
 import { failureCause } from "../utils/outcome";
 import { resolveArtistMbid } from "./artistCorrection";
 import { titlesAgree } from "./albumIdentity";
-import { songLinkService } from "./songlink";
+import { recogniseMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
 import { M3UEntry } from "./m3uParser";
@@ -134,24 +134,20 @@ const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
 const PREVIEW_JOB_KEY = (id: string) => `preview:job:${id}`;
 const PREVIEW_JOB_TTL = 2 * 60 * 60; // 2 hours
 
-/**
- * Extract a readable hint from a playlist URL to show before the real name resolves.
- */
-function extractPlaylistHint(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("spotify")) return "Spotify Playlist";
-    if (parsed.hostname.includes("deezer")) return "Deezer Playlist";
-    if (parsed.hostname.includes("youtube") || parsed.hostname.includes("youtu.be")) return "YouTube Import";
-    if (parsed.hostname.includes("apple")) return "Apple Music Import";
-    if (parsed.hostname.includes("tidal")) return "Tidal Import";
-    if (parsed.hostname.includes("soundcloud")) return "SoundCloud Import";
-    if (parsed.hostname.includes("bandcamp")) return "Bandcamp Import";
-    if (parsed.hostname.includes("mixcloud")) return "Mixcloud Import";
-    return "Playlist Import";
-  } catch {
-    return "Playlist Import";
-  }
+// The name a playlist shows before its real name resolves.
+const PLAYLIST_HINTS: Record<MusicPlatform, string> = {
+  spotify: "Spotify Playlist",
+  deezer: "Deezer Playlist",
+  youtube: "YouTube Import",
+  youtubeMusic: "YouTube Import",
+  appleMusic: "Apple Music Import",
+  tidal: "Tidal Import",
+  soundcloud: "SoundCloud Import",
+  mixcloud: "Mixcloud Import",
+};
+
+function extractPlaylistHint(link: MusicLink): string {
+  return PLAYLIST_HINTS[link.platform];
 }
 
 /**
@@ -935,15 +931,10 @@ class SpotifyImportService {
     );
   }
 
-  isExternalPlatformUrl(url: string): boolean {
-    const platform = songLinkService.detectPlatform(url);
-    return !!platform && platform !== "spotify" && platform !== "deezer";
-  }
+  async generatePreviewFromExternalPlatform(link: MusicLink): Promise<ImportPreview> {
+    const { platform, url } = link;
 
-  async generatePreviewFromExternalPlatform(url: string): Promise<ImportPreview> {
-    const platform = songLinkService.detectPlatform(url) || "unknown";
-
-    const isSingleTrack = !this.isPlaylistUrl(url);
+    const isSingleTrack = !this.isPlaylistLink(link);
     if (isSingleTrack) {
       const resolved = await trackIdentityService.resolveUrl(url);
       if (!resolved) {
@@ -981,19 +972,19 @@ class SpotifyImportService {
     return this.extractPlaylistWithYtDlp(url);
   }
 
-  private isPlaylistUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      const hostname = parsed.hostname.toLowerCase();
-      if ((hostname.includes("youtube.com") || hostname.includes("youtu.be")) && parsed.searchParams.has("list")) return true;
-      if (hostname.includes("music.youtube.com") && parsed.pathname.includes("/playlist")) return true;
-      if (hostname.includes("soundcloud.com") && parsed.pathname.includes("/sets/")) return true;
-      if (hostname.includes("bandcamp.com") && parsed.pathname.includes("/album/")) return true;
-      if (hostname.includes("mixcloud.com") && parsed.pathname.includes("/playlist/")) return true;
-      return false;
-    } catch {
-      // A URL that will not parse is not a playlist link.
-      return false;
+  private isPlaylistLink({ platform, url }: MusicLink): boolean {
+    const parsed = new URL(url);
+    switch (platform) {
+      case "youtube":
+        return parsed.searchParams.has("list");
+      case "youtubeMusic":
+        return parsed.searchParams.has("list") || parsed.pathname.includes("/playlist");
+      case "soundcloud":
+        return parsed.pathname.includes("/sets/");
+      case "mixcloud":
+        return parsed.pathname.includes("/playlist/");
+      default:
+        return false;
     }
   }
 
@@ -2503,9 +2494,12 @@ class SpotifyImportService {
           });
         };
 
+        const link = recogniseMusicLink(url);
+        if (!link) throw new Error("Not a link to a supported music site");
+
         let preview: ImportPreview;
-        if (url.includes("deezer.com")) {
-          const deezerMatch = url.match(/playlist[\/:](\d+)/);
+        if (link.platform === "deezer") {
+          const deezerMatch = link.url.match(/playlist[\/:](\d+)/);
           if (!deezerMatch) throw new Error("Invalid Deezer playlist URL");
           const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(deezerMatch[1], emitFetchProgress));
           if (!deezerPlaylist) throw new Error("Deezer playlist not found");
@@ -2517,14 +2511,14 @@ class SpotifyImportService {
           });
 
           preview = await this.generatePreviewFromDeezer(deezerPlaylist);
-        } else if (this.isExternalPlatformUrl(url)) {
+        } else if (link.platform !== "spotify") {
           eventBus.emit({
             type: "preview:progress",
             userId,
             payload: { jobId, phase: "matching", message: "Resolving tracks via song.link..." },
           });
 
-          preview = await this.generatePreviewFromExternalPlatform(url);
+          preview = await this.generatePreviewFromExternalPlatform(link);
         } else {
           const emitMatchingStart = () => {
             eventBus.emit({
@@ -2534,7 +2528,7 @@ class SpotifyImportService {
             });
           };
 
-          preview = await this.generatePreview(url, emitFetchProgress, emitMatchingStart);
+          preview = await this.generatePreview(link.url, emitFetchProgress, emitMatchingStart);
         }
 
         await redisClient.setex(
@@ -2798,17 +2792,20 @@ class SpotifyImportService {
 
     const jobId = newImportJobId();
 
+    const link = recogniseMusicLink(url);
+    if (!link) throw new Error("Not a link to a supported music site");
+
     // Fetch the real playlist name if not provided (lightweight API call)
     let resolvedName = playlistName;
     if (!resolvedName) {
       try {
-        if (url.includes("deezer.com")) {
-          const deezerMatch = url.match(/playlist[\/:](\d+)/);
+        if (link.platform === "deezer") {
+          const deezerMatch = link.url.match(/playlist[\/:](\d+)/);
           if (deezerMatch) {
             resolvedName = await deezerService.getPlaylistName(deezerMatch[1]) ?? undefined;
           }
-        } else if (url.includes("spotify.com")) {
-          resolvedName = await spotifyService.getPlaylistName(url) ?? undefined;
+        } else if (link.platform === "spotify") {
+          resolvedName = await spotifyService.getPlaylistName(link.url) ?? undefined;
         }
       } catch {
         // Non-critical -- fall back to hint
@@ -2819,7 +2816,7 @@ class SpotifyImportService {
       id: jobId,
       userId,
       spotifyPlaylistId: "",
-      playlistName: resolvedName || extractPlaylistHint(url),
+      playlistName: resolvedName || extractPlaylistHint(link),
       status: "pending",
       progress: 0,
       albumsTotal: 0,
@@ -2874,17 +2871,20 @@ class SpotifyImportService {
 
       jobLogger.info(`[Quick Import] Fetching playlist from ${url}`);
 
+      const link = recogniseMusicLink(url);
+      if (!link) throw new Error("Not a link to a supported music site");
+
       let preview: ImportPreview;
-      if (url.includes("deezer.com")) {
-        const deezerMatch = url.match(/playlist[\/:](\d+)/);
+      if (link.platform === "deezer") {
+        const deezerMatch = link.url.match(/playlist[\/:](\d+)/);
         if (!deezerMatch) throw new Error("Invalid Deezer playlist URL");
         const deezerPlaylist = await withRetry(() => deezerService.getPlaylist(deezerMatch[1]));
         if (!deezerPlaylist) throw new Error("Deezer playlist not found");
         preview = await this.generatePreviewFromDeezer(deezerPlaylist);
-      } else if (this.isExternalPlatformUrl(url)) {
-        preview = await this.generatePreviewFromExternalPlatform(url);
+      } else if (link.platform !== "spotify") {
+        preview = await this.generatePreviewFromExternalPlatform(link);
       } else {
-        preview = await this.generatePreview(url);
+        preview = await this.generatePreview(link.url);
       }
 
       // Re-read from DB to detect cancellation during the fetch phase

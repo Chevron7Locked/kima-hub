@@ -79,9 +79,9 @@ Links it accepts:
 
 - Spotify and Deezer playlists
 - YouTube and YouTube Music playlists
-- SoundCloud sets, Bandcamp albums and Mixcloud playlists
+- SoundCloud sets and Mixcloud playlists
 
-Spotify playlists are read from their public pages, so you do not need to connect a Spotify account. The YouTube, SoundCloud, Bandcamp and Mixcloud links are read with `yt-dlp`, which the Docker image includes.
+Spotify playlists are read from their public pages, so you do not need to connect a Spotify account. The YouTube, SoundCloud and Mixcloud links are read with `yt-dlp`, which the Docker image includes.
 
 ## Artwork and identification keys
 

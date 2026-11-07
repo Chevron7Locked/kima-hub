@@ -484,7 +484,7 @@ export default function BrowsePlaylistsPage() {
                             )}
                         </div>
                         <p className="text-xs text-[var(--text-muted)] mt-2 ml-1">
-                            Spotify, Deezer, YouTube, SoundCloud, Bandcamp, Mixcloud
+                            Spotify, Deezer, YouTube, SoundCloud, Mixcloud
                         </p>
                     </div>
                 </div>

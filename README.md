@@ -121,7 +121,7 @@ After each update, Kima shows a short list of what changed, sometimes with a not
 
 - **Lidarr.** Request an album you do not own, and Kima adds it when Lidarr finishes the download.
 - **Soulseek.** Search the network and download from it, through Kima's own connection or your [slskd](https://github.com/slskd/slskd) server.
-- **Playlist import.** Bring in playlists from Spotify, Deezer, YouTube, YouTube Music, SoundCloud, Bandcamp and Mixcloud, or an M3U file. Kima matches each track to your library and can send the missing ones to your download source.
+- **Playlist import.** Bring in playlists from Spotify, Deezer, YouTube, YouTube Music, SoundCloud and Mixcloud, or an M3U file. Kima matches each track to your library and can send the missing ones to your download source.
 
 ### Accounts and apps
 

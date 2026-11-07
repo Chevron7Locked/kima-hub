@@ -87,24 +87,6 @@ class SongLinkService {
             return null;
         }
     }
-
-    detectPlatform(url: string): string | null {
-        try {
-            const hostname = new URL(url).hostname.toLowerCase();
-            if (hostname.includes("music.youtube.com")) return "youtubeMusic";
-            if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) return "youtube";
-            if (hostname.includes("spotify.com")) return "spotify";
-            if (hostname.includes("deezer.com")) return "deezer";
-            if (hostname.includes("music.apple.com")) return "appleMusic";
-            if (hostname.includes("tidal.com")) return "tidal";
-            if (hostname.includes("soundcloud.com")) return "soundcloud";
-            if (hostname.includes("bandcamp.com")) return "bandcamp";
-            if (hostname.includes("mixcloud.com")) return "mixcloud";
-            return null;
-        } catch {
-            return null;
-        }
-    }
 }
 
 export const songLinkService = new SongLinkService();
