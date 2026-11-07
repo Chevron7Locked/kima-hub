@@ -103,7 +103,8 @@ class LidarrHealthMonitor {
         unreadableFields: string[];
     }): Promise<void> {
         if (!settings.unreadableFields.includes("lidarrWebhookSecret")) {
-            if (this.secretRefused) await notificationService.resolve(SECRET_REFUSED_KEY);
+            // Every check, not only when this process sent the notice: it outlives a restart.
+            await notificationService.resolve(SECRET_REFUSED_KEY);
             this.secretRefused = false;
             return;
         }

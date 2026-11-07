@@ -153,6 +153,20 @@ it("asks a Lidarr that will not keep the secret only once, tells admins, and cle
     expect(await secretNotices()).toBe(0);
 });
 
+it("clears the refused-secret notice on a healthy check after a restart, when this process never sent it", async () => {
+    await settings({ lidarrWebhookSecret: encrypt("readable") });
+    await lidarrHealthMonitor.check();
+    // The notice was sent by the process that ran before the restart.
+    await prisma.notification.create({
+        data: { userId: ADMIN, type: "error", title: "Lidarr did not keep its webhook secret", groupKey: "lidarr-secret-refused" },
+    });
+    expect(await secretNotices()).toBe(1);
+
+    await lidarrHealthMonitor.check();
+
+    expect(await secretNotices()).toBe(0);
+});
+
 it("leaves a secret that reads alone", async () => {
     await settings({ lidarrWebhookSecret: encrypt("kept") });
 
