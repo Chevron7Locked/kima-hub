@@ -7,11 +7,10 @@
  */
 
 import { prisma } from "../../utils/db";
+import { redisClient } from "../../utils/redis";
 import { loadScenario, startLidarrReplay, type LidarrReplay, type LidarrScenario } from "../../__tests__/helpers/lidarrReplay";
-import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { simpleDownloadManager } from "../simpleDownloadManager";
-import { lidarrService } from "../lidarr";
+import type { ReplayServer } from "../../__tests__/helpers/replayServer";
+import { setUpPipeline, tearDownPipeline } from "./helpers/lidarrPipeline";
 import { scanQueue } from "../../workers/queues";
 import type { LidarrAlbum, LidarrQueueItem } from "../../types/lidarr";
 
@@ -20,14 +19,21 @@ jest.setTimeout(60_000);
 const USER = "sdm_watch_user";
 const junkRun = loadScenario("junk-removed");
 
+const OUT_OF_IT = "16f30346-886a-3144-9377-cbfceb32fd34";
+
+let mb: ReplayServer;
 let lidarr: LidarrReplay;
+let simpleDownloadManager: typeof import("../simpleDownloadManager").simpleDownloadManager;
+let lidarrService: typeof import("../lidarr").lidarrService;
+let useLidarr: typeof import("../../__tests__/helpers/lidarrSettings").useLidarr;
 
 const queueReads = (run: LidarrScenario) =>
     run.exchanges.filter((e) => e.path.startsWith("/api/v1/queue?")) as { seq: number; response: { records: LidarrQueueItem[] } }[];
 
 beforeAll(async () => {
-    await prisma.user.deleteMany({ where: { id: USER } });
-    await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    let lidarrModule: typeof import("../lidarr");
+    ({ mb, lidarr: lidarrModule, manager: simpleDownloadManager, useLidarr } = await setUpPipeline(USER));
+    ({ lidarrService } = lidarrModule);
 });
 
 beforeEach(async () => {
@@ -37,14 +43,12 @@ beforeEach(async () => {
 
 afterEach(async () => {
     await lidarr.close();
+    await redisClient.del(`mb:rg:${OUT_OF_IT}`);
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
 });
 
-afterAll(async () => {
-    await prisma.user.deleteMany({ where: { id: USER } });
-    await closeEngineConnections();
-});
+afterAll(() => tearDownPipeline(USER, mb));
 
 const job = (data: Record<string, unknown>) =>
     prisma.downloadJob.create({
@@ -100,9 +104,10 @@ it("fails a job whose download left Lidarr's queue unimported, after three cycle
 it("holds a request while Lidarr cannot be reached, instead of failing it", async () => {
     await lidarr.close();
     await useLidarr("http://127.0.0.1:9");
-    const held = await job({ status: "pending", targetMbid: "16f30346-886a-3144-9377-cbfceb32fd34", metadata: { artistName: "Brad Sucks", albumTitle: "Out of It" } });
+    await redisClient.del(`mb:rg:${OUT_OF_IT}`);
+    const held = await job({ status: "pending", targetMbid: OUT_OF_IT, metadata: { artistName: "Brad Sucks", albumTitle: "Out of It" } });
 
-    await simpleDownloadManager.startDownload(held.id, "Brad Sucks", "Out of It", "16f30346-886a-3144-9377-cbfceb32fd34");
+    await simpleDownloadManager.startDownload(held.id, "Brad Sucks", "Out of It", OUT_OF_IT);
 
     const r = await row(held.id);
     expect(r.status).toBe("pending");
