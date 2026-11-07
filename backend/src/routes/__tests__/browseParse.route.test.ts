@@ -23,7 +23,6 @@ describe("an address that is not a music link", () => {
         "javascript:alert(1)",
         "https://",
         "spotify:playlist:abc",
-        "open.spotify.com/playlist/abc",
     ])("%s is a 400", async (url) => {
         const res = await parse({ url });
         expect(res.status).toBe(400);
@@ -69,5 +68,23 @@ describe("a playlist address on a supported site", () => {
         const res = await parse({});
         expect(res.status).toBe(400);
         expect(res.body).toEqual({ error: "URL is required" });
+    });
+});
+
+describe("a playlist address typed without https://", () => {
+    it.each([
+        "open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+        "www.youtube.com/playlist?list=PL123",
+        "www.deezer.com/en/playlist/1313621735",
+    ])("%s is told to paste the full link", async (url) => {
+        const res = await parse({ url });
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: "Paste the full link, starting with https://" });
+    });
+
+    it.each(["spotify:playlist:abc", "evil.invalid/playlist/1"])("%s keeps the unsupported-address message", async (url) => {
+        const res = await parse({ url });
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual(REFUSED);
     });
 });

@@ -228,13 +228,6 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
         const trimmed = url.trim();
         if (!trimmed) return;
 
-        try {
-            new URL(trimmed);
-        } catch {
-            setError("Enter a valid URL");
-            return;
-        }
-
         setIsSubmitting(true);
         setError(null);
         try {

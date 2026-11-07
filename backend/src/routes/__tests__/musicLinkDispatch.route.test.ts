@@ -171,3 +171,36 @@ describe("a quick import, as far as its fetch", () => {
         expect(job.playlistName).toBe("youtube import");
     });
 });
+
+describe("a pasted link the person typed without https://", () => {
+    const FULL_LINK_MESSAGE = { error: "Paste the full link, starting with https://" };
+    const INVALID_URL = { error: "Invalid URL. Supported: Spotify, Deezer, YouTube, SoundCloud, Mixcloud." };
+
+    it.each([
+        "open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+        "www.youtube.com/playlist?list=PL123",
+        "www.deezer.com/en/playlist/90210",
+    ])("%s is told to paste the full link, by the preview and the quick import", async (url) => {
+        for (const route of ["/spotify/preview/start", "/spotify/import/quick"]) {
+            const res = await request(app).post(route).send({ url });
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual(FULL_LINK_MESSAGE);
+        }
+        expect(getSpotifyPlaylist).not.toHaveBeenCalled();
+        expect(mockExtractPlaylist).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        "https://youtube.com.evil.invalid/playlist?list=x",
+        "https://evil.invalid/playlist/1",
+        "evil.invalid/playlist/1",
+        "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+        "not a url",
+    ])("%s is refused as not a supported site, by the preview and the quick import", async (url) => {
+        for (const route of ["/spotify/preview/start", "/spotify/import/quick"]) {
+            const res = await request(app).post(route).send({ url });
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual(INVALID_URL);
+        }
+    });
+});

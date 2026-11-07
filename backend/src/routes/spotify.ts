@@ -9,7 +9,7 @@ import { safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
 import { parseM3U } from "../services/m3uParser";
-import { recogniseMusicLink, MusicLink, MusicPlatform } from "../services/musicLink";
+import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE, MusicLink, MusicPlatform } from "../services/musicLink";
 
 const router = Router();
 
@@ -30,7 +30,8 @@ const m3uUpload = multer({
 router.use(requireAuthOrToken);
 
 const parseUrlSchema = z.object({
-    url: z.string().url(),
+    // Not .url(): that refuses a link typed without https:// with a message that says nothing about the link.
+    url: z.string(),
 });
 
 const importSchema = z.object({
@@ -42,7 +43,8 @@ const importSchema = z.object({
 });
 
 const quickImportSchema = z.object({
-    url: z.string().url(),
+    // Not .url(): that refuses a link typed without https:// with a message that says nothing about the link.
+    url: z.string(),
     playlistName: z.string().min(1).max(200).optional(),
 });
 
@@ -65,6 +67,11 @@ const QUICK_IMPORT_PATHS: Partial<Record<MusicPlatform, string[]>> = {
 };
 
 const INVALID_URL = "Invalid URL. Supported: Spotify, Deezer, YouTube, SoundCloud, Mixcloud.";
+
+/** The 400 reply for an address that is not an importable music link. */
+function refuseLink(res: Response, raw: string) {
+    return res.status(400).json({ error: lacksLinkScheme(raw) ? FULL_LINK_MESSAGE : INVALID_URL });
+}
 
 /** The address as a music link on a site playlists can be imported from, or null. */
 function importableLink(raw: string): MusicLink | null {
@@ -114,7 +121,7 @@ router.post("/preview/start", async (req, res) => {
 
         const link = importableLink(url);
         if (!link) {
-            return res.status(400).json({ error: INVALID_URL });
+            return refuseLink(res, url);
         }
 
         logger.debug(`[Playlist Import] Starting preview job for: ${link.url}`);
@@ -156,7 +163,7 @@ router.post("/import/quick", async (req, res) => {
 
         const link = quickImportableLink(url);
         if (!link) {
-            return res.status(400).json({ error: INVALID_URL });
+            return refuseLink(res, url);
         }
 
         const { jobId } = await spotifyImportService.quickImport(link.url, req.user!.id, playlistName);

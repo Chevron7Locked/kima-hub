@@ -6,7 +6,7 @@ import { safeError } from "../utils/errors";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview } from "../services/deezer";
 import { parseLimit } from "./library/paging";
-import { recogniseMusicLink } from "../services/musicLink";
+import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE } from "../services/musicLink";
 
 const router = Router();
 
@@ -176,6 +176,10 @@ router.post("/playlists/parse", async (req, res) => {
                     });
                 }
             }
+        }
+
+        if (lacksLinkScheme(url)) {
+            return res.status(400).json({ error: FULL_LINK_MESSAGE });
         }
 
         return res.status(400).json({

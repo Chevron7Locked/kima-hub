@@ -51,7 +51,7 @@ beforeEach(() => {
 
 describe("a bad body", () => {
     it.each([
-        ["/spotify/preview/start", { url: "not a url" }],
+        ["/spotify/preview/start", { url: 42 }],
         ["/spotify/import/quick", {}],
         ["/spotify/import", { playlistName: "Mix" }],
     ])("is a 400 at %s", async (path, body) => {
