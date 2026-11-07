@@ -4,8 +4,16 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
+import { approve, deny, waitForAnswer, waitingDevice } from "../services/users/deviceLinkApproval";
 
 const router = Router();
+
+const MAX_DEVICE_NAME = 100;
+
+/** The device name comes from whoever sent the request, and the code's owner reads it on the link page. */
+function cleanDeviceName(raw: unknown): string {
+    return typeof raw === "string" && raw ? raw.slice(0, MAX_DEVICE_NAME) : "Mobile Device";
+}
 
 // Generate a random 6-character alphanumeric code
 function generateLinkCode(): string {
@@ -68,7 +76,8 @@ router.post("/generate", requireAuthOrToken, async (req, res) => {
 // POST /device-link/verify - Verify a code and get API key (no auth required)
 router.post("/verify", async (req, res) => {
     try {
-        const { code, deviceName } = req.body;
+        const { code } = req.body;
+        const deviceName = cleanDeviceName(req.body.deviceName);
 
         if (!code || typeof code !== "string") {
             return res.status(400).json({ error: "Code is required" });
@@ -92,26 +101,41 @@ router.post("/verify", async (req, res) => {
             return res.status(400).json({ error: "Code expired" });
         }
 
+        const appLeft = new AbortController();
+        res.on("close", () => {
+            if (!res.writableFinished) appLeft.abort();
+        });
+        const outcome = await waitForAnswer(linkCode.id, deviceName, appLeft.signal);
+        if (outcome === "gone" || appLeft.signal.aborted) return;
+        if (outcome === "already-waiting") {
+            return res.status(409).json({ error: "A device is already waiting on this code" });
+        }
+        if (outcome === "no-answer") {
+            return res.status(408).json({ error: "Nobody approved the link in time, try again" });
+        }
+        if (outcome === "denied") {
+            return res.status(403).json({ error: "The owner of this code denied the link" });
+        }
+
         // Claim the code atomically so two concurrent /verify requests cannot both
         // mint a key. Codes are single-use: consumed even if minting then fails.
         const claimed = await prisma.deviceLinkCode.updateMany({
-            where: { id: linkCode.id, usedAt: null },
+            where: { id: linkCode.id, usedAt: null, expiresAt: { gt: new Date(Date.now()) } },
             data: {
                 usedAt: new Date(),
-                deviceName: deviceName || "Mobile Device",
+                deviceName,
             },
         });
         if (claimed.count !== 1) {
-            return res.status(400).json({ error: "Code already used" });
+            // The owner may have approved after the code ran out while the request waited.
+            const error = Date.now() >= linkCode.expiresAt.getTime() ? "Code expired" : "Code already used";
+            return res.status(400).json({ error });
         }
 
         // Generate an API key for this device. The plaintext value goes back to
         // the device in the response below and is never stored -- the row keeps
         // only a SHA-256 digest.
-        const createdApiKey = await createApiKey(
-            linkCode.userId,
-            deviceName || "Mobile Device"
-        );
+        const createdApiKey = await createApiKey(linkCode.userId, deviceName);
         const apiKey = createdApiKey.key;
 
         await prisma.deviceLinkCode.update({
@@ -131,13 +155,46 @@ router.post("/verify", async (req, res) => {
     }
 });
 
-// GET /device-link/status/:code - Poll for code usage status (no auth required)
-router.get("/status/:code", async (req, res) => {
+// POST /device-link/approve/:code - The code's owner lets the waiting device link (requires auth)
+router.post("/approve/:code", requireAuthOrToken, async (req, res) => {
+    try {
+        const linkCode = await prisma.deviceLinkCode.findFirst({
+            where: { code: req.params.code.toUpperCase(), userId: req.user!.id },
+        });
+        if (!linkCode || !approve(linkCode.id)) {
+            return res.status(404).json({ error: "No device is waiting" });
+        }
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Approve device link error:", error);
+        res.status(500).json({ error: "Failed to approve device" });
+    }
+});
+
+// POST /device-link/deny/:code - The code's owner refuses the waiting device; the code is gone (requires auth)
+router.post("/deny/:code", requireAuthOrToken, async (req, res) => {
+    try {
+        const linkCode = await prisma.deviceLinkCode.findFirst({
+            where: { code: req.params.code.toUpperCase(), userId: req.user!.id },
+        });
+        if (!linkCode || !deny(linkCode.id)) {
+            return res.status(404).json({ error: "No device is waiting" });
+        }
+        await prisma.deviceLinkCode.deleteMany({ where: { id: linkCode.id } });
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Deny device link error:", error);
+        res.status(500).json({ error: "Failed to deny device" });
+    }
+});
+
+// GET /device-link/status/:code - Poll for code usage status (requires auth; only the code's owner)
+router.get("/status/:code", requireAuthOrToken, async (req, res) => {
     try {
         const { code } = req.params;
 
-        const linkCode = await prisma.deviceLinkCode.findUnique({
-            where: { code: code.toUpperCase() },
+        const linkCode = await prisma.deviceLinkCode.findFirst({
+            where: { code: code.toUpperCase(), userId: req.user!.id },
         });
 
         if (!linkCode) {
@@ -157,6 +214,11 @@ router.get("/status/:code", async (req, res) => {
                 usedAt: linkCode.usedAt,
                 deviceName: linkCode.deviceName,
             });
+        }
+
+        const deviceName = waitingDevice(linkCode.id);
+        if (deviceName) {
+            return res.json({ status: "waiting", expiresAt: linkCode.expiresAt, deviceName });
         }
 
         res.json({

@@ -49,6 +49,8 @@ export default function DeviceLinkPage() {
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [pendingRevoke, setPendingRevoke] = useState<LinkedDevice | null>(null);
+    const [askingDevice, setAskingDevice] = useState<string | null>(null);
+    const [answering, setAnswering] = useState(false);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {
@@ -112,6 +114,7 @@ export default function DeviceLinkPage() {
                     `/device-link/status/${linkCode.code}`
                 );
 
+                setAskingDevice(status.status === "waiting" ? (status.deviceName ?? "a device") : null);
                 if (status.status === "used") {
                     setCodeUsed(true);
                     loadDevices();
@@ -123,6 +126,24 @@ export default function DeviceLinkPage() {
 
         return () => clearInterval(pollInterval);
     }, [linkCode, expired, codeUsed, loadDevices]);
+
+    const answerDevice = async (answer: "approve" | "deny") => {
+        if (!linkCode) return;
+        setAnswering(true);
+        setError(null);
+        try {
+            await api.request(`/device-link/${answer}/${linkCode.code}`, { method: "POST" });
+            setAskingDevice(null);
+            if (answer === "deny") {
+                setLinkCode(null);
+                setTimeRemaining(0);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Couldn't send your answer");
+        } finally {
+            setAnswering(false);
+        }
+    };
 
     const copyCode = async () => {
         if (linkCode && (await copyText(linkCode.code))) {
@@ -239,6 +260,34 @@ export default function DeviceLinkPage() {
                                                 <RefreshCw className="w-4 h-4 inline mr-2" />
                                                 Generate New Code
                                             </Button>
+                                        </div>
+                                    ) : askingDevice !== null ? (
+                                        <div className="py-8">
+                                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-brand/20 flex items-center justify-center">
+                                                <Smartphone className="w-8 h-8 text-brand" />
+                                            </div>
+                                            <h3 className="text-xl font-bold text-white mb-2">
+                                                {askingDevice} wants to link
+                                            </h3>
+                                            <p className="text-[var(--text-secondary)] mb-4">
+                                                only approve this if you just entered the code on your own device
+                                            </p>
+                                            <div className="flex items-center justify-center gap-3">
+                                                <Button
+                                                    variant="primary"
+                                                    disabled={answering}
+                                                    onClick={() => answerDevice("approve")}
+                                                >
+                                                    {answering ? "sending..." : "approve"}
+                                                </Button>
+                                                <Button
+                                                    variant="secondary"
+                                                    disabled={answering}
+                                                    onClick={() => answerDevice("deny")}
+                                                >
+                                                    deny
+                                                </Button>
+                                            </div>
                                         </div>
                                     ) : (
                                         <>

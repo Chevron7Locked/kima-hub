@@ -100,6 +100,11 @@ const nextConfig: NextConfig = {
             { source: "/queue", destination: "/", permanent: true },
         ];
     },
+    // The proxy gives up on a backend reply after 30 s by default. Linking a device holds the app's request up to 45 s
+    // for the owner's approval, and the app waits 60 s.
+    experimental: {
+        proxyTimeout: 60_000,
+    },
     // /api/* goes to the backend. Images set NEXT_PUBLIC_BACKEND_URL; the
     // fallback is the local dev backend (backend/.env PORT=3111). /api/events
     // is excluded: app/api/events/route.ts streams it without buffering.
