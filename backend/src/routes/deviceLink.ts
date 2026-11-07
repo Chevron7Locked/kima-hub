@@ -15,6 +15,11 @@ function cleanDeviceName(raw: unknown): string {
     return typeof raw === "string" && raw ? raw.slice(0, MAX_DEVICE_NAME) : "Mobile Device";
 }
 
+/** The code the signed-in user was shown, or null when it is not theirs or does not exist. */
+function ownedCode(code: string, userId: string) {
+    return prisma.deviceLinkCode.findFirst({ where: { code: code.toUpperCase(), userId } });
+}
+
 // Generate a random 6-character alphanumeric code
 function generateLinkCode(): string {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude similar looking chars
@@ -158,9 +163,7 @@ router.post("/verify", async (req, res) => {
 // POST /device-link/approve/:code - The code's owner lets the waiting device link (requires auth)
 router.post("/approve/:code", requireAuthOrToken, async (req, res) => {
     try {
-        const linkCode = await prisma.deviceLinkCode.findFirst({
-            where: { code: req.params.code.toUpperCase(), userId: req.user!.id },
-        });
+        const linkCode = await ownedCode(req.params.code, req.user!.id);
         if (!linkCode || !approve(linkCode.id)) {
             return res.status(404).json({ error: "No device is waiting" });
         }
@@ -174,9 +177,7 @@ router.post("/approve/:code", requireAuthOrToken, async (req, res) => {
 // POST /device-link/deny/:code - The code's owner refuses the waiting device; the code is gone (requires auth)
 router.post("/deny/:code", requireAuthOrToken, async (req, res) => {
     try {
-        const linkCode = await prisma.deviceLinkCode.findFirst({
-            where: { code: req.params.code.toUpperCase(), userId: req.user!.id },
-        });
+        const linkCode = await ownedCode(req.params.code, req.user!.id);
         if (!linkCode || !deny(linkCode.id)) {
             return res.status(404).json({ error: "No device is waiting" });
         }
@@ -193,9 +194,7 @@ router.get("/status/:code", requireAuthOrToken, async (req, res) => {
     try {
         const { code } = req.params;
 
-        const linkCode = await prisma.deviceLinkCode.findFirst({
-            where: { code: code.toUpperCase(), userId: req.user!.id },
-        });
+        const linkCode = await ownedCode(code, req.user!.id);
 
         if (!linkCode) {
             return res.status(404).json({ error: "Invalid code" });

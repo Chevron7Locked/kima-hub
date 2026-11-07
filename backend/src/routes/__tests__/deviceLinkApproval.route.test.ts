@@ -94,7 +94,7 @@ describe("a right code", () => {
     it("after approval answers in the shape the app expects, the key works, and the code is used", async () => {
         const owner = await signedInUser();
         const { code } = await freshCode(owner.id);
-        const held = startAppVerify(code, "kevin's iphone");
+        const held = startAppVerify(code, "test iphone");
         await sleep(1000);
         await approve(owner.token, code);
 
@@ -108,7 +108,7 @@ describe("a right code", () => {
         });
         const devices = await request(app).get("/api/device-link/devices").set("X-API-Key", res.body.apiKey);
         expect(devices.status).toBe(200);
-        expect(devices.body.map((d: { name: string }) => d.name)).toContain("kevin's iphone");
+        expect(devices.body.map((d: { name: string }) => d.name)).toContain("test iphone");
         const again = await appVerify(code);
         expect(again.status).toBe(400);
         expect(again.body.error).toBe("Code already used");
@@ -294,12 +294,12 @@ describe("the status check", () => {
     it("shows the name of the device that is waiting, and only while one waits", async () => {
         const owner = await signedInUser();
         const { code } = await freshCode(owner.id);
-        const held = startAppVerify(code, "kevin's iphone");
+        const held = startAppVerify(code, "test iphone");
         await sleep(1000);
 
         const waiting = await status(code, owner.token);
 
-        expect(waiting.body).toMatchObject({ status: "waiting", deviceName: "kevin's iphone" });
+        expect(waiting.body).toMatchObject({ status: "waiting", deviceName: "test iphone" });
         await approve(owner.token, code);
         await held;
         expect((await status(code, owner.token)).body.status).toBe("used");

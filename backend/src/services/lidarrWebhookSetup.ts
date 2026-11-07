@@ -11,6 +11,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { encryptSettings } from "../utils/encryptedFields";
 import { createLidarrClient } from "./lidarrClient";
+import { lidarrWebhookSecretHeld } from "./lidarrWebhookSecret";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { notificationService } from "./notificationService";
 
@@ -77,7 +78,7 @@ async function linkLidarr(lidarrUrl: string, apiKey: string): Promise<boolean> {
 
     const settings = await getSystemSettings();
     const storedSecret = settings?.lidarrWebhookSecret;
-    const secretRequired = !!storedSecret || !!settings?.unreadableFields.includes("lidarrWebhookSecret");
+    const secretRequired = lidarrWebhookSecretHeld(settings);
     const secret = storedSecret || crypto.randomBytes(32).toString("hex");
     const config = {
         ...EVENTS,

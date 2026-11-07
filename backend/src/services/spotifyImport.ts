@@ -34,7 +34,7 @@ import { trackIdentityService } from "./trackIdentity";
 import { failureCause } from "../utils/outcome";
 import { resolveArtistMbid } from "./artistCorrection";
 import { titlesAgree } from "./albumIdentity";
-import { recogniseMusicLink, MusicLink, MusicPlatform } from "./musicLink";
+import { requireMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
 import { M3UEntry } from "./m3uParser";
@@ -140,8 +140,6 @@ const PLAYLIST_HINTS: Record<MusicPlatform, string> = {
   deezer: "Deezer Playlist",
   youtube: "YouTube Import",
   youtubeMusic: "YouTube Import",
-  appleMusic: "Apple Music Import",
-  tidal: "Tidal Import",
   soundcloud: "SoundCloud Import",
   mixcloud: "Mixcloud Import",
 };
@@ -2494,8 +2492,7 @@ class SpotifyImportService {
           });
         };
 
-        const link = recogniseMusicLink(url);
-        if (!link) throw new Error("Not a link to a supported music site");
+        const link = requireMusicLink(url);
 
         let preview: ImportPreview;
         if (link.platform === "deezer") {
@@ -2792,8 +2789,7 @@ class SpotifyImportService {
 
     const jobId = newImportJobId();
 
-    const link = recogniseMusicLink(url);
-    if (!link) throw new Error("Not a link to a supported music site");
+    const link = requireMusicLink(url);
 
     // Fetch the real playlist name if not provided (lightweight API call)
     let resolvedName = playlistName;
@@ -2871,8 +2867,7 @@ class SpotifyImportService {
 
       jobLogger.info(`[Quick Import] Fetching playlist from ${url}`);
 
-      const link = recogniseMusicLink(url);
-      if (!link) throw new Error("Not a link to a supported music site");
+      const link = requireMusicLink(url);
 
       let preview: ImportPreview;
       if (link.platform === "deezer") {

@@ -3,8 +3,6 @@ export type MusicPlatform =
     | "youtube"
     | "spotify"
     | "deezer"
-    | "appleMusic"
-    | "tidal"
     | "soundcloud"
     | "mixcloud";
 
@@ -15,8 +13,6 @@ const SUPPORTED_DOMAINS: Array<[string, MusicPlatform]> = [
     ["youtu.be", "youtube"],
     ["spotify.com", "spotify"],
     ["deezer.com", "deezer"],
-    ["music.apple.com", "appleMusic"],
-    ["tidal.com", "tidal"],
     ["soundcloud.com", "soundcloud"],
     ["mixcloud.com", "mixcloud"],
 ];
@@ -40,4 +36,11 @@ export function recogniseMusicLink(raw: unknown): MusicLink | null {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     const match = SUPPORTED_DOMAINS.find(([domain]) => parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`));
     return match ? { platform: match[1], domain: match[0], url: parsed.href } : null;
+}
+
+/** The address as a music link, or a thrown error naming why it is not one. */
+export function requireMusicLink(raw: unknown): MusicLink {
+    const link = recogniseMusicLink(raw);
+    if (!link) throw new Error("Not a link to a supported music site");
+    return link;
 }

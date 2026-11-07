@@ -63,11 +63,12 @@ export function decryptOrNull(
 /**
  * Read a settings row into usable values: every `ENCRYPTED_FIELDS` entry
  * decrypted, or `null` when it is unset or unreadable. Never writes to the row.
- * Admins hear about every unreadable field but a webhook secret Kima can replace
- * by itself, which needs only a readable Lidarr API key.
+ * Admins hear about every unreadable field, except those `selfRepairing` names for
+ * these settings: the integration that owns such a field replaces it itself.
  */
 export async function resolveEncryptedSettings<S extends Record<string, unknown>>(
     settings: S,
+    selfRepairing: (resolved: ResolvedSystemSettings<S>) => EncryptedField[],
 ): Promise<ResolvedSystemSettings<S>> {
     const resolved = { ...settings } as Record<string, unknown>;
     const unreadableFields: EncryptedField[] = [];
@@ -79,11 +80,12 @@ export async function resolveEncryptedSettings<S extends Record<string, unknown>
         if (held && plain === null) unreadableFields.push(field);
     }
     resolved.unreadableFields = unreadableFields;
+    const result = resolved as ResolvedSystemSettings<S>;
+    const repairing = selfRepairing(result);
     for (const field of encryptedFields()) {
-        const repairable = field === "lidarrWebhookSecret" && resolved.lidarrApiKey !== null;
-        await noteReadability(field, !unreadableFields.includes(field) || repairable);
+        await noteReadability(field, !unreadableFields.includes(field) || repairing.includes(field));
     }
-    return resolved as ResolvedSystemSettings<S>;
+    return result;
 }
 
 /**

@@ -182,8 +182,8 @@ describe("the notice to admins", () => {
     it("comes once per field per process, and says what to do without saying anything was cleared", async () => {
         const server = restart();
 
-        await server.resolveEncryptedSettings(await row());
-        await server.resolveEncryptedSettings(await row());
+        await server.resolveEncryptedSettings(await row(), () => []);
+        await server.resolveEncryptedSettings(await row(), () => []);
 
         const sent = await notices();
         expect(sent.map((n) => n.title).sort()).toEqual(Object.values(ENCRYPTED_FIELDS).map((l) => `${l} cannot be read`).sort());
@@ -194,30 +194,30 @@ describe("the notice to admins", () => {
     });
 
     it("comes back after a restart, as one row per field", async () => {
-        await restart().resolveEncryptedSettings(await row());
+        await restart().resolveEncryptedSettings(await row(), () => []);
         await prisma.notification.updateMany({ where: { userId: ADMIN }, data: { cleared: true } });
 
-        await restart().resolveEncryptedSettings(await row());
+        await restart().resolveEncryptedSettings(await row(), () => []);
 
         expect(await notices()).toHaveLength(FIELDS.length);
         expect(await prisma.notification.count({ where: { userId: ADMIN } })).toBe(FIELDS.length);
     });
 
     it("goes away once the right key is back", async () => {
-        await restart().resolveEncryptedSettings(await row());
+        await restart().resolveEncryptedSettings(await row(), () => []);
         expect(await notices()).toHaveLength(FIELDS.length);
 
-        await restart(RIGHT_KEY).resolveEncryptedSettings(await row());
+        await restart(RIGHT_KEY).resolveEncryptedSettings(await row(), () => []);
 
         expect(await notices()).toHaveLength(0);
     });
 
     it("goes away when a new value replaces the unreadable one", async () => {
         const server = restart();
-        await server.resolveEncryptedSettings(await row());
+        await server.resolveEncryptedSettings(await row(), () => []);
 
         await store({ fanartApiKey: encrypt("a fresh key") });
-        await server.resolveEncryptedSettings(await row());
+        await server.resolveEncryptedSettings(await row(), () => []);
 
         expect((await notices()).map((n) => n.title)).not.toContain("Fanart.tv API key cannot be read");
         expect(await notices()).toHaveLength(FIELDS.length - 1);

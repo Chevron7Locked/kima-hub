@@ -46,7 +46,7 @@ const quickImportSchema = z.object({
     playlistName: z.string().min(1).max(200).optional(),
 });
 
-// The sites a playlist can be imported from. Apple Music and Tidal links are music links too, but no importer reads them.
+// The sites a playlist can be imported from.
 const IMPORT_PLATFORMS: ReadonlySet<MusicPlatform> = new Set([
     "spotify",
     "deezer",

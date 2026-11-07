@@ -20,6 +20,7 @@ import {
     gpuSupported,
 } from "../services/gpuRuntime";
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
+import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 import { config, musicFolderProblem, musicPathFixedByEnv, useMusicFolder } from "../config";
 import { createLidarrClient } from "../services/lidarrClient";
 import { safeError } from "../utils/errors";
@@ -137,7 +138,7 @@ router.get("/", async (_req, res) => {
     }
 
     // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
-    const { unreadableFields: _unreadable, ...resolved } = await resolveEncryptedSettings({ ...settings });
+    const { unreadableFields: _unreadable, ...resolved } = await resolveEncryptedSettings({ ...settings }, lidarrSelfRepairingFields);
 
     // The folder actually in use, which MUSIC_PATH can fix whatever the row says.
     res.json({ ...resolved, musicPath: config.music.musicPath, musicPathFixedByEnv: musicPathFixedByEnv() });

@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { logger } from "../utils/logger";
-import { recogniseMusicLink, MusicPlatform } from "./musicLink";
+import { requireMusicLink, MusicPlatform } from "./musicLink";
 
 interface YtDlpTrack {
   id: string;
@@ -83,10 +83,7 @@ export function playlistArgs(url: string): string[] {
 }
 
 export async function extractPlaylist(address: string): Promise<YtDlpPlaylist> {
-  const link = recogniseMusicLink(address);
-  if (!link) {
-    throw new Error("Not a link to a supported music site");
-  }
+  const link = requireMusicLink(address);
   const stdout = await runYtDlp(playlistArgs(link.url));
 
   const lines = stdout.trim().split("\n").filter(Boolean);

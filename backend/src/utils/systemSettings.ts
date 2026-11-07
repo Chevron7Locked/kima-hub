@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { resolveEncryptedSettings } from "./encryptedFields";
+import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -8,7 +9,7 @@ async function buildSettings() {
         where: { id: "default" },
     });
     if (!settings) return null;
-    return resolveEncryptedSettings(settings);
+    return resolveEncryptedSettings(settings, lidarrSelfRepairingFields);
 }
 
 let cachedSettings: Awaited<ReturnType<typeof buildSettings>> | null = null;
