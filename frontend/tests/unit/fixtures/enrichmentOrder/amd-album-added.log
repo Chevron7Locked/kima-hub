@@ -1,0 +1,32 @@
+2026-11-07T19:28:27.339970423Z 2026-11-07 13:28:27,339 INFO spawned: 'audio-analyzer' with pid 176
+2026-11-07T19:28:27.341839195Z 2026-11-07 13:28:27,341 INFO spawned: 'audio-analyzer-clap' with pid 178
+2026-11-07T19:28:30.541714866Z [INFO] [Enrichment] Cleared 2 mix cache entries after core enrichment complete
+2026-11-07T19:28:48.606649147Z 2026-11-07 13:28:48,606 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/01.flac
+2026-11-07T19:28:49.652612509Z 2026-11-07 13:28:49,652 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/02.flac
+2026-11-07T19:29:10.203129078Z 2026-11-07 13:29:10,202 INFO spawned: 'audio-analyzer' with pid 3562
+2026-11-07T19:31:42.493812310Z 2026-11-07 13:31:42,493 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/03.flac
+2026-11-07T19:31:43.189996578Z 2026-11-07 13:31:43,189 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/04.flac
+2026-11-07T19:31:59.856361876Z 2026-11-07 13:31:59,856 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6qpwq300u91v8wvgvv2ero
+2026-11-07T19:31:59.857096578Z 2026-11-07 13:31:59,857 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6qpws900uf1v8w4x0dsqbq
+2026-11-07T19:32:07.741142151Z 2026-11-07 13:32:07,740 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6qpwq300u91v8wvgvv2ero (instr=0.817, acoustic=0.206, valence=0.116, arousal=0.699)
+2026-11-07T19:32:07.743113068Z 2026-11-07 13:32:07,742 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6qpws900uf1v8w4x0dsqbq (instr=0.742, acoustic=0.229, valence=0.203, arousal=0.484)
+2026-11-07T19:33:22.621991512Z 2026-11-07 13:33:22,621 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6qpp9l00361v8wmypvn3fl
+2026-11-07T19:33:22.716312283Z 2026-11-07 13:33:22,716 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6qpp9e00341v8whzovcved
+2026-11-07T19:33:23.884342798Z 2026-11-07 13:33:23,883 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6qpp9e00341v8whzovcved (instr=0.664, acoustic=0.009, valence=0.694, arousal=0.669)
+2026-11-07T19:33:23.896310216Z 2026-11-07 13:33:23,896 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6qpp9l00361v8wmypvn3fl (instr=0.22, acoustic=0.005, valence=0.462, arousal=0.977)
+2026-11-07T19:33:32.668594904Z 2026-11-07 13:33:32,668 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/05.flac
+2026-11-07T19:33:33.736232103Z 2026-11-07 13:33:33,736 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/06.flac
+2026-11-07T19:33:33.847969581Z 2026-11-07 13:33:33,847 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/07.flac
+2026-11-07T19:33:33.959416669Z 2026-11-07 13:33:33,959 - audio-analyzer - INFO - ✓ Completed: Artist A/Album 1/08.flac
+2026-11-07T19:33:40.100587290Z 2026-11-07 13:33:40,100 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6sv8ng001dfh3oh6rh8rde
+2026-11-07T19:33:40.103929096Z 2026-11-07 13:33:40,103 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6sv8n70019fh3ogg7m9xnz
+2026-11-07T19:33:40.105211273Z 2026-11-07 13:33:40,105 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6sv8nb001bfh3oa84a4r9v
+2026-11-07T19:33:40.105771663Z 2026-11-07 13:33:40,105 - clap-analyzer - INFO - [BullMQ] Processing vibe for track: cmw6sv8mz0017fh3o6ltfis9h
+2026-11-07T19:33:40.382824222Z 2026-11-07 13:33:40,382 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6sv8ng001dfh3oh6rh8rde (instr=0.423, acoustic=0.006, valence=0.758, arousal=0.97)
+2026-11-07T19:33:40.385810825Z 2026-11-07 13:33:40,384 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6sv8n70019fh3ogg7m9xnz (instr=0.383, acoustic=0.003, valence=0.634, arousal=0.97)
+2026-11-07T19:33:40.402318016Z 2026-11-07 13:33:40,402 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6sv8nb001bfh3oa84a4r9v (instr=0.463, acoustic=0.004, valence=0.543, arousal=0.975)
+2026-11-07T19:33:40.421835486Z 2026-11-07 13:33:40,421 - clap-analyzer - INFO - [BullMQ] Completed vibe for track: cmw6sv8mz0017fh3o6ltfis9h (instr=0.406, acoustic=0.007, valence=0.546, arousal=0.972)
+2026-11-07T19:33:50.250889730Z [INFO] [Enrichment] Cleared 1 mix cache entries after the moods changed
+2026-11-07T19:33:50.291410668Z [INFO] [Enrichment] Mood tags changed on 445 tracks
+2026-11-07T19:33:51.626857848Z [INFO] [Enrichment] Vibe map laid out: 512 tracks
+2026-11-07T19:34:51.706800138Z [INFO] [Enrichment] Mood tags changed on 32 tracks

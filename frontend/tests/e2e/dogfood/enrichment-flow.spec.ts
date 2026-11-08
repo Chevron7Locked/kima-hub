@@ -1,7 +1,8 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { test, expect, APIRequestContext } from "@playwright/test";
 import { requireBaseUrl } from "../fixtures/target";
-import { stackSql } from "../fixtures/stackDb";
+import { stackLog, stackSql } from "../fixtures/stackDb";
+import { completions, findOrderBreaks, mapLayouts, parseDockerLog, parseStageRows, STAGE_ROWS_SQL } from "../fixtures/enrichmentOrder";
 
 /**
  * Enrichment runs in order on the real stack, measured from the analyzers' own logs and the stage records:
@@ -11,7 +12,8 @@ import { stackSql } from "../fixtures/stackDb";
  *   other starts, and an album added during either run waits its turn;
  * - every song is analysed once and given its sound vector once, also across an analyzer restart in the middle of
  *   analysis, which loses no time;
- * - the moods and the vibe map come once, after the last sound vector.
+ * - the moods and the vibe map come once, after the last sound vector;
+ * - the rules every run keeps (fixtures/enrichmentOrder.ts) hold over this run's log and the stage records.
  *
  * It re-runs enrichment from audio analysis and needs an admin, so it runs only on a throwaway stack (KIMA_CONTAINER names its all-in-one
  * container, whose /music it adds two albums to and removes them from again).
@@ -23,48 +25,11 @@ const username = process.env.KIMA_TEST_USERNAME || "";
 const password = process.env.KIMA_TEST_PASSWORD || "";
 const ADDED = "/music/_e2e_enrichment_flow";
 
-const MUSICNN_DONE = /audio-analyzer - INFO - ✓ Completed: (.+)$/;
-const CLAP_DONE = /clap-analyzer - INFO - \[BullMQ\] Completed vibe for track: (\S+)/;
-const MAP_LAID_OUT = /Vibe map laid out: \d+ tracks/;
-
 const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
 const inStack = (cmd: string) => docker("exec", container, "sh", "-c", cmd).trim();
 
-interface LogLine {
-    at: number;
-    text: string;
-}
-
-/** The container's log since `since`, both streams (the analyzers write to stderr), each line with Docker's own
- * timestamp, in time order. */
-function logSince(since: Date): LogLine[] {
-    const out = spawnSync("docker", ["logs", "-t", "--since", since.toISOString(), container], {
-        encoding: "utf8",
-        timeout: 120_000,
-        maxBuffer: 256 * 1024 * 1024,
-    });
-    if (out.status !== 0) throw new Error(`docker logs failed: ${out.stderr.slice(0, 300)}`);
-    return `${out.stdout}\n${out.stderr}`
-        .split("\n")
-        .map((line) => {
-            const space = line.indexOf(" ");
-            return { at: Date.parse(line.slice(0, space)), text: line.slice(space + 1) };
-        })
-        .filter((l) => Number.isFinite(l.at))
-        .sort((a, b) => a.at - b.at);
-}
-
-/** Each analyzer's completions, in order, with what they finished. */
-function completions(lines: LogLine[]) {
-    const out: Array<{ at: number; model: "musicnn" | "clap"; what: string }> = [];
-    for (const l of lines) {
-        const m = MUSICNN_DONE.exec(l.text);
-        if (m) out.push({ at: l.at, model: "musicnn", what: m[1] });
-        const c = CLAP_DONE.exec(l.text);
-        if (c) out.push({ at: l.at, model: "clap", what: c[1] });
-    }
-    return out;
-}
+/** The container's log since `since`, each line with Docker's own timestamp, in time order. */
+const logSince = (since: Date) => parseDockerLog(stackLog(since));
 
 async function waitFor(what: string, check: () => Promise<boolean> | boolean, timeoutMs: number, everyMs = 5_000) {
     const end = Date.now() + timeoutMs;
@@ -120,6 +85,8 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
 
     // Every 5 s through the run: MusiCNN and CLAP must never both hold work (stage records in flight).
     const overlaps: string[] = [];
+    let sampled = 0;
+    let skipped = 0;
     let sampling = true;
     const sampler = (async () => {
         while (sampling) {
@@ -127,8 +94,10 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
                 const [analysing, embedding] = (stackSql(
                     `SELECT count(*) FILTER (WHERE stage = 'analysis'), count(*) FILTER (WHERE stage = 'embedding') FROM "TrackStage" WHERE status = 'working'`,
                 ) ?? "0|0").split("|").map(Number);
+                sampled++;
                 if (analysing > 0 && embedding > 0) overlaps.push(`${new Date().toISOString()}: ${analysing} analysing, ${embedding} embedding`);
             } catch (error) {
+                skipped++;
                 console.warn(`overlap sample skipped: ${(error as Error).message.slice(0, 200)}`);
             }
             await new Promise((r) => setTimeout(r, 5_000));
@@ -184,6 +153,8 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
         const clap = done.filter((c) => c.model === "clap");
 
         await test.step("MusiCNN and CLAP never ran at once: whole runs, in turn", async () => {
+            console.log(`[enrichment-flow] overlap samples: ${sampled} read, ${skipped} skipped`);
+            expect(sampled, `no overlap sample could be read (${skipped} skipped): the check saw nothing`).toBeGreaterThan(0);
             expect(overlaps, "moments both models held work").toEqual([]);
             // Consecutive completions of one model are one run; at once, the two would interleave.
             const runs = done.reduce<Array<{ model: string; last: number }>>(
@@ -206,6 +177,11 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
             expect(count(`SELECT count(*) FROM "TrackStage" WHERE stage IN ('analysis', 'embedding') AND redelivered > 0`), "claims handed out again after being lost").toBe(0);
         });
 
+        await test.step("the order rules every run must keep hold (the same check the gate's last spec runs over the whole log)", async () => {
+            const breaks = findOrderBreaks({ lines, stageRows: parseStageRows(stackSql(STAGE_ROWS_SQL) ?? "") });
+            expect(breaks, "order breaks in this run").toEqual([]);
+        });
+
         await test.step("the analyzer restart lost no time", async () => {
             const next = musicnn.find((c) => c.at > restartedAt);
             expect(next, "no song was analysed after the restart").toBeTruthy();
@@ -214,7 +190,7 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
 
         await test.step("the moods and the map came once, after the last sound vector", async () => {
             const lastVector = clap.at(-1)!.at;
-            const maps = lines.filter((l) => MAP_LAID_OUT.test(l.text));
+            const maps = mapLayouts(lines);
             expect(maps, "vibe map layouts during the run").toHaveLength(1);
             expect(maps[0].at).toBeGreaterThan(lastVector);
             const computed = count(`SELECT extract(epoch FROM computed_at) * 1000 FROM mood_state WHERE id = 'default'`);
