@@ -1,4 +1,4 @@
-// A right device-link code no longer hands out a key by itself: the app's request is held until the signed-in owner of
+// A right device-link code does not hand out a key by itself: the app's request is held until the signed-in owner of
 // the code approves it. Real database, real routes, requests shaped as the iOS app sends them ({code, deviceName}, no auth).
 
 import express from "express";
