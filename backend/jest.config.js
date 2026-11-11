@@ -3,6 +3,11 @@
 // follow the host's zone.
 process.env.TZ = 'UTC';
 
+// Outside production the logger defaults to debug, which buries a run's failures under thousands of lines.
+// Set here, before Prisma copies backend/.env (often LOG_LEVEL=debug) into the environment during global setup.
+// Warnings and errors still print; LOG_LEVEL=debug on the command line brings the rest back for one run.
+process.env.LOG_LEVEL ||= 'warn';
+
 /** @type {import('jest').Config} */
 module.exports = {
     preset: 'ts-jest',
