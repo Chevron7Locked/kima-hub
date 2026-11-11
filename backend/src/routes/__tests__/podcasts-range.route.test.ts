@@ -12,7 +12,7 @@ jest.mock('../../services/podcastDownload', () => ({
 jest.mock('../../utils/db', () => ({
     prisma: {
         podcastEpisode: {
-            findUnique: jest.fn(),
+            findFirst: jest.fn(),
             update: jest.fn(),
         },
         podcast: {
@@ -105,7 +105,7 @@ describe('cached-path range policy', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        (prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue(BASE_EPISODE);
+        (prisma.podcastEpisode.findFirst as jest.Mock).mockResolvedValue(BASE_EPISODE);
         (podcastDownload.getCachedFilePath as jest.Mock).mockResolvedValue(tmpFile);
     });
 
@@ -188,7 +188,7 @@ describe('uncached stream from the host', () => {
         jest.clearAllMocks();
         seen = [];
         const { port } = host.address() as AddressInfo;
-        (prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue({
+        (prisma.podcastEpisode.findFirst as jest.Mock).mockResolvedValue({
             ...BASE_EPISODE,
             audioUrl: `http://127.0.0.1:${port}/ep1.mp3`,
             fileSize: FEED_DECLARED,

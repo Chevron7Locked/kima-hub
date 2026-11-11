@@ -922,8 +922,8 @@ router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (
 
         logger.debug(`[PODCAST STREAM] ${podcastId}/${episodeId}, range ${req.headers.range || "none"}`);
 
-        const episode = await prisma.podcastEpisode.findUnique({
-            where: { id: episodeId },
+        const episode = await prisma.podcastEpisode.findFirst({
+            where: { id: episodeId, podcastId },
         });
 
         if (!episode) {
@@ -1100,13 +1100,13 @@ const progressSchema = z.object({
  */
 router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
     try {
-        const { episodeId } = req.params;
+        const { podcastId, episodeId } = req.params;
         const body = progressSchema.safeParse(req.body);
         if (!body.success) {
             return res.status(400).json({ error: "currentTime (seconds) is required" });
         }
         const { currentTime, duration, isFinished } = body.data;
-        const episode = await prisma.podcastEpisode.findUnique({ where: { id: episodeId }, select: { id: true } });
+        const episode = await prisma.podcastEpisode.findFirst({ where: { id: episodeId, podcastId }, select: { id: true } });
         if (!episode) {
             return res.status(404).json({ error: "Episode not found" });
         }
@@ -1152,9 +1152,14 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
  */
 router.delete("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
     try {
-        const { episodeId } = req.params;
+        const { podcastId, episodeId } = req.params;
 
         logger.debug(`[PODCAST PROGRESS] ${req.user!.username} clears progress on ${episodeId}`);
+
+        const episode = await prisma.podcastEpisode.findFirst({ where: { id: episodeId, podcastId }, select: { id: true } });
+        if (!episode) {
+            return res.status(404).json({ error: "Episode not found" });
+        }
 
         await prisma.podcastProgress.deleteMany({
             where: {
