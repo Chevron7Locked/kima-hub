@@ -8,8 +8,13 @@ const LOG_LEVELS: Record<LogLevel, number> = {
     silent: 4,
 };
 
-const currentLevel = (process.env.LOG_LEVEL as LogLevel) || 
-    (process.env.NODE_ENV === 'production' ? 'warn' : 'debug');
+const defaultLevel: LogLevel = process.env.NODE_ENV === 'production' ? 'warn' : 'debug';
+const rawLevel = process.env.LOG_LEVEL;
+const requestedLevel = rawLevel?.trim().toLowerCase() ?? '';
+const isKnownLevel = Object.hasOwn(LOG_LEVELS, requestedLevel);
+const currentLevel: LogLevel = isKnownLevel
+    ? (requestedLevel as LogLevel)
+    : defaultLevel;
 
 function shouldLog(level: LogLevel): boolean {
     return LOG_LEVELS[level] >= LOG_LEVELS[currentLevel];
@@ -54,3 +59,9 @@ export const logger = {
         }
     },
 };
+
+if (requestedLevel && !isKnownLevel) {
+    logger.warn(
+        `LOG_LEVEL "${rawLevel}" is not one of ${Object.keys(LOG_LEVELS).join(", ")}; logging at "${defaultLevel}"`,
+    );
+}

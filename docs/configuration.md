@@ -53,7 +53,7 @@ With the split stack (`docker-compose.yml`), set both in a `.env` file next to t
 | `KIMA_CALLBACK_URL` | `http://host.docker.internal:3030` (all-in-one), `http://backend:3006` (split stack) | The address Lidarr uses to call Kima. Lidarr resolves it, not Kima. See [integrations.md](integrations.md#lidarr). |
 | `ALLOWED_ORIGINS` | unset | Comma-separated list of origins allowed to call the API from a browser. Unset means any origin; login still protects the API. The split stack's Compose file sets it to `http://localhost:3000,http://localhost:3030` unless you override it. |
 | `SECURE_COOKIES` | `false` | Set to `true` when Kima is served over HTTPS, so the session cookie is only sent over HTTPS. |
-| `LOG_LEVEL` | `warn` in production (the Compose files set `info`), `debug` otherwise | One of `debug`, `info`, `warn`, `error`, `silent`. |
+| `LOG_LEVEL` | `warn` in production (the Compose files set `info`), `debug` otherwise | One of `debug`, `info`, `warn`, `error`, `silent`, in any case. Any other value logs at the default with a warning. |
 | `TZ` | `UTC` | The server's time zone, as an IANA name such as `America/Chicago` or `Europe/London`. The daily mixes and Discover Weekly roll over at midnight in this zone, and Discover Weekly makes the new week's playlist on Monday at 05:00 here. |
 | `TRANSCODE_CACHE_MAX_GB` | `10` | Size limit for cached transcoded audio. |
 | `MUSICBRAINZ_BASE_URL` | `https://musicbrainz.org/ws/2` | Point Kima at your own MusicBrainz mirror. |
