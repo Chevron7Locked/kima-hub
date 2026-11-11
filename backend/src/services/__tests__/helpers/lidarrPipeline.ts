@@ -2,6 +2,9 @@ import { prisma } from "../../../utils/db";
 import { waitForRedisReady } from "../../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../../__tests__/helpers/replayServer";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { setEnv } from "../../../__tests__/helpers/env";
+
+let restoreEnv = () => {};
 
 /**
  * The download pipeline's modules, loaded after MusicBrainz points at a replay of its recorded answers (the service
@@ -10,7 +13,7 @@ import { closeEngineConnections } from "../../../__tests__/helpers/engineConnect
 export async function setUpPipeline(userId: string) {
     await waitForRedisReady();
     const mb: ReplayServer = await startReplayServer(loadRecording("musicbrainz", "lidarr-pipeline"));
-    process.env.MUSICBRAINZ_BASE_URL = mb.url;
+    restoreEnv = setEnv({ MUSICBRAINZ_BASE_URL: mb.url });
     const modules = {
         lidarr: await import("../../lidarr"),
         manager: (await import("../../simpleDownloadManager")).simpleDownloadManager,
@@ -33,6 +36,6 @@ export async function clearDownloads(userId: string) {
 export async function tearDownPipeline(userId: string, mb: ReplayServer) {
     await prisma.user.deleteMany({ where: { id: userId } });
     await mb.close();
-    delete process.env.MUSICBRAINZ_BASE_URL;
+    restoreEnv();
     await closeEngineConnections();
 }

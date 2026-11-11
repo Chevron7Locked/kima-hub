@@ -1,5 +1,6 @@
 import { AxiosError } from "axios";
 import { logger } from "../logger";
+import { setEnv } from "../../__tests__/helpers/env";
 
 it("logs a failed request as one line without its query string", () => {
     const spy = jest.spyOn(console, "warn").mockImplementation(() => {});
@@ -17,33 +18,31 @@ it("logs a failed request as one line without its query string", () => {
 });
 
 describe("LOG_LEVEL", () => {
-    const saved = { LOG_LEVEL: process.env.LOG_LEVEL, NODE_ENV: process.env.NODE_ENV };
     afterEach(() => {
-        for (const [name, value] of Object.entries(saved)) {
-            if (value === undefined) delete process.env[name];
-            else process.env[name] = value;
-        }
         jest.restoreAllMocks();
     });
 
     /** Loads a fresh logger with LOG_LEVEL set, logs one line at every level, and
      * says which levels printed. */
     function printedAt(value: string, nodeEnv = "production") {
-        process.env.LOG_LEVEL = value;
-        process.env.NODE_ENV = nodeEnv;
+        const restoreEnv = setEnv({ LOG_LEVEL: value, NODE_ENV: nodeEnv });
         const printed: string[] = [];
         for (const method of ["debug", "info", "warn", "error"] as const) {
             jest.spyOn(console, method).mockImplementation((...args: unknown[]) => {
                 printed.push(String(args[0]));
             });
         }
-        jest.isolateModules(() => {
-            const { logger: fresh } = require("../logger");
-            fresh.debug("d");
-            fresh.info("i");
-            fresh.warn("w");
-            fresh.error("e");
-        });
+        try {
+            jest.isolateModules(() => {
+                const { logger: fresh } = require("../logger");
+                fresh.debug("d");
+                fresh.info("i");
+                fresh.warn("w");
+                fresh.error("e");
+            });
+        } finally {
+            restoreEnv();
+        }
         return printed;
     }
 

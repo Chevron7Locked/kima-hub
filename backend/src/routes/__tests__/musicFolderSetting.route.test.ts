@@ -16,6 +16,7 @@ import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { soulseekTarget } from "../../services/pendingTrackRetry";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import systemSettingsRoutes from "../systemSettings";
+import { setEnv } from "../../__tests__/helpers/env";
 
 jest.mock("../../services/soulseek", () => ({ soulseekService: { isAvailable: jest.fn().mockResolvedValue(true), resetAndReconnect: jest.fn() } }));
 
@@ -36,9 +37,10 @@ const folderWithLibrary = (prefix: string) => {
 };
 let startFolder: string;
 let folderA: string;
-const envBefore = process.env.MUSIC_PATH;
+let restoreEnv = () => {};
 
 beforeAll(async () => {
+    restoreEnv = setEnv({ MUSIC_PATH: undefined });
     before = await prisma.systemSettings.findUnique({ where: { id: "default" } });
     await prisma.user.create({ data: { id: ADMIN, username: ADMIN, passwordHash: "x", role: "admin", tokenVersion: 0 } });
     startFolder = config.music.musicPath;
@@ -54,8 +56,7 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-    if (envBefore === undefined) delete process.env.MUSIC_PATH;
-    else process.env.MUSIC_PATH = envBefore;
+    restoreEnv();
     (config.music as { musicPath: string }).musicPath = startFolder;
     if (before) await prisma.systemSettings.update({ where: { id: "default" }, data: before as any });
     invalidateSystemSettingsCache();

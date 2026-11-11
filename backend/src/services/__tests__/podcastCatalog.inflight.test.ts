@@ -8,13 +8,16 @@ import { waitForRedisReady } from "../../utils/redis";
 import { clearCatalogCache } from "./helpers/catalogCache";
 import * as catalog from "../podcastCatalog";
 import { INTERACTIVE_PRIORITY, rateLimiter } from "../rateLimiter";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const recording = loadRecording("apple", "catalog");
 let replay: ReplayServer;
 
+let restoreEnv = () => {};
+
 beforeAll(async () => {
     replay = await startReplayServer(recording);
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: replay.url });
     await waitForRedisReady();
 });
 
@@ -25,7 +28,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await replay.close();
 });
 
@@ -52,9 +55,9 @@ it("asks Apple once when three ask for the same chart while it is on its way", a
 });
 
 it("asks again once a request fails, rather than handing that failure to later askers", async () => {
-    process.env.ITUNES_BASE_URL = "http://127.0.0.1:9"; // nothing listens: the first request fails
+    const restoreAppleUrl = setEnv({ ITUNES_BASE_URL: "http://127.0.0.1:9" }); // nothing listens: the first request fails
     await expect(catalog.chart(1495)).rejects.toThrow();
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreAppleUrl();
     expect(await catalog.chart(1495)).toHaveLength(200);
     expect(chartAsks()).toHaveLength(1);
 });

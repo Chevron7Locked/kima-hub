@@ -13,6 +13,7 @@ import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const USER = "u_podsub";
 const STORED = "pod_sub_stored";
@@ -29,6 +30,8 @@ const FEED = `<?xml version="1.0"?><rss version="2.0"><channel><title>Race Show<
 const cleanup = async () => {
     await prisma.podcast.deleteMany({ where: { OR: [{ id: STORED }, { feedUrl: { startsWith: feedBase || "http://public.test" } }] } });
 };
+
+let restoreEnv = () => {};
 
 beforeAll(async () => {
     feedHost = http.createServer((req, res) => {
@@ -55,7 +58,7 @@ beforeAll(async () => {
     await new Promise<void>((ok) => feedHost.listen(0, "127.0.0.1", () => ok()));
     routePublicHost();
     feedBase = publicUrl((feedHost.address() as AddressInfo).port);
-    process.env.ITUNES_BASE_URL = feedBase;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: feedBase });
     await waitForRedisReady();
     await prisma.user.upsert({ where: { id: USER }, create: { id: USER, username: USER, passwordHash: "x" }, update: {} });
 });
@@ -71,7 +74,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
     jest.restoreAllMocks();
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await cleanup();
     await prisma.user.deleteMany({ where: { id: USER } });
     await new Promise<void>((ok) => feedHost.close(() => ok()));

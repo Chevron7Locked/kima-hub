@@ -15,6 +15,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { queues } from "../../workers/queues";
 import webhookRoutes from "../webhooks";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const USER = "webhook_route_user";
 const complete = loadScenario("complete");
@@ -73,15 +74,14 @@ afterAll(async () => {
 
 it("answers the verification request with the app version, also when npm did not start the server", async () => {
     // The published image starts with `node dist/index.js`, so npm's own version variable is never set there.
-    const npmVersion = process.env.npm_package_version;
-    delete process.env.npm_package_version;
+    const restoreEnv = setEnv({ npm_package_version: undefined });
     try {
         const res = await request(app()).get("/webhooks/lidarr/verify");
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("ok");
         expect(res.body.version).toBe(require("../../../package.json").version);
     } finally {
-        if (npmVersion !== undefined) process.env.npm_package_version = npmVersion;
+        restoreEnv();
     }
 });
 

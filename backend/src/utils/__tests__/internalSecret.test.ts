@@ -4,6 +4,7 @@
  */
 import { redisClient, waitForRedisReady } from "../redis";
 import { INTERNAL_SECRET_KEY, internalSecret, isInternalSecret } from "../internalSecret";
+import { setEnv } from "../../__tests__/helpers/env";
 
 describe("internal secret", () => {
     beforeAll(waitForRedisReady);
@@ -23,14 +24,14 @@ describe("internal secret", () => {
 
     it("lets only this server's secret through", async () => {
         const secret = await internalSecret();
-        process.env.INTERNAL_API_SECRET = "kima-internal-aio";
+        const restoreEnv = setEnv({ INTERNAL_API_SECRET: "kima-internal-aio" });
         try {
             expect(await isInternalSecret(secret)).toBe(true);
             for (const wrong of ["kima-internal-aio", "kima-internal-secret-change-me", "", undefined, secret.slice(1)]) {
                 expect(await isInternalSecret(wrong)).toBe(false);
             }
         } finally {
-            delete process.env.INTERNAL_API_SECRET;
+            restoreEnv();
         }
     });
 

@@ -14,12 +14,15 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { assignMissingCategories } from "../podcastCatalog";
 import { measureCachedEpisodeLengths } from "../podcastDownload";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const IDS = ["9100001", "9100002", "9100003"];
 let host: http.Server;
 let lookups: string[] = [];
 let cacheRoot = "";
 let originalCache = "";
+
+let restoreEnv = () => {};
 
 beforeAll(async () => {
     host = http.createServer((req, res) => {
@@ -28,7 +31,7 @@ beforeAll(async () => {
         res.end(JSON.stringify({ resultCount: 3, results: IDS.map((id) => ({ kind: "podcast", collectionId: Number(id), feedUrl: `https://f.example.invalid/${id}`, genreIds: ["1495", "26"] })) }));
     });
     await new Promise<void>((ok) => host.listen(0, "127.0.0.1", () => ok()));
-    process.env.ITUNES_BASE_URL = `http://127.0.0.1:${(host.address() as AddressInfo).port}`;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: `http://127.0.0.1:${(host.address() as AddressInfo).port}` });
     await waitForRedisReady();
     cacheRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "kima-startup-"));
     originalCache = config.music.transcodeCachePath;
@@ -36,7 +39,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     config.music.transcodeCachePath = originalCache;
     await prisma.podcast.deleteMany({ where: { id: { startsWith: "pod_startup" } } });
     await new Promise<void>((ok) => host.close(() => ok()));

@@ -7,6 +7,7 @@ import { prisma } from "../../utils/db";
 import { waitForRedisReady } from "../../utils/redis";
 import { clearCatalogCache } from "./helpers/catalogCache";
 import * as catalog from "../podcastCatalog";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const recording = loadRecording("apple", "catalog");
 let replay: ReplayServer;
@@ -14,9 +15,11 @@ let replay: ReplayServer;
 const DND = "1450241676";
 const P = "pod_catalog_dnd";
 
+let restoreEnv = () => {};
+
 beforeAll(async () => {
     replay = await startReplayServer(recording);
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: replay.url });
     await waitForRedisReady();
     await clearCatalogCache();
     await prisma.podcast.deleteMany({ where: { id: P } });
@@ -25,7 +28,7 @@ beforeAll(async () => {
 // The cache is cleared before each run, not after: the shared client reaper has closed Redis by then.
 afterAll(async () => {
     await prisma.podcast.deleteMany({ where: { id: P } });
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await replay.close();
 });
 

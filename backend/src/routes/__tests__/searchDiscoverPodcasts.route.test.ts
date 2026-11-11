@@ -13,15 +13,18 @@ import searchRoutes from "../search";
 import { INTERACTIVE_PRIORITY, rateLimiter } from "../../services/rateLimiter";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const app = express();
 app.use(express.json());
 app.use("/search", searchRoutes);
 let replay: ReplayServer;
 
+let restoreEnv = () => {};
+
 beforeAll(async () => {
     replay = await startReplayServer(loadRecording("apple", "search"));
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: replay.url });
     await waitForRedisReady();
 });
 
@@ -32,7 +35,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await replay.close();
 });
 
@@ -50,9 +53,9 @@ it("answers Apple's shows for the term, asked through the Apple queue ahead of b
 });
 
 it("answers an empty podcast section, and caches nothing, when Apple fails", async () => {
-    process.env.ITUNES_BASE_URL = "http://127.0.0.1:9";
+    const restoreAppleUrl = setEnv({ ITUNES_BASE_URL: "http://127.0.0.1:9" });
     const res = await request(app).get("/search/discover?q=dungeons&type=podcasts&limit=5");
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreAppleUrl();
     expect(res.status).toBe(200);
     expect(res.body.results).toEqual([]);
     expect(await redisClient.keys("search:discover:*")).toEqual([]);

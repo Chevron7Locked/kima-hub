@@ -12,6 +12,7 @@ import * as catalog from "../../services/podcastCatalog";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const recording = loadRecording("apple", "catalog");
 const app = express();
@@ -23,9 +24,11 @@ const SHOW = "pod_disc_dnd";
 const DND = "1450241676";
 let replay: ReplayServer;
 
+let restoreEnv = () => {};
+
 beforeAll(async () => {
     replay = await startReplayServer(recording);
-    process.env.ITUNES_BASE_URL = replay.url;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: replay.url });
     await waitForRedisReady();
     const keys = await redisClient.keys("podcasts:*");
     if (keys.length > 0) await redisClient.del(...keys);
@@ -46,7 +49,7 @@ beforeAll(async () => {
 afterAll(async () => {
     await prisma.podcast.deleteMany({ where: { id: SHOW } });
     await prisma.user.deleteMany({ where: { id: USER } });
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await replay.close();
 });
 

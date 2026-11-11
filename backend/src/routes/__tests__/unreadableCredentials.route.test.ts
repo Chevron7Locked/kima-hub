@@ -14,6 +14,7 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const ADMIN = "zz-unreadable-admin";
 const RIGHT_KEY = "the-key-these-credentials-were-stored-under";
@@ -27,17 +28,19 @@ type Server = {
 
 /** This code as a process started with `key` would load it: nothing kept from any earlier one. */
 function restart(key: string | undefined = process.env.SETTINGS_ENCRYPTION_KEY): Server {
-    const running = process.env.SETTINGS_ENCRYPTION_KEY;
     let server!: Server;
-    jest.isolateModules(() => {
-        process.env.SETTINGS_ENCRYPTION_KEY = key;
-        server = {
-            encrypt: require("../../utils/encryption").encrypt,
-            getSystemSettings: require("../../utils/systemSettings").getSystemSettings,
-            resolveEncryptedSettings: require("../../utils/encryptedFields").resolveEncryptedSettings,
-        };
-    });
-    process.env.SETTINGS_ENCRYPTION_KEY = running;
+    const restoreEnv = setEnv({ SETTINGS_ENCRYPTION_KEY: key });
+    try {
+        jest.isolateModules(() => {
+            server = {
+                encrypt: require("../../utils/encryption").encrypt,
+                getSystemSettings: require("../../utils/systemSettings").getSystemSettings,
+                resolveEncryptedSettings: require("../../utils/encryptedFields").resolveEncryptedSettings,
+            };
+        });
+    } finally {
+        restoreEnv();
+    }
     return server;
 }
 

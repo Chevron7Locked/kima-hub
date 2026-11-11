@@ -24,6 +24,7 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { AppleReplyError, chart, lookupShows } from "../../services/podcastCatalog";
 import { proxyPreviewStream } from "../../utils/previewProxy";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
+import { setEnv } from "../../__tests__/helpers/env";
 
 type Reply = { status: number; body: string; type?: string };
 const replies = new Map<string, Reply[]>();
@@ -42,6 +43,8 @@ app.use("/podcasts", podcastRoutes);
 app.get("/preview-proxy", (_req, res) => proxyPreviewStream(res, `${base}/forbidden.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 app.get("/preview-proxy-busy", (_req, res) => proxyPreviewStream(res, `${base}/busy.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 app.get("/preview-proxy-internal", (_req, res) => proxyPreviewStream(res, `${base}/to-internal.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
+
+let restoreEnv = () => {};
 
 beforeAll(async () => {
     host = http.createServer((req, res) => {
@@ -68,7 +71,7 @@ beforeAll(async () => {
     await new Promise<void>((ok) => host.listen(0, "127.0.0.1", () => ok()));
     routePublicHost();
     base = publicUrl((host.address() as AddressInfo).port);
-    process.env.ITUNES_BASE_URL = base;
+    restoreEnv = setEnv({ ITUNES_BASE_URL: base });
     await waitForRedisReady();
     await prisma.podcast.deleteMany({ where: { id: "pod_fail" } });
     await prisma.podcast.create({
@@ -94,7 +97,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
     jest.restoreAllMocks();
-    delete process.env.ITUNES_BASE_URL;
+    restoreEnv();
     await prisma.podcast.deleteMany({ where: { id: { in: ["pod_fail", "pod_refresh_gone", "pod_refresh_page"] } } });
     await new Promise<void>((ok) => host.close(() => ok()));
 });

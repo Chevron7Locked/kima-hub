@@ -16,6 +16,7 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { setEnv } from "../../__tests__/helpers/env";
 
 const ADMIN = "zz-settings-save-admin";
 const ENV_FILES = [path.resolve(process.cwd(), "..", ".env"), path.resolve(process.cwd(), ".env")];
@@ -50,12 +51,11 @@ it("a partial save writes no file, and startup loads the saved cache size", asyn
     expect(snapshot()).toEqual(files);
 
     invalidateSystemSettingsCache();
-    const previous = process.env.MUSIC_PATH;
-    process.env.MUSIC_PATH = music;
+    const restoreEnv = setEnv({ MUSIC_PATH: music });
     try {
         expect((await validateMusicConfig()).transcodeCacheMaxGb).toBe(7);
     } finally {
-        process.env.MUSIC_PATH = previous;
+        restoreEnv();
     }
 });
 
