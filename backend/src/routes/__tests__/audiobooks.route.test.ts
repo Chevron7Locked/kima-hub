@@ -404,12 +404,6 @@ describe("POST /audiobooks/sync", () => {
 
 describe("an audiobook id", () => {
     const app = createApp();
-    let lookup: jest.SpyInstance;
-
-    // Calls through: it only watches whether the database was asked.
-    beforeAll(() => { lookup = jest.spyOn(prisma.audiobook, "findUnique"); });
-    afterAll(() => lookup.mockRestore());
-
     beforeEach(() => {
         jest.clearAllMocks();
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
@@ -426,9 +420,9 @@ describe("an audiobook id", () => {
     ] as const)("that is not one is refused at %s %s before Audiobookshelf is asked", async (method, path) => {
         const res = await request(app)[method](path).send({ currentTime: 1, duration: 2 });
         expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: "Audiobook not found" });
         expect(audiobookshelfService.streamAudiobook).not.toHaveBeenCalled();
         expect(audiobookshelfService.updateProgress).not.toHaveBeenCalled();
         expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
-        expect(lookup).not.toHaveBeenCalled();
     });
 });

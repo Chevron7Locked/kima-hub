@@ -125,11 +125,19 @@ describe("library delete routes stay inside the music root", () => {
     });
 
     it("DELETE /artists/:id leaves the outside folder alone when the artist name and a song path climb out of the root", async () => {
-        // The name is a tag; it once reached rmSync(recursive, force) through a folder guess.
-        const { artist } = await artistWith(EVIL, [`${EVIL}.flac`]);
+        // The name is a tag; it once reached rmSync(recursive, force) through a folder guess. The folder the name
+        // points to (music root + name = OUTSIDE/evil) has to exist, with files in it, or deleting it would remove nothing.
+        const nameFolder = path.join(MUSIC, EVIL);
+        expect(nameFolder).toBe(path.join(OUTSIDE, "evil"));
+        put(OUTSIDE, "evil/song.flac");
+        put(OUTSIDE, "evil/keep.jpg");
+        const { artist } = await artistWith(EVIL, [`${EVIL}.flac`, `${EVIL}/song.flac`]);
 
         await request(app).delete(`/artists/${artist}`);
 
+        expect(exists(nameFolder)).toBe(true);
+        expect(exists(path.join(nameFolder, "song.flac"))).toBe(true);
+        expect(exists(path.join(nameFolder, "keep.jpg"))).toBe(true);
         expect(exists(path.join(OUTSIDE, "evil.flac"))).toBe(true);
         expect(exists(path.join(OUTSIDE, "one.flac"))).toBe(true);
     });

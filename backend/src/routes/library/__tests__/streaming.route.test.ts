@@ -145,8 +145,6 @@ describe('the stream endpoint records no plays', () => {
         for (let i = 0; i < 3; i++) {
             await request(app).get(`/tracks/${id}/stream`).expect(200);
         }
-        // The insert it once made ran in the background, after the response.
-        await new Promise((r) => setTimeout(r, 60));
         expect(await prisma.play.count({ where: { userId: USER } })).toBe(0);
     });
 

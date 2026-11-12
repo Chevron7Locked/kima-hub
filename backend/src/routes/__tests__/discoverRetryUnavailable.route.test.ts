@@ -53,7 +53,6 @@ app.use((req: any, _res, next) => {
 app.use("/discover", discoverRoutes);
 
 useMidWeekClock();
-afterAll(() => jest.useRealTimers());
 
 // The listener's latest completed batch is last week's, so that is the week the retry works on.
 const WEEK = addWeeks(startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON }), -1);

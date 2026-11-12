@@ -37,7 +37,6 @@ app.use((req: any, _res, next) => {
 app.use("/discover", discoverRoutes);
 
 useMidWeekClock();
-afterAll(() => jest.useRealTimers());
 
 // "Today" is in the calendar week starting THIS_WEEK.
 const THIS_WEEK = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });

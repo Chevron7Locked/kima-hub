@@ -7,8 +7,11 @@
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
+import path from 'path';
 import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
+import { coversBasePath } from '../../services/imageStorage';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const TAG = 'zz-share-route';
@@ -145,10 +148,40 @@ describe('DELETE /share/:token -- revoke share link', () => {
 });
 
 describe('GET /share/:token/cover-art/:coverArtId', () => {
-    it('answers a cover id holding a lone percent sign with 404, not a server error', async () => {
-        await prisma.shareLink.create({ data: { token: TOKEN, entityType: 'track', entityId: trackId, createdBy: OWNER } });
+    const coverUrl = (id: string) => `/share/${TOKEN}/cover-art/${encodeURIComponent(id)}`;
+    const made: string[] = [];
+    const putFile = (full: string) => {
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, 'cover bytes');
+        made.push(full);
+    };
 
-        const res = await request(app).get(`/share/${TOKEN}/cover-art/${encodeURIComponent('native:50%off')}`);
+    beforeEach(() => prisma.shareLink.create({ data: { token: TOKEN, entityType: 'track', entityId: trackId, createdBy: OWNER } }));
+    afterEach(() => {
+        for (const full of made.splice(0)) fs.rmSync(full, { force: true });
+    });
+
+    it('answers a cover id holding a lone percent sign with 404, not a server error', async () => {
+        const res = await request(app).get(coverUrl('native:50%off'));
         expect(res.status).toBe(404);
+    });
+
+    it('serves a stored cover whose name holds a lone percent sign', async () => {
+        // The 404 above means "no such file" only if a file by that name is found when it exists.
+        putFile(path.join(coversBasePath(), 'albums', `${TAG}-50%off.jpg`));
+
+        const res = await request(app).get(coverUrl(`native:albums/${TAG}-50%off.jpg`));
+        expect(res.status).toBe(200);
+    });
+
+    it('refuses a cover id that climbs out of the covers folder, though a file is there', async () => {
+        // The file exists, so only the path guard can be the reason for the 404.
+        const outside = path.join(coversBasePath(), '..', `${TAG}-outside-50%off.jpg`);
+        putFile(outside);
+        expect(fs.existsSync(outside)).toBe(true);
+
+        const res = await request(app).get(coverUrl(`native:../${path.basename(outside)}`));
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: 'Cover art not found' });
     });
 });

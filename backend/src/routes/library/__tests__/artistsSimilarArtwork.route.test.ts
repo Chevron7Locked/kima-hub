@@ -117,6 +117,7 @@ describe("the similar-artists strip and where its pictures come from", () => {
 
             expect(res.status).toBe(200);
             const [first] = similarFrom(res);
+            expect(first?.name).toBe(SIMILAR_NAME);
             expect(first?.coverArt ?? null).toBeNull();
         });
 
