@@ -42,6 +42,7 @@ import systemRoutes from "./routes/system";
 import shareRoutes from "./routes/share";
 import eventsRoutes from "./routes/events";
 import eventsTicketRoutes from "./routes/eventsTicket";
+import metricsRoutes from "./routes/metrics";
 import { subsonicRouter } from "./routes/subsonic/index";
 import { dataCacheService } from "./services/dataCache";
 import { enrichmentStateService } from "./services/enrichmentState";
@@ -261,17 +262,7 @@ async function healthHandler(_req: express.Request, res: express.Response) {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-// Prometheus metrics endpoint
-app.get("/api/metrics", requireAuth, async (_req, res) => {
-    try {
-        const { getMetrics } = await import("./utils/metrics");
-        res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-        res.send(await getMetrics());
-    } catch (error) {
-        logger.error("Error generating metrics:", error);
-        res.status(500).send("Error generating metrics");
-    }
-});
+app.use("/api/metrics", metricsRoutes);
 
 // Error handler
 app.use(errorHandler);

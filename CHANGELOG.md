@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - nightly
 
+### Changed
+
+- **Only admins can read `/api/metrics`.** A metrics scraper needs an admin's app key; a member's key is now refused.
+
 ### Fixed
 
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
