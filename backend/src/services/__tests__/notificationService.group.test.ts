@@ -1,6 +1,6 @@
 /**
- * A grouped alert drops only an identical repeat; a new type or link replaces
- * the row and brings it back unread.
+ * A grouped alert drops only an identical repeat, judged by its data whatever
+ * the key order; a new type, link or value replaces the row and brings it back unread.
  */
 
 import { prisma } from "../../utils/db";
@@ -54,4 +54,26 @@ it("replaces the row when only the type changes", async () => {
     await alert("system", "/settings#lidarr");
 
     expect(await only()).toMatchObject({ read: false, type: "system" });
+});
+
+describe("comparing data", () => {
+    // jsonb keeps shorter keys first, so "href" is stored ahead of "albumTitle".
+    const withData = (metadata: Record<string, unknown>) =>
+        notificationService.create({ userId: USER, type: "error", title: "Lidarr", message: "Check it", metadata, groupKey: "nsg" });
+
+    it("drops a repeat whose data matches in a different key order", async () => {
+        await withData({ albumTitle: "Blue", href: "/settings#lidarr", nested: { zeta: 1, a: [1, 2] }, gone: undefined });
+        await markRead();
+        await withData({ nested: { a: [1, 2], zeta: 1 }, href: "/settings#lidarr", albumTitle: "Blue" });
+
+        expect((await only()).read).toBe(true);
+    });
+
+    it("replaces the row when the data differs", async () => {
+        await withData({ albumTitle: "Blue", href: "/settings#lidarr", nested: { a: [1, 2] } });
+        await markRead();
+        await withData({ albumTitle: "Blue", href: "/settings#lidarr", nested: { a: [2, 1] } });
+
+        expect(await only()).toMatchObject({ read: false, metadata: { nested: { a: [2, 1] } } });
+    });
 });

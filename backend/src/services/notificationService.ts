@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { eventBus } from "./eventBus";
@@ -25,6 +26,10 @@ interface CreateNotificationParams {
     renotify?: boolean;
 }
 
+/** Stored data against new data as it would be stored. jsonb reorders keys, so text can't be compared. */
+const sameData = (stored: unknown, next: CreateNotificationParams["metadata"]) =>
+    isDeepStrictEqual(stored ?? null, JSON.parse(JSON.stringify(next ?? null)));
+
 class NotificationService {
     async create(params: CreateNotificationParams) {
         const { userId, type, title, message, metadata, groupKey, renotify } = params;
@@ -38,7 +43,7 @@ class NotificationService {
                 existing.type === type &&
                 existing.title === title &&
                 existing.message === (message ?? null) &&
-                JSON.stringify(existing.metadata ?? null) === JSON.stringify(metadata ?? null);
+                sameData(existing.metadata, metadata);
             if (!renotify && identical) return existing;
             const fields = { type, title, message: message ?? null, metadata };
             notification = await prisma.notification.upsert({
