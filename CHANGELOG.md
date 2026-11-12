@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
+- **Subsonic playlists and the saved play queue show only songs that play.** A Discover suggestion, a song whose file is missing or one that could not be read is left out of a playlist's songs, count and length, and out of the queue a Subsonic app resumes. If the current song is one of them, the queue resumes at the next song. The songs stay in the playlist and come back when their file does, and a Subsonic app saving the playlist keeps them.
 
 ## [1.12.4] - 2026-11-07
 

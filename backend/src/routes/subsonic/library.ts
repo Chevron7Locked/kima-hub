@@ -4,7 +4,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 
 export const libraryRouter = Router();
@@ -69,10 +69,10 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
         where: { id },
         include: {
             albums: {
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 orderBy: { year: "desc" },
                 include: {
-                    _count: { select: { tracks: { where: PLAYABLE } } },
+                    _count: { select: { tracks: { where: PLAYABLE_SONG } } },
                 },
             },
         },
@@ -140,7 +140,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         where: { id: artistId },
         include: {
             albums: {
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 orderBy: { year: "desc" },
             },
         },
@@ -181,7 +181,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         include: {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
-                where: PLAYABLE,
+                where: PLAYABLE_SONG,
                 orderBy: [
                     { discNumber: { sort: "asc", nulls: "first" } },
                     { trackNo: "asc" },
@@ -224,7 +224,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
         include: {
             artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
-                where: PLAYABLE,
+                where: PLAYABLE_SONG,
                 orderBy: [
                     { discNumber: { sort: "asc", nulls: "first" } },
                     { trackNo: "asc" },
@@ -308,8 +308,8 @@ const ALBUM_LIST_SELECT = Prisma.sql`
     SELECT a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
            json_build_object('id', ar.id, 'name', ar.name, 'displayName', ar."displayName",
                'genres', ar.genres, 'userGenres', ar."userGenres") as artist,
-           (SELECT COUNT(*)::int FROM "Track" t2 WHERE t2."albumId" = a.id AND t2.corrupt = false AND t2."missingSince" IS NULL) as "songCount",
-           (SELECT COALESCE(SUM(t2.duration), 0) FROM "Track" t2 WHERE t2."albumId" = a.id AND t2.corrupt = false AND t2."missingSince" IS NULL) as "totalDuration"
+           (SELECT COUNT(*)::int FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "songCount",
+           (SELECT COALESCE(SUM(t2.duration), 0) FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "totalDuration"
     FROM "Album" a
     JOIN "Artist" ar ON a."artistId" = ar.id
 `;
@@ -323,7 +323,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
     const albumInclude = {
         artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
-        tracks: { where: PLAYABLE, select: { duration: true } },
+        tracks: { where: PLAYABLE_SONG, select: { duration: true } },
     } as const;
 
     let albums: AlbumWithArtist[] = [];
@@ -331,7 +331,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
     switch (type) {
         case "newest":
             albums = await prisma.album.findMany({
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 orderBy: { lastSynced: "desc" },
                 take: size,
                 skip: offset,
@@ -341,7 +341,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
         case "alphabeticalByName":
             albums = await prisma.album.findMany({
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 orderBy: { sortName: "asc" },
                 take: size,
                 skip: offset,
@@ -351,7 +351,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
         case "alphabeticalByArtist":
             albums = await prisma.album.findMany({
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 // "alphabeticalByArtist" means alphabetical to the user, and a
                 // user does not file The Beatles under T.
                 orderBy: { artist: { sortName: "asc" } },
@@ -369,12 +369,11 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             }
             albums = await prisma.album.findMany({
                 where: {
-                    location: LIBRARY_LOCATION,
                     year: {
                         gte: Math.min(fromYear, toYear),
                         lte: Math.max(fromYear, toYear),
                     },
-                    tracks: { some: PLAYABLE },
+                    tracks: { some: PLAYABLE_SONG },
                 },
                 orderBy: { year: fromYear <= toYear ? "asc" : "desc" },
                 take: size,
@@ -394,9 +393,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             const genreArtistIds = await libraryArtistIdsForGenre(genre);
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
-                WHERE a."location" = 'LIBRARY'
-                  AND ${genreArtistIds.length > 0 ? Prisma.sql`a."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
-                  AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t.corrupt = false AND t."missingSince" IS NULL)
+                WHERE ${genreArtistIds.length > 0 ? Prisma.sql`a."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
+                  AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND ${playableSongSql("t", "a")})
                 ORDER BY a."sortName" ASC
                 LIMIT ${size} OFFSET ${offset}
             `);
@@ -407,10 +405,9 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "starred":
             albums = await prisma.album.findMany({
                 where: {
-                    location: LIBRARY_LOCATION,
                     tracks: {
                         some: {
-                            ...PLAYABLE,
+                            ...PLAYABLE_SONG,
                             likedBy: { some: { userId } },
                         },
                     },
@@ -425,8 +422,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "random": {
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
-                WHERE a."location" = 'LIBRARY'
-                  AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t.corrupt = false AND t."missingSince" IS NULL)
+                WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND ${playableSongSql("t", "a")})
                 ORDER BY RANDOM()
                 LIMIT ${size}
             `);
@@ -439,9 +435,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN "Play" p ON p."trackId" = t.id
-                WHERE a."location" = 'LIBRARY'
-                  AND p."userId" = ${userId}
-                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND t3.corrupt = false AND t3."missingSince" IS NULL)
+                WHERE p."userId" = ${userId}
+                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY MAX(p."playedAt") DESC
@@ -456,9 +451,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN "Play" p ON p."trackId" = t.id
-                WHERE a."location" = 'LIBRARY'
-                  AND p."userId" = ${userId}
-                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND t3.corrupt = false AND t3."missingSince" IS NULL)
+                WHERE p."userId" = ${userId}
+                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY COUNT(p.id) DESC
@@ -470,7 +464,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
         default:
             albums = await prisma.album.findMany({
-                where: { location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { tracks: { some: PLAYABLE_SONG } },
                 orderBy: { lastSynced: "desc" },
                 take: size,
                 skip: offset,

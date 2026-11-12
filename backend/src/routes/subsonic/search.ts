@@ -1,13 +1,12 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { PLAYABLE, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
-import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 
 export const searchRouter = Router();
@@ -159,7 +158,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     if (!enumerateLibrary && rawAlbums.length > 0) {
         const libraryIds = new Set(
             (await prisma.album.findMany({
-                where: { id: { in: rawAlbums.map((a) => a.id) }, location: LIBRARY_LOCATION, tracks: { some: PLAYABLE } },
+                where: { id: { in: rawAlbums.map((a) => a.id) }, tracks: { some: PLAYABLE_SONG } },
                 select: { id: true },
             })).map((a) => a.id)
         );

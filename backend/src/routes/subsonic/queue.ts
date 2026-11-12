@@ -2,6 +2,7 @@ import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 
 export const queueRouter = Router();
 
@@ -35,6 +36,34 @@ function mapQueueEntry(item: QueueTrack) {
         "@_artist": item.artist?.name || undefined,
         "@_coverArt": item.album?.coverArt || item.album?.id || undefined,
         "@_duration": item.duration || 0,
+    };
+}
+
+/**
+ * The saved queue as a Subsonic client sees it: only its playable songs, the stored queue left as it is (the web
+ * player shares it, and a song whose file comes back returns to it). When the current song is left out, the next
+ * playable one becomes current (else the last one before it), from its start.
+ */
+async function playableQueue(state: { queue: unknown; currentIndex: number; position: number } | null) {
+    const saved = getQueueFromPlaybackState(state?.queue);
+    const playable = new Set(
+        saved.length === 0
+            ? []
+            : (
+                  await prisma.track.findMany({
+                      where: { id: { in: saved.map((item) => item.id) }, ...PLAYABLE_SONG },
+                      select: { id: true },
+                  })
+              ).map((t) => t.id),
+    );
+    const savedIndex = Math.min(Math.max(state?.currentIndex ?? 0, 0), Math.max(saved.length - 1, 0));
+    const shownBefore = saved.slice(0, savedIndex).filter((item) => playable.has(item.id)).length;
+    const queue = saved.filter((item) => playable.has(item.id));
+    const currentKept = saved.length > 0 && playable.has(saved[savedIndex].id);
+    return {
+        queue,
+        currentIndex: queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1),
+        position: currentKept ? (state?.position ?? 0) : 0,
     };
 }
 
@@ -98,18 +127,15 @@ queueRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const state = await prisma.playbackState.findUnique({ where: { userId } });
 
-    const queue = getQueueFromPlaybackState(state?.queue);
-    const currentIndex = state?.currentIndex ?? 0;
-    const currentId = queue.length > 0
-        ? queue[Math.min(Math.max(currentIndex, 0), queue.length - 1)]?.id
-        : undefined;
+    const { queue, currentIndex, position } = await playableQueue(state);
+    const currentId = queue[currentIndex]?.id;
 
     const entry = queue.map(mapQueueEntry);
 
     return subsonicOk(req, res, {
         playQueue: {
             "@_current": currentId,
-            "@_position": state?.position ?? 0,
+            "@_position": position,
             "@_username": req.user!.username,
             "@_changed": state?.updatedAt?.toISOString() || new Date().toISOString(),
             "@_changedBy": state?.changedBy || "Kima",
@@ -122,17 +148,14 @@ queueRouter.all("/getPlayQueueByIndex.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const state = await prisma.playbackState.findUnique({ where: { userId } });
 
-    const queue = getQueueFromPlaybackState(state?.queue);
-    const currentIndex = queue.length > 0
-        ? Math.min(Math.max(state?.currentIndex ?? 0, 0), queue.length - 1)
-        : 0;
+    const { queue, currentIndex, position } = await playableQueue(state);
 
     const entry = queue.map(mapQueueEntry);
 
     return subsonicOk(req, res, {
         playQueueByIndex: {
             "@_currentIndex": currentIndex,
-            "@_position": state?.position ?? 0,
+            "@_position": position,
             "@_username": req.user!.username,
             "@_changed": state?.updatedAt?.toISOString() || new Date().toISOString(),
             "@_changedBy": state?.changedBy || "Kima",

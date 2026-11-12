@@ -5,8 +5,15 @@ import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, wrap } from "./mappers";
 import { announcePlaylistChange } from "../../services/playlistEvents";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 
 export const playlistRouter = Router();
+
+/**
+ * A Subsonic client sees only a playlist's playable songs: its entries, counts, length and the indexes it removes by
+ * all leave the others out. They stay in the playlist (the web marks them unavailable) and return when their file does.
+ */
+const SHOWN = { track: PLAYABLE_SONG } as const;
 
 // ===================== PLAYLISTS =====================
 
@@ -16,8 +23,8 @@ playlistRouter.all("/getPlaylists.view", wrap(async (req, res) => {
     const playlists = await prisma.playlist.findMany({
         where: { OR: [{ userId }, { isPublic: true }] },
         include: {
-            _count: { select: { items: true } },
-            items: { select: { track: { select: { duration: true } } } },
+            _count: { select: { items: { where: SHOWN } } },
+            items: { where: SHOWN, select: { track: { select: { duration: true } } } },
             user: { select: { username: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -37,13 +44,14 @@ playlistRouter.all("/getPlaylists.view", wrap(async (req, res) => {
     });
 }));
 
-/** A playlist with its owner's name and its songs in order, each with album and artist. */
+/** A playlist with its owner's name and its playable songs in order, each with album and artist. */
 function loadPlaylist(id: string) {
     return prisma.playlist.findUnique({
         where: { id },
         include: {
             user: { select: { username: true } },
             items: {
+                where: SHOWN,
                 orderBy: { rank: "asc" },
                 include: { track: { include: { album: { include: { artist: true } } } } },
             },
@@ -123,24 +131,32 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
         }
 
         // Replacing rewrites every entry (new ids, even for the same songs): devices are told unless nothing was there
-        // before or after.
-        const written = await prisma.$transaction([
-            prisma.playlistItem.deleteMany({ where: { playlistId } }),
-            ...(songIds.length > 0 ? [
-                prisma.playlistItem.createMany({
-                    // rank is the playlist order and must be unique per playlist.
-                    data: songIds.map((trackId, index) => ({
-                        playlistId,
-                        trackId,
-                        sort: index,
-                        rank: rankForPosition(index),
-                    })),
-                    skipDuplicates: true,
-                }),
-            ] : []),
-        ]);
+        // before or after. The client replaces only the songs it was shown; the hidden ones are kept, after them, so a
+        // song whose file comes back is not lost to a client that saved the playlist meanwhile.
+        const written = await prisma.$transaction(async (tx) => {
+            await lockPlaylist(tx, playlistId);
+            const hidden = (
+                await tx.playlistItem.findMany({
+                    where: { playlistId, NOT: SHOWN, trackId: { notIn: songIds } },
+                    orderBy: { rank: "asc" },
+                    select: { trackId: true },
+                })
+            ).map((item) => item.trackId);
+            const removed = await tx.playlistItem.deleteMany({ where: { playlistId } });
+            // rank is the playlist order and must be unique per playlist.
+            const created = await tx.playlistItem.createMany({
+                data: [...songIds, ...hidden].map((trackId, index) => ({
+                    playlistId,
+                    trackId,
+                    sort: index,
+                    rank: rankForPosition(index),
+                })),
+                skipDuplicates: true,
+            });
+            return removed.count > 0 || created.count > 0;
+        });
         resolvedPlaylistId = playlistId;
-        changed = written.some((result) => result.count > 0);
+        changed = written;
     } else if (name) {
         // One write: the playlist exists with all its songs or not at all. A song named twice is kept once, first.
         const playlist = await prisma.playlist.create({
@@ -233,8 +249,9 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
         }
 
         if (indexesToRemove.length > 0) {
+            // The indexes count the entries the client was shown.
             const currentItems = await tx.playlistItem.findMany({
-                where: { playlistId },
+                where: { playlistId, ...SHOWN },
                 orderBy: { rank: "asc" },
                 select: { id: true },
             });
