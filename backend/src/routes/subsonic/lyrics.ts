@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 
 export const lyricsRouter = Router();
 
@@ -12,8 +13,8 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
     }
 
     const [track, lyrics] = await Promise.all([
-        prisma.track.findUnique({
-            where: { id },
+        prisma.track.findFirst({
+            where: { id, ...PLAYABLE_SONG },
             include: {
                 album: {
                     include: {
@@ -25,7 +26,10 @@ lyricsRouter.all("/getLyricsBySongId.view", wrap(async (req, res) => {
         prisma.trackLyrics.findUnique({ where: { track_id: id } }),
     ]);
 
-    if (!track || !lyrics) {
+    if (!track) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
+    }
+    if (!lyrics) {
         return subsonicOk(req, res, { lyricsList: {} });
     }
 

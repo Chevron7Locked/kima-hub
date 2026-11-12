@@ -25,6 +25,7 @@ import { libraryRouter } from "../../routes/subsonic/library";
 import { starredRouter } from "../../routes/subsonic/starred";
 import { playlistRouter } from "../../routes/subsonic/playlists";
 import { queueRouter } from "../../routes/subsonic/queue";
+import { lyricsRouter } from "../../routes/subsonic/lyrics";
 
 const P = "zz-playable";
 const USER = `${P}-user`;
@@ -35,13 +36,15 @@ const BYTES = Buffer.from("fLaC-playable-song-bytes");
 const YEAR = 1901;
 const GENRE = `${P}-genre`;
 const PLAYLIST = `${P}-playlist`;
+/** Someone else listening to one seeded song, so the now-playing list has each to offer. */
+const listenerOf = (kind: string) => `${P}-listener-${kind}`;
 
 const app = express()
     .use((req: any, _res, next) => {
         req.user = { id: USER, username: USER, role: "user" };
         next();
     })
-    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter);
+    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter);
 const subsonic = (route: string, query: Record<string, string | string[]>) =>
     request(app).get(`/rest/${route}`).query({ u: USER, f: "json", ...query });
 
@@ -135,13 +138,25 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     "Subsonic getPlaylist": async () => idsOf((await reply("getPlaylist.view", { id: PLAYLIST })).playlist.entry),
     "Subsonic getPlayQueue": async () => idsOf((await reply("getPlayQueue.view", {})).playQueue.entry),
     "Subsonic getPlayQueueByIndex": async () => idsOf((await reply("getPlayQueueByIndex.view", {})).playQueueByIndex.entry),
+    "Subsonic getNowPlaying": async () =>
+        idsOf((await reply("getNowPlaying.view", {})).nowPlaying.entry).filter((id) => id.startsWith(P)),
+    "Subsonic getBookmarks": async () =>
+        ((await reply("getBookmarks.view", {})).bookmarks.bookmark ?? []).map((b: { entry: { id: string } }) => b.entry.id),
+    "Subsonic getLyrics by artist and title": async () => {
+        const found = await Promise.all(
+            Object.entries(SONG).map(async ([kind, id]) =>
+                (await reply("getLyrics.view", { artist: P, title: `${P} ${kind}` })).lyrics.title ? [id] : [],
+            ),
+        );
+        return found.flat();
+    },
 };
 
 type Answer = { status: number; body: Buffer };
 const subsonicBody = (res: Answer) => JSON.parse(res.body.toString())["subsonic-response"];
 const sendsTheFile = (res: Answer) => expect(res.body.equals(BYTES)).toBe(true);
 
-/** Every Subsonic route that plays one song by id, and what it answers for a playable song. */
+/** Every Subsonic route that plays or shows one song by id, and what it answers for a playable song. */
 const STREAMS: Record<string, { ask: (id: string) => request.Test; plays: (res: Answer) => void }> = {
     "stream.view": { ask: (id) => subsonic("stream.view", { id }), plays: sendsTheFile },
     "download.view": { ask: (id) => subsonic("download.view", { id }), plays: sendsTheFile },
@@ -153,10 +168,18 @@ const STREAMS: Record<string, { ask: (id: string) => request.Test; plays: (res: 
         ask: (id) => subsonic("getTranscodeDecision.view", { mediaId: id, mediaType: "song" }),
         plays: (res) => expect(subsonicBody(res).transcodeDecision.canDirectPlay).toBe(true),
     },
+    "getSong.view": {
+        ask: (id) => subsonic("getSong.view", { id }),
+        plays: (res) => expect(subsonicBody(res).song.id).toBe(SONG.playable),
+    },
+    "getLyricsBySongId.view": {
+        ask: (id) => subsonic("getLyricsBySongId.view", { id }),
+        plays: (res) => expect(subsonicBody(res).lyricsList.structuredLyrics).toBeDefined(),
+    },
 };
 
 async function cleanup() {
-    await prisma.user.deleteMany({ where: { id: USER } });
+    await prisma.user.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
@@ -165,7 +188,7 @@ async function cleanup() {
 beforeAll(async () => {
     await cleanup();
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
-    await prisma.artist.create({ data: { id: `${P}-ar`, name: P, identityKey: `${P}-ar`, libraryAlbumCount: 3, genres: [GENRE] } });
+    await prisma.artist.create({ data: { id: `${P}-ar`, name: P, normalizedName: P, identityKey: `${P}-ar`, libraryAlbumCount: 3, genres: [GENRE] } });
     for (const [kind, id] of Object.entries(SONG)) {
         // Each file is on disk, so a refusal can only come from the rule, never from a file the stream could not open.
         const rel = `${P}/${kind}.flac`;
@@ -202,6 +225,18 @@ beforeAll(async () => {
         // Played and liked, so the lists of starred, recent and frequent music have it to offer.
         await prisma.play.create({ data: { userId: USER, trackId: id } });
         await prisma.likedTrack.create({ data: { userId: USER, trackId: id } });
+        await prisma.subsonicBookmark.create({ data: { userId: USER, trackId: id, position: 1000 } });
+        await prisma.trackLyrics.create({ data: { track_id: id, plain_lyrics: `${kind} words`, synced_lyrics: `[00:01.00]${kind} words`, source: "test" } });
+        await prisma.user.create({
+            data: {
+                id: listenerOf(kind),
+                username: listenerOf(kind),
+                passwordHash: "x",
+                role: "user",
+                tokenVersion: 0,
+                playbackState: { create: { playbackType: "track", trackId: id } },
+            },
+        });
     }
     const ids = Object.values(SONG);
     await prisma.playlist.create({
@@ -243,7 +278,7 @@ describe.each(Object.entries(STREAMS))("Subsonic %s", (_name, { ask, plays }) =>
         plays(res);
     });
 
-    it.each(Object.entries(SONG).filter(([kind]) => kind !== "playable"))("answers not-found for the %s song", async (_kind, id) => {
+    it.each([...Object.entries(SONG).filter(([kind]) => kind !== "playable"), ["unknown", `${P}-unknown`]])("answers not-found for the %s song", async (_kind, id) => {
         const res = await answer(id);
         expect(res.status).toBe(200);
         expect(subsonicBody(res)).toMatchObject({ status: "failed", error: { code: 70 } });
@@ -296,6 +331,76 @@ describe("the songs left out of a Subsonic list", () => {
         expect((await reply("getPlaylist.view", { id: PLAYLIST })).playlist.entry).toBeUndefined();
         const kept = await prisma.playlistItem.findMany({ where: { playlistId: PLAYLIST }, orderBy: { rank: "asc" }, select: { trackId: true } });
         expect(kept.map((i) => i.trackId)).toEqual(UNPLAYABLE);
+    });
+
+    it("start the song made current from its beginning when the client's current one was unknown", async () => {
+        await subsonic("savePlayQueue.view", { id: [SONG.playable, `${P}-unknown`, second], current: `${P}-unknown`, position: "4200" }).expect(200);
+        expect((await reply("getPlayQueue.view", {})).playQueue).toMatchObject({ current: second, position: 0 });
+        await subsonic("savePlayQueueByIndex.view", { id: [SONG.playable, `${P}-unknown`, second], currentIndex: "1", position: "4200" }).expect(200);
+        expect((await reply("getPlayQueueByIndex.view", {})).playQueueByIndex).toMatchObject({ currentIndex: 1, position: 0 });
+    });
+
+    it("point the saved current song at the queue as stored when an id was unknown", async () => {
+        await subsonic("savePlayQueue.view", { id: [`${P}-unknown`, SONG.playable, second], current: SONG.playable }).expect(200);
+        expect((await reply("getPlayQueue.view", {})).playQueue).toMatchObject({ current: SONG.playable });
+        await subsonic("savePlayQueueByIndex.view", { id: [`${P}-unknown`, SONG.playable, second], currentIndex: "1" }).expect(200);
+        expect((await reply("getPlayQueueByIndex.view", {})).playQueueByIndex).toMatchObject({ currentIndex: 0 });
+        expect((await reply("getPlayQueue.view", {})).playQueue).toMatchObject({ current: SONG.playable });
+    });
+
+    it.each(UNPLAYABLE.map((id) => [id]))("cannot be added to a playlist or bookmarked: %s", async (id) => {
+        const refused = { status: "failed", error: { code: 70 } };
+        expect((await subsonic("createPlaylist.view", { name: `${P}-new`, songId: [SONG.playable, id] }).expect(200)).body["subsonic-response"]).toMatchObject(refused);
+        expect((await subsonic("createPlaylist.view", { playlistId: PLAYLIST, songId: id }).expect(200)).body["subsonic-response"]).toMatchObject(refused);
+        expect((await subsonic("updatePlaylist.view", { playlistId: PLAYLIST, songIdToAdd: id }).expect(200)).body["subsonic-response"]).toMatchObject(refused);
+        expect((await subsonic("createBookmark.view", { id, position: "5" }).expect(200)).body["subsonic-response"]).toMatchObject(refused);
+        expect(await prisma.playlist.count({ where: { userId: USER, name: `${P}-new` } })).toBe(0);
+    });
+
+    it("leave a scrobble answered but unrecorded, while a playable song's scrobble counts", async () => {
+        const time = String(Date.UTC(2001, 0, 1));
+        for (const id of [...UNPLAYABLE, SONG.playable]) {
+            await subsonic("scrobble.view", { id, submission: "true", time }).expect(200);
+        }
+        const recorded = await prisma.play.findMany({ where: { userId: USER, playedAt: new Date(Number(time)) }, select: { trackId: true } });
+        expect(recorded.map((p) => p.trackId)).toEqual([SONG.playable]);
+    });
+
+    it("leave a batch scrobble's unplayable songs unrecorded and record each playable one at its own time", async () => {
+        const times = [Date.UTC(2002, 0, 1), Date.UTC(2002, 0, 2), Date.UTC(2002, 0, 3)];
+        await subsonic("scrobble.view", { id: [SONG.playable, SONG.discover, second], time: times.map(String), submission: "true" }).expect(200);
+        const recorded = await prisma.play.findMany({
+            where: { userId: USER, playedAt: { in: times.map((t) => new Date(t)) } },
+            orderBy: { playedAt: "asc" },
+            select: { trackId: true, playedAt: true },
+        });
+        expect(recorded).toEqual([
+            { trackId: SONG.playable, playedAt: new Date(times[0]) },
+            { trackId: second, playedAt: new Date(times[2]) },
+        ]);
+    });
+
+    it("answer a now-playing scrobble of an unplayable song ok", async () => {
+        for (const id of UNPLAYABLE) {
+            expect((await reply("scrobble.view", { id, submission: "false" })).status).toBe("ok");
+        }
+    });
+
+    it("are not picked for lyrics by a title the database folds", async () => {
+        // A non-ASCII title is matched in SQL, not by Prisma; the four songs get one, then their own back.
+        for (const [kind, id] of Object.entries(SONG)) await prisma.track.update({ where: { id }, data: { title: `${P} ${kind} ü` } });
+        try {
+            for (const artist of [P, undefined]) {
+                const found = [];
+                for (const [kind, id] of Object.entries(SONG)) {
+                    const lyrics = (await reply("getLyrics.view", { ...(artist ? { artist } : {}), title: `${P} ${kind} Ü` })).lyrics;
+                    if (lyrics.title) found.push(id);
+                }
+                expect(found).toEqual([SONG.playable]);
+            }
+        } finally {
+            for (const [kind, id] of Object.entries(SONG)) await prisma.track.update({ where: { id }, data: { title: `${P} ${kind}` } });
+        }
     });
 
     it("are kept when a client replaces the playlist with the songs it was shown", async () => {

@@ -117,6 +117,17 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
         }));
 }
 
+/**
+ * Where the client's current song sits in the queue as stored, which leaves out the ids it did not know. The songs
+ * before it that were dropped no longer count, so the stored index still names the client's current song.
+ */
+function storedIndex(ids: string[], stored: QueueTrack[], clientIndex: number): number {
+    if (stored.length === 0) return 0;
+    const known = new Set(stored.map((item) => item.id));
+    const before = ids.slice(0, clientIndex).filter((id) => known.has(id)).length;
+    return Math.min(before, stored.length - 1);
+}
+
 /** The client writing the queue, stored so other devices see who changed it. */
 function clientName(req: Request): string {
     const c = req.query.c as string | undefined;
@@ -191,34 +202,34 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     }
 
     const queueItems = await hydrateQueue(ids);
-    const currentIndex =
-        current && ids.length > 0
-            ? Math.max(0, ids.indexOf(current))
-            : 0;
+    const currentIndex = current ? storedIndex(ids, queueItems, ids.indexOf(current)) : 0;
+    const currentTrackId = queueItems[currentIndex]?.id ?? null;
+    // A current song Kima does not know was dropped, so the song now current starts from its beginning.
+    const storedPosition = currentTrackId === current ? safePosition : 0;
 
     await prisma.playbackState.upsert({
         where: { userId },
         update: {
             playbackType: "track",
-            trackId: current || null,
+            trackId: currentTrackId,
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex,
             isShuffle: false,
-            position: safePosition,
+            position: storedPosition,
             changedBy: clientName(req),
         },
         create: {
             userId,
             playbackType: "track",
-            trackId: current || null,
+            trackId: currentTrackId,
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             currentIndex,
             isShuffle: false,
-            position: safePosition,
+            position: storedPosition,
             changedBy: clientName(req),
         },
     });
@@ -274,7 +285,10 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     }
 
     const queueItems = await hydrateQueue(ids);
-    const currentTrackId = ids.length > 0 ? ids[parsedIndex] : null;
+    const currentIndex = storedIndex(ids, queueItems, parsedIndex);
+    const currentTrackId = queueItems[currentIndex]?.id ?? null;
+    // A current song Kima does not know was dropped, so the song now current starts from its beginning.
+    const storedPosition = ids.length > 0 && currentTrackId === ids[parsedIndex] ? safePosition : 0;
 
     await prisma.playbackState.upsert({
         where: { userId },
@@ -284,9 +298,9 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            currentIndex: ids.length > 0 ? parsedIndex : 0,
+            currentIndex,
             isShuffle: false,
-            position: safePosition,
+            position: storedPosition,
             changedBy: clientName(req),
         },
         create: {
@@ -296,9 +310,9 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            currentIndex: ids.length > 0 ? parsedIndex : 0,
+            currentIndex,
             isShuffle: false,
-            position: safePosition,
+            position: storedPosition,
             changedBy: clientName(req),
         },
     });

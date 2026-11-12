@@ -15,7 +15,7 @@ import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
 
 export const playbackRouter = Router();
@@ -74,7 +74,6 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
             user: { select: { username: true } },
         },
         orderBy: { updatedAt: "desc" },
-        take: 50,
     });
 
     const trackIds = states
@@ -83,7 +82,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
 
     const tracks = trackIds.length > 0
         ? await prisma.track.findMany({
-              where: { id: { in: trackIds } },
+              where: { id: { in: trackIds }, ...PLAYABLE_SONG },
               include: {
                   album: {
                       include: {
@@ -104,6 +103,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
 
     const trackById = new Map(tracks.map((track) => [track.id, track]));
 
+    // One state per listener; the limit counts only the songs shown, so unplayable ones never crowd them out.
     const entries = states.flatMap((state) => {
         if (!state.trackId) return [];
         const track = trackById.get(state.trackId);
@@ -122,8 +122,9 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
         }];
     });
 
+    const shown = entries.slice(0, 50);
     return subsonicOk(req, res, {
-        nowPlaying: entries.length > 0 ? { entry: entries } : {},
+        nowPlaying: shown.length > 0 ? { entry: shown } : {},
     });
 }));
 
@@ -311,33 +312,47 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 // ===================== SCROBBLE =====================
 
 playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
-    if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+    // A client may send several plays at once: `id` repeated, each with its own `time` in the same order.
+    const ids = ([] as unknown[]).concat(req.query.id ?? []).filter((v): v is string => typeof v === "string" && v !== "");
+    const times = ([] as unknown[]).concat(req.query.time ?? []);
+    if (ids.length === 0) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     const userId = req.user!.id;
     // submission=false is "now playing": it starts the public live trip, never a play.
     const submission = req.query.submission !== "false";
 
-    if (!submission && config.publicVibe && userId === (await publicUserId())) {
-        const track = await prisma.track.findUnique({ where: { id }, select: { duration: true } });
+    // Only a playable song can have been played here; any other is answered ok and not recorded, since a client
+    // that saw an error would retry it.
+    const durations = new Map(
+        (
+            await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, select: { id: true, duration: true } })
+        ).map((t) => [t.id, t.duration]),
+    );
+
+    const nowPlaying = ids[ids.length - 1];
+    const duration = durations.get(nowPlaying);
+    if (!submission && duration !== undefined && config.publicVibe && userId === (await publicUserId())) {
         // A repeat "now playing" for the current track is a resume, not a restart.
         const live = getLiveState();
-        const position = live.trackId === id && live.status !== "stopped" ? live.position : 0;
-        if (track) reportLive({ status: "playing", trackId: id, position, duration: track.duration * 1000, queue: [] });
+        const position = live.trackId === nowPlaying && live.status !== "stopped" ? live.position : 0;
+        reportLive({ status: "playing", trackId: nowPlaying, position, duration: duration * 1000, queue: [] });
     }
 
     if (submission) {
-        // A client's scrobble counts as played (client-attested); the 30-second
-        // floor and the duplicate window in playRecording.ts still apply.
-        const timeMs = req.query.time ? parseInt(req.query.time as string, 10) : Date.now();
-        const playedAt = isNaN(timeMs) ? new Date() : new Date(timeMs);
-        await recordPlay({
-            userId,
-            trackId: id,
-            clientAttestedComplete: true,
-            source: ListenSource.SUBSONIC,
-            playedAt,
-        }).catch((err: unknown) => logger.warn("[Subsonic] scrobble play-log failed:", err));
+        for (const [i, id] of ids.entries()) {
+            if (!durations.has(id)) continue;
+            // A client's scrobble counts as played (client-attested); the 30-second
+            // floor and the duplicate window in playRecording.ts still apply.
+            const timeMs = typeof times[i] === "string" ? parseInt(times[i] as string, 10) : Date.now();
+            const playedAt = isNaN(timeMs) ? new Date() : new Date(timeMs);
+            await recordPlay({
+                userId,
+                trackId: id,
+                clientAttestedComplete: true,
+                source: ListenSource.SUBSONIC,
+                playedAt,
+            }).catch((err: unknown) => logger.warn("[Subsonic] scrobble play-log failed:", err));
+        }
     }
 
     return subsonicOk(req, res);
@@ -350,7 +365,7 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
 playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const bookmarks = await prisma.subsonicBookmark.findMany({
-        where: { userId },
+        where: { userId, track: PLAYABLE_SONG },
         include: { track: { include: { album: { include: { artist: true } } } } },
     });
 
@@ -394,6 +409,10 @@ playbackRouter.all("/createBookmark.view", wrap(async (req, res) => {
     }
 
     const comment = (req.query.comment as string) || undefined;
+
+    if (!(await prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG }, select: { id: true } }))) {
+        return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
+    }
 
     await prisma.subsonicBookmark.upsert({
         where: { userId_trackId: { userId, trackId: id } },
@@ -441,10 +460,13 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
                 SELECT t.id FROM "Track" t
                   JOIN "Album" al ON al.id = t."albumId"
                   JOIN "Artist" ar ON ar.id = al."artistId"
-                 WHERE ar."normalizedName" = ${normalizedArtist} AND t.title ~ ${pattern}
+                 WHERE ar."normalizedName" = ${normalizedArtist} AND t.title ~ ${pattern} AND ${playableSongSql("t", "al")}
                  ORDER BY t.id LIMIT 1`
             : await prisma.$queryRaw<{ id: string }[]>`
-                SELECT t.id FROM "Track" t WHERE t.title ~ ${pattern} ORDER BY t.id LIMIT 1`;
+                SELECT t.id FROM "Track" t
+                  JOIN "Album" al ON al.id = t."albumId"
+                 WHERE t.title ~ ${pattern} AND ${playableSongSql("t", "al")}
+                 ORDER BY t.id LIMIT 1`;
         if (!hit) return subsonicOk(req, res, { lyrics: {} });
         titleMatch = { id: hit.id };
     } else if (title) {
@@ -452,8 +474,9 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
     }
 
     const track = await prisma.track.findFirst({
-        where: { ...titleMatch, ...ofArtist },
+        where: { ...titleMatch, ...ofArtist, ...PLAYABLE_SONG },
         include: { trackLyrics: true, album: { include: { artist: true } } },
+        orderBy: { id: "asc" },
     });
 
     if (!track?.trackLyrics) {

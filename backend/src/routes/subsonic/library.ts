@@ -258,8 +258,8 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    const track = await prisma.track.findUnique({
-        where: { id },
+    const track = await prisma.track.findFirst({
+        where: { id, ...PLAYABLE_SONG },
         include: {
             album: {
                 include: {
@@ -268,7 +268,7 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
             },
         },
     });
-    if (!track || track.album.location !== LIBRARY_LOCATION) {
+    if (!track) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 

@@ -94,11 +94,11 @@ playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
     return subsonicOk(req, res, { playlist: playlistReply(playlist) });
 }));
 
-/** Whether every id names a song in the library: a playlist change naming one that does not is refused whole. */
-async function allSongsExist(ids: string[]): Promise<boolean> {
+/** Whether every id names a playable song: a playlist change naming one that does not is refused whole, as not found. */
+async function allSongsPlayable(ids: string[]): Promise<boolean> {
     const unique = [...new Set(ids)];
     if (unique.length === 0) return true;
-    return (await prisma.track.count({ where: { id: { in: unique } } })) === unique.length;
+    return (await prisma.track.count({ where: { id: { in: unique }, ...PLAYABLE_SONG } })) === unique.length;
 }
 
 playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
@@ -114,7 +114,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             ? [rawSongIds]
             : []
     ).filter(Boolean) as string[];
-    if (!(await allSongsExist(songIds))) {
+    if (!(await allSongsPlayable(songIds))) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
@@ -234,7 +234,7 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
         .map((v) => parseInt(v as string, 10))
         .filter((n) => !isNaN(n));
 
-    if (!(await allSongsExist(songIdsToAdd))) {
+    if (!(await allSongsPlayable(songIdsToAdd))) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
 
