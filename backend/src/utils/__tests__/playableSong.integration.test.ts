@@ -21,7 +21,6 @@ import { PLAYABLE_SONG, playableSongSql } from "../libraryEligibility";
 import { compatRouter } from "../../routes/subsonic/compat";
 import { playbackRouter } from "../../routes/subsonic/playback";
 import { searchRouter } from "../../routes/subsonic/search";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-playable";
 const USER = `${P}-user`;
@@ -137,7 +136,6 @@ beforeAll(async () => {
 afterAll(async () => {
     await cleanup();
     fs.rmSync(path.dirname(config.music.musicPath), { recursive: true, force: true });
-    await closeEngineConnections();
 });
 
 describe.each(Object.entries(PICKERS))("%s", (_name, pick) => {

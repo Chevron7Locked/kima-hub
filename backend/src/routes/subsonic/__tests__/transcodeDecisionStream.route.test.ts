@@ -21,7 +21,6 @@ import { parseFile } from "music-metadata";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import { prisma } from "../../../utils/db";
 import { config } from "../../../config";
-import { getAudioStreamingService } from "../../../services/audioStreaming";
 import { compatRouter } from "../compat";
 import { playbackRouter } from "../playback";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
@@ -90,8 +89,6 @@ afterAll(async () => {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: `${P}-al` } });
     await prisma.artist.deleteMany({ where: { id: `${P}-ar` } });
-    // The shared streaming service keeps a cache-eviction timer; stop it so the run can exit.
-    getAudioStreamingService(config.music.transcodeCachePath, config.music.transcodeCacheMaxGb).destroy();
     fs.rmSync(path.dirname(config.music.musicPath), { recursive: true, force: true });
     await closeEngineConnections();
 });

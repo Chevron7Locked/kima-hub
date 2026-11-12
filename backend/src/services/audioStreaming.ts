@@ -66,7 +66,8 @@ export class AudioStreamingService {
             fs.mkdirSync(this.transcodeCachePath, { recursive: true });
         }
 
-        // Start cache eviction timer (every 6 hours)
+        // Cache eviction every 6 hours. Unref'd: the server is kept up by what it serves, and a timer that held the
+        // process would keep any test file that streamed a song running after its last test.
         this.evictionInterval = setInterval(() => {
             this.cacheLimitGb()
                 .then((limit) => this.evictCache(limit))
@@ -74,6 +75,7 @@ export class AudioStreamingService {
                     logger.error("Cache eviction failed:", err);
                 });
         }, 6 * 60 * 60 * 1000);
+        this.evictionInterval.unref();
     }
 
     /** The cache size saved in settings now, so a change applies without a restart; the startup size if unreadable. */
