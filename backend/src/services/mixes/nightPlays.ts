@@ -6,6 +6,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, rankMatches } from "../matching/rank";
@@ -82,7 +83,7 @@ async function energyBand(): Promise<[number, number] | null> {
     const [row] = await prisma.$queryRaw<Array<{ band: number[] | null }>>`
         SELECT percentile_cont(ARRAY[0.25, 0.75]) WITHIN GROUP (ORDER BY t.arousal) AS band
         FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-        WHERE t.arousal IS NOT NULL AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+        WHERE t.arousal IS NOT NULL AND ${playableSongSql("t", "a")}
     `;
     const band: [number, number] | null = row?.band ? [row.band[0], row.band[1]] : null;
     try {
@@ -119,7 +120,7 @@ export async function nightSongs(
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
             WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard
-              AND t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+              AND ${playableSongSql("t", "a")}
               AND (EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) >= ${NIGHT_START_HOUR}
                    OR EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) < ${NIGHT_END_HOUR})
         )

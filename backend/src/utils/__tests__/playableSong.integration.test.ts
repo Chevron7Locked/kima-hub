@@ -16,6 +16,7 @@ import request from "supertest";
 import fs from "fs";
 import path from "path";
 import { prisma } from "../db";
+import { normalizeArtistName } from "../../services/artistIdentity";
 import { config } from "../../config";
 import { PLAYABLE_SONG, playableSongSql } from "../libraryEligibility";
 import { compatRouter } from "../../routes/subsonic/compat";
@@ -26,6 +27,18 @@ import { starredRouter } from "../../routes/subsonic/starred";
 import { playlistRouter } from "../../routes/subsonic/playlists";
 import { queueRouter } from "../../routes/subsonic/queue";
 import { lyricsRouter } from "../../routes/subsonic/lyrics";
+import { Prisma } from "@prisma/client";
+import { redisClient } from "../redis";
+import * as artistSimilarity from "../../services/artistSimilarity";
+import { sampleTrackIds, sampledMix, seededTrackIds, tracksByIds, unplayedTrackIds } from "../../services/mixes/helpers";
+import { generateArtistSimilarMix, generateRandomDiscoveryMix, generateRediscoverMix, generateTopTracksMix } from "../../services/mixes/discoveryMixes";
+import { generateEraMix, generateGenreMix } from "../../services/mixes/genreMixes";
+import { seedsOf } from "../../services/mixes/familiarity";
+import { nightMixTracks, nightSongs } from "../../services/mixes/nightPlays";
+import { generateMinorKeyMix } from "../../services/mixes/moodMixes";
+import { selectRadioTracks } from "../../services/mixes/stationSelection";
+import { stationCovers, type CoverStationType } from "../../services/mixes/stationCovers";
+import { libraryDecades, libraryGenres } from "../../services/mixes/radioRow";
 
 const P = "zz-playable";
 const USER = `${P}-user`;
@@ -36,6 +49,8 @@ const BYTES = Buffer.from("fLaC-playable-song-bytes");
 const YEAR = 1901;
 const GENRE = `${P}-genre`;
 const PLAYLIST = `${P}-playlist`;
+/** The other library artists, each with one album of two playable songs. */
+const FILLERS = Array.from({ length: 9 }, (_, i) => `${P}-f${i}`);
 /** Someone else listening to one seeded song, so the now-playing list has each to offer. */
 const listenerOf = (kind: string) => `${P}-listener-${kind}`;
 
@@ -65,6 +80,28 @@ async function everyAlbum(route: string, key: string, query: Record<string, stri
         if (page.length < 500 || query.type === "random") return all;
     }
 }
+/** The day every mix is drawn for: a Monday, so the weekly mixes are made too. */
+const TODAY = "2026-11-09";
+const ourSongs = Prisma.sql`t.id LIKE ${`${P}%`}`;
+const mixSongs = async (mix: Promise<{ trackIds: string[] } | null>) => {
+    const made = await mix;
+    if (!made) throw new Error("no mix was made from the seeded library");
+    return made.trackIds;
+};
+/** The songs a station plays for USER. */
+async function station(type: string, value?: string): Promise<string[]> {
+    const picked = await selectRadioTracks(type, value, {}, 50, USER);
+    if ("reply" in picked) throw new Error(`the ${type} station answered ${picked.reply.status}`);
+    return picked.trackIds;
+}
+/** The song whose album is USER's cover for a station today; only the seeded songs' albums have covers. */
+async function stationCover(type: CoverStationType, value?: string): Promise<string[]> {
+    const keys = await redisClient.keys(`radiocover:${USER}:*`);
+    if (keys.length) await redisClient.del(...keys);
+    const [cover] = await stationCovers([{ type, value }], USER, "UTC");
+    return Object.values(SONG).filter((id) => coverOf(id) === cover);
+}
+const STATION_TYPES: [string, string | undefined][] = [["all", undefined], ["discovery", undefined], ["favorites", undefined], ["decade", "1900"], ["genre", GENRE], ["artist", `${P}-ar`]];
 const ALBUM_LIST_TYPES = ["newest", "alphabeticalByName", "alphabeticalByArtist", "byYear", "byGenre", "starred", "random", "recent", "frequent"];
 
 /** Every interface that lists songs, each answering the ids it offers. */
@@ -142,6 +179,37 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
         idsOf((await reply("getNowPlaying.view", {})).nowPlaying.entry).filter((id) => id.startsWith(P)),
     "Subsonic getBookmarks": async () =>
         ((await reply("getBookmarks.view", {})).bookmarks.bookmark ?? []).map((b: { entry: { id: string } }) => b.entry.id),
+    "mix helper tracksByIds": async () => (await tracksByIds([...Object.values(SONG)], {})).map((t) => t.id),
+    "mix helper sampleTrackIds": () => sampleTrackIds({ where: { id: { startsWith: P } }, take: 500 }),
+    "mix helper seededTrackIds": () => seededTrackIds(ourSongs, 500, 1),
+    "mix helper sampledMix": () =>
+        mixSongs(sampledMix({ id: "x", type: "x", name: "x", description: "x", colorType: "x", seed: 1, where: ourSongs, minTracks: 5, limit: 500 })),
+    "mix helper unplayedTrackIds": async () => (await unplayedTrackIds({ userId: listenerOf("playable") })).filter((id) => id.startsWith(P)),
+    "Your Top 20 mix": () => mixSongs(generateTopTracksMix(USER)),
+    "Rediscover mix": () => mixSongs(generateRediscoverMix(USER, TODAY)),
+    "More Like mix": async () => {
+        // The one call off the server: every seeded artist is similar.
+        const artists = await prisma.artist.findMany({ where: { id: { startsWith: P } }, select: { name: true } });
+        const similar = jest.spyOn(artistSimilarity, "getSimilarArtists").mockResolvedValue(artists.map((a) => ({ name: a.name })) as never);
+        try {
+            return await mixSongs(generateArtistSimilarMix(USER));
+        } finally {
+            similar.mockRestore();
+        }
+    },
+    "Random Discovery mix": () => mixSongs(generateRandomDiscoveryMix(USER, TODAY)),
+    "decade mix": () => mixSongs(generateEraMix(USER, TODAY)),
+    "genre mix": () => mixSongs(generateGenreMix(USER, TODAY)),
+    "familiar songs a recipe mix is lifted towards": async () => (await seedsOf(USER, new Date())).map((s) => s.id),
+    "night songs of the night mixes and station": async () => (await nightSongs(USER, "UTC")).map((s) => s.id),
+    "Late Night mix": async () => (await nightMixTracks({ fallbackRecipe: "late-night", ranking: "plays" }, USER, TODAY, "UTC")) ?? [],
+    "Midnight Drive mix": async () => (await nightMixTracks({ fallbackRecipe: "midnight-drive", ranking: "drive" }, USER, TODAY, "UTC")) ?? [],
+    "Minor Key Mondays mix": () => mixSongs(generateMinorKeyMix(USER, TODAY)),
+    "a similar artist's station": () => station("artist", `${FILLERS[0]}-ar`),
+    ...Object.fromEntries(STATION_TYPES.map(([type, value]) => [`the ${type} station`, () => station(type, value)])),
+    ...Object.fromEntries(
+        STATION_TYPES.filter(([type]) => type !== "artist").map(([type, value]) => [`the ${type} station's cover`, () => stationCover(type as CoverStationType, value)]),
+    ),
     "Subsonic getLyrics by artist and title": async () => {
         const found = await Promise.all(
             Object.entries(SONG).map(async ([kind, id]) =>
@@ -183,48 +251,104 @@ async function cleanup() {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.genre.deleteMany({ where: { name: GENRE } });
 }
+
+/** A night hour yesterday (UTC), so a seeded play is a recent night listen: night, familiar and similar-artist picks read it. */
+const LISTENED = (() => {
+    const d = new Date();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1, 23));
+})();
+
+/**
+ * A library artist and its albums as the app writes them: the name folded as the scanner folds it, the seeded genre, the
+ * seeded year, a library album per song unless it says otherwise. Every derived field a picker filters on is filled, so
+ * no filter passes on an empty default. Each song is played (a finished listen) and liked by USER.
+ */
+async function seedArtist(artist: { id: string; name: string }, albums: { id: string; location?: "LIBRARY" | "DISCOVER"; cover?: string; songs: { id: string; title: string; filePath: string; missingSince?: Date | null; corrupt?: boolean }[] }[]) {
+    await prisma.artist.create({
+        data: { id: artist.id, name: artist.name, normalizedName: normalizeArtistName(artist.name), identityKey: artist.id, libraryAlbumCount: albums.length, genres: [GENRE] },
+    });
+    const genre = await prisma.genre.upsert({ where: { name: GENRE }, create: { name: GENRE }, update: {} });
+    for (const album of albums) {
+        await prisma.album.create({
+            data: {
+                id: album.id,
+                rgMbid: `${album.id}-rg`,
+                identityKey: `${album.id}-ak`,
+                artistId: artist.id,
+                title: album.songs[0].title,
+                primaryType: "Album",
+                year: YEAR,
+                originalYear: YEAR,
+                coverUrl: album.cover ?? null,
+                location: album.location ?? "LIBRARY",
+            },
+        });
+        if ((album.location ?? "LIBRARY") === "LIBRARY") {
+            await prisma.ownedAlbum.create({ data: { artistId: artist.id, rgMbid: `${album.id}-rg`, source: "test" } });
+        }
+        for (const [i, song] of album.songs.entries()) {
+            await prisma.track.create({
+                data: {
+                    id: song.id,
+                    albumId: album.id,
+                    title: song.title,
+                    trackNo: i + 1,
+                    duration: 100,
+                    mime: "audio/flac",
+                    filePath: song.filePath,
+                    fileModified: new Date(),
+                    fileSize: BYTES.length,
+                    missingSince: song.missingSince ?? null,
+                    corrupt: song.corrupt ?? false,
+                    trackGenres: { create: { genreId: genre.id } },
+                    // One analysis for every song, so a picker that keeps "the upper half" or "minor key" keeps them all.
+                    analysisStatus: "completed",
+                    arousal: 0.5,
+                    keyScale: "minor",
+                    bpm: 120,
+                    energy: 0.5,
+                    valence: 0.5,
+                    danceability: 0.5,
+                },
+            });
+            await prisma.play.create({ data: { userId: USER, trackId: song.id, playedAt: LISTENED, heard: true } });
+            await prisma.likedTrack.create({ data: { userId: USER, trackId: song.id } });
+        }
+    }
+}
+
+/** The cover of a seeded song's album; the fillers have none, so a station's cover can only be one of these. */
+const coverOf = (id: string) => `${id}-cover`;
 
 beforeAll(async () => {
     await cleanup();
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
-    await prisma.artist.create({ data: { id: `${P}-ar`, name: P, normalizedName: P, identityKey: `${P}-ar`, libraryAlbumCount: 3, genres: [GENRE] } });
+    // The seeded songs, each alone on its album.
+    await seedArtist(
+        { id: `${P}-ar`, name: P },
+        Object.entries(SONG).map(([kind, id]) => ({
+            id: `${id}-al`,
+            location: id === SONG.discover ? ("DISCOVER" as const) : ("LIBRARY" as const),
+            cover: coverOf(id),
+            songs: [{ id, title: `${P} ${kind}`, filePath: `${P}/${kind}.flac`, missingSince: id === SONG.missing ? new Date() : null, corrupt: id === SONG.corrupt }],
+        })),
+    );
+    // Other library artists, two playable songs each, so every mix and station has enough to be made. With the
+    // playable song, 19 songs by 10 artists: fewer than a mix holds, so a mix made holds the playable song.
+    for (const id of FILLERS) {
+        await seedArtist({ id: `${id}-ar`, name: `${P} ${id.slice(P.length + 1)}` }, [
+            { id: `${id}-al`, songs: [1, 2].map((n) => ({ id: `${id}-s${n}`, title: `${P} ${id} ${n}`, filePath: `${P}/${id}-${n}.flac` })) },
+        ]);
+    }
+    // The first filler's artist radio fills its similar share from the seeded songs' artist.
+    await prisma.similarArtist.create({ data: { fromArtistId: `${FILLERS[0]}-ar`, toArtistId: `${P}-ar` } });
     for (const [kind, id] of Object.entries(SONG)) {
         // Each file is on disk, so a refusal can only come from the rule, never from a file the stream could not open.
-        const rel = `${P}/${kind}.flac`;
-        const file = path.join(config.music.musicPath, rel);
+        const file = path.join(config.music.musicPath, `${P}/${kind}.flac`);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, BYTES);
-        await prisma.album.create({
-            data: {
-                id: `${id}-al`,
-                rgMbid: `${id}-rg`,
-                identityKey: `${id}-ak`,
-                artistId: `${P}-ar`,
-                title: `${P} ${kind}`,
-                primaryType: "Album",
-                year: YEAR,
-                location: id === SONG.discover ? "DISCOVER" : "LIBRARY",
-            },
-        });
-        await prisma.track.create({
-            data: {
-                id,
-                albumId: `${id}-al`,
-                title: `${P} ${kind}`,
-                trackNo: 1,
-                duration: 100,
-                mime: "audio/flac",
-                filePath: rel,
-                fileModified: new Date(),
-                fileSize: BYTES.length,
-                missingSince: id === SONG.missing ? new Date() : null,
-                corrupt: id === SONG.corrupt,
-            },
-        });
-        // Played and liked, so the lists of starred, recent and frequent music have it to offer.
-        await prisma.play.create({ data: { userId: USER, trackId: id } });
-        await prisma.likedTrack.create({ data: { userId: USER, trackId: id } });
         await prisma.subsonicBookmark.create({ data: { userId: USER, trackId: id, position: 1000 } });
         await prisma.trackLyrics.create({ data: { track_id: id, plain_lyrics: `${kind} words`, synced_lyrics: `[00:01.00]${kind} words`, source: "test" } });
         await prisma.user.create({
@@ -283,6 +407,22 @@ describe.each(Object.entries(STREAMS))("Subsonic %s", (_name, { ask, plays }) =>
         expect(res.status).toBe(200);
         expect(subsonicBody(res)).toMatchObject({ status: "failed", error: { code: 70 } });
     });
+});
+
+// 19 playable songs in the seeded genre and decade; the Discover, missing and corrupt songs carry both too.
+it("counts only playable songs for the radio row's genre and decade stations", async () => {
+    expect((await libraryGenres()).find((g) => g.genre === GENRE)?.count).toBe(19);
+    expect((await libraryDecades()).find((d) => d.decade === 1900)?.count).toBe(19);
+});
+
+// An artist whose every song is missing still has a radio: the similar artists' share.
+it("plays similar artists on the radio of an artist with no playable song", async () => {
+    await seedArtist({ id: `${P}-gone-ar`, name: `${P} gone` }, [
+        { id: `${P}-gone-al`, songs: [{ id: `${P}-gone-s1`, title: `${P} gone 1`, filePath: `${P}/gone-1.flac`, missingSince: new Date() }] },
+    ]);
+    await prisma.similarArtist.create({ data: { fromArtistId: `${P}-gone-ar`, toArtistId: `${FILLERS[1]}-ar` } });
+    // Its similar artist, and the artists sharing its genre that make up a short list.
+    expect(await station("artist", `${P}-gone-ar`)).toEqual(expect.arrayContaining([`${FILLERS[1]}-s1`, `${FILLERS[1]}-s2`]));
 });
 
 it("refuses a table name that is not a plain identifier", () => {

@@ -6,6 +6,7 @@
  */
 import crypto from "crypto";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, topScores } from "../matching/rank";
@@ -60,7 +61,7 @@ export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
         FROM "Play" p
         JOIN "Track" t ON t.id = p."trackId"
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard AND a.location = 'LIBRARY'
+        WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard AND ${playableSongSql("t", "a")}
         GROUP BY p."trackId"
         ORDER BY plays DESC, max(p."playedAt") DESC, p."trackId"
         LIMIT ${FAMILIAR_SEEDS}

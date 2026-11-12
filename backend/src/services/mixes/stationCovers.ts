@@ -7,9 +7,8 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
-import { IN_LIBRARY } from "../../utils/libraryEligibility";
 import { nightZone } from "./nightPlays";
-import { selectRadioTracks, stillPlayable } from "./stationSelection";
+import { selectRadioTracks } from "./stationSelection";
 
 /** The station types that have tiles (radioRow.ts lists them). */
 export const COVER_STATION_TYPES = ["all", "workout", "discovery", "favorites", "mood", "genre", "decade"] as const;
@@ -71,12 +70,11 @@ async function pickCover(station: CoverStation, query: Record<string, unknown>, 
   const picked = await selectRadioTracks(station.type, station.value, query, COVER_SAMPLE, listener);
   // A retired or unknown mood has no songs; that is no cover, not an error.
   if ("reply" in picked) return null;
-  const playable = picked.station ? null : await stillPlayable(picked.trackIds);
-  const ids = playable ? picked.trackIds.filter((id) => playable.has(id)) : picked.trackIds;
+  // Every station offers only playable songs, so a Discover album's cover is never a station's.
+  const ids = picked.trackIds;
   if (ids.length === 0) return null;
-  // Only songs of library albums: a Discover album's cover is never a station's.
   const rows = await prisma.track.findMany({
-    where: { id: { in: ids }, ...IN_LIBRARY },
+    where: { id: { in: ids } },
     select: { id: true, album: { select: { coverUrl: true } } },
   });
   const coverOf = new Map(rows.map((r) => [r.id, r.album.coverUrl]));

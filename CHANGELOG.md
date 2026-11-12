@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
 - **Subsonic playlists and the saved play queue show only songs that play.** A Discover suggestion, a song whose file is missing or one that could not be read is left out of a playlist's songs, count and length, and out of the queue a Subsonic app resumes. If the current song is one of them, the queue resumes at the next song. The songs stay in the playlist and come back when their file does, and a Subsonic app saving the playlist keeps them.
 - **Subsonic apps can no longer reach a song that does not play.** Looking up, bookmarking or adding a Discover suggestion, a missing song or one that could not be read to a playlist answers not found; lyrics, bookmarks and the now-playing list leave them out; and a scrobble of one is not counted. A queue saved with a song Kima does not know now resumes on the right song, and an app sending several scrobbles at once has each one counted.
+- **Genre and decade stations count only songs that play.** A genre or decade now shows in the radio row only when enough of its songs play; Discover suggestions, missing songs and ones that could not be read no longer count towards it. The familiar songs your mixes lean towards and the minor-key mix leave them out too.
 
 ## [1.12.4] - 2026-11-07
 

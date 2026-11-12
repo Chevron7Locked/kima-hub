@@ -50,17 +50,9 @@ afterAll(async () => {
 });
 
 describe("unplayedTrackIds on a bulk-written, never-analysed table", () => {
-    it("returns every unplayed track, in id order, in seconds", async () => {
+    it("returns every unplayed playable track, in id order, in seconds", async () => {
         const t0 = Date.now();
         const ids = await unplayedTrackIds({ userId: USER });
-        const ms = Date.now() - t0;
-        expect(ids).toEqual(Array.from({ length: TRACKS - PLAYED }, (_, k) => id(PLAYED + k)));
-        expect(ms).toBeLessThan(5_000);
-    });
-
-    it("leaves out tracks whose file is missing when asked", async () => {
-        const t0 = Date.now();
-        const ids = await unplayedTrackIds({ userId: USER, excludeMissing: true });
         const ms = Date.now() - t0;
         expect(ids).toEqual(Array.from({ length: MISSING_FROM - PLAYED }, (_, k) => id(PLAYED + k)));
         expect(ms).toBeLessThan(5_000);
@@ -71,9 +63,9 @@ describe("unplayedTrackIds on a bulk-written, never-analysed table", () => {
         await prisma.play.create({ data: { id: `${PREFIX}extra`, userId: `${PREFIX}user2`, trackId: id(PLAYED) } });
         const mine = await unplayedTrackIds({ userId: USER });
         expect(mine[0]).toBe(id(PLAYED));
-        expect(mine).toHaveLength(TRACKS - PLAYED);
+        expect(mine).toHaveLength(MISSING_FROM - PLAYED);
         const theirs = await unplayedTrackIds({ userId: `${PREFIX}user2` });
         expect(theirs).not.toContain(id(PLAYED));
-        expect(theirs).toHaveLength(TRACKS - 1);
+        expect(theirs).toHaveLength(MISSING_FROM - 1);
     });
 });

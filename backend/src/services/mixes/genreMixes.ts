@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { LIBRARY_PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { ProgrammaticMix, sampledMix, getSeededRandom, seededOrder, TRACK_LIMIT } from "./helpers";
 import { recipeMixGenerator } from "./recipeMix";
 import { MIN_MIX_TRACKS, artistSql } from "./artistCap";
@@ -21,7 +21,7 @@ export async function mixableDecades(): Promise<number[]> {
             FROM "Track" t
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+            WHERE ${playableSongSql("t", "a")}
               AND COALESCE(a."displayYear", a."originalYear", a.year) IS NOT NULL
               AND COALESCE(a."displayYear", a."originalYear", a.year) <> 0
             GROUP BY 1, 2
@@ -64,7 +64,7 @@ export async function generateEraMix(
 export async function mixableGenres(): Promise<{ id: string; name: string }[]> {
     const genres = await prisma.genre.findMany({
         include: {
-            _count: { select: { trackGenres: { where: { track: LIBRARY_PLAYABLE } } } },
+            _count: { select: { trackGenres: { where: { track: PLAYABLE_SONG } } } },
         },
         orderBy: {
             trackGenres: { _count: "desc" },
@@ -82,7 +82,7 @@ export async function mixableGenres(): Promise<{ id: string; name: string }[]> {
                   JOIN "Album" a ON a.id = t."albumId"
                   JOIN "Artist" ar ON ar.id = a."artistId"
                   WHERE tg."genreId" IN (${Prisma.join(genres.map((g) => g.id))})
-                    AND a.location = 'LIBRARY' AND t."missingSince" IS NULL AND t.corrupt = false
+                    AND ${playableSongSql("t", "a")}
                   GROUP BY 1, 2
               ) per_artist
               GROUP BY "genreId"`

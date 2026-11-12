@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
-import { LIBRARY_PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 
 export interface ProgrammaticMix {
@@ -268,13 +268,16 @@ export async function tracksByIds<I extends Prisma.TrackInclude>(
     include: I
 ): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
     if (ids.length === 0) return [];
-    const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...LIBRARY_PLAYABLE }, include });
+    const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, include });
     const byId = new Map(rows.map((t) => [t.id, t]));
     return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
+/** The playable-song rule on "Track" t and its "Album" a, the names every query here gives them. */
+const PLAYABLE_SONG_SQL = playableSongSql("t", "a");
+
 /**
- * Ids of up to `take` library songs drawn uniformly at random from every one
+ * Ids of up to `take` playable songs drawn uniformly at random from every one
  * matching `where`, not from the first rows the database returns. A draw that
  * must repeat for a day is seededTrackIds.
  */
@@ -284,7 +287,7 @@ export async function sampleTrackIds(args: {
 }): Promise<string[]> {
     assertTake(args.take);
     const rows = await prisma.track.findMany({
-        where: { AND: [args.where, LIBRARY_PLAYABLE] },
+        where: { AND: [args.where, PLAYABLE_SONG] },
         select: { id: true },
         orderBy: { id: "asc" },
     });
@@ -295,7 +298,7 @@ export async function sampleTrackIds(args: {
 }
 
 /**
- * Ids of up to `take` library songs whose file is there and that match `where`, a condition on "Track" t and its "Album" a,
+ * Ids of up to `take` playable songs that match `where`, a condition on "Track" t and its "Album" a,
  * ranked by seededKeySql: the draw drawIds(every matching id, take, seed) makes, picked in the database, so neither the
  * matching ids nor their hashing reach the server's event loop however large the library.
  */
@@ -305,7 +308,7 @@ export async function seededTrackIds(where: Prisma.Sql, take: number, seed: numb
         SELECT t.id
         FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${where}
+        WHERE ${PLAYABLE_SONG_SQL} AND ${where}
         ORDER BY ${seededKeySql(seed, Prisma.sql`t.id`)}
         LIMIT ${take}
     `;
@@ -326,7 +329,7 @@ async function seededCappedTrackIds(where: Prisma.Sql, limit: number, seed: numb
             FROM "Track" t
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${where}
+            WHERE ${PLAYABLE_SONG_SQL} AND ${where}
         ) ranked
         WHERE n <= 3
         ORDER BY k
@@ -350,20 +353,16 @@ export async function seededTracks<I extends Prisma.TrackInclude>(args: {
 }
 
 /**
- * Ids of every library song this listener has not played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
+ * Ids of every playable song this listener has not played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
  * `NOT IN (SELECT ...)`, which Postgres rescans per track once Play is too large to hash (1.5 minutes at 105,000 plays).
- * `excludeMissing` and `excludeCorrupt` together are the PLAYABLE rule.
  */
-export async function unplayedTrackIds(
-    args: { userId: string; excludeMissing?: boolean; excludeCorrupt?: boolean }
-): Promise<string[]> {
+export async function unplayedTrackIds(args: { userId: string }): Promise<string[]> {
     const rows = await prisma.$queryRaw<{ id: string }[]>`
         SELECT t.id
         FROM "Track" t
+        JOIN "Album" a ON a.id = t."albumId"
         WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${args.userId})
-          AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
-          AND (${!args.excludeMissing} OR t."missingSince" IS NULL)
-          AND (${!args.excludeCorrupt} OR t.corrupt = false)
+          AND ${PLAYABLE_SONG_SQL}
         ORDER BY t.id
     `;
     return rows.map((r) => r.id);
@@ -386,7 +385,7 @@ export async function sampledMix(
     const [{ matching }] = await prisma.$queryRaw<{ matching: number }[]>`
         SELECT count(*)::int AS matching FROM (
             SELECT 1 FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-            WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY' AND ${spec.where}
+            WHERE ${PLAYABLE_SONG_SQL} AND ${spec.where}
             LIMIT ${spec.minTracks}
         ) enough`;
     if (matching < spec.minTracks) return null;

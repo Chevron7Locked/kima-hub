@@ -4,8 +4,7 @@ import { logger } from "../../utils/logger";
 import { normalizeArtistName } from "../artistIdentity";
 import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
-import { LIBRARY_LOCATION } from "../libraryFilters";
-import { IN_LIBRARY, LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
+import { IN_LIBRARY, PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -25,7 +24,7 @@ export async function generateTopTracksMix(
 ): Promise<ProgrammaticMix | null> {
     const playStats = await prisma.play.groupBy({
         by: ["trackId"],
-        where: { userId, track: LIBRARY_PLAYABLE },
+        where: { userId, track: PLAYABLE_SONG },
         _count: { trackId: true },
         orderBy: { _count: { trackId: "desc" } },
         take: TRACK_LIMIT,
@@ -60,9 +59,8 @@ export async function generateRediscoverMix(
     // The library's songs this listener has played two times or fewer: every song but the few played more, looked up
     // in one hashed list (counting each song's plays instead took 2.2 s at 500,000 songs).
     const underplayedIds = await seededTrackIds(
-        Prisma.sql`a.location = ${LIBRARY_LOCATION}::"AlbumLocation"
-                   AND t.id NOT IN (SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId}
-                                    GROUP BY p."trackId" HAVING count(*) > 2)`,
+        Prisma.sql`t.id NOT IN (SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId}
+                         GROUP BY p."trackId" HAVING count(*) > 2)`,
         200,
         getSeededRandom(`rediscover-${today}`)
     );
@@ -140,10 +138,9 @@ export async function generateArtistSimilarMix(
             where: { normalizedName: { in: similarArtistNormalized } },
             include: {
                 albums: {
-                    where: { location: LIBRARY_LOCATION },
                     include: {
                         tracks: {
-                            where: PLAYABLE,
+                            where: PLAYABLE_SONG,
                             include: { album: MIX_SONG_ALBUM },
                         },
                     },
@@ -186,8 +183,7 @@ export async function generateRandomDiscoveryMix(
             SELECT a.id, ${key} AS k, row_number() OVER (PARTITION BY ${albumArtistSql()} ORDER BY ${key}) AS n
             FROM "Album" a
             JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE a.location = 'LIBRARY'
-              AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND t."missingSince" IS NULL AND t.corrupt = false)
+            WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND ${playableSongSql("t", "a")})
         ) ranked
         WHERE n = 1
         ORDER BY k
@@ -200,7 +196,7 @@ export async function generateRandomDiscoveryMix(
         where: { id: { in: albumIds } },
         include: {
             tracks: {
-                where: PLAYABLE,
+                where: PLAYABLE_SONG,
                 include: { album: MIX_SONG_ALBUM },
             },
         },

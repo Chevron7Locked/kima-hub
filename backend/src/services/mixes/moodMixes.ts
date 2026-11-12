@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { nightMixGenerator } from "./nightPlays";
 import {
     ProgrammaticMix,
@@ -330,8 +331,8 @@ export async function generateMinorKeyMix(
     const [{ median }] = await prisma.$queryRaw<Array<{ median: number | null }>>`
         SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY arousal) AS median
         FROM "Track" t
-        WHERE t."missingSince" IS NULL AND t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL
-          AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+        WHERE t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL
+          AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND ${playableSongSql("t", "a")})
     `;
     if (median === null) return null;
 

@@ -21,8 +21,7 @@ import { pickNightStationPage } from "../mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../mixes/stationOrder";
 import { resolveMoodStation } from "../mixes/stations";
 import { listenRows } from "../stats/listens";
-import { LIBRARY_LOCATION } from "../libraryFilters";
-import { LIBRARY_PLAYABLE, PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 
 /** A recipe station's refill; no songs when the library cannot rank its songs for the recipe. */
 async function recipeStationPage(recipe: string, request: StationRequest): Promise<StationPage> {
@@ -35,9 +34,9 @@ async function recipeStationPage(recipe: string, request: StationRequest): Promi
   }
 }
 
-/** The ids of these songs that can still play: the file is present and not corrupt. */
+/** Which of these ids are still playable songs: a station paging through its order skips any that stopped being one. */
 export async function stillPlayable(ids: string[]): Promise<Set<string>> {
-  const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...LIBRARY_PLAYABLE }, select: { id: true } });
+  const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, select: { id: true } });
   return new Set(rows.map((t) => t.id));
 }
 
@@ -82,9 +81,9 @@ export interface RadioReply {
 }
 
 /**
- * The song ids a station would play for `listener`, up to about `limit`. `station` is true for the stations that play
- * every matching song in their own order, already checked playable; the other radios still need that check. `next` is
- * the position to ask from next, for a station asked with a seed.
+ * The playable songs a station would play for `listener`, up to about `limit`. `station` is true for the stations that
+ * play every matching song in their own order; the other radios' ids still want shuffling and cutting to `limit`. `next`
+ * is the position to ask from next, for a station asked with a seed.
  */
 export async function selectRadioTracks(
   type: unknown,
@@ -101,7 +100,7 @@ export async function selectRadioTracks(
     case "discovery": {
       if (!listener) return { reply: SIGN_IN_REQUIRED };
       const unplayed = drawIds(
-        await unplayedTrackIds({ userId: listener, excludeMissing: true, excludeCorrupt: true }),
+        await unplayedTrackIds({ userId: listener }),
         limitNum * 2,
       );
 
@@ -113,7 +112,7 @@ export async function selectRadioTracks(
         const candidates = [
           ...new Set([
             ...unplayed,
-            ...(await sampleTrackIds({ where: PLAYABLE, take: limitNum * 10 })),
+            ...(await sampleTrackIds({ where: {}, take: limitNum * 10 })),
           ]),
         ];
         const playsOf = await listensOf(listener, candidates);
@@ -133,7 +132,7 @@ export async function selectRadioTracks(
         FROM p
         JOIN "Track" t ON t.id = p."trackId"
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE t."missingSince" IS NULL AND t.corrupt = false AND a.location = 'LIBRARY'
+        WHERE ${playableSongSql("t", "a")}
         GROUP BY t.id
         ORDER BY -LN(1 - random()) / count(*) ASC
         LIMIT ${limitNum * 2}`);
@@ -173,7 +172,7 @@ export async function selectRadioTracks(
       const genreTracks = artistIds.length
         ? await prisma.$queryRaw<{ id: string }[]>`
             SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
-             WHERE al.location = ${LIBRARY_LOCATION}::"AlbumLocation" AND al."artistId" = ANY(${artistIds}::text[])`
+             WHERE ${playableSongSql("t", "al")} AND al."artistId" = ANY(${artistIds}::text[])`
         : [];
       trackIds = drawIds(
         genreTracks.map((t) => t.id),
@@ -228,7 +227,7 @@ export async function selectRadioTracks(
       logger.debug(`[Radio:artist] Starting artist radio for: ${artistId}`);
 
       const artistTracks = await prisma.track.findMany({
-        where: { album: { artistId, location: LIBRARY_LOCATION } },
+        where: { AND: [PLAYABLE_SONG, { album: { artistId } }] },
         select: {
           id: true,
           bpm: true,
@@ -241,10 +240,7 @@ export async function selectRadioTracks(
         `[Radio:artist] Found ${artistTracks.length} tracks from artist`,
       );
 
-      if (artistTracks.length === 0) {
-        return { reply: { status: 200, body: { tracks: [] } } };
-      }
-
+      // No playable song of its own still leaves the similar artists' share.
       const analyzedTracks = artistTracks.filter(
         (t) => t.bpm || t.energy || t.valence,
       );
@@ -343,10 +339,7 @@ export async function selectRadioTracks(
       }[] = [];
       if (similarArtistIds.length > 0) {
         similarTracks = await prisma.track.findMany({
-          where: {
-            album: { artistId: { in: similarArtistIds }, location: LIBRARY_LOCATION },
-            ...PLAYABLE,
-          },
+          where: { AND: [PLAYABLE_SONG, { album: { artistId: { in: similarArtistIds } } }] },
           select: {
             id: true,
             bpm: true,
@@ -402,31 +395,17 @@ export async function selectRadioTracks(
         );
       }
 
-      // Only tracks that can play are candidates, so the 40/60 split holds after
-      // the playable filter below. The similar tracks are filtered in their query.
-      const playableIds = new Set(
-        (
-          await prisma.track.findMany({
-            where: {
-              id: { in: artistTracks.map((t) => t.id) },
-              ...PLAYABLE,
-            },
-            select: { id: true },
-          })
-        ).map((t) => t.id),
-      );
-      const ownPlayable = artistTracks.filter((t) => playableIds.has(t.id));
-
+      // Both queries offer only playable songs, so the 40/60 split holds.
       const originalCount = Math.min(
         Math.ceil(limitNum * 0.4),
-        ownPlayable.length,
+        artistTracks.length,
       );
       const similarCount = Math.min(
         limitNum - originalCount,
         similarTracks.length,
       );
 
-      const selectedOriginal = shuffleArray(ownPlayable).slice(
+      const selectedOriginal = shuffleArray(artistTracks).slice(
         0,
         originalCount,
       );

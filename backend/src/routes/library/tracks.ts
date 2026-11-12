@@ -15,7 +15,7 @@ import {
 } from "../../services/mixes/radioRow";
 import { songArtistKey } from "../../services/mixes/recipes";
 import { noOneKeys } from "../../services/mixes/artistCap";
-import { selectRadioTracks, stillPlayable } from "../../services/mixes/stationSelection";
+import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
@@ -621,8 +621,8 @@ router.get("/radio", async (req, res) => {
     if ("reply" in picked) return res.status(picked.reply.status).json(picked.reply.body);
     const { trackIds, station, next } = picked;
 
-    // Every radio plays only tracks that can play: the file is present and not corrupt. The stations checked theirs.
-    const finalIds = station ? trackIds : shuffleArray([...(await stillPlayable(trackIds))]).slice(0, limitNum);
+    // Every station picks only playable songs; the others are drawn in a fresh order.
+    const finalIds = station ? trackIds : shuffleArray([...new Set(trackIds)]).slice(0, limitNum);
 
     if (finalIds.length === 0) {
       return res.json(next === undefined ? { tracks: [] } : { tracks: [], next });

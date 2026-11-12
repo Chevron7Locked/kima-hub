@@ -8,7 +8,7 @@ import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { computeGenreTotals } from "../../utils/genreSql";
 import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
-import { LIBRARY_LOCATION } from "../libraryFilters";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { featureDetection } from "../featureDetection";
 import { moodStationList } from "./stations";
 import { nightZone } from "./nightPlays";
@@ -45,7 +45,7 @@ export async function libraryGenres(): Promise<{ genre: string; count: number }[
         FROM "Artist" ar
         JOIN "Album" a ON a."artistId" = ar.id
         JOIN "Track" t ON t."albumId" = a.id
-        WHERE a.location = 'LIBRARY' AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+        WHERE ${playableSongSql("t", "a")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
         GROUP BY ar.id
     `;
     return computeGenreTotals(artists.map((a) => ({ ...a, songs: Number(a.n), albums: 0 })))
@@ -58,8 +58,8 @@ export async function libraryGenres(): Promise<{ genre: string; count: number }[
 /** The library's decades with enough songs for a station, newest first. */
 export async function libraryDecades(): Promise<{ decade: number; count: number }[]> {
     const albums = await prisma.album.findMany({
-        where: { location: LIBRARY_LOCATION },
-        select: { year: true, originalYear: true, displayYear: true, _count: { select: { tracks: true } } },
+        where: { tracks: { some: PLAYABLE_SONG } },
+        select: { year: true, originalYear: true, displayYear: true, _count: { select: { tracks: { where: PLAYABLE_SONG } } } },
     });
     const songs = new Map<number, number>();
     for (const album of albums) {
