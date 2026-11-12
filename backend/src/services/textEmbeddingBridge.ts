@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { playableSongSql } from "../utils/libraryEligibility";
 import { redisClient } from "../utils/redis";
 import { withTimeout } from "../utils/timeout";
 import { logger } from "../utils/logger";
@@ -198,7 +199,7 @@ function searchableSql(vector: string): Prisma.Sql {
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id
-        WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY') AND te.model_version = ${MATCHING_MODEL}
+        WHERE ${playableSongSql("t", "a")} AND te.model_version = ${MATCHING_MODEL}
     `;
 }
 

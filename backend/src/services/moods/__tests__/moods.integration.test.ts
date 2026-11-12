@@ -341,8 +341,9 @@ describe("the library statistics", () => {
 });
 
 describe("the mood step's progress", () => {
-    it("counts present tracks with a sound vector of the heads' model, and those with current scores", async () => {
-        const present = SCORED - 1;
+    it("counts playable songs with a sound vector of the heads' model, and those with current scores", async () => {
+        // The missing and the corrupt songs are scored but not playable, so the step owes them nothing.
+        const present = SCORED - 2;
         expect(await moodProgress()).toEqual({ total: present, completed: present });
         await insertVector(trackId(8), vector());
         expect(await moodProgress()).toEqual({ total: present, completed: present - 1 });

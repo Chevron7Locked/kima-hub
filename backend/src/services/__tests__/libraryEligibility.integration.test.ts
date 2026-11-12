@@ -3,8 +3,6 @@
  * similar tracks, mood buckets, song paths, the map — while streaming already
  * refuses it. Clearing the flag brings it back everywhere, with no work.
  */
-import fs from "fs";
-import path from "path";
 import { prisma } from "../../utils/db";
 import { findSimilarTracks } from "../hybridSimilarity";
 import { generateSongPath } from "../songPath";
@@ -105,42 +103,6 @@ async function seed() {
     await buildMatching();
     await prisma.$transaction((tx) => buildMoodState(tx));
 }
-
-/**
- * Grep gate: every raw query over track_embeddings in the recommendation
- * consumers must carry the eligibility fragment in the same template. Seed lookups
- * (a single track by id, chosen by the user) are the allowlisted exception
- * — they read the track the request names, and streaming refuses it.
- */
-describe("grep gate: no embedding query without the eligibility fragments (present file, library song)", () => {
-    const CONSUMERS = [
-        "services/matching/rank.ts",
-        "services/textEmbeddingBridge.ts",
-        "services/vibeMap.ts",
-        "services/matching/map.ts",
-        "services/search.ts",
-    ];
-    // Seed lookups: the query reads exactly the tracks the request names (by
-    // id), which streaming refuses if they are gone.
-    const SEED_LOOKUP = /WHERE (te\.|t\.)?(track_id|id) = (ANY\()?\$\{/;
-    // Status counters: a plain COUNT over the whole table is allowed; it counts and shows, and returns no results.
-    const STATUS_COUNT = /^\s*SELECT\s+COUNT\(/i;
-
-    it.each(CONSUMERS)("every library query in %s is filtered", (file) => {
-        const src = fs.readFileSync(path.join(__dirname, "../..", file), "utf8");
-        const templates = [
-            ...[...src.matchAll(/\$queryRaw(?:<[^>]*>)?`([\s\S]*?)`/g)].map((m) => m[1]),
-            ...[...src.matchAll(/Prisma\.sql`([\s\S]*?)`/g)].map((m) => m[1]),
-        ];
-        expect(templates.length).toBeGreaterThan(0); // the scan must find the queries
-        for (const sql of templates) {
-            if (!/FROM (track_embeddings|"Track")/.test(sql)) continue;
-            if (SEED_LOOKUP.test(sql) || STATUS_COUNT.test(sql)) continue;
-            expect(sql).toMatch(/"missingSince" IS NULL/);
-            expect(sql).toMatch(/location = 'LIBRARY'/);
-        }
-    });
-});
 
 describe("library eligibility at the read side", () => {
     beforeAll(seed);

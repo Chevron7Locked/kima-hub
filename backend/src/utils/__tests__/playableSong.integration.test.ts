@@ -14,6 +14,7 @@ jest.mock("../../config", () => {
 import express from "express";
 import request from "supertest";
 import fs from "fs";
+import zlib from "zlib";
 import path from "path";
 import { prisma } from "../db";
 import { normalizeArtistName } from "../../services/artistIdentity";
@@ -39,6 +40,23 @@ import { generateMinorKeyMix } from "../../services/mixes/moodMixes";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { stationCovers, type CoverStationType } from "../../services/mixes/stationCovers";
 import { libraryDecades, libraryGenres } from "../../services/mixes/radioRow";
+import { nightStationPool } from "../../services/mixes/nightPlays";
+import { featureDetection } from "../../services/featureDetection";
+import { findSimilarTracks } from "../../services/hybridSimilarity";
+import { generateSongPath } from "../../services/songPath";
+import { refreshLibraryExport } from "../../services/publicLibraryExport";
+import { getMoodSummary, getVibeMap } from "../../services/vibeMap";
+import { searchTracksByEmbedding } from "../../services/textEmbeddingBridge";
+import { searchService } from "../../services/search";
+import { artistProfiles, matchingContext, rankMatches, scoreLibrary, topScores } from "../../services/matching/rank";
+import { MATCHING_MODEL, buildMatching, loadMatchingState } from "../../services/matching/state";
+import { updateMap } from "../../services/matching/map";
+import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
+import { buildMoodState } from "../../services/moods/state";
+import { writeMoodTags } from "../../services/moods/tags";
+import { currentMoodSnapshot, refreshMoodSnapshot } from "../../services/moodBucketService";
+
+jest.setTimeout(120_000);
 
 const P = "zz-playable";
 const USER = `${P}-user`;
@@ -53,6 +71,27 @@ const PLAYLIST = `${P}-playlist`;
 const FILLERS = Array.from({ length: 9 }, (_, i) => `${P}-f${i}`);
 /** Someone else listening to one seeded song, so the now-playing list has each to offer. */
 const listenerOf = (kind: string) => `${P}-listener-${kind}`;
+/** A listener with one night play, of a filler song: the Late Night station fills the rest with songs like it. */
+const NIGHT = `${P}-night`;
+
+/**
+ * Each song's sound vector: the seeded songs share one sound, each with a trace of its own, and each filler has its own
+ * beside it, so every song is near every other and an artist's profile tells which of its songs it was built from.
+ */
+const SEEDED: ReadonlySet<string> = new Set(Object.values(SONG));
+function soundOf(id: string, i: number): number[] {
+    const v = Array<number>(MOOD_HEADS.dims).fill(0);
+    v[0] = 1;
+    if (SEEDED.has(id)) {
+        v[1] = 1;
+        v[100 + Object.values(SONG).indexOf(id as never)] = 0.1;
+    } else v[2 + i] = 1;
+    return v;
+}
+/** The seeded songs' mood scores (logits): high on every mood the Energy station and Workout lean toward, low on the ones they push away. */
+const ENERGETIC: Partial<Record<Mood, number>> = {
+    workout: 3, energetic: 3, uplifting: 3, party: 3, groovy: 3, happy: 3, fun_quirky: 3, calm: -3, sleep: -3, sad: -3,
+};
 
 const app = express()
     .use((req: any, _res, next) => {
@@ -101,7 +140,17 @@ async function stationCover(type: CoverStationType, value?: string): Promise<str
     const [cover] = await stationCovers([{ type, value }], USER, "UTC");
     return Object.values(SONG).filter((id) => coverOf(id) === cover);
 }
-const STATION_TYPES: [string, string | undefined][] = [["all", undefined], ["discovery", undefined], ["favorites", undefined], ["decade", "1900"], ["genre", GENRE], ["artist", `${P}-ar`]];
+const STATION_TYPES: [string, string | undefined][] = [
+    ["all", undefined], ["discovery", undefined], ["favorites", undefined], ["decade", "1900"], ["genre", GENRE], ["artist", `${P}-ar`],
+    ["mood", "energy"], ["mood", "wildcard"], ["workout", undefined],
+];
+/** The song the matching is asked about: a filler, so the seeded songs are among its matches. */
+const NEAR = `${FILLERS[0]}-s1`;
+async function matching() {
+    const ctx = await matchingContext([NEAR]);
+    if (!ctx) throw new Error("the seeded song has no matching data");
+    return { ctx, inputs: [{ trackId: NEAR, weight: 1 }] };
+}
 const ALBUM_LIST_TYPES = ["newest", "alphabeticalByName", "alphabeticalByArtist", "byYear", "byGenre", "starred", "random", "recent", "frequent"];
 
 /** Every interface that lists songs, each answering the ids it offers. */
@@ -208,8 +257,75 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     "a similar artist's station": () => station("artist", `${FILLERS[0]}-ar`),
     ...Object.fromEntries(STATION_TYPES.map(([type, value]) => [`the ${type} station`, () => station(type, value)])),
     ...Object.fromEntries(
-        STATION_TYPES.filter(([type]) => type !== "artist").map(([type, value]) => [`the ${type} station's cover`, () => stationCover(type as CoverStationType, value)]),
+        STATION_TYPES.filter(([type]) => type !== "artist").map(([type, value]) => [
+            `the ${value ?? type} station's cover`,
+            () => stationCover(type as CoverStationType, value),
+        ]),
     ),
+    "the Late Night station's cold start, filled with songs like a listener's one night song": async () =>
+        (await nightStationPool(NIGHT, "UTC", "late-night")).map((s) => s.id),
+    "similar songs": async () => {
+        const features = jest.spyOn(featureDetection, "getFeatures").mockResolvedValue({ vibeEmbeddings: true } as never);
+        try {
+            return (await findSimilarTracks(NEAR, 100)).map((t) => t.id);
+        } finally {
+            features.mockRestore();
+        }
+    },
+    "the matching's ranked matches": async () => {
+        const { ctx, inputs } = await matching();
+        return (await rankMatches(ctx, inputs, { limit: 100, counted: [] })).map((t) => t.id);
+    },
+    "the matching's top scores": async () => {
+        const { ctx, inputs } = await matching();
+        return (await topScores(ctx, inputs, 100)).map((t) => t.id);
+    },
+    "the matching's scores over the library": async () => {
+        const { ctx, inputs } = await matching();
+        return (await scoreLibrary(ctx, [inputs], [])).map((t) => t.id);
+    },
+    "a song path": async () => (await generateSongPath(NEAR, `${FILLERS[1]}-s1`, { length: 50 })).path.map((t) => t.id),
+    "text search's ranking by sound": async () => (await searchTracksByEmbedding(soundOf(SONG.playable, 0), 100)).map((t) => t.id),
+    "the songs the map lays out": async () =>
+        (await prisma.$queryRaw<{ id: string }[]>`SELECT track_id AS id FROM matching_map WHERE track_id LIKE ${`${P}%`}`).map((r) => r.id),
+    "the public vibe site's library export, with a map place left over for each unplayable song": async () => {
+        await prisma.$executeRaw`
+            INSERT INTO matching_map (track_id, embedded_at, x, y, z, colour, laid_out)
+            SELECT track_id, analyzed_at, 0.1, 0.2, 0.3, 0.5, true FROM track_embeddings WHERE track_id = ANY(${UNPLAYABLE})
+            ON CONFLICT DO NOTHING`;
+        try {
+            const doc = JSON.parse(zlib.gunzipSync((await refreshLibraryExport()).gzipped).toString());
+            return doc.tracks.map((t: { id: string }) => t.id);
+        } finally {
+            await prisma.$executeRaw`DELETE FROM matching_map WHERE track_id = ANY(${UNPLAYABLE})`;
+        }
+    },
+    "the vibe map": async () => {
+        const map = await getVibeMap();
+        if (map.status !== "ready") throw new Error(`the map is ${map.status}`);
+        return map.data.tracks.map((t) => t.id);
+    },
+    "the map's mood summary, which lists only albums with a playable song": async () => {
+        const summary = await getMoodSummary();
+        if (summary.status !== "ready") throw new Error(`the mood summary is ${summary.status}`);
+        return songsOfAlbums(Object.keys(summary.data.albums).map((id) => ({ id })));
+    },
+    "the mood snapshot": async () => {
+        await refreshMoodSnapshot();
+        return [...(await currentMoodSnapshot()).views.keys()];
+    },
+    "mood tags": async () => {
+        await writeMoodTags();
+        try {
+            return (await prisma.track.findMany({ where: { id: { startsWith: P }, NOT: { moodTags: { isEmpty: true } } }, select: { id: true } })).map((t) => t.id);
+        } finally {
+            // Wildcard plays the untagged songs.
+            await prisma.track.updateMany({ where: { id: { startsWith: P } }, data: { moodTags: [] } });
+        }
+    },
+    "web song search": async () => (await searchService.searchTracks({ query: "playable", limit: 500 })).map((t) => t.id),
+    "web song search by a name full-text search cannot read": async () =>
+        (await searchService.searchTracks({ query: P, limit: 500 })).map((t) => t.id),
     "Subsonic getLyrics by artist and title": async () => {
         const found = await Promise.all(
             Object.entries(SONG).map(async ([kind, id]) =>
@@ -247,6 +363,12 @@ const STREAMS: Record<string, { ask: (id: string) => request.Test; plays: (res: 
 };
 
 async function cleanup() {
+    // The statistics and the map are the whole library's; this file's songs are the library while it runs.
+    await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
+    await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
+    for (const table of ["matching_map", "matching_feel", "track_moods", "track_embeddings"]) {
+        await prisma.$executeRawUnsafe(`DELETE FROM ${table} WHERE track_id LIKE $1`, `${P}%`);
+    }
     await prisma.user.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
@@ -265,7 +387,7 @@ const LISTENED = (() => {
  * seeded year, a library album per song unless it says otherwise. Every derived field a picker filters on is filled, so
  * no filter passes on an empty default. Each song is played (a finished listen) and liked by USER.
  */
-async function seedArtist(artist: { id: string; name: string }, albums: { id: string; location?: "LIBRARY" | "DISCOVER"; cover?: string; songs: { id: string; title: string; filePath: string; missingSince?: Date | null; corrupt?: boolean }[] }[]) {
+async function seedArtist(artist: { id: string; name: string }, albums: { id: string; location?: "LIBRARY" | "DISCOVER"; cover?: string; songs: { id: string; title: string; filePath: string; missingSince?: Date | null; corrupt?: boolean; arousal?: number }[] }[]) {
     await prisma.artist.create({
         data: { id: artist.id, name: artist.name, normalizedName: normalizeArtistName(artist.name), identityKey: artist.id, libraryAlbumCount: albums.length, genres: [GENRE] },
     });
@@ -305,7 +427,7 @@ async function seedArtist(artist: { id: string; name: string }, albums: { id: st
                     trackGenres: { create: { genreId: genre.id } },
                     // One analysis for every song, so a picker that keeps "the upper half" or "minor key" keeps them all.
                     analysisStatus: "completed",
-                    arousal: 0.5,
+                    arousal: song.arousal ?? 0.5,
                     keyScale: "minor",
                     bpm: 120,
                     energy: 0.5,
@@ -317,6 +439,30 @@ async function seedArtist(artist: { id: string; name: string }, albums: { id: st
             await prisma.likedTrack.create({ data: { userId: USER, trackId: song.id } });
         }
     }
+}
+
+/**
+ * Every seeded song's sound vector and mood scores, as the analysis and the mood step write them, then the similarity
+ * step's statistics, the mood statistics and the map, built from the library as it is.
+ */
+async function seedSoundAndMoods() {
+    const ids = (await prisma.track.findMany({ where: { id: { startsWith: P } }, select: { id: true }, orderBy: { id: "asc" } })).map((t) => t.id);
+    for (const [i, id] of ids.entries()) {
+        await prisma.$executeRaw`
+            INSERT INTO track_embeddings (track_id, embedding, model_version)
+            VALUES (${id}, ${`[${soundOf(id, i).join(",")}]`}::vector, ${MATCHING_MODEL})`;
+        const moods = SEEDED.has(id) ? ENERGETIC : {};
+        // Copied in SQL: the vector's time has microseconds a JavaScript Date would drop.
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_moods (track_id, embedded_at, weights, ${MOODS.map((m) => `"${m}"`).join(", ")})
+             SELECT track_id, analyzed_at, $2, ${MOODS.map((_, k) => `$${k + 3}::real`).join(", ")}
+             FROM track_embeddings WHERE track_id = $1`,
+            id, MOOD_HEADS.version, ...MOODS.map((m) => moods[m] ?? 0),
+        );
+    }
+    await buildMatching();
+    await prisma.$transaction((tx) => buildMoodState(tx));
+    await updateMap(true);
 }
 
 /** The cover of a seeded song's album; the fillers have none, so a station's cover can only be one of these. */
@@ -332,7 +478,7 @@ beforeAll(async () => {
             id: `${id}-al`,
             location: id === SONG.discover ? ("DISCOVER" as const) : ("LIBRARY" as const),
             cover: coverOf(id),
-            songs: [{ id, title: `${P} ${kind}`, filePath: `${P}/${kind}.flac`, missingSince: id === SONG.missing ? new Date() : null, corrupt: id === SONG.corrupt }],
+            songs: [{ id, title: `${P} ${kind}`, filePath: `${P}/${kind}.flac`, missingSince: id === SONG.missing ? new Date() : null, corrupt: id === SONG.corrupt, arousal: 0.9 }],
         })),
     );
     // Other library artists, two playable songs each, so every mix and station has enough to be made. With the
@@ -371,6 +517,9 @@ beforeAll(async () => {
             items: { create: ids.map((trackId, i) => ({ trackId, sort: i, rank: `a${i}` })) },
         },
     });
+    await seedSoundAndMoods();
+    await prisma.user.create({ data: { id: NIGHT, username: NIGHT, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    await prisma.play.create({ data: { userId: NIGHT, trackId: `${FILLERS[0]}-s1`, playedAt: LISTENED, heard: true } });
     // A saved queue holding all four, the playable song current and last, so the ones before it are left out around it.
     await subsonic("savePlayQueue.view", { id: [...UNPLAYABLE, SONG.playable], current: SONG.playable }).expect(200);
 });
@@ -423,6 +572,15 @@ it("plays similar artists on the radio of an artist with no playable song", asyn
     await prisma.similarArtist.create({ data: { fromArtistId: `${P}-gone-ar`, toArtistId: `${FILLERS[1]}-ar` } });
     // Its similar artist, and the artists sharing its genre that make up a short list.
     expect(await station("artist", `${P}-gone-ar`)).toEqual(expect.arrayContaining([`${FILLERS[1]}-s1`, `${FILLERS[1]}-s2`]));
+});
+
+it("builds an artist's sound profile from its playable songs only", async () => {
+    const state = await loadMatchingState();
+    if (!state) throw new Error("no matching state");
+    const profile = (await artistProfiles(state, [`${P}-ar`])).get(`${P}-ar`);
+    const own = soundOf(SONG.playable, 0);
+    const length = Math.hypot(...own);
+    expect(Array.from(profile?.sound ?? [], (x) => Number(x.toFixed(5)))).toEqual(own.map((x) => Number((x / length).toFixed(5))));
 });
 
 it("refuses a table name that is not a plain identifier", () => {

@@ -1,6 +1,6 @@
 /**
- * The owned library as one gzipped JSON document for the public vibe site: every present
- * track with a map position, its raw 3-axis position, moods, energy, valence and
+ * The owned library as one gzipped JSON document for the public vibe site: every playable
+ * song with a map position, its raw 3-axis position, moods, energy, valence and
  * its nearest tracks by the matching formula and how many times the public user
  * has listened to it. Rebuilt only when the library's fingerprint changes, in the
  * background; the fingerprint doubles as the ETag.
@@ -10,6 +10,7 @@ import { promisify } from "util";
 import zlib from "zlib";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { playableSongSql } from "../utils/libraryEligibility";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getLiveState, publicUserId } from "./liveListening";
@@ -52,12 +53,12 @@ const MAPPED = Prisma.sql`
     JOIN "Track" t ON t.id = te.track_id
     JOIN "Album" a ON a.id = t."albumId"
     JOIN "Artist" ar ON ar.id = a."artistId"
-    WHERE a.location = 'LIBRARY' AND t."missingSince" IS NULL
+    WHERE ${playableSongSql("t", "a")}
 `;
 
 const OWNED_TRACKS = Prisma.sql`
     SELECT COUNT(*) FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-    WHERE a.location = 'LIBRARY' AND t."missingSince" IS NULL
+    WHERE ${playableSongSql("t", "a")}
 `;
 
 const MOOD_ID_BY_FIELD = new Map<string, string>(MOODS.map((m) => [m.field, m.id]));

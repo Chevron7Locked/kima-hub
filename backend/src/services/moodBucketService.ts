@@ -7,6 +7,7 @@
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { playableSongSql } from "../utils/libraryEligibility";
 import { albumCoverUrls, getMixColor, tracksByIds } from "./mixes/helpers";
 import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";
@@ -170,7 +171,7 @@ async function librarySignature(): Promise<{ signature: string; pending: number 
         LEFT JOIN track_embeddings te ON te.track_id = t.id AND te.model_version = ${MOOD_HEADS.model}
                                      AND vector_dims(te.embedding) = ${MOOD_HEADS.dims} AND vector_norm(te.embedding) > 0
         LEFT JOIN track_moods m ON m.track_id = t.id
-        WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})
           AND (t."analysisStatus" IN ('pending', 'queued', 'processing')
                OR (te.track_id IS NOT NULL AND (m.embedded_at IS DISTINCT FROM te.analyzed_at
                                                 OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})))

@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { Prisma, type MoodState as MoodStateRow } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { formatEmbedding } from "../../utils/embedding";
 import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "./heads";
@@ -283,7 +284,7 @@ export async function moodProgress(): Promise<{ total: number; completed: number
         JOIN "Track" t ON t.id = te.track_id
         LEFT JOIN track_moods m ON m.track_id = te.track_id
         WHERE te.model_version = ${MOOD_HEADS.model}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+          AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})
           AND vector_dims(te.embedding) = ${MOOD_HEADS.dims}
           AND vector_norm(te.embedding) > 0
     `;

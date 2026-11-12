@@ -5,6 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { parseEmbedding } from "../../utils/embedding";
 import { feelVector, unit, type MatchTrack } from "./formula";
 import type { LaidOutMap, PlacedTracks } from "./mapCompute";
@@ -129,7 +130,7 @@ async function mapStatus(): Promise<{ laidOut: boolean; complete: boolean }> {
         JOIN matching_feel f ON f.track_id = te.track_id AND f.embedded_at = te.analyzed_at AND f.probe = ${PROBE_ID}
         JOIN "Track" t ON t.id = te.track_id
         LEFT JOIN matching_map m ON m.track_id = te.track_id AND m.embedded_at = te.analyzed_at
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE te.model_version = ${MATCHING_MODEL} AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})
     `;
     const laidOut = Number(counts?.laidOut ?? 0) >= 2;
     return { laidOut, complete: laidOut && Number(counts?.unplaced ?? 0) === 0 };
@@ -191,7 +192,7 @@ async function update(inputsSettled: boolean): Promise<MapUpdate> {
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         LEFT JOIN matching_map m ON m.track_id = te.track_id AND m.embedded_at = te.analyzed_at
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE te.model_version = ${MATCHING_MODEL} AND ${playableSongSql("t", "a")}
         ORDER BY te.track_id
     `;
     if (rows.length === 0) return { laidOut: 0, placed: 0 };

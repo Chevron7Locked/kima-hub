@@ -5,6 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { formatEmbedding, parseEmbedding } from "../../utils/embedding";
 import {
     FEEL_WEIGHT,
@@ -166,8 +167,7 @@ function scoreQuery(
         JOIN "Artist" ar ON ar.id = a."artistId"
         LEFT JOIN bonus b ON b.artist_id = ar.id
         WHERE te.model_version = ${MATCHING_MODEL}
-          AND t."missingSince" IS NULL AND t.corrupt = false
-          AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+          AND ${playableSongSql("t", "a")}
           AND te.track_id <> ALL(${exclude}::text[])
     `;
 }
@@ -302,7 +302,7 @@ export async function artistProfiles(state: MatchingState, artistIds: string[]):
         JOIN "Artist" ar ON ar.id = a."artistId"
         WHERE ar.id = ANY(${artistIds})
           AND te.model_version = ${MATCHING_MODEL}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+          AND ${playableSongSql("t", "a")}
         GROUP BY ar.id
     `;
     return new Map(

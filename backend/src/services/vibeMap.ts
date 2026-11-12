@@ -5,6 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { playableSongSql } from "../utils/libraryEligibility";
 import { featureDetection } from "./featureDetection";
 import { MATCHING_MODEL } from "./matching/state";
 import { MOODS, currentMoodSnapshot, moodOutput } from "./moodBucketService";
@@ -66,13 +67,13 @@ const MAP_TRACKS = Prisma.sql`
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')`;
+        WHERE te.model_version = ${MATCHING_MODEL} AND ${playableSongSql("t", "a")}`;
 
 /** True when no track is laid out yet but the library has songs and sound vectors are on: the first layout is pending. */
 async function layoutPending(): Promise<boolean> {
     const { vibeEmbeddings } = await featureDetection.getFeatures();
     const [{ waiting }] = await prisma.$queryRaw<Array<{ waiting: boolean }>>`
-        SELECT EXISTS (SELECT 1 FROM "Track" t WHERE t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')) AS waiting
+        SELECT EXISTS (SELECT 1 FROM "Track" t WHERE EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})) AS waiting
     `;
     return vibeEmbeddings && waiting;
 }

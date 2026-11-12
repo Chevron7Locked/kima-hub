@@ -4,6 +4,7 @@
  * a tag, a statistic and a mix disagree about which songs exist.
  */
 import { Prisma } from "@prisma/client";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { MOOD_HEADS } from "./heads";
 
 /**
@@ -12,7 +13,7 @@ import { MOOD_HEADS } from "./heads";
  */
 export function coveredTrackSql(alias: string): Prisma.Sql {
     const t = Prisma.raw(alias);
-    return Prisma.sql`${t}."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = ${t}."albumId" AND la.location = 'LIBRARY') AND ${t}.corrupt = false AND ${t}."analysisStatus" = 'completed'`;
+    return Prisma.sql`EXISTS (SELECT 1 FROM "Album" la WHERE la.id = ${t}."albumId" AND ${playableSongSql(alias, "la")}) AND ${t}."analysisStatus" = 'completed'`;
 }
 
 /**

@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { formatEmbedding } from "../../utils/embedding";
 import { getMergedGenres } from "../../utils/metadataOverrides";
 import feelProbe from "./feelProbe.json";
@@ -129,7 +130,7 @@ async function inputsFingerprint(tx: Prisma.TransactionClient): Promise<string> 
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE te.model_version = ${MATCHING_MODEL} AND ${playableSongSql("t", "a")}
     `;
     return crypto.createHash("sha256").update(JSON.stringify([STATE_VERSION, row.n, row.h])).digest("hex");
 }
@@ -148,7 +149,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         FROM track_embeddings te
         JOIN matching_feel f ON f.track_id = te.track_id AND f.embedded_at = te.analyzed_at AND f.probe = ${PROBE_ID}
         JOIN "Track" t ON t.id = te.track_id
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE te.model_version = ${MATCHING_MODEL} AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})
     `;
     if (stats.n === 0) return null;
 
@@ -161,7 +162,7 @@ async function computeState(tx: Prisma.TransactionClient): Promise<StateColumns 
         JOIN "Track" t ON t.id = te.track_id
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
-        WHERE te.model_version = ${MATCHING_MODEL} AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+        WHERE te.model_version = ${MATCHING_MODEL} AND ${playableSongSql("t", "a")}
         GROUP BY ar.id
     `;
     const soundSpread = 1 - stats.meanNorm * stats.meanNorm;
@@ -259,7 +260,7 @@ export async function matchingProgress(): Promise<{ total: number; completed: nu
         LEFT JOIN matching_feel f ON f.track_id = te.track_id
         LEFT JOIN matching_map m ON m.track_id = te.track_id
         WHERE te.model_version = ${MATCHING_MODEL}
-          AND t."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND la.location = 'LIBRARY')
+          AND EXISTS (SELECT 1 FROM "Album" la WHERE la.id = t."albumId" AND ${playableSongSql("t", "la")})
           AND vector_dims(te.embedding) = ${PROBE_DIMS}
           AND vector_norm(te.embedding) > 0
     `;
