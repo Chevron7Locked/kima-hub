@@ -1,266 +1,173 @@
 /**
  * The artist and album metadata override and reset handlers keep `sortName` in
  * step with displayName / displayTitle. They are its only writers, and every
- * listing orders on it.
+ * listing orders on it. Real router, real admin token and database.
  */
-
-jest.mock('../../middleware/auth', () => ({
-    requireAuth: (req: any, _res: any, next: any) => {
-        req.user = { id: 'admin-1', role: 'admin' };
-        next();
-    },
-    requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'admin-1', role: 'admin' };
-        next();
-    },
-}));
-
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
-jest.mock('../../utils/redis', () => ({
-    redisClient: { get: jest.fn(), setex: jest.fn(), del: jest.fn() },
-}));
-
-jest.mock('../../workers/unifiedEnrichment', () => ({
-    getEnrichmentProgress: jest.fn(),
-    runFullEnrichment: jest.fn(),
-    reRunArtistsOnly: jest.fn(),
-    reRunMoodTagsOnly: jest.fn(),
-    resetAllEnrichmentData: jest.fn(),
-    triggerEnrichmentNow: jest.fn(),
-    startEnrichmentNow: jest.fn(),
-}));
-jest.mock('../../services/enrichmentState', () => ({ enrichmentStateService: {} }));
-jest.mock('../../services/enrichmentFailureService', () => ({
-    enrichmentFailureService: {},
-}));
-jest.mock('../../utils/systemSettings', () => ({
-    getSystemSettings: jest.fn(),
-    invalidateSystemSettingsCache: jest.fn(),
-}));
-jest.mock('../../services/rateLimiter', () => ({ rateLimiter: {} }));
-jest.mock('../../services/imageBackfill', () => ({ repairBrokenCovers: jest.fn() }));
-jest.mock('../../services/mbidReassign', () => ({
-    DuplicateMbidError: class DuplicateMbidError extends Error {},
-    reassignAlbumRgMbid: jest.fn(),
-    reassignArtistMbid: jest.fn(),
-}));
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        artist: { findUnique: jest.fn(), update: jest.fn() },
-        album: { findUnique: jest.fn(), update: jest.fn() },
-    },
-}));
 
 import express from 'express';
 import request from 'supertest';
 import router from '../enrichment';
 import { prisma } from '../../utils/db';
+import { generateToken } from '../../middleware/auth';
+import { closeEngineConnections } from '../../__tests__/helpers/engineConnections';
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/enrichment', router);
-    return app;
+const P = 'esn_';
+const ADMIN = `${P}admin`;
+const ARTIST = `${P}art`;
+const ALBUM = `${P}alb`;
+const SENTINEL = 'zz sentinel';
+
+const app = express();
+app.use(express.json());
+app.use('/enrichment', router);
+const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: 'admin', tokenVersion: 0 })}`;
+const put = (path: string) => request(app).put(path).set('Authorization', asAdmin);
+const post = (path: string) => request(app).post(path).set('Authorization', asAdmin);
+
+// An artist and an album carrying an earlier edit, filed under a sortName that is neither name.
+async function seed(artistName: string, albumTitle: string) {
+    await prisma.album.deleteMany({ where: { id: ALBUM } });
+    await prisma.artist.deleteMany({ where: { id: ARTIST } });
+    await prisma.artist.create({
+        data: { id: ARTIST, name: artistName, normalizedName: artistName.toLowerCase(), identityKey: `${P}ik`, displayName: 'Earlier Edit', sortName: SENTINEL, hasUserOverrides: true },
+    });
+    await prisma.album.create({
+        data: {
+            id: ALBUM, rgMbid: `${P}rg`, artistId: ARTIST, identityKey: `${P}ak`, title: albumTitle, primaryType: 'Album', location: 'LIBRARY',
+            displayTitle: 'Earlier Edit', sortName: SENTINEL, hasUserOverrides: true,
+        },
+    });
 }
+const artistRow = () => prisma.artist.findUniqueOrThrow({ where: { id: ARTIST } });
+const albumRow = () => prisma.album.findUniqueOrThrow({ where: { id: ALBUM } });
 
-beforeEach(() => {
-    jest.clearAllMocks();
-    (prisma.artist.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
-        id: 'artist-1',
-        ...data,
-        albums: [],
-    }));
-    (prisma.album.update as jest.Mock).mockImplementation(async ({ data }: any) => ({
-        id: 'album-1',
-        ...data,
-        artist: { id: 'artist-1', name: 'Some Artist' },
-        tracks: [],
-    }));
+beforeAll(async () => {
+    await prisma.user.deleteMany({ where: { id: ADMIN } });
+    await prisma.user.create({ data: { id: ADMIN, username: ADMIN, passwordHash: 'x', role: 'admin', tokenVersion: 0 } });
+});
+
+afterAll(async () => {
+    await prisma.album.deleteMany({ where: { id: ALBUM } });
+    await prisma.artist.deleteMany({ where: { id: ARTIST } });
+    await prisma.user.deleteMany({ where: { id: ADMIN } });
+    await closeEngineConnections();
+    await prisma.$disconnect();
 });
 
 describe('PUT /enrichment/artists/:id/metadata -- sortName follows displayName', () => {
     it('sets sortName from the override, article-stripped, not from the canonical name', async () => {
-        await request(makeApp())
-            .put('/enrichment/artists/artist-1/metadata')
+        await seed('Canonical Name', 'x');
+
+        const res = await put(`/enrichment/artists/${ARTIST}/metadata`)
             .send({ name: 'The Artist Formerly Known As Prince' })
             .expect(200);
 
-        expect(prisma.artist.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayName: 'The Artist Formerly Known As Prince',
-                sortName: 'artist formerly known as prince',
-            }),
-        }));
-        // The canonical name was never needed for this branch -- no lookup.
-        expect(prisma.artist.findUnique).not.toHaveBeenCalled();
+        expect(res.body).toMatchObject({ displayName: 'The Artist Formerly Known As Prince', sortName: 'artist formerly known as prince' });
+        expect(await artistRow()).toMatchObject({
+            displayName: 'The Artist Formerly Known As Prince',
+            sortName: 'artist formerly known as prince',
+            name: 'Canonical Name',
+        });
     });
 
     it('reverts sortName to the canonical name when the override is cleared to an empty string', async () => {
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({ name: 'The Beatles' });
+        await seed('The Beatles', 'x');
 
-        await request(makeApp())
-            .put('/enrichment/artists/artist-1/metadata')
-            .send({ name: '' })
-            .expect(200);
+        await put(`/enrichment/artists/${ARTIST}/metadata`).send({ name: '' }).expect(200);
 
-        expect(prisma.artist.findUnique).toHaveBeenCalledWith({
-            where: { id: 'artist-1' },
-            select: { name: true },
-        });
-        expect(prisma.artist.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayName: '',
-                sortName: 'beatles',
-            }),
-        }));
+        expect(await artistRow()).toMatchObject({ displayName: '', sortName: 'beatles' });
     });
 
     it('reverts sortName to the canonical name when the override is cleared to null', async () => {
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({ name: 'Los Lobos' });
+        await seed('Los Lobos', 'x');
 
-        await request(makeApp())
-            .put('/enrichment/artists/artist-1/metadata')
-            .send({ name: null })
-            .expect(200);
+        await put(`/enrichment/artists/${ARTIST}/metadata`).send({ name: null }).expect(200);
 
-        expect(prisma.artist.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayName: null,
-                sortName: 'lobos',
-            }),
-        }));
+        expect(await artistRow()).toMatchObject({ displayName: null, sortName: 'lobos' });
     });
 
     it('does not touch sortName at all when name is not part of the request', async () => {
-        await request(makeApp())
-            .put('/enrichment/artists/artist-1/metadata')
-            .send({ bio: 'Some bio text' })
-            .expect(200);
+        await seed('The Beatles', 'x');
 
-        const call = (prisma.artist.update as jest.Mock).mock.calls[0][0];
-        expect(call.data).not.toHaveProperty('sortName');
-        expect(call.data).not.toHaveProperty('displayName');
+        await put(`/enrichment/artists/${ARTIST}/metadata`).send({ bio: 'Some bio text' }).expect(200);
+
+        expect(await artistRow()).toMatchObject({ userSummary: 'Some bio text', displayName: 'Earlier Edit', sortName: SENTINEL });
     });
 });
 
 describe('POST /enrichment/artists/:id/reset -- sortName follows the cleared override', () => {
     it('resets sortName to the canonical name alongside displayName', async () => {
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({ id: 'artist-1', name: 'The Beatles' });
+        await seed('The Beatles', 'x');
 
-        await request(makeApp())
-            .post('/enrichment/artists/artist-1/reset')
-            .expect(200);
+        await post(`/enrichment/artists/${ARTIST}/reset`).expect(200);
 
-        expect(prisma.artist.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayName: null,
-                sortName: 'beatles',
-            }),
-        }));
+        expect(await artistRow()).toMatchObject({ displayName: null, sortName: 'beatles', hasUserOverrides: false });
     });
 
     it('404s without touching sortName when the artist does not exist', async () => {
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue(null);
+        await seed('The Beatles', 'x');
 
-        await request(makeApp())
-            .post('/enrichment/artists/missing/reset')
-            .expect(404);
+        await post(`/enrichment/artists/${P}missing/reset`).expect(404);
 
-        expect(prisma.artist.update).not.toHaveBeenCalled();
+        expect(await artistRow()).toMatchObject({ displayName: 'Earlier Edit', sortName: SENTINEL });
     });
 });
 
 describe('PUT /enrichment/albums/:id/metadata -- sortName follows displayTitle', () => {
     it('sets sortName from the override, article-stripped, not from the canonical title', async () => {
-        await request(makeApp())
-            .put('/enrichment/albums/album-1/metadata')
+        await seed('Artist', 'Canonical Title');
+
+        const res = await put(`/enrichment/albums/${ALBUM}/metadata`)
             .send({ title: 'The Dark Side of the Moon' })
             .expect(200);
 
-        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayTitle: 'The Dark Side of the Moon',
-                sortName: 'dark side of the moon',
-            }),
-        }));
-        expect(prisma.album.findUnique).not.toHaveBeenCalled();
+        expect(res.body).toMatchObject({ displayTitle: 'The Dark Side of the Moon', sortName: 'dark side of the moon' });
+        expect(await albumRow()).toMatchObject({
+            displayTitle: 'The Dark Side of the Moon',
+            sortName: 'dark side of the moon',
+            title: 'Canonical Title',
+        });
     });
 
     it('reverts sortName to the canonical title when the override is cleared to an empty string', async () => {
-        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ title: 'Los Angeles' });
+        await seed('Artist', 'Los Angeles');
 
-        await request(makeApp())
-            .put('/enrichment/albums/album-1/metadata')
-            .send({ title: '' })
-            .expect(200);
+        await put(`/enrichment/albums/${ALBUM}/metadata`).send({ title: '' }).expect(200);
 
-        expect(prisma.album.findUnique).toHaveBeenCalledWith({
-            where: { id: 'album-1' },
-            select: { title: true },
-        });
-        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayTitle: '',
-                sortName: 'angeles',
-            }),
-        }));
+        expect(await albumRow()).toMatchObject({ displayTitle: '', sortName: 'angeles' });
     });
 
     it('reverts sortName to the canonical title when the override is cleared to null', async () => {
-        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ title: 'Le Bootleg' });
+        await seed('Artist', 'Le Bootleg');
 
-        await request(makeApp())
-            .put('/enrichment/albums/album-1/metadata')
-            .send({ title: null })
-            .expect(200);
+        await put(`/enrichment/albums/${ALBUM}/metadata`).send({ title: null }).expect(200);
 
-        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayTitle: null,
-                sortName: 'bootleg',
-            }),
-        }));
+        expect(await albumRow()).toMatchObject({ displayTitle: null, sortName: 'bootleg' });
     });
 
     it('does not touch sortName at all when title is not part of the request', async () => {
-        await request(makeApp())
-            .put('/enrichment/albums/album-1/metadata')
-            .send({ year: '1973' })
-            .expect(200);
+        await seed('Artist', 'The Dark Side of the Moon');
 
-        const call = (prisma.album.update as jest.Mock).mock.calls[0][0];
-        expect(call.data).not.toHaveProperty('sortName');
-        expect(call.data).not.toHaveProperty('displayTitle');
+        await put(`/enrichment/albums/${ALBUM}/metadata`).send({ year: '1973' }).expect(200);
+
+        expect(await albumRow()).toMatchObject({ displayYear: 1973, displayTitle: 'Earlier Edit', sortName: SENTINEL });
     });
 });
 
 describe('POST /enrichment/albums/:id/reset -- sortName follows the cleared override', () => {
     it('resets sortName to the canonical title alongside displayTitle', async () => {
-        (prisma.album.findUnique as jest.Mock).mockResolvedValue({ id: 'album-1', title: 'The Dark Side of the Moon' });
+        await seed('Artist', 'The Dark Side of the Moon');
 
-        await request(makeApp())
-            .post('/enrichment/albums/album-1/reset')
-            .expect(200);
+        await post(`/enrichment/albums/${ALBUM}/reset`).expect(200);
 
-        expect(prisma.album.update).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
-                displayTitle: null,
-                sortName: 'dark side of the moon',
-            }),
-        }));
+        expect(await albumRow()).toMatchObject({ displayTitle: null, sortName: 'dark side of the moon', hasUserOverrides: false });
     });
 
     it('404s without touching sortName when the album does not exist', async () => {
-        (prisma.album.findUnique as jest.Mock).mockResolvedValue(null);
+        await seed('Artist', 'The Dark Side of the Moon');
 
-        await request(makeApp())
-            .post('/enrichment/albums/missing/reset')
-            .expect(404);
+        await post(`/enrichment/albums/${P}missing/reset`).expect(404);
 
-        expect(prisma.album.update).not.toHaveBeenCalled();
+        expect(await albumRow()).toMatchObject({ displayTitle: 'Earlier Edit', sortName: SENTINEL });
     });
 });

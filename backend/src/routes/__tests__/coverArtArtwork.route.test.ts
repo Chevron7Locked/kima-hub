@@ -1,19 +1,8 @@
 /**
  * `/cover-art/native:<id>.jpg` (file missing on disk) and `/album-cover/:mbid`
  * go through `artwork.ts`; the latter looks up the album so Deezer can be
- * searched by artist and title.
+ * searched by artist and title. Real router, real database; the artwork sources and outside fetches are stubbed.
  */
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        album: {
-            findUnique: jest.fn(),
-            findFirst: jest.fn(),
-            update: jest.fn().mockResolvedValue({}),
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-    },
-}));
 
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -61,7 +50,6 @@ jest.mock("../../services/artwork", () => ({
 
 import express from "express";
 import request from "supertest";
-import fs from "fs";
 import libraryCoverArtRoutes from "../library/coverArt";
 import { prisma } from "../../utils/db";
 
@@ -73,86 +61,102 @@ function makeApp() {
 }
 
 const FOUND = "https://e-cdns-images.dzcdn.net/images/cover/abc/500x500.jpg";
+const P = "caart";
+const ALBUM_ID = `${P}_alb`;
+const RG = `${P}-rg-1`;
+const NATIVE = `native:${ALBUM_ID}.jpg`;
+
+async function wipe() {
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+beforeAll(async () => {
+    await wipe();
+    await prisma.artist.create({ data: { id: `${P}_art`, name: "Perturbator", normalizedName: "perturbator", identityKey: `${P}_ik` } });
+});
+
+afterAll(wipe);
+
+// The album's stored cover is NATIVE, a file that is not on disk: the case that sends the route looking for a replacement.
+beforeEach(async () => {
+    await prisma.album.deleteMany({ where: { id: ALBUM_ID } });
+    await prisma.album.create({
+        data: { id: ALBUM_ID, rgMbid: RG, artistId: `${P}_art`, identityKey: `${P}_ak`, title: "Age Of Aquarius", primaryType: "Album", coverUrl: NATIVE },
+    });
+});
 
 describe("the cover-art route asks every source", () => {
-    let existsSpy: jest.SpyInstance;
-
     beforeEach(() => {
         jest.clearAllMocks();
         mockFindAlbumArtwork.mockResolvedValue(null);
-        // The stored file is gone from disk -- the case that sends this route
-        // looking for a replacement in the first place.
-        existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
     });
-
-    afterEach(() => existsSpy.mockRestore());
 
     describe("GET /cover-art/:id when the stored file has gone", () => {
         it("gives up honestly when no source has a replacement", async () => {
-            (prisma.album.findUnique as jest.Mock).mockResolvedValue({
-                id: "a1",
-                title: "Age Of Aquarius",
-                rgMbid: "rg-1",
-                artist: { name: "Perturbator" },
-            });
-
             const res = await request(makeApp()).get(
-                "/library/cover-art/" + encodeURIComponent("native:a1.jpg"),
+                "/library/cover-art/" + encodeURIComponent(NATIVE),
             );
 
             expect(res.status).toBe(404);
         });
 
         it("asks with the release-group id as well as the name, not Deezer alone", async () => {
-            (prisma.album.findUnique as jest.Mock).mockResolvedValue({
-                id: "a1",
-                title: "Age Of Aquarius",
-                rgMbid: "rg-1",
-                artist: { name: "Perturbator" },
-            });
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
 
             await request(makeApp()).get(
-                "/library/cover-art/" + encodeURIComponent("native:a1.jpg"),
+                "/library/cover-art/" + encodeURIComponent(NATIVE),
             );
 
             expect(mockFindAlbumArtwork).toHaveBeenCalledWith({
-                rgMbid: "rg-1",
+                rgMbid: RG,
                 artistName: "Perturbator",
                 albumTitle: "Age Of Aquarius",
             });
         });
 
+        it("answers 404 for a stored cover whose album is not in the library", async () => {
+            const res = await request(makeApp()).get("/library/cover-art/" + encodeURIComponent(`native:${P}_nosuch.jpg`));
+
+            expect(res.status).toBe(404);
+            expect(mockFindAlbumArtwork).not.toHaveBeenCalled();
+        });
+
         it("remembers the replacement against the album and serves it through Kima", async () => {
-            (prisma.album.findUnique as jest.Mock).mockResolvedValue({
-                id: "a1",
-                title: "Age Of Aquarius",
-                rgMbid: "rg-1",
-                artist: { name: "Perturbator" },
-            });
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
             mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
 
             const res = await request(makeApp()).get(
-                "/library/cover-art/" + encodeURIComponent("native:a1.jpg"),
+                "/library/cover-art/" + encodeURIComponent(NATIVE),
             );
 
             // Never a redirect off-site: the web app's service worker may only fetch Kima itself.
             expect(res.status).toBe(200);
             expect(res.headers.location).toBeUndefined();
             expect(mockFetchChecked).toHaveBeenCalledWith(FOUND, expect.anything());
-            expect(prisma.album.updateMany).toHaveBeenCalledWith({
-                where: { id: "a1", coverUrl: "native:a1.jpg" },
-                data: { coverUrl: FOUND },
-            });
+            const album = await prisma.album.findUniqueOrThrow({ where: { id: ALBUM_ID } });
+            expect(album.coverUrl).toBe(FOUND);
+        });
+
+        it("does not overwrite a cover the album has been given since", async () => {
+            mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+            mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
+            // The path asks for this album's old file, but the album now points elsewhere.
+            const newer = "https://example.invalid/newer.jpg";
+            await prisma.album.update({ where: { id: ALBUM_ID }, data: { coverUrl: newer } });
+
+            await request(makeApp()).get("/library/cover-art/" + encodeURIComponent(NATIVE));
+
+            const album = await prisma.album.findUniqueOrThrow({ where: { id: ALBUM_ID } });
+            expect(album.coverUrl).toBe(newer);
         });
     });
 
     describe("GET /album-cover/:mbid", () => {
         it("looks up an album whose id this app invented", async () => {
-            (prisma.album.findFirst as jest.Mock).mockResolvedValue({
-                title: "Reliance",
-                artist: { name: "Soen" },
+            await prisma.artist.create({ data: { id: `${P}_art2`, name: "Soen", normalizedName: "soen", identityKey: `${P}_ik2` } });
+            await prisma.album.create({
+                data: { id: `${P}_alb2`, rgMbid: "temp-9", artistId: `${P}_art2`, identityKey: `${P}_ak2`, title: "Reliance", primaryType: "Album" },
             });
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
 
@@ -160,33 +164,29 @@ describe("the cover-art route asks every source", () => {
 
             expect(res.status).toBe(200);
             expect(res.body).toEqual({ coverUrl: FOUND });
+            expect(mockFindAlbumArtwork).toHaveBeenCalledWith({ rgMbid: "temp-9", artistName: "Soen", albumTitle: "Reliance" });
         });
 
         it("looks the album up so the sources can search Deezer by name", async () => {
             // Given only an MBID, the sources can ask the Cover Art Archive and
             // nothing else; the album's name lets them search Deezer too.
-            (prisma.album.findFirst as jest.Mock).mockResolvedValue({
-                title: "Age Of Aquarius",
-                artist: { name: "Perturbator" },
-            });
 
-            await request(makeApp()).get("/library/album-cover/rg-1");
+            await request(makeApp()).get(`/library/album-cover/${RG}`);
 
             expect(mockFindAlbumArtwork).toHaveBeenCalledWith({
-                rgMbid: "rg-1",
+                rgMbid: RG,
                 artistName: "Perturbator",
                 albumTitle: "Age Of Aquarius",
             });
         });
 
         it("asks for an album the library does not have a row for", async () => {
-            (prisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "coverartarchive" });
 
-            const res = await request(makeApp()).get("/library/album-cover/rg-1");
+            const res = await request(makeApp()).get(`/library/album-cover/${P}-rg-unknown`);
 
             expect(mockFindAlbumArtwork).toHaveBeenCalledWith({
-                rgMbid: "rg-1",
+                rgMbid: `${P}-rg-unknown`,
                 artistName: "",
                 albumTitle: "",
             });
@@ -194,24 +194,15 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("says so plainly when nobody has it", async () => {
-            (prisma.album.findFirst as jest.Mock).mockResolvedValue({
-                title: "Age Of Aquarius",
-                artist: { name: "Perturbator" },
-            });
-
-            const res = await request(makeApp()).get("/library/album-cover/rg-1");
+            const res = await request(makeApp()).get(`/library/album-cover/${RG}`);
 
             expect(res.status).toBe(204);
         });
 
         it("hands back what any source found", async () => {
-            (prisma.album.findFirst as jest.Mock).mockResolvedValue({
-                title: "Age Of Aquarius",
-                artist: { name: "Perturbator" },
-            });
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "fanart" });
 
-            const res = await request(makeApp()).get("/library/album-cover/rg-1");
+            const res = await request(makeApp()).get(`/library/album-cover/${RG}`);
 
             expect(res.status).toBe(200);
             expect(res.body).toEqual({ coverUrl: FOUND });

@@ -1,21 +1,8 @@
 /**
  * GET /audiobooks/:id/cover is unauthenticated and must not serve a file outside
  * the covers folder; Express decodes %2F in a param after matching. A real file
- * outside the root is planted and requested.
+ * outside the root is planted and requested. Real router and database.
  */
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        audiobook: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            update: jest.fn().mockResolvedValue({}),
-        },
-        audiobookProgress: {
-            findMany: jest.fn().mockResolvedValue([]),
-            findUnique: jest.fn().mockResolvedValue(null),
-        },
-    },
-}));
 
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -72,6 +59,7 @@ import audiobookRoutes from "../../routes/audiobooks";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 
+const BOOK = "cover_rt_book";
 const MUSIC = config.music.musicPath;
 const ALBUM_COVER = path.join(MUSIC, "Artist", "Album", "cover.jpg");
 const ALBUM_COVER_BODY = "an album cover inside the music folder";
@@ -102,21 +90,19 @@ function makeApp() {
 describe("GET /audiobooks/:id/cover", () => {
     let app: express.Application;
 
-    beforeAll(() => {
+    beforeAll(async () => {
         app = makeApp();
+        await prisma.audiobook.deleteMany({ where: { id: BOOK } });
+        await prisma.audiobook.create({ data: { id: BOOK, title: "Book", audioUrl: "https://abs.invalid/book" } });
         fs.writeFileSync(probeFile, PROBE_BODY);
         fs.mkdirSync(path.dirname(ALBUM_COVER), { recursive: true });
         fs.writeFileSync(ALBUM_COVER, ALBUM_COVER_BODY);
     });
 
-    afterAll(() => {
+    afterAll(async () => {
+        await prisma.audiobook.deleteMany({ where: { id: BOOK } });
         fs.rmSync(probeFile, { force: true });
         fs.rmSync(MUSIC, { recursive: true, force: true });
-    });
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(null);
     });
 
     it("refuses an id that escapes the music root, and does not serve the file", async () => {
@@ -134,7 +120,23 @@ describe("GET /audiobooks/:id/cover", () => {
     it("does not record an out-of-root path back onto the audiobook row", async () => {
         await request(app).get(`/${traversingId()}/cover`);
 
-        expect(prisma.audiobook.update).not.toHaveBeenCalled();
+        // Nothing was recorded, and the same route does record a cover that is inside the root.
+        expect((await prisma.audiobook.findUnique({ where: { id: BOOK } }))?.localCoverPath).toBeNull();
+        expect(await prisma.audiobook.count({ where: { localCoverPath: { contains: path.basename(probeFile) } } })).toBe(0);
+    });
+
+    it("records a cover found inside the covers folder back onto the audiobook row", async () => {
+        const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
+        fs.mkdirSync(path.dirname(inside), { recursive: true });
+        fs.writeFileSync(inside, "a cover inside the covers folder");
+
+        const res = await request(app).get(`/${BOOK}/cover`);
+
+        expect(res.status).toBe(200);
+        expect(res.body.toString()).toBe("a cover inside the covers folder");
+        expect((await prisma.audiobook.findUnique({ where: { id: BOOK } }))?.localCoverPath).toBe(inside);
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+        fs.rmSync(inside);
     });
 
     it("refuses an id that reaches another folder inside the music root", async () => {

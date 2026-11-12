@@ -1,24 +1,9 @@
 /**
  * GET /podcasts/:id caps `episodes`, newest first, so old clients still render;
  * the paging endpoint serves the rest. Both read one page through the same query.
+ * Real router and database.
  */
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        podcastSubscription: { count: jest.fn() },
-        podcast: { findUnique: jest.fn() },
-        podcastEpisode: { findMany: jest.fn(), count: jest.fn() },
-    },
-}));
-
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
-jest.mock('../../middleware/auth', () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: 'u1', username: 't' }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: 'u1', username: 't' }; next(); },
-}));
+jest.mock('../../middleware/auth', () => require('./helpers/podcastRoute').podcastAuthMock('u_podpaging'));
 
 jest.mock('../../services/rss-parser', () => ({ rssParserService: {} }));
 jest.mock('../../utils/ssrf', () => ({ validateUrlForFetch: jest.fn() }));
@@ -29,148 +14,108 @@ import request from 'supertest';
 import podcastRoutes from '../podcasts';
 import { prisma } from '../../utils/db';
 
-const BACK_CATALOGUE = 2944;
+const USER = 'u_podpaging';
+const SHOW = 'pod_paging_show';
+const STRANGER = 'pod_paging_unsubscribed';
+// More than the largest page (200), so a page cap shows.
+const TOTAL = 250;
+// Episode n is the n-th oldest: pg_000 is the oldest, pg_249 the newest.
+const id = (n: number) => `pg_${String(n).padStart(3, '0')}`;
+const ids = (episodes: Array<{ id: string }>) => episodes.map((e) => e.id);
+const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
-function episodes(n: number, from = 0) {
-    return Array.from({ length: n }, (_, i) => ({
-        id: `ep-${from + i}`,
-        title: `Episode ${from + i}`,
-        description: '',
-        duration: 1800,
-        publishedAt: new Date(),
-        episodeNumber: from + i,
-        season: 1,
-        imageUrl: null,
-        progress: [],
-        downloads: [],
-    }));
-}
+beforeAll(async () => {
+    await prisma.podcast.deleteMany({ where: { id: { in: [SHOW, STRANGER] } } });
+    await prisma.user.upsert({ where: { id: USER }, create: { id: USER, username: USER, passwordHash: 'x' }, update: {} });
+    await prisma.podcast.create({ data: { id: SHOW, feedUrl: 'https://f.invalid/paging', title: 'The Daily', author: 'NYT' } });
+    await prisma.podcast.create({ data: { id: STRANGER, feedUrl: 'https://f.invalid/paging-other', title: 'Not Followed' } });
+    await prisma.podcastEpisode.createMany({
+        data: [
+            ...range(0, TOTAL - 1).map((n) => ({
+                id: id(n), podcastId: SHOW, guid: id(n), title: `Episode ${n}`, audioUrl: `https://a.invalid/${id(n)}.mp3`,
+                duration: 1800, publishedAt: new Date(Date.UTC(2020, 0, 1 + n)),
+            })),
+            { id: 'pg_stranger', podcastId: STRANGER, guid: 'g', title: 'x', audioUrl: 'https://a.invalid/s.mp3', publishedAt: new Date() },
+        ],
+    });
+    await prisma.podcastSubscription.create({ data: { userId: USER, podcastId: SHOW } });
+});
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/podcasts', podcastRoutes);
-    return app;
-}
+afterAll(async () => {
+    await prisma.podcast.deleteMany({ where: { id: { in: [SHOW, STRANGER] } } });
+    await prisma.user.deleteMany({ where: { id: USER } });
+});
+
+const app = express();
+app.use(express.json());
+app.use('/podcasts', podcastRoutes);
 
 describe('podcast episode paging', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.podcastSubscription.count as jest.Mock).mockResolvedValue(1);
-        (prisma.podcastEpisode.count as jest.Mock).mockResolvedValue(BACK_CATALOGUE);
-    });
-
-    it('asks the database for a bounded page, not every episode', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'The Daily', author: 'NYT', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: 'https://x/rss',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
-
-        await request(app).get('/podcasts/p1');
-
-        const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(args.take).toBe(50);
-        expect(args.skip).toBe(0);
-    });
-
-    it('reports the true total so a client knows there is more', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'The Daily', author: 'NYT', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: 'https://x/rss',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
-
-        const res = await request(app).get('/podcasts/p1');
+    it('serves a bounded page, not every episode', async () => {
+        const res = await request(app).get(`/podcasts/${SHOW}`);
 
         expect(res.status).toBe(200);
         expect(res.body.episodes).toHaveLength(50);
-        expect(res.body.episodeTotal).toBe(BACK_CATALOGUE);
+        expect(res.body.episodeOffset).toBe(0);
+    });
+
+    it('reports the true total so a client knows there is more', async () => {
+        const res = await request(app).get(`/podcasts/${SHOW}`);
+
+        expect(res.status).toBe(200);
+        expect(res.body.episodes).toHaveLength(50);
+        expect(res.body.episodeTotal).toBe(TOTAL);
         expect(res.body.episodeLimit).toBe(50);
         expect(res.body.episodeOffset).toBe(0);
     });
 
     it('clamps an oversized limit instead of rejecting it', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(200));
-
-        const res = await request(app).get('/podcasts/p1?limit=99999');
+        const res = await request(app).get(`/podcasts/${SHOW}?limit=99999`);
 
         expect(res.status).toBe(200);
-        const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(args.take).toBe(200);
+        expect(res.body.episodes).toHaveLength(200);
+        expect(res.body.episodeLimit).toBe(200);
     });
 
     it('falls back to the default for a nonsense limit', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
+        const res = await request(app).get(`/podcasts/${SHOW}?limit=banana&offset=-5`);
 
-        await request(app).get('/podcasts/p1?limit=banana&offset=-5');
-
-        const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(args.take).toBe(50);
-        expect(args.skip).toBe(0);
+        expect(res.status).toBe(200);
+        expect(res.body.episodes).toHaveLength(50);
+        expect(res.body.episodeOffset).toBe(0);
+        expect(ids(res.body.episodes)[0]).toBe(id(TOTAL - 1));
     });
 
     it('serves the rest through GET /:id/episodes', async () => {
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50, 100));
-
-        const res = await request(app).get('/podcasts/p1/episodes?limit=50&offset=100');
+        const res = await request(app).get(`/podcasts/${SHOW}/episodes?limit=50&offset=100`);
 
         expect(res.status).toBe(200);
-        expect(res.body.total).toBe(BACK_CATALOGUE);
+        expect(res.body.total).toBe(TOTAL);
         expect(res.body.offset).toBe(100);
         expect(res.body.limit).toBe(50);
-        expect(res.body.episodes).toHaveLength(50);
-        const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(args.take).toBe(50);
-        expect(args.skip).toBe(100);
+        // Newest first: the page after 100 episodes starts at the 101st newest.
+        expect(ids(res.body.episodes)).toEqual(range(TOTAL - 150, TOTAL - 101).reverse().map(id));
     });
 
     it('pages from the oldest end when asked, on both endpoints', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
+        const detail = await request(app).get(`/podcasts/${SHOW}?order=oldest`);
+        expect(ids(detail.body.episodes)).toEqual(range(0, 49).map(id));
 
-        await request(app).get('/podcasts/p1?order=oldest');
-        const detailArgs = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(detailArgs.orderBy).toEqual({ publishedAt: 'asc' });
-
-        await request(app).get('/podcasts/p1/episodes?order=oldest');
-        const pageArgs = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[1][0];
-        expect(pageArgs.orderBy).toEqual({ publishedAt: 'asc' });
+        const page = await request(app).get(`/podcasts/${SHOW}/episodes?order=oldest&limit=10&offset=5`);
+        expect(ids(page.body.episodes)).toEqual(range(5, 14).map(id));
     });
 
     it('keeps newest-first as the default order', async () => {
-        (prisma.podcast.findUnique as jest.Mock).mockResolvedValue({
-            id: 'p1', title: 'x', author: '', description: '',
-            imageUrl: null, itunesId: null, categoryIds: [], feedUrl: '',
-        });
-        (prisma.podcastEpisode.findMany as jest.Mock).mockResolvedValue(episodes(50));
+        const res = await request(app).get(`/podcasts/${SHOW}`);
 
-        await request(app).get('/podcasts/p1');
-
-        const args = (prisma.podcastEpisode.findMany as jest.Mock).mock.calls[0][0];
-        expect(args.orderBy).toEqual({ publishedAt: 'desc' });
+        expect(ids(res.body.episodes)).toEqual(range(TOTAL - 50, TOTAL - 1).reverse().map(id));
     });
 
     it('refuses episodes for a podcast the user is not subscribed to', async () => {
-        (prisma.podcastSubscription.count as jest.Mock).mockResolvedValue(0);
+        const page = await request(app).get(`/podcasts/${STRANGER}/episodes`);
+        expect(page.status).toBe(404);
+        expect(page.body.episodes).toBeUndefined();
 
-        const res = await request(app).get('/podcasts/p1/episodes');
-
-        expect(res.status).toBe(404);
-        expect(prisma.podcastEpisode.findMany).not.toHaveBeenCalled();
+        expect((await request(app).get(`/podcasts/${STRANGER}`)).status).toBe(404);
     });
 });

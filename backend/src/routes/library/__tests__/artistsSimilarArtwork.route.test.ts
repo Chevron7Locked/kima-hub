@@ -1,77 +1,12 @@
 /**
  * The similar-artists strip on GET /artists/:id gets images through
  * `artwork.ts` on both its paths, and an artist already in the library keeps the
- * library's picture.
+ * library's picture. Real router, real database and Redis; the outside
+ * lookups (artwork sources, similarity engine, Deezer, MusicBrainz,
+ * ListenBrainz) are stubbed.
  */
 
 jest.mock("p-limit", () => () => (fn: (...args: any[]) => any) => fn());
-
-jest.mock("../../../middleware/auth", () => ({
-    requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: "admin", role: "admin" };
-        next();
-    },
-    requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: "user-1" };
-        next();
-    },
-}));
-
-// The handler reads req.user directly; this router does not mount the auth
-// middleware itself, so the app has to put a user on the request.
-const authenticate = (req: any, _res: any, next: any) => {
-    req.user = { id: "user-1", role: "admin" };
-    next();
-};
-
-const mockArtistFindUnique = jest.fn();
-const mockArtistFindMany = jest.fn();
-
-jest.mock("../../../utils/db", () => {
-    const prisma = {
-        artist: {
-            // The route accepts an id, a name or an MBID, so it is findFirst.
-            findFirst: (...a: any[]) => mockArtistFindUnique(...a),
-            findUnique: (...a: any[]) => mockArtistFindUnique(...a),
-            findMany: (...a: any[]) => mockArtistFindMany(...a),
-            count: jest.fn().mockResolvedValue(0),
-        },
-        album: { findMany: jest.fn().mockResolvedValue([]) },
-        track: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
-        // The handler counts this user's plays across the artist's tracks
-        // before it ever gets to the similar-artists strip.
-        play: { groupBy: jest.fn().mockResolvedValue([]) },
-        $queryRaw: jest.fn().mockResolvedValue([]),
-        $transaction: (fn: any) => fn(prisma),
-    };
-    return {
-        prisma,
-        Prisma: {
-            SortOrder: { asc: "asc", desc: "desc" },
-            sql: (strings: TemplateStringsArray, ...vals: any[]) => ({ strings, vals }),
-            empty: { strings: [""], vals: [] },
-            join: (parts: any[]) => ({ parts }),
-        },
-    };
-});
-
-jest.mock("../../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
-jest.mock("../../../utils/redis", () => ({
-    redisClient: {
-        get: jest.fn().mockResolvedValue(null),
-        setex: jest.fn().mockResolvedValue("OK"),
-        del: jest.fn().mockResolvedValue(1),
-    },
-}));
-
-// These tests are about the artist page, not Deezer: its popular-songs fallback answers "no top list" here rather
-// than reaching the real service.
-jest.mock("../../../services/deezer", () => ({
-    deezerService: { getArtistTopTracks: jest.fn().mockResolvedValue([]) },
-}));
 
 const mockGetSimilarArtists = jest.fn();
 // Similar artists come from the local-centroid / ListenBrainz engine.
@@ -80,77 +15,105 @@ jest.mock("../../../services/artistSimilarity", () => ({
     enrichSimilarArtists: jest.fn().mockResolvedValue([]),
 }));
 
+// These tests are about the artist page, not Deezer: its popular-songs fallback answers "no top list" here rather
+// than reaching the real service.
+jest.mock("../../../services/deezer", () => ({
+    deezerService: { getArtistTopTracks: jest.fn().mockResolvedValue([]) },
+}));
+
+jest.mock("../../../services/listenBrainz", () => ({
+    listenBrainzService: { getTopRecordingsForArtist: jest.fn().mockResolvedValue([]) },
+}));
+
 jest.mock("../../../services/musicbrainz", () => ({
     musicBrainzService: {
-        getArtist: jest.fn().mockResolvedValue(null),
-        searchArtist: jest.fn().mockResolvedValue([]),
-        getReleaseGroups: jest.fn().mockResolvedValue([]),
+        getReleaseGroups: jest.fn().mockResolvedValue({ kind: "absent" }),
     },
 }));
 
 jest.mock("../../../services/dataCache", () => ({
-    dataCacheService: {
-        getArtistImage: jest.fn().mockResolvedValue(null),
-        getAlbumCover: jest.fn().mockResolvedValue(null),
-        getArtistImagesBatch: jest.fn().mockResolvedValue(new Map()),
-    },
+    dataCacheService: { getArtistImage: jest.fn().mockResolvedValue(null) },
 }));
 
 const mockFindArtistArtwork = jest.fn();
 jest.mock("../../../services/artwork", () => ({
     findArtistArtwork: (...a: any[]) => mockFindArtistArtwork(...a),
+    withAlbumArtwork: async (albums: any[]) => albums,
 }));
 
 import express from "express";
 import request from "supertest";
 import libraryArtistRoutes from "../artists";
+import { prisma } from "../../../utils/db";
+import { redisClient } from "../../../utils/redis";
+import { normalizeArtistName } from "../../../services/artistIdentity";
+import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
+const P = "zz-similar-art";
+
+// The handler reads req.user directly; this router does not mount the auth
+// middleware itself, so the app has to put a user on the request.
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use(authenticate);
+    app.use((req: any, _res, next) => {
+        req.user = { id: `${P}-user`, role: "admin" };
+        next();
+    });
     app.use("/library", libraryArtistRoutes);
     return app;
 }
 
 const FOUND = "https://assets.fanart.tv/fanart/music/x/artistthumb/a.jpg";
-const LOCAL = "native:artists/known-1.jpg";
+const LOCAL = `native:artists/${P}-known.jpg`;
+const SIMILAR_NAME = `${P} Carpenter Brut`;
+const SIMILAR_MBID = `${P}-sim-mbid`;
 
-/** The artist whose page is being rendered. */
-const subject = (similarArtistsJson: unknown) => ({
-    id: "art-1",
-    name: "Perturbator",
+const SUBJECT_ID = `${P}-subject`;
+const KNOWN_ID = `${P}-known`;
+const subjectInput = (id: string) => ({
+    id,
+    name: `${P} Perturbator`,
+    normalizedName: normalizeArtistName(`${P} Perturbator`),
+    identityKey: `${id}-ik`,
     mbid: "11111111-2222-3333-4444-555555555555",
-    normalizedName: "perturbator",
-    heroUrl: null,
-    bio: null,
-    genres: [],
-    similarArtistsJson,
-    enrichmentStatus: "enriched",
-    albums: [],
-    // The handler reads these straight off the row; without them it throws
-    // before it ever reaches the similar-artists strip.
-    ownedAlbums: [],
-    _count: { albums: 0 },
+    enrichmentStatus: "enriched" as const,
+});
+
+const clearSimilarCache = () => redisClient.del(`similar-artists:${SUBJECT_ID}`);
+
+const setSimilarJson = (similarArtistsJson: unknown) =>
+    prisma.artist.update({ where: { id: SUBJECT_ID }, data: { similarArtistsJson: similarArtistsJson as any } });
+
+beforeAll(async () => {
+    await prisma.artist.create({ data: subjectInput(SUBJECT_ID) });
+});
+
+afterAll(async () => {
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    await closeEngineConnections();
 });
 
 const similarFrom = (res: any): any[] => res.body.similarArtists || [];
 
 describe("the similar-artists strip and where its pictures come from", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
         mockFindArtistArtwork.mockResolvedValue(null);
-        mockArtistFindMany.mockResolvedValue([]);
         mockGetSimilarArtists.mockResolvedValue([]);
+        await prisma.artist.deleteMany({ where: { id: KNOWN_ID } });
     });
 
+    // The engine path caches its answer; clear it here, as the file's Redis client is closed before afterAll.
+    afterEach(clearSimilarCache);
+
     describe("built from the artist's own enriched data", () => {
-        const enriched = [{ name: "Carpenter Brut", mbid: "sim-1", match: 0.9 }];
+        const enriched = [{ name: SIMILAR_NAME, mbid: SIMILAR_MBID, match: 0.9 }];
+
+        beforeEach(() => setSimilarJson(enriched));
 
         it("leaves the picture empty when no source had one", async () => {
-            mockArtistFindUnique.mockResolvedValue(subject(enriched));
-
-            const res = await request(makeApp()).get("/library/artists/art-1");
+            const res = await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`);
 
             expect(res.status).toBe(200);
             const [first] = similarFrom(res);
@@ -158,14 +121,13 @@ describe("the similar-artists strip and where its pictures come from", () => {
         });
 
         it("asks the one door, by name and by id, rather than Deezer alone", async () => {
-            mockArtistFindUnique.mockResolvedValue(subject(enriched));
             mockFindArtistArtwork.mockResolvedValue({ url: FOUND, source: "fanart" });
 
-            const res = await request(makeApp()).get("/library/artists/art-1");
+            const res = await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`);
 
             expect(mockFindArtistArtwork).toHaveBeenCalledWith({
-                name: "Carpenter Brut",
-                mbid: "sim-1",
+                name: SIMILAR_NAME,
+                mbid: SIMILAR_MBID,
             });
             const [first] = similarFrom(res);
             expect(first?.coverArt).toBe(FOUND);
@@ -174,21 +136,21 @@ describe("the similar-artists strip and where its pictures come from", () => {
         it("keeps the library's own picture instead of going out for one", async () => {
             // Already downloaded, already chosen. Replacing it would be slower
             // and worse.
-            mockArtistFindUnique.mockResolvedValue(subject(enriched));
-            mockArtistFindMany.mockResolvedValue([
-                {
-                    id: "known-1",
-                    name: "Carpenter Brut",
-                    normalizedName: "carpenter brut",
-                    mbid: "sim-1",
+            await prisma.artist.create({
+                data: {
+                    id: KNOWN_ID,
+                    name: SIMILAR_NAME,
+                    normalizedName: normalizeArtistName(SIMILAR_NAME),
+                    identityKey: `${KNOWN_ID}-ik`,
+                    mbid: SIMILAR_MBID,
                     heroUrl: LOCAL,
-                    _count: { albums: 3 },
                 },
-            ]);
+            });
 
-            const res = await request(makeApp()).get("/library/artists/art-1");
+            const res = await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`);
 
             const [first] = similarFrom(res);
+            expect(first?.id).toBe(KNOWN_ID);
             expect(first?.coverArt).toBe(LOCAL);
             expect(mockFindArtistArtwork).not.toHaveBeenCalled();
         });
@@ -196,19 +158,20 @@ describe("the similar-artists strip and where its pictures come from", () => {
 
     describe("built from the similarity engine", () => {
         it("asks the one door here too", async () => {
-            mockArtistFindUnique.mockResolvedValue(subject(null));
+            await setSimilarJson(null);
             mockGetSimilarArtists.mockResolvedValue([
-                { name: "Carpenter Brut", mbid: "sim-1", match: 0.9 },
+                { name: SIMILAR_NAME, mbid: SIMILAR_MBID, match: 0.9 },
             ]);
             mockFindArtistArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
 
-            const res = await request(makeApp()).get("/library/artists/art-1");
+            const res = await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`);
 
             expect(res.status).toBe(200);
             expect(mockFindArtistArtwork).toHaveBeenCalledWith({
-                name: "Carpenter Brut",
-                mbid: "sim-1",
+                name: SIMILAR_NAME,
+                mbid: SIMILAR_MBID,
             });
+            expect(similarFrom(res)[0]?.coverArt).toBe(FOUND);
         });
     });
 });

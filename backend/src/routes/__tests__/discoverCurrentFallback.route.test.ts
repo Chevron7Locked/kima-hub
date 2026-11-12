@@ -2,368 +2,310 @@
  * GET /discover/current shows the latest completed batch's week, with a `stale`
  * flag when it is older than this week. GET /discover/batch-status reports the
  * latest finished batch (lastBatchId, lastBatchStatus) for a client that missed
- * the SSE.
+ * the SSE. Real database and router. Weeks are worked out from today, so a
+ * suggestion is told apart from the others by the song it shows. The clock is pinned mid-week.
  */
 
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        discoveryBatch: {
-            findFirst: jest.fn(),
-        },
-        discoveryAlbum: {
-            findMany: jest.fn(),
-        },
-        unavailableAlbum: {
-            findMany: jest.fn(),
-        },
-        album: {
-            findMany: jest.fn(),
-            findFirst: jest.fn(),
-        },
-        track: {
-            findMany: jest.fn(),
-        },
-    },
+jest.mock("../../middleware/auth", () => ({
+    ...jest.requireActual("../../middleware/auth"),
+    requireAuthOrToken: (_req: any, _res: any, next: any) => next(),
+    requireAdmin: (_req: any, _res: any, next: any) => next(),
+    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
 }));
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
+import express from "express";
+import request from "supertest";
+import { addHours, addWeeks, endOfWeek, startOfWeek } from "date-fns";
+import discoverRoutes from "../discover";
+import { prisma } from "../../utils/db";
+import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
+import { useMidWeekClock } from "./helpers/midWeekClock";
+import { redisClient } from "../../utils/redis";
+import { closeClient } from "../../utils/closeRedisClient";
 
-// Inject an authenticated user; the real middleware would 401 without a session.
-jest.mock('../../middleware/auth', () => ({
-    requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
-    requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
-        next();
-    },
-    requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123', role: 'admin' };
-        next();
-    },
-}));
+const MARK = "zz-curfall";
+let listener: string;
+let other: string;
+let acting: string;
 
-// Modules discover.ts imports at load time that this test does not exercise.
-jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').discoverQueuesMock());
-jest.mock('../../utils/systemSettings', () => require('./helpers/discoverMocks').systemSettingsMock());
-jest.mock('../../services/lidarr', () => require('./helpers/discoverMocks').emptyLidarrMock());
-jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks').distributedLockMock());
-jest.mock('../../config', () => require('./helpers/discoverMocks').musicConfigMock());
-
-import express from 'express';
-import request from 'supertest';
-import discoverRoutes from '../discover';
-import { prisma } from '../../utils/db';
-import { redisClient } from '../../utils/redis';
-import { closeClient } from '../../utils/closeRedisClient';
-
-// /current computes its week from the clock, so pin it to noon on the fixture
-// Monday.
-beforeAll(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-25T12:00:00.000Z'));
+const app = express();
+app.use(express.json());
+app.use((req: any, _res, next) => {
+    req.user = { id: acting, username: `${MARK}-listener`, role: "user" };
+    next();
 });
+app.use("/discover", discoverRoutes);
+
+useMidWeekClock();
+afterAll(() => jest.useRealTimers());
+
+// "Today" is in the calendar week starting THIS_WEEK.
+const THIS_WEEK = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
+const LAST_WEEK = addWeeks(THIS_WEEK, -1);
+const NEXT_WEEK = addWeeks(THIS_WEEK, 1);
+
 afterAll(async () => {
-    jest.useRealTimers();
+    await cleanup();
+    await prisma.$disconnect();
     // The router pulls in services/listenBrainz, which opens the shared Redis
     // client at import. Left open, Jest finishes the suite and outlives the
     // process on that socket.
     await closeClient(redisClient);
 });
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/discover', discoverRoutes);
-    return app;
+async function cleanup() {
+    await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
+    await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
+    await prisma.artist.deleteMany({ where: { name: { startsWith: MARK } } });
 }
 
-// "Today" is in the week of Mon 2026-05-25, but the active albums and latest
-// completed batch belong to the prior week (Mon 2026-05-18).
-const CALENDAR_MONDAY = '2026-05-25';
-const BATCH_MONDAY_ISO = '2026-05-18T00:00:00.000Z';
+beforeAll(cleanup);
+beforeEach(async () => {
+    await cleanup();
+    listener = (await prisma.user.create({ data: { username: `${MARK}-listener`, passwordHash: "x" } })).id;
+    other = (await prisma.user.create({ data: { username: `${MARK}-other`, passwordHash: "x" } })).id;
+    acting = listener;
+});
 
-const ACTIVE_ALBUM = {
-    id: 'da-1',
-    rgMbid: 'rg-mbid-1',
-    artistName: 'Boards of Canada',
-    albumTitle: 'Geogaddi',
-    status: 'ACTIVE',
-    likedAt: null,
-    similarity: 0.9,
-    tier: 'core',
-    downloadedAt: new Date(BATCH_MONDAY_ISO),
-    weekStartDate: new Date(BATCH_MONDAY_ISO),
-    tracks: [{ trackId: 'track-1' }],
-};
-
-const LIBRARY_TRACK = {
-    id: 'track-1',
-    title: 'Music Is Math',
-    duration: 320,
-    album: { id: 'alb-1', coverUrl: '/c/geo.jpg', artist: { name: 'Boards of Canada' } },
-};
-
-describe('GET /discover/current -- shows the latest completed batch', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockReset();
-        (prisma.unavailableAlbum.findMany as jest.Mock).mockResolvedValue([]);
-        (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
-        (prisma.album.findFirst as jest.Mock).mockResolvedValue(null);
-        (prisma.track.findMany as jest.Mock).mockResolvedValue([LIBRARY_TRACK]);
+/** A batch of the listener's, with the week it is keyed by. */
+const batch = (weekStart: Date, status: string, extra: { createdAt?: Date; completedAt?: Date; userId?: string } = {}) =>
+    prisma.discoveryBatch.create({
+        data: { userId: listener, weekStart, targetSongCount: 5, status, ...extra },
     });
 
-    it('queries the albums at the older batch week, not the empty calendar week', async () => {
-        // The active albums and the latest completed batch are tagged 05-18; the calendar week is 05-25.
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({
-            weekStart: new Date(BATCH_MONDAY_ISO),
-        });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([ACTIVE_ALBUM]);
+/** A suggestion of that week with a Discover song, as the downloaded album leaves it. Returns the song's title. */
+async function suggest(weekStartDate: Date, name: string): Promise<string> {
+    const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: `${MARK}-${name}` } });
+    const album = await prisma.album.create({
+        data: { rgMbid: `${MARK}-rg-${name}`, identityKey: `${MARK}-${name}`, title: `${MARK} ${name} LP`, primaryType: "Album", artistId: artist.id, location: "DISCOVER" },
+    });
+    const track = await prisma.track.create({
+        data: { albumId: album.id, title: `${MARK} ${name} song`, trackNo: 1, duration: 320, filePath: `/music/${MARK}/${name}.flac`, fileModified: new Date(), fileSize: 1 },
+    });
+    await prisma.discoveryAlbum.create({
+        data: {
+            userId: listener,
+            rgMbid: album.rgMbid,
+            artistName: artist.name,
+            albumTitle: album.title,
+            weekStartDate,
+            status: "ACTIVE",
+            downloadedAt: weekStartDate,
+            similarity: 0.9,
+            tier: "core",
+            tracks: { create: { trackId: track.id, fileName: "song.flac", filePath: track.filePath } },
+        },
+    });
+    return track.title;
+}
 
-        const res = await request(app).get('/discover/current');
+const unavailable = (weekStartDate: Date, albumMbid: string) =>
+    prisma.unavailableAlbum.create({
+        data: { userId: listener, albumMbid, artistName: `${MARK} Missing Band`, albumTitle: `${MARK} ${albumMbid}`, similarity: 0.5, tier: "medium", weekStartDate },
+    });
+
+const titles = (body: { tracks: Array<{ title: string }> }) => body.tracks.map((t) => t.title).sort();
+const instant = (iso: string) => new Date(iso).getTime();
+
+describe("GET /discover/current -- shows the latest completed batch", () => {
+    it("shows the albums of the older batch week, not the empty calendar week", async () => {
+        // The latest completed batch and its albums are last week's; this week has a suggestion too, which is not shown.
+        await batch(LAST_WEEK, "completed", { completedAt: new Date() });
+        const lastWeeks = await suggest(LAST_WEEK, "last");
+        await suggest(THIS_WEEK, "this");
+
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
-
-        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
-        const queriedWeek: Date = albumQuery.where.weekStartDate;
-        expect(queriedWeek.toISOString().slice(0, 10)).toBe('2026-05-18');
-        expect(queriedWeek.toISOString().slice(0, 10)).not.toBe(CALENDAR_MONDAY);
-
-        expect(res.body.tracks.length).toBeGreaterThan(0);
-        expect(res.body.weekStart).toBe(BATCH_MONDAY_ISO);
+        expect(titles(res.body)).toEqual([lastWeeks]);
+        expect(instant(res.body.weekStart)).toBe(LAST_WEEK.getTime());
+        expect(instant(res.body.weekStart)).not.toBe(THIS_WEEK.getTime());
     });
 
-    it('serves an older completed batch with stale set', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({
-            weekStart: new Date(BATCH_MONDAY_ISO),
-        });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([ACTIVE_ALBUM]);
+    it("serves an older completed batch with stale set", async () => {
+        await batch(LAST_WEEK, "completed", { completedAt: new Date() });
+        await suggest(LAST_WEEK, "last");
 
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
         expect(res.body.stale).toBe(true);
     });
 
-    it('falls back to the calendar week, not stale, when no batch has completed', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue(null);
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
+    it("falls back to the calendar week, not stale, when no batch has completed", async () => {
+        const thisWeeks = await suggest(THIS_WEEK, "this");
+        await suggest(LAST_WEEK, "last");
 
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
-        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
-        const queriedWeek: Date = albumQuery.where.weekStartDate;
-        expect(queriedWeek.toISOString().slice(0, 10)).toBe(CALENDAR_MONDAY);
+        expect(titles(res.body)).toEqual([thisWeeks]);
+        expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
         expect(res.body.stale).toBe(false);
     });
 
-    it('looks up only completed batches', async () => {
+    it("looks only at completed batches", async () => {
         // An in-flight or failed batch must not decide the week /current shows.
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue(null);
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
+        await batch(LAST_WEEK, "scanning");
+        await batch(LAST_WEEK, "failed", { completedAt: new Date() });
+        await suggest(LAST_WEEK, "last");
+        const thisWeeks = await suggest(THIS_WEEK, "this");
 
-        await request(app).get('/discover/current');
-
-        expect((prisma.discoveryBatch.findFirst as jest.Mock).mock.calls.length).toBeGreaterThan(0);
-        const batchQuery = (prisma.discoveryBatch.findFirst as jest.Mock).mock.calls[0][0];
-        expect(batchQuery.where).toEqual(
-            expect.objectContaining({ userId: 'user-123', status: 'completed' }),
-        );
-    });
-
-    it('orders the completed-batch lookup newest first', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({
-            weekStart: new Date(BATCH_MONDAY_ISO),
-        });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
-
-        await request(app).get('/discover/current');
-
-        expect((prisma.discoveryBatch.findFirst as jest.Mock).mock.calls.length).toBeGreaterThan(0);
-        const batchQuery = (prisma.discoveryBatch.findFirst as jest.Mock).mock.calls[0][0];
-        const orderBy = Array.isArray(batchQuery.orderBy)
-            ? batchQuery.orderBy
-            : [batchQuery.orderBy];
-        expect(orderBy).toContainEqual(
-            expect.objectContaining({ createdAt: 'desc' }),
-        );
-    });
-
-    it('ends the week and scopes the unavailable albums to the resolved week, not the calendar week', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({
-            weekStart: new Date(BATCH_MONDAY_ISO),
-        });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([ACTIVE_ALBUM]);
-
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
-        // The Sunday of the resolved week (05-18 -> 05-24), not the calendar week's (05-31).
-        expect(new Date(res.body.weekEnd).toISOString().slice(0, 10)).toBe('2026-05-24');
-        const unavailQuery = (prisma.unavailableAlbum.findMany as jest.Mock).mock.calls[0][0];
-        const unavailWeek: Date = unavailQuery.where.weekStartDate;
-        expect(unavailWeek.toISOString().slice(0, 10)).toBe('2026-05-18');
-        expect(unavailWeek.toISOString().slice(0, 10)).not.toBe(CALENDAR_MONDAY);
+        expect(titles(res.body)).toEqual([thisWeeks]);
+        expect(res.body.stale).toBe(false);
     });
 
-    it('serves a batch generated early for the upcoming week as not stale', async () => {
-        const futureMondayIso = '2026-06-01T00:00:00.000Z'; // next week
-        const futureMonday = new Date(futureMondayIso);
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({
-            weekStart: futureMonday,
-        });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([
-            { ...ACTIVE_ALBUM, weekStartDate: futureMonday, downloadedAt: futureMonday },
-        ]);
+    it("looks only at the listener's own batches", async () => {
+        await batch(LAST_WEEK, "completed", { completedAt: new Date(), userId: other });
 
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
+
+        expect(res.status).toBe(200);
+        expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
+        expect(res.body.stale).toBe(false);
+    });
+
+    it("takes the newest completed batch", async () => {
+        await batch(addWeeks(THIS_WEEK, -2), "completed", { completedAt: new Date(), createdAt: addWeeks(new Date(), -2) });
+        await batch(LAST_WEEK, "completed", { completedAt: new Date(), createdAt: addWeeks(new Date(), -1) });
+        await suggest(addWeeks(THIS_WEEK, -2), "older");
+        const newer = await suggest(LAST_WEEK, "newer");
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.status).toBe(200);
+        expect(titles(res.body)).toEqual([newer]);
+    });
+
+    it("ends the week and scopes the unavailable albums to the resolved week, not the calendar week", async () => {
+        await batch(LAST_WEEK, "completed", { completedAt: new Date() });
+        await suggest(LAST_WEEK, "last");
+        await unavailable(LAST_WEEK, `${MARK}-rg-last-week`);
+        await unavailable(THIS_WEEK, `${MARK}-rg-this-week`);
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.status).toBe(200);
+        // The Sunday of the resolved week, not the calendar week's.
+        expect(instant(res.body.weekEnd)).toBe(endOfWeek(LAST_WEEK, { weekStartsOn: WEEK_STARTS_ON }).getTime());
+        expect(res.body.unavailable.map((a: { albumId: string }) => a.albumId)).toEqual([`${MARK}-rg-last-week`]);
+    });
+
+    it("serves a batch generated early for the upcoming week as not stale", async () => {
+        await batch(NEXT_WEEK, "completed", { completedAt: new Date() });
+        const upcoming = await suggest(NEXT_WEEK, "next");
+        await suggest(THIS_WEEK, "this");
+
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
         expect(res.body.stale).toBe(false);
-        expect(res.body.weekStart).toBe(futureMondayIso);
-        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
-        expect(albumQuery.where.weekStartDate.toISOString().slice(0, 10)).toBe('2026-06-01');
+        expect(instant(res.body.weekStart)).toBe(NEXT_WEEK.getTime());
+        expect(titles(res.body)).toEqual([upcoming]);
     });
 
-    // The batch's stored week start is midnight Monday in Tokyo, 15:00 on Sunday in UTC. It is
+    // The batch's stored week start is midnight Monday in Tokyo, 9 hours before the same midnight in UTC. It is
     // still this week's batch, and its albums are found by the instant they were stored under.
-    it('counts a batch made at another time zone\'s midnight as its own week, keyed by its stored instant', async () => {
-        const tokyoMonday = new Date('2026-05-24T15:00:00.000Z');
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({ weekStart: tokyoMonday });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([
-            { ...ACTIVE_ALBUM, weekStartDate: tokyoMonday, downloadedAt: tokyoMonday },
-        ]);
+    it("counts a batch made at another time zone's midnight as its own week, keyed by its stored instant", async () => {
+        const tokyoMonday = addHours(THIS_WEEK, -9);
+        await batch(tokyoMonday, "completed", { completedAt: new Date() });
+        const stored = await suggest(tokyoMonday, "tokyo");
+        await suggest(THIS_WEEK, "this");
+        await unavailable(tokyoMonday, `${MARK}-rg-gone-tokyo`);
 
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
         expect(res.body.stale).toBe(false);
-        expect(res.body.weekStart).toBe(`${CALENDAR_MONDAY}T00:00:00.000Z`);
-        expect(res.body.weekEnd).toBe('2026-05-31T23:59:59.999Z');
-        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
-        expect(albumQuery.where.weekStartDate.getTime()).toBe(tokyoMonday.getTime());
-        const unavailQuery = (prisma.unavailableAlbum.findMany as jest.Mock).mock.calls[0][0];
-        expect(unavailQuery.where.weekStartDate.getTime()).toBe(tokyoMonday.getTime());
+        expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
+        expect(instant(res.body.weekEnd)).toBe(endOfWeek(THIS_WEEK, { weekStartsOn: WEEK_STARTS_ON }).getTime());
+        expect(titles(res.body)).toEqual([stored]);
+        expect(res.body.unavailable.map((a: { albumId: string }) => a.albumId)).toEqual([`${MARK}-rg-gone-tokyo`]);
     });
 
-    it('serves a batch that matches the calendar week as not stale', async () => {
-        const sameWeek = new Date(`${CALENDAR_MONDAY}T00:00:00.000Z`);
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue({ weekStart: sameWeek });
-        (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([
-            { ...ACTIVE_ALBUM, weekStartDate: sameWeek, downloadedAt: sameWeek },
-        ]);
+    it("serves a batch that matches the calendar week as not stale", async () => {
+        await batch(THIS_WEEK, "completed", { completedAt: new Date() });
+        const thisWeeks = await suggest(THIS_WEEK, "this");
 
-        const res = await request(app).get('/discover/current');
+        const res = await request(app).get("/discover/current");
 
         expect(res.status).toBe(200);
         expect(res.body.stale).toBe(false);
-        const albumQuery = (prisma.discoveryAlbum.findMany as jest.Mock).mock.calls[0][0];
-        expect(albumQuery.where.weekStartDate.toISOString().slice(0, 10)).toBe(CALENDAR_MONDAY);
-        expect(res.body.tracks.length).toBeGreaterThan(0);
+        expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
+        expect(titles(res.body)).toEqual([thisWeeks]);
     });
 });
 
-describe('GET /discover/batch-status -- reports the latest finished batch when none is active', () => {
-    let app: express.Application;
+describe("GET /discover/batch-status -- reports the latest finished batch when none is active", () => {
+    it("returns lastBatchId and lastBatchStatus from a finished batch", async () => {
+        const done = await batch(LAST_WEEK, "completed", { completedAt: new Date() });
 
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => {
-        // mockReset drops queued once-values, so one test's leftovers cannot shift the next one's calls.
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockReset();
-    });
-
-    it('returns lastBatchId and lastBatchStatus from a finished-batch lookup', async () => {
-        // The first findFirst is the active-batch lookup (none), the second the finished-batch lookup.
-        (prisma.discoveryBatch.findFirst as jest.Mock)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({ id: 'batch-done-1', status: 'completed' });
-
-        const res = await request(app).get('/discover/batch-status');
+        const res = await request(app).get("/discover/batch-status");
 
         expect(res.status).toBe(200);
         expect(res.body.active).toBe(false);
-        expect(res.body.lastBatchId).toBe('batch-done-1');
-        expect(res.body.lastBatchStatus).toBe('completed');
-
-        // A scanning batch does not count as finished.
-        const terminalQuery = (prisma.discoveryBatch.findFirst as jest.Mock).mock.calls[1][0];
-        expect(terminalQuery.where.status).toEqual({ in: ['completed', 'failed'] });
+        expect(res.body.lastBatchId).toBe(done.id);
+        expect(res.body.lastBatchStatus).toBe("completed");
     });
 
-    it('returns null, not a missing field, for lastBatchId and lastBatchStatus when nothing has finished', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null);
+    it("returns null, not a missing field, for lastBatchId and lastBatchStatus when nothing has finished", async () => {
+        // Another listener's finished batch is not this listener's.
+        await batch(LAST_WEEK, "completed", { completedAt: new Date(), userId: other });
 
-        const res = await request(app).get('/discover/batch-status');
+        const res = await request(app).get("/discover/batch-status");
 
         expect(res.status).toBe(200);
         expect(res.body.active).toBe(false);
         // A client tells "nothing finished yet" from "field absent" by null versus missing.
-        expect(res.body).toHaveProperty('lastBatchId', null);
-        expect(res.body).toHaveProperty('lastBatchStatus', null);
+        expect(res.body).toHaveProperty("lastBatchId", null);
+        expect(res.body).toHaveProperty("lastBatchStatus", null);
     });
 
-    it('scopes the finished-batch lookup to the user and takes the most recently completed', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({ id: 'batch-done-2', status: 'failed' });
+    it("takes the listener's most recently completed batch, finished or failed", async () => {
+        const hoursAgo = (h: number) => addHours(new Date(), -h);
+        await batch(LAST_WEEK, "completed", { completedAt: hoursAgo(5) });
+        const latest = await batch(LAST_WEEK, "failed", { completedAt: hoursAgo(2) });
+        // Finished more recently still, but another listener's.
+        await batch(LAST_WEEK, "completed", { completedAt: hoursAgo(1), userId: other });
 
-        const res = await request(app).get('/discover/batch-status');
+        const res = await request(app).get("/discover/batch-status");
 
         expect(res.status).toBe(200);
-        expect(res.body.lastBatchId).toBe('batch-done-2');
-
-        const terminalQuery = (prisma.discoveryBatch.findFirst as jest.Mock).mock.calls[1][0];
-        expect(terminalQuery.where).toEqual(
-            expect.objectContaining({ userId: 'user-123' }),
-        );
-        const orderBy = Array.isArray(terminalQuery.orderBy)
-            ? terminalQuery.orderBy
-            : [terminalQuery.orderBy];
-        expect(orderBy).toContainEqual(
-            expect.objectContaining({ completedAt: 'desc' }),
-        );
+        expect(res.body.lastBatchId).toBe(latest.id);
+        expect(res.body.lastBatchStatus).toBe("failed");
     });
 
-    it('counts only in-flight statuses in the active-batch lookup', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock)
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(null);
+    it("counts only in-flight batches as active", async () => {
+        await batch(LAST_WEEK, "completed", { completedAt: new Date() });
+        await batch(LAST_WEEK, "failed", { completedAt: new Date() });
+        expect((await request(app).get("/discover/batch-status")).body.active).toBe(false);
 
-        await request(app).get('/discover/batch-status');
+        const scanning = await batch(THIS_WEEK, "scanning");
+        const res = await request(app).get("/discover/batch-status");
 
-        const activeQuery = (prisma.discoveryBatch.findFirst as jest.Mock).mock.calls[0][0];
-        const inClause = activeQuery.where.status?.in ?? [];
-        expect(inClause).not.toContain('completed');
-        expect(inClause).not.toContain('failed');
-        expect(inClause.length).toBeGreaterThan(0);
+        expect(res.body).toMatchObject({ active: true, status: "scanning", batchId: scanning.id });
     });
 
-    it('reports progress without consulting the finished-batch lookup when a batch is active', async () => {
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValueOnce({
-            id: 'batch-active-1',
-            status: 'scanning',
-            jobs: [
-                { status: 'completed' },
-                { status: 'completed' },
-                { status: 'pending' },
-                { status: 'failed' },
-            ],
-        });
+    it("reports progress, and no finished batch, when a batch is active", async () => {
+        await batch(LAST_WEEK, "completed", { completedAt: new Date() });
+        const active = await batch(THIS_WEEK, "scanning");
+        for (const status of ["completed", "completed", "pending", "failed"]) {
+            await prisma.downloadJob.create({
+                data: { userId: listener, subject: `${MARK} ${status}`, type: "album", status, discoveryBatchId: active.id },
+            });
+        }
 
-        const res = await request(app).get('/discover/batch-status');
+        const res = await request(app).get("/discover/batch-status");
 
         expect(res.status).toBe(200);
         expect(res.body.active).toBe(true);
-        expect(res.body.batchId).toBe('batch-active-1');
+        expect(res.body.batchId).toBe(active.id);
         // 2 completed + 1 failed of 4 -> 75%.
         expect(res.body.progress).toBe(75);
-        expect((prisma.discoveryBatch.findFirst as jest.Mock).mock.calls.length).toBe(1);
+        expect(res.body).toMatchObject({ completed: 2, failed: 1, total: 4 });
+        expect(res.body).not.toHaveProperty("lastBatchId");
     });
 });

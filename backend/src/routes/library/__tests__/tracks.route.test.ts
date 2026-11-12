@@ -3,63 +3,34 @@
  * unanalysed, 404 for an unknown id, and the list transform's matching shape.
  */
 
-jest.mock('../../../utils/db', () => ({
-    prisma: {
-        track: {
-            findUnique: jest.fn(),
-            findMany: jest.fn(),
-        },
-        album: {
-            findMany: jest.fn(),
-        },
-    },
-}));
-
-jest.mock('../../../utils/logger', () => ({
-    logger: {
-        error: jest.fn(),
-        warn: jest.fn(),
-        info: jest.fn(),
-        debug: jest.fn(),
-    },
-}));
-
-jest.mock('../../../config', () => ({
-    config: {
-        music: {
-            musicPath: '/music',
-        },
-    },
-}));
-
-jest.mock('fs', () => ({
-    existsSync: jest.fn().mockReturnValue(false),
-    unlinkSync: jest.fn(),
-    readdirSync: jest.fn().mockReturnValue([]),
-    rmdirSync: jest.fn(),
-}));
-
 import express from 'express';
 import request from 'supertest';
 import tracksRoutes from '../tracks';
 import { prisma } from '../../../utils/db';
 import { toAudioFeaturesDTO } from '../../../utils/audioFeatures';
+import { closeEngineConnections } from '../../../__tests__/helpers/engineConnections';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const P = 'zz-tracks-detail';
 
 function makeApp() {
     const app = express();
     app.use(express.json());
+    app.use((req: any, _res, next) => {
+        req.user = { id: `${P}-user`, username: 'admin', role: 'admin' };
+        next();
+    });
     app.use('/', tracksRoutes);
     return app;
 }
 
-const BASE_ARTIST = { id: 'artist-1', mbid: 'mbid-artist-1', name: 'Radiohead' };
+const BASE_ARTIST = { id: `${P}-artist`, mbid: `${P}-artist-mbid`, name: 'Radiohead' };
 const BASE_ALBUM = {
-    id: 'album-1',
+    id: `${P}-album`,
     title: 'OK Computer',
-    artistId: 'artist-1',
-    rgMbid: 'mbid-ok-computer',
+    artistId: BASE_ARTIST.id,
+    rgMbid: `${P}-album-rg`,
     year: 1997,
     coverUrl: '/covers/ok-computer.jpg',
     location: 'LIBRARY',
@@ -67,7 +38,7 @@ const BASE_ALBUM = {
 };
 
 const ANALYZED_TRACK = {
-    id: 'track-1',
+    id: `${P}-track-1`,
     title: 'Paranoid Android',
     duration: 383,
     bpm: 120.5,
@@ -82,7 +53,7 @@ const ANALYZED_TRACK = {
 };
 
 const UNANALYZED_TRACK = {
-    id: 'track-2',
+    id: `${P}-track-2`,
     title: 'Karma Police',
     duration: 264,
     bpm: null,
@@ -96,22 +67,43 @@ const UNANALYZED_TRACK = {
     album: BASE_ALBUM,
 };
 
+beforeAll(async () => {
+    await prisma.artist.create({
+        data: { id: BASE_ARTIST.id, mbid: BASE_ARTIST.mbid, name: BASE_ARTIST.name, normalizedName: 'radiohead', identityKey: `${P}-ik` },
+    });
+    await prisma.album.create({
+        data: {
+            id: BASE_ALBUM.id, rgMbid: BASE_ALBUM.rgMbid, artistId: BASE_ARTIST.id, identityKey: BASE_ALBUM.id,
+            title: BASE_ALBUM.title, year: BASE_ALBUM.year, coverUrl: BASE_ALBUM.coverUrl, primaryType: 'Album', location: 'LIBRARY',
+        },
+    });
+    for (const { album: _album, ...t } of [ANALYZED_TRACK, UNANALYZED_TRACK]) {
+        await prisma.track.create({
+            data: { ...t, albumId: BASE_ALBUM.id, trackNo: 1, filePath: `${t.id}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+    }
+});
+
+afterAll(async () => {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    await closeEngineConnections();
+});
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /tracks/:id -- track detail', () => {
     let app: express.Application;
 
     beforeAll(() => { app = makeApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
 
     it('returns 200 with all 8 audio feature fields for an analyzed track', async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(ANALYZED_TRACK);
-
-        const res = await request(app).get('/tracks/track-1');
+        const res = await request(app).get(`/tracks/${ANALYZED_TRACK.id}`);
         expect(res.status).toBe(200);
 
         const body = res.body;
-        expect(body.id).toBe('track-1');
+        expect(body.id).toBe(ANALYZED_TRACK.id);
         expect(body.title).toBe('Paranoid Android');
         expect(body.duration).toBe(383);
         expect(body.artist.name).toBe('Radiohead');
@@ -131,13 +123,11 @@ describe('GET /tracks/:id -- track detail', () => {
     });
 
     it('returns 200 with null audio features for an un-analyzed track', async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(UNANALYZED_TRACK);
-
-        const res = await request(app).get('/tracks/track-2');
+        const res = await request(app).get(`/tracks/${UNANALYZED_TRACK.id}`);
         expect(res.status).toBe(200);
 
         const body = res.body;
-        expect(body.id).toBe('track-2');
+        expect(body.id).toBe(UNANALYZED_TRACK.id);
         expect(body.title).toBe('Karma Police');
 
         // Verify all 8 audio feature fields are present but null
@@ -154,8 +144,6 @@ describe('GET /tracks/:id -- track detail', () => {
     });
 
     it('returns 404 for an unknown track id', async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(null);
-
         const res = await request(app).get('/tracks/nonexistent-id');
         expect(res.status).toBe(404);
         expect(res.body.error).toBe('Track not found');
@@ -200,7 +188,7 @@ describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio
 
     it('passes through null feature fields and preserves non-null ones', () => {
         const partialTrack = {
-            id: 'track-partial',
+            id: `${P}-track-partial`,
             title: 'Partial',
             duration: 100,
             bpm: 100,

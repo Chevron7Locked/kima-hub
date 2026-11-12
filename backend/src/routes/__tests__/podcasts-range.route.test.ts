@@ -1,4 +1,4 @@
-// Range handling on cached podcast files: unsatisfiable → 416 with
+// Real router and database. Range handling on cached podcast files: unsatisfiable → 416 with
 // Content-Range, multi-range → 200 full body, valid → 206 slice. An episode not
 // cached yet is streamed from its host with the size the host states.
 
@@ -9,42 +9,7 @@ jest.mock('../../services/podcastDownload', () => ({
     isDownloading: jest.fn().mockReturnValue(false),
 }));
 
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        podcastEpisode: {
-            findFirst: jest.fn(),
-            update: jest.fn(),
-        },
-        podcast: {
-            findUnique: jest.fn(),
-            findMany: jest.fn(),
-            count: jest.fn(),
-        },
-        podcastDownload: {
-            deleteMany: jest.fn(),
-        },
-    },
-}));
-
-jest.mock('../../utils/logger', () => ({
-    logger: {
-        error: jest.fn(),
-        warn: jest.fn(),
-        info: jest.fn(),
-        debug: jest.fn(),
-    },
-}));
-
-jest.mock('../../middleware/auth', () => ({
-    requireAuth: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
-        next();
-    },
-    requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
-        next();
-    },
-}));
+jest.mock('../../middleware/auth', () => require('./helpers/podcastRoute').podcastAuthMock('user-123'));
 
 jest.mock('../../services/rss-parser', () => ({
     rssParserService: { parseFeed: jest.fn() },
@@ -66,15 +31,26 @@ import http from 'http';
 import type { AddressInfo } from 'net';
 import { USER_AGENT } from '../../config';
 
-const BASE_EPISODE = {
-    id: 'ep-1',
-    podcastId: 'pod-1',
-    title: 'Episode 1',
-    audioUrl: 'http://example.com/ep1.mp3',
-    mimeType: 'audio/mpeg',
-    fileSize: null,
-    guid: 'ep-1-guid',
-};
+const SHOW = 'pod_range_show';
+const EP = 'pod_range_ep';
+const URL_PATH = `/podcasts/${SHOW}/episodes/${EP}/stream`;
+
+// The episode row, replaced in beforeAll/beforeEach as each case needs it.
+async function seedEpisode(fields: { audioUrl: string; fileSize: number | null }) {
+    await prisma.podcastEpisode.deleteMany({ where: { id: EP } });
+    await prisma.podcastEpisode.create({
+        data: { id: EP, podcastId: SHOW, guid: 'g', title: 'Episode 1', publishedAt: new Date(Date.UTC(2026, 9, 1)), mimeType: 'audio/mpeg', ...fields },
+    });
+}
+
+beforeAll(async () => {
+    await prisma.podcast.deleteMany({ where: { id: SHOW } });
+    await prisma.podcast.create({ data: { id: SHOW, feedUrl: 'https://f.invalid/range', title: 'Range Show' } });
+});
+
+afterAll(async () => {
+    await prisma.podcast.deleteMany({ where: { id: SHOW } });
+});
 
 function makeApp() {
     const app = express();
@@ -103,15 +79,15 @@ describe('cached-path range policy', () => {
         await fs.promises.unlink(tmpFile).catch(() => {});
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
-        (prisma.podcastEpisode.findFirst as jest.Mock).mockResolvedValue(BASE_EPISODE);
+        await seedEpisode({ audioUrl: 'http://example.com/ep1.mp3', fileSize: null });
         (podcastDownload.getCachedFilePath as jest.Mock).mockResolvedValue(tmpFile);
     });
 
     it('valid range -> 206 with the correct slice', async () => {
         const res = await request(app)
-            .get('/podcasts/pod-1/episodes/ep-1/stream')
+            .get(URL_PATH)
             .set('Range', 'bytes=0-99');
 
         expect(res.status).toBe(206);
@@ -125,9 +101,15 @@ describe('cached-path range policy', () => {
         expect(res.body[99]).toBe(99);
     });
 
+    it('an episode asked for under another show -> 404, nothing served', async () => {
+        const res = await request(app).get(`/podcasts/some_other_show/episodes/${EP}/stream`);
+
+        expect(res.status).toBe(404);
+    });
+
     it('out-of-range -> 416 with Content-Range: bytes */<size>', async () => {
         const res = await request(app)
-            .get('/podcasts/pod-1/episodes/ep-1/stream')
+            .get(URL_PATH)
             .set('Range', `bytes=${FILE_SIZE + 100}-${FILE_SIZE + 200}`);
 
         expect(res.status).toBe(416);
@@ -136,7 +118,7 @@ describe('cached-path range policy', () => {
 
     it('multi-range -> 200 with full body', async () => {
         const res = await request(app)
-            .get('/podcasts/pod-1/episodes/ep-1/stream')
+            .get(URL_PATH)
             .set('Range', 'bytes=0-99,200-299');
 
         expect(res.status).toBe(200);
@@ -184,20 +166,16 @@ describe('uncached stream from the host', () => {
 
     afterAll(() => new Promise<void>((ok) => host.close(() => ok())));
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
         seen = [];
         const { port } = host.address() as AddressInfo;
-        (prisma.podcastEpisode.findFirst as jest.Mock).mockResolvedValue({
-            ...BASE_EPISODE,
-            audioUrl: `http://127.0.0.1:${port}/ep1.mp3`,
-            fileSize: FEED_DECLARED,
-        });
+        await seedEpisode({ audioUrl: `http://127.0.0.1:${port}/ep1.mp3`, fileSize: FEED_DECLARED });
         (podcastDownload.getCachedFilePath as jest.Mock).mockResolvedValue(null);
     });
 
     const stream = (range?: string) => {
-        const req = request(app).get('/podcasts/pod-1/episodes/ep-1/stream').buffer(true).parse((res, done) => {
+        const req = request(app).get(URL_PATH).buffer(true).parse((res, done) => {
             const chunks: Buffer[] = [];
             res.on('data', (c: Buffer) => chunks.push(c));
             res.on('end', () => done(null, Buffer.concat(chunks)));
@@ -216,7 +194,7 @@ describe('uncached stream from the host', () => {
     it('asks the host as Kima, like the background download, so the copy played is the copy cached', async () => {
         await stream('bytes=1000-1999');
         expect(seen).toEqual([{ agent: USER_AGENT, range: 'bytes=1000-1999' }]);
-        expect(podcastDownload.downloadInBackground).toHaveBeenCalledWith('ep-1', expect.stringContaining('/ep1.mp3'), 'user-123');
+        expect(podcastDownload.downloadInBackground).toHaveBeenCalledWith(EP, expect.stringContaining('/ep1.mp3'), 'user-123');
     });
 
     it('passes a slice and its place in the whole copy through', async () => {

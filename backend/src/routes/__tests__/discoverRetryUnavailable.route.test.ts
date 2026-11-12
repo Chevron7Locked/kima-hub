@@ -2,411 +2,307 @@
  * POST /discover/retry-unavailable downloads the albums, saves the counts, then
  * hands the batch to checkBatchCompletion, which waits for Lidarr imports. It
  * never marks the batch completed itself, and any crash in the background work
- * marks it failed ("Retry processing crashed").
+ * marks it failed ("Retry processing crashed"). Real database and router; the
+ * download and the completion flow are stood in for, since they talk to Lidarr.
  */
 
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        discoveryBatch: {
-            findFirst: jest.fn(),
-            create: jest.fn(),
-            update: jest.fn(),
-        },
-        discoveryAlbum: {
-            findMany: jest.fn(),
-        },
-        unavailableAlbum: {
-            findMany: jest.fn(),
-            deleteMany: jest.fn(),
-        },
-        album: {
-            findMany: jest.fn(),
-        },
-        downloadJob: {
-            findMany: jest.fn(),
-            create: jest.fn(),
-            update: jest.fn(),
-        },
-        $transaction: jest.fn(),
-    },
-}));
-
-jest.mock('../../utils/logger', () => ({
+jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-// Inject an authenticated user; the real middleware would 401 without a session.
-jest.mock('../../middleware/auth', () => ({
-    requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
-    requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
-        next();
-    },
-    requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123', role: 'admin' };
-        next();
-    },
+// Sign-in is passed through; the app below sets the user.
+jest.mock("../../middleware/auth", () => ({
+    ...jest.requireActual("../../middleware/auth"),
+    requireAuthOrToken: (_req: any, _res: any, next: any) => next(),
+    requireAdmin: (_req: any, _res: any, next: any) => next(),
+    requireAcquirePermission: (_req: any, _res: any, next: any) => next(),
 }));
 
-// Modules discover.ts imports at load time that this test does not exercise.
-jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').discoverQueuesMock());
-jest.mock('../../utils/systemSettings', () => require('./helpers/discoverMocks').systemSettingsMock());
-jest.mock('../../services/lidarr', () => require('./helpers/discoverMocks').emptyLidarrMock());
-jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks').distributedLockMock());
-jest.mock('../../config', () => require('./helpers/discoverMocks').musicConfigMock());
+// The queues are only here to see that no scan is asked for.
+jest.mock("../../workers/queues", () => require("./helpers/discoverMocks").discoverQueuesMock());
 
 // The two services the background job imports: acquireAlbum drives the loop,
 // checkBatchCompletion is where the batch is handed off.
 const mockAcquireAlbum = jest.fn();
 const mockCheckBatchCompletion = jest.fn();
-jest.mock('../../services/acquisitionService', () => ({
+jest.mock("../../services/acquisitionService", () => ({
     acquisitionService: { acquireAlbum: mockAcquireAlbum },
 }));
-jest.mock('../../services/discoverWeekly', () => ({
+jest.mock("../../services/discoverWeekly", () => ({
     discoverWeeklyService: { checkBatchCompletion: mockCheckBatchCompletion },
 }));
 
-import express from 'express';
-import request from 'supertest';
-import discoverRoutes from '../discover';
-import { prisma } from '../../utils/db';
-import { scanQueue } from '../../workers/queues';
+import express from "express";
+import request from "supertest";
+import { addWeeks, startOfWeek } from "date-fns";
+import discoverRoutes from "../discover";
+import { prisma } from "../../utils/db";
+import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
+import { useMidWeekClock } from "./helpers/midWeekClock";
+import { scanQueue } from "../../workers/queues";
 
-// Pin the wall clock so the resolved retry week is deterministic across CI.
-beforeAll(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-25T12:00:00.000Z'));
+const MARK = "zz-retry";
+let listener: string;
+
+const app = express();
+app.use(express.json());
+app.use((req: any, _res, next) => {
+    req.user = { id: listener, username: `${MARK}-listener`, role: "user" };
+    next();
 });
-afterAll(() => {
-    jest.useRealTimers();
-});
+app.use("/discover", discoverRoutes);
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/discover', discoverRoutes);
-    return app;
-}
+useMidWeekClock();
+afterAll(() => jest.useRealTimers());
 
-const RETRY_BATCH_ID = 'retry-batch-1';
+// The listener's latest completed batch is last week's, so that is the week the retry works on.
+const WEEK = addWeeks(startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON }), -1);
 
-const UNAVAILABLE_ALBUM = {
-    id: 'unavail-1',
-    userId: 'user-123',
-    albumMbid: 'mbid-aaa',
-    artistMbid: 'art-mbid-1',
-    artistName: 'Aphex Twin',
-    albumTitle: 'Drukqs',
-    similarity: 0.88,
-    tier: 'core',
-    weekStartDate: new Date('2026-05-18T00:00:00.000Z'),
-};
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const RETRY_JOB = {
-    id: 'job-1',
-    userId: 'user-123',
-    discoveryBatchId: RETRY_BATCH_ID,
-    status: 'pending',
-    targetMbid: 'mbid-aaa',
-    metadata: {
-        downloadType: 'discovery',
-        artistName: 'Aphex Twin',
-        albumTitle: 'Drukqs',
-        albumMbid: 'mbid-aaa',
-    },
-};
-
-/**
- * The background work runs after the response, so poll until `predicate` holds,
- * flushing microtasks between checks (timers are not advanced). Throws when it never does.
- */
-async function waitFor(predicate: () => boolean, label: string): Promise<void> {
-    for (let i = 0; i < 50; i++) {
-        if (predicate()) return;
-        await Promise.resolve();
-        await Promise.resolve();
+/** The background work runs after the response, so poll until `predicate` holds. */
+async function waitFor(predicate: () => boolean | Promise<boolean>, label: string): Promise<void> {
+    for (let i = 0; i < 300; i++) {
+        if (await predicate()) return;
+        await sleep(10);
     }
     throw new Error(`waitFor timed out: ${label}`);
 }
 
-const SECOND_ALBUM = { ...UNAVAILABLE_ALBUM, id: 'unavail-2', albumMbid: 'mbid-bbb', albumTitle: 'Windowlicker' };
-const SECOND_JOB = { ...RETRY_JOB, id: 'job-2', targetMbid: 'mbid-bbb' };
+const handedOff = () => mockCheckBatchCompletion.mock.calls.length > 0;
+const batchRow = (id: string) => prisma.discoveryBatch.findUniqueOrThrow({ where: { id } });
 
-/** Wire every query the handler runs BEFORE its res.json, plus the transaction. */
-function primeHandlerPreResponse({ twoAlbums = false } = {}) {
-    (prisma.discoveryBatch.findFirst as jest.Mock)
-        // the latest completed batch, tagged the prior week
-        .mockResolvedValueOnce({ weekStart: new Date('2026-05-18T00:00:00.000Z') })
-        // the active-batch guard: none in progress
-        .mockResolvedValueOnce(null);
-
-    (prisma.unavailableAlbum.findMany as jest.Mock).mockResolvedValue(
-        twoAlbums ? [UNAVAILABLE_ALBUM, SECOND_ALBUM] : [UNAVAILABLE_ALBUM],
-    );
-    // No discovery or library matches, so the album survives filtering.
-    (prisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue([]);
-    (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
-    (prisma.unavailableAlbum.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
-
-    // The create-batch transaction returns the new batch.
-    (prisma.$transaction as jest.Mock).mockImplementation(async (cb: any) =>
-        cb({
-            discoveryBatch: { create: jest.fn().mockResolvedValue({ id: RETRY_BATCH_ID }) },
-            downloadJob: { create: jest.fn().mockResolvedValue({}) },
-            unavailableAlbum: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-        }),
-    );
-
-    // No download is already working on the album; then the IIFE's job list.
-    (prisma.downloadJob.findMany as jest.Mock)
-        .mockResolvedValueOnce([])
-        .mockResolvedValue(twoAlbums ? [RETRY_JOB, SECOND_JOB] : [RETRY_JOB]);
-    (prisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
-    (prisma.downloadJob.update as jest.Mock).mockResolvedValue({});
+async function cleanup() {
+    await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
+    await prisma.album.deleteMany({ where: { title: { startsWith: MARK } } });
+    await prisma.artist.deleteMany({ where: { name: { startsWith: MARK } } });
 }
 
-describe('POST /discover/retry-unavailable -- routes through checkBatchCompletion', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockReset();
-        mockAcquireAlbum.mockReset();
-        mockCheckBatchCompletion.mockReset();
-        (scanQueue.add as jest.Mock).mockClear();
+const unavailable = (albumMbid: string, albumTitle: string) =>
+    prisma.unavailableAlbum.create({
+        data: {
+            userId: listener,
+            albumMbid,
+            artistMbid: `${MARK}-art-mbid`,
+            artistName: `${MARK} Aphex Twin`,
+            albumTitle: `${MARK} ${albumTitle}`,
+            similarity: 0.88,
+            tier: "core",
+            weekStartDate: WEEK,
+        },
     });
 
-    it('catches a rejected checkBatchCompletion and marks the batch failed', async () => {
-        primeHandlerPreResponse();
-        mockAcquireAlbum.mockResolvedValue({ success: true });
-        mockCheckBatchCompletion.mockRejectedValue(new Error('reconcile exploded'));
+/** The listener, a completed batch from last week, and the albums the retry should queue. */
+async function seed(albums: Array<[mbid: string, title: string]>) {
+    await prisma.discoveryBatch.create({
+        data: { userId: listener, weekStart: WEEK, targetSongCount: 5, status: "completed", completedAt: new Date() },
+    });
+    for (const [mbid, title] of albums) await unavailable(mbid, title);
+}
 
-        const res = await request(app).post('/discover/retry-unavailable');
+const ONE: Array<[string, string]> = [[`${MARK}-mbid-aaa`, "Drukqs"]];
+const TWO: Array<[string, string]> = [...ONE, [`${MARK}-mbid-bbb`, "Windowlicker"]];
+
+beforeAll(cleanup);
+afterAll(async () => {
+    await cleanup();
+    await prisma.$disconnect();
+});
+
+beforeEach(async () => {
+    await cleanup();
+    listener = (await prisma.user.create({ data: { username: `${MARK}-listener`, passwordHash: "x" } })).id;
+    mockAcquireAlbum.mockReset();
+    mockCheckBatchCompletion.mockReset();
+    (scanQueue.add as jest.Mock).mockClear();
+});
+
+describe("POST /discover/retry-unavailable -- routes through checkBatchCompletion", () => {
+    it("catches a rejected checkBatchCompletion and marks the batch failed", async () => {
+        await seed(ONE);
+        mockAcquireAlbum.mockResolvedValue({ success: true });
+        mockCheckBatchCompletion.mockRejectedValue(new Error("reconcile exploded"));
+
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200); // response already sent before background work
 
-        await waitFor(
-            () =>
-                (prisma.discoveryBatch.update as jest.Mock).mock.calls.some(
-                    (c) =>
-                        c[0]?.data?.status === 'failed' &&
-                        c[0]?.data?.errorMessage === 'Retry processing crashed',
-                ),
-            'batch marked failed with "Retry processing crashed"',
-        );
+        await waitFor(async () => (await batchRow(res.body.batchId)).status === "failed", "batch marked failed");
 
-        const failedCall = (prisma.discoveryBatch.update as jest.Mock).mock.calls.find(
-            (c) => c[0]?.data?.status === 'failed',
-        );
-        expect(failedCall[0].where).toEqual({ id: RETRY_BATCH_ID });
-        expect(failedCall[0].data.errorMessage).toBe('Retry processing crashed');
+        const batch = await batchRow(res.body.batchId);
+        expect(batch.errorMessage).toBe("Retry processing crashed");
+        expect(batch.completedAt).toBeInstanceOf(Date);
     });
 
-    it('never sets the batch completed itself, since checkBatchCompletion owns that', async () => {
-        primeHandlerPreResponse();
+    it("never sets the batch completed itself, since checkBatchCompletion owns that", async () => {
+        await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(
-            () => mockCheckBatchCompletion.mock.calls.length > 0,
-            'checkBatchCompletion invoked',
-        );
+        await waitFor(handedOff, "checkBatchCompletion invoked");
+        await sleep(50);
 
-        const completedSelfWrites = (prisma.discoveryBatch.update as jest.Mock).mock.calls.filter(
-            (c) => c[0]?.data?.status === 'completed',
-        );
-        expect(completedSelfWrites).toHaveLength(0);
+        const batch = await batchRow(res.body.batchId);
+        expect(batch.status).toBe("downloading");
+        expect(batch.completedAt).toBeNull();
     });
 
-    it('never enqueues a scan with the discover-retry-unavailable source', async () => {
+    it("never enqueues a scan with the discover-retry-unavailable source", async () => {
         // The scan processor only builds the playlist for the discover-weekly-completion source,
         // which checkBatchCompletion queues itself.
-        primeHandlerPreResponse();
+        await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(
-            () => mockCheckBatchCompletion.mock.calls.length > 0,
-            'checkBatchCompletion invoked',
-        );
+        await waitFor(handedOff, "checkBatchCompletion invoked");
 
         const retrySourceScans = (scanQueue.add as jest.Mock).mock.calls.filter(
-            (c) => c[1]?.source === 'discover-retry-unavailable',
+            (c) => c[1]?.source === "discover-retry-unavailable",
         );
         expect(retrySourceScans).toHaveLength(0);
     });
 
-    it('still hands off to checkBatchCompletion when one album fails to acquire', async () => {
+    it("still hands off to checkBatchCompletion when one album fails to acquire", async () => {
         // A failed acquire must not short-circuit into a self-completed batch.
-        primeHandlerPreResponse({ twoAlbums: true });
-
-        mockAcquireAlbum
-            .mockResolvedValueOnce({ success: true })
-            .mockResolvedValueOnce({ success: false });
+        await seed(TWO);
+        mockAcquireAlbum.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce({ success: false });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(
-            () => mockCheckBatchCompletion.mock.calls.length > 0,
-            'checkBatchCompletion invoked after partial failure',
-        );
+        await waitFor(handedOff, "checkBatchCompletion invoked after partial failure");
+        await sleep(50);
 
-        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(RETRY_BATCH_ID);
-        const completedSelfWrites = (prisma.discoveryBatch.update as jest.Mock).mock.calls.filter(
-            (c) => c[0]?.data?.status === 'completed',
-        );
-        expect(completedSelfWrites).toHaveLength(0);
+        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(res.body.batchId);
+        expect((await batchRow(res.body.batchId)).status).toBe("downloading");
     });
 
-    it('hands the batch to checkBatchCompletion after the acquisitions', async () => {
-        primeHandlerPreResponse();
+    it("queues a batch with a download job per album, clears the week's unavailable list, and hands the batch off after the acquisitions", async () => {
+        await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
 
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
         expect(res.body.queued).toBe(1);
-        expect(res.body.batchId).toBe(RETRY_BATCH_ID);
 
-        await waitFor(
-            () => mockCheckBatchCompletion.mock.calls.length > 0,
-            'checkBatchCompletion invoked on happy path',
-        );
+        const batch = await batchRow(res.body.batchId);
+        expect(batch).toMatchObject({ userId: listener, targetSongCount: 1, totalAlbums: 1 });
+        expect(batch.weekStart.getTime()).toBe(WEEK.getTime());
 
-        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(RETRY_BATCH_ID);
+        const jobs = await prisma.downloadJob.findMany({ where: { discoveryBatchId: batch.id } });
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({ userId: listener, targetMbid: ONE[0][0], status: "pending" });
+        expect(jobs[0].metadata).toMatchObject({ downloadType: "discovery", albumMbid: ONE[0][0], retryOfUnavailable: true });
+        expect(await prisma.unavailableAlbum.count({ where: { userId: listener } })).toBe(0);
+
+        await waitFor(handedOff, "checkBatchCompletion invoked on happy path");
+
+        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(batch.id);
         expect(mockAcquireAlbum).toHaveBeenCalledTimes(1);
+        expect(mockAcquireAlbum.mock.calls[0][1]).toMatchObject({ userId: listener, discoveryBatchId: batch.id, existingJobId: jobs[0].id });
     });
 
-    it('writes the completed and failed tally to the batch before handing off', async () => {
+    it("writes the completed and failed tally to the batch before handing off", async () => {
         // One success and one failure: completedAlbums 1, failedAlbums 1.
-        primeHandlerPreResponse({ twoAlbums: true });
-
-        // Record the order of every batch update and the handoff.
-        const events: string[] = [];
-        (prisma.discoveryBatch.update as jest.Mock).mockImplementation(async (arg: any) => {
-            const d = arg?.data ?? {};
-            if (d.completedAlbums !== undefined || d.failedAlbums !== undefined) {
-                events.push(`count:${d.completedAlbums ?? 'x'}/${d.failedAlbums ?? 'x'}`);
-            } else {
-                events.push(`update:${JSON.stringify(d)}`);
-            }
-            return {};
-        });
-        mockAcquireAlbum
-            .mockResolvedValueOnce({ success: true })
-            .mockResolvedValueOnce({ success: false });
-        mockCheckBatchCompletion.mockImplementation(async () => {
-            events.push('handoff');
+        await seed(TWO);
+        mockAcquireAlbum.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce({ success: false });
+        // checkBatchCompletion would read stale counts if the tally landed after it, so read them as it would.
+        let tallyAtHandoff: { completedAlbums: number; failedAlbums: number } | undefined;
+        mockCheckBatchCompletion.mockImplementation(async (batchId: string) => {
+            const { completedAlbums, failedAlbums } = await batchRow(batchId);
+            tallyAtHandoff = { completedAlbums, failedAlbums };
         });
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(() => events.includes('handoff'), 'handoff recorded');
+        await waitFor(() => tallyAtHandoff !== undefined, "handoff recorded");
 
-        const persistedFinalTally = (prisma.discoveryBatch.update as jest.Mock).mock.calls.some(
-            (c) => c[0]?.data?.completedAlbums === 1 && c[0]?.data?.failedAlbums === 1,
-        );
-        expect(persistedFinalTally).toBe(true);
-
-        // checkBatchCompletion would read stale counts if the tally landed after it.
-        const handoffIdx = events.indexOf('handoff');
-        const finalTallyIdx = events.indexOf('count:1/1');
-        expect(finalTallyIdx).toBeGreaterThanOrEqual(0);
-        expect(finalTallyIdx).toBeLessThanOrEqual(handoffIdx);
+        expect(tallyAtHandoff).toEqual({ completedAlbums: 1, failedAlbums: 1 });
     });
 
-    it('acquires the albums before handing the batch off', async () => {
-        primeHandlerPreResponse();
+    it("acquires the albums before handing the batch off", async () => {
+        await seed(ONE);
         const order: string[] = [];
         mockAcquireAlbum.mockImplementation(async () => {
-            order.push('acquire');
+            order.push("acquire");
             return { success: true };
         });
         mockCheckBatchCompletion.mockImplementation(async () => {
-            order.push('handoff');
+            order.push("handoff");
         });
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(() => order.includes('handoff'), 'handoff after acquire');
+        await waitFor(() => order.includes("handoff"), "handoff after acquire");
 
-        expect(order[0]).toBe('acquire');
-        expect(order.indexOf('acquire')).toBeLessThan(order.indexOf('handoff'));
+        expect(order).toEqual(["acquire", "handoff"]);
     });
 
-    it('marks the batch failed when a failure comes before the handoff', async () => {
-        primeHandlerPreResponse();
+    it("marks the batch failed when a failure comes before the handoff", async () => {
+        await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        // The per-job count update swallows its errors; the count update after the loop (no status
-        // field) is awaited unguarded. Reject that one and let the status "failed" write succeed.
-        (prisma.discoveryBatch.update as jest.Mock).mockImplementation(async (arg: any) => {
-            const d = arg?.data ?? {};
-            if (d.status === undefined && (d.completedAlbums !== undefined || d.failedAlbums !== undefined)) {
-                throw new Error('count persist exploded');
-            }
-            return {};
-        });
+        // The per-job count write swallows its errors; the count write after the loop is awaited
+        // unguarded. Refuse both, so the second one crashes the background work.
+        const refusal = jest
+            .spyOn(prisma.discoveryBatch, "update")
+            .mockRejectedValueOnce(new Error("count persist exploded"))
+            .mockRejectedValueOnce(new Error("count persist exploded"));
+        try {
+            const res = await request(app).post("/discover/retry-unavailable");
+            expect(res.status).toBe(200);
 
-        const res = await request(app).post('/discover/retry-unavailable');
-        expect(res.status).toBe(200);
+            await waitFor(async () => (await batchRow(res.body.batchId)).status === "failed", "pre-handoff crash marks batch failed");
 
-        // The outer catch writes the failed shape, and the handoff never runs.
-        await waitFor(
-            () =>
-                (prisma.discoveryBatch.update as jest.Mock).mock.calls.some(
-                    (c) =>
-                        c[0]?.data?.status === 'failed' &&
-                        c[0]?.data?.errorMessage === 'Retry processing crashed',
-                ),
-            'pre-handoff crash marks batch failed',
-        );
-        expect(mockCheckBatchCompletion).not.toHaveBeenCalled();
+            expect((await batchRow(res.body.batchId)).errorMessage).toBe("Retry processing crashed");
+            expect(mockCheckBatchCompletion).not.toHaveBeenCalled();
+        } finally {
+            refusal.mockRestore();
+        }
     });
 
-    it('hands the batch off once, not once per album', async () => {
-        primeHandlerPreResponse({ twoAlbums: true });
+    it("hands the batch off once, not once per album", async () => {
+        await seed(TWO);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
         expect(res.status).toBe(200);
 
-        await waitFor(
-            () => mockCheckBatchCompletion.mock.calls.length > 0,
-            'checkBatchCompletion invoked',
-        );
+        await waitFor(handedOff, "checkBatchCompletion invoked");
+        await waitFor(() => mockAcquireAlbum.mock.calls.length === 2, "both albums acquired");
         // Give an extra handoff a chance to fire before asserting there was one.
-        await waitFor(() => mockAcquireAlbum.mock.calls.length === 2, 'both albums acquired');
-        await Promise.resolve();
-        await Promise.resolve();
+        await sleep(50);
 
         expect(mockCheckBatchCompletion).toHaveBeenCalledTimes(1);
-        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(RETRY_BATCH_ID);
+        expect(mockCheckBatchCompletion).toHaveBeenCalledWith(res.body.batchId);
     });
 
-    it('does not queue again an album a download is already working on', async () => {
-        primeHandlerPreResponse();
-        (prisma.downloadJob.findMany as jest.Mock).mockReset().mockResolvedValueOnce([{ targetMbid: UNAVAILABLE_ALBUM.albumMbid }]);
+    it("does not queue again an album a download is already working on", async () => {
+        await seed(ONE);
+        await prisma.downloadJob.create({
+            data: { userId: listener, subject: `${MARK} Aphex Twin - ${MARK} Drukqs`, type: "album", status: "processing", targetMbid: ONE[0][0] },
+        });
 
-        const res = await request(app).post('/discover/retry-unavailable');
+        const res = await request(app).post("/discover/retry-unavailable");
 
         expect(res.status).toBe(200);
-        expect(res.body).toMatchObject({ success: true, queued: 0, message: 'The unavailable albums are already downloading' });
-        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(res.body).toMatchObject({ success: true, queued: 0, message: "The unavailable albums are already downloading" });
+        // Only the seeded completed batch; no retry batch was made, and the album stays listed.
+        expect(await prisma.discoveryBatch.count({ where: { userId: listener } })).toBe(1);
+        expect(await prisma.unavailableAlbum.count({ where: { userId: listener } })).toBe(1);
         expect(mockAcquireAlbum).not.toHaveBeenCalled();
     });
 });

@@ -1,176 +1,149 @@
 /**
- * The track and artist DELETE routes touch nothing outside the music root, even
- * when the stored path or artist name (an ID3 tag) traverses.
+ * The track and artist DELETE routes touch nothing outside the music root, even when the stored path or artist name
+ * (an ID3 tag) traverses, or a song sits behind a link leading out. Real database and real files: a temporary music
+ * root, with a sibling folder standing for "outside" whose files must survive.
  */
 
-jest.mock('../../../utils/db', () => ({
-    prisma: {
-        track: { findUnique: jest.fn(), delete: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
-        artist: { findUnique: jest.fn(), delete: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
-        album: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-        ownedAlbum: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-        similarArtist: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-        $transaction: jest.fn(async (fn: any) => (typeof fn === 'function' ? fn({}) : [])),
-    },
-}));
-
-jest.mock('../../../utils/logger', () => ({
+jest.mock("../../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
-
-jest.mock('../../../config', () => ({
-    config: { music: { musicPath: '/music' } },
-}));
-
-jest.mock('../../../middleware/auth', () => ({
-    requireAuth: (req: any, _res: any, next: any) => { req.user = { id: 'u1', role: 'admin' }; next(); },
-    requireAdmin: (req: any, _res: any, next: any) => { req.user = { id: 'u1', role: 'admin' }; next(); },
-    requireAuthOrToken: (req: any, _res: any, next: any) => { req.user = { id: 'u1', role: 'admin' }; next(); },
-}));
-
-// artists.ts pulls these in at module load. Left real, their clients start
-// connecting and the test process never settles.
-jest.mock('../../../utils/redis', () => ({
-    redisClient: {
-        get: jest.fn().mockResolvedValue(null),
-        set: jest.fn().mockResolvedValue('OK'),
-        setex: jest.fn().mockResolvedValue('OK'),
-        del: jest.fn().mockResolvedValue(1),
-        keys: jest.fn().mockResolvedValue([]),
+jest.mock("../../../middleware/auth", () => {
+    const signIn = (req: any, _res: any, next: any) => {
+        req.user = { id: "dtrav_admin", role: "admin" };
+        next();
+    };
+    return { requireAuth: signIn, requireAdmin: signIn, requireAuthOrToken: signIn };
+});
+jest.mock("../../../config", () => ({
+    config: {
+        music: { musicPath: require("path").join(require("os").tmpdir(), `kima-dtrav-music-${process.pid}`) },
+        redisUrl: process.env.REDIS_URL,
     },
 }));
-jest.mock('../../../services/deezer', () => ({ deezerService: {} }));
-jest.mock('../../../services/musicbrainz', () => ({ musicBrainzService: {} }));
-jest.mock('../../../services/dataCache', () => ({ dataCacheService: { get: jest.fn(), set: jest.fn() } }));
 
-jest.mock('fs', () => ({
-    existsSync: jest.fn().mockReturnValue(true),
-    unlinkSync: jest.fn(),
-    rmSync: jest.fn(),
-    rmdirSync: jest.fn(),
-    readdirSync: jest.fn().mockReturnValue([]),
-    statSync: jest.fn().mockReturnValue({ isDirectory: () => false }),
-    realpathSync: jest.fn((p: string) => p.replace('/music/Linked', '/nas/Album')),
-}));
+import express from "express";
+import request from "supertest";
+import fs from "fs";
+import path from "path";
+import { prisma } from "../../../utils/db";
+import { config } from "../../../config";
+import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import tracksRoutes from "../tracks";
+import artistsRoutes from "../artists";
 
-import express from 'express';
-import request from 'supertest';
-import fs from 'fs';
-import tracksRoutes from '../tracks';
-import artistsRoutes from '../artists';
-import { prisma } from '../../../utils/db';
+const P = "dtrav";
+const MUSIC = path.resolve(config.music.musicPath);
+const OUTSIDE_NAME = `kima-dtrav-outside-${process.pid}`;
+const OUTSIDE = path.join(path.dirname(MUSIC), OUTSIDE_NAME);
+/** A stored path or tag that climbs out of the music root into the outside folder. */
+const EVIL = `../${OUTSIDE_NAME}/evil`;
 
-const ROOT = '/music';
-const EVIL = '../../../../tmp/evil';
+const app = express();
+app.use(express.json());
+app.use("/", tracksRoutes);
+app.use("/", artistsRoutes);
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/', tracksRoutes);
-    app.use('/', artistsRoutes);
-    return app;
+let n = 0;
+/** An artist with one album holding a song at each of `files` (paths as stored, relative to the music root). */
+async function artistWith(name: string, files: string[]) {
+    n += 1;
+    const artist = `${P}_art_${n}`;
+    await prisma.artist.create({ data: { id: artist, name, identityKey: `${P}_ik_${n}` } });
+    const album = `${P}_alb_${n}`;
+    await prisma.album.create({ data: { id: album, rgMbid: `${P}_rg_${n}`, artistId: artist, title: `${P} album ${n}`, primaryType: "Album", location: "LIBRARY" } });
+    const songs: string[] = [];
+    for (const [i, filePath] of files.entries()) {
+        const id = `${P}_t_${n}_${i}`;
+        await prisma.track.create({ data: { id, albumId: album, title: `${P} song ${n} ${i}`, trackNo: i + 1, duration: 100, filePath, fileModified: new Date(), fileSize: 10 } });
+        songs.push(id);
+    }
+    return { artist, songs };
 }
 
-/** Every filesystem path this request touched, across all destructive calls. */
-function touchedPaths(): string[] {
-    const calls = [
-        ...(fs.unlinkSync as jest.Mock).mock.calls,
-        ...(fs.rmSync as jest.Mock).mock.calls,
-        ...(fs.rmdirSync as jest.Mock).mock.calls,
-    ];
-    return calls.map((c) => String(c[0]));
+function put(root: string, file: string) {
+    const full = path.join(root, file);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, "x");
+}
+const exists = (full: string) => fs.existsSync(full);
+
+async function cleanup() {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
 }
 
-describe('library delete routes stay inside the music root', () => {
-    let app: express.Application;
+beforeEach(async () => {
+    await cleanup();
+    fs.rmSync(MUSIC, { recursive: true, force: true });
+    fs.rmSync(OUTSIDE, { recursive: true, force: true });
+    fs.mkdirSync(MUSIC, { recursive: true });
+    fs.mkdirSync(OUTSIDE, { recursive: true });
+    put(OUTSIDE, "evil.flac");
+    put(OUTSIDE, "one.flac");
+    // A link inside the music root that leads out to the outside folder.
+    fs.symlinkSync(OUTSIDE, path.join(MUSIC, "Linked"));
+});
 
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (fs.existsSync as jest.Mock).mockReturnValue(true);
+afterAll(async () => {
+    await cleanup();
+    fs.rmSync(MUSIC, { recursive: true, force: true });
+    fs.rmSync(OUTSIDE, { recursive: true, force: true });
+    await closeEngineConnections();
+    await prisma.$disconnect();
+});
+
+describe("library delete routes stay inside the music root", () => {
+    it("DELETE /tracks/:id leaves a file its stored path points to outside the root", async () => {
+        const { songs } = await artistWith("Radiohead", [`${EVIL}.flac`]);
+
+        await request(app).delete(`/tracks/${songs[0]}`);
+
+        expect(exists(path.join(OUTSIDE, "evil.flac"))).toBe(true);
     });
 
-    it('DELETE /tracks/:id refuses a filePath that escapes the root', async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            id: 'tr-1',
-            title: 'Airbag',
-            filePath: `${EVIL}.flac`,
-            album: { id: 'al-1', title: 'OK Computer', artist: { id: 'ar-1', name: 'Radiohead' } },
-        });
+    it("DELETE /tracks/:id refuses a song behind a link leading out, keeping file and row", async () => {
+        const { songs } = await artistWith("Linked artist", ["Linked/one.flac"]);
 
-        await request(app).delete('/tracks/tr-1');
+        const res = await request(app).delete(`/tracks/${songs[0]}`);
 
-        for (const p of touchedPaths()) {
-            expect(p.startsWith(ROOT + '/')).toBe(true);
-        }
-        expect(fs.unlinkSync).not.toHaveBeenCalled();
-    });
-
-    it('DELETE /tracks/:id refuses a song behind a link leading out, keeping file and row', async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({ id: 't1', title: 'T', filePath: 'Linked/one.flac' });
-        const res = await request(app).delete('/tracks/t1');
         expect(res.status).toBe(409);
-        expect(fs.unlinkSync).not.toHaveBeenCalled();
-        expect(prisma.track.delete).not.toHaveBeenCalled();
+        expect(exists(path.join(OUTSIDE, "one.flac"))).toBe(true);
+        expect(await prisma.track.count({ where: { id: songs[0] } })).toBe(1);
     });
 
-    it('DELETE /artists/:id refuses when any song is behind a link leading out, before touching anything', async () => {
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({
-            id: 'a1', name: 'A', mbid: null,
-            albums: [{ tracks: [{ filePath: 'A/Album/ok.flac' }, { filePath: 'Linked/one.flac' }] }],
-        });
-        const res = await request(app).delete('/artists/a1');
+    it("DELETE /artists/:id refuses when any song is behind a link leading out, before touching anything", async () => {
+        put(MUSIC, "A/Album/ok.flac");
+        const { artist } = await artistWith("A", ["A/Album/ok.flac", "Linked/one.flac"]);
+
+        const res = await request(app).delete(`/artists/${artist}`);
+
         expect(res.status).toBe(409);
-        expect(fs.unlinkSync).not.toHaveBeenCalled();
-        expect(prisma.artist.delete).not.toHaveBeenCalled();
+        expect(exists(path.join(MUSIC, "A/Album/ok.flac"))).toBe(true);
+        expect(exists(path.join(OUTSIDE, "one.flac"))).toBe(true);
+        expect(await prisma.artist.count({ where: { id: artist } })).toBe(1);
     });
 
-    it('DELETE /artists/:id refuses a tag-derived name that escapes the root', async () => {
-        // artist.name reaches rmSync(recursive, force) through the "common
-        // paths" list, and the track filePath reaches unlinkSync.
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({
-            id: 'ar-1',
-            name: EVIL,
-            mbid: null,
-            albums: [
-                {
-                    id: 'al-1',
-                    title: 'Album',
-                    tracks: [{ id: 'tr-1', filePath: `${EVIL}.flac` }],
-                },
-            ],
-        });
+    it("DELETE /artists/:id leaves the outside folder alone when the artist name and a song path climb out of the root", async () => {
+        // The name is a tag; it once reached rmSync(recursive, force) through a folder guess.
+        const { artist } = await artistWith(EVIL, [`${EVIL}.flac`]);
 
-        await request(app).delete('/artists/ar-1');
+        await request(app).delete(`/artists/${artist}`);
 
-        for (const p of touchedPaths()) {
-            expect(p.startsWith(ROOT + '/')).toBe(true);
-        }
-        expect(fs.rmSync).not.toHaveBeenCalled();
-        expect(fs.unlinkSync).not.toHaveBeenCalled();
+        expect(exists(path.join(OUTSIDE, "evil.flac"))).toBe(true);
+        expect(exists(path.join(OUTSIDE, "one.flac"))).toBe(true);
     });
 
-    it('DELETE /artists/:id still deletes an ordinary artist folder', async () => {
+    it("DELETE /artists/:id still deletes an ordinary artist folder", async () => {
         // The guard must not break the feature it protects.
-        (prisma.artist.findUnique as jest.Mock).mockResolvedValue({
-            id: 'ar-1',
-            name: 'Radiohead',
-            mbid: null,
-            albums: [
-                {
-                    id: 'al-1',
-                    title: 'OK Computer',
-                    tracks: [{ id: 'tr-1', filePath: 'Radiohead/OK Computer/01.flac' }],
-                },
-            ],
-        });
+        put(MUSIC, "Radiohead/OK Computer/01.flac");
+        const { artist } = await artistWith("Radiohead", ["Radiohead/OK Computer/01.flac"]);
 
-        await request(app).delete('/artists/ar-1');
+        const res = await request(app).delete(`/artists/${artist}`);
 
-        const touched = touchedPaths();
-        expect(touched.length).toBeGreaterThan(0);
-        for (const p of touched) {
-            expect(p.startsWith(ROOT + '/')).toBe(true);
-        }
+        expect(res.status).toBe(200);
+        expect(exists(path.join(MUSIC, "Radiohead"))).toBe(false);
+        expect(exists(MUSIC)).toBe(true);
+        expect(await prisma.artist.count({ where: { id: artist } })).toBe(0);
     });
 });

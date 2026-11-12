@@ -1,14 +1,8 @@
 /**
  * The Release Radar resolves artwork through the providers and
  * prefers it over Lidarr's unchecked Cover Art Archive address.
+ * Real router and database; Lidarr, the artwork sources and outside fetches are stubbed.
  */
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        album: { findMany: jest.fn().mockResolvedValue([]) },
-        similarArtist: { findMany: jest.fn().mockResolvedValue([]) },
-    },
-}));
 
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -75,6 +69,18 @@ function makeApp() {
     return app;
 }
 
+const P = 'relcover';
+const ALBUM_MBID = `${P}-album-mbid`;
+
+async function wipe() {
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+// A test that owns the album seeds it; none leaves it behind for the next.
+beforeEach(wipe);
+afterAll(wipe);
+
 /** What Lidarr hands out: an archive address nobody has checked. */
 const LIDARR_GUESS = 'https://coverartarchive.org/release-group/album-mbid/front-500';
 /** What a provider returns: an address that came from an index, not a guess. */
@@ -85,7 +91,7 @@ const calendarEntry = (over: Record<string, unknown> = {}) => ({
     title: 'Age Of Aquarius',
     artistName: 'Perturbator',
     artistMbid: 'artist-mbid',
-    albumMbid: 'album-mbid',
+    albumMbid: ALBUM_MBID,
     releaseDate: new Date(Date.now() + 7 * 864e5).toISOString(),
     monitored: true,
     grabbed: false,
@@ -149,7 +155,6 @@ describe('the Release Radar and the artwork it promises', () => {
 
             expect(res.body.monitoredArtistCount).toEqual(expect.any(Number));
             expect(res.body).not.toHaveProperty('similarArtistCount');
-            expect(prisma.similarArtist.findMany).not.toHaveBeenCalled();
         });
 
         it('keeps every other field on the release untouched', async () => {
@@ -160,7 +165,7 @@ describe('the Release Radar and the artwork it promises', () => {
             expect(res.body.upcoming[0]).toMatchObject({
                 title: 'Age Of Aquarius',
                 artistName: 'Perturbator',
-                albumMbid: 'album-mbid',
+                albumMbid: ALBUM_MBID,
                 status: 'upcoming',
                 inLibrary: false,
             });
@@ -175,6 +180,20 @@ describe('the Release Radar and the artwork it promises', () => {
 
             expect(res.body.upcoming[0].coverUrl).toBe(LIDARR_GUESS);
         });
+    });
+
+    it('marks a release the library already owns as available', async () => {
+        await prisma.artist.create({ data: { id: `${P}_art`, name: 'Perturbator', normalizedName: 'perturbator', identityKey: `${P}_ik` } });
+        await prisma.album.create({
+            data: { id: `${P}_alb`, rgMbid: ALBUM_MBID, artistId: `${P}_art`, identityKey: `${P}_ak`, title: 'Age Of Aquarius', primaryType: 'Album' },
+        });
+        mockGetCalendar.mockResolvedValue([
+            calendarEntry({ releaseDate: new Date(Date.now() - 864e5).toISOString() }),
+        ]);
+
+        const res = await request(makeApp()).get('/releases/radar');
+
+        expect(res.body.recent[0]).toMatchObject({ albumMbid: ALBUM_MBID, status: 'available', inLibrary: true, canDownload: false });
     });
 
     it('the radar never carries a hand-built archive address', async () => {

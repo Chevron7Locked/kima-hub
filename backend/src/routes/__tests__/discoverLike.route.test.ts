@@ -1,32 +1,8 @@
 /**
  * POST /discover/like claims the album only while it is still ACTIVE, so a
  * concurrent cleanup cannot be undone. A lost claim answers 409 ALBUM_GONE and
- * skips the Lidarr tag removal.
+ * skips the Lidarr tag removal. Real router, real database; auth, queues, Lidarr and the enrichment wake-up are stood in.
  */
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        discoveryAlbum: {
-            findFirst: jest.fn(),
-            updateMany: jest.fn(),
-        },
-        album: {
-            // The exact-id lookup comes first; null sends the route to the title match.
-            findUnique: jest.fn().mockResolvedValue(null),
-            findMany: jest.fn(),
-            update: jest.fn(),
-        },
-        ownedAlbum: {
-            upsert: jest.fn(),
-        },
-        discoveryTrack: {
-            findMany: jest.fn(),
-        },
-        play: {
-            updateMany: jest.fn(),
-        },
-    },
-}));
 
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -36,11 +12,11 @@ jest.mock('../../utils/logger', () => ({
 jest.mock('../../middleware/auth', () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
+        req.user = { id: 'dlk_user' };
         next();
     },
     requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123', role: 'admin' };
+        req.user = { id: 'dlk_user', role: 'admin' };
         next();
     },
 }));
@@ -53,9 +29,7 @@ jest.mock('../../services/artistCountsService', () => ({ updateArtistCounts: jes
 
 // Modules discover.ts imports at load time that this test does not exercise.
 jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').discoverQueuesMock());
-jest.mock('../../utils/systemSettings', () => require('./helpers/discoverMocks').systemSettingsMock());
 jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks').distributedLockMock());
-jest.mock('../../config', () => require('./helpers/discoverMocks').musicConfigMock());
 
 // The Lidarr tag-removal calls in the /like body; none may run on the 409 path.
 const mockRemoveDiscoveryTagByMbid = jest.fn();
@@ -78,99 +52,151 @@ import { prisma } from '../../utils/db';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
 
+const P = 'dlk_';
+const USER = `${P}user`;
+const OTHER = `${P}other`;
+const ALBUM_ID = `${P}rg`;
+const WEEK = new Date(Date.UTC(2026, 9, 19));
+
+const app = express();
+app.use(express.json());
+app.use('/discover', discoverRoutes);
+
+async function cleanup() {
+    await prisma.discoveryAlbum.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
+    await prisma.ownedAlbum.deleteMany({ where: { artistId: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.user.deleteMany({ where: { id: { in: [USER, OTHER] } } });
+}
+
+beforeEach(async () => {
+    jest.clearAllMocks();
+    await cleanup();
+    for (const id of [USER, OTHER]) await prisma.user.create({ data: { id, username: id, passwordHash: 'x' } });
+});
+
 afterAll(async () => {
+    await cleanup();
     // The router pulls in services/listenBrainz, which opens the shared Redis
     // client at import. Left open, Jest finishes the suite and outlives the
     // process on that socket.
     await closeClient(redisClient);
+    await prisma.$disconnect();
 });
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/discover', discoverRoutes);
-    return app;
+// A real artistMbid (not "temp-") sends the success path through removeDiscoveryTagByMbid.
+async function suggest(userId = USER, id = `${P}da`) {
+    return prisma.discoveryAlbum.create({
+        data: {
+            id,
+            userId,
+            rgMbid: ALBUM_ID,
+            artistMbid: 'art-mbid-1',
+            artistName: 'Dlk Artist',
+            albumTitle: 'Dlk Album',
+            weekStartDate: WEEK,
+            status: 'ACTIVE',
+        },
+    });
 }
 
-const ALBUM_ID = 'rg-mbid-123';
+// The scanned copy of the suggestion, which a like moves to the library.
+async function seedDiscoverAlbum() {
+    await prisma.artist.create({ data: { id: `${P}art`, name: 'Dlk Artist', normalizedName: 'dlk artist', identityKey: 'dlkartist' } });
+    await prisma.album.create({
+        data: { id: `${P}alb`, rgMbid: ALBUM_ID, artistId: `${P}art`, identityKey: `${P}ik`, title: 'Dlk Album', primaryType: 'Album', location: 'DISCOVER' },
+    });
+}
 
-// A real artistMbid (not "temp-") sends the success path through removeDiscoveryTagByMbid.
-const ACTIVE_DISCOVERY_ALBUM = {
-    id: 'da-1',
-    userId: 'user-123',
-    rgMbid: ALBUM_ID,
-    artistMbid: 'art-mbid-1',
-    artistName: 'Aphex Twin',
-    albumTitle: 'Drukqs',
-    status: 'ACTIVE',
-};
+const statusOf = async (id: string) => (await prisma.discoveryAlbum.findUniqueOrThrow({ where: { id } })).status;
 
 describe('POST /discover/like -- claims the album only while it is ACTIVE', () => {
-    let app: express.Application;
-
-    beforeAll(() => {
-        app = makeApp();
-    });
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
-
     it('400 when albumId is missing (no claim attempted)', async () => {
+        await suggest();
+
         const res = await request(app).post('/discover/like').send({});
 
         expect(res.status).toBe(400);
-        expect(prisma.discoveryAlbum.updateMany).not.toHaveBeenCalled();
+        expect(await statusOf(`${P}da`)).toBe('ACTIVE');
     });
 
-    it('404 when no ACTIVE discovery album matches (find returns null)', async () => {
-        (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValue(null);
+    it('404 when no ACTIVE discovery album of the listener matches', async () => {
+        // Another listener's suggestion for the same release, and the listener's own already liked one.
+        await suggest(OTHER, `${P}da-other`);
+        await prisma.discoveryAlbum.create({
+            data: { id: `${P}da-liked`, userId: USER, rgMbid: `${P}rg-liked`, artistName: 'Dlk Artist', albumTitle: 'Liked', weekStartDate: WEEK, status: 'LIKED' },
+        });
 
         const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+        const liked = await request(app).post('/discover/like').send({ albumId: `${P}rg-liked` });
 
         expect(res.status).toBe(404);
-        expect(prisma.discoveryAlbum.updateMany).not.toHaveBeenCalled();
+        expect(liked.status).toBe(404);
+        expect(await statusOf(`${P}da-other`)).toBe('ACTIVE');
+        expect(mockRemoveDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
 
-    it('answers 409 ALBUM_GONE and skips the Lidarr tag removal when the claim matches no row', async () => {
-        // findFirst saw the row as ACTIVE, but a concurrent cleanup marked it DELETED before the claim.
-        (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValue(ACTIVE_DISCOVERY_ALBUM);
-        (prisma.discoveryAlbum.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+    it('answers 409 ALBUM_GONE and skips the Lidarr tag removal when cleanup claims the row first', async () => {
+        await suggest();
+        await seedDiscoverAlbum();
+        // The route's lookup saw the row as ACTIVE, but a concurrent cleanup marks it DELETED before the claim.
+        const realFindFirst = prisma.discoveryAlbum.findFirst.bind(prisma.discoveryAlbum);
+        const spy = jest.spyOn(prisma.discoveryAlbum, 'findFirst').mockImplementationOnce((async (args: any) => {
+            const seen = await realFindFirst(args);
+            await prisma.discoveryAlbum.update({ where: { id: `${P}da` }, data: { status: 'DELETED' } });
+            return seen;
+        }) as any);
 
-        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+        let res;
+        try {
+            res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+        } finally {
+            spy.mockRestore();
+        }
 
         expect(res.status).toBe(409);
         expect(res.body.code).toBe('ALBUM_GONE');
 
         // Gating on status ACTIVE, not the id alone, keeps a deleted album from being revived.
-        expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
-            where: { id: 'da-1', status: 'ACTIVE' },
-            data: { status: 'LIKED', likedAt: expect.any(Date) },
-        });
+        const row = await prisma.discoveryAlbum.findUniqueOrThrow({ where: { id: `${P}da` } });
+        expect(row.status).toBe('DELETED');
+        expect(row.likedAt).toBeNull();
 
-        // No post-claim side effect (Lidarr tag removal, OwnedAlbum upsert) runs.
+        // No post-claim side effect (Lidarr tag removal, library move, ownership row) runs.
         expect(mockRemoveDiscoveryTagByMbid).not.toHaveBeenCalled();
         expect(mockGetArtists).not.toHaveBeenCalled();
         expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
-        expect(prisma.ownedAlbum.upsert).not.toHaveBeenCalled();
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location).toBe('DISCOVER');
+        expect(await prisma.ownedAlbum.count({ where: { artistId: `${P}art` } })).toBe(0);
     });
 
-    it('answers 200 and runs the side effects when the claim matches a row', async () => {
-        (prisma.discoveryAlbum.findFirst as jest.Mock).mockResolvedValue(ACTIVE_DISCOVERY_ALBUM);
-        (prisma.discoveryAlbum.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+    it('answers 200, marks the suggestion LIKED, takes the album into the library and removes the Lidarr tag', async () => {
+        await suggest();
+        await seedDiscoverAlbum();
         mockRemoveDiscoveryTagByMbid.mockResolvedValue(true);
-        // No scanned Album matches, so the OwnedAlbum branch is skipped.
-        (prisma.album.findMany as jest.Mock).mockResolvedValue([]);
-        (prisma.discoveryTrack.findMany as jest.Mock).mockResolvedValue([]);
 
         const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
 
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
 
-        expect(prisma.discoveryAlbum.updateMany).toHaveBeenCalledWith({
-            where: { id: 'da-1', status: 'ACTIVE' },
-            data: { status: 'LIKED', likedAt: expect.any(Date) },
-        });
+        const row = await prisma.discoveryAlbum.findUniqueOrThrow({ where: { id: `${P}da` } });
+        expect(row.status).toBe('LIKED');
+        expect(row.likedAt).toBeInstanceOf(Date);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location).toBe('LIBRARY');
+        expect((await prisma.ownedAlbum.findFirstOrThrow({ where: { artistId: `${P}art` } })).source).toBe('discovery_liked');
+        expect(mockRemoveDiscoveryTagByMbid).toHaveBeenCalledWith('art-mbid-1');
+    });
+
+    it('answers 200 when no scanned album matches yet', async () => {
+        await suggest();
+        mockRemoveDiscoveryTagByMbid.mockResolvedValue(true);
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(await statusOf(`${P}da`)).toBe('LIKED');
         expect(mockRemoveDiscoveryTagByMbid).toHaveBeenCalledWith('art-mbid-1');
     });
 });

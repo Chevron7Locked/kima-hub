@@ -1,52 +1,8 @@
 /**
  * POST /share and DELETE /share/:token (authenticated); the cover route. GET /share/:token is in publicShare.route.test.ts. Streaming and cover
  * routes need real files and are left out; their path guard is tested directly.
+ * Real router, real auth and real database.
  */
-
-// All mocks must be before imports
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        user: {
-            findUnique: jest.fn(),
-        },
-        shareLink: {
-            findUnique: jest.fn(),
-            findFirst: jest.fn(),
-            create: jest.fn(),
-            update: jest.fn(),
-            delete: jest.fn(),
-            count: jest.fn(),
-        },
-        track: { findUnique: jest.fn(), findFirst: jest.fn() },
-        $transaction: jest.fn(),
-        $executeRaw: jest.fn(),
-    },
-}));
-
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
-jest.mock('../../services/imageStorage', () => ({
-    getLocalImagePath: jest.fn(),
-    getResizedImagePath: jest.fn(),
-}));
-
-jest.mock('../../services/audioStreaming', () => ({
-    getAudioStreamingService: jest.fn(() => ({
-        streamFileWithRangeSupport: jest.fn(),
-    })),
-}));
-
-jest.mock('../../config', () => ({
-    config: {
-        music: {
-            musicPath: '/music',
-            transcodeCachePath: '/tmp/transcode',
-            transcodeCacheMaxGb: 10,
-        },
-    },
-}));
 
 import express from 'express';
 import request from 'supertest';
@@ -55,164 +11,144 @@ import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
+const TAG = 'zz-share-route';
+const OWNER = `${TAG}-owner`;
+const OTHER = `${TAG}-other`;
+const TOKEN = `${TAG}-token`;
 
-function makeApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/share', shareRoutes);
-    return app;
+const app = express();
+app.use(express.json());
+app.use('/share', shareRoutes);
+
+/** A signed-in user's token; both users are seeded with token version 0. */
+function userToken(userId: string) {
+    return jwt.sign({ userId, username: userId, role: 'user', tokenVersion: 0 }, JWT_SECRET, { expiresIn: '24h' });
 }
 
-function userToken(userId = 'user-1', role = 'user') {
-    return jwt.sign({ userId, username: 'testuser', role, tokenVersion: 1 }, JWT_SECRET, { expiresIn: '24h' });
-}
+let trackId: string;
 
-const BASE_USER = {
-    id: 'user-1',
-    username: 'testuser',
-    role: 'user',
-    tokenVersion: 1,
-    twoFactorEnabled: false,
-    twoFactorSecret: null,
-    onboardingComplete: true,
-    createdAt: new Date(),
+const clean = async () => {
+    await prisma.shareLink.deleteMany({ where: { createdBy: { in: [OWNER, OTHER] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [OWNER, OTHER] } } });
+    await prisma.track.deleteMany({ where: { album: { rgMbid: TAG } } });
+    await prisma.album.deleteMany({ where: { rgMbid: TAG } });
+    await prisma.artist.deleteMany({ where: { identityKey: TAG } });
 };
 
-const BASE_SHARE_LINK = {
-    id: 'share-id-1',
-    token: 'valid-token-abc',
-    entityType: 'track',
-    entityId: 'track-id-1',
-    createdBy: 'user-1',
-    expiresAt: null,
-    maxPlays: null,
-    playCount: 0,
-    createdAt: new Date(),
-};
+beforeAll(async () => {
+    await clean();
+    for (const id of [OWNER, OTHER]) {
+        await prisma.user.create({ data: { id, username: id, passwordHash: 'x' } });
+    }
+    const artist = await prisma.artist.create({ data: { name: 'The Artist', normalizedName: TAG, identityKey: TAG } });
+    const album = await prisma.album.create({
+        data: { rgMbid: TAG, artistId: artist.id, title: 'The Album', primaryType: 'Album', location: 'LIBRARY' },
+    });
+    trackId = (await prisma.track.create({ data: { albumId: album.id, title: 'The Track', duration: 100, trackNo: 1, filePath: `/${TAG}/1.flac`, fileModified: new Date(), fileSize: 1 } })).id;
+});
+
+afterAll(clean);
+
+beforeEach(() => prisma.shareLink.deleteMany({ where: { createdBy: { in: [OWNER, OTHER] } } }));
+
+const sharesBy = (userId: string) => prisma.shareLink.findMany({ where: { createdBy: userId } });
 
 describe('POST /share -- create share link', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
-
     it('returns 401 when not authenticated', async () => {
         const res = await request(app)
             .post('/share')
-            .send({ entityType: 'track', entityId: 'track-1' });
+            .send({ entityType: 'track', entityId: trackId });
         expect(res.status).toBe(401);
+        expect(await sharesBy(OWNER)).toHaveLength(0);
     });
 
     it('returns 400 when entityType is missing', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
         const res = await request(app)
             .post('/share')
-            .set('Authorization', `Bearer ${userToken()}`)
-            .send({ entityId: 'track-1' });
+            .set('Authorization', `Bearer ${userToken(OWNER)}`)
+            .send({ entityId: trackId });
         expect(res.status).toBe(400);
         expect(res.body.error).toBeDefined();
     });
 
     it('returns 400 for invalid entityType', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
         const res = await request(app)
             .post('/share')
-            .set('Authorization', `Bearer ${userToken()}`)
+            .set('Authorization', `Bearer ${userToken(OWNER)}`)
             .send({ entityType: 'podcast', entityId: 'ep-1' });
         expect(res.status).toBe(400);
         expect(res.body.error).toBe('entityType must be playlist, track, or album');
+        expect(await sharesBy(OWNER)).toHaveLength(0);
     });
 
     it('returns 404 when track does not exist', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(null);
-
         const res = await request(app)
             .post('/share')
-            .set('Authorization', `Bearer ${userToken()}`)
-            .send({ entityType: 'track', entityId: 'missing-track' });
+            .set('Authorization', `Bearer ${userToken(OWNER)}`)
+            .send({ entityType: 'track', entityId: `${TAG}-missing-track` });
         expect(res.status).toBe(404);
+        expect(await sharesBy(OWNER)).toHaveLength(0);
     });
 
     it('creates and returns a share token for a valid track', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({ id: 'track-1' });
-        (prisma.$transaction as jest.Mock).mockResolvedValue({
-            token: 'new-share-token-xyz',
-            url: '/share/new-share-token-xyz',
-        });
-
         const res = await request(app)
             .post('/share')
-            .set('Authorization', `Bearer ${userToken()}`)
-            .send({ entityType: 'track', entityId: 'track-1' });
+            .set('Authorization', `Bearer ${userToken(OWNER)}`)
+            .send({ entityType: 'track', entityId: trackId });
         expect(res.status).toBe(200);
-        expect(res.body.token).toBe('new-share-token-xyz');
-        expect(res.body.url).toBe('/share/new-share-token-xyz');
+        expect(res.body.url).toBe(`/share/${res.body.token}`);
+        const rows = await sharesBy(OWNER);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ token: res.body.token, entityType: 'track', entityId: trackId });
     });
 });
 
 describe('DELETE /share/:token -- revoke share link', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
+    const seedLink = (createdBy: string) =>
+        prisma.shareLink.create({ data: { token: TOKEN, entityType: 'track', entityId: trackId, createdBy } });
 
     it('returns 401 when not authenticated', async () => {
-        const res = await request(app).delete('/share/some-token');
+        await seedLink(OWNER);
+        const res = await request(app).delete(`/share/${TOKEN}`);
         expect(res.status).toBe(401);
+        expect(await sharesBy(OWNER)).toHaveLength(1);
     });
 
     it('returns 404 when token does not exist', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(null);
-
         const res = await request(app)
             .delete('/share/ghost-token')
-            .set('Authorization', `Bearer ${userToken()}`);
+            .set('Authorization', `Bearer ${userToken(OWNER)}`);
         expect(res.status).toBe(404);
     });
 
     it('returns 403 when authenticated user is not the link owner', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue({
-            ...BASE_SHARE_LINK,
-            createdBy: 'other-user-id',
-        });
+        await seedLink(OTHER);
 
         const res = await request(app)
-            .delete('/share/valid-token-abc')
-            .set('Authorization', `Bearer ${userToken('user-1')}`);
+            .delete(`/share/${TOKEN}`)
+            .set('Authorization', `Bearer ${userToken(OWNER)}`);
         expect(res.status).toBe(403);
         expect(res.body.error).toBe('Not the link owner');
+        expect(await sharesBy(OTHER)).toHaveLength(1);
     });
 
     it('revokes successfully when owner deletes their link', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(BASE_USER);
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
-        (prisma.shareLink.delete as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
+        await seedLink(OWNER);
 
         const res = await request(app)
-            .delete('/share/valid-token-abc')
-            .set('Authorization', `Bearer ${userToken('user-1')}`);
+            .delete(`/share/${TOKEN}`)
+            .set('Authorization', `Bearer ${userToken(OWNER)}`);
         expect(res.status).toBe(200);
         expect(res.body.message).toBe('Share link revoked');
-        expect(prisma.shareLink.delete).toHaveBeenCalledWith(
-            expect.objectContaining({ where: { id: 'share-id-1' } }),
-        );
+        expect(await sharesBy(OWNER)).toHaveLength(0);
     });
 });
 
 describe('GET /share/:token/cover-art/:coverArtId', () => {
-    let app: express.Application;
-
-    beforeAll(() => { app = makeApp(); });
-    beforeEach(() => { jest.clearAllMocks(); });
-
     it('answers a cover id holding a lone percent sign with 404, not a server error', async () => {
-        (prisma.shareLink.findUnique as jest.Mock).mockResolvedValue(BASE_SHARE_LINK);
+        await prisma.shareLink.create({ data: { token: TOKEN, entityType: 'track', entityId: trackId, createdBy: OWNER } });
 
-        const res = await request(app).get(`/share/valid-token-abc/cover-art/${encodeURIComponent('50%off')}`);
+        const res = await request(app).get(`/share/${TOKEN}/cover-art/${encodeURIComponent('native:50%off')}`);
         expect(res.status).toBe(404);
     });
 });

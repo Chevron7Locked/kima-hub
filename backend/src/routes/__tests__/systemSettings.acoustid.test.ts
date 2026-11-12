@@ -1,21 +1,7 @@
 /**
  * An acoustidApiKey saved through POST /system-settings comes back from GET as
- * the plaintext, through the real encryption. Prisma is mocked.
+ * the plaintext, through the real encryption. Real router, real database.
  */
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        systemSettings: {
-            findUnique: jest.fn(),
-            create: jest.fn(),
-            upsert: jest.fn(),
-        },
-    },
-}));
-
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => {
@@ -36,7 +22,7 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
-import { config } from "../../config";
+import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 
 afterAll(async () => {
     // The router reaches jobs/queueCleaner, which enqueues through the real
@@ -50,47 +36,33 @@ const app = express();
 app.use(express.json());
 app.use("/system-settings", systemSettingsRouter);
 
-// A baseline settings row as GET would find it (no acoustid key yet).
-const baseRow: Record<string, unknown> = {
-    id: "default",
-    lidarrEnabled: true,
-    lidarrUrl: "http://localhost:8686",
-    fanartEnabled: false,
-    audiobookshelfEnabled: false,
-    audiobookshelfUrl: "http://localhost:13378",
-    musicPath: config.music.musicPath,
-    autoSync: true,
-    transcodeCacheMaxGb: 10,
-    maxQueueLength: 10000,
-    soulseekConcurrentDownloads: 4,
-    acoustidApiKey: null,
-};
+// System settings is one shared row: put the key back as the file found it.
+let original: { acoustidApiKey: string | null } | null;
+beforeAll(async () => {
+    original = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { acoustidApiKey: true } });
+});
+afterAll(async () => {
+    if (original) await prisma.systemSettings.update({ where: { id: "default" }, data: { acoustidApiKey: original.acoustidApiKey } });
+    else await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+    invalidateSystemSettingsCache();
+});
+
+const storedKey = async () => (await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).acoustidApiKey;
 
 describe("acoustidApiKey round-trip", () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({ ...baseRow });
+    beforeEach(async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: { acoustidApiKey: null } });
+        invalidateSystemSettingsCache();
     });
 
     it("POST stores the key encrypted; GET returns the stored plaintext", async () => {
-        // capture what POST actually persists
-        let stored: Record<string, unknown> = { ...baseRow };
-        (prisma.systemSettings.upsert as jest.Mock).mockImplementation(async ({ create, update }) => {
-            // prisma upsert carries the payload in create/update, not a top-level data key
-            stored = { ...stored, ...(update ?? create) };
-            return stored;
-        });
-        // GET then reads the same row back
-        (prisma.systemSettings.findUnique as jest.Mock).mockImplementation(async () => stored);
-
-        const post = await request(app)
-            .post("/system-settings")
-            .send({ ...baseRow, acoustidApiKey: "acoustid-test-key-1234" });
+        const post = await request(app).post("/system-settings").send({ acoustidApiKey: "acoustid-test-key-1234" });
         expect(post.status).toBe(200);
 
         // the stored value must NOT be plaintext
-        expect(stored.acoustidApiKey).not.toBe("acoustid-test-key-1234");
-        expect(stored.acoustidApiKey).toBeTruthy();
+        const stored = await storedKey();
+        expect(stored).toBeTruthy();
+        expect(stored).not.toBe("acoustid-test-key-1234");
 
         const get = await request(app).get("/system-settings");
         expect(get.status).toBe(200);

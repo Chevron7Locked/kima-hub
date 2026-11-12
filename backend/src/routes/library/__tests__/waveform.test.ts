@@ -1,30 +1,15 @@
 /**
- * Waveform route tests -- peak math (computeWaveformPeaks) and route contract.
+ * Waveform route tests -- peak math (computeWaveformPeaks) and route contract. Real router, database and Redis;
+ * only ffmpeg is stood in for, so no audio file is needed.
  */
 
 /* Mocks are hoisted above the imports. waveform.ts clears its `inFlight` map
  * in a `finally`, so nothing leaks between tests. */
 
-// -- child_process (spawn) --
+// -- child_process (spawn): the ffmpeg run --
 jest.mock("child_process", () => ({
+    ...jest.requireActual("child_process"),
     spawn: jest.fn(),
-}));
-
-// -- redis --
-jest.mock("../../../utils/redis", () => ({
-    redisClient: {
-        get: jest.fn(),
-        setex: jest.fn(),
-    },
-}));
-
-// -- prisma --
-jest.mock("../../../utils/db", () => ({
-    prisma: {
-        track: {
-            findUnique: jest.fn(),
-        },
-    },
 }));
 
 // -- logger --
@@ -34,15 +19,6 @@ jest.mock("../../../utils/logger", () => ({
         warn: jest.fn(),
         info: jest.fn(),
         debug: jest.fn(),
-    },
-}));
-
-// -- config --
-jest.mock("../../../config", () => ({
-    config: {
-        music: {
-            musicPath: "/music",
-        },
     },
 }));
 
@@ -57,6 +33,8 @@ import { EventEmitter } from "events";
 import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
 import { computeWaveformPeaks, PEAK_COUNT } from "../waveform";
+
+const P = "wavef";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -292,62 +270,71 @@ describe("computeWaveformPeaks", () => {
 
 describe("GET /tracks/:id/waveform", () => {
     let app: express.Application;
+    let modified: Date;
 
-    beforeEach(() => {
-        jest.clearAllMocks();
+    /** The cache entry the route reads and writes for a seeded track (its key embeds the stored mtime). */
+    const cacheKey = (id: string) => `waveform:${id}:${modified.getTime()}`;
+
+    async function cleanup() {
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    }
+
+    async function seedTrack(id: string, filePath: string) {
+        await prisma.track.create({
+            data: { id: `${P}_${id}`, albumId: `${P}_alb`, title: `${P} ${id}`, trackNo: 1, duration: 100, filePath, fileModified: modified, fileSize: 10 },
+        });
+        await redisClient.del(cacheKey(`${P}_${id}`));
+        return `${P}_${id}`;
+    }
+
+    beforeAll(async () => {
+        await cleanup();
+        // Whole seconds, so the column's millisecond precision cannot change the cache key built from what it hands back.
+        modified = new Date(Math.floor(Date.now() / 1000) * 1000);
+        await prisma.artist.create({ data: { id: `${P}_art`, name: `${P} artist`, identityKey: `${P}_ik` } });
+        await prisma.album.create({
+            data: { id: `${P}_alb`, rgMbid: `${P}_rg`, artistId: `${P}_art`, title: `${P} album`, primaryType: "Album", location: "LIBRARY" },
+        });
         app = makeApp();
     });
 
-    it("returns 404 when track not found", async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(null);
+    afterAll(async () => {
+        const rows = await prisma.track.findMany({ where: { id: { startsWith: P } }, select: { id: true } });
+        await Promise.all(rows.map((r) => redisClient.del(cacheKey(r.id))));
+        await cleanup();
+    });
 
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it("returns 404 when track not found", async () => {
         const res = await request(app).get("/api/library/tracks/unknown-id/waveform");
         expect(res.status).toBe(404);
         expect(res.body.error).toBe("Track not found");
     });
 
-    it("returns 404 when track.filePath is null", async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            id: "track-1",
-            filePath: null,
-            fileModified: new Date(),
-        });
+    it("returns 404 when the stored path leaves the music folder", async () => {
+        // The schema keeps filePath and fileModified non-null, so a path that climbs out is how a
+        // song's audio is "unavailable" here.
+        const id = await seedTrack("escape", "../../etc/passwd");
 
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
+        const res = await request(app).get(`/api/library/tracks/${id}/waveform`);
         expect(res.status).toBe(404);
         expect(res.body.error).toBe("Track audio file unavailable");
-    });
-
-    it("returns 404 when track.fileModified is null", async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            id: "track-1",
-            filePath: "Artist/Album/track.mp3",
-            fileModified: null,
-        });
-
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
-        expect(res.status).toBe(404);
-        expect(res.body.error).toBe("Track audio file unavailable");
+        expect(spawn).not.toHaveBeenCalled();
     });
 
     it("returns 200 with { peaks: number[], count: 400 } on success", async () => {
-        const track = {
-            id: "track-1",
-            filePath: "Artist/Album/track.mp3",
-            fileModified: new Date(),
-        };
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(track);
+        const id = await seedTrack("ok", "Artist/Album/ok.mp3");
 
-        // Mock redis to return null (no cache hit), so we need to compute.
-        (redisClient.get as jest.Mock).mockResolvedValue(null);
-
-        // Create a simple PCM buffer (4000 samples = 40 mini-blocks).
+        // A simple PCM buffer (4000 samples = 40 mini-blocks).
         const samples = Array.from({ length: 4000 }, () => 32767);
-        const pcm = makePcm(samples);
+        makeFakeProcess([makePcm(samples)]);
 
-        makeFakeProcess([pcm]);
-
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
+        const res = await request(app).get(`/api/library/tracks/${id}/waveform`);
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty("peaks");
         expect(res.body).toHaveProperty("count");
@@ -358,77 +345,48 @@ describe("GET /tracks/:id/waveform", () => {
     });
 
     it("Redis cache-HIT returns cached payload without spawning ffmpeg", async () => {
+        const id = await seedTrack("hit", "Artist/Album/hit.mp3");
         const cachedPayload = {
             peaks: Array.from({ length: PEAK_COUNT }, (_, i) =>
                 Math.round((i / PEAK_COUNT) * 10000) / 10000,
             ),
             count: PEAK_COUNT,
         };
-        const track = {
-            id: "track-1",
-            filePath: "Artist/Album/track.mp3",
-            fileModified: new Date(),
-        };
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(track);
+        await redisClient.setex(cacheKey(id), 60, JSON.stringify(cachedPayload));
 
-        // Mock redis to return a cached payload.
-        (redisClient.get as jest.Mock).mockResolvedValue(
-            JSON.stringify(cachedPayload),
-        );
-
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
+        const res = await request(app).get(`/api/library/tracks/${id}/waveform`);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(cachedPayload);
 
         // Verify that spawn was NOT called (cache hit path).
         expect(spawn).not.toHaveBeenCalled();
-
-        // Verify redisClient.setex was NOT called (no write on cache hit).
-        expect(redisClient.setex).not.toHaveBeenCalled();
     });
 
     it("Redis cache-MISS computes and caches peaks", async () => {
-        const track = {
-            id: "track-1",
-            filePath: "Artist/Album/track.mp3",
-            fileModified: new Date(),
-        };
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(track);
-
-        // Mock redis to return null (no cache hit).
-        (redisClient.get as jest.Mock).mockResolvedValue(null);
-
-        // Create a simple PCM buffer.
+        const id = await seedTrack("miss", "Artist/Album/miss.mp3");
         const samples = Array.from({ length: 4000 }, () => 32767);
-        const pcm = makePcm(samples);
+        makeFakeProcess([makePcm(samples)]);
 
-        makeFakeProcess([pcm]);
-
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
+        const res = await request(app).get(`/api/library/tracks/${id}/waveform`);
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty("peaks");
         expect(res.body).toHaveProperty("count");
 
-        // Verify redisClient.setex was called (cache write on miss).
-        expect(redisClient.setex).toHaveBeenCalled();
+        // The entry written on a miss is the payload that was served.
+        const stored = await redisClient.get(cacheKey(id));
+        expect(JSON.parse(stored!)).toEqual(res.body);
     });
 
     it("returns 500 on ffmpeg failure", async () => {
-        const track = {
-            id: "track-1",
-            filePath: "Artist/Album/track.mp3",
-            fileModified: new Date(),
-        };
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue(track);
+        const id = await seedTrack("fail", "Artist/Album/fail.mp3");
 
-        // Mock redis to return null (no cache hit).
-        (redisClient.get as jest.Mock).mockResolvedValue(null);
-
-        // Create a fake process that exits with an error.
+        // A fake process that exits with an error.
         makeFakeProcess([], 1);
 
-        const res = await request(app).get("/api/library/tracks/track-1/waveform");
+        const res = await request(app).get(`/api/library/tracks/${id}/waveform`);
         expect(res.status).toBe(500);
         expect(res.body.error).toBe("Failed to compute waveform");
+        // Nothing is cached for a failed run.
+        expect(await redisClient.get(cacheKey(id))).toBeNull();
     });
 });

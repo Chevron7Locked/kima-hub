@@ -1,151 +1,83 @@
 /**
  * GET /artists orders by name on the stored `sortName`, not on an article
- * stripped inline, and every sort runs through the one list query. The tests
- * check the SQL text.
+ * stripped inline, and every sort runs through the one list query. Real router,
+ * real database; the `query` filter keeps the answer to this file's artists.
  */
-
-jest.mock('p-limit', () => () => (fn: (...args: any[]) => any) => fn());
-
-jest.mock('../../../middleware/auth', () => ({
-    requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'admin', username: 'admin', role: 'admin' };
-        next();
-    },
-}));
-
-const mockQueryRaw = jest.fn();
-
-jest.mock('../../../utils/db', () => {
-    const actualPrisma = {
-        $queryRaw: (...args: any[]) => mockQueryRaw(...args),
-        $transaction: (fn: any) => fn(actualPrisma),
-    };
-    return {
-        prisma: actualPrisma,
-        Prisma: {
-            SortOrder: { asc: 'asc', desc: 'desc' },
-            sql: (strings: TemplateStringsArray, ...vals: any[]) => ({ strings, vals }),
-            empty: { strings: [''], vals: [] },
-            join: (parts: any[]) => ({ parts }),
-        },
-    };
-});
-
-jest.mock('../../../utils/redis', () => ({
-    redisClient: { get: jest.fn().mockResolvedValue(null), setex: jest.fn(), del: jest.fn() },
-}));
-
-jest.mock('../../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
-jest.mock('../../../services/deezer', () => ({ deezerService: {} }));
-jest.mock('../../../services/musicbrainz', () => ({ musicBrainzService: {} }));
-jest.mock('../../../services/dataCache', () => ({
-    dataCacheService: {
-        get: jest.fn(),
-        set: jest.fn(),
-        getArtistImagesBatch: jest.fn().mockResolvedValue(new Map()),
-    },
-}));
-jest.mock('../../../services/artistCountsService', () => ({
-    backfillAllArtistCounts: jest.fn(),
-    isBackfillNeeded: jest.fn().mockResolvedValue(false),
-    getBackfillProgress: jest.fn(),
-    isBackfillInProgress: jest.fn().mockReturnValue(false),
-}));
-jest.mock('../../../utils/metadataOverrides', () => ({
-    getMergedGenres: jest.fn(() => []),
-    getArtistDisplaySummary: jest.fn(() => null),
-}));
-jest.mock('../../../utils/errors', () => ({
-    safeError: jest.fn((res: any) => res.status(500).json({ error: 'Internal server error' })),
-}));
 
 import express from 'express';
 import request from 'supertest';
 import artistRoutes from '../artists';
+import { prisma } from '../../../utils/db';
+import { closeEngineConnections } from '../../../__tests__/helpers/engineConnections';
+
+const P = 'zz-artists-sort';
+
+// Names and stored sort names disagree on purpose, so only the stored column gives the expected order.
+// `tracks` has a tie (Zebra and Dup), broken by id.
+const ARTISTS = [
+    { id: `${P}-1`, name: `${P} Zebra`, sortName: 'alpha', tracks: 20 },
+    { id: `${P}-2`, name: `${P} The Mango`, sortName: 'mango', tracks: 30 },
+    { id: `${P}-3`, name: `${P} Apple`, sortName: 'zulu', tracks: 10 },
+    { id: `${P}-0`, name: `${P} Dup`, sortName: 'mango2', tracks: 20 },
+];
 
 function makeApp() {
     const app = express();
     app.use(express.json());
+    app.use((req: any, _res, next) => {
+        req.user = { id: `${P}-user`, username: 'admin', role: 'admin' };
+        next();
+    });
     app.use('/', artistRoutes);
     return app;
 }
 
-function sqlOf(call: any[]): string {
-    const strings = call?.[0];
-    return Array.isArray(strings) ? strings.join(' ? ') : String(strings ?? '');
-}
-
-/**
- * The SELECT that fetches the rows, not the COUNT that paginates them. The
- * handler issues both, and only the first carries an ORDER BY, so "the last
- * call" would assert against the wrong statement.
- */
-function orderingSql(): string {
-    const call = mockQueryRaw.mock.calls.find((c) => sqlOf(c).includes('ORDER BY'));
-    return call ? sqlOf(call) : '';
-}
-
-/**
- * The sort direction is an interpolated `Prisma.sql` value, not literal
- * template text, so it lands in the call's VALUES rather than its strings and
- * is invisible to `orderingSql()`.
- */
-function interpolatedText(): string {
-    const call = mockQueryRaw.mock.calls.find((c) => sqlOf(c).includes('ORDER BY')) ?? [];
-    return call
-        .slice(1)
-        .map((v: any) => (Array.isArray(v?.strings) ? v.strings.join('') : String(v ?? '')))
-        .join(' ');
-}
-
-beforeEach(() => {
-    jest.clearAllMocks();
-    mockQueryRaw.mockImplementation((...args: any[]) => {
-        const sql = sqlOf(args);
-        // The count query's caller reads `rows[0].total`, so an empty array
-        // throws before any assertion runs.
-        if (/COUNT\(/i.test(sql)) return Promise.resolve([{ total: BigInt(0) }]);
-        return Promise.resolve([]);
-    });
+beforeAll(async () => {
+    for (const a of ARTISTS) {
+        await prisma.artist.create({
+            data: {
+                id: a.id, name: a.name, normalizedName: a.name.toLowerCase(), identityKey: `${a.id}-ik`,
+                sortName: a.sortName, totalTrackCount: a.tracks,
+            },
+        });
+        // The list shows artists with a library album that has a song.
+        await prisma.album.create({
+            data: { id: `${a.id}-al`, rgMbid: `${a.id}-rg`, artistId: a.id, identityKey: `${a.id}-al`, title: a.name, primaryType: 'Album', location: 'LIBRARY' },
+        });
+        await prisma.track.create({
+            data: { id: `${a.id}-t`, albumId: `${a.id}-al`, title: a.name, trackNo: 1, duration: 100, filePath: `${a.id}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+    }
 });
 
+afterAll(async () => {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    await closeEngineConnections();
+});
+
+const names = async (sortBy: string) => {
+    const res = await request(makeApp()).get(`/artists?query=${P}&sortBy=${sortBy}`).expect(200);
+    return (res.body.artists as { name: string }[]).map((a) => a.name.replace(`${P} `, ''));
+};
+
 describe('GET /artists alphabetical ordering', () => {
-    it.each(['name', 'name-desc'])('orders %s on the stored sortName column', async (sortBy) => {
-        await request(makeApp()).get(`/artists?sortBy=${sortBy}`).expect(200);
-
-        expect(interpolatedText()).toContain('"sortName"');
+    // "The Mango" would sort under M by name, and "Zebra" last: only the stored column, not an article stripped
+    // inline, puts Zebra first.
+    it('orders name on the stored sortName column, ascending', async () => {
+        expect(await names('name')).toEqual(['Zebra', 'The Mango', 'Dup', 'Apple']);
     });
 
-    // Direction and column are separate claims: pinning only the column would
-    // pass even if `name-desc` silently ordered ascending.
-    it('sends DESC for name-desc', async () => {
-        await request(makeApp()).get('/artists?sortBy=name-desc').expect(200);
-        expect(interpolatedText()).toContain('DESC');
-    });
-
-    it('sends ASC, and only ASC, for name', async () => {
-        await request(makeApp()).get('/artists?sortBy=name').expect(200);
-        const asc = interpolatedText();
-        expect(asc).toContain('ASC');
-        expect(asc).not.toContain('DESC');
-    });
-
-    it('does not recompute an article-stripped key inline', async () => {
-        await request(makeApp()).get("/artists?sortBy=name").expect(200);
-
-        const sql = orderingSql();
-        // The specific shape that made this path disagree with every other
-        // sort in the system.
-        expect(sql).not.toContain('REGEXP_REPLACE');
-        expect(sql.toLowerCase()).not.toContain("'^the");
+    it('orders name-desc on the stored sortName column, descending', async () => {
+        expect(await names('name-desc')).toEqual(['Apple', 'Dup', 'The Mango', 'Zebra']);
     });
 
     it('orders tracks by track count, with the id as tiebreaker, through the same query', async () => {
-        await request(makeApp()).get('/artists?sortBy=tracks').expect(200);
+        expect(await names('tracks')).toEqual(['The Mango', 'Dup', 'Zebra', 'Apple']);
+    });
 
-        expect(interpolatedText()).toContain('"totalTrackCount" DESC, a.id ASC');
+    it('falls back to the name order for an unrecognised sortBy', async () => {
+        expect(await names('nonsense')).toEqual(['Zebra', 'The Mango', 'Dup', 'Apple']);
     });
 });

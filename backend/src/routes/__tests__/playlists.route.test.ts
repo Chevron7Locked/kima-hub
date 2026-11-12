@@ -1,296 +1,133 @@
 /**
- * Playlist mutations check ownership: a non-owner gets 403, and the update or
- * delete is never called.
+ * Playlist reads and mutations check ownership: a non-owner gets 403 and the playlist is left as it was.
+ * Real router and database, real tokens.
  */
 
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        playlist: {
-            create: jest.fn(),
-            findUnique: jest.fn(),
-            findMany: jest.fn(),
-            update: jest.fn(),
-            delete: jest.fn(),
-        },
-        hiddenPlaylist: {
-            findMany: jest.fn(),
-            upsert: jest.fn(),
-            deleteMany: jest.fn(),
-        },
-        playlistItem: {
-            findFirst: jest.fn(),
-            create: jest.fn(),
-            findMany: jest.fn(),
-            deleteMany: jest.fn(),
-        },
-        apiKey: {
-            findUnique: jest.fn(),
-            update: jest.fn(),
-        },
-        user: {
-            findUnique: jest.fn(),
-        },
-    },
-}));
+import express from "express";
+import request from "supertest";
+import jwt from "jsonwebtoken";
+import playlistsRoutes from "../../routes/playlists";
+import { prisma } from "../../utils/db";
+import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
+const MARK = "zz-playlists-route";
+const app = express().use(express.json()).use("/playlists", playlistsRoutes);
+const as = (userId: string) =>
+    `Bearer ${jwt.sign({ userId, username: userId, role: "user", tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: "24h" })}`;
 
-jest.mock('../../utils/playlistLogger', () => ({
-    sessionLog: jest.fn().mockResolvedValue(undefined),
-}));
+let userA: string;
+let userB: string;
+let privateId: string;
+let publicId: string;
+let bPrivateId: string;
 
-jest.mock('../../utils/errors', () => ({
-    safeError: jest.fn((err: Error) => err.message),
-}));
-
-import express from 'express';
-import request from 'supertest';
-import jwt from 'jsonwebtoken';
-import playlistsRoutes from '../../routes/playlists';
-import { prisma } from '../../utils/db';
-
-const TEST_SECRET = process.env.JWT_SECRET!;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function createTestApp() {
-    const app = express();
-    app.use(express.json());
-    app.use('/playlists', playlistsRoutes);
-    return app;
+async function cleanup() {
+    await prisma.playlist.deleteMany({ where: { name: { startsWith: MARK } } });
+    await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
 }
 
-function tokenFor(userId: string, tokenVersion = 1): string {
-    return jwt.sign(
-        { userId, username: `user-${userId}`, role: 'user', tokenVersion },
-        TEST_SECRET,
-        { expiresIn: '24h' }
-    );
-}
+const nameOf = async (id: string) => (await prisma.playlist.findUnique({ where: { id } }))?.name;
 
-const USER_A = 'user-aaaa-1111';
-const USER_B = 'user-bbbb-2222';
-const PLAYLIST_ID = 'playlist-xyz-789';
+beforeAll(async () => {
+    await cleanup();
+    userA = (await prisma.user.create({ data: { username: `${MARK}-a`, passwordHash: "x" } })).id;
+    userB = (await prisma.user.create({ data: { username: `${MARK}-b`, passwordHash: "x" } })).id;
+    privateId = (await prisma.playlist.create({ data: { userId: userA, name: `${MARK} A private` } })).id;
+    publicId = (await prisma.playlist.create({ data: { userId: userA, name: `${MARK} A public`, isPublic: true } })).id;
+    bPrivateId = (await prisma.playlist.create({ data: { userId: userB, name: `${MARK} B private` } })).id;
+});
 
-// Playlist owned by User A
-const userAPlaylist = {
-    id: PLAYLIST_ID,
-    userId: USER_A,
-    name: 'User A Playlist',
-    isPublic: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-};
+afterAll(async () => {
+    await cleanup();
+    await closeEngineConnections();
+});
 
-// ── Auth check ────────────────────────────────────────────────────────────────
-
-describe('Authentication enforcement', () => {
-    const app = createTestApp();
-
-    it('returns 401 on all playlist routes without token', async () => {
+describe("authentication enforcement", () => {
+    it("returns 401 on all playlist routes without a token", async () => {
         const endpoints = [
-            () => request(app).get('/playlists'),
-            () => request(app).get(`/playlists/${PLAYLIST_ID}`),
-            () => request(app).post('/playlists').send({ name: 'test' }),
-            () => request(app).put(`/playlists/${PLAYLIST_ID}`).send({ name: 'x' }),
-            () => request(app).delete(`/playlists/${PLAYLIST_ID}`),
+            () => request(app).get("/playlists"),
+            () => request(app).get(`/playlists/${privateId}`),
+            () => request(app).post("/playlists").send({ name: "test" }),
+            () => request(app).put(`/playlists/${privateId}`).send({ name: "x" }),
+            () => request(app).delete(`/playlists/${privateId}`),
         ];
 
         for (const req of endpoints) {
-            const res = await req();
-            expect(res.status).toBe(401);
+            expect((await req()).status).toBe(401);
         }
+        expect(await nameOf(privateId)).toBe(`${MARK} A private`);
     });
 });
 
-// ── IDOR: GET (read isolation) ────────────────────────────────────────────────
-
-describe('GET /playlists/:id -- access control', () => {
-    const app = createTestApp();
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-        // Auth: both users are valid
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_B,
-            username: 'user-b',
-            role: 'user',
-            tokenVersion: 1,
-        });
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
-    it('returns 403 when User B requests User A\'s private playlist', async () => {
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(userAPlaylist);
-
-        const res = await request(app)
-            .get(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_B)}`);
+describe("GET /playlists/:id access control", () => {
+    it("returns 403, not 404, when User B requests User A's private playlist", async () => {
+        // 404 would hide that the playlist exists and mask the access check.
+        const res = await request(app).get(`/playlists/${privateId}`).set("Authorization", as(userB));
 
         expect(res.status).toBe(403);
         expect(res.body.error).toBeDefined();
-        // 403 not 404 -- the playlist exists but access is denied
-        // (404 would hide whether the resource exists, masking the auth check)
     });
 
-    it('returns 200 when User A requests their own private playlist', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_A, username: 'user-a', role: 'user', tokenVersion: 1,
-        });
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue({
-            ...userAPlaylist,
-            items: [],
-            pendingTracks: [],
-            hiddenByUsers: [],
-            user: { username: 'user-a' },
-        });
-
-        const res = await request(app)
-            .get(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_A)}`);
+    it("returns 200 when User A requests their own private playlist", async () => {
+        const res = await request(app).get(`/playlists/${privateId}`).set("Authorization", as(userA));
 
         expect(res.status).toBe(200);
-        expect(res.body.id).toBe(PLAYLIST_ID);
+        expect(res.body.id).toBe(privateId);
+        expect(res.body.isOwner).toBe(true);
     });
 
-    it('returns 200 when any user requests a public playlist', async () => {
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue({
-            ...userAPlaylist,
-            isPublic: true,
-            items: [],
-            pendingTracks: [],
-            hiddenByUsers: [],
-            user: { username: 'user-a' },
-        });
-
-        const res = await request(app)
-            .get(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_B)}`);
+    it("returns 200 when any user requests a public playlist", async () => {
+        const res = await request(app).get(`/playlists/${publicId}`).set("Authorization", as(userB));
 
         expect(res.status).toBe(200);
+        expect(res.body.id).toBe(publicId);
+        expect(res.body.isOwner).toBe(false);
     });
 });
 
-// ── IDOR: PUT (write isolation) ───────────────────────────────────────────────
-
-describe('PUT /playlists/:id -- ownership enforcement', () => {
-    const app = createTestApp();
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_B, username: 'user-b', role: 'user', tokenVersion: 1,
-        });
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
-    it('returns 403 and does NOT call prisma.playlist.update when User B updates User A\'s playlist', async () => {
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(userAPlaylist);
-
-        const res = await request(app)
-            .put(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_B)}`)
-            .send({ name: 'Hijacked' });
+describe("PUT /playlists/:id ownership enforcement", () => {
+    it("returns 403 and leaves the playlist alone when User B updates User A's playlist", async () => {
+        const res = await request(app).put(`/playlists/${privateId}`).set("Authorization", as(userB)).send({ name: "Hijacked" });
 
         expect(res.status).toBe(403);
-        // Critical: the update must not have been executed
-        expect(prisma.playlist.update).not.toHaveBeenCalled();
+        expect(await nameOf(privateId)).toBe(`${MARK} A private`);
     });
 
-    it('allows User A to update their own playlist', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_A, username: 'user-a', role: 'user', tokenVersion: 1,
-        });
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(userAPlaylist);
-        (prisma.playlist.update as jest.Mock).mockResolvedValue({
-            ...userAPlaylist, name: 'Renamed',
-        });
-
-        const res = await request(app)
-            .put(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_A)}`)
-            .send({ name: 'Renamed' });
+    it("allows User A to update their own playlist", async () => {
+        const res = await request(app).put(`/playlists/${privateId}`).set("Authorization", as(userA)).send({ name: `${MARK} A renamed` });
 
         expect(res.status).toBe(200);
-        expect(prisma.playlist.update).toHaveBeenCalledTimes(1);
+        expect(res.body.name).toBe(`${MARK} A renamed`);
+        expect(await nameOf(privateId)).toBe(`${MARK} A renamed`);
     });
 });
 
-// ── IDOR: DELETE (deletion isolation) ────────────────────────────────────────
-
-describe('DELETE /playlists/:id -- ownership enforcement', () => {
-    const app = createTestApp();
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_B, username: 'user-b', role: 'user', tokenVersion: 1,
-        });
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
-    it('returns 403 and does NOT call prisma.playlist.delete when User B deletes User A\'s playlist', async () => {
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(userAPlaylist);
-
-        const res = await request(app)
-            .delete(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_B)}`);
+describe("DELETE /playlists/:id ownership enforcement", () => {
+    it("returns 403 and keeps the playlist when User B deletes User A's playlist", async () => {
+        const res = await request(app).delete(`/playlists/${publicId}`).set("Authorization", as(userB));
 
         expect(res.status).toBe(403);
-        // The delete must not have run
-        expect(prisma.playlist.delete).not.toHaveBeenCalled();
+        expect(await prisma.playlist.findUnique({ where: { id: publicId } })).not.toBeNull();
     });
 
-    it('allows User A to delete their own playlist', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_A, username: 'user-a', role: 'user', tokenVersion: 1,
-        });
-        (prisma.playlist.findUnique as jest.Mock).mockResolvedValue(userAPlaylist);
-        (prisma.playlist.delete as jest.Mock).mockResolvedValue(userAPlaylist);
+    it("allows User A to delete their own playlist", async () => {
+        const id = (await prisma.playlist.create({ data: { userId: userA, name: `${MARK} A doomed` } })).id;
 
-        const res = await request(app)
-            .delete(`/playlists/${PLAYLIST_ID}`)
-            .set('Authorization', `Bearer ${tokenFor(USER_A)}`);
+        const res = await request(app).delete(`/playlists/${id}`).set("Authorization", as(userA));
 
         expect(res.status).toBe(200);
-        expect(prisma.playlist.delete).toHaveBeenCalledTimes(1);
+        expect(await prisma.playlist.findUnique({ where: { id } })).toBeNull();
     });
 });
 
-// ── GET /playlists -- data isolation (user only sees their own + public) ──────
+describe("GET /playlists data isolation", () => {
+    it("lists the caller's own and public playlists, never another user's private one", async () => {
+        const res = await request(app).get("/playlists?limit=100").set("Authorization", as(userB));
 
-describe('GET /playlists -- data isolation', () => {
-    const app = createTestApp();
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            id: USER_B, username: 'user-b', role: 'user', tokenVersion: 1,
-        });
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-        (prisma.hiddenPlaylist.findMany as jest.Mock).mockResolvedValue([]);
-    });
-
-    it('playlist list query includes userId filter -- only own + public playlists are accessible', async () => {
-        (prisma.playlist.findMany as jest.Mock).mockResolvedValue([]);
-
-        await request(app)
-            .get('/playlists')
-            .set('Authorization', `Bearer ${tokenFor(USER_B)}`);
-
-        const call = (prisma.playlist.findMany as jest.Mock).mock.calls[0][0];
-        // The WHERE clause must scope results to the requesting user
-        expect(call.where).toEqual(
-            expect.objectContaining({
-                OR: expect.arrayContaining([
-                    expect.objectContaining({ userId: USER_B }),
-                    expect.objectContaining({ isPublic: true }),
-                ]),
-            })
-        );
-        // Must NOT contain a query with no user scope
-        expect(call.where.userId).toBeUndefined(); // not a global userId filter
+        expect(res.status).toBe(200);
+        const mine = (res.body as { id: string; isOwner: boolean }[]).filter((p) => [privateId, publicId, bPrivateId].includes(p.id));
+        expect(mine.map((p) => p.id).sort()).toEqual([publicId, bPrivateId].sort());
+        expect(mine.find((p) => p.id === bPrivateId)?.isOwner).toBe(true);
+        expect(mine.find((p) => p.id === publicId)?.isOwner).toBe(false);
     });
 });

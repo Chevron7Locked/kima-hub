@@ -2,37 +2,21 @@
  * POST /downloads takes only a MusicBrainz id, refuses one MusicBrainz does not
  * know, and files an album under the artist its release group credits. Another
  * user's download of the same album is not a duplicate. An artist download
- * explains a refusal instead of failing with a server error.
+ * explains a refusal instead of failing with a server error. Real router and database;
+ * auth, Lidarr, MusicBrainz and the download manager are stood in.
  */
 
-const mockJobCreate = jest.fn();
-const mockQueryRaw = jest.fn();
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        $transaction: (fn: (tx: unknown) => unknown) =>
-            fn({
-                $queryRaw: (...a: unknown[]) => mockQueryRaw(...a),
-                downloadJob: { create: (...a: unknown[]) => mockJobCreate(...a) },
-            }),
-        downloadJob: { findUnique: jest.fn().mockResolvedValue({ id: "job-1" }) },
-        album: { findFirst: jest.fn().mockResolvedValue(null) },
-    },
-}));
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: "user-1" };
+        req.user = { id: "dlc_user" };
         next();
     },
     requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
-jest.mock("../../utils/systemSettings", () => ({
-    getSystemSettings: jest.fn().mockResolvedValue({ musicPath: "/music" }),
-}));
-jest.mock("../../config", () => ({ config: { music: { musicPath: "/music" } } }));
 const mockAddArtist = jest.fn();
 jest.mock("../../services/lidarr", () => ({
     lidarrService: {
@@ -60,12 +44,27 @@ import express from "express";
 import request from "supertest";
 import downloadsRouter from "../downloads";
 import { UserFacingError } from "../../utils/errors";
+import { prisma } from "../../utils/db";
+import { config } from "../../config";
 
 const app = express();
 app.use(express.json());
 app.use("/downloads", downloadsRouter);
 
-const RG = "3a1b2c3d-1111-2222-3333-444455556666";
+const USER = "dlc_user";
+const OTHER = "dlc_other";
+const RG = "d1c00000-1111-2222-3333-444455556666";
+const ALBUM = "d1c00001-1111-2222-3333-444455556666";
+const LIBRARY_ALBUM = "d1c00002-1111-2222-3333-444455556666";
+const MBIDS = [RG, ALBUM, LIBRARY_ALBUM];
+const jobsOf = (userId = USER) => prisma.downloadJob.findMany({ where: { userId, targetMbid: { in: MBIDS } }, orderBy: { createdAt: "asc" } });
+
+async function cleanup() {
+    await prisma.downloadJob.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: "dlc_" } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: "dlc_" } } });
+    await prisma.user.deleteMany({ where: { id: { in: [USER, OTHER] } } });
+}
 const post = (mbid: string) =>
     request(app).post("/downloads").send({
         type: "album",
@@ -75,17 +74,18 @@ const post = (mbid: string) =>
         albumTitle: "Things We Lost in the Fire",
     });
 
-beforeEach(() => {
-    mockJobCreate.mockReset().mockImplementation(async ({ data }) => ({
-        id: "job-1",
-        status: "pending",
-        ...data,
-    }));
-    mockQueryRaw.mockReset().mockResolvedValue([]);
+beforeEach(async () => {
+    await cleanup();
+    for (const id of [USER, OTHER]) await prisma.user.create({ data: { id, username: id, passwordHash: "x" } });
     mockGetReleaseGroup.mockReset();
     mockGetArtist.mockReset();
     mockAddArtist.mockReset();
     mockStartDownload.mockReset().mockResolvedValue({ success: true });
+});
+
+afterAll(async () => {
+    await cleanup();
+    await prisma.$disconnect();
 });
 
 const startedWith = async () => {
@@ -98,7 +98,7 @@ describe("POST /downloads", () => {
         const res = await post(mbid);
 
         expect(res.status).toBe(400);
-        expect(mockJobCreate).not.toHaveBeenCalled();
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 
     it.each([
@@ -110,17 +110,24 @@ describe("POST /downloads", () => {
         const res = await post(RG);
 
         expect(res.status).toBe(404);
-        expect(mockJobCreate).not.toHaveBeenCalled();
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 
     it("treats only the caller's own active job as a duplicate", async () => {
         mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
+        const others = await prisma.downloadJob.create({
+            data: { userId: OTHER, subject: "low - Things", type: "album", targetMbid: RG, status: "processing" },
+        });
 
-        await post(RG);
+        const first = await post(RG).expect(200);
+        const second = await post(RG).expect(200);
 
-        const [sql, ...values] = mockQueryRaw.mock.calls[0];
-        expect(sql.join("?")).toContain('"userId" =');
-        expect(values).toEqual(expect.arrayContaining([RG, "user-1"]));
+        // Another user's job is no duplicate; the caller's own is.
+        expect(first.body.duplicate).toBeUndefined();
+        expect(first.body.id).not.toBe(others.id);
+        expect(second.body).toMatchObject({ id: first.body.id, duplicate: true });
+        expect(await jobsOf()).toHaveLength(1);
+        expect(await jobsOf(OTHER)).toHaveLength(1);
     });
 
     it("keeps the requested name when MusicBrainz is down", async () => {
@@ -132,7 +139,8 @@ describe("POST /downloads", () => {
         const res = await post(RG);
 
         expect(res.status).toBe(200);
-        expect(mockJobCreate.mock.calls[0][0].data.metadata.artistName).toBe("low");
+        const [job] = await jobsOf();
+        expect(job.metadata).toMatchObject({ artistName: "low" });
     });
 
     it("files the album under the release group's credited artist", async () => {
@@ -145,33 +153,37 @@ describe("POST /downloads", () => {
         const res = await post(RG);
 
         expect(res.status).toBe(200);
-        expect(mockJobCreate.mock.calls[0][0].data.metadata.artistName).toBe("Low");
+        const [job] = await jobsOf();
+        expect(job).toMatchObject({ id: res.body.id, status: "pending", targetMbid: RG, type: "album" });
+        expect(job.metadata).toMatchObject({ artistName: "Low", albumTitle: "Things We Lost in the Fire" });
     });
 
     it("starts the album with the names it was given", async () => {
         mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
 
-        await post(RG).expect(200);
+        const res = await post(RG).expect(200);
 
-        expect(await startedWith()).toEqual(["job-1", "low", "Things We Lost in the Fire", RG]);
+        expect(await startedWith()).toEqual([res.body.id, "low", "Things We Lost in the Fire", RG]);
     });
 
     it("reads the names from the subject when they are not given", async () => {
         mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
 
-        await request(app).post("/downloads").send({ type: "album", mbid: RG, subject: "low - Things - We Lost" }).expect(200);
+        const res = await request(app).post("/downloads").send({ type: "album", mbid: RG, subject: "low - Things - We Lost" }).expect(200);
 
-        expect(await startedWith()).toEqual(["job-1", "low", "Things - We Lost", RG]);
+        expect(await startedWith()).toEqual([res.body.id, "low", "Things - We Lost", RG]);
     });
 
     it("answers a second request for the same album with the job already queued", async () => {
         mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
-        mockQueryRaw.mockResolvedValue([{ id: "job-0", status: "processing" }]);
+        const queued = await prisma.downloadJob.create({
+            data: { userId: USER, subject: "low - Things", type: "album", targetMbid: RG, status: "processing" },
+        });
 
         const res = await post(RG).expect(200);
 
-        expect(res.body).toMatchObject({ id: "job-0", status: "processing", duplicate: true });
-        expect(mockJobCreate).not.toHaveBeenCalled();
+        expect(res.body).toMatchObject({ id: queued.id, status: "processing", duplicate: true });
+        expect(await jobsOf()).toHaveLength(1);
         expect(mockStartDownload).not.toHaveBeenCalled();
     });
 
@@ -198,23 +210,35 @@ describe("POST /downloads", () => {
 
             expect(res.status).toBe(409);
             expect(res.body.error).toMatch(/has no default profiles/);
-            expect(mockAddArtist).toHaveBeenCalledWith(RG, "Low", "/music");
+            expect(mockAddArtist).toHaveBeenCalledWith(RG, "Low", config.music.musicPath);
         });
 
-        it("queues one job per album, each in one batch", async () => {
-            const ALBUM = "4b1b2c3d-1111-2222-3333-444455556666";
+        it("queues one job per album, each in one batch, and skips an album already in the library", async () => {
             mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Low" } });
             mockAddArtist.mockResolvedValue({ id: 7 });
-            mockGetReleaseGroups.mockResolvedValue({ kind: "answered", value: [{ id: ALBUM, title: "Ones and Sixes" }] });
+            mockGetReleaseGroups.mockResolvedValue({
+                kind: "answered",
+                value: [
+                    { id: ALBUM, title: "Ones and Sixes" },
+                    { id: LIBRARY_ALBUM, title: "Double Negative" },
+                ],
+            });
+            await prisma.artist.create({ data: { id: "dlc_art", name: "Low", normalizedName: "low", identityKey: "dlclow" } });
+            await prisma.album.create({
+                data: { id: "dlc_alb", rgMbid: LIBRARY_ALBUM, artistId: "dlc_art", identityKey: "dlc_ik", title: "Double Negative", primaryType: "Album", location: "LIBRARY" },
+            });
 
             const res = await postArtist().expect(200);
 
-            expect(res.body).toMatchObject({ albumCount: 1, jobs: [{ id: "job-1", subject: "Low - Ones and Sixes" }] });
-            const { metadata } = mockJobCreate.mock.calls[0][0].data;
+            const jobs = await jobsOf();
+            expect(jobs).toHaveLength(1);
+            expect(res.body).toMatchObject({ albumCount: 1, jobs: [{ id: jobs[0].id, subject: "Low - Ones and Sixes" }] });
+            expect(jobs[0]).toMatchObject({ targetMbid: ALBUM, artistMbid: RG, status: "pending" });
+            const metadata = jobs[0].metadata as Record<string, unknown>;
             expect(Object.keys(metadata).sort()).toEqual(
                 ["albumTitle", "artistMbid", "artistName", "batchId", "downloadType", "rootFolderPath"],
             );
-            expect(await startedWith()).toEqual(["job-1", "Low", "Ones and Sixes", ALBUM]);
+            expect(await startedWith()).toEqual([jobs[0].id, "Low", "Ones and Sixes", ALBUM]);
         });
     });
 });

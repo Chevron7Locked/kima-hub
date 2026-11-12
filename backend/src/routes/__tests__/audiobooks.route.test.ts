@@ -1,25 +1,10 @@
 /**
- * The audiobook list and series carry tracks and trackCount (absent, never 0,
- * when numTracks is null). Detail is served from the cache with sections and
- * tracks, and resyncs when sectionsJson is null.
+ * The audiobook list and series carry tracks and trackCount (absent, never 0, when numTracks is null). Detail is
+ * served from the cache with sections and tracks, and resyncs when sectionsJson is null. Real router and database;
+ * Audiobookshelf itself and the settings are stood in for.
  */
 
 // All mocks before imports.
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        audiobook: {
-            findMany: jest.fn(),
-            findUnique: jest.fn(),
-            update: jest.fn().mockResolvedValue({}),
-            count: jest.fn(),
-        },
-        audiobookProgress: {
-            findMany: jest.fn().mockResolvedValue([]),
-            findUnique: jest.fn().mockResolvedValue(null),
-        },
-    },
-}));
 
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -102,33 +87,69 @@ const sectionsFixture = [
     { index: 2, title: "Part 2", start: 1200 },
 ];
 
-const bookRow = {
-    id: "abs-book-1",
+// Every row this file seeds has this prefix, so cleanup (and the list, which has no filter) can tell them apart.
+const P = "abs_rt_";
+const WITH_TRACKS = `${P}tracks`;
+const NO_TRACKS = `${P}notracks`;
+
+const row = (id: string, fields: Record<string, unknown> = {}) => ({
+    id,
+    title: id,
+    sortName: id,
+    audioUrl: `https://abs.invalid/${id}`,
+    ...fields,
+});
+
+const fellowship = row(WITH_TRACKS, {
     title: "The Fellowship",
     sortName: "fellowship",
     author: "Tolkien",
     narrator: "Andy Serkis",
     description: "desc",
-    coverUrl: null,
-    localCoverPath: null,
     duration: 2400,
     libraryId: "lib1",
     series: "Lord of the Rings",
     seriesSequence: "1",
-    genres: [],
-    lastSyncedAt: new Date(),
     numTracks: 2,
     tracksJson: tracksFixture,
     sectionsJson: sectionsFixture,
-};
+});
 
-const bookRowNullTracks = {
-    ...bookRow,
-    id: "abs-book-2",
-    numTracks: null,
-    tracksJson: null,
-    sectionsJson: null,
-};
+// A row the cache has not filled in: no tracks, no sections.
+const bare = row(NO_TRACKS, { title: "Bare", sortName: "bare", series: "Lord of the Rings", seriesSequence: "2" });
+
+// What a resync answers with for the bare row.
+const synced = { ...fellowship, id: NO_TRACKS };
+
+const SERIES_NAMES = ["100% Hits", "Fifty%2FFifty", "A/B"];
+const seriesId = (i: number) => `${P}series${i}`;
+
+const ownRows = { where: { id: { startsWith: P } } };
+
+beforeAll(async () => {
+    await prisma.audiobook.deleteMany(ownRows);
+    await prisma.audiobook.createMany({
+        data: [
+            fellowship,
+            bare,
+            // "The Hobbit" files under H; by title "Iliad" would come first.
+            row(`${P}hobbit`, { title: "The Hobbit", sortName: "hobbit" }),
+            row(`${P}iliad`, { title: "Iliad", sortName: "iliad" }),
+            row(`${P}article`, { title: "x", series: "The Lord of the Rings", seriesSequence: "1" }),
+            // Names that differ from each series only in what a loose match would let through.
+            row(`${P}decoy1`, { series: "100" }),
+            row(`${P}decoy2`, { series: "Fifty/Fifty" }),
+            row(`${P}decoy3`, { series: "A" }),
+            ...SERIES_NAMES.map((series, i) => row(seriesId(i), { series })),
+        ],
+    });
+});
+
+afterAll(async () => {
+    await prisma.audiobook.deleteMany(ownRows);
+});
+
+const mine = (body: Array<{ id: string }>) => body.filter((b) => b.id.startsWith(P));
 
 // ── GET / (list) ──────────────────────────────────────────────────────────────
 
@@ -137,29 +158,23 @@ describe("GET /audiobooks", () => {
 
     beforeEach(() => {
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
-        (prisma.audiobookProgress.findMany as jest.Mock).mockResolvedValue([]);
     });
 
-    // "The Hobbit" files under H. sortName is written by audiobookCache.ts and
-    // audiobookshelf.ts, like Artist.sortName and Album.sortName.
+    // sortName is written by audiobookCache.ts and audiobookshelf.ts, like Artist.sortName and Album.sortName.
     it("orders the list on sortName, not title", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([]);
+        const res = await request(app).get("/audiobooks");
 
-        await request(app).get("/audiobooks");
-
-        expect(prisma.audiobook.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({ orderBy: { sortName: "asc" } }),
-        );
+        const ids = mine(res.body).map((b: { id: string }) => b.id);
+        expect(ids.indexOf(`${P}hobbit`)).toBeGreaterThanOrEqual(0);
+        expect(ids.indexOf(`${P}hobbit`)).toBeLessThan(ids.indexOf(`${P}iliad`));
     });
 
     // The DTO is built by hand, so a field the query reads is not automatically
     // in the response; the client's series fallback needs sortName.
     it("includes sortName in the response body", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRow]);
-
         const res = await request(app).get("/audiobooks");
 
-        expect(res.body[0].sortName).toBe("fellowship");
+        expect(res.body.find((b: { id: string }) => b.id === WITH_TRACKS).sortName).toBe("fellowship");
     });
 
     // The series NAME is sorted client-side too, and has no stored column --
@@ -167,13 +182,9 @@ describe("GET /audiobooks", () => {
     // uses. Without it the series view files "The Lord of the Rings" under T
     // while the same library sorts "The Fellowship" under F one tab over.
     it("includes an article-stripped sortName on the series object", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([
-            { ...bookRow, series: "The Lord of the Rings" },
-        ]);
-
         const res = await request(app).get("/audiobooks");
 
-        expect(res.body[0].series).toEqual(
+        expect(res.body.find((b: { id: string }) => b.id === `${P}article`).series).toEqual(
             expect.objectContaining({
                 name: "The Lord of the Rings",
                 sortName: "lord of the rings",
@@ -182,23 +193,19 @@ describe("GET /audiobooks", () => {
     });
 
     it("includes tracks and trackCount for a row with tracksJson", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRow]);
-
         const res = await request(app).get("/audiobooks");
 
         expect(res.status).toBe(200);
-        const book = res.body[0];
+        const book = res.body.find((b: { id: string }) => b.id === WITH_TRACKS);
         expect(book.tracks).toEqual(tracksFixture);
         expect(book.trackCount).toBe(2);
     });
 
     it("omits tracks and trackCount when tracksJson and numTracks are NULL", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRowNullTracks]);
-
         const res = await request(app).get("/audiobooks");
 
         expect(res.status).toBe(200);
-        const book = res.body[0];
+        const book = res.body.find((b: { id: string }) => b.id === NO_TRACKS);
         expect(book.tracks).toBeUndefined();
         expect(book.trackCount).toBeUndefined();
         expect(book).not.toHaveProperty("trackCount");
@@ -212,36 +219,30 @@ describe("GET /audiobooks/series/:seriesName", () => {
 
     beforeEach(() => {
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
-        (prisma.audiobookProgress.findMany as jest.Mock).mockResolvedValue([]);
     });
 
-    it("includes tracks and trackCount for a row with tracksJson", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRow]);
-
+    it("lists the series' books in sequence, with tracks and trackCount for a row with tracksJson", async () => {
         const res = await request(app).get("/audiobooks/series/Lord%20of%20the%20Rings");
 
         expect(res.status).toBe(200);
+        expect(res.body.map((b: { id: string }) => b.id)).toEqual([WITH_TRACKS, NO_TRACKS]);
         const book = res.body[0];
         expect(book.tracks).toEqual(tracksFixture);
         expect(book.trackCount).toBe(2);
     });
 
-    it.each(["100% Hits", "Fifty%2FFifty", "A/B"])("looks up the series named %p as sent", async (name) => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([]);
-
+    it.each(SERIES_NAMES.map((name, i) => [name, i] as const))("looks up the series named %p as sent", async (name, i) => {
         const res = await request(app).get(`/audiobooks/series/${encodeURIComponent(name)}`);
 
         expect(res.status).toBe(200);
-        expect((prisma.audiobook.findMany as jest.Mock).mock.calls.at(-1)[0].where).toEqual({ series: name });
+        expect(res.body.map((b: { id: string }) => b.id)).toEqual([seriesId(i)]);
     });
 
     it("omits trackCount when numTracks is NULL", async () => {
-        (prisma.audiobook.findMany as jest.Mock).mockResolvedValue([bookRowNullTracks]);
-
         const res = await request(app).get("/audiobooks/series/Lord%20of%20the%20Rings");
 
         expect(res.status).toBe(200);
-        const book = res.body[0];
+        const book = res.body.find((b: { id: string }) => b.id === NO_TRACKS);
         expect(book).not.toHaveProperty("trackCount");
     });
 });
@@ -252,15 +253,13 @@ describe("GET /audiobooks/:id", () => {
     const app = createApp();
 
     beforeEach(() => {
+        jest.clearAllMocks();
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
-        (prisma.audiobookProgress.findUnique as jest.Mock).mockResolvedValue(null);
-        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRow);
+        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(synced);
     });
 
     it("returns sections and tracks from DB cache without hitting ABS", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRow);
-
-        const res = await request(app).get("/audiobooks/abs-book-1");
+        const res = await request(app).get(`/audiobooks/${WITH_TRACKS}`);
 
         expect(res.status).toBe(200);
         expect(res.body.sections).toEqual(sectionsFixture);
@@ -268,24 +267,21 @@ describe("GET /audiobooks/:id", () => {
         expect(res.body.tracksUnavailable).toBeUndefined();
         expect(res.body.chapters).toBeUndefined();
         expect(res.body.audioFiles).toBeUndefined();
+        expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
     });
 
     it("triggers resync via audiobookCacheService when sectionsJson is null", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRow);
-
-        const res = await request(app).get("/audiobooks/abs-book-2");
+        const res = await request(app).get(`/audiobooks/${NO_TRACKS}`);
 
         expect(res.status).toBe(200);
-        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith("abs-book-2");
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith(NO_TRACKS);
         expect(res.body.sections).toEqual(sectionsFixture);
     });
 
     it("returns empty sections array when audiobookCacheService returns book with null sectionsJson", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRowNullTracks);
+        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(await prisma.audiobook.findUnique({ where: { id: NO_TRACKS } }));
 
-        const res = await request(app).get("/audiobooks/abs-book-2");
+        const res = await request(app).get(`/audiobooks/${NO_TRACKS}`);
 
         expect(res.status).toBe(200);
         expect(res.body.sections).toEqual([]);
@@ -293,33 +289,31 @@ describe("GET /audiobooks/:id", () => {
     });
 
     it("returns 404 when audiobook is not found after resync", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(null);
         (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(null);
 
-        const res = await request(app).get("/audiobooks/missing-id");
+        const res = await request(app).get(`/audiobooks/${P}missing`);
 
         expect(res.status).toBe(404);
+        expect(audiobookCacheService.getAudiobook).toHaveBeenCalledWith(`${P}missing`);
     });
 
     it("includes trackCount from numTracks when present", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRow);
-
-        const res = await request(app).get("/audiobooks/abs-book-1");
+        const res = await request(app).get(`/audiobooks/${WITH_TRACKS}`);
 
         expect(res.status).toBe(200);
         expect(res.body.trackCount).toBe(2);
     });
 
     it("omits trackCount when numTracks is NULL", async () => {
-        (prisma.audiobook.findUnique as jest.Mock).mockResolvedValue(bookRowNullTracks);
-        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(bookRowNullTracks);
+        (audiobookCacheService.getAudiobook as jest.Mock).mockResolvedValue(await prisma.audiobook.findUnique({ where: { id: NO_TRACKS } }));
 
-        const res = await request(app).get("/audiobooks/abs-book-2");
+        const res = await request(app).get(`/audiobooks/${NO_TRACKS}`);
 
         expect(res.status).toBe(200);
         expect(res.body).not.toHaveProperty("trackCount");
     });
 });
+
 // ── POST /sync ──────────────────────────────────────────────────────────────────
 
 describe("POST /audiobooks/sync", () => {
@@ -327,7 +321,6 @@ describe("POST /audiobooks/sync", () => {
 
     beforeEach(() => {
         (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
-        (prisma.audiobook.count as jest.Mock).mockResolvedValue(0);
         (audiobookCacheService.syncAll as jest.Mock).mockResolvedValue({
             synced: 3,
             failed: 0,
@@ -411,6 +404,11 @@ describe("POST /audiobooks/sync", () => {
 
 describe("an audiobook id", () => {
     const app = createApp();
+    let lookup: jest.SpyInstance;
+
+    // Calls through: it only watches whether the database was asked.
+    beforeAll(() => { lookup = jest.spyOn(prisma.audiobook, "findUnique"); });
+    afterAll(() => lookup.mockRestore());
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -431,6 +429,6 @@ describe("an audiobook id", () => {
         expect(audiobookshelfService.streamAudiobook).not.toHaveBeenCalled();
         expect(audiobookshelfService.updateProgress).not.toHaveBeenCalled();
         expect(audiobookCacheService.getAudiobook).not.toHaveBeenCalled();
-        expect(prisma.audiobook.findUnique).not.toHaveBeenCalled();
+        expect(lookup).not.toHaveBeenCalled();
     });
 });

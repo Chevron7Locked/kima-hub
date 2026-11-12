@@ -10,17 +10,17 @@ const TOKEN = "s".repeat(40);
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
+// Stored covers live beside the transcode cache; this points them at a folder of this file's own.
 jest.mock("../../config", () => ({
     USER_AGENT: "kima-test",
-    config: { publicVibe: { token: "s".repeat(40), username: "listener" } },
-}));
-jest.mock("../../utils/db", () => ({
-    prisma: { track: { findUnique: jest.fn() }, user: { findUnique: jest.fn() } },
+    config: {
+        publicVibe: { token: "s".repeat(40), username: "listener" },
+        music: { transcodeCachePath: require("path").join(require("os").tmpdir(), `kima-pvibe-${process.pid}`, "transcodes") },
+    },
 }));
 jest.mock("../../services/publicLibraryExport", () => ({ latestLibraryExport: jest.fn() }));
 jest.mock("../../services/textEmbeddingBridge", () => ({ searchTracksByText: jest.fn() }));
 jest.mock("../../services/artwork", () => ({ findAlbumArtwork: jest.fn(async () => null) }));
-jest.mock("../../services/imageStorage", () => ({ getLocalImagePath: jest.fn(() => null) }));
 
 import fs from "fs";
 import os from "os";
@@ -33,7 +33,7 @@ import publicVibeRouter from "../publicVibe";
 import { prisma } from "../../utils/db";
 import { latestLibraryExport } from "../../services/publicLibraryExport";
 import { searchTracksByText } from "../../services/textEmbeddingBridge";
-import { getLocalImagePath } from "../../services/imageStorage";
+import { coversBasePath } from "../../services/imageStorage";
 import { reportLive, resetLive, setLiveHidden } from "../../services/liveListening";
 
 const app = express();
@@ -42,6 +42,11 @@ app.use("/api/public/vibe", publicVibeRouter);
 const auth = { Authorization: `Bearer ${TOKEN}` };
 
 const TRACK = "ctrackaaaaaaaaaaaaaaaaaa1";
+// The cover tests seed their own rows, under ids only this file uses.
+const P = "pvibe_smoke";
+const COVER_TRACK = "cpvibesmoketrack0001";
+const NO_COVER_TRACK = "cpvibesmoketrack0002";
+const MISSING_FILE_TRACK = "cpvibesmoketrack0003";
 const LIBRARY = { version: 1, tracks: [{ id: TRACK }] };
 const ETAG = '"abc123"';
 
@@ -196,11 +201,37 @@ describe("POST /search", () => {
 });
 
 describe("GET /cover/:trackId", () => {
-    const file = path.join(os.tmpdir(), `kima-public-cover-${process.pid}.jpg`);
+    const coverDir = path.join(coversBasePath(), "albums");
+    const file = path.join(coverDir, `${P}.jpg`);
     const bytes = Buffer.from("ffd8ffe000104a464946", "hex");
 
-    beforeAll(() => fs.writeFileSync(file, bytes));
-    afterAll(() => fs.rmSync(file, { force: true }));
+    async function seedTrack(id: string, key: string, coverUrl: string | null) {
+        await prisma.artist.create({
+            data: { id: `${P}_art_${key}`, name: "Ar", normalizedName: "ar", identityKey: `${P}_ik_${key}` },
+        });
+        await prisma.album.create({
+            data: { id: `${P}_alb_${key}`, rgMbid: `${P}_rg_${key}`, artistId: `${P}_art_${key}`, identityKey: `${P}_ak_${key}`, title: "Al", primaryType: "Album", coverUrl },
+        });
+        await prisma.track.create({
+            data: { id, albumId: `${P}_alb_${key}`, title: "T", trackNo: 1, duration: 100, filePath: `${P}/${key}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+    }
+
+    beforeAll(async () => {
+        fs.mkdirSync(coverDir, { recursive: true });
+        fs.writeFileSync(file, bytes);
+        await seedTrack(COVER_TRACK, "cover", `native:albums/${P}.jpg`);
+        await seedTrack(NO_COVER_TRACK, "none", null);
+        // A stored cover whose file has gone; the mocked artwork sources have no copy.
+        await seedTrack(MISSING_FILE_TRACK, "gone", `native:albums/${P}_gone.jpg`);
+    });
+
+    afterAll(async () => {
+        await prisma.track.deleteMany({ where: { id: { in: [COVER_TRACK, NO_COVER_TRACK, MISSING_FILE_TRACK] } } });
+        await prisma.album.deleteMany({ where: { id: { startsWith: `${P}_alb_` } } });
+        await prisma.artist.deleteMany({ where: { id: { startsWith: `${P}_art_` } } });
+        fs.rmSync(path.join(os.tmpdir(), `kima-pvibe-${process.pid}`), { recursive: true, force: true });
+    });
 
     it("refuses an id that is not a track id", async () => {
         const res = await request(app).get("/api/public/vibe/cover/..%2Fetc").set(auth);
@@ -208,22 +239,25 @@ describe("GET /cover/:trackId", () => {
     });
 
     it("serves the stored cover with an ETag, then 304 for it", async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            album: { coverUrl: "native:al.jpg", rgMbid: null, title: "Al", artist: { name: "Ar" } },
-        });
-        (getLocalImagePath as jest.Mock).mockReturnValue(file);
-        const res = await request(app).get(`/api/public/vibe/cover/${TRACK}`).set(auth);
+        const res = await request(app).get(`/api/public/vibe/cover/${COVER_TRACK}`).set(auth);
         expect(res.status).toBe(200);
         expect(Buffer.from(res.body)).toEqual(bytes);
-        const again = await request(app).get(`/api/public/vibe/cover/${TRACK}`).set(auth).set("If-None-Match", res.headers.etag);
+        const again = await request(app).get(`/api/public/vibe/cover/${COVER_TRACK}`).set(auth).set("If-None-Match", res.headers.etag);
         expect(again.status).toBe(304);
     });
 
     it("answers 404 for a track with no stored cover", async () => {
-        (prisma.track.findUnique as jest.Mock).mockResolvedValue({
-            album: { coverUrl: null, rgMbid: null, title: "Al", artist: { name: "Ar" } },
-        });
-        const res = await request(app).get(`/api/public/vibe/cover/${TRACK}`).set(auth);
+        const res = await request(app).get(`/api/public/vibe/cover/${NO_COVER_TRACK}`).set(auth);
+        expect(res.status).toBe(404);
+    });
+
+    it("answers 404 for a stored cover whose file has gone and no source has a copy", async () => {
+        const res = await request(app).get(`/api/public/vibe/cover/${MISSING_FILE_TRACK}`).set(auth);
+        expect(res.status).toBe(404);
+    });
+
+    it("answers 404 for a track that is not in the library", async () => {
+        const res = await request(app).get("/api/public/vibe/cover/cpvibesmokenosuchtrack").set(auth);
         expect(res.status).toBe(404);
     });
 });

@@ -1,15 +1,8 @@
 /**
  * POST /discover/generate removes a finished job with the same id before
  * re-adding, since BullMQ silently ignores a re-add. A running job is left alone.
+ * Real router and database; auth, the queue, the lock and Lidarr are stood in.
  */
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        discoveryBatch: {
-            findFirst: jest.fn(),
-        },
-    },
-}));
 
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -18,18 +11,16 @@ jest.mock('../../utils/logger', () => ({
 jest.mock('../../middleware/auth', () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123' };
+        req.user = { id: 'dgj_user' };
         next();
     },
     requireAdmin: (req: any, _res: any, next: any) => {
-        req.user = { id: 'user-123', role: 'admin' };
+        req.user = { id: 'dgj_user', role: 'admin' };
         next();
     },
 }));
 
 jest.mock('../../services/lidarr', () => require('./helpers/discoverMocks').emptyLidarrMock());
-jest.mock('../../utils/systemSettings', () => require('./helpers/discoverMocks').systemSettingsMock());
-jest.mock('../../config', () => require('./helpers/discoverMocks').musicConfigMock());
 
 jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').discoverQueuesMock());
 
@@ -44,11 +35,20 @@ import { discoverQueue } from '../../workers/queues';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
 
+const USER = 'dgj_user';
+
+async function cleanup() {
+    await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
+    await prisma.user.deleteMany({ where: { id: USER } });
+}
+
 afterAll(async () => {
+    await cleanup();
     // The router pulls in services/listenBrainz, which opens the shared Redis
     // client at import. Left open, Jest finishes the suite and outlives the
     // process on that socket.
     await closeClient(redisClient);
+    await prisma.$disconnect();
 });
 
 function makeApp() {
@@ -61,7 +61,7 @@ function makeApp() {
 /** Build a fake BullMQ Job whose getState resolves to the given lifecycle state. */
 function fakeJob(state: string) {
     return {
-        id: `discover-weekly-user-123-${state}`,
+        id: `discover-weekly-dgj_user-${state}`,
         getState: jest.fn().mockResolvedValue(state),
         remove: jest.fn().mockResolvedValue(undefined),
     };
@@ -74,10 +74,11 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         app = makeApp();
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
         // No active batch -> the handler proceeds to the enqueue path.
-        (prisma.discoveryBatch.findFirst as jest.Mock).mockResolvedValue(null);
+        await cleanup();
+        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: 'x' } });
         // add() resolves to a job with an id so the handler can return jobId.
         (discoverQueue.add as jest.Mock).mockResolvedValue({ id: 'new-job-id' });
     });
@@ -137,7 +138,7 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         const lookedUpId = (discoverQueue.getJob as jest.Mock).mock.calls[0][0];
         const enqueuedId = (discoverQueue.add as jest.Mock).mock.calls[0][2].jobId;
         expect(lookedUpId).toBe(enqueuedId);
-        expect(lookedUpId).toMatch(/^discover-weekly-user-123-\d{4}-\d{2}-\d{2}$/);
+        expect(lookedUpId).toMatch(/^discover-weekly-dgj_user-\d{4}-\d{2}-\d{2}$/);
     });
 
     it('enqueues once with a week-keyed job id when no job exists', async () => {
@@ -148,6 +149,24 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         expect(res.status).toBe(200);
         expect(discoverQueue.add).toHaveBeenCalledTimes(1);
         const addArgs = (discoverQueue.add as jest.Mock).mock.calls[0];
-        expect(addArgs[2].jobId).toMatch(/^discover-weekly-user-123-\d{4}-\d{2}-\d{2}$/);
+        expect(addArgs[2].jobId).toMatch(/^discover-weekly-dgj_user-\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('enqueues nothing while the listener has a batch downloading, but a finished batch does not block', async () => {
+        const batch = { userId: USER, weekStart: new Date(Date.UTC(2026, 9, 19)), targetSongCount: 40 };
+        await prisma.discoveryBatch.create({ data: { ...batch, status: 'downloading' } });
+
+        const blocked = await request(app).post('/discover/generate');
+
+        expect(blocked.status).toBe(409);
+        expect(discoverQueue.add).not.toHaveBeenCalled();
+
+        await prisma.discoveryBatch.updateMany({ where: { userId: USER }, data: { status: 'completed' } });
+        (discoverQueue.getJob as jest.Mock).mockResolvedValue(null);
+
+        const free = await request(app).post('/discover/generate');
+
+        expect(free.status).toBe(200);
+        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
     });
 });
