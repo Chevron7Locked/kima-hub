@@ -4,6 +4,7 @@ import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicRe
 import { DIRECT_PARAMS, knownSuffix, parseRepeatedQueryParam, songFormat, transcodeParamsFor, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { resolveWithinMusicRoot } from "../library/trackPath";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 import {
     createShareLink,
     deleteShareLink,
@@ -277,8 +278,8 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
         return subsonicError(req, res, SubsonicError.GENERIC, "Unsupported mediaType");
     }
 
-    const track = await prisma.track.findUnique({
-        where: { id: mediaId },
+    const track = await prisma.track.findFirst({
+        where: { id: mediaId, ...PLAYABLE_SONG },
         select: { filePath: true, mime: true },
     });
     const absolutePath = track?.filePath ? resolveWithinMusicRoot(track.filePath) : null;

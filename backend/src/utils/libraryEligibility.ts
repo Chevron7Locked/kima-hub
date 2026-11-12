@@ -1,35 +1,52 @@
 /**
- * The one library-eligibility predicate.
+ * The playable-song rule, the one place it is written.
  *
- * A file missing from disk is flagged `missingSince`, never offered to a
- * stage, and never streamed — so it must not appear in any recommendation,
- * ranking, projection, search answer, or mix. Streaming already refuses these
- * tracks; every read path must agree with what it refuses. The flag clears
- * when the file returns, and the track comes back to every consumer with no
- * extra work. Deleting flagged rows is the reconcile step's job, never this
- * predicate's.
+ * A playable song is a song on a library album whose file is there (`missingSince` unset) and was read (not
+ * `corrupt`). Every interface that picks, lists, plays or measures songs offers only playable ones, through
+ * PLAYABLE_SONG in a Prisma `where` or playableSongSql in raw SQL:
  *
- * Status counters are the deliberate exception: they count the whole
- * library, missing files included, and show the count (invariant 3 —
- * counted and shown, never silent).
+ * - A Discover song lives only in Discover. It plays on the Discover page and nowhere else until a like moves its
+ *   album to the library.
+ * - A missing file is flagged by the scan, never deleted here. The flag clears when the file returns and the song
+ *   comes back to every interface with no extra work; deleting flagged rows is the reconcile step's job.
+ * - A corrupt file cannot be read, so it cannot be played.
  *
- * In raw SQL the same rule is the literal fragment
- * `<track alias>."missingSince" IS NULL`, inline in the query — enforced
- * by the grep gate in `libraryEligibility.integration.test.ts`.
+ * Exactly three exceptions read songs without the rule:
+ *
+ * 1. Web stream by id: the Discover page plays Discover songs through it. Of the rule it checks only that the file
+ *    is not missing.
+ * 2. Status counters: they count the whole library, missing files included, and show the count (counted and shown,
+ *    never silent).
+ * 3. Owner lookups by id: a read of the one song a request names, to say who owns it or what it is, never a pick.
  */
+import { Prisma } from "@prisma/client";
 
-/** For Prisma `where` clauses on Track. */
-export const NOT_MISSING = { missingSince: null } as const;
+/** The rule for a Prisma `where` on Track. */
+export const PLAYABLE_SONG = { missingSince: null, corrupt: false, album: { location: "LIBRARY" } } as const;
 
-/** A track that can be streamed: its file is there and was read. For Prisma `where` clauses on Track. */
-export const PLAYABLE = { ...NOT_MISSING, corrupt: false } as const;
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * A song in the library: its album is a library album, not a Discover suggestion. Discover songs live only in Discover,
- * so every query that picks, lists or measures songs outside Discover carries this. In raw SQL it is the literal fragment
- * `location = 'LIBRARY'` on the song's album, held to by the same grep gate as `"missingSince" IS NULL`.
+ * The rule for raw SQL, given the names the query uses for the song (`"Track"`) and its album (`"Album"`): an alias
+ * such as `t` and `al`, or the table names themselves. The album must be joined in the query.
  */
-export const IN_LIBRARY = { album: { location: "LIBRARY" } } as const;
+export function playableSongSql(song: string, album: string): Prisma.Sql {
+    for (const name of [song, album]) {
+        if (!IDENTIFIER.test(name)) throw new Error(`playableSongSql: "${name}" is not a table name or alias`);
+    }
+    return Prisma.raw(`"${album}".location = 'LIBRARY' AND "${song}".corrupt = false AND "${song}"."missingSince" IS NULL`);
+}
 
-/** A library song that can be streamed (PLAYABLE and IN_LIBRARY). */
-export const LIBRARY_PLAYABLE = { ...PLAYABLE, ...IN_LIBRARY } as const;
+// Parts of the rule, left only until every caller uses the whole of it.
+
+/** For Prisma `where` clauses on Track. */
+export const NOT_MISSING = { missingSince: PLAYABLE_SONG.missingSince } as const;
+
+/** A track that can be streamed: its file is there and was read. For Prisma `where` clauses on Track. */
+export const PLAYABLE = { ...NOT_MISSING, corrupt: PLAYABLE_SONG.corrupt } as const;
+
+/** A song on a library album, not a Discover suggestion. */
+export const IN_LIBRARY = { album: PLAYABLE_SONG.album } as const;
+
+/** The whole rule, under its old name. */
+export const LIBRARY_PLAYABLE = PLAYABLE_SONG;

@@ -15,20 +15,21 @@ import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
 
 export const playbackRouter = Router();
 
 type SongTrack = { mime: string | null; filePath: string | null };
 
-/** Streams a song: the file as it is ("direct") or the MP3 `choose` names for it. */
+/** Streams a playable song: the file as it is ("direct") or the MP3 `choose` names for it. Any other song is not found. */
 async function streamTrackById(
     req: Request,
     res: Response,
     id: string,
     choose: (track: SongTrack, absolutePath: string) => Promise<"direct" | SubsonicServe> | "direct" | SubsonicServe,
 ) {
-    const track = await prisma.track.findUnique({ where: { id } });
+    const track = await prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG } });
     if (!track || !track.filePath) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE, playableSongSql } from "../../utils/libraryEligibility";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
@@ -19,8 +19,8 @@ const SONG_COLUMNS = Prisma.sql`
     ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
     ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"`;
 const SONG_FROM = Prisma.sql`"Track" t JOIN "Album" al ON t."albumId" = al.id JOIN "Artist" ar ON al."artistId" = ar.id`;
-/** Songs a client can play: on a library album, with a file that is present and readable. */
-const PLAYABLE_SONG = Prisma.sql`al.location = 'LIBRARY' AND t.corrupt = false AND t."missingSince" IS NULL`;
+/** The playable-song rule, for the aliases every query here uses. */
+const PLAYABLE_SQL = playableSongSql("t", "al");
 
 type SongRow = {
     id: string;
@@ -67,7 +67,7 @@ async function playableSongsInOrder(ids: string[]): Promise<SongRow[]> {
     if (ids.length === 0) return [];
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
-        WHERE t.id = ANY(${ids}::text[]) AND ${PLAYABLE_SONG}`;
+        WHERE t.id = ANY(${ids}::text[]) AND ${PLAYABLE_SQL}`;
     const byId = new Map(rows.map((r) => [r.id, r]));
     return ids.flatMap((id) => byId.get(id) ?? []);
 }
@@ -114,15 +114,14 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                 ? prisma.$queryRaw<{ id: string; title: string; artistId: string; artistName: string; year: number | null }[]>`
                       SELECT al.id, al.title, al."artistId", ar.name AS "artistName", al.year
                       FROM "Album" al JOIN "Artist" ar ON al."artistId" = ar.id
-                      WHERE al.location = 'LIBRARY'
-                        AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND t.corrupt = false AND t."missingSince" IS NULL)
+                      WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND ${PLAYABLE_SQL})
                       ORDER BY LOWER(al.title) ASC, al.id ASC
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                 : Promise.resolve([]),
             songCount > 0
                 ? prisma.$queryRaw<SongRow[]>`
                       SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
-                      WHERE ${PLAYABLE_SONG}
+                      WHERE ${PLAYABLE_SQL}
                       ORDER BY LOWER(t.title) ASC, t.id ASC
                       LIMIT ${songCount} OFFSET ${songOffset}`
                 : Promise.resolve([]),
@@ -218,7 +217,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         ? parseInt(req.query.toYear as string, 10)
         : undefined;
 
-    const whereConditions: Prisma.Sql[] = [PLAYABLE_SONG];
+    const whereConditions: Prisma.Sql[] = [PLAYABLE_SQL];
 
     if (fromYear !== undefined && !isNaN(fromYear) && toYear !== undefined && !isNaN(toYear)) {
         const lo = Math.min(fromYear, toYear);
@@ -272,7 +271,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
-        WHERE ${PLAYABLE_SONG}
+        WHERE ${PLAYABLE_SQL}
           AND ${genreArtistIds.length > 0 ? Prisma.sql`al."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
         ORDER BY LOWER(t.title) ASC, t.title ASC
         OFFSET ${offset}
@@ -333,7 +332,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         SELECT ${SONG_COLUMNS}
         FROM ${SONG_FROM}
         CROSS JOIN LATERAL (SELECT COUNT(*)::int AS plays FROM "Play" pl WHERE pl."trackId" = t.id) p
-        WHERE ${PLAYABLE_SONG}
+        WHERE ${PLAYABLE_SQL}
           AND al."artistId" = ${artist.id}
         ORDER BY p.plays DESC, LOWER(t.title) ASC, t.title ASC
         LIMIT ${count}
@@ -396,7 +395,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
-        WHERE ${PLAYABLE_SONG}
+        WHERE ${PLAYABLE_SQL}
           AND al."artistId" IN (${Prisma.join(artistIdList, ", ")})
         ORDER BY RANDOM()
         LIMIT ${count}
