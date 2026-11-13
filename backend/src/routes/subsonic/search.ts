@@ -87,7 +87,7 @@ type AlbumHit = {
     artistGenres: unknown;
     artistUserGenres: unknown;
     songCount: number;
-    totalDuration: number;
+    duration: number;
 };
 
 /** The albums among `ids` that have a playable song, in the order given, each with its playable songs counted and timed. */
@@ -97,7 +97,7 @@ async function playableAlbumsInOrder(ids: string[]): Promise<AlbumHit[]> {
         SELECT al.id, al.title, al."displayTitle", al.year, al."coverUrl", al."userCoverUrl", al."artistId", al."createdAt",
                ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres",
-               COUNT(t.id)::int AS "songCount", COALESCE(SUM(t.duration), 0)::float8 AS "totalDuration"
+               COUNT(t.id)::int AS "songCount", COALESCE(SUM(t.duration), 0)::float8 AS duration
         FROM "Album" al
         JOIN "Artist" ar ON al."artistId" = ar.id
         JOIN "Track" t ON t."albumId" = al.id AND ${PLAYABLE_SQL}
@@ -199,7 +199,6 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
             mapAlbum(
                 {
                     ...al,
-                    duration: al.totalDuration,
                     genre: firstArtistGenre(al.artistGenres, al.artistUserGenres),
                 },
                 al.artistDisplayName || al.artistName,
