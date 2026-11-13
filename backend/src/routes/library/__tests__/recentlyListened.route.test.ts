@@ -71,7 +71,8 @@ describe("the page is full", () => {
         express()
             .use((req: any, _res, next) => { req.user = { id: BUSY, role: "user" }; next(); })
             .use("/library", tracksRouter);
-    const FIRST = ["x", "y", "z"];
+    // w has one old play from before the app recorded whether a song was heard (heard = false): it is still a listen.
+    const FIRST = ["x", "y", "z", "w"];
 
     beforeAll(async () => {
         await prisma.user.create({ data: { id: BUSY, username: BUSY, passwordHash: "x" } });
@@ -90,7 +91,7 @@ describe("the page is full", () => {
             const plays = key === "x" ? 20 : 1;
             await prisma.play.createMany({
                 data: Array.from({ length: plays }, (_, j) => ({
-                    id: `${albumId}-p${j}`, userId: BUSY, trackId: `${albumId}-t`, source: "LIBRARY" as const, heard: true,
+                    id: `${albumId}-p${j}`, userId: BUSY, trackId: `${albumId}-t`, source: "LIBRARY" as const, heard: key !== "w",
                     // x's plays are 3 minutes apart, so each is a listen of its own (the song is 100 s long).
                     playedAt: key === "x" ? at(10 + j * 3) : at(1000 + i * 100),
                 })),
@@ -123,6 +124,10 @@ describe("the page is full", () => {
     it("holds as many artists as asked for when that many were listened to, however often one was", async () => {
         // The newest nine plays are all the busy artist's.
         expect(await artistsAsked(3)).toEqual([`${P} x`, `${P} y`, `${P} z`]);
+    });
+
+    it("counts a play that predates the heard flag as a listen", async () => {
+        expect(await artistsAsked(4)).toEqual([`${P} x`, `${P} y`, `${P} z`, `${P} w`]);
     });
 
     it("keeps the most recent listen first and stops at the limit", async () => {

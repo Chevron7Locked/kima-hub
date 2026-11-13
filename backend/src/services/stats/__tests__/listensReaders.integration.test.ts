@@ -243,7 +243,7 @@ describe("artists of recent listens", () => {
         expect((await recentListenArtists(B, { take: 10 })).map((r) => r.artistId)).toEqual([id("art_p"), id("art_q")]);
     });
 
-    it("refuses an alias-free where it cannot read: a take that is not a whole number", async () => {
+    it("refuses a take that is not a whole number", async () => {
         await expect(recentListenArtists(A, { take: 1.5 })).rejects.toThrow();
     });
 });

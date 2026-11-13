@@ -18,7 +18,7 @@
  * Every question is scoped to one listener, except `albumsPlayedAtLeast`, which
  * asks of albums whoever played them. Which songs count is the caller's rule
  * (the playable-song rule, usually), passed in or composed in its own SQL.
- * Plays are read only here: no other module queries the Play table.
+ * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  */
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
