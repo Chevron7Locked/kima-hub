@@ -7,8 +7,15 @@ import { encryptField } from "../../utils/encryption";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { lidarrService } from "../../services/lidarr";
 
+/** Write the Lidarr fields on the settings row, then make the cache and the Lidarr client read them again. */
+async function writeLidarrSettings(data: Record<string, unknown>): Promise<void> {
+    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
+    invalidateSystemSettingsCache();
+    lidarrService.reinitialize();
+}
+
 export async function useLidarr(url: string, extra: Record<string, unknown> = {}): Promise<void> {
-    const data = {
+    await writeLidarrSettings({
         lidarrEnabled: true,
         lidarrUrl: url,
         lidarrApiKey: encryptField("recorded-scenario"),
@@ -16,10 +23,7 @@ export async function useLidarr(url: string, extra: Record<string, unknown> = {}
         lidarrMetadataProfileId: 1,
         lidarrRemoveJunk: true,
         ...extra,
-    };
-    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
-    invalidateSystemSettingsCache();
-    lidarrService.reinitialize();
+    });
 }
 
 /**
@@ -28,8 +32,5 @@ export async function useLidarr(url: string, extra: Record<string, unknown> = {}
  * one is configured must say so, or it passes and fails with the order the files happened to run in.
  */
 export async function useNoLidarr(): Promise<void> {
-    const data = { lidarrEnabled: false, lidarrUrl: null, lidarrApiKey: null };
-    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
-    invalidateSystemSettingsCache();
-    lidarrService.reinitialize();
+    await writeLidarrSettings({ lidarrEnabled: false, lidarrUrl: null, lidarrApiKey: null });
 }
