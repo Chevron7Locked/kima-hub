@@ -1,129 +1,134 @@
 /**
  * A download notifies once per album: a job is silent when another job for the
  * same artist and album already notified, checked over the user's recent jobs.
- * A failed job notifies whatever its error says.
+ * A failed job notifies whatever its error says. Jobs are real rows.
  */
 
 import { prisma } from "../../utils/db";
 import { notificationPolicyService } from "../notificationPolicyService";
 
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        downloadJob: {
-            findUnique: jest.fn(),
-            findMany: jest.fn(),
-        },
-    },
-}));
+const P = "zz-notifPolicy-";
+const USER = `${P}u1`;
+const OTHER_USER = `${P}u2`;
+const JOB = `${P}job`;
 
-function makeJob(overrides: Record<string, any> = {}) {
-    return {
-        id: "job-1",
-        userId: "user-1",
-        status: "completed",
-        error: null,
-        metadata: { artistName: "Boards of Canada", albumTitle: "Geogaddi" },
-        ...overrides,
-    };
+const BOC = { artistName: "Boards of Canada", albumTitle: "Geogaddi" };
+
+async function wipe() {
+    await prisma.downloadJob.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.user.deleteMany({ where: { id: { in: [USER, OTHER_USER] } } });
 }
 
+/** A download job of USER, the one being judged unless another id is given. */
+function seedJob(overrides: Record<string, unknown> = {}) {
+    return prisma.downloadJob.create({
+        data: {
+            id: JOB,
+            userId: USER,
+            subject: "Geogaddi",
+            type: "album",
+            status: "completed",
+            error: null,
+            metadata: BOC,
+            ...overrides,
+        } as never,
+    });
+}
+const evaluate = (eventType: "complete" | "failed" | "retry" | "cancel" = "complete") =>
+    notificationPolicyService.evaluateNotification(JOB, eventType);
+
+beforeAll(wipe);
+afterAll(wipe);
+beforeEach(async () => {
+    await wipe();
+    await prisma.user.createMany({
+        data: [
+            { id: USER, username: USER, passwordHash: "x" },
+            { id: OTHER_USER, username: OTHER_USER, passwordHash: "x" },
+        ],
+    });
+});
+
 describe("notificationPolicyService.hasAlreadyNotified (via evaluateNotification)", () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
-
-    it("scans only id+metadata, bounded and ordered by completedAt desc with nulls last", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob());
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([]);
-
-        await notificationPolicyService.evaluateNotification("job-1", "complete");
-
-        expect(prisma.downloadJob.findMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: {
-                    id: { not: "job-1" },
-                    userId: "user-1",
-                    status: { in: ["completed", "failed", "exhausted"] },
-                },
-                select: { id: true, metadata: true },
-                // Regression pin: a bare "desc" sorts NULLS FIRST in Postgres,
-                // which would let legacy null-completedAt rows crowd out real
-                // dated ones inside the bounded window.
-                orderBy: { completedAt: { sort: "desc", nulls: "last" } },
-                take: 100,
-            })
-        );
-    });
-
     it("suppresses the notification when a recent terminal job for the same artist+album already notified", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob());
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
-            {
-                id: "job-0",
-                metadata: {
-                    artistName: "Boards of Canada",
-                    albumTitle: "Geogaddi",
-                    notificationSent: true,
-                },
-            },
-        ]);
+        await seedJob();
+        await seedJob({ id: `${P}job-0`, metadata: { ...BOC, notificationSent: true }, completedAt: new Date() });
 
-        const decision = await notificationPolicyService.evaluateNotification(
-            "job-1",
-            "complete"
-        );
-
-        expect(decision).toEqual({
+        expect(await evaluate()).toEqual({
             shouldNotify: false,
             reason: "Another job for same album already sent notification",
         });
     });
 
     it("takes one album spelled with another apostrophe or accent for the same album", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(
-            makeJob({ metadata: { artistName: "Sigur Rós", albumTitle: "Ágætis byrjun" } }),
-        );
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
-            { id: "job-0", metadata: { artistName: "Sigur Ros", albumTitle: "Agaetis Byrjun", notificationSent: true } },
-        ]);
-        expect((await notificationPolicyService.evaluateNotification("job-1", "complete")).shouldNotify).toBe(false);
+        await seedJob({ metadata: { artistName: "Sigur Rós", albumTitle: "Ágætis byrjun" } });
+        await seedJob({
+            id: `${P}job-0`,
+            metadata: { artistName: "Sigur Ros", albumTitle: "Agaetis Byrjun", notificationSent: true },
+            completedAt: new Date(),
+        });
+
+        expect((await evaluate()).shouldNotify).toBe(false);
     });
 
-    it("finds a matching job anywhere in the returned window", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob());
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
-            {
-                id: "job-legacy",
-                metadata: { artistName: "Unrelated Artist", albumTitle: "Unrelated Album" },
-            },
-            {
-                id: "job-recent",
-                metadata: {
-                    artistName: "Boards of Canada",
-                    albumTitle: "Geogaddi",
-                    notificationSent: true,
-                },
-            },
-        ]);
+    it("finds a matching job anywhere in the window", async () => {
+        await seedJob();
+        await seedJob({
+            id: `${P}job-legacy`,
+            metadata: { artistName: "Unrelated Artist", albumTitle: "Unrelated Album" },
+            completedAt: new Date(Date.now() - 1000),
+        });
+        await seedJob({
+            id: `${P}job-recent`,
+            metadata: { ...BOC, notificationSent: true },
+            completedAt: new Date(Date.now() - 60_000),
+        });
 
-        const decision = await notificationPolicyService.evaluateNotification(
-            "job-1",
-            "complete"
-        );
-
-        expect(decision.shouldNotify).toBe(false);
+        expect((await evaluate()).shouldNotify).toBe(false);
     });
 
     it("notifies when no other terminal job for the same artist+album sent a notification", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob());
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([]);
+        await seedJob();
+        await seedJob({ id: `${P}job-0`, metadata: BOC, completedAt: new Date() }); // same album, never notified
 
-        const decision = await notificationPolicyService.evaluateNotification(
-            "job-1",
-            "complete"
-        );
+        expect((await evaluate()).shouldNotify).toBe(true);
+    });
 
-        expect(decision.shouldNotify).toBe(true);
+    it("is not silenced by another person's notification, or by a job still running", async () => {
+        await seedJob();
+        await seedJob({ id: `${P}job-theirs`, userId: OTHER_USER, metadata: { ...BOC, notificationSent: true }, completedAt: new Date() });
+        await seedJob({ id: `${P}job-busy`, status: "processing", metadata: { ...BOC, notificationSent: true } });
+
+        expect((await evaluate()).shouldNotify).toBe(true);
+    });
+
+    it("looks at the 100 most recent jobs, so an older match is out of reach", async () => {
+        await seedJob();
+        const now = Date.now();
+        await seedJob({ id: `${P}job-old`, metadata: { ...BOC, notificationSent: true }, completedAt: new Date(now - 10_000_000) });
+        await prisma.downloadJob.createMany({
+            data: Array.from({ length: 100 }, (_, i) => ({
+                id: `${P}fill-${i}`, userId: USER, subject: "x", type: "album", status: "completed",
+                metadata: { artistName: `Other ${i}`, albumTitle: `Album ${i}` }, completedAt: new Date(now - i * 1000),
+            })),
+        });
+
+        expect((await evaluate()).shouldNotify).toBe(true);
+    });
+
+    it("lets jobs with no completion time fall behind dated ones, so they cannot crowd a real match out of the window", async () => {
+        // A bare "desc" sorts NULLS FIRST in Postgres, which would let legacy null-completedAt rows
+        // fill the window and hide the dated match.
+        await seedJob();
+        await seedJob({ id: `${P}job-dated`, metadata: { ...BOC, notificationSent: true }, completedAt: new Date() });
+        await prisma.downloadJob.createMany({
+            data: Array.from({ length: 100 }, (_, i) => ({
+                id: `${P}legacy-${i}`, userId: USER, subject: "x", type: "album", status: "completed",
+                metadata: { artistName: `Other ${i}`, albumTitle: `Album ${i}` }, completedAt: null,
+            })),
+        });
+
+        expect((await evaluate()).shouldNotify).toBe(false);
     });
 });
 
@@ -133,20 +138,15 @@ describe("failed downloads", () => {
         "Lidarr's music folder /music has no default profiles. Set them in Lidarr, or choose them in Kima's Lidarr settings",
         "something nobody listed",
     ])("notifies for %p", async (error) => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob({ status: "failed", error }));
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([]);
+        await seedJob({ status: "failed", error });
 
-        const decision = await notificationPolicyService.evaluateNotification("job-1", "failed");
-
-        expect(decision).toMatchObject({ shouldNotify: true, notificationType: "download_failed" });
+        expect(await evaluate("failed")).toMatchObject({ shouldNotify: true, notificationType: "download_failed" });
     });
 
     it("stays silent for a Discover job", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(
-            makeJob({ status: "failed", error: "x", metadata: { downloadType: "discovery" } })
-        );
+        await seedJob({ status: "failed", error: "x", metadata: { downloadType: "discovery" } });
 
-        expect((await notificationPolicyService.evaluateNotification("job-1", "failed")).shouldNotify).toBe(false);
+        expect((await evaluate("failed")).shouldNotify).toBe(false);
     });
 
     it.each(["complete", "failed"] as const)("stays silent for a pending song's retry, which the user asked for (%s)", async (event) => {
@@ -162,10 +162,12 @@ describe("failed downloads", () => {
     });
 
     it("stays silent for a cancel, the user having asked for it", async () => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob({ status: "failed", error: "Cancelled by user" }));
+        await seedJob({ status: "failed", error: "Cancelled by user" });
 
-        const decision = await notificationPolicyService.evaluateNotification("job-1", "cancel");
+        expect((await evaluate("cancel")).shouldNotify).toBe(false);
+    });
 
-        expect(decision.shouldNotify).toBe(false);
+    it("says nothing for a job that is not there", async () => {
+        expect(await evaluate("failed")).toEqual({ shouldNotify: false, reason: "Job not found" });
     });
 });
