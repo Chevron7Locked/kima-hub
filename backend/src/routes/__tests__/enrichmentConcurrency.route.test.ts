@@ -6,9 +6,6 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: any) => next(),
     requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../workers/unifiedEnrichment", () => ({
     getEnrichmentProgress: jest.fn(),
     triggerEnrichmentNow: jest.fn(),

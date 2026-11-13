@@ -160,6 +160,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
     });
 
     it("fails the album's download job through the download-job module when acquiring it throws", async () => {
+        expectLog("error");
         await seed(ONE);
         mockAcquireAlbum.mockRejectedValue(new Error("lidarr exploded"));
         mockCheckBatchCompletion.mockResolvedValue(undefined);

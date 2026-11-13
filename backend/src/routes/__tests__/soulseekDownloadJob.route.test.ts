@@ -21,6 +21,7 @@ import soulseekRoutes from "../soulseek";
 import { config, useMusicFolder } from "../../config";
 import { eventBus } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const startFolder = config.music.musicPath;
 const ADMIN = "zz-slsk-job-admin";
@@ -77,6 +78,7 @@ it("completes the job once, telling the user and the event bus once each", async
 });
 
 it("fails the job with the reason when the file was not written", async () => {
+    expectLog("error");
     mockDownloadTrack.mockResolvedValue({ success: true });
 
     const res = await download();
@@ -99,6 +101,7 @@ it("fails the job with the peer's error when the download fails", async () => {
 });
 
 it("fails the job when the download throws", async () => {
+    expectLog("error");
     mockDownloadTrack.mockRejectedValue(new Error("connection reset"));
 
     await download();

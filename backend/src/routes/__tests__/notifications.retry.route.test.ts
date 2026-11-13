@@ -6,9 +6,6 @@
  * Real database and router; Soulseek, the download manager and the import are stood in for.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuth: (req: any, _res: any, next: any) => {
@@ -39,6 +36,7 @@ import notificationRoutes from "../notifications";
 import { prisma } from "../../utils/db";
 import { mergeMetadata, whenIdle } from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const USER = "nrt_user";
 const IMPORT = "nrt_import";
@@ -162,6 +160,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
     });
 
     it("fails the new job with the error when Soulseek throws", async () => {
+        expectLog("error");
         const old = await failedJob();
         mockSearchAndDownloadBatch.mockRejectedValue(new Error("slskd unreachable"));
 

@@ -9,6 +9,7 @@ import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { listRoutes, mountRoute, parseRouteKey, type AccessFamily, type Mount, type RouteListing } from "../access";
 import { apiMounts, mountApi } from "../mounts";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const P = "zz-access";
 const MEMBER = `${P}-member`;
@@ -46,6 +47,7 @@ afterAll(async () => {
 
 describe("a mount with no declaration refuses everything", () => {
     it("answers every method with a refusal and never reaches the router", async () => {
+        expectLog("error");
         const reached = jest.fn();
         const router = Router().all("*", (_req, res) => {
             reached();

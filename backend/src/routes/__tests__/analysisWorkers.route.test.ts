@@ -166,6 +166,7 @@ describe('analysis worker sliders', () => {
     });
 
     it('tells whoever reads a slider\'s setting that it changed, through the settings save', async () => {
+        expectLog('warn');
         const heard = jest.fn();
         const signOff = onSystemSettingsChange(['audioAnalyzerWorkers', 'clapWorkers'], heard);
         try {

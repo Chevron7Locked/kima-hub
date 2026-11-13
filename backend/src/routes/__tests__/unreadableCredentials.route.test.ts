@@ -25,6 +25,7 @@ type Server = {
     encrypt: typeof encrypt;
     getSystemSettings: typeof getSystemSettings;
     resolveEncryptedSettings: typeof import("../../utils/encryptedFields").resolveEncryptedSettings;
+    logger: typeof import("../../utils/logger").logger;
 };
 
 /** This code as a process started with `key` would load it: nothing kept from any earlier one. */
@@ -37,6 +38,7 @@ function restart(key: string | undefined = process.env.SETTINGS_ENCRYPTION_KEY):
                 encrypt: require("../../utils/encryption").encrypt,
                 getSystemSettings: require("../../utils/systemSettings").getSystemSettings,
                 resolveEncryptedSettings: require("../../utils/encryptedFields").resolveEncryptedSettings,
+                logger: require("../../utils/logger").logger,
             };
         });
     } finally {
@@ -135,6 +137,7 @@ describe("a wrong key", () => {
     });
 
     it("keeps a credential through the setup wizard's blank key and its soulseek-off step", async () => {
+        expectLog("warn");
         const stored = await storedCredentials();
         const wizard = (step: string, body: object) =>
             request(app()).post(`/onboarding/${step}`).set("Authorization", asAdmin()).send(body);
@@ -187,11 +190,16 @@ describe("a readable credential", () => {
 describe("the notice to admins", () => {
     const notices = () =>
         prisma.notification.findMany({ where: { userId: ADMIN, cleared: false }, orderBy: { title: "asc" } });
+    // The restarted copy has a logger of its own; the unreadable fields are logged through it.
+    const restartExpectingWarnings = (): Server => {
+        const server = restart();
+        expectLog("warn", server.logger);
+        return server;
+    };
     const row = async () => prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } });
 
     it("comes once per field per process, and says what to do without saying anything was cleared", async () => {
-        expectLog("warn");
-        const server = restart();
+        const server = restartExpectingWarnings();
 
         await server.resolveEncryptedSettings(await row(), () => []);
         await server.resolveEncryptedSettings(await row(), () => []);
@@ -205,19 +213,17 @@ describe("the notice to admins", () => {
     });
 
     it("comes back after a restart, as one row per field", async () => {
-        expectLog("warn");
-        await restart().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
         await prisma.notification.updateMany({ where: { userId: ADMIN }, data: { cleared: true } });
 
-        await restart().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
 
         expect(await notices()).toHaveLength(FIELDS.length);
         expect(await prisma.notification.count({ where: { userId: ADMIN } })).toBe(FIELDS.length);
     });
 
     it("goes away once the right key is back", async () => {
-        expectLog("warn");
-        await restart().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
         expect(await notices()).toHaveLength(FIELDS.length);
 
         await restart(RIGHT_KEY).resolveEncryptedSettings(await row(), () => []);
@@ -226,8 +232,7 @@ describe("the notice to admins", () => {
     });
 
     it("goes away when a new value replaces the unreadable one", async () => {
-        expectLog("warn");
-        const server = restart();
+        const server = restartExpectingWarnings();
         await server.resolveEncryptedSettings(await row(), () => []);
 
         await store({ fanartApiKey: encrypt("a fresh key") });

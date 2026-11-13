@@ -19,8 +19,11 @@ afterEach(() => {
     for (const spy of spies.splice(0)) spy.mockRestore();
 });
 
-export function expectLog(level: Level): jest.SpyInstance {
-    const spy = jest.spyOn(logger, level).mockImplementation(() => {});
+/**
+ * `on` is only for code loaded in `jest.isolateModules`, which has a logger of its own: pass that copy's logger.
+ */
+export function expectLog(level: Level, on: Pick<typeof logger, Level> = logger): jest.SpyInstance {
+    const spy = jest.spyOn(on, level).mockImplementation(() => {});
     spies.push(spy);
     return spy;
 }

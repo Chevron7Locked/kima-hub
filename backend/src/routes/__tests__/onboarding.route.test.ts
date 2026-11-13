@@ -208,6 +208,7 @@ describe("a saved step reaches whatever holds the setting", () => {
     afterAll(() => soulseekService.disconnect());
 
     it("Lidarr is reloaded by its own step, not by the last one", async () => {
+        expectLog("warn");
         await request(app).post("/onboarding/lidarr").set(asAdmin()).send({ url: CLOSED, apiKey: "k", enabled: true }).expect(200);
 
         expect(reload.lidarr).toHaveBeenCalledTimes(1);
@@ -215,6 +216,7 @@ describe("a saved step reaches whatever holds the setting", () => {
     });
 
     it("Audiobookshelf is reloaded by its own step", async () => {
+        expectLog("warn");
         await request(app).post("/onboarding/audiobookshelf").set(asAdmin()).send({ url: CLOSED, apiKey: "k", enabled: true }).expect(200);
 
         expect(reload.audiobookshelf).toHaveBeenCalledTimes(1);
@@ -229,6 +231,8 @@ describe("a saved step reaches whatever holds the setting", () => {
     });
 
     it("a new Soulseek account reconnects once, not twice", async () => {
+        expectLog("error");
+        expectLog("warn");
         const res = await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
 
         expect(reconnect).toHaveBeenCalledTimes(1);
@@ -247,6 +251,7 @@ describe("a saved step reaches whatever holds the setting", () => {
     });
 
     it("the same Soulseek account sent again is tried again", async () => {
+        expectLog("warn");
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
         reconnect.mockClear();
 
@@ -269,6 +274,7 @@ describe("a saved step reaches whatever holds the setting", () => {
     });
 
     it("Soulseek turned off clears the account", async () => {
+        expectLog("warn");
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
 
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ enabled: false }).expect(200);

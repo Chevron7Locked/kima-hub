@@ -5,9 +5,6 @@
  */
 const mockConfigure = jest.fn();
 jest.mock("../../services/lidarrWebhookSetup", () => ({ configureLidarrWebhook: (...a: unknown[]) => mockConfigure(...a) }));
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 
 import express from "express";
 import request from "supertest";
@@ -19,6 +16,7 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const ADMIN = "zz-settings-webhook-admin";
 const URL_A = "http://lidarr-a.test:8686";
@@ -84,6 +82,7 @@ it("turning Lidarr back on sets the webhook up, and turning it off does not", as
 });
 
 it("a failed webhook setup does not fail the save", async () => {
+    expectLog("error");
     mockConfigure.mockRejectedValueOnce(new Error("lidarr is down"));
 
     await save({ lidarrUrl: URL_B });
