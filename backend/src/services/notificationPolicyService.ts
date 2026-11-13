@@ -28,16 +28,21 @@ class NotificationPolicyService {
      * Evaluate whether a notification should be sent for a download job.
      *
      * @param jobId - The download job ID
-     * @param eventType - The type of event (complete, failed, retry)
+     * @param eventType - The type of event (complete, failed, retry, cancel)
      * @returns Decision on whether to send notification
      */
     async evaluateNotification(
         jobId: string,
-        eventType: "complete" | "failed" | "retry"
+        eventType: "complete" | "failed" | "retry" | "cancel"
     ): Promise<NotificationDecision> {
         logger.debug(
             `[NOTIFICATION-POLICY] Evaluating: ${jobId} (${eventType})`
         );
+
+        // The person who cancelled a download knows it ended.
+        if (eventType === "cancel") {
+            return { shouldNotify: false, reason: "Cancelled by the user" };
+        }
 
         // Fetch job with current state
         const job = await prisma.downloadJob.findUnique({

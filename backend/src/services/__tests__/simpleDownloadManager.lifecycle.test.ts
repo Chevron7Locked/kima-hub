@@ -1,8 +1,8 @@
 /**
- * Job state on the real test database: a job fails once however many paths
- * reach it, a parked download keeps its job waiting and tells the user once,
- * metadata writes merge instead of overwriting, and a job that never started
- * fails after ten minutes unless it is held for Lidarr.
+ * Job state on the real test database: a parked download keeps its job waiting
+ * and tells the user once, and a job that never started fails after ten minutes
+ * unless it is held for Lidarr. Settling a job once is the download-jobs
+ * module's own test (downloads/__tests__/jobs.test.ts).
  */
 
 import { prisma } from "../../utils/db";
@@ -40,25 +40,6 @@ afterEach(async () => {
 afterAll(async () => {
     await prisma.user.deleteMany({ where: { id: USER } });
     await closeEngineConnections();
-});
-
-it("fails a job once when two paths reach it, and tells the user once", async () => {
-    const j = await job("sdm_life_fail");
-
-    expect(await simpleDownloadManager.failJobs([j], "Lidarr removed the download without importing it")).toBe(1);
-    expect(await simpleDownloadManager.failJobs([j], "Download never started - timed out")).toBe(0);
-
-    const row = await prisma.downloadJob.findUniqueOrThrow({ where: { id: j.id } });
-    expect(row.status).toBe("failed");
-    expect(row.error).toBe("Lidarr removed the download without importing it");
-    expect((row.metadata as any).albumTitle).toBe("Guess Who’s a Mess");
-    expect(await notices("download_failed")).toBe(1);
-});
-
-it("never fails a job that already completed", async () => {
-    const j = await job("sdm_life_done", { status: "completed" });
-    expect(await simpleDownloadManager.failJobs([j], "late failure")).toBe(0);
-    expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: j.id } })).status).toBe("completed");
 });
 
 it("keeps a parked download's job waiting and says so once", async () => {

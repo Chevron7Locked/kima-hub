@@ -148,4 +148,12 @@ describe("failed downloads", () => {
 
         expect((await notificationPolicyService.evaluateNotification("job-1", "failed")).shouldNotify).toBe(false);
     });
+
+    it("stays silent for a cancel, the user having asked for it", async () => {
+        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(makeJob({ status: "failed", error: "Cancelled by user" }));
+
+        const decision = await notificationPolicyService.evaluateNotification("job-1", "cancel");
+
+        expect(decision.shouldNotify).toBe(false);
+    });
 });

@@ -1,7 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { requestScan } from "../workers/scanRequest";
-import { simpleDownloadManager } from "../services/simpleDownloadManager";
+import * as downloadJobs from "../services/downloads/jobs";
 import { artistIdentityKey } from "../services/artistIdentity";
 import { editionlessKey } from "../services/albumIdentity";
 
@@ -167,7 +167,7 @@ class QueueCleanerService {
                 (!!meta.artistName && !!meta.albumTitle && owned.has(`${artistKey(meta.artistName)}|${editionlessKey(meta.albumTitle)}`))
             );
         });
-        const reconciled = await simpleDownloadManager.completeJobs(found);
+        const reconciled = (await downloadJobs.complete(found)).length;
         if (reconciled > 0) {
             logger.debug(`[LOCAL-RECONCILE] ${reconciled} job(s) found in the library`);
         }
