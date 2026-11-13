@@ -2,7 +2,7 @@
  * enrichSingleTrack identifies a recording in this order: the file's recording id tag, AcoustID by the sound, the album's
  * MusicBrainz tracklist (the album row's own, else the one AcoustID lists), the ISRC, then the name search; the
  * fingerprint is stored even on a no-match, and every MusicBrainz candidate must agree it is this track.
- * The identification services are mocked.
+ * The identification services are mocked; the song, its album and the stage record are real rows.
  */
 
 // ── Mocks ───────────────────────────────────────────────────────────
@@ -138,42 +138,6 @@ jest.mock("../audioCompletionSubscriber", () => ({
     resumeVibeQueuing: jest.fn(),
 }));
 
-const mockTrackFindUnique = jest.fn();
-const mockTrackUpdate = jest.fn().mockResolvedValue({});
-const mockAlbumUpdate = jest.fn().mockResolvedValue({});
-const mockExecuteRawUnsafe = jest.fn().mockResolvedValue(1);
-const mockQueryRawUnsafe = jest.fn().mockResolvedValue([]);
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        artist: {
-            findMany: jest.fn().mockResolvedValue([]),
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-        },
-        track: {
-            findUnique: (...args: unknown[]) => mockTrackFindUnique(...args),
-            findMany: jest.fn().mockResolvedValue([]),
-            update: (...args: unknown[]) => mockTrackUpdate(...args),
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-            count: jest.fn().mockResolvedValue(0),
-        },
-        album: {
-            update: (...args: unknown[]) => mockAlbumUpdate(...args),
-        },
-        $queryRaw: jest.fn().mockResolvedValue([]),
-        $executeRaw: jest.fn().mockResolvedValue(0),
-        // Source pause reads and stage-record writes (SourceAttempt / TrackStage).
-        $queryRawUnsafe: (...args: unknown[]) => mockQueryRawUnsafe(...args),
-        $executeRawUnsafe: (...args: unknown[]) => mockExecuteRawUnsafe(...args),
-        // A stage-record move runs in one transaction; its statements land on the same spies.
-        $transaction: async (run: (tx: unknown) => Promise<unknown>) =>
-            run({
-                $queryRawUnsafe: (...args: unknown[]) => mockQueryRawUnsafe(...args),
-                $executeRawUnsafe: (...args: unknown[]) => mockExecuteRawUnsafe(...args),
-            }),
-    },
-}));
-
 jest.mock("../../utils/logger", () => ({
     logger: {
         debug: jest.fn(),
@@ -188,8 +152,12 @@ jest.mock("../../utils/logger", () => ({
 import { enrichSingleTrack } from "../unifiedEnrichment";
 import { acoustidService } from "../../services/acoustidService";
 import { sourcePauseController } from "../../services/sourcePauseController";
+import { prisma } from "../../utils/db";
+import { putStage, deleteSeededRows } from "../../__tests__/helpers/trackStage";
 
-const TRACK_ID = "track-1";
+const P = "zz-aco";
+const TRACK_ID = `${P}_t1`;
+const ALBUM_ID = `${P}_alb`;
 const RECORDING = "rec-aaaa-bbbb";
 const MB_TRACK = "mb-track-1";
 const FINGERPRINT = "AQAA0pMiRZkQ";
@@ -198,45 +166,84 @@ const FINGERPRINT = "AQAA0pMiRZkQ";
 const RG_MBID = "48117b90-a16e-34ca-a514-19c702df1158";
 const REL_MBID = "d073287b-d1bd-4f11-a933-a4386f8cf701";
 
-function seedTrack(
-    overrides?: { isrc?: string | null; isrcSource?: string | null; rgMbid?: string | null },
-) {
-    mockTrackFindUnique.mockResolvedValue({
-        id: TRACK_ID,
-        title: "Cheerleader Effect",
-        filePath: "/music/artist/album/02 - Cheerleader Effect.mp3",
-        duration: 218,
-        isrc: overrides?.isrc ?? null,
-        isrcSource: overrides?.isrcSource ?? (overrides?.isrc ? "id3" : null),
-        acoustidFingerprint: null,
-        album: {
-            id: "album-1",
-            title: "Leather Teeth",
-            artist: { name: "Carpenter Brut" },
-            // A placeholder id is locally made up — with it the chain step
-            // is skipped and the per-track ladder runs.
-            rgMbid: overrides?.rgMbid ?? "temp-1693-abc",
-            year: null,
-            label: null,
-            genres: null,
+interface SongSpec {
+    title: string;
+    artist: string;
+    albumTitle: string;
+    filePath: string;
+    duration: number;
+    isrc?: string | null;
+    isrcSource?: string | null;
+    fingerprint?: string | null;
+    rgMbid: string;
+    rgMbidSource?: string | null;
+}
+
+/** One library song on its own album and artist, replacing whatever an earlier seed left. */
+async function seedSong(spec: SongSpec) {
+    await wipe();
+    await prisma.artist.create({ data: { id: `${P}_art`, name: spec.artist, identityKey: `${P}_a` } });
+    await prisma.album.create({
+        data: {
+            id: ALBUM_ID,
+            rgMbid: spec.rgMbid,
+            rgMbidSource: spec.rgMbidSource ?? null,
+            artistId: `${P}_art`,
+            title: spec.albumTitle,
+            primaryType: "Album",
+        },
+    });
+    await prisma.track.create({
+        data: {
+            id: TRACK_ID,
+            albumId: ALBUM_ID,
+            title: spec.title,
+            trackNo: 1,
+            filePath: spec.filePath,
+            duration: spec.duration,
+            fileModified: new Date(),
+            fileSize: 1000,
+            isrc: spec.isrc ?? null,
+            isrcSource: spec.isrcSource ?? null,
+            acoustidFingerprint: spec.fingerprint ?? null,
         },
     });
 }
 
-/** True when the TrackStage row was written `done` by `source`. */
-function stageWrittenDone(source: string): boolean {
-    return mockExecuteRawUnsafe.mock.calls.some(
-        (call) =>
-            String(call[0]).includes(`INSERT INTO "TrackStage"`) &&
-            String(call[0]).includes("'done'") &&
-            call.includes(source),
-    );
+async function seedTrack(
+    overrides?: { isrc?: string | null; isrcSource?: string | null; rgMbid?: string | null },
+) {
+    await seedSong({
+        title: "Cheerleader Effect",
+        artist: "Carpenter Brut",
+        albumTitle: "Leather Teeth",
+        filePath: `/music/${P}/02 - Cheerleader Effect.mp3`,
+        duration: 218,
+        isrc: overrides?.isrc ?? null,
+        isrcSource: overrides?.isrcSource ?? (overrides?.isrc ? "id3" : null),
+        // A placeholder id is locally made up: with it the chain step is skipped and the per-track ladder runs.
+        rgMbid: overrides?.rgMbid ?? "temp-1693-abc",
+    });
 }
 
-beforeEach(() => {
+const wipe = () => deleteSeededRows(P);
+const trackRow = () => prisma.track.findUniqueOrThrow({ where: { id: TRACK_ID } });
+const albumRow = () => prisma.album.findUniqueOrThrow({ where: { id: ALBUM_ID } });
+const recordingStage = () =>
+    prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: TRACK_ID, stage: "recording" } } });
+
+/** True when the song's recording question holds a `done` answer given by `source`. */
+async function stageWrittenDone(source: string): Promise<boolean> {
+    const stage = await recordingStage();
+    return stage?.status === "done" && stage.source === source;
+}
+
+beforeAll(wipe);
+afterAll(wipe);
+
+beforeEach(async () => {
     jest.clearAllMocks();
     mockGetFeatures.mockResolvedValue({ fpcalc: true });
-    mockQueryRawUnsafe.mockResolvedValue([]);
     mockReadTags.mockResolvedValue({
         recordingMbid: null,
         fingerprint: null,
@@ -251,7 +258,7 @@ beforeEach(() => {
     mockGetRecordingIsrc.mockResolvedValue(noData);
     mockGetRecordingGenres.mockResolvedValue(noData);
     mockLookupRecordingsByIsrc.mockResolvedValue(noData);
-    seedTrack();
+    await seedTrack();
 });
 
 describe("enrichSingleTrack: the identification order", () => {
@@ -276,12 +283,8 @@ describe("enrichSingleTrack: the identification order", () => {
             FINGERPRINT,
         );
         // The answer lands on Track and on the stage record.
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({ recordingMbid: RECORDING }),
-            }),
-        );
-        expect(stageWrittenDone("file_tag")).toBe(true);
+        expect((await trackRow()).recordingMbid).toBe(RECORDING);
+        expect(await stageWrittenDone("file_tag")).toBe(true);
     });
 
     it("asks AcoustID before the name search, which gets the track's title, artist and length", async () => {
@@ -310,10 +313,8 @@ describe("enrichSingleTrack: the identification order", () => {
         expect(result).toBe("identified");
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
         expect(mockLookupRecordingsByIsrc).not.toHaveBeenCalled();
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: MB_TRACK }) }),
-        );
-        expect(stageWrittenDone("acoustid")).toBe(true);
+        expect((await trackRow()).recordingMbid).toBe(MB_TRACK);
+        expect(await stageWrittenDone("acoustid")).toBe(true);
     });
 
     it("stores the fingerprint and answers the question as Absent when nothing matches", async () => {
@@ -327,13 +328,13 @@ describe("enrichSingleTrack: the identification order", () => {
         // Nothing matched — an answer, not a failure: the record settles
         // `done` on the no-match evidence, and the Track row is not written.
         expect(result).toBe("no_match");
-        expect(mockTrackUpdate).not.toHaveBeenCalled();
+        expect((await trackRow()).recordingMbid).toBeNull();
         expect(mockPersistAcoustidFingerprint).toHaveBeenCalledWith(TRACK_ID, FINGERPRINT);
-        expect(stageWrittenDone("acoustid")).toBe(true);
+        expect(await stageWrittenDone("acoustid")).toBe(true);
     });
 
     it("answers from the album's tracklist before the name search", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             answeredWith({
                 releaseGroupMbid: RG_MBID,
@@ -370,24 +371,18 @@ describe("enrichSingleTrack: the identification order", () => {
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
         // The ISRC and the genres come from the tracklist row; the album row gets
         // its year, label and genres filled from the same fetch.
-        expect(mockTrackUpdate).toHaveBeenCalledWith({
-            where: { id: TRACK_ID },
-            data: { isrc: "GBAYE0601498", isrcSource: "musicbrainz" },
-        });
+        expect(await trackRow()).toMatchObject({ isrc: "GBAYE0601498", isrcSource: "musicbrainz" });
         expect(mockPopulateTrackGenres).toHaveBeenCalledWith(TRACK_ID, ["trip-hop"]);
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "album-1" },
-            data: {
-                year: 1997,
-                label: "Some Labels",
-                genres: ["electronic", "ambient"],
-            },
+        expect(await albumRow()).toMatchObject({
+            year: 1997,
+            label: "Some Labels",
+            genres: ["electronic", "ambient"],
         });
-        expect(stageWrittenDone("musicbrainz")).toBe(true);
+        expect(await stageWrittenDone("musicbrainz")).toBe(true);
     });
 
     it("does not take a tracklist entry whose length says it is another version", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             answeredWith({
                 releaseGroupMbid: RG_MBID,
@@ -404,13 +399,11 @@ describe("enrichSingleTrack: the identification order", () => {
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockIdentifyRecording).toHaveBeenCalled();
-        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "radio-edit" }) }),
-        );
+        expect((await trackRow()).recordingMbid).not.toBe("radio-edit");
     });
 
     it("defers without falling through to the search when the tracklist call fails", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue({
             kind: "transient",
             error: { code: "NETWORK", message: "boom", retryable: true, retryAfterMs: 60_000 },
@@ -422,7 +415,7 @@ describe("enrichSingleTrack: the identification order", () => {
         // the MusicBrainz ladder is not asked while the source is down.
         expect(result).toBe("deferred");
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
-        expect(mockTrackUpdate).not.toHaveBeenCalled();
+        expect((await trackRow()).recordingMbid).toBeNull();
     });
 
     it("asks AcoustID even with the fpcalc flag off — the step needs a fingerprint, not the binary", async () => {
@@ -434,19 +427,17 @@ describe("enrichSingleTrack: the identification order", () => {
     });
 
     it("reads the file's recording id before its ISRC", async () => {
-        seedTrack({ isrc: "USRC17607839" });
+        await seedTrack({ isrc: "USRC17607839" });
         mockReadTags.mockResolvedValue({ recordingMbid: RECORDING, fingerprint: null, artists: [], duration: 218 });
 
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockLookupRecordingsByIsrc).not.toHaveBeenCalled();
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: RECORDING }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(RECORDING);
     });
 
     it("takes the ISRC's recording that is this track, not the first one listed", async () => {
-        seedTrack({ isrc: "USRC17607839" });
+        await seedTrack({ isrc: "USRC17607839" });
         mockLookupRecordingsByIsrc.mockResolvedValue(
             answeredWith([
                 { id: "live-2014", title: "Cheerleader Effect (Live 2014)", lengthMs: 240000, artists: ["Carpenter Brut"] },
@@ -458,16 +449,14 @@ describe("enrichSingleTrack: the identification order", () => {
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio" }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe("studio");
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
         // The file's own ISRC is never replaced.
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
     });
 
     it("goes on down the ladder when none of the ISRC's recordings is this track", async () => {
-        seedTrack({ isrc: "USRC17607839" });
+        await seedTrack({ isrc: "USRC17607839" });
         mockLookupRecordingsByIsrc.mockResolvedValue(
             answeredWith([{ id: "other-song", title: "Decode", lengthMs: 218000, artists: ["Paramore"] }]),
         );
@@ -476,13 +465,11 @@ describe("enrichSingleTrack: the identification order", () => {
 
         expect(mockIdentifyRecording).toHaveBeenCalled();
         expect(mockIdentifyTrackByAcoustid).toHaveBeenCalled();
-        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "other-song" }) }),
-        );
+        expect((await trackRow()).recordingMbid).not.toBe("other-song");
     });
 
     it("never sends a code that is not an ISRC", async () => {
-        seedTrack({ isrc: "PMEDIA" });
+        await seedTrack({ isrc: "PMEDIA" });
 
         await enrichSingleTrack(TRACK_ID);
 
@@ -491,7 +478,7 @@ describe("enrichSingleTrack: the identification order", () => {
     });
 
     it("replaces an ISRC MusicBrainz gave for an earlier answer with the new answer's", async () => {
-        seedTrack({ isrc: "GBAYE0601498", isrcSource: "musicbrainz" });
+        await seedTrack({ isrc: "GBAYE0601498", isrcSource: "musicbrainz" });
         mockLookupRecordingsByIsrc.mockResolvedValue(
             answeredWith([{ id: "other-song", title: "Decode", lengthMs: 218000, artists: ["Paramore"] }]),
         );
@@ -500,10 +487,7 @@ describe("enrichSingleTrack: the identification order", () => {
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith({
-            where: { id: TRACK_ID },
-            data: { isrc: "FRX451500123", isrcSource: "musicbrainz" },
-        });
+        expect(await trackRow()).toMatchObject({ isrc: "FRX451500123", isrcSource: "musicbrainz" });
     });
 });
 
@@ -525,7 +509,7 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         });
 
     it("finds an ISRC track in its album's tracklist without looking the ISRC up", async () => {
-        seedTrack({ rgMbid: RG_MBID, isrc: "USRC17607839" });
+        await seedTrack({ rgMbid: RG_MBID, isrc: "USRC17607839" });
         mockGetAlbumCatalogue.mockResolvedValue(
             tracklist([
                 { recordingId: "other", title: "Decode", durationMs: 218000, isrcs: ["USRC17600001"] },
@@ -539,15 +523,13 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         expect(mockLookupRecordingsByIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio" }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe("studio");
     });
 
     it("on a compilation, the row credited to the track's artist wins over a same-titled song", async () => {
         for (const order of [0, 1]) {
             jest.clearAllMocks();
-            seedTrack({ rgMbid: RG_MBID });
+            await seedTrack({ rgMbid: RG_MBID });
             const rows = [
                 { recordingId: "someone-else", title: "Cheerleader Effect", durationMs: 217000, isrcs: [], artists: ["Other Band"] },
                 { recordingId: "ours", title: "Cheerleader Effect", durationMs: 219500, isrcs: [], artists: ["Carpenter Brut"] },
@@ -556,14 +538,12 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
 
             await enrichSingleTrack(TRACK_ID);
 
-            expect(mockTrackUpdate).toHaveBeenCalledWith(
-                expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "ours" }) }),
-            );
+            expect((await trackRow()).recordingMbid).toBe("ours");
         }
     });
 
     it("the album vouches for a credit written another way when one row alone is the track", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             tracklist([
                 { recordingId: "studio", title: "Cheerleader Effect", durationMs: 218400, isrcs: [], artists: ["カーペンター・ブルート"] },
@@ -573,13 +553,11 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio" }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe("studio");
     });
 
     it("two uncredited rows that could both be the track: the album vouches for neither", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockGetAlbumCatalogue.mockResolvedValue(
             tracklist([
                 { recordingId: "first", title: "Cheerleader Effect", durationMs: 217000, isrcs: [], artists: ["Other Band"] },
@@ -591,13 +569,11 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockIdentifyRecording).toHaveBeenCalled();
-        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: expect.stringMatching(/first|second/) }) }),
-        );
+        expect((await trackRow()).recordingMbid ?? "").not.toMatch(/first|second/);
     });
 
     it("an ISRC row that is another recording is not taken; the ISRC lookup comes next", async () => {
-        seedTrack({ rgMbid: RG_MBID, isrc: "USRC17607839" });
+        await seedTrack({ rgMbid: RG_MBID, isrc: "USRC17607839" });
         mockGetAlbumCatalogue.mockResolvedValue(
             tracklist([{ recordingId: "mislabelled", title: "Decode", durationMs: 300000, isrcs: ["USRC17607839"] }]),
         );
@@ -605,13 +581,11 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockLookupRecordingsByIsrc).toHaveBeenCalledWith("USRC17607839");
-        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "mislabelled" }) }),
-        );
+        expect((await trackRow()).recordingMbid).not.toBe("mislabelled");
     });
 
     it("a file's recording tag takes its ISRC and genres from its row in the tracklist", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockReadTags.mockResolvedValue({ recordingMbid: RECORDING, fingerprint: null, artists: [], duration: 218 });
         mockGetAlbumCatalogue.mockResolvedValue(
             tracklist([{ recordingId: RECORDING, title: "Cheerleader Effect", durationMs: 218400, isrcs: ["FRX451500123"] }]),
@@ -622,13 +596,11 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
         expect(result).toBe("identified");
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: RECORDING }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(RECORDING);
     });
 
     it("a file's recording tag still answers when the album's tracklist cannot be fetched", async () => {
-        seedTrack({ rgMbid: RG_MBID });
+        await seedTrack({ rgMbid: RG_MBID });
         mockReadTags.mockResolvedValue({ recordingMbid: RECORDING, fingerprint: null, artists: [], duration: 218 });
         mockGetAlbumCatalogue.mockResolvedValue({
             kind: "transient",
@@ -645,24 +617,20 @@ describe("the album's tracklist answers before any per-track MusicBrainz call", 
 
 describe("AcoustID paused", () => {
     it("the question waits for the pause to end and uses up no retry", async () => {
-        const { sourcePauseController } = await import("../../services/sourcePauseController");
         const until = new Date(Date.now() + 30 * 60_000);
         const pause = jest.spyOn(sourcePauseController, "getPause").mockResolvedValue({
             source: "acoustid", until, code: "RATE_LIMITED", message: null,
         } as any);
+        // The engine has claimed the question twice already.
+        await putStage(TRACK_ID, "recording", "working", { attempt: 2, seedError: false, source: "musicbrainz" });
 
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("deferred");
         expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
-        const writes = mockExecuteRawUnsafe.mock.calls.map((call) => String(call[0]));
-        expect(writes.some((sql) => sql.includes(`INSERT INTO "TrackStage"`) && sql.includes("'RATE_LIMITED'"))).toBe(true);
-        expect(writes.some((sql) => sql.includes("SET status = 'failed'"))).toBe(false);
-        // Parked pending, and the update of an existing record leaves its attempt and failure counts as they were.
-        const parked = writes.find((sql) => sql.includes(`INSERT INTO "TrackStage"`) && sql.includes("'RATE_LIMITED'"))!;
-        const onConflict = parked.slice(parked.indexOf("DO UPDATE"));
-        expect(onConflict).toContain("status = 'pending'");
-        expect(onConflict).not.toMatch(/attempt|failures/);
+        // Parked pending with the cause, and the attempt and failure counts of the record that was there stay as they were.
+        const parked = await recordingStage();
+        expect(parked).toMatchObject({ status: "pending", lastErrorCode: "RATE_LIMITED", attempt: 2, failures: 0 });
         pause.mockRestore();
     });
 });
@@ -694,15 +662,15 @@ describe("AcoustID first, and the album it names", () => {
             })),
         });
     const seedFutureClub = (rgMbid = "temp-1693-abc", rgMbidSource: string | null = null) =>
-        mockTrackFindUnique.mockResolvedValue({
-            id: TRACK_ID,
+        seedSong({
             title: "Future Club",
-            filePath: "Perturbator/Dangerous Days/04 Future Club.mp3",
+            artist: "Perturbator",
+            albumTitle: "Dangerous Days",
+            filePath: "/music/zz-aco/Perturbator/Dangerous Days/04 Future Club.mp3",
             duration: 289,
-            isrc: null,
-            isrcSource: null,
-            acoustidFingerprint: FINGERPRINT,
-            album: { id: "album-dd", title: "Dangerous Days", artist: { name: "Perturbator" }, rgMbid, rgMbidSource, year: null, label: null, genres: null },
+            fingerprint: FINGERPRINT,
+            rgMbid,
+            rgMbidSource,
         });
     const acoustidAnswers = (candidates: string[]) =>
         mockIdentifyTrackByAcoustid.mockResolvedValue(
@@ -710,7 +678,7 @@ describe("AcoustID first, and the album it names", () => {
         );
 
     it("an album still without an id: no tracklist per song, the song pays its own details request", async () => {
-        seedFutureClub();
+        await seedFutureClub();
         acoustidAnswers([FUTURE_CLUB]);
         mockGetRecordingIsrc.mockResolvedValue(answeredWith("TCABW1462862"));
         mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 3 }] }));
@@ -721,12 +689,12 @@ describe("AcoustID first, and the album it names", () => {
         // The album's id is decided once, by the album step's vote, never by one song.
         expect(mockGetAlbumCatalogue).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).toHaveBeenCalledWith(FUTURE_CLUB);
-        expect(mockAlbumUpdate).not.toHaveBeenCalled();
-        expect(stageWrittenDone("acoustid")).toBe(true);
+        expect(await albumRow()).toMatchObject({ year: null, label: null, genres: null });
+        expect(await stageWrittenDone("acoustid")).toBe(true);
     });
 
     it("an album the AcoustID vote named: its tracklist by the row's id gives ISRC and genres", async () => {
-        seedFutureClub(DANGEROUS_DAYS, "acoustid");
+        await seedFutureClub(DANGEROUS_DAYS, "acoustid");
         acoustidAnswers([FUTURE_CLUB]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
 
@@ -737,59 +705,47 @@ describe("AcoustID first, and the album it names", () => {
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
         expect(mockPopulateTrackGenres).toHaveBeenCalledWith(TRACK_ID, ["electronic", "synthwave"]);
-        expect(mockTrackUpdate).toHaveBeenCalledWith({
-            where: { id: TRACK_ID },
-            data: { isrc: "TCABW1462862", isrcSource: "musicbrainz" },
-        });
-        const evidence = mockExecuteRawUnsafe.mock.calls.find((call) => String(call[0]).includes(`INSERT INTO "TrackStage"`) && String(call[0]).includes("'done'"));
-        expect(JSON.stringify(evidence)).toContain("the album's id from the AcoustID vote");
+        expect(await trackRow()).toMatchObject({ isrc: "TCABW1462862", isrcSource: "musicbrainz" });
+        const stage = await recordingStage();
+        expect(stage?.status).toBe("done");
+        expect(JSON.stringify(stage?.evidence)).toContain("the album's id from the AcoustID vote");
     });
 
     it("takes AcoustID's candidate that is on this album's tracklist", async () => {
-        seedFutureClub(DANGEROUS_DAYS, "acoustid");
+        await seedFutureClub(DANGEROUS_DAYS, "acoustid");
         acoustidAnswers(["compilation-recording", FUTURE_CLUB]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(FUTURE_CLUB);
     });
 
     it("the album row's own id wins over AcoustID's albums, and that album is filled", async () => {
-        seedFutureClub(DANGEROUS_DAYS);
+        await seedFutureClub(DANGEROUS_DAYS);
         acoustidAnswers([FUTURE_CLUB]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
 
         await enrichSingleTrack(TRACK_ID);
 
         expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(DANGEROUS_DAYS);
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "album-dd" },
-            data: { year: 2014, label: "Blood Music" },
-        });
+        expect(await albumRow()).toMatchObject({ year: 2014, label: "Blood Music" });
     });
 
     it("the album row's own tracklist fills the album even when AcoustID's recording is not on it", async () => {
-        seedFutureClub(DANGEROUS_DAYS);
+        await seedFutureClub(DANGEROUS_DAYS);
         acoustidAnswers(["remaster-recording"]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: FUTURE_CLUB, title: "Future Club" }]));
         mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [{ name: "synthwave", count: 1 }] }));
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "remaster-recording" }) }),
-        );
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "album-dd" },
-            data: { year: 2014, label: "Blood Music" },
-        });
+        expect((await trackRow()).recordingMbid).toBe("remaster-recording");
+        expect(await albumRow()).toMatchObject({ year: 2014, label: "Blood Music" });
     });
 
     it("an AcoustID pick with only the track's length goes last: the tracklist's name match wins", async () => {
-        seedFutureClub(DANGEROUS_DAYS);
+        await seedFutureClub(DANGEROUS_DAYS);
         mockIdentifyTrackByAcoustid.mockResolvedValue(
             answeredWith({ source: "acoustid", recordingMbid: "studio-not-live", releaseGroups: ACOUSTID_ALBUMS, candidates: ["studio-not-live"], titleAgrees: false }),
         );
@@ -797,12 +753,8 @@ describe("AcoustID first, and the album it names", () => {
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
-        );
-        expect(mockTrackUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio-not-live" }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(FUTURE_CLUB);
+        expect((await trackRow()).recordingMbid).not.toBe("studio-not-live");
     });
 
     it("an AcoustID pick with only the track's length is taken when nothing else names the recording", async () => {
@@ -814,26 +766,24 @@ describe("AcoustID first, and the album it names", () => {
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockIdentifyRecording.mock.invocationCallOrder[0]).toBeLessThan(mockTrackUpdate.mock.invocationCallOrder[0]);
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "length-only" }) }),
-        );
-        expect(stageWrittenDone("acoustid")).toBe(true);
+        expect(mockIdentifyRecording).toHaveBeenCalled();
+        expect((await trackRow()).recordingMbid).toBe("length-only");
+        expect(await stageWrittenDone("acoustid")).toBe(true);
     });
 
     it("the album row is not filled when neither this track's recording nor its name is on the tracklist", async () => {
-        seedFutureClub(DANGEROUS_DAYS);
+        await seedFutureClub(DANGEROUS_DAYS);
         acoustidAnswers(["remaster-recording"]);
         mockGetAlbumCatalogue.mockResolvedValue(dangerousDays([{ recordingId: "other-song", title: "Sentient" }]));
         mockGetRecordingGenres.mockResolvedValue(answeredWith({ genres: [] }));
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockAlbumUpdate).not.toHaveBeenCalled();
+        expect(await albumRow()).toMatchObject({ year: null, label: null, genres: null });
     });
 
     it("a length-only AcoustID pick loses to the file's ISRC", async () => {
-        seedTrack({ isrc: "USRC17607839" });
+        await seedTrack({ isrc: "USRC17607839" });
         mockIdentifyTrackByAcoustid.mockResolvedValue(
             answeredWith({ source: "acoustid", recordingMbid: "length-only", releaseGroups: [], candidates: ["length-only"], titleAgrees: false }),
         );
@@ -843,9 +793,7 @@ describe("AcoustID first, and the album it names", () => {
 
         await enrichSingleTrack(TRACK_ID);
 
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: "studio" }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe("studio");
     });
 
     it("a MusicBrainz failure defers the track instead of taking a length-only AcoustID pick", async () => {
@@ -858,11 +806,11 @@ describe("AcoustID first, and the album it names", () => {
         });
 
         expect(await enrichSingleTrack(TRACK_ID)).toBe("deferred");
-        expect(mockTrackUpdate).not.toHaveBeenCalled();
+        expect((await trackRow()).recordingMbid).toBeNull();
     });
 
     it("a length-only pick on the fetched tracklist takes its ISRC and genres from it", async () => {
-        seedFutureClub(DANGEROUS_DAYS);
+        await seedFutureClub(DANGEROUS_DAYS);
         mockIdentifyTrackByAcoustid.mockResolvedValue(
             answeredWith({ source: "acoustid", recordingMbid: FUTURE_CLUB, releaseGroups: ACOUSTID_ALBUMS, candidates: [FUTURE_CLUB], titleAgrees: false }),
         );
@@ -872,16 +820,11 @@ describe("AcoustID first, and the album it names", () => {
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: FUTURE_CLUB }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(FUTURE_CLUB);
         expect(mockGetRecordingGenres).not.toHaveBeenCalled();
         expect(mockGetRecordingIsrc).not.toHaveBeenCalled();
         // Its recording is on the album row's own tracklist: the album is filled.
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "album-dd" },
-            data: { year: 2014, label: "Blood Music" },
-        });
+        expect(await albumRow()).toMatchObject({ year: 2014, label: "Blood Music" });
     });
 
     it("AcoustID failing does not stop MusicBrainz from answering", async () => {
@@ -894,9 +837,7 @@ describe("AcoustID first, and the album it names", () => {
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("identified");
-        expect(mockTrackUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ data: expect.objectContaining({ recordingMbid: MB_TRACK }) }),
-        );
+        expect((await trackRow()).recordingMbid).toBe(MB_TRACK);
     });
 
     it("AcoustID failing and MusicBrainz knowing nothing: the record waits for AcoustID", async () => {
@@ -909,7 +850,7 @@ describe("AcoustID first, and the album it names", () => {
 
         expect(result).toBe("deferred");
         expect(mockIdentifyRecording).toHaveBeenCalled();
-        expect(mockTrackUpdate).not.toHaveBeenCalled();
+        expect((await trackRow()).recordingMbid).toBeNull();
     });
 });
 
@@ -955,8 +896,8 @@ describe("AcoustID paused: a second question is not asked live either", () => {
             source: "acoustid", until: new Date(Date.now() + 30 * 60_000), code: "RATE_LIMITED", message: null,
         } as any);
         mockReadTags.mockResolvedValue({ recordingMbid: null, fingerprint: FINGERPRINT, artists: [], duration: 218 });
-        seedTrack();
-        mockTrackFindUnique.mockResolvedValue({ ...(await mockTrackFindUnique()), acoustidFingerprint: "STORED-FINGERPRINT" });
+        await seedTrack();
+        await prisma.track.update({ where: { id: TRACK_ID }, data: { acoustidFingerprint: "STORED-FINGERPRINT" } });
         const answer = jest.spyOn(acoustidService, "savedAnswer").mockImplementation(async (_d, fp) => (fp === FINGERPRINT ? null : undefined));
         const has = jest.spyOn(acoustidService, "hasSavedReply").mockImplementation(async (_d, fp) => fp === FINGERPRINT);
 
@@ -971,15 +912,12 @@ describe("AcoustID paused: a second question is not asked live either", () => {
 });
 
 describe("the fingerprint question closed", () => {
-    // Only the question about the fingerprint stage's record is answered; every other raw query finds nothing.
     const fingerprintStageIs = (status: string, retryable: boolean) =>
-        mockQueryRawUnsafe.mockImplementation(async (sql: string) =>
-            String(sql).includes("stage = 'fingerprint'") ? [{ status, retryable }] : [],
-        );
+        putStage(TRACK_ID, "fingerprint", status, { retryable, source: "fpcalc" });
 
     it("a fingerprint stage that failed for good still asks AcoustID with the file's fingerprint tag", async () => {
         mockReadTags.mockResolvedValue({ recordingMbid: null, fingerprint: FINGERPRINT, artists: [], duration: 218 });
-        fingerprintStageIs("failed", false);
+        await fingerprintStageIs("failed", false);
 
         await enrichSingleTrack(TRACK_ID);
 
@@ -987,14 +925,15 @@ describe("the fingerprint question closed", () => {
     });
 
     it("a fingerprint set aside by a person closes the song as no match, not as a permanent failure", async () => {
-        fingerprintStageIs("blocked", true);
+        await fingerprintStageIs("blocked", true);
 
         const result = await enrichSingleTrack(TRACK_ID);
 
         expect(result).toBe("no_match");
         expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
-        expect(stageWrittenDone("acoustid")).toBe(true);
-        expect(JSON.stringify(mockExecuteRawUnsafe.mock.calls)).toContain("not asked");
-        expect(mockExecuteRawUnsafe.mock.calls.some((c) => String(c[0]).includes("'PERMANENT'"))).toBe(false);
+        expect(await stageWrittenDone("acoustid")).toBe(true);
+        const stage = await recordingStage();
+        expect(JSON.stringify(stage?.evidence)).toContain("not asked");
+        expect(stage).toMatchObject({ lastErrorCode: null, failureClass: null });
     });
 });

@@ -1,7 +1,9 @@
 /**
  * The enrichment cycle's controls (stop, pause, resume, re-run), stop
- * persistence and state sync, plus the per-track stage queue. Prisma, Redis,
- * BullMQ and services are mocked; the control flow in unifiedEnrichment.ts is real.
+ * persistence and state sync, plus the per-track stage queue. Real database: the
+ * stage queue, progress counts and mood step read seeded tracks and stage records.
+ * Redis, BullMQ and the network-facing services are mocked; the control flow in
+ * unifiedEnrichment.ts is real.
  */
 
 // ── Mocks ───────────────────────────────────────────────────────────
@@ -136,14 +138,6 @@ jest.mock("../audioCompletionSubscriber", () => ({
     resumeVibeQueuing: jest.fn(),
 }));
 
-// Mock Prisma with defaults that make the cycle do minimal work
-const mockPrismaArtistFindMany = jest.fn().mockResolvedValue([]);
-const mockPrismaArtistUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
-const mockPrismaTrackFindMany = jest.fn().mockResolvedValue([]);
-const mockPrismaTrackUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
-const mockPrismaTrackCount = jest.fn().mockResolvedValue(0);
-const mockQueryRaw = jest.fn();
-
 // The album step before dispatch is not what this tests, and must never reach the network.
 jest.mock("../../services/albumIdentification", () => ({
     ...jest.requireActual("../../services/albumIdentification"),
@@ -153,50 +147,6 @@ jest.mock("../../services/albumIdentification", () => ({
 jest.mock("../../services/acoustidIdentification", () => ({
     ...jest.requireActual("../../services/acoustidIdentification"),
     prefetchAcoustidReplies: jest.fn().mockResolvedValue(0),
-}));
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        artist: {
-            findMany: mockPrismaArtistFindMany,
-            updateMany: mockPrismaArtistUpdateMany,
-            count: jest.fn().mockResolvedValue(0),
-            groupBy: jest.fn().mockResolvedValue([]),
-        },
-        track: {
-            findMany: mockPrismaTrackFindMany,
-            updateMany: mockPrismaTrackUpdateMany,
-            count: mockPrismaTrackCount,
-            groupBy: jest.fn().mockResolvedValue([]),
-        },
-        trackStage: {
-            deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-            count: jest.fn().mockResolvedValue(0),
-        },
-        sourceAttempt: {
-            deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        },
-        podcast: {
-            findMany: jest.fn().mockResolvedValue([]),
-            count: jest.fn().mockResolvedValue(0),
-        },
-        enrichmentFailure: {
-            findMany: jest.fn().mockResolvedValue([]),
-        },
-        notification: {
-            findMany: jest.fn().mockResolvedValue([]),
-        },
-        $queryRaw: mockQueryRaw,
-        $queryRawUnsafe: mockQueryRaw,
-        $executeRaw: jest.fn().mockResolvedValue(0),
-        $executeRawUnsafe: jest.fn().mockResolvedValue(1),
-        // A stage-record move runs in one transaction; its statements land on the same stubs.
-        $transaction: async (run: (tx: unknown) => Promise<unknown>) =>
-            run({
-                $queryRawUnsafe: mockQueryRaw,
-                $executeRawUnsafe: jest.fn().mockResolvedValue(1),
-            }),
-    },
 }));
 
 jest.mock("../../utils/systemSettings", () => ({
@@ -219,6 +169,8 @@ import {
     triggerEnrichmentNow,
     startEnrichmentNow,
     startUnifiedEnrichmentWorker,
+    stopUnifiedEnrichmentWorker,
+    waitForFingerprintWork,
     executeAudioPhase,
     executeVibePhase,
     executeMoodPhase,
@@ -227,6 +179,13 @@ import {
     invalidateEnrichmentProgress,
 } from "../unifiedEnrichment";
 import { logger } from "../../utils/logger";
+import { prisma } from "../../utils/db";
+import { distributedLock } from "../../utils/distributedLock";
+import { setTimeout as realSleep } from "timers/promises";
+import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
+
+const P = "zz-esm";
+const id = (n: string) => `${P}_${n}`;
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -242,61 +201,77 @@ function simulatePauseViaStateService() {
     mockGetState.mockResolvedValueOnce({ status: "paused" });
 }
 
-/** One owed stage row, shaped like the TrackStage query result. */
-function stageRows(rows: Array<{ trackId: string; stage: string; attempt?: number }>) {
-    return rows.map((r) => ({
-        trackId: r.trackId,
-        stage: r.stage,
-        status: "pending",
-        attempt: r.attempt ?? 0,
-        source: "analyzer",
-        filePath: `/music/${r.trackId}.flac`,
-        duration: 200,
-        title: r.trackId,
-    }));
-}
-
-/** The claim succeeds; only `stage` is owed, by `trackIds`. */
-function claimOneStage(stage: string, trackIds: string[]) {
-    mockQueryRaw.mockImplementation(async (...args: unknown[]) => {
-        const sql = String(args[0]);
-        if (sql.includes("SET status = 'working'")) return [{ attempt: 1, redelivered: 0 }];
-        if (args[1] === stage) return stageRows(trackIds.map((trackId) => ({ trackId, stage })));
-        return [];
+/** A library song with no stage records: it owes every question until a test answers some. */
+async function seedTrack(n: string, columns: Record<string, unknown> = {}) {
+    await prisma.track.create({
+        data: {
+            id: id(n), albumId: id("alb"), title: n, trackNo: 1, duration: 200,
+            filePath: `/music/${P}/${n}.flac`, fileModified: new Date(), fileSize: 1000,
+            ...columns,
+        },
     });
 }
 
-/** One stage's progress counts, as BigInt the way the SQL returns them. */
-function progressRow(completed: bigint, retryableFailed = 0n) {
-    return [{ total: 10n, completed, working: 0n, retryable_failed: retryableFailed, terminal_failed: 0n }];
+/** The fingerprint and recording questions are answered, so only the sound questions remain owed. */
+async function answerIdentity(n: string) {
+    await putStage(id(n), "fingerprint", "done", { source: "fpcalc" });
+    await putStage(id(n), "recording", "done", { source: "musicbrainz" });
 }
+
+const wipe = () => deleteSeededRows(P);
+
+const stageStatus = async (n: string, stage: string) =>
+    (await prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: id(n), stage } } }))?.status ?? null;
+
+/** Wait for something a timer-driven cycle does in the background, in real time (the fake clock stays put). */
+async function until(done: () => boolean) {
+    for (let i = 0; i < 200 && !done(); i++) await realSleep(10);
+    expect(done()).toBe(true);
+}
+
+/** Cycle leases taken and given back: a cycle holds its lease until it ends, so equal counts mean none is still running. */
+const leases = { taken: 0, returned: 0 };
+const realAcquire = distributedLock.acquire.bind(distributedLock);
+const realRelease = distributedLock.release.bind(distributedLock);
 
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("Enrichment State Machine", () => {
-    beforeEach(() => {
+    beforeAll(wipe);
+    afterAll(wipe);
+    beforeEach(async () => {
+        await wipe();
+        await seedArtistAndAlbum(P, "Esm");
         jest.clearAllMocks();
-        jest.useFakeTimers();
+        leases.taken = 0;
+        leases.returned = 0;
+        jest.spyOn(distributedLock, "acquire").mockImplementation(async (key, ttl) => {
+            const got = await realAcquire(key, ttl);
+            if (got) leases.taken++;
+            return got;
+        });
+        jest.spyOn(distributedLock, "release").mockImplementation(async (key) => {
+            const done = await realRelease(key);
+            leases.returned++;
+            return done;
+        });
+        // Only the clock timers are faked: the database's own I/O needs the real next-tick and immediate queues.
+        jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "clearImmediate", "queueMicrotask"] });
         // Default: state service returns idle
         mockGetState.mockResolvedValue({ status: "idle" });
         mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
         mockWriteMoodTags.mockResolvedValue(0);
         mockRedisScan.mockResolvedValue(["0", []]);
-        // Default: one track owes each stage, so a phase that consults the
-        // stage records finds work unless a test restapes this.
-        // getNextWork passes the stage as a bind parameter, so the stage under
-        // query arrives as the argument after the SQL, not inside the text.
-        mockQueryRaw.mockImplementation(async (...args: unknown[]) => {
-            const sql = String(args[0]);
-            const stage = args[1] as string | undefined;
-            if (sql.includes('"TrackStage"') && stage) {
-                return stageRows([{ trackId: "t1", stage }]);
-            }
-            return [];
-        });
+        // The library is empty unless a test seeds songs: no phase finds work.
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+        // Inline fingerprint runs finish before the next test's wipe deletes their song.
+        await waitForFingerprintWork();
+        // The cycle's timer chain ends with the test; its fake clock goes with it. A cycle already under way
+        // finishes first, so it never reads the next test's songs or writes against a deleted one.
+        await stopUnifiedEnrichmentWorker();
+        await until(() => leases.returned >= leases.taken);
         jest.useRealTimers();
     });
 
@@ -333,6 +308,9 @@ describe("Enrichment State Machine", () => {
     describe("the scan goes first", () => {
         it("hands out no work at all while a library scan is running, and runs once it is done", async () => {
             await startUnifiedEnrichmentWorker();
+            // One song owes only its analysis, so a cycle that runs hands it to the analyzer.
+            await seedTrack("t1");
+            await answerIdentity("t1");
             mockQueueAdd.mockClear();
             mockRedisRpush.mockClear();
             mockUpdateState.mockClear();
@@ -348,6 +326,7 @@ describe("Enrichment State Machine", () => {
 
             await triggerEnrichmentNow();
             expect(mockUpdateState).toHaveBeenCalledWith(expect.objectContaining({ currentPhase: "artists" }));
+            expect(mockRedisRpush).toHaveBeenCalledWith("audio:analysis:queue", expect.stringContaining(`"trackId":"${id("t1")}"`));
         });
     });
 
@@ -483,8 +462,11 @@ describe("Enrichment State Machine", () => {
             mockClearGate.mockClear();
             mockPublishToChannel.mockClear();
 
-            // Advance to the next scheduled cycle (timer path)
+            // Advance to the next scheduled cycle (timer path). The cycle's database work runs in real time.
             await jest.advanceTimersByTimeAsync(60_000);
+            await until(() => mockClearGate.mock.calls.length > 0);
+            // The cycle has finished when it has armed the next one.
+            await until(() => jest.getTimerCount() > 0);
 
             // The reverse-sync must have resumed the real infrastructure,
             // NOT merely flipped the local flag.
@@ -500,78 +482,78 @@ describe("Enrichment State Machine", () => {
         it("does not drain a past-cap track to permanently_failed", async () => {
             // Selection comes from the stage record, so tracks are never
             // selected by analysisRetryCount to have their status rewritten.
-            mockPrismaTrackFindMany.mockResolvedValue([
-                { id: "stuck", title: "Stuck", filePath: "/m/stuck.flac", analysisRetryCount: 5 },
-            ]);
+            await seedTrack("stuck", { analysisRetryCount: 5, analysisStatus: "failed" });
 
-            await executeAudioPhase();
+            await expect(executeAudioPhase()).resolves.toBe(1);
 
-            const purgatorySelects = mockPrismaTrackFindMany.mock.calls.filter(
-                (call) => JSON.stringify(call[0] ?? {}).includes("analysisRetryCount"),
-            );
-            expect(purgatorySelects).toHaveLength(0);
-
-            const condemned = mockPrismaTrackUpdateMany.mock.calls.filter(
-                (call) => JSON.stringify(call[0] ?? {}).includes("permanently_failed"),
-            );
-            expect(condemned).toHaveLength(0);
+            expect((await prisma.track.findUnique({ where: { id: id("stuck") } }))?.analysisStatus).not.toBe("permanently_failed");
+            expect(await stageStatus("stuck", "analysis")).toBe("working");
         });
 
         it("feeds the analysis queue from the stage record, not from analysisStatus", async () => {
-            // One track owes analysis; it must be pushed even though no
-            // `analysisStatus: "pending"` select drove the choice.
-            claimOneStage("analysis", ["t1"]);
+            // The column says done but no record answers it: the question is owed. The other song's
+            // column says pending but its record is answered: it is not.
+            await seedTrack("t1", { analysisStatus: "completed" });
+            await seedTrack("t2", { analysisStatus: "pending" });
+            await putStage(id("t2"), "analysis", "done");
 
             const queued = await executeAudioPhase();
 
             expect(queued).toBe(1);
+            expect(mockRedisRpush).toHaveBeenCalledTimes(1);
             expect(mockRedisRpush).toHaveBeenCalledWith(
                 "audio:analysis:queue",
-                expect.stringContaining('"trackId":"t1"'),
+                expect.stringContaining(`"trackId":"${id("t1")}"`),
             );
         });
 
         it("does not re-queue a track whose recording stage is already answered", async () => {
-            // Only the recording stage is owed, and only for one track.
-            claimOneStage("recording", ["t1"]);
+            // Both songs' fingerprints are settled; only one song's recording is still owed.
+            await seedTrack("t1");
+            await seedTrack("t2");
+            await putStage(id("t1"), "fingerprint", "done", { source: "fpcalc" });
+            await putStage(id("t2"), "fingerprint", "done", { source: "fpcalc" });
+            await putStage(id("t2"), "recording", "done", { source: "musicbrainz" });
 
             const queued = await executeIdentificationPhase();
 
             expect(queued).toBe(1);
+            expect(mockQueueAdd).toHaveBeenCalledTimes(1);
             expect(mockQueueAdd).toHaveBeenCalledWith(
                 "enrich",
-                expect.objectContaining({ trackId: "t1" }),
-                expect.objectContaining({ jobId: "track-t1-recording-1-r0" }),
+                expect.objectContaining({ trackId: id("t1") }),
+                expect.objectContaining({ jobId: `track-${id("t1")}-recording-1-r0` }),
             );
         });
 
         it("with no analyzer running, embeds a ready track while another track's analysis is still owed", async () => {
             // Only the ready track's embedding record is due; the other is gated by its own unfinished analysis.
             // A running analyzer holds every vector until analysis is done (unifiedEnrichment.oneHeavyModel.test.ts).
-            claimOneStage("embedding", ["ready"]);
-            // A track still sits at analysisStatus 'pending'; that must not
-            // hold back the embedding phase.
-            mockPrismaTrackCount.mockResolvedValue(1);
+            await seedTrack("ready");
+            await seedTrack("owing");
+            await putStage(id("ready"), "analysis", "done");
 
             await expect(executeVibePhase()).resolves.toBe(1);
+            expect(mockQueueAdd).toHaveBeenCalledTimes(1);
             expect(mockQueueAdd).toHaveBeenCalledWith(
                 "embed",
-                expect.objectContaining({ trackId: "ready" }),
-                expect.objectContaining({ jobId: "track-ready-embedding-1-r0" }),
+                expect.objectContaining({ trackId: id("ready") }),
+                expect.objectContaining({ jobId: `track-${id("ready")}-embedding-1-r0` }),
             );
         });
 
-        it("does not select work by scanning Track status columns", async () => {
-            await executeVibePhase();
-            await executeIdentificationPhase();
+        it("offers nothing for a track whose records are all answered, whatever its status columns say", async () => {
+            await seedTrack("answered", { analysisStatus: "pending", vibeAnalysisStatus: "pending" });
+            for (const stage of ["fingerprint", "recording", "analysis", "embedding"]) {
+                await putStage(id("answered"), stage, "done");
+            }
 
-            // Gating reads TrackStage; no phase may decide work from
-            // analysisStatus across the whole library.
-            const statusScans = mockPrismaTrackFindMany.mock.calls.filter((call) => {
-                const where = JSON.stringify(call[0] ?? {});
-                return where.includes("analysisStatus");
-            });
-            expect(statusScans).toHaveLength(0);
+            await expect(executeAudioPhase()).resolves.toBe(0);
+            await expect(executeVibePhase()).resolves.toBe(0);
+            await expect(executeIdentificationPhase()).resolves.toBe(0);
+
+            expect(mockRedisRpush).not.toHaveBeenCalled();
+            expect(mockQueueAdd).not.toHaveBeenCalled();
         });
     });
 
@@ -579,7 +561,6 @@ describe("Enrichment State Machine", () => {
         // The mood step reads the progress counts to see whether the moods' inputs have settled: with no tracks owing
         // anything they have.
         beforeEach(() => {
-            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
             invalidateEnrichmentProgress();
             // A small in-memory Redis for the notes the step writes; a fresh one for every test.
             const notes = new Map<string, string>();
@@ -629,12 +610,8 @@ describe("Enrichment State Machine", () => {
         });
 
         it("scores nothing and writes no tags while analysis or sound vectors are still being made", async () => {
-            // Every track still owes its stage: the moods' inputs have not settled.
-            mockQueryRaw.mockImplementation(async (...args: unknown[]) =>
-                String(args[0]).includes('LEFT JOIN "TrackStage"')
-                    ? [{ total: 10n, completed: 0n, working: 0n, retryable_failed: 0n, terminal_failed: 0n, file_missing: 0n }]
-                    : [{ total: 0, completed: 0 }],
-            );
+            // A track still owes its stages: the moods' inputs have not settled.
+            await seedTrack("owing");
             invalidateEnrichmentProgress();
             expect(await executeMoodPhase()).toBe(0);
             expect(mockBuildMoods).not.toHaveBeenCalled();
@@ -652,7 +629,6 @@ describe("Enrichment State Machine", () => {
 
             // The server restarts: nothing is held in memory, only the note in Redis is left.
             mockRedisGet.mockImplementation(async (key: string) => (key === OWED ? "1" : null));
-            mockQueryRaw.mockImplementation(async () => [{ total: 0, completed: 0 }]);
             invalidateEnrichmentProgress();
             mockBuildMoods.mockResolvedValue({ scored: 0, stateChanged: false });
             mockRedisScan.mockResolvedValueOnce(["0", ["mixes:u1"]]);
@@ -736,26 +712,26 @@ describe("Enrichment State Machine", () => {
         it("computes progress from the TrackStage records, not the columns", async () => {
             // The record owns the answer: each stage's counts come from
             // TrackStage, and no stage checks track_embeddings to decide
-            // whether an answer exists.
-            mockQueryRaw.mockImplementation(async (...args: unknown[]) => {
-                const sql = String(args[0]); const stage = args[1];
-                if (sql.includes("FROM \"Track\"") && sql.includes("count(*) FILTER")) {
-                    if (stage === "recording") return progressRow(5n);
-                    if (stage === "analysis") return progressRow(8n);
-                    return progressRow(6n, 2n);
-                }
-                return [{ count: 8n }];
-            });
+            // whether an answer exists. Every column says pending except one that says done with no record.
+            await seedTrack("a");
+            await seedTrack("b");
+            await seedTrack("c", { analysisStatus: "completed" });
+            await putStage(id("a"), "recording", "done");
+            await putStage(id("b"), "recording", "done");
+            await putStage(id("a"), "analysis", "done");
+            await putStage(id("b"), "analysis", "failed", { retryable: true });
+            await putStage(id("a"), "embedding", "done");
 
             // The progress readout is memoized for PROGRESS_MEMO_MS so the
             // settings UI's polling does not re-scan Track every call; drop it
-            // so this test reads its own shaped rows rather than a cached value.
+            // so this test reads its own rows rather than a cached value.
             invalidateEnrichmentProgress();
 
             const progress = await getEnrichmentProgress();
 
-            expect(progress.audioAnalysis.completed).toBe(8);
-            expect(progress.clapEmbeddings.completed).toBe(6);
+            expect(progress.audioAnalysis).toEqual(expect.objectContaining({ total: 3, completed: 1, failed: 1, pending: 1 }));
+            expect(progress.clapEmbeddings).toEqual(expect.objectContaining({ total: 3, completed: 1, pending: 2 }));
+            expect(progress.trackTags).toEqual(expect.objectContaining({ total: 3, enriched: 2 }));
             expect(progress.coreComplete).toBe(false);
         });
     });
