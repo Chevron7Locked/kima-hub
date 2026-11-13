@@ -9,10 +9,6 @@ const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job" });
 const mockQueueClean = jest.fn().mockResolvedValue([]);
 const mockQueueResume = jest.fn().mockResolvedValue(undefined);
 
-const mockPodcastCount = jest.fn();
-const mockPodcastFindMany = jest.fn();
-const mockPodcastUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
-
 jest.mock("../enrichmentQueues", () => ({
     QUEUE_NAMES: {
         ARTISTS: "enrichment-artists",
@@ -48,51 +44,60 @@ jest.mock("ioredis", () => jest.fn().mockImplementation(() => ({
 jest.mock("../../config", () => ({
     config: { redis: { host: "localhost", port: 6379 }, music: {}, nodeEnv: "test" },
 }));
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        podcast: {
-            count: mockPodcastCount,
-            findMany: mockPodcastFindMany,
-            updateMany: mockPodcastUpdateMany,
-        },
-    },
-}));
 jest.mock("../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
 import { executePodcastRefreshPhase } from "../unifiedEnrichment";
+import { prisma } from "../../utils/db";
+
+const P = "zz-podcastRefresh-";
+const HOUR = 60 * 60 * 1000;
+
+async function wipe() {
+    await prisma.podcast.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+/** A podcast last refreshed `hoursAgo` hours ago; the phase refreshes those not refreshed in the last hour. */
+const seedPodcast = (n: string, title: string, hoursAgo: number) =>
+    prisma.podcast.create({
+        data: { id: `${P}${n}`, feedUrl: `https://example.test/${P}${n}.xml`, title, lastRefreshed: new Date(Date.now() - hoursAgo * HOUR) },
+    });
+
+const lastRefreshed = async (n: string) => (await prisma.podcast.findUniqueOrThrow({ where: { id: `${P}${n}` } })).lastRefreshed;
 
 describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
-    beforeEach(() => {
+    beforeAll(wipe);
+    afterAll(wipe);
+    beforeEach(async () => {
         jest.clearAllMocks();
+        await wipe();
         mockQueueClean.mockResolvedValue([]);
         mockQueueAdd.mockResolvedValue({ id: "job" });
-        mockPodcastUpdateMany.mockResolvedValue({ count: 0 });
     });
 
     it("no podcasts: does nothing", async () => {
-        mockPodcastCount.mockResolvedValue(0);
         const n = await executePodcastRefreshPhase();
         expect(n).toBe(0);
         expect(mockQueueClean).not.toHaveBeenCalled();
         expect(mockQueueAdd).not.toHaveBeenCalled();
-        expect(mockPodcastUpdateMany).not.toHaveBeenCalled();
     });
 
     it("podcasts exist but none stale: no clean, no queue, no bump", async () => {
-        mockPodcastCount.mockResolvedValue(3);
-        mockPodcastFindMany.mockResolvedValue([]);
+        await seedPodcast("1", "Pod One", 0.2);
+        await seedPodcast("2", "Pod Two", 0.5);
+        const before = await lastRefreshed("1");
+
         const n = await executePodcastRefreshPhase();
+
         expect(n).toBe(0);
         expect(mockQueueClean).not.toHaveBeenCalled();
         expect(mockQueueAdd).not.toHaveBeenCalled();
-        expect(mockPodcastUpdateMany).not.toHaveBeenCalled();
+        expect(await lastRefreshed("1")).toEqual(before);
     });
 
     it("cleans the failed set, not only completed", async () => {
-        mockPodcastCount.mockResolvedValue(1);
-        mockPodcastFindMany.mockResolvedValue([{ id: "p1", title: "Pod One" }]);
+        await seedPodcast("1", "Pod One", 3);
         await executePodcastRefreshPhase();
         const cleanedStates = mockQueueClean.mock.calls.map((c) => c[2]);
         expect(cleanedStates).toContain("completed");
@@ -100,41 +105,38 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
     });
 
     it("claims podcasts by bumping lastRefreshed before queuing (backoff)", async () => {
-        mockPodcastCount.mockResolvedValue(2);
-        mockPodcastFindMany.mockResolvedValue([
-            { id: "p1", title: "Pod One" },
-            { id: "p2", title: "Pod Two" },
-        ]);
+        await seedPodcast("1", "Pod One", 3);
+        await seedPodcast("2", "Pod Two", 5);
+        await seedPodcast("3", "Fresh", 0.1);
+        const freshBefore = await lastRefreshed("3");
+        const started = Date.now();
 
-        const order: string[] = [];
-        mockPodcastUpdateMany.mockImplementation(async () => { order.push("bump"); return { count: 2 }; });
-        mockQueueAdd.mockImplementation(async () => { order.push("add"); return { id: "j" }; });
+        // What the stored rows say at the moment each job is queued.
+        const claimedWhenQueued: boolean[] = [];
+        mockQueueAdd.mockImplementation(async (_name: string, data: { podcastId: string }) => {
+            claimedWhenQueued.push((await prisma.podcast.findUniqueOrThrow({ where: { id: data.podcastId } })).lastRefreshed.getTime() >= started);
+            return { id: "j" };
+        });
 
         await executePodcastRefreshPhase();
 
-        // updateMany targets exactly the selected ids
-        expect(mockPodcastUpdateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: { in: ["p1", "p2"] } },
-                data: expect.objectContaining({ lastRefreshed: expect.any(Date) }),
-            }),
-        );
-        // the bump happens before any job is queued
-        expect(order[0]).toBe("bump");
-        expect(order).toEqual(["bump", "add", "add"]);
+        // the bump happens before any job is queued, and only the stale podcasts are bumped
+        expect(claimedWhenQueued).toEqual([true, true]);
+        expect((await lastRefreshed("1")).getTime()).toBeGreaterThanOrEqual(started);
+        expect((await lastRefreshed("2")).getTime()).toBeGreaterThanOrEqual(started);
+        expect(await lastRefreshed("3")).toEqual(freshBefore);
     });
 
     it("queues each stale podcast with its real data and stable jobId", async () => {
-        mockPodcastCount.mockResolvedValue(1);
-        mockPodcastFindMany.mockResolvedValue([{ id: "p1", title: "Pod One" }]);
+        await seedPodcast("1", "Pod One", 3);
 
         const n = await executePodcastRefreshPhase();
 
         expect(n).toBe(1);
         expect(mockQueueAdd).toHaveBeenCalledWith(
             "refresh",
-            { podcastId: "p1", podcastTitle: "Pod One" },
-            { jobId: "podcast-p1" },
+            { podcastId: `${P}1`, podcastTitle: "Pod One" },
+            { jobId: `podcast-${P}1` },
         );
     });
 });

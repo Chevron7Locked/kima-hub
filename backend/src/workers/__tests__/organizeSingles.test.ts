@@ -17,13 +17,6 @@ jest.mock("../../utils/playlistLogger", () => ({
     sessionLog: mockSessionLog,
 }));
 
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        downloadJob: { findMany: jest.fn().mockResolvedValue([]) },
-        downloadSource: { findMany: jest.fn().mockResolvedValue([]) },
-    },
-}));
-
 jest.mock("../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
