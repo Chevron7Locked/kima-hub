@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Only admins can read `/api/metrics`.** A metrics scraper needs an admin's app key; a member's key is now refused.
+- **Subsonic apps no longer manage accounts.** Changing a password or creating, editing or deleting users from a Subsonic app now answers "not supported"; manage accounts in the web app.
+- **Saving settings reloads only what changed.** Changing one setting no longer drops the Soulseek connection or reloads Lidarr, Audiobookshelf and fanart; each reloads only when its own settings change, and turning Audiobookshelf on or off takes effect at once.
+- **Playlists mark songs that can't play.** A playlist keeps listing a song whose file went missing or unreadable, or that now sits only in Discover, marked "unavailable"; play, shuffle and add to queue skip it. Adding such a song to a playlist is refused.
 
 ### Fixed
 
@@ -17,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A newly created account stays signed in.** Creating an account now hands the app the same long-lived sign-in that logging in does, so the web and the iOS app renew the session on their own instead of asking for the password again once it runs out.
 - **A podcast episode plays and keeps its place only under its own show.** An address that pairs an episode with a different show now answers not found for streaming and for saving or clearing progress.
 - **The web song list refuses an album asked for twice.** Giving `albumId` more than once now answers a clear error instead of a server error.
+- **Song search with a genre filter fills its pages.** Each page now comes from that genre's songs, instead of showing short or empty pages while matches remain.
+- **Paging through song search keeps one set of results.** A page past the last match stays empty instead of switching to a different search.
+- **Imports pick only songs that play.** Importing a playlist from a link or an M3U file, and the weekly Discover playlist, no longer pick a song whose file is missing or unreadable, and an import no longer adds a Discover song to a playlist.
+- **Saving settings while Audiobookshelf is off no longer clears listening progress again.**
+- **Account sign-up and admin password reset answer plainly.** An `ADMIN_RESET_PASSWORD` shorter than 6 characters now logs a warning and leaves the admin password as it was; a sign-up that races another for the same name, or for the first account, gets a plain answer instead of "Failed to create account".
 - **Discover tells same-name artists apart in Lidarr.** Keeping a Discover album takes Discover's tag off only the Lidarr artist that owns that album, not off other artists with the same name. And an unrelated artist with the same name as one of this week's suggestions no longer stops Discover clearing an artist it added.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
