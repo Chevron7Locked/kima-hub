@@ -55,6 +55,7 @@ class KimaTestEnvironment extends TestEnvironment {
         super(config, context);
         this.testPath = context && context.testPath;
         this.violations = [];
+        this.hosts = new Set();
     }
 
     async setup() {
@@ -71,6 +72,7 @@ class KimaTestEnvironment extends TestEnvironment {
         const refuse = (host, how) => {
             const message = `[net-guard] ${how} to ${host} refused in ${this.testPath}: tests must not reach outside services`;
             this.violations.push(message);
+            this.hosts.add(String(host));
             process.stderr.write(`${message}\n`);
             const err = new Error(message);
             err.code = 'ENETGUARD';
@@ -167,7 +169,16 @@ class KimaTestEnvironment extends TestEnvironment {
         }
         for (const undo of this.restore ?? []) undo();
         await super.teardown();
-        if (this.violations.length) throw new Error(`${this.violations.length} outbound network attempt(s):\n${this.violations.join('\n')}`);
+        if (this.violations.length) {
+            // Jest reports a throw here as "Test suite failed to run" with no failing test, so the first line says
+            // which file reached out and where to; the lines under it are each attempt.
+            const err = new Error(
+                `[net-guard] ${this.testPath} reached outside services (refused: ${[...this.hosts].join(', ')}); ` +
+                    `${this.violations.length} attempt(s):\n${this.violations.join('\n')}`,
+            );
+            err.stack = err.message; // the stack is this teardown's own frames, which say nothing about the test
+            throw err;
+        }
     }
 }
 
