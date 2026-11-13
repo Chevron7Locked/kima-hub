@@ -47,10 +47,11 @@ router.get("/recently-listened", async (req, res) => {
       await Promise.all([
         // Listens, not Play rows, and one entry per artist, so `limit` cards come back
         // whenever that many artists were listened to. Various Artists and Unknown Artist
-        // name no one, so their listens give no artist card.
+        // name no one, so their listens give no artist card. Plays of Discover songs are left out by the album's
+        // location, Subsonic scrobbles by their source.
         recentListenArtists(userId, {
           take: limitNum,
-          sources: ["LIBRARY", "DISCOVERY_KEPT"],
+          sources: ["LIBRARY"],
           where: Prisma.sql`al.location = ${LIBRARY_LOCATION}::"AlbumLocation" AND ar."identityKey" NOT IN (${Prisma.join(noOneKeys())})`,
         }),
         prisma.audiobookProgress.findMany({

@@ -1150,8 +1150,6 @@ enum DiscoverStatus {
 
 enum ListenSource {
   LIBRARY
-  DISCOVERY
-  DISCOVERY_KEPT
   SUBSONIC
 }
 

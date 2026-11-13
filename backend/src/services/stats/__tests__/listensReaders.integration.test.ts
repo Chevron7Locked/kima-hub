@@ -74,7 +74,7 @@ beforeAll(async () => {
             play(A, "p1", ago(1 * DAY), { heard: true }),
             play(A, "p2", ago(6 * HOUR)),
             play(A, "p2", ago(6 * HOUR - 10 * SECOND)),
-            play(A, "q1", ago(1 * HOUR), { source: "DISCOVERY" }),
+            play(A, "q1", ago(1 * HOUR)),
             play(A, "r1", ago(2 * HOUR), { source: "SUBSONIC" }),
             play(A, "r2", ago(30 * DAY), { heard: true }),
             // B: one play of p1 and of q1.
@@ -130,8 +130,8 @@ describe("play counts", () => {
     it("goes back only as far as since, stops at take, and keeps only the sources asked for", async () => {
         expect((await playCounts(A, { since: ago(7 * DAY) })).map((c) => c.trackId)).not.toContain(id("r2"));
         expect(await playCounts(A, { take: 2 })).toHaveLength(2);
-        const library = await playCounts(A, { sources: ["LIBRARY", "DISCOVERY_KEPT"] });
-        expect(library.map((c) => c.trackId).sort()).toEqual([id("p1"), id("p2"), id("r2")]);
+        const library = await playCounts(A, { sources: ["LIBRARY"] });
+        expect(library.map((c) => c.trackId).sort()).toEqual([id("p1"), id("q1"), id("p2"), id("r2")].sort());
     });
 
     it("counts only this listener", async () => {
@@ -228,14 +228,14 @@ describe("artists of recent listens", () => {
 
     it("answers the same from the recent walk and from the whole history", async () => {
         // take 1 is filled from the last weeks alone; take 2 needs r2's listen thirty days back, so the whole history is walked.
-        const options = { sources: ["LIBRARY" as const, "DISCOVERY_KEPT" as const], where: LIBRARY_ONLY };
+        const options = { sources: ["LIBRARY" as const], where: LIBRARY_ONLY };
         expect((await recentListenArtists(A, { take: 1, ...options })).map((r) => r.artistId)).toEqual([id("art_p")]);
         expect((await recentListenArtists(A, { take: 2, ...options })).map((r) => r.artistId)).toEqual([id("art_p"), id("art_r")]);
     });
 
     it("lets through only the sources and songs asked for", async () => {
-        const rows = await recentListenArtists(A, { take: 10, sources: ["LIBRARY", "DISCOVERY_KEPT"], where: LIBRARY_ONLY });
-        // The Discover play, the Subsonic scrobble and r1 are out: r2's old library play is r's only listen left.
+        const rows = await recentListenArtists(A, { take: 10, sources: ["LIBRARY"], where: LIBRARY_ONLY });
+        // The Subsonic scrobble and the Discover song (by its album) are out: r2's old library play is r's only listen left.
         expect(rows.map((r) => r.artistId)).toEqual([id("art_p"), id("art_r")]);
     });
 

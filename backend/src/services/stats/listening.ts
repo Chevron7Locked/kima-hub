@@ -25,7 +25,7 @@ export interface ListeningStats {
     distinctAlbums: number;
     firstPlay: string | null;
     lastPlay: string | null;
-    /** Where the plays came from: own library, Discover, a Subsonic client. */
+    /** Where the plays came from: Kima's own player or a Subsonic client. */
     bySource: Record<string, number>;
     /** [weekday 0=Sunday][hour 0-23] -> play count, in the user's own timezone. */
     clock: number[][];

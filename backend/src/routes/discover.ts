@@ -471,22 +471,6 @@ router.get("/current", async (req, res) => {
 });
 
 /**
- * A like keeps the suggestion and an unlike gives it back, so the listener's plays of its songs are relabelled: a
- * kept suggestion's plays count as DISCOVERY_KEPT, a returned one's as DISCOVERY.
- */
-async function relabelSuggestionPlays(
-    userId: string,
-    discoveryAlbumId: string,
-    from: "DISCOVERY" | "DISCOVERY_KEPT",
-    to: "DISCOVERY" | "DISCOVERY_KEPT",
-): Promise<void> {
-    const songs = await prisma.discoveryTrack.findMany({ where: { discoveryAlbumId }, select: { trackId: true } });
-    const trackIds = songs.map((t) => t.trackId).filter((id): id is string => id !== null);
-    if (trackIds.length === 0) return;
-    await prisma.play.updateMany({ where: { userId, trackId: { in: trackIds }, source: from }, data: { source: to } });
-}
-
-/**
  * Takes Discover's tag off the Lidarr artist that owns the suggestion's Lidarr album record, and off no one else: the
  * album's Lidarr id is the stored one, else the one Discover's records name (a suggestion or Discover download job, by
  * release-group id or name; `rgMbids` are the ids the album is known by). The tag stays while another current suggestion
@@ -585,8 +569,6 @@ router.post("/like", async (req, res) => {
         // album's Lidarr id, or Lidarr cannot find it, nobody is untagged. A failure is logged and the like stands.
         await untagAlbumOwner(discoveryAlbum, [...new Set([discoveryAlbum.rgMbid, ...(dbAlbum ? [dbAlbum.rgMbid] : [])])]);
 
-        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY", "DISCOVERY_KEPT");
-
         res.json({ success: true });
     } catch (error) {
         logger.error("Like discovery album error:", error);
@@ -626,8 +608,6 @@ router.delete("/unlike", async (req, res) => {
         // Back to Discover with the ownership the like gave it, unless another listener's like still keeps it.
         const dbAlbum = await findScannedAlbum(discoveryAlbum, "LIBRARY");
         if (dbAlbum) await returnToDiscover(dbAlbum, albumId);
-
-        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY_KEPT", "DISCOVERY");
 
         res.json({ success: true });
     } catch (error) {

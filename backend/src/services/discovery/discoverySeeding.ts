@@ -42,7 +42,8 @@ export class DiscoverySeeding {
 
         const recentPlays = await playCounts(userId, {
             since: fourWeeksAgo,
-            sources: ['LIBRARY', 'DISCOVERY_KEPT'],
+            song: { album: { location: LIBRARY_LOCATION } },
+            sources: ['LIBRARY'],
         });
 
         const weightedPlays = recentPlays

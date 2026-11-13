@@ -1,28 +1,23 @@
 "use client";
 
 /**
- * Where plays came from: your shelf, Discover, kept-from-Discover, Subsonic
- * clients. One bar, four segments; the Discover pair sit together so kept
- * reads against offered.
+ * Where plays came from: your shelf or Subsonic clients. One bar, two
+ * segments. Plays carry no Discover label: where an album sits says that.
  */
 
 import type { ListeningStats } from "../types";
 
-const ORDER = ["LIBRARY", "SUBSONIC", "DISCOVERY", "DISCOVERY_KEPT"] as const;
+const ORDER = ["LIBRARY", "SUBSONIC"] as const;
 
 const SAY: Record<string, string> = {
     LIBRARY: "library",
     SUBSONIC: "subsonic apps",
-    DISCOVERY: "discover",
-    DISCOVERY_KEPT: "discover, kept",
 };
 
 /** Opacity, not hue. The accent stays one colour and share does the work. */
 const INK: Record<string, string> = {
     LIBRARY: "100%",
     SUBSONIC: "62%",
-    DISCOVERY: "34%",
-    DISCOVERY_KEPT: "80%",
 };
 
 export function SourceSplit({ listening }: { listening: ListeningStats }) {
@@ -42,10 +37,6 @@ export function SourceSplit({ listening }: { listening: ListeningStats }) {
         );
     }
 
-    const offered = (bySource.DISCOVERY ?? 0) + (bySource.DISCOVERY_KEPT ?? 0);
-    const kept = bySource.DISCOVERY_KEPT ?? 0;
-    const keepRate = offered > 0 ? Math.round((kept / offered) * 100) : null;
-
     return (
         <div className="flex flex-col gap-4">
             <div className="flex h-2 w-full gap-[2px] overflow-hidden">
@@ -60,10 +51,10 @@ export function SourceSplit({ listening }: { listening: ListeningStats }) {
                 ))}
             </div>
 
-            {/* Rows rather than a four-up figure grid. This lives in one third
-                of the measure now, and four columns of numbers in 200 pixels
-                is a table nobody can read. A name and a share on one line is
-                the same information at a quarter of the height. */}
+            {/* Rows rather than a figure grid. This lives in one third of the
+                measure now, and columns of numbers in 200 pixels are a table
+                nobody can read. A name and a share on one line is the same
+                information at a fraction of the height. */}
             <dl className="flex flex-col">
                 {segments.map((s) => (
                     <div
@@ -78,13 +69,6 @@ export function SourceSplit({ listening }: { listening: ListeningStats }) {
                     </div>
                 ))}
             </dl>
-
-            {keepRate !== null && (
-                <p className="t-meta max-w-[32ch]">
-                    {offered.toLocaleString()} discover {offered === 1 ? "play" : "plays"} ·{" "}
-                    <span className="t-figure text-xs">{keepRate}%</span> on albums you kept
-                </p>
-            )}
         </div>
     );
 }
