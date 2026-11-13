@@ -13,25 +13,33 @@ import { artistNamed } from "../artistIdentity";
 import { RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
 import type { LidarrAlbum, LidarrArtist } from "../../types/lidarr";
 
-/** What names the album being removed, beyond the id Lidarr was asked about. */
-export interface RemovalNames {
-    rgMbids?: string[];
-    artistName?: string;
-    albumTitle?: string;
-}
+/**
+ * What names the album being removed, beyond the id Lidarr was asked about. An artist name comes with its title and its
+ * MusicBrainz id (null when the artist is known by name only), so no caller falls back to name-only matching by leaving
+ * the id out.
+ */
+export type RemovalNames = { rgMbids?: string[] } & (
+    | { artistName?: undefined; albumTitle?: undefined; artistMbid?: undefined }
+    | { artistName: string; albumTitle: string; artistMbid: string | null }
+);
 
-/** Whether the library holds the album, by any release-group id the caller knows or by artist and title with case and accents ignored. */
+/**
+ * Whether the library holds the album, by any release-group id the caller knows or by artist (sameArtist: a namesake
+ * under another MusicBrainz id is not this artist) and title with case and accents ignored.
+ */
 async function libraryHolds(rgMbids: string[], names: RemovalNames): Promise<boolean> {
     const byId = await prisma.album.findFirst({
         where: { location: LIBRARY_LOCATION, rgMbid: { in: rgMbids } },
         select: { id: true },
     });
-    if (byId || !names.artistName || !names.albumTitle) return byId !== null;
+    if (byId || !names.artistName) return byId !== null;
+    const { artistName, artistMbid, albumTitle } = names;
     const ofArtist = await prisma.album.findMany({
-        where: { location: LIBRARY_LOCATION, artist: artistNamed(names.artistName) },
-        select: { title: true },
+        where: { location: LIBRARY_LOCATION, artist: artistNamed(artistName) },
+        select: { title: true, artist: { select: { mbid: true } } },
     });
-    return ofArtist.some((a) => sameName(a.title, names.albumTitle));
+    // The artist row is one per name, so a namesake's albums come back with it.
+    return ofArtist.some((a) => sameName(a.title, albumTitle) && sameArtist({ artistMbid: a.artist.mbid, artistName }, { artistMbid, artistName }));
 }
 
 /** What Kima's records can name a Lidarr album by: the Lidarr id Discover got back when it added it, and MusicBrainz ids. */

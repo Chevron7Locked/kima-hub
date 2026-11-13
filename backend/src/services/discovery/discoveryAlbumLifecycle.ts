@@ -187,12 +187,12 @@ export async function returnToDiscover(
     // 30 days, and an unliked album with no record goes back by its origin.
     const recorded = await prisma.album.findUnique({
         where: { id: album.id },
-        select: { title: true, artist: { select: { name: true } } },
+        select: { title: true, artist: { select: { name: true, mbid: true } } },
     });
     if (recorded) {
         const records = await loadDiscoverRecords();
         const keptByEvidence = [...new Set([album.rgMbid, suggestedAs])].some((rgMbid) => {
-            const evidence = discoverEvidence({ artistName: recorded.artist.name, title: recorded.title, rgMbid }, records);
+            const evidence = discoverEvidence({ artistName: recorded.artist.name, artistMbid: recorded.artist.mbid, title: recorded.title, rgMbid }, records);
             return evidence === "liked" || evidence === "requested";
         });
         if (keptByEvidence) return false;

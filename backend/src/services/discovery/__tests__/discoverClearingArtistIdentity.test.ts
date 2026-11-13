@@ -78,10 +78,12 @@ const suggestion = (
 /** A finished Discover download of the album, from Soulseek (or Lidarr, with an album id), naming the artist under `artistMbid`. */
 async function discoverJob(
     artistMbid: string | null,
-    extra: { userId?: string; source?: "soulseek" | "lidarr"; lidarrAlbumId?: number; targetMbid?: string | null } = {},
+    extra: { userId?: string; source?: "soulseek" | "lidarr"; lidarrAlbumId?: number; targetMbid?: string | null; batchStatus?: string } = {},
 ) {
     const userId = extra.userId ?? USER;
-    const batch = await prisma.discoveryBatch.create({ data: { userId, weekStart: new Date("2026-11-02"), targetSongCount: 10, status: "completed" } });
+    const batch = await prisma.discoveryBatch.create({
+        data: { userId, weekStart: new Date("2026-11-02"), targetSongCount: 10, status: extra.batchStatus ?? "completed" },
+    });
     return prisma.downloadJob.create({
         data: {
             userId,
@@ -294,5 +296,46 @@ describe("clearOrphanedDiscoverAlbums", () => {
 
         const { failures } = await clearOrphanedDiscoverAlbums();
         expect([...failures[0].userIds].sort()).toEqual([OTHER_USER, USER].sort());
+    });
+});
+
+describe("clearOrphanedDiscoverAlbums' two coverage checks", () => {
+    it("is not covered by a namesake's current suggestion of the same names (discoverAlbumIsCovered)", async () => {
+        await scannedAlbum(ARTIST);
+        await suggestion(NAMESAKE, { rgMbid: "temp-namesake" });
+
+        const result = await clearOrphanedDiscoverAlbums();
+        expect(result.returned).toBe(1);
+        expect(await prisma.album.findFirst({ where: { identityKey: `${MARK}-album`, location: "LIBRARY" } })).not.toBeNull();
+    });
+
+    it.each(SAME_OR_NONE)("is covered by a current suggestion of the same names under artist id %s", async (id) => {
+        await scannedAlbum(ARTIST);
+        await suggestion(id, { rgMbid: "temp-another-suggestion" });
+
+        expect(await clearOrphanedDiscoverAlbums()).toEqual({ cleared: 0, returned: 0, failures: [] });
+        expect(removeDiscoveryAlbum).not.toHaveBeenCalled();
+    });
+
+    it.each(NO_REAL_ID)("is covered by a suggestion of the same names when the album's artist id is %s", async (id) => {
+        await scannedAlbum(id);
+        await suggestion(NAMESAKE, { rgMbid: "temp-another-suggestion" });
+
+        expect(await clearOrphanedDiscoverAlbums()).toEqual({ cleared: 0, returned: 0, failures: [] });
+    });
+
+    it("is not held back by a namesake's download in a running batch (albumsInRunningBatches)", async () => {
+        await scannedAlbum(ARTIST);
+        await discoverJob(NAMESAKE, { batchStatus: "downloading" });
+
+        expect((await clearOrphanedDiscoverAlbums()).returned).toBe(1);
+    });
+
+    it.each(SAME_OR_NONE)("is held back by a download in a running batch under artist id %s", async (id) => {
+        await scannedAlbum(ARTIST);
+        await discoverJob(id, { batchStatus: "downloading" });
+
+        expect(await clearOrphanedDiscoverAlbums()).toEqual({ cleared: 0, returned: 0, failures: [] });
+        expect(removeDiscoveryAlbum).not.toHaveBeenCalled();
     });
 });

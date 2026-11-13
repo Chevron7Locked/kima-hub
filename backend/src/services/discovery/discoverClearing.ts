@@ -319,6 +319,7 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
         const outcome = await removeDiscoveryAlbum(holding.lidarrAlbumId, holding.rgMbid, {
             rgMbids,
             artistName: target.artistName,
+            artistMbid: target.artistMbid,
             albumTitle: target.albumTitle,
         });
         if (!outcome.removed) return { cleared: false, reason: outcome.reason ?? "Lidarr did not delete the album" };
@@ -437,15 +438,32 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
 }
 
 /**
+ * Artist-and-title keys of Discover records, each with the artist it names, so `has` tells a namesake under another
+ * MusicBrainz id apart (sameArtist) and a record with no real id still matches by name.
+ */
+class NameIndex {
+    private readonly byKey = new Map<string, { artistName: string; artistMbid: string | null }[]>();
+
+    add(artistName: string, artistMbid: string | null, title: string): void {
+        const key = lookupKey(artistName, title);
+        this.byKey.set(key, [...(this.byKey.get(key) ?? []), { artistName, artistMbid }]);
+    }
+
+    has(artistName: string, artistMbid: string | null, title: string): boolean {
+        return (this.byKey.get(lookupKey(artistName, title)) ?? []).some((entry) => sameArtist(entry, { artistName, artistMbid }));
+    }
+}
+
+/**
  * Whether a DISCOVER album is covered: a suggestion that is ACTIVE, LIKED or MOVED names it (by release-group id, or by
- * artist and title by `nameKey`, the way `findScannedAlbum` finds it), or a listener owns it. `suggested` is the
- * ids and name keys of all such suggestions, loaded once for the sweep.
+ * artist (sameArtist) and title by `nameKey`, the way `findScannedAlbum` finds it), or a listener owns it. `suggested` is
+ * the ids and names of all such suggestions, loaded once for the sweep.
  */
 async function discoverAlbumIsCovered(
-    album: { rgMbid: string; title: string; artist: { name: string } },
-    suggested: { ids: Set<string>; names: Set<string> },
+    album: { rgMbid: string; title: string; artist: { name: string; mbid: string | null } },
+    suggested: { ids: Set<string>; names: NameIndex },
 ): Promise<boolean> {
-    if (suggested.ids.has(album.rgMbid) || suggested.names.has(lookupKey(album.artist.name, album.title))) return true;
+    if (suggested.ids.has(album.rgMbid) || suggested.names.has(album.artist.name, album.artist.mbid, album.title)) return true;
     return (await prisma.ownedAlbum.findFirst({ where: { rgMbid: album.rgMbid }, select: { rgMbid: true } })) !== null;
 }
 
@@ -453,14 +471,14 @@ async function discoverAlbumIsCovered(
 async function albumsInRunningBatches() {
     const jobs = await prisma.downloadJob.findMany({
         where: { discoveryBatch: { status: { in: RUNNING_BATCH } } },
-        select: { targetMbid: true, metadata: true },
+        select: { targetMbid: true, artistMbid: true, metadata: true },
     });
     const ids = new Set<string>();
-    const names = new Set<string>();
+    const names = new NameIndex();
     for (const job of jobs) {
         if (job.targetMbid) ids.add(job.targetMbid);
         const metadata = job.metadata as JobMetadata;
-        if (metadata?.artistName && metadata.albumTitle) names.add(lookupKey(metadata.artistName, metadata.albumTitle));
+        if (metadata?.artistName && metadata.albumTitle) names.add(metadata.artistName, job.artistMbid, metadata.albumTitle);
     }
     return { ids, names };
 }
@@ -532,18 +550,16 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
     const running = await albumsInRunningBatches();
     const records = await prisma.discoveryAlbum.findMany({
         where: { status: { in: ["ACTIVE", "LIKED", "MOVED"] } },
-        select: { rgMbid: true, artistName: true, albumTitle: true },
+        select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true },
     });
-    const suggested = {
-        ids: new Set(records.map((r) => r.rgMbid)),
-        names: new Set(records.map((r) => lookupKey(r.artistName, r.albumTitle))),
-    };
+    const suggested = { ids: new Set(records.map((r) => r.rgMbid)), names: new NameIndex() };
+    for (const r of records) suggested.names.add(r.artistName, r.artistMbid, r.albumTitle);
 
     let cleared = 0;
     let returned = 0;
     const failures: OrphanFailure[] = [];
     for (const album of albums) {
-        if (running.ids.has(album.rgMbid) || running.names.has(lookupKey(album.artist.name, album.title))) continue;
+        if (running.ids.has(album.rgMbid) || running.names.has(album.artist.name, album.artist.mbid, album.title)) continue;
         if (await discoverAlbumIsCovered(album, suggested)) continue;
         const ref = { rgMbid: album.rgMbid, artistName: album.artist.name, albumTitle: album.title, artistMbid: album.artist.mbid };
         if (!(await discoverRecordNames(ref))) {

@@ -219,6 +219,7 @@ describe("Lidarr removal keeps files the library holds", () => {
         (lidarrService.deleteAlbumById as jest.Mock).mockClear();
         const outcome = await removeDiscoveryAlbum(1, `${P}-asked-${k}`, {
             artistName: SHOUTED[k],
+            artistMbid: null,
             albumTitle: TITLES[k].toUpperCase(),
         });
         expect(outcome.removed).toBe(false);

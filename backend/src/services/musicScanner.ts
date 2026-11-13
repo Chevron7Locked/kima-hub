@@ -642,7 +642,7 @@ export class MusicScannerService {
             if (lead) return lead.mbid ? { name: lead.name, mbid: lead.mbid } : { name: lead.name };
         }
 
-        const evidence = discoverEvidence({ artistName: chosen.name, title: albumTitle, rgMbid }, await loadDiscoverRecords());
+        const evidence = discoverEvidence({ artistName: chosen.name, artistMbid: chosen.mbid ?? null, title: albumTitle, rgMbid }, await loadDiscoverRecords());
         if (isDiscoverEvidence(evidence)) return chosen;
         return (await this.jointFiler.file(chosen)).candidate;
     }
@@ -737,7 +737,7 @@ export class MusicScannerService {
             // has no folder of its own); read fresh, as Discover writes its download record before the download starts.
             createData: async () => {
                 const evidence = discoverEvidence(
-                    { artistName: credited.name, title: albumTitle, rgMbid: tagged },
+                    { artistName: credited.name, artistMbid: credited.mbid ?? null, title: albumTitle, rgMbid: tagged },
                     await loadDiscoverRecords(),
                 );
                 return { primaryType: "Album", location: isDiscoverEvidence(evidence) ? "DISCOVER" : "LIBRARY" };

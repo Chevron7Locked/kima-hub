@@ -143,7 +143,12 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
             heldBy.has(groupKey) ||
             isDiscoverEvidence(
                 discoverEvidence(
-                    { artistName: (elected ?? group[0].credit!.candidate).name, title: group[0].credit!.albumTitle, rgMbid: group[0].credit!.rgMbid },
+                    {
+                        artistName: (elected ?? group[0].credit!.candidate).name,
+                        artistMbid: (elected ?? group[0].credit!.candidate).mbid ?? null,
+                        title: group[0].credit!.albumTitle,
+                        rgMbid: group[0].credit!.rgMbid,
+                    },
                     discoverRecords,
                 ),
             );

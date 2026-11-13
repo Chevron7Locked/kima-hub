@@ -70,7 +70,7 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
             artist: { select: { name: true, mbid: true } },
         },
     });
-    const named = (album: SortedAlbum) => ({ artistName: album.artist.name, title: album.title, rgMbid: album.rgMbid });
+    const named = (album: SortedAlbum) => ({ artistName: album.artist.name, artistMbid: album.artist.mbid, title: album.title, rgMbid: album.rgMbid });
 
     // Albums filed as Discover: they stay only on evidence.
     const toLibrary: SortedAlbum[] = [];

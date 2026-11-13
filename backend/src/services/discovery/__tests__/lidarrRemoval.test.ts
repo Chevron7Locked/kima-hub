@@ -320,9 +320,39 @@ describe("removeDiscoveryAlbum", () => {
         await inLibrary("rg-unrelated");
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
 
-        const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "INTERPOL", albumTitle: "owned" });
+        const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "INTERPOL", artistMbid: "artist-mbid", albumTitle: "owned" });
         expect(kept.removed).toBe(false);
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("does not take a namesake's library album, matching only by artist and title, as the one Discover fetched", async () => {
+        await discovered("rg-asked", "DELETED");
+        await inLibrary("rg-unrelated");
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const outcome = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "Interpol", artistMbid: "another-artist-mbid", albumTitle: "owned" });
+        expect(outcome.removed).toBe(true);
+        expect(lidarr.deleteAlbumById).toHaveBeenCalledWith(7, true);
+    });
+
+    it.each([[null], ["temp-1792991402890-0.92"]])("keeps the files of a library album matching by artist and title when Discover's artist id is %s", async (id) => {
+        await discovered("rg-asked", "DELETED");
+        await inLibrary("rg-unrelated");
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "Interpol", artistMbid: id, albumTitle: "owned" });
+        expect(kept).toEqual({ removed: false, reason: "The library holds this album" });
+        expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
+    });
+
+    it("keeps the files of a library album matching by artist and title when the library artist has no id", async () => {
+        await discovered("rg-asked", "DELETED");
+        await inLibrary("rg-unrelated");
+        await prisma.artist.update({ where: { id: ARTIST }, data: { mbid: null } });
+        lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
+
+        const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "Interpol", artistMbid: "artist-mbid", albumTitle: "owned" });
+        expect(kept).toEqual({ removed: false, reason: "The library holds this album" });
     });
 
     it("keeps an album Lidarr no longer has, since its files may still be on disk", async () => {

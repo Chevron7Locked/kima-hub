@@ -166,7 +166,7 @@ describe("Lidarr deletes the album (recorded)", () => {
 describe("Lidarr no longer has the album id (recorded 404)", () => {
     it("is not counted as removed, and says why", async () => {
         await startReplay("album-not-found", 4);
-        const outcome = await removeDiscoveryAlbum(NO_SUCH_LIDARR_ID, MOON_RG, { rgMbids: [MOON_RG], artistName: ARTIST, albumTitle: "Moon Music" });
+        const outcome = await removeDiscoveryAlbum(NO_SUCH_LIDARR_ID, MOON_RG, { rgMbids: [MOON_RG], artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music" });
         expect(outcome.removed).toBe(false);
         expect(outcome.reason).toContain("Lidarr no longer knows this album");
         expect(lidarr!.asked.map((a) => a.method)).toEqual(["GET"]);

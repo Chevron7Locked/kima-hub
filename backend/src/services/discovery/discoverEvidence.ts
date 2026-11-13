@@ -15,15 +15,23 @@ interface Mark {
     request: boolean;
 }
 
+/** A mark by artist and title, with the artist it names: its name, and its MusicBrainz id when it has a real one. */
+interface NamedMark extends Mark {
+    artistName: string;
+    artistMbid: string | null;
+}
+
 /**
  * Discover's records and the listeners' own download requests, keyed by release-group id and by artist and title
  * (nameKey): suggestions of every status; download jobs waiting, running or finished, from each listener's newest batch,
  * a batch still running, or no batch (an earlier week's albums were cleared, so a later copy is theirs; the one-time sort
- * reads every kept week); and their own requests, which make an album theirs whatever Discover suggested.
+ * reads every kept week); and their own requests, which make an album theirs whatever Discover suggested. By artist and
+ * title, a key holds one mark per artist (a namesake under another MusicBrainz id is another artist; ids that are missing
+ * or `temp-` share one mark, known by name).
  */
 export interface DiscoverRecords {
     byId: Map<string, Mark>;
-    byName: Map<string, Mark>;
+    byName: Map<string, NamedMark[]>;
 }
 
 /** A Discover batch in these states is still fetching its albums. */
@@ -72,10 +80,10 @@ export const lookupKey = (artist: string, title: string) => albumNameKey(artist,
 
 export async function loadDiscoverRecords(options: { everyWeek?: boolean } = {}): Promise<DiscoverRecords> {
     const [suggestions, allJobs, batches] = await Promise.all([
-        prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, albumTitle: true, status: true } }),
+        prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true, status: true } }),
         prisma.downloadJob.findMany({
             where: { status: { in: ["pending", "processing", "completed"] } },
-            select: { targetMbid: true, metadata: true, discoveryBatchId: true },
+            select: { targetMbid: true, artistMbid: true, metadata: true, discoveryBatchId: true },
         }),
         options.everyWeek
             ? Promise.resolve([])
@@ -95,20 +103,27 @@ export async function loadDiscoverRecords(options: { everyWeek?: boolean } = {})
         ? allJobs
         : allJobs.filter((j) => j.discoveryBatchId === null || current.has(j.discoveryBatchId));
     const records: DiscoverRecords = { byId: new Map(), byName: new Map() };
-    const mark = (id: string | null, artist: string, title: string, apply: (m: Mark) => void) => {
-        const name = albumNameKey(artist, title);
-        for (const [map, key] of [[records.byId, id], [records.byName, name]] as const) {
-            if (!key) continue;
-            let m = map.get(key);
-            if (!m) map.set(key, (m = { statuses: new Set(), discoverJob: false, request: false }));
+    const mark = (id: string | null, artist: string, artistMbid: string | null, title: string, apply: (m: Mark) => void) => {
+        if (id) {
+            let m = records.byId.get(id);
+            if (!m) records.byId.set(id, (m = { statuses: new Set(), discoverJob: false, request: false }));
+            apply(m);
+        }
+        const key = albumNameKey(artist, title);
+        if (key) {
+            const identity = hasRealArtistId(artistMbid) ? artistMbid : null;
+            const marks = records.byName.get(key) ?? [];
+            let m = marks.find((n) => n.artistMbid === identity);
+            if (!m) marks.push((m = { statuses: new Set(), discoverJob: false, request: false, artistName: artist, artistMbid: identity }));
+            records.byName.set(key, marks);
             apply(m);
         }
     };
-    for (const s of suggestions) mark(s.rgMbid, s.artistName, s.albumTitle, (m) => m.statuses.add(s.status));
+    for (const s of suggestions) mark(s.rgMbid, s.artistName, s.artistMbid, s.albumTitle, (m) => m.statuses.add(s.status));
     for (const job of jobs) {
         const metadata = job.metadata as { artistName?: string; albumTitle?: string; downloadType?: string } | null;
         const fromDiscover = job.discoveryBatchId !== null || metadata?.downloadType === "discovery";
-        mark(job.targetMbid, metadata?.artistName ?? "", metadata?.albumTitle ?? "", (m) => {
+        mark(job.targetMbid, metadata?.artistName ?? "", job.artistMbid, metadata?.albumTitle ?? "", (m) => {
             if (fromDiscover) m.discoverJob = true;
             else m.request = true;
         });
@@ -124,15 +139,16 @@ export async function loadDiscoverRecords(options: { everyWeek?: boolean } = {})
  */
 export type DiscoverEvidence = "liked" | "requested" | "downloaded" | null;
 
-type RecordedAlbum = { artistName: string; title: string; rgMbid: string | null };
+/** An album as the records see it: its artist's name and MusicBrainz id (null when it has none), so a namesake is not mistaken for it. */
+type RecordedAlbum = { artistName: string; artistMbid: string | null; title: string; rgMbid: string | null };
 
 function marksOf(album: RecordedAlbum, records: DiscoverRecords): Mark[] {
     const primary = parseCredit(album.artistName).primary || album.artistName;
-    return [
-        album.rgMbid ? records.byId.get(album.rgMbid) : undefined,
-        records.byName.get(albumNameKey(album.artistName, album.title) ?? ""),
-        records.byName.get(albumNameKey(primary, album.title) ?? ""),
-    ].filter((m): m is Mark => !!m);
+    const named = (artistName: string) =>
+        (records.byName.get(albumNameKey(artistName, album.title) ?? "") ?? []).filter((m) =>
+            sameArtist(m, { artistMbid: album.artistMbid, artistName }),
+        );
+    return [...(album.rgMbid && records.byId.has(album.rgMbid) ? [records.byId.get(album.rgMbid)!] : []), ...named(album.artistName), ...named(primary)];
 }
 
 /** Whether a Discover download asked for this album (a suggestion alone is not a download). */
@@ -170,13 +186,13 @@ export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Prom
     const records = await loadDiscoverRecords();
     const albums = await prisma.album.findMany({
         where: { location: "LIBRARY" },
-        select: { id: true, title: true, rgMbid: true, artistId: true, artist: { select: { name: true } } },
+        select: { id: true, title: true, rgMbid: true, artistId: true, artist: { select: { name: true, mbid: true } } },
     });
 
     const moved: { artist: string; title: string }[] = [];
     const movedArtists = new Set<string>();
     for (const album of albums) {
-        const evidence = discoverEvidence({ artistName: album.artist.name, title: album.title, rgMbid: album.rgMbid }, records);
+        const evidence = discoverEvidence({ artistName: album.artist.name, artistMbid: album.artist.mbid, title: album.title, rgMbid: album.rgMbid }, records);
         if (!isDiscoverEvidence(evidence)) continue;
 
         // An album marked as a listener's, by any source (a scan, a like, enrichment, a repair), stays theirs. The
