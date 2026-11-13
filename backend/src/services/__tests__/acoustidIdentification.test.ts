@@ -5,7 +5,6 @@
  */
 
 jest.mock("../../config", () => ({ config: { music: { musicPath: "/srv/music" } } }));
-jest.mock("../../utils/db", () => ({ prisma: { track: { update: jest.fn() } } }));
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));

@@ -1,7 +1,7 @@
 /**
  * searchTracksByText end to end: the Redis round trip to the analyzer, riding
- * out a dead analyzer, and the embedding reaching the ranking query inside the
- * ef_search transaction. Redis and prisma are mocked; the pub/sub code is real.
+ * out a dead analyzer, and the embedding ranking the songs in the real database.
+ * Redis is mocked (the analyzer is not running); the pub/sub code is real.
  */
 
 const duplicateMock = jest.fn();
@@ -12,46 +12,50 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
-const queryRawMock = jest.fn();
-const txQueryRawMock = jest.fn();
-const transactionMock = jest.fn();
-jest.mock("../../utils/db", () => ({
-    __esModule: true,
-    prisma: {
-        $queryRaw: (...a: unknown[]) => queryRawMock(...a),
-        // The callback gets a tx whose $queryRaw is txQueryRawMock, so tests can
-        // tell a transaction call from a pool call.
-        $transaction: (fn: (tx: unknown) => Promise<unknown>) => {
-            transactionMock(fn);
-            return fn({ $queryRaw: (...a: unknown[]) => txQueryRawMock(...a) });
-        },
-    },
-}));
-
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-import { Prisma } from "@prisma/client";
-import { searchTracksByText, TextSearchRow } from "../textEmbeddingBridge";
+import { searchTracksByText } from "../textEmbeddingBridge";
+import { prisma } from "../../utils/db";
+import { insertEmbeddings, seedEmbedding, unitVectorAt, unitVectorValues } from "../../__tests__/helpers/embeddingFixtures";
 
 const RESPONSE_PREFIX = "audio:text:embed:response:";
 
-const ROW_A: TextSearchRow = {
-    id: "t1",
-    title: "First",
-    duration: 200,
-    trackNo: 1,
-    distance: 0.3,
-    albumId: "a1",
-    albumTitle: "Al",
-    albumCoverUrl: null,
-    artistId: "ar1",
-    artistName: "Ar",
-};
-// Worse distance than ROW_A and past any plausible threshold: the bridge must
-// return ranked rows as pgvector ordered them, with NO similarity cut-off.
-const ROW_B: TextSearchRow = { ...ROW_A, id: "t2", title: "Second", distance: 0.9 };
+const P = "zz-textEmbed-";
+const id = (name: string) => `${P}${name}`;
+/** What the analyzer answers for the query text: the unit vector along axis 0, so a song's distance is 1 minus its `cos`. */
+const QUERY_EMBEDDING = unitVectorValues(1, 1);
+
+async function wipe() {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } }); // sound vectors go with the song
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+/** A song on an album of its own, with a sound vector at `cos` to the query. Playable unless asked otherwise. */
+async function seedSong(
+    name: string,
+    cos: number,
+    opts: { corrupt?: boolean; location?: "LIBRARY" | "DISCOVER"; missing?: boolean; model?: string } = {},
+) {
+    await prisma.album.create({
+        data: {
+            id: id(`alb-${name}`), artistId: id("art"), title: `Album ${name}`, identityKey: id(`alb-${name}`),
+            rgMbid: id(`alb-${name}`), primaryType: "Album", location: opts.location ?? "LIBRARY",
+        },
+    });
+    await prisma.track.create({
+        data: {
+            id: id(name), albumId: id(`alb-${name}`), title: `Song ${name}`, trackNo: 1, duration: 200,
+            filePath: `/tmp/${P}${name}.flac`, fileModified: new Date(), fileSize: 1000,
+            corrupt: opts.corrupt ?? false, missingSince: opts.missing ? new Date() : null,
+        },
+    });
+    const vector = unitVectorAt(cos, 2 + (Number.parseInt(name.replace(/\D/g, ""), 10) || 0));
+    if (opts.model) await insertEmbeddings([{ trackId: id(name), vector }], { model: opts.model });
+    else await seedEmbedding(id(name), vector);
+}
 
 // The bridge's pmessage handler, captured when the shared subscriber wires up.
 let onPMessage: ((pattern: string, channel: string, message: string) => void) | undefined;
@@ -83,110 +87,117 @@ async function flush(): Promise<void> {
     for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-beforeEach(() => {
+/** Ask the bridge a question and have the analyzer answer it with `embedding`. */
+async function search(text: string, limit: number, embedding: number[] = QUERY_EMBEDDING) {
+    const pending = searchTracksByText(text, limit);
+    await flush();
+    expect(lastRequest!.text).toBe(text);
+    deliverResponse(lastRequest!, { success: true, embedding });
+    return pending;
+}
+
+beforeAll(wipe);
+afterAll(wipe);
+
+beforeEach(async () => {
     duplicateMock.mockReset().mockImplementation(() => makeConn());
-    queryRawMock.mockReset();
-    txQueryRawMock.mockReset();
-    transactionMock.mockReset();
     lastRequest = undefined;
+    await wipe();
+    await prisma.artist.create({ data: { id: id("art"), name: "Vibe Artist", identityKey: id("art") } });
 });
 
 describe("searchTracksByText", () => {
-    it("round-trips the query into the pgvector ranking query and returns its rows in order", async () => {
-        txQueryRawMock.mockResolvedValue([ROW_A, ROW_B]);
+    it("round-trips the query into the ranking and returns the nearest songs, best first", async () => {
+        await seedSong("far", 0.1);
+        await seedSong("near", 0.9);
+        await seedSong("mid", 0.5);
 
-        const pending = searchTracksByText("solo piano", 2);
-        await flush();
-        expect(lastRequest).toBeDefined();
-        expect(lastRequest!.text).toBe("solo piano");
-        deliverResponse(lastRequest!, { success: true, embedding: [0.1, 0.2, -0.3] });
+        const rows = await search("solo piano", 2);
 
-        const rows = await pending;
         // Soft duplicate options: the shared client is strict/fail-fast, but
         // pub/sub must ride out a cold Redis.
         expect(duplicateMock).toHaveBeenCalledWith({
             enableOfflineQueue: true,
             maxRetriesPerRequest: null,
         });
-        // The ranking query runs inside the ef_search-widened transaction
-        // on the transaction's own client -- never on the pool, where the
-        // raised width would not be in effect.
-        expect(transactionMock).toHaveBeenCalledTimes(1);
-        expect(queryRawMock).not.toHaveBeenCalled();
-        expect(txQueryRawMock).toHaveBeenCalledTimes(2);
-        // First tx call: the transaction-local ef_search raise, sized from the
-        // requested limit (efFor(2) floors at 100). The is_local=true flag
-        // is literal SQL text in the template, so it is asserted there.
-        const [configStrings, efValue] = txQueryRawMock.mock.calls[0];
-        const configSql = configStrings.join(" ");
-        expect(configSql).toContain("set_config('hnsw.ef_search'");
-        expect(configSql).toContain(", true)");
-        expect(efValue).toBe("100");
-        // Ranking is pgvector's ORDER BY on the cosine distance of the SAME
-        // interpolated vector used for the selected distance column.
-        // Only vectors from the model the query was embedded with are ranked.
-        const [ranking] = txQueryRawMock.mock.calls[1] as [Prisma.Sql];
-        expect(ranking.sql).toContain("ORDER BY te.embedding <=>");
-        expect(ranking.sql).toContain("te.model_version =");
-        expect(ranking.values).toEqual(["[0.1,0.2,-0.3]", "laion-clap-music-onnx-v1", "[0.1,0.2,-0.3]", 2]);
-        // Ranked list passes through untouched -- no cut-off, so the weaker
-        // match stays in the results behind the better one.
-        expect(rows).toEqual([ROW_A, ROW_B]);
+        expect(rows.map((r) => r.id)).toEqual([id("near"), id("mid")]);
+        expect(rows[0]).toMatchObject({
+            title: "Song near", albumId: id("alb-near"), albumTitle: "Album near", albumCoverUrl: null,
+            artistId: id("art"), artistName: "Vibe Artist", duration: 200, trackNo: 1,
+        });
+        expect(rows[0].distance).toBeCloseTo(0.1, 5);
+        expect(rows[1].distance).toBeCloseTo(0.5, 5);
     });
 
-    it("reads every searchable track after the index's transaction when the index returns too few", async () => {
-        txQueryRawMock.mockResolvedValueOnce([{}]).mockResolvedValueOnce([ROW_A]);
-        queryRawMock.mockResolvedValueOnce([ROW_A, ROW_B]);
+    it("keeps a weak match behind the better ones: there is no similarity cut-off", async () => {
+        await seedSong("good", 0.95);
+        await seedSong("poor", 0.1);
 
-        const pending = searchTracksByText("solo piano", 2);
-        await flush();
-        deliverResponse(lastRequest!, { success: true, embedding: [0.1, 0.2, -0.3] });
+        const rows = await search("solo piano", 2);
 
-        expect(await pending).toEqual([ROW_A, ROW_B]);
-        // The exact read is its own query on the pool, outside the index's transaction and its time limit.
-        expect(transactionMock).toHaveBeenCalledTimes(1);
-        expect(txQueryRawMock).toHaveBeenCalledTimes(2);
-        expect(queryRawMock).toHaveBeenCalledTimes(1);
-        // The distance offset by "+ 0" is not an order the vector index can give, so every row is read.
-        const [exact] = queryRawMock.mock.calls[0] as [Prisma.Sql];
-        expect(exact.sql).toContain("ORDER BY (te.embedding <=>");
-        expect(exact.sql).toContain(") + 0, t.id");
-        expect(exact.values).toEqual(["[0.1,0.2,-0.3]", "laion-clap-music-onnx-v1", "[0.1,0.2,-0.3]", 2]);
+        expect(rows.map((r) => r.id)).toEqual([id("good"), id("poor")]);
+        expect(rows[1].distance).toBeCloseTo(0.9, 5);
     });
 
-    it("rejects and never reaches pgvector when the analyzer reports failure", async () => {
+    it("answers with fewer songs than asked when the library holds fewer", async () => {
+        await seedSong("only", 0.5);
+
+        expect((await search("solo piano", 10)).map((r) => r.id)).toEqual([id("only")]);
+    });
+
+    it("offers only playable songs, and still fills the page when the nearest vectors belong to others", async () => {
+        // The nearest vectors are a corrupt, a missing and a Discover song, then one from another model;
+        // the page still holds the two playable songs that follow.
+        await seedSong("bad", 0.99, { corrupt: true });
+        await seedSong("gone", 0.98, { missing: true });
+        await seedSong("disc", 0.97, { location: "DISCOVER" });
+        await seedSong("other", 0.96, { model: "some-other-model" });
+        await seedSong("ok1", 0.5);
+        await seedSong("ok2", 0.3);
+
+        const rows = await search("solo piano", 2);
+
+        expect(rows.map((r) => r.id)).toEqual([id("ok1"), id("ok2")]);
+    });
+
+    it("rejects when the analyzer reports failure", async () => {
+        await seedSong("a", 0.5);
         const pending = searchTracksByText("synth pop", 10);
         await flush();
         deliverResponse(lastRequest!, { success: false, embedding: null });
 
         await expect(pending).rejects.toThrow("Analyzer failed to produce embedding");
-        expect(txQueryRawMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects on a reply that is not JSON", async () => {
+        const pending = searchTracksByText("synth pop", 10);
+        await flush();
+        onPMessage?.("audio:text:embed*", `${RESPONSE_PREFIX}${lastRequest!.requestId}`, "not json");
+
+        await expect(pending).rejects.toThrow("Invalid response from analyzer");
     });
 
     it("rejects on timeout, ignores the late reply, and lets the next request succeed", async () => {
+        await seedSong("a", 0.5);
+        // Only the timers are faked, while the database is not in use: it is read after the clock is real again.
         jest.useFakeTimers();
+        let deadRequest: typeof lastRequest;
         try {
             const pending = searchTracksByText("quiet piano", 10);
             await flush();
-            const deadRequest = lastRequest;
+            deadRequest = lastRequest;
 
             const timedOut = expect(pending).rejects.toThrow("Text embedding request timed out");
             await jest.advanceTimersByTimeAsync(15_001);
             await timedOut;
-
-            // The analyzer's answer arrives after the listener was torn down:
-            // it must be dropped, not delivered to the wrong request.
-            deliverResponse(deadRequest!, { success: true, embedding: [1, 1, 1] });
-
-            txQueryRawMock.mockResolvedValue([ROW_A]);
-            const second = searchTracksByText("loud piano", 1);
-            await flush();
-            expect(lastRequest!.text).toBe("loud piano");
-            deliverResponse(lastRequest!, { success: true, embedding: [0.4, 0.5, 0.6] });
-
-            await expect(second).resolves.toEqual([ROW_A]);
         } finally {
             jest.useRealTimers();
         }
+
+        // The analyzer's answer arrives after the listener was torn down:
+        // it must be dropped, not delivered to the wrong request.
+        deliverResponse(deadRequest!, { success: true, embedding: unitVectorValues(1, 5) });
+
+        expect((await search("loud piano", 1)).map((r) => r.id)).toEqual([id("a")]);
     });
 });

@@ -1,18 +1,11 @@
 /**
  * getSimilarArtists asks ListenBrainz first and Deezer to fill the gap, deduped
  * by name; the library only re-ranks (by at most ±0.1) and flags inLibrary.
- * All HTTP is mocked.
+ * All HTTP is mocked; the library is the real database.
  */
 
 const mockLb = { getSimilarArtists: jest.fn() };
 const mockDeezer = { getRelatedArtists: jest.fn() };
-const mockPrisma = {
-    artist: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-    },
-};
 const mockLoadMatchingState = jest.fn();
 const mockArtistProfiles = jest.fn();
 
@@ -31,7 +24,6 @@ const mockRedis = {
     status: "ready",
 };
 
-jest.mock("../../utils/db", () => ({ prisma: mockPrisma }));
 jest.mock("../../utils/redis", () => ({ redisClient: mockRedis }));
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -42,8 +34,20 @@ jest.mock("../matching/state", () => ({ loadMatchingState: mockLoadMatchingState
 jest.mock("../matching/rank", () => ({ artistProfiles: mockArtistProfiles }));
 
 import { getSimilarArtists } from "../artistSimilarity";
+import { prisma } from "../../utils/db";
 
-const SEED_MBID = "11111111-1111-1111-1111-111111111111";
+const P = "zz-simTiers-";
+const SEED_MBID = `${P}seed-mbid`;
+
+async function wipe() {
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+/** An artist the library holds, under the id and (when it has one) the MusicBrainz id the similar-artist replies use. */
+const seedOwned = (id: string, fields: { mbid?: string; name?: string } = {}) =>
+    prisma.artist.create({ data: { id: `${P}${id}`, name: fields.name ?? `Zz Simtiers ${id}`, identityKey: `${P}${id}`, mbid: fields.mbid } });
+
+const seedInLibrary = () => seedOwned("a-seed", { mbid: SEED_MBID });
 
 const lb = (name: string, mbid: string, match: number) => ({
     name,
@@ -57,13 +61,14 @@ const dz = (name: string, match: number) => ({
     url: `https://www.deezer.com/artist/${name.length}`,
 });
 
-beforeEach(() => {
+beforeAll(wipe);
+afterAll(wipe);
+
+beforeEach(async () => {
     jest.resetAllMocks();
+    await wipe();
     mockRedis.get.mockResolvedValue(null);
     mockRedis.setex.mockResolvedValue("OK");
-    mockPrisma.artist.findUnique.mockResolvedValue(null);
-    mockPrisma.artist.findFirst.mockResolvedValue(null);
-    mockPrisma.artist.findMany.mockResolvedValue([]);
     mockLoadMatchingState.mockResolvedValue(STATE);
     mockArtistProfiles.mockResolvedValue(new Map());
     mockLb.getSimilarArtists.mockResolvedValue([]);
@@ -123,8 +128,8 @@ describe("getSimilarArtists — tier ordering (LB first, Deezer fallback, local 
         mockDeezer.getRelatedArtists.mockResolvedValue([]);
         // Even with a seed row and its tracks averaged, the library must not
         // substitute its own artists.
-        mockPrisma.artist.findUnique.mockResolvedValue({ id: "a-seed" });
-        mockArtistProfiles.mockResolvedValue(profiles({ "a-seed": [1, 0], "a-1": [1, 0] }));
+        await seedInLibrary();
+        mockArtistProfiles.mockResolvedValue(profiles({ [`${P}a-seed`]: [1, 0], [`${P}a-1`]: [1, 0] }));
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 5);
 
@@ -135,7 +140,7 @@ describe("getSimilarArtists — tier ordering (LB first, Deezer fallback, local 
     it("returns [] when every source has nothing (and never throws)", async () => {
         mockLb.getSimilarArtists.mockResolvedValue([]);
         mockDeezer.getRelatedArtists.mockResolvedValue([]);
-        mockPrisma.artist.findUnique.mockResolvedValue(null); // seed not in library
+        // the seed is not in the library
 
         await expect(getSimilarArtists(SEED_MBID, "Seed Artist", 5)).resolves.toEqual([]);
     });
@@ -161,18 +166,15 @@ describe("getSimilarArtists — tier ordering (LB first, Deezer fallback, local 
 describe("getSimilarArtists — inLibrary flag", () => {
     it("sets inLibrary by MBID lookup", async () => {
         mockLb.getSimilarArtists.mockResolvedValue([
-            lb("In Our Library", "m-owned", 0.9),
+            lb("In Our Library", "zz-simTiers-m-owned", 0.9),
             lb("Not In Library", "m-unknown", 0.85),
         ]);
         // Only the first artist has a row here.
-        mockPrisma.artist.findMany.mockImplementation(async (args: any) => {
-          const wanted: string[] = args?.where?.mbid?.in ?? [];
-          return wanted.includes("m-owned") ? [{ id: "a-owned", mbid: "m-owned" }] : [];
-        });
+        await seedOwned("a-owned", { mbid: "zz-simTiers-m-owned" });
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 2);
 
-        const owned = result.find((r) => r.mbid === "m-owned");
+        const owned = result.find((r) => r.mbid === "zz-simTiers-m-owned");
         const unknown = result.find((r) => r.mbid === "m-unknown");
         expect(owned?.inLibrary).toBe(true);
         expect(unknown?.inLibrary).toBe(false);
@@ -180,11 +182,8 @@ describe("getSimilarArtists — inLibrary flag", () => {
 
     it("falls back to name lookup for results without an MBID", async () => {
         mockLb.getSimilarArtists.mockResolvedValue([]);
-        mockDeezer.getRelatedArtists.mockResolvedValue([dz("Signed To Us", 0.9)]);
-        mockPrisma.artist.findMany.mockImplementation(async (args: any) => {
-          const wanted: string[] = args?.where?.name?.in ?? [];
-          return wanted.includes("Signed To Us") ? [{ id: "a-signed", name: "Signed To Us" }] : [];
-        });
+        mockDeezer.getRelatedArtists.mockResolvedValue([dz("Zz Simtiers Signed To Us", 0.9)]);
+        await seedOwned("a-signed", { name: "Zz Simtiers Signed To Us" });
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 2);
         expect(result[0].inLibrary).toBe(true);
@@ -195,20 +194,17 @@ describe("getSimilarArtists — ±0.1 re-rank bound", () => {
     it("dampens an in-library artist that sounds nothing like the seed", async () => {
         // Same match for both; ordering after re-rank proves the dampening.
         mockLb.getSimilarArtists.mockResolvedValue([
-            lb("Owned Distant", "m-owned", 0.9),
+            lb("Owned Distant", "zz-simTiers-m-owned", 0.9),
             lb("Unknown", "m-unknown", 0.9),
         ]);
-        mockPrisma.artist.findMany.mockImplementation(async (args: any) => {
-          const wanted: string[] = args?.where?.mbid?.in ?? [];
-          return wanted.includes("m-owned") ? [{ id: "a-owned", mbid: "m-owned" }] : [];
-        });
-        mockPrisma.artist.findUnique.mockResolvedValue({ id: "a-seed" });
+        await seedOwned("a-owned", { mbid: "zz-simTiers-m-owned" });
+        await seedInLibrary();
         // Seed [1,0]; owned artist [0,1] → closeness 0.
-        mockArtistProfiles.mockResolvedValue(profiles({ "a-seed": [1, 0], "a-owned": [0, 1] }));
+        mockArtistProfiles.mockResolvedValue(profiles({ [`${P}a-seed`]: [1, 0], [`${P}a-owned`]: [0, 1] }));
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 2);
 
-        const owned = result.find((r) => r.mbid === "m-owned")!;
+        const owned = result.find((r) => r.mbid === "zz-simTiers-m-owned")!;
         const unknown = result.find((r) => r.mbid === "m-unknown")!;
         expect(owned.match).toBeCloseTo(0.8, 5); // 0.9 − 0.1
         expect(unknown.match).toBe(0.9); // not in library — untouched
@@ -218,20 +214,17 @@ describe("getSimilarArtists — ±0.1 re-rank bound", () => {
 
     it("boosts an in-library artist that sounds like the seed", async () => {
         mockLb.getSimilarArtists.mockResolvedValue([
-            lb("Owned Close", "m-owned", 0.85),
+            lb("Owned Close", "zz-simTiers-m-owned", 0.85),
             lb("Unknown", "m-unknown", 0.9),
         ]);
-        mockPrisma.artist.findMany.mockImplementation(async (args: any) => {
-          const wanted: string[] = args?.where?.mbid?.in ?? [];
-          return wanted.includes("m-owned") ? [{ id: "a-owned", mbid: "m-owned" }] : [];
-        });
-        mockPrisma.artist.findUnique.mockResolvedValue({ id: "a-seed" });
+        await seedOwned("a-owned", { mbid: "zz-simTiers-m-owned" });
+        await seedInLibrary();
         // Identical tracks → closeness 1 → full +0.1 boost.
-        mockArtistProfiles.mockResolvedValue(profiles({ "a-seed": [1, 0], "a-owned": [1, 0] }));
+        mockArtistProfiles.mockResolvedValue(profiles({ [`${P}a-seed`]: [1, 0], [`${P}a-owned`]: [1, 0] }));
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 2);
 
-        const owned = result.find((r) => r.mbid === "m-owned")!;
+        const owned = result.find((r) => r.mbid === "zz-simTiers-m-owned")!;
         expect(owned.match).toBeCloseTo(0.95, 5); // 0.85 + 0.1
         // The boosted artist floats above the untouched one.
         expect(result.map((r) => r.name)).toEqual(["Owned Close", "Unknown"]);
@@ -240,20 +233,18 @@ describe("getSimilarArtists — ±0.1 re-rank bound", () => {
     it("never moves any match score by more than 0.1", async () => {
         const original = new Map<string, number>();
         mockLb.getSimilarArtists.mockResolvedValue([
-            lb("Owned Distant", "m-owned", 0.9),
-            lb("Owned Close", "m-owned-2", 0.75),
+            lb("Owned Distant", "zz-simTiers-m-owned", 0.9),
+            lb("Owned Close", "zz-simTiers-m-owned-2", 0.75),
             lb("Unknown", "m-unknown", 0.6),
         ]);
         for (const r of await mockLb.getSimilarArtists("x", "y", 3)) {
             original.set(r.name, r.match);
         }
-        mockPrisma.artist.findMany.mockResolvedValue([
-            { id: "a1", mbid: "m-owned" },
-            { id: "a2", mbid: "m-owned-2" },
-        ]);
-        mockPrisma.artist.findUnique.mockResolvedValue({ id: "a-seed" });
+        await seedOwned("a1", { mbid: "zz-simTiers-m-owned" });
+        await seedOwned("a2", { mbid: "zz-simTiers-m-owned-2" });
+        await seedInLibrary();
         mockArtistProfiles.mockResolvedValue(
-            profiles({ "a-seed": [1, 0], a1: [-1, 0], a2: [1, 0.0001] }),
+            profiles({ [`${P}a-seed`]: [1, 0], [`${P}a1`]: [-1, 0], [`${P}a2`]: [1, 0.0001] }),
         );
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 3);
@@ -264,13 +255,9 @@ describe("getSimilarArtists — ±0.1 re-rank bound", () => {
     });
 
     it("leaves scores untouched when the seed is not in the library", async () => {
-        mockLb.getSimilarArtists.mockResolvedValue([lb("Owned", "m-owned", 0.9)]);
-        mockPrisma.artist.findMany.mockImplementation(async (args: any) => {
-          const wanted: string[] = args?.where?.mbid?.in ?? [];
-          return wanted.includes("m-owned") ? [{ id: "a-owned", mbid: "m-owned" }] : [];
-        });
+        mockLb.getSimilarArtists.mockResolvedValue([lb("Owned", "zz-simTiers-m-owned", 0.9)]);
+        await seedOwned("a-owned", { mbid: "zz-simTiers-m-owned" });
         // Seed not in library → no distance to measure from.
-        mockPrisma.artist.findUnique.mockResolvedValue(null);
 
         const result = await getSimilarArtists(SEED_MBID, "Seed Artist", 1);
         expect(result[0].inLibrary).toBe(true);
