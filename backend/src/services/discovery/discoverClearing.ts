@@ -28,11 +28,23 @@ interface NamedRow {
 const namesRecord = (row: NamedRow, ref: AlbumRef) => sameArtist(row, ref) && sameName(row.albumTitle, ref.albumTitle);
 
 /**
- * Whether a download job whose subject already names the record's artist and title is also that artist's: a namesake
- * under another MusicBrainz id is not, a job with no real id is (its subject says so).
+ * Whether a download job's subject names the record's artist and title (`nameKey`) and its artist id agrees: a namesake
+ * under another MusicBrainz id is not this artist's, a job with no real id is (its subject names the artist).
  */
-const jobIsArtist = (job: { artistMbid: string | null }, ref: AlbumRef) =>
+const jobNamesRecord = (job: { subject: string; artistMbid: string | null }, ref: AlbumRef) =>
+    sameName(job.subject, `${ref.artistName} ${ref.albumTitle}`) &&
     sameArtist({ artistMbid: job.artistMbid, artistName: ref.artistName }, ref);
+
+/** Whether a download job's metadata names the record's artist and title, with the same artist-id agreement. */
+const metadataNamesRecord = (job: { metadata: unknown; artistMbid: string | null }, ref: AlbumRef) => {
+    const meta = job.metadata as { artistName?: string; albumTitle?: string } | null;
+    return (
+        !!meta?.artistName &&
+        !!meta?.albumTitle &&
+        sameName(`${meta.artistName} ${meta.albumTitle}`, `${ref.artistName} ${ref.albumTitle}`) &&
+        sameArtist({ artistMbid: job.artistMbid, artistName: ref.artistName }, ref)
+    );
+};
 
 /**
  * What names a Discover album: the suggestion's or download job's release-group id, artist and title, and the artist's
@@ -255,9 +267,8 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
         where: { discoveryBatchId: { not: null } },
         select: { status: true, lidarrAlbumId: true, metadata: true, targetMbid: true, subject: true, artistMbid: true },
     });
-    const wanted = `${ref.artistName} ${ref.albumTitle}`;
     const jobs = candidates.filter(
-        (j) => (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) || (sameName(j.subject, wanted) && jobIsArtist(j, ref)),
+        (j) => (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) || jobNamesRecord(j, ref),
     );
     const source = (j: (typeof jobs)[number]) => (j.metadata as { currentSource?: string } | null)?.currentSource;
     if (jobs.some((j) => j.lidarrAlbumId !== null || source(j) === "lidarr")) return false;
@@ -273,17 +284,10 @@ async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promis
         where: { discoveryBatchId: { not: null }, status: { notIn: ["pending", "processing"] } },
         select: { id: true, targetMbid: true, subject: true, metadata: true, artistMbid: true },
     });
-    const wanted = `${ref.artistName} ${ref.albumTitle}`;
     // A job that names a release group is this album's only by that id: another album of the same name keeps its own.
-    const naming = jobs.filter((j) => {
-        if (j.targetMbid !== null) return rgMbids.includes(j.targetMbid);
-        const meta = j.metadata as { artistName?: string; albumTitle?: string } | null;
-        return (
-            (sameName(j.subject, wanted) ||
-                (!!meta?.artistName && !!meta?.albumTitle && sameName(`${meta.artistName} ${meta.albumTitle}`, wanted))) &&
-            jobIsArtist(j, ref)
-        );
-    });
+    const naming = jobs.filter((j) =>
+        j.targetMbid !== null ? rgMbids.includes(j.targetMbid) : jobNamesRecord(j, ref) || metadataNamesRecord(j, ref),
+    );
     if (naming.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: naming.map((j) => j.id) } } });
 }
 
@@ -474,11 +478,7 @@ async function listenersNaming(ref: AlbumRef): Promise<string[]> {
     ]);
     const named = [
         ...suggestions.filter((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref)),
-        ...jobs.filter(
-            (j) =>
-                j.targetMbid === ref.rgMbid ||
-                (sameName(j.subject, `${ref.artistName} - ${ref.albumTitle}`) && jobIsArtist(j, ref)),
-        ),
+        ...jobs.filter((j) => j.targetMbid === ref.rgMbid || jobNamesRecord(j, ref)),
     ];
     return [...new Set(named.map((r) => r.userId))];
 }
@@ -495,10 +495,9 @@ async function discoverRecordNames(ref: AlbumRef): Promise<boolean> {
             select: { targetMbid: true, subject: true, artistMbid: true },
         }),
     ]);
-    const wanted = `${ref.artistName} ${ref.albumTitle}`;
     return (
         suggestions.some((s) => s.rgMbid === ref.rgMbid || namesRecord(s, ref)) ||
-        jobs.some((j) => j.targetMbid === ref.rgMbid || (sameName(j.subject, wanted) && jobIsArtist(j, ref)))
+        jobs.some((j) => j.targetMbid === ref.rgMbid || jobNamesRecord(j, ref))
     );
 }
 
