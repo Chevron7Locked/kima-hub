@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAuthOrToken } from "../../middleware/auth";
 import { apiLimiter } from "../../middleware/rateLimiter";
 
 import scanRouter from "./scan";
@@ -13,13 +12,13 @@ import waveformRouter from "./waveform";
 
 const router = Router();
 
-// All routes require auth (session or API key)
-router.use(requireAuthOrToken);
+/** Whether `path` is `prefix` or lies under it, by whole segments: "/cover-art" and "/cover-art/x", not "/cover-artX". */
+const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
 
 // Apply the runaway limit to routes that need it
 // Skip it for cover art and the album cover search (they carry the image limit) and for streaming
 router.use((req, res, next) => {
-  if (req.path.startsWith("/cover-art") || req.path.startsWith("/album-cover")) {
+  if (under(req.path, "/cover-art") || under(req.path, "/album-cover")) {
     return next();
   }
   if (req.path.endsWith("/stream")) {   // final segment only (matches stream routes; not /tracks/stream_x)

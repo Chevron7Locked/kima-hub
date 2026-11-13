@@ -1,5 +1,6 @@
 // The runaway limit counts each request once: audiobook routes carry the mount's limit and no second one, and the
-// album cover search carries its image limit and not the general one. Through the real mounts, on the real database.
+// album cover search carries its image limit and not the general one. Streams carry no runaway limit, and a path
+// that only starts like an exempt one is not exempt. Through the real mounts, on the real database.
 
 import express from "express";
 import request from "supertest";
@@ -68,5 +69,32 @@ describe("the album cover search counts against its image limit only", () => {
         const after = await remaining(server, "/api/library/genres");
         // Only the two genre reads are counted.
         expect(after).toBe(before - 1);
+    });
+});
+
+describe("streams are not counted", () => {
+    it.each([
+        "/api/audiobooks/none/stream",
+        "/api/podcasts/1/episodes/none/stream",
+        "/api/library/tracks/none/stream",
+    ])("%s", async (path) => {
+        const server = app();
+        const before = await remaining(server, "/api/stats/hour");
+        await request(server).get(path).set("Authorization", auth);
+        await request(server).get(path).set("Authorization", auth);
+        const after = await remaining(server, "/api/stats/hour");
+        // Only the two reads of the stats are counted.
+        expect(after).toBe(before - 1);
+    });
+});
+
+describe("a path that only starts like an exempt one is counted", () => {
+    it.each(["/api/library/album-coverX/a", "/api/library/cover-artX/a"])("%s", async (path) => {
+        const server = app();
+        const before = await remaining(server, "/api/library/genres");
+        await request(server).get(path).set("Authorization", auth);
+        const after = await remaining(server, "/api/library/genres");
+        // The two genre reads and the request in between.
+        expect(after).toBe(before - 2);
     });
 });

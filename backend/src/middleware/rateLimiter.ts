@@ -37,6 +37,8 @@ export const apiLimiter = createRateLimiter({
             (fullPath.startsWith("/api/library/tracks/") && fullPath.endsWith("/stream")) ||
             // Podcast streaming: /api/podcasts/:podcastId/episodes/:episodeId/stream
             (fullPath.startsWith("/api/podcasts/") && fullPath.endsWith("/stream")) ||
+            // Audiobook streaming: /api/audiobooks/:id/stream, one range request after another while it plays
+            (fullPath.startsWith("/api/audiobooks/") && fullPath.endsWith("/stream")) ||
             // Soulseek search polling: /api/soulseek/search/:searchId (no /status suffix)
             /^\/api\/soulseek\/search\/[a-f0-9-]+$/.test(fullPath) ||
             // Spotify import status: /api/spotify/import/:jobId/status
