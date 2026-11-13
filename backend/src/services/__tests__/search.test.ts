@@ -1,20 +1,8 @@
 /**
- * SearchService.queryToTsquery, through a subclass that exposes it.
+ * SearchService.queryToTsquery, through a subclass that exposes it, and the artist search against the real database.
  */
 
 // All mocks must be before imports
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        artist: { findMany: jest.fn() },
-        album: { findMany: jest.fn(), count: jest.fn() },
-        track: { findMany: jest.fn() },
-        podcast: { findMany: jest.fn() },
-        podcastEpisode: { findMany: jest.fn() },
-        audiobook: { findMany: jest.fn() },
-        $queryRaw: jest.fn(),
-    },
-}));
-
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
@@ -24,6 +12,7 @@ jest.mock('../../utils/redis', () => ({
 }));
 
 import { SearchService } from '../search';
+import { prisma } from '../../utils/db';
 
 // Expose the private method for direct testing
 class TestableSearchService extends SearchService {
@@ -122,46 +111,91 @@ describe('SearchService.queryToTsquery', () => {
 });
 
 describe('SearchService.searchArtists', () => {
-    const { prisma } = require('../../utils/db');
+    const P = 'zz-search-';
 
-    beforeEach(() => {
-        jest.clearAllMocks();
+    async function wipe() {
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+    }
+
+    /** An artist with one playable song, so the search can offer it. */
+    async function seedArtist(id: string, name: string, albumOpts: { corrupt?: boolean } = {}) {
+        await prisma.artist.create({ data: { id: `${P}${id}`, name, identityKey: `${P}${id}` } });
+        await prisma.album.create({
+            data: { id: `${P}${id}-alb`, artistId: `${P}${id}`, title: 'Record', identityKey: `${P}${id}-alb`, rgMbid: `${P}${id}-alb`, primaryType: 'Album' },
+        });
+        await prisma.track.create({
+            data: {
+                id: `${P}${id}-t`, albumId: `${P}${id}-alb`, title: 'Song', trackNo: 1, duration: 200,
+                filePath: `/tmp/${P}${id}.flac`, fileModified: new Date(), fileSize: 1000, corrupt: albumOpts.corrupt ?? false,
+            },
+        });
+    }
+
+    beforeAll(wipe);
+    afterAll(wipe);
+    beforeEach(async () => {
+        jest.restoreAllMocks();
+        await wipe();
     });
 
     it('returns empty array for empty query', async () => {
-        const result = await svc.searchArtists({ query: '' });
-        expect(result).toEqual([]);
-        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        await seedArtist('a1', 'Zzradioheadtest');
+        const spy = jest.spyOn(prisma, '$queryRaw');
+        expect(await svc.searchArtists({ query: '' })).toEqual([]);
+        expect(spy).not.toHaveBeenCalled();
     });
 
     it('returns empty array for whitespace-only query', async () => {
-        const result = await svc.searchArtists({ query: '   ' });
-        expect(result).toEqual([]);
+        await seedArtist('a1', 'Zzradioheadtest');
+        expect(await svc.searchArtists({ query: '   ' })).toEqual([]);
     });
 
     it('falls back to LIKE search when tsquery returns empty', async () => {
         // All-special-chars query -> empty tsquery -> fallback path
-        (prisma.artist.findMany as jest.Mock).mockResolvedValue([]);
+        await seedArtist('a1', 'zz!!! chk');
+        await seedArtist('a2', 'Zzradioheadtest');
+
         const result = await svc.searchArtists({ query: '!!!' });
-        expect(result).toEqual([]);
-        expect(prisma.artist.findMany).toHaveBeenCalled();
+
+        expect(result.map((r) => r.id)).toEqual([`${P}a1`]);
+        expect(result[0]).toMatchObject({ name: 'zz!!! chk', rank: 0 });
     });
 
-    it('uses $queryRaw for normal queries', async () => {
-        const mockResult = [{ id: '1', name: 'Radiohead', mbid: null, heroUrl: null, rank: 0.8 }];
-        (prisma.$queryRaw as jest.Mock).mockResolvedValue(mockResult);
+    it('finds an artist by full-text search and ranks it', async () => {
+        await seedArtist('a1', 'Zzradioheadtest');
+        await seedArtist('a2', 'Someone Else');
 
-        const result = await svc.searchArtists({ query: 'radiohead' });
-        expect(result).toEqual(mockResult);
-        expect(prisma.$queryRaw).toHaveBeenCalled();
+        const result = await svc.searchArtists({ query: 'zzradioheadtest' });
+
+        expect(result.map((r) => r.id)).toEqual([`${P}a1`]);
+        expect(result[0]).toMatchObject({ name: 'Zzradioheadtest', mbid: null, heroUrl: null });
+        expect(result[0].rank).toBeGreaterThan(0);
     });
 
-    it('falls back to LIKE search when $queryRaw throws', async () => {
-        (prisma.$queryRaw as jest.Mock).mockRejectedValue(new Error('DB error'));
-        (prisma.artist.findMany as jest.Mock).mockResolvedValue([]);
+    it('offers only artists with a playable song', async () => {
+        await seedArtist('a1', 'Zzradioheadtest', { corrupt: true });
 
-        const result = await svc.searchArtists({ query: 'radiohead' });
-        expect(result).toEqual([]);
-        expect(prisma.artist.findMany).toHaveBeenCalled();
+        expect(await svc.searchArtists({ query: 'zzradioheadtest' })).toEqual([]);
+    });
+
+    it('falls back to LIKE search when the full-text query throws', async () => {
+        await seedArtist('a1', 'Zzradioheadtest');
+        jest.spyOn(prisma, '$queryRaw').mockRejectedValueOnce(new Error('DB error'));
+
+        const result = await svc.searchArtists({ query: 'zzradioheadtest' });
+
+        expect(result.map((r) => r.id)).toEqual([`${P}a1`]);
+        expect(result[0].rank).toBe(0);
+    });
+
+    it('falls back to LIKE search when full-text finds nothing, so a partial word still matches', async () => {
+        await seedArtist('a1', 'Zzradioheadtest');
+
+        // "adioheadte" is no prefix of any word in the name, so the full-text query finds nothing
+        const result = await svc.searchArtists({ query: 'adioheadte' });
+
+        expect(result.map((r) => r.id)).toEqual([`${P}a1`]);
     });
 });

@@ -4,7 +4,6 @@
  * must hold one of them. Outages pass through untouched.
  */
 
-jest.mock("../../utils/db", () => ({ prisma: {} }));
 jest.mock("../../utils/redis", () => ({ redisClient: { get: jest.fn(), setex: jest.fn() } }));
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
