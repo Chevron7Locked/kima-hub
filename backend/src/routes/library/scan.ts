@@ -7,6 +7,7 @@ import { scanQueue } from "../../workers/queues";
 import { requestRefile, requestScan } from "../../workers/scanRequest";
 import { organizeSingles } from "../../workers/organizeSingles";
 import { parseLimit, parseOffset } from "./paging";
+import { updateArtistCounts } from "../../services/artistCountsService";
 
 const router = Router();
 
@@ -162,11 +163,16 @@ router.get("/removals", requireAdmin, async (req, res) => {
 router.delete("/corrupt-tracks", requireAdmin, async (_req, res) => {
   try {
     // Clear the corrupt flag only, keeping the track and its stage records; the
-    // next scan re-checks the file.
+    // next scan re-checks the file. The songs play again, so their artists are recounted.
+    const albums = await prisma.album.findMany({
+      where: { tracks: { some: { corrupt: true } } },
+      select: { artistId: true },
+    });
     const result = await prisma.track.updateMany({
       where: { corrupt: true },
       data: { corrupt: false },
     });
+    for (const artistId of new Set(albums.map((a) => a.artistId))) await updateArtistCounts(artistId);
     res.json({
       cleared: result.count,
       message: `Cleared the corrupt flag on ${result.count} tracks (rows kept)`,

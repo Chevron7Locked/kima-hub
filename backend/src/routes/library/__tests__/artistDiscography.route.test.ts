@@ -59,6 +59,8 @@ const album = (id: string, rgMbid: string, title: string) =>
         data: {
             id, rgMbid, artistId: ARTIST, title, identityKey: id, sortName: title,
             primaryType: "Album", location: "LIBRARY",
+            // A song it can play, so the page lists it.
+            tracks: { create: { id: `${id}-t`, title: `${title} song`, trackNo: 1, duration: 100, filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1 } },
         },
     });
 

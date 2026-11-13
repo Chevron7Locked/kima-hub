@@ -308,7 +308,11 @@ describe("bounded lookups", () => {
         const extra = ["Ночь А", "Ночь Б", "Ночь В"];
         for (const [i, title] of extra.entries()) {
             await prisma.album.create({
-                data: { id: `${P}-pg-${i}`, rgMbid: `${P}-pg-rg-${i}`, artistId: artistId("ddt"), identityKey: `${P}-pg-ak-${i}`, title, primaryType: "Album", location: "LIBRARY" },
+                data: {
+                    id: `${P}-pg-${i}`, rgMbid: `${P}-pg-rg-${i}`, artistId: artistId("ddt"), identityKey: `${P}-pg-ak-${i}`, title, primaryType: "Album", location: "LIBRARY",
+                    // A song it can play, so search finds the album.
+                    tracks: { create: { id: `${P}-pg-t-${i}`, title: "песня", trackNo: 1, duration: 100, filePath: `${P}-pg-t-${i}.flac`, fileModified: new Date(), fileSize: 1 } },
+                },
             });
         }
         const album = jest.spyOn(prisma.album, "findMany");

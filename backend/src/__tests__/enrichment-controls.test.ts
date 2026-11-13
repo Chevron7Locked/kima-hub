@@ -541,6 +541,23 @@ describe("DELETE /library/corrupt-tracks", () => {
         expect(stillThere?.corrupt).toBe(false);
     });
 
+    it("recounts the artist, since a cleared song plays again", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/library", scanRouter);
+
+        await seedTrack(id("corrupt3"), { analysis: "failed" });
+        await prisma.track.update({ where: { id: id("corrupt3") }, data: { corrupt: true } });
+        await prisma.artist.update({ where: { id: id("art") }, data: { libraryAlbumCount: 0, totalTrackCount: 0 } });
+        const token = await makeUser(id("route_admin"), "admin");
+
+        await request(app).delete("/library/corrupt-tracks").set("Authorization", `Bearer ${token}`);
+
+        const artist = await prisma.artist.findUnique({ where: { id: id("art") } });
+        expect(artist?.libraryAlbumCount).toBe(1);
+        expect(artist?.totalTrackCount).toBeGreaterThanOrEqual(1);
+    });
+
     it("lists the true state: the corrupt track shows up before the clear and not after", async () => {
         const app = express();
         app.use(express.json());

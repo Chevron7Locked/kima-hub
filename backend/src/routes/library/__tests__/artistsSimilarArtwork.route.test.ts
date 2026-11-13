@@ -145,6 +145,13 @@ describe("the similar-artists strip and where its pictures come from", () => {
                     identityKey: `${KNOWN_ID}-ik`,
                     mbid: SIMILAR_MBID,
                     heroUrl: LOCAL,
+                    // In the library: a library album with a song it can play.
+                    albums: {
+                        create: {
+                            id: `${KNOWN_ID}-al`, rgMbid: `${KNOWN_ID}-rg`, identityKey: `${KNOWN_ID}-ak`, title: "album", primaryType: "Album", location: "LIBRARY",
+                            tracks: { create: { id: `${KNOWN_ID}-t`, title: "song", trackNo: 1, duration: 100, filePath: `${KNOWN_ID}-t.flac`, fileModified: new Date(), fileSize: 1 } },
+                        },
+                    },
                 },
             });
 

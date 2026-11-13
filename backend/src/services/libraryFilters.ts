@@ -5,6 +5,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
 
 /** `Album.location` for owned albums. */
 export const LIBRARY_LOCATION = "LIBRARY";
@@ -13,6 +14,40 @@ export const LIBRARY_LOCATION = "LIBRARY";
 export const LIBRARY_ALBUM_WHERE: Prisma.AlbumWhereInput = {
     location: LIBRARY_LOCATION,
 };
+
+/**
+ * A library album with at least one playable song. Lists of albums and artists show only these: an album whose every
+ * file is missing or unreadable has nothing to play, so it is left out until a file comes back.
+ */
+export const PLAYABLE_ALBUM_WHERE: Prisma.AlbumWhereInput = {
+    location: LIBRARY_LOCATION,
+    tracks: { some: PLAYABLE_SONG },
+};
+
+const SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The outer query's table name or alias, checked before it is written into SQL. `ps` and `pa` are the inner aliases
+ * these pieces use, so an outer name of either would be shadowed. */
+function outerName(name: string): void {
+    if (!SQL_NAME.test(name)) throw new Error(`"${name}" is not a table name or alias`);
+    if (name === "ps" || name === "pa") throw new Error(`"${name}" clashes with an alias the playable pieces use inside`);
+}
+
+/** PLAYABLE_ALBUM_WHERE for raw SQL, given the name the query uses for the album (an alias such as `al`). */
+export function albumHasPlayableSongSql(album: string): Prisma.Sql {
+    outerName(album);
+    return albumSql(album);
+}
+
+function albumSql(album: string): Prisma.Sql {
+    return Prisma.sql`EXISTS (SELECT 1 FROM "Track" ps WHERE ps."albumId" = "${Prisma.raw(album)}".id AND ${playableSongSql("ps", album)})`;
+}
+
+/** An artist with a PLAYABLE_ALBUM_WHERE album, for raw SQL, given the name the query uses for the artist. */
+export function artistHasPlayableSongSql(artist: string): Prisma.Sql {
+    outerName(artist);
+    return Prisma.sql`EXISTS (SELECT 1 FROM "Album" pa WHERE pa."artistId" = "${Prisma.raw(artist)}".id AND ${albumSql("pa")})`;
+}
 
 export type CollectionFilter = "owned" | "discovery" | "all";
 
@@ -35,12 +70,12 @@ export async function yourDiscoverRgMbids(userId: string): Promise<string[]> {
 }
 
 /**
- * The albums the collection's "show" choice lists: "owned" the library (Discover albums only after a like moves them
- * there), "discovery" this listener's own current Discover albums, "all" both.
+ * The albums the collection's "show" choice lists: "owned" the library's albums with a playable song (Discover albums
+ * only after a like moves them there), "discovery" this listener's own current Discover albums, "all" both.
  */
 export function collectionAlbumWhere(filter: CollectionFilter, yourDiscover: string[]): Prisma.AlbumWhereInput {
     const discover: Prisma.AlbumWhereInput = { location: "DISCOVER", rgMbid: { in: yourDiscover } };
-    if (filter === "owned") return LIBRARY_ALBUM_WHERE;
+    if (filter === "owned") return PLAYABLE_ALBUM_WHERE;
     if (filter === "discovery") return discover;
-    return { OR: [LIBRARY_ALBUM_WHERE, discover] };
+    return { OR: [PLAYABLE_ALBUM_WHERE, discover] };
 }

@@ -23,6 +23,13 @@ beforeAll(async () => {
                 normalizedName: normalizeArtistName(name),
                 identityKey: `${P}-${artistIdentityKey(name)}`,
                 heroUrl: `native:artists/${P}-${i}.jpg`,
+                // In the library: a library album with a song it can play.
+                albums: {
+                    create: {
+                        id: `${P}-al-${i}`, rgMbid: `${P}-rg-${i}`, identityKey: `${P}-ak-${i}`, title: "album", primaryType: "Album", location: "LIBRARY",
+                        tracks: { create: { id: `${P}-t-${i}`, title: "song", trackNo: 1, duration: 100, filePath: `${P}-t-${i}.flac`, fileModified: new Date(), fileSize: 1 } },
+                    },
+                },
             },
         });
     }

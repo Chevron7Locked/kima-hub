@@ -2,6 +2,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
+import { PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { artistTaggedWithGenre, genreKey } from "../utils/genreSql";
 import { searchRows } from "./textMatch";
 
@@ -194,9 +195,7 @@ export class SearchService {
                 prisma.artist.findMany({
                     where: {
                         name: { contains: query, mode: "insensitive" },
-                        albums: {
-                            some: { location: "LIBRARY" },
-                        },
+                        albums: { some: PLAYABLE_ALBUM_WHERE },
                     },
                     select: ARTIST_FIELDS,
                     take,
@@ -206,7 +205,7 @@ export class SearchService {
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT a.id FROM "Artist" a
                  WHERE a.name ~ ${pattern}
-                   AND EXISTS (SELECT 1 FROM "Album" al WHERE al."artistId" = a.id AND al.location = 'LIBRARY')
+                   AND ${artistHasPlayableSongSql("a")}
                  ORDER BY a.name ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
             (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS }),
         );
@@ -233,7 +232,7 @@ export class SearchService {
               ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
             FROM "Artist" a
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-              AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id AND alb.location = 'LIBRARY')
+              AND ${artistHasPlayableSongSql("a")}
             ORDER BY rank DESC, a.name ASC
             LIMIT ${limit}
             OFFSET ${offset}
@@ -257,7 +256,7 @@ export class SearchService {
             ({ skip, take }) =>
                 prisma.album.findMany({
                     where: {
-                        location: "LIBRARY",
+                        ...PLAYABLE_ALBUM_WHERE,
                         OR: [
                             { title: { contains: query, mode: "insensitive" } },
                             { artist: { name: { contains: query, mode: "insensitive" } } },
@@ -270,7 +269,7 @@ export class SearchService {
                 }),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
-                 WHERE al.location = 'LIBRARY' AND (al.title ~ ${pattern} OR ar.name ~ ${pattern})
+                 WHERE ${albumHasPlayableSongSql("al")} AND (al.title ~ ${pattern} OR ar.name ~ ${pattern})
                  ORDER BY al.title ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
             (ids) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS }),
         );
@@ -310,7 +309,7 @@ export class SearchService {
                 FROM "Album" a
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
                 WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-                  AND a.location = 'LIBRARY'
+                  AND ${albumHasPlayableSongSql("a")}
     
                 UNION ALL
     
@@ -325,7 +324,7 @@ export class SearchService {
                 FROM "Album" a
                 INNER JOIN "Artist" ar ON a."artistId" = ar.id
                 WHERE ar."searchVector" @@ to_tsquery('english', ${tsquery})
-                  AND a.location = 'LIBRARY'
+                  AND ${albumHasPlayableSongSql("a")}
               ) combined
               ORDER BY id, rank DESC
             ) deduped

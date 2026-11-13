@@ -25,7 +25,11 @@ beforeAll(async () => {
             data: { id: `${P}${i}`, name, normalizedName: normalizeArtistName(name), identityKey: `${P}-${i}` },
         });
         await prisma.album.create({
-            data: { id: `${P}${i}alb`, artistId: `${P}${i}`, rgMbid: `${P}-rg-${i}`, primaryType: "Album", title: `${name} Album` },
+            data: {
+                id: `${P}${i}alb`, artistId: `${P}${i}`, rgMbid: `${P}-rg-${i}`, primaryType: "Album", title: `${name} Album`,
+                // A song it can play, so search finds its artist.
+                tracks: { create: { id: `${P}${i}t`, title: "song", trackNo: 1, duration: 100, filePath: `${P}${i}t.flac`, fileModified: new Date(), fileSize: 1 } },
+            },
         });
     }
 });

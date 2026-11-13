@@ -25,6 +25,7 @@ import { prisma } from "../db";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { config } from "../../config";
 import { PLAYABLE_SONG, playableSongSql } from "../libraryEligibility";
+import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { compatRouter } from "../../routes/subsonic/compat";
 import { playbackRouter } from "../../routes/subsonic/playback";
 import { searchRouter } from "../../routes/subsonic/search";
@@ -64,7 +65,10 @@ import { playableSlice, type Slice } from "../../services/stats/playable";
 import { shelfStats } from "../../services/stats/shelf";
 import { signature } from "../../services/stats/signature";
 import libraryTracksRouter from "../../routes/library/tracks";
-import libraryArtistsRouter from "../../routes/library/artists";
+import libraryArtistsRouter, { resolveSimilarArtists } from "../../routes/library/artists";
+import libraryAlbumsRouter from "../../routes/library/albums";
+import { updateArtistCounts } from "../../services/artistCountsService";
+import { libraryArtistIdsForGenre } from "../genreSql";
 import recommendationsRouter from "../../routes/recommendations";
 import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
@@ -116,7 +120,7 @@ const app = express()
         next();
     })
     .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter)
-    .use("/api/library", libraryTracksRouter, libraryArtistsRouter)
+    .use("/api/library", libraryTracksRouter, libraryArtistsRouter, libraryAlbumsRouter)
     .use("/api/recommendations", recommendationsRouter);
 /** A web route's JSON answer, asked as `user`. */
 const web = async (route: string, user = USER) => (await request(app).get(route).set("x-user", user).expect(200)).body;
@@ -384,6 +388,17 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
         ),
     "the web shuffle": async () => (await web("/api/library/tracks/shuffle?limit=10000")).tracks.map((t: { id: string }) => t.id),
     "the web artist page's play queue": async () => (await web(`/api/library/artists/${P}-ar/play-tracks`)).tracks.map((t: { id: string }) => t.id),
+    ...Object.fromEntries(
+        ["owned", "all"].map((filter) => [
+            `the web album list showing ${filter}, which lists only albums with a playable song`,
+            async () => songsOfAlbums((await web(`/api/library/albums?filter=${filter}&artistId=${P}-ar&limit=500`)).albums),
+        ]),
+    ),
+    "the web artist page, which lists only albums with a playable song": async () => songsOfAlbums((await artistPage([])).albums),
+    "web album search, which lists only albums with a playable song": async () =>
+        songsOfAlbums(await searchService.searchAlbums({ query: "playable", limit: 500 })),
+    "web album search by a name full-text search cannot read, which lists only albums with a playable song": async () =>
+        songsOfAlbums(await searchService.searchAlbums({ query: P, limit: 500 })),
     "the web artist page's album songs": async () =>
         (await artistPage([])).albums.flatMap((a: { tracks: { id: string }[] }) => a.tracks.map((t) => t.id)),
     // The page matches a top-list title to an owned song by its part before any dash, and every seeded title starts
@@ -705,6 +720,79 @@ it("builds an artist's sound profile from its playable songs only", async () => 
 
 it("refuses a table name that is not a plain identifier", () => {
     expect(() => playableSongSql(`t"; DROP TABLE "Track"; --`, "al")).toThrow();
+});
+
+it("refuses an album or artist name that is not an identifier, or that the pieces use inside", () => {
+    for (const piece of [albumHasPlayableSongSql, artistHasPlayableSongSql]) {
+        expect(() => piece(`a"; --`)).toThrow();
+        expect(() => piece("ps")).toThrow();
+        expect(() => piece("pa")).toThrow();
+        expect(() => piece("al")).not.toThrow();
+    }
+});
+
+// An artist whose library albums hold only a missing and a corrupt song has nothing to play, so it is listed nowhere
+// artists are listed, and the seeded artist's album counts are its one album with a playable song.
+describe("an artist with no playable song", () => {
+    const VANISHED = `${P}-vanished-ar`;
+    beforeAll(async () => {
+        await seedArtist({ id: VANISHED, name: `${P} vanished` }, [
+            { id: `${P}-vanished-al1`, songs: [{ id: `${P}-vanished-s1`, title: `${P} vanished 1`, filePath: `${P}/vanished-1.flac`, missingSince: new Date() }] },
+            { id: `${P}-vanished-al2`, songs: [{ id: `${P}-vanished-s2`, title: `${P} vanished 2`, filePath: `${P}/vanished-2.flac`, corrupt: true }] },
+        ]);
+    });
+    const listed = (ids: string[]) => {
+        expect(ids).toContain(`${P}-ar`);
+        expect(ids).not.toContain(VANISHED);
+    };
+
+    it("is not in the web artist list, whichever collection it shows", async () => {
+        for (const filter of ["owned", "all"]) {
+            listed((await web(`/api/library/artists?filter=${filter}&query=${P}&limit=500`)).artists.map((a: { id: string }) => a.id));
+        }
+    });
+
+    it("is not found by web artist search", async () => {
+        listed((await searchService.searchArtists({ query: "playable", limit: 500 })).map((a) => a.id));
+        listed((await searchService.searchArtists({ query: P, limit: 500 })).map((a) => a.id));
+    });
+
+    it("is not among the recently added artists, and the seeded artist counts one album", async () => {
+        const artists: { id: string; albumCount: number }[] = (await web("/api/library/recently-added?limit=100")).artists;
+        listed(artists.map((a) => a.id));
+        expect(artists.find((a) => a.id === `${P}-ar`)?.albumCount).toBe(1);
+    });
+
+    it("is a similar artist outside the library", async () => {
+        // The one call off the server: neither seeded artist has an image of its own.
+        const image = jest.spyOn(deezerService, "getArtistImage").mockResolvedValue(null);
+        try {
+            const similar = await resolveSimilarArtists([{ name: `${P} vanished`, match: 1 }, { name: P, match: 1 }]);
+            expect(similar.map((a) => [a.inLibrary, a.ownedAlbumCount])).toEqual([[false, 0], [true, 1]]);
+        } finally {
+            image.mockRestore();
+        }
+    });
+
+    it("is not among a genre's library artists", async () => {
+        listed(await libraryArtistIdsForGenre(GENRE));
+    });
+
+    it("counts no albums and no songs, so the Subsonic artist lists leave it out", async () => {
+        await updateArtistCounts(VANISHED);
+        await updateArtistCounts(`${P}-ar`);
+        const counts = await prisma.artist.findMany({
+            where: { id: { in: [VANISHED, `${P}-ar`] } },
+            select: { id: true, libraryAlbumCount: true, totalTrackCount: true },
+            orderBy: { id: "asc" },
+        });
+        expect(counts).toEqual([
+            { id: `${P}-ar`, libraryAlbumCount: 1, totalTrackCount: 1 },
+            { id: VANISHED, libraryAlbumCount: 0, totalTrackCount: 0 },
+        ]);
+        const index = (await reply("getArtists.view", {})).artists.index ?? [];
+        listed(index.flatMap((i: { artist: { id: string }[] }) => i.artist.map((a) => a.id)));
+    });
 });
 
 // What a Subsonic client does with the songs it was shown lines up with them, never with the ones left out. These run

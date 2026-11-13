@@ -18,7 +18,7 @@ import { noOneKeys } from "../../services/mixes/artistCap";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
-import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
@@ -215,11 +215,11 @@ router.get("/recently-added", async (req, res) => {
   try {
     const limitNum = parseLimit(req.query.limit, 10, 100);
 
-    // Artists ordered by their newest library album with songs, one row each; Various Artists and Unknown Artist name
-    // no one, so they are left out.
+    // Artists ordered by their newest library album with a playable song, one row each; Various Artists and
+    // Unknown Artist name no one, so they are left out.
     const newest = await prisma.album.groupBy({
       by: ["artistId"],
-      where: { location: LIBRARY_LOCATION, tracks: { some: {} }, artist: { identityKey: { notIn: noOneKeys() } } },
+      where: { ...PLAYABLE_ALBUM_WHERE, artist: { identityKey: { notIn: noOneKeys() } } },
       _max: { lastSynced: true },
       orderBy: { _max: { lastSynced: "desc" } },
       take: limitNum,
@@ -238,8 +238,7 @@ router.get("/recently-added", async (req, res) => {
       by: ["artistId"],
       where: {
         artistId: { in: artistIds },
-        location: LIBRARY_LOCATION,
-        tracks: { some: {} },
+        ...PLAYABLE_ALBUM_WHERE,
       },
       _count: { id: true },
     });

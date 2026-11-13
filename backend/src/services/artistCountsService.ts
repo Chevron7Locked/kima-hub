@@ -1,12 +1,13 @@
 /**
- * Denormalised Artist counts for filtering without joins: libraryAlbumCount
- * and discoveryAlbumCount (albums with tracks), and totalTrackCount (songs on library albums; Discover songs are not
- * the library's).
+ * Denormalised Artist counts for filtering without joins: libraryAlbumCount (library albums with a playable song),
+ * discoveryAlbumCount (Discover albums with songs), and totalTrackCount (playable songs; Discover songs are not the
+ * library's). The scan recounts every artist, so a file that goes missing or comes back moves them.
  */
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { LIBRARY_LOCATION } from "./libraryFilters";
+import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
@@ -22,11 +23,7 @@ async function calculateArtistCounts(
 ): Promise<ArtistCounts> {
   const [libraryAlbums, discoveryAlbums, trackCount] = await Promise.all([
     prisma.album.count({
-      where: {
-        artistId,
-        location: LIBRARY_LOCATION,
-        tracks: { some: {} },
-      },
+      where: { artistId, ...PLAYABLE_ALBUM_WHERE },
     }),
     prisma.album.count({
       where: {
@@ -36,9 +33,7 @@ async function calculateArtistCounts(
       },
     }),
     prisma.track.count({
-      where: {
-        album: { artistId, location: LIBRARY_LOCATION },
-      },
+      where: { ...PLAYABLE_SONG, album: { ...PLAYABLE_SONG.album, artistId } },
     }),
   ]);
 

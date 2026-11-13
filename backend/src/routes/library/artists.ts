@@ -33,7 +33,13 @@ import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
 import { listenBrainzService } from "../../services/listenBrainz";
 import { deezerService } from "../../services/deezer";
-import { CollectionFilter, LIBRARY_LOCATION, collectionFilter, yourDiscoverRgMbids } from "../../services/libraryFilters";
+import {
+  CollectionFilter,
+  PLAYABLE_ALBUM_WHERE,
+  artistHasPlayableSongSql,
+  collectionFilter,
+  yourDiscoverRgMbids,
+} from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
@@ -76,8 +82,10 @@ export async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
     .map((s) => s.mbid)
     .filter(Boolean) as string[];
 
+  // A library artist is one with an album it can play; a Discover-only or emptied one is outside the library.
   const libraryMatches = await prisma.artist.findMany({
     where: {
+      albums: { some: PLAYABLE_ALBUM_WHERE },
       OR: [
         { normalizedName: { in: similarNames } },
         ...(similarMbids.length > 0 ? [{ mbid: { in: similarMbids } }] : []),
@@ -91,12 +99,7 @@ export async function resolveSimilarArtists(similar: SimilarArtistSource[]) {
       heroUrl: true,
       _count: {
         select: {
-          albums: {
-            where: {
-              location: LIBRARY_LOCATION,
-              tracks: { some: {} },
-            },
-          },
+          albums: { where: PLAYABLE_ALBUM_WHERE },
         },
       },
     },
@@ -141,13 +144,10 @@ const router = Router();
 
 /**
  * The artists the collection's "show" choice lists (collectionAlbumWhere): "owned" those with a library album that has
- * a song, "discovery" those with one of this listener's Discover albums and no library album, "all" either.
+ * a playable song, "discovery" those with one of this listener's Discover albums and no library album, "all" either.
  */
 function artistListWhereSql(show: CollectionFilter, yourDiscover: string[], query: string): Prisma.Sql {
-  const library = Prisma.sql`EXISTS (
-    SELECT 1 FROM "Album" al
-    WHERE al."artistId" = a.id AND al.location = 'LIBRARY' AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id)
-  )`;
+  const library = artistHasPlayableSongSql("a");
   const discover = Prisma.sql`EXISTS (
     SELECT 1 FROM "Album" al
     WHERE al."artistId" = a.id AND al.location = 'DISCOVER' AND al."rgMbid" = ANY(${yourDiscover}::text[])
@@ -476,8 +476,11 @@ router.get("/artists/:id", async (req, res) => {
     let albumsWithOwnership = [];
     const ownedRgMbids = new Set(artist.ownedAlbums.map((o) => o.rgMbid));
 
+    // An album with no playable song has nothing to show or play, so the page leaves it out; it still counts as the
+    // library's below, so its MusicBrainz copy is not offered as one to get.
+    const libraryAlbums = artist.albums;
     // The id belongs to enrichment; a page view never searches for or stores one.
-    const dbAlbums = artist.albums.map((album) => ({
+    const dbAlbums = libraryAlbums.filter((album) => album.tracks.length > 0).map((album) => ({
       ...album,
       tracks: album.tracks.map((t) => ({
         ...t,
@@ -561,8 +564,8 @@ router.get("/artists/:id", async (req, res) => {
           source: "musicbrainz" as const,
         }));
 
-        const inLibrary = new Set(dbAlbums.map((a) => a.rgMbid).filter(Boolean));
-        const inLibraryTitles = new Set(dbAlbums.map((a) => editionlessKey(a.title)));
+        const inLibrary = new Set(libraryAlbums.map((a) => a.rgMbid).filter(Boolean));
+        const inLibraryTitles = new Set(libraryAlbums.map((a) => editionlessKey(a.title)));
         const mbAlbumsFiltered = await withAlbumArtwork(
           mbAlbums.filter((a) => !inLibrary.has(a.rgMbid) && !inLibraryTitles.has(editionlessKey(a.title))),
           (album) => ({ rgMbid: album.rgMbid, artistName: artist.name, albumTitle: album.title }),

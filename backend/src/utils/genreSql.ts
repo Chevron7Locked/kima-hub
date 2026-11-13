@@ -7,6 +7,7 @@
  */
 import { prisma } from "./db";
 import { getMergedGenres } from "./metadataOverrides";
+import { artistHasPlayableSongSql } from "../services/libraryFilters";
 
 /**
  * Spaces (any width, no-break included), hyphens, dashes and the minus sign, underscores, slashes, dots and middle dots,
@@ -45,17 +46,16 @@ export function artistTaggedWithGenre(genres: unknown, userGenres: unknown, genr
 }
 
 /**
- * The ids of the artists tagged with a genre, matched by genreKey (the rule above): the database
- * lists the library's artists, the names are compared here. Every surface that filters library
- * music by genre asks this, so none can drift from the others.
+ * The ids of the artists tagged with a genre, matched by genreKey (the rule above): the database lists the
+ * library's artists (those with a playable song), the names are compared here. Every surface that filters
+ * library music by genre asks this, so none can drift from the others.
  */
 export async function libraryArtistIdsForGenre(genreValue: string): Promise<string[]> {
     if (genreKey(genreValue) === "") return [];
     const tagged = await prisma.$queryRaw<{ id: string; genres: unknown; userGenres: unknown }[]>`
-        SELECT DISTINCT ar.id, ar.genres, ar."userGenres"
+        SELECT ar.id, ar.genres, ar."userGenres"
         FROM "Artist" ar
-        JOIN "Album" a ON a."artistId" = ar.id
-        WHERE a.location = 'LIBRARY' AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+        WHERE ${artistHasPlayableSongSql("ar")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
     `;
     return tagged.filter((ar) => artistTaggedWithGenre(ar.genres, ar.userGenres, genreValue)).map((ar) => ar.id);
 }
