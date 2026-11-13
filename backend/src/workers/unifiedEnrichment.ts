@@ -31,13 +31,13 @@ import {
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
+// The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 import * as stageRecords from "../services/stages/stageRecords";
 import {
     STAGE_ORDER,
     PREREQUISITE_STAGE,
     STAGE_SOURCE,
     STAGE_CLAIM_LEASE_MS,
-    STAGE_REDELIVERY_CAP,
     WAITING_KEY_PREFIX,
     ASKED_AGAIN_SQL,
     type StageName,
@@ -75,8 +75,6 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording } from "../services/recordingMatch";
 
 // ── Per-track stage queue ────────────────────────────────────────────────
-
-// The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 
 /**
  * Exactly one producer per queue, so the same work cannot be queued twice under
@@ -2034,11 +2032,6 @@ async function dispatchStageWork(
             // record whose worker died; the module closes it at the redelivery cap so a poison file stops
             // looping, and never claims an answered or closed record.
             claim = await stageRecords.claim(item.trackId, stage, { jobKey: item.jobKey, source });
-            if (claim.kind === "closed") {
-                logger.warn(
-                    `[Enrichment] ${stage}: ${item.title} lost its worker ${STAGE_REDELIVERY_CAP} times — record closed until a human re-decides`,
-                );
-            }
             if (claim.kind !== "claimed") continue;
             item.jobId = claim.jobId;
 
