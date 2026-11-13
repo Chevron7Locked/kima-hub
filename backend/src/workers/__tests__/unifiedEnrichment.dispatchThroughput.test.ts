@@ -205,6 +205,7 @@ describe("in-flight caps keep queues inside the record's patience", () => {
         }
     });
 
+    // 200 claims, one transaction each (the claim also mirrors the status columns): about 4 s here.
     it("analysis claims no deeper than its ceiling on a fast machine", async () => {
         const cap = STAGE_IN_FLIGHT_CAP.analysis ?? 0;
         await seedRecentCloses("analysis", 400);
@@ -227,7 +228,7 @@ describe("in-flight caps keep queues inside the record's patience", () => {
             `${PREFIX}_%`,
         );
         expect(Number(stillPending.n)).toBe(5);
-    });
+    }, 20_000);
 
     it("embedding claims no deeper than its ceiling on a fast machine", async () => {
         const cap = STAGE_IN_FLIGHT_CAP.embedding ?? 0;
