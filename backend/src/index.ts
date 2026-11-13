@@ -263,6 +263,7 @@ async function healthHandler(_req: express.Request, res: express.Response) {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
+// The metrics router applies the runaway limit itself, before its admin check.
 app.use("/api/metrics", metricsRoutes);
 
 // Error handler

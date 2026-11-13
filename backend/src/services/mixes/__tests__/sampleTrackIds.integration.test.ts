@@ -97,6 +97,23 @@ describe("sampleTrackIds", () => {
         expect(few).toEqual([tid(10, 5)]);
     });
 
+    it("is nothing when the filter matches nothing, and reads little to find that out", async () => {
+        let read = 0;
+        const raw = prisma.$queryRaw.bind(prisma) as unknown as (...args: unknown[]) => Promise<unknown[]>;
+        const rawSpy = jest.spyOn(prisma, "$queryRaw").mockImplementation((async (...args: unknown[]) => {
+            const rows = await raw(...args);
+            read += rows.length;
+            return rows;
+        }) as never);
+        try {
+            expect(await sampleTrackIds({ where: { ...mine, title: "no such song" }, take: 30 })).toEqual([]);
+            // One random pass of a few times `take`, then the count shows nothing is left to find.
+            expect(read).toBeLessThanOrEqual(30 * 4);
+        } finally {
+            rawSpy.mockRestore();
+        }
+    });
+
     it("draws differently each call and reaches the whole match over many draws, not the first rows", async () => {
         const a = await sampleTrackIds({ where: mine, take: 100 });
         const b = await sampleTrackIds({ where: mine, take: 100 });

@@ -279,6 +279,8 @@ const PLAYABLE_SONG_SQL = playableSongSql("t", "a");
 
 /** The most random songs one pass of sampleTrackIds asks the database for; a rarer filter reads its matches instead. */
 const SAMPLE_PASS_MAX = 20_000;
+/** How many times `take` the first pass asks for, and how much bigger each next pass is. */
+const SAMPLE_GROWTH = 4;
 
 /**
  * Ids of up to `take` playable songs drawn uniformly at random from every one
@@ -287,8 +289,9 @@ const SAMPLE_PASS_MAX = 20_000;
  *
  * The database draws a few times `take` playable songs at random (ORDER BY random() LIMIT) and `where` keeps those
  * that match, so the matching ids are not all read, however large the library. A uniform draw of the library, kept
- * to the matches, is a uniform draw of the matches: when it holds `take` of them, `take` are drawn from it; when it
- * holds fewer, the draw grows fourfold, until it is the whole library or too big to pass, when every match is read.
+ * to the matches, is a uniform draw of the matches: when it holds `take` of them, `take` are drawn from it. When it
+ * holds fewer, the matches are counted: if no more than the next pass would ask for, they are read (none, when none
+ * match); otherwise the draw grows fourfold, up to SAMPLE_PASS_MAX, and a draw too big for that reads every match.
  */
 export async function sampleTrackIds(args: {
     where: Prisma.TrackWhereInput;
@@ -296,26 +299,28 @@ export async function sampleTrackIds(args: {
 }): Promise<string[]> {
     assertTake(args.take);
     const matching = { AND: [args.where, PLAYABLE_SONG] };
-    for (let drawn = args.take * 4; drawn <= SAMPLE_PASS_MAX; drawn *= 4) {
+    const pick = (rows: { id: string }[]) =>
+        rows.length === 0 ? [] : drawIds(rows.map((r) => r.id), Math.min(args.take, rows.length));
+
+    for (let asked = args.take * SAMPLE_GROWTH; asked <= SAMPLE_PASS_MAX; asked *= SAMPLE_GROWTH) {
         const candidates = await prisma.$queryRaw<{ id: string }[]>`
             SELECT t.id
             FROM "Track" t
             JOIN "Album" a ON a.id = t."albumId"
             WHERE ${PLAYABLE_SONG_SQL}
             ORDER BY random()
-            LIMIT ${drawn}
+            LIMIT ${asked}
         `;
         const rows = await prisma.track.findMany({
             where: { AND: [matching, { id: { in: candidates.map((c) => c.id) } }] },
             select: { id: true },
         });
         // Fewer candidates than asked for means they are every playable song: these are all the matches.
-        if (rows.length >= args.take || candidates.length < drawn) {
-            return rows.length === 0 ? [] : drawIds(rows.map((r) => r.id), Math.min(args.take, rows.length));
-        }
+        if (rows.length >= args.take || candidates.length < asked) return pick(rows);
+        // Few matches: reading them costs no more than another pass would.
+        if ((await prisma.track.count({ where: matching })) <= asked * SAMPLE_GROWTH) break;
     }
-    const rows = await prisma.track.findMany({ where: matching, select: { id: true } });
-    return rows.length === 0 ? [] : drawIds(rows.map((r) => r.id), Math.min(args.take, rows.length));
+    return pick(await prisma.track.findMany({ where: matching, select: { id: true } }));
 }
 
 /**
