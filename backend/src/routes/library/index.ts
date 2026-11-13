@@ -17,9 +17,9 @@ const router = Router();
 router.use(requireAuthOrToken);
 
 // Apply API rate limiter to routes that need it
-// Skip rate limiting for high-traffic endpoints (cover-art, streaming)
+// Skip rate limiting for high-traffic endpoints (cover art and the album cover search, which carry the image limit, and streaming)
 router.use((req, res, next) => {
-  if (req.path.startsWith("/cover-art")) {
+  if (req.path.startsWith("/cover-art") || req.path.startsWith("/album-cover")) {
     return next();
   }
   if (req.path.endsWith("/stream")) {   // final segment only (matches stream routes; not /tracks/stream_x)

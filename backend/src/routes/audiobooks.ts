@@ -6,7 +6,6 @@ import { audiobookCacheService } from "../services/audiobookCache";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { prisma } from "../utils/db";
 import { requireAuthOrToken } from "../middleware/auth";
-import { apiLimiter } from "../middleware/rateLimiter";
 import { getSystemSettings } from "../utils/systemSettings";
 import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
@@ -102,7 +101,6 @@ function toAudiobookDto(book: Audiobook, progress: AudiobookProgress | null) {
 router.get(
     "/continue-listening",
     requireAuthOrToken,
-    apiLimiter,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -150,7 +148,7 @@ router.get(
  * Manually trigger audiobook sync from Audiobookshelf
  * Fetches all audiobooks and caches metadata + cover images locally
  */
-router.post("/sync", requireAuthOrToken, apiLimiter, async (_req, res) => {
+router.post("/sync", requireAuthOrToken, async (_req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -213,7 +211,7 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (_req, res) => {
  * GET /audiobooks/search
  * Search audiobooks
  */
-router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get("/search", requireAuthOrToken, async (req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -238,7 +236,7 @@ router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
  * GET /audiobooks
  * Get all audiobooks from cached database (instant, no API calls)
  */
-router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get("/", requireAuthOrToken, async (req, res) => {
     logger.debug("[Audiobooks] GET / - fetching audiobooks list");
     try {
         const settings = await getSystemSettings();
@@ -294,7 +292,6 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
 router.get(
     "/series/:seriesName",
     requireAuthOrToken,
-    apiLimiter,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -460,7 +457,7 @@ router.get("/:id/cover", async (req, res) => {
  * GET /audiobooks/:id
  * Get a specific audiobook with full details (cache-only; syncs when missing/stale/no sections).
  */
-router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get("/:id", requireAuthOrToken, async (req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -648,7 +645,6 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
 router.post(
     "/:id/progress",
     requireAuthOrToken,
-    apiLimiter,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -793,7 +789,6 @@ router.post(
 router.delete(
     "/:id/progress",
     requireAuthOrToken,
-    apiLimiter,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
