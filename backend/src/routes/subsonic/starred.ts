@@ -103,31 +103,25 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
     if (!ids) return;
 
     // A song the app is never offered (Discover, missing, corrupt) is skipped like one that is not there.
-    const playableIds = (await prisma.track.findMany({
-        where: { id: { in: ids }, ...PLAYABLE_SONG },
-        select: { id: true },
-    })).map((t) => t.id);
+    const playable = async () =>
+        (await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, select: { id: true } })).map((t) => ({
+            userId,
+            trackId: t.id,
+        }));
 
-    // Star every id, skipping tracks deleted meanwhile (P2003) and logging real
-    // failures. Error only when a real failure left nothing starred; a partial
-    // success answers ok, and the upsert makes a retry safe.
-    let anySucceeded = false;
-    let realFailure = false;
-    for (const trackId of playableIds) {
-        try {
-            await prisma.likedTrack.upsert({
-                where: { userId_trackId: { userId, trackId } },
-                create: { userId, trackId },
-                update: {},
-            });
-            anySucceeded = true;
-        } catch (err) {
-            if ((err as { code?: string }).code === "P2003") continue;
-            realFailure = true;
-            logger.warn(`[Subsonic] star failed for track ${trackId}:`, err);
+    // One write for every song; a song already liked is left as it is, so a retry is safe. A song deleted between the
+    // read and the write (P2003) fails the write, so it is read again once and the rest are still starred.
+    try {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                await prisma.likedTrack.createMany({ data: await playable(), skipDuplicates: true });
+                break;
+            } catch (err) {
+                if ((err as { code?: string }).code !== "P2003" || attempt > 0) throw err;
+            }
         }
-    }
-    if (realFailure && !anySucceeded) {
+    } catch (err) {
+        logger.warn(`[Subsonic] star failed:`, err);
         return subsonicError(req, res, SubsonicError.GENERIC, "Failed to star track");
     }
     return subsonicOk(req, res);
