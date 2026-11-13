@@ -110,13 +110,10 @@ interface Track {
 }
 
 
-interface PlaylistItem {
-    id: string;
+interface PlaylistItem extends PlaylistEntry {
     track: Track;
     type?: "track";
     sort?: number;
-    /** The song stopped playing (missing or unreadable file, or its album left the library): listed, never played. */
-    unavailable?: boolean;
 }
 
 interface PendingTrack {
@@ -416,14 +413,14 @@ export default function PlaylistDetailPage() {
             return;
         }
 
-        const queue = playablePlaylist(playlist.items as PlaylistEntry[]);
+        const queue = playablePlaylist(playlist.items);
         if (queue) playTracks(queue.tracks, 0);
     };
 
     const handlePlayTrack = (index: number) => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
-        const queue = playablePlaylist(playlist.items as PlaylistEntry[], index);
+        const queue = playablePlaylist(playlist.items, index);
         if (queue) playTracks(queue.tracks, queue.start);
     };
 
@@ -939,7 +936,7 @@ export default function PlaylistDetailPage() {
 
             <div className="relative page-shell py-4">
                 <div className="flex items-center gap-4">
-                    {playlist.items && playlist.items.length > 0 && (
+                    {playlist.items?.some((item: PlaylistItem) => !item.unavailable) && (
                         <button
                             onClick={handlePlayPlaylist}
                             aria-label={isThisPlaylistPlaying && isPlaying ? "Pause" : "Play all"}
@@ -953,10 +950,10 @@ export default function PlaylistDetailPage() {
                         </button>
                     )}
 
-                    {playlist.items && playlist.items.length > 1 && (
+                    {playlist.items?.filter((item: PlaylistItem) => !item.unavailable).length > 1 && (
                         <button
                             onClick={() => {
-                                const queue = playablePlaylist(playlist.items as PlaylistEntry[]);
+                                const queue = playablePlaylist(playlist.items);
                                 if (queue) playTracks(shuffleArray(queue.tracks), 0);
                             }}
                             className="h-8 w-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-all"

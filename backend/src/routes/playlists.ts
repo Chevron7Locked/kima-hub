@@ -419,18 +419,17 @@ router.post("/:id/items/batch", requirePlaylistOwner, async (req, res) => {
         const { trackIds } = parsed.data;
         const result = await addSongs(req, trackIds);
 
-        const items = await playlistService.markUnavailable(
-            await prisma.playlistItem.findMany({
-                where: {
-                    playlistId: req.params.id,
-                    trackId: { in: [...new Set(trackIds)] },
-                },
-                include: {
-                    track: { include: { album: { include: { artist: true } } } },
-                },
-                orderBy: { rank: "asc" },
-            })
-        );
+        const rows = await prisma.playlistItem.findMany({
+            where: {
+                playlistId: req.params.id,
+                trackId: { in: [...new Set(trackIds)] },
+            },
+            include: {
+                track: { include: { album: { include: { artist: true } } } },
+            },
+            orderBy: { rank: "asc" },
+        });
+        const items = await playlistService.markUnavailable(rows);
 
         return res.json({
             added: result.added,
