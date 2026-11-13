@@ -27,6 +27,7 @@ interface DiscoveryAlbumInfo {
     id: string;
     rgMbid: string;
     artistName: string;
+    artistMbid: string | null;
     albumTitle: string;
     lidarrAlbumId?: number | null;
 }

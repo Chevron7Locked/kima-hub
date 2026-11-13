@@ -17,25 +17,33 @@ import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
 import { RUNNING_BATCH, couldBeArtist, lookupKey, sameArtist, sameName } from "./discoverEvidence";
 
-/** A suggestion row's names, for comparing with a record's. */
+/** A suggestion row's names and artist id, for comparing with a record's. */
 interface NamedRow {
     artistName: string;
     albumTitle: string;
+    artistMbid: string | null;
 }
 
-/** Whether a suggestion row names the same artist and title as the record, by `nameKey`. */
-const namesRecord = (row: NamedRow, ref: NamedRow) =>
-    sameName(row.artistName, ref.artistName) && sameName(row.albumTitle, ref.albumTitle);
+/** Whether a suggestion row names the same artist (sameArtist) and title (`nameKey`) as the record. */
+const namesRecord = (row: NamedRow, ref: AlbumRef) => sameArtist(row, ref) && sameName(row.albumTitle, ref.albumTitle);
+
+/**
+ * Whether a download job whose subject already names the record's artist and title is also that artist's: a namesake
+ * under another MusicBrainz id is not, a job with no real id is (its subject says so).
+ */
+const jobIsArtist = (job: { artistMbid: string | null }, ref: AlbumRef) =>
+    sameArtist({ artistMbid: job.artistMbid, artistName: ref.artistName }, ref);
 
 /**
  * What names a Discover album: the suggestion's or download job's release-group id, artist and title, and the artist's
- * MusicBrainz id when it has one (missing or `temp-` means the artist is known by name only).
+ * MusicBrainz id, which is null when the artist is known by name only (a `temp-` placeholder counts as none). Required, so
+ * no caller falls back to name-only matching by leaving it out.
  */
 export interface AlbumRef {
     rgMbid: string;
     artistName: string;
     albumTitle: string;
-    artistMbid?: string | null;
+    artistMbid: string | null;
 }
 
 /** An album that was not deleted, with the reason in words for the listener. */
@@ -60,7 +68,10 @@ export async function findScannedAlbum(ref: AlbumRef, at: "DISCOVER" | "LIBRARY"
         orderBy: [{ location: at === "DISCOVER" ? "desc" : "asc" }, { id: "asc" }],
         include: { artist: true },
     });
-    const named = ofArtist.filter((a) => sameName(a.title, ref.albumTitle));
+    // The artist row is one per name, so a namesake's albums come back with it: only the record's artist's stay.
+    const named = ofArtist.filter(
+        (a) => sameName(a.title, ref.albumTitle) && sameArtist({ artistMbid: a.artist.mbid, artistName: ref.artistName }, ref),
+    );
     if (at === "DISCOVER" || named.length < 2) return named[0] ?? null;
     // In the library, the album a like brought in carries the like's mark; a listener's own copy of the same name
     // does not.
@@ -192,7 +203,7 @@ export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): P
         orderBy: { weekStartDate: "desc" },
         select: { artistMbid: true, artistName: true, albumTitle: true, lidarrAlbumId: true },
     });
-    const suggestion = recorded.find((r) => namesRecord(r, ref) && sameArtist(r, ref));
+    const suggestion = recorded.find((r) => namesRecord(r, ref));
     if (suggestion?.lidarrAlbumId) return suggestion.lidarrAlbumId;
     const jobs = await prisma.downloadJob.findMany({
         where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null }, ...couldBeArtist(ref.artistMbid) },
@@ -204,8 +215,7 @@ export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): P
         return (
             !!meta?.artistName &&
             !!meta?.albumTitle &&
-            namesRecord({ artistName: meta.artistName, albumTitle: meta.albumTitle }, ref) &&
-            sameArtist({ artistMbid: j.artistMbid, artistName: meta.artistName }, ref)
+            namesRecord({ artistName: meta.artistName, albumTitle: meta.albumTitle, artistMbid: j.artistMbid }, ref)
         );
     });
     return job?.lidarrAlbumId ?? null;
@@ -243,11 +253,11 @@ const UNKNOWN_SOURCE =
 async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<boolean> {
     const candidates = await prisma.downloadJob.findMany({
         where: { discoveryBatchId: { not: null } },
-        select: { status: true, lidarrAlbumId: true, metadata: true, targetMbid: true, subject: true },
+        select: { status: true, lidarrAlbumId: true, metadata: true, targetMbid: true, subject: true, artistMbid: true },
     });
     const wanted = `${ref.artistName} ${ref.albumTitle}`;
     const jobs = candidates.filter(
-        (j) => (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) || sameName(j.subject, wanted),
+        (j) => (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) || (sameName(j.subject, wanted) && jobIsArtist(j, ref)),
     );
     const source = (j: (typeof jobs)[number]) => (j.metadata as { currentSource?: string } | null)?.currentSource;
     if (jobs.some((j) => j.lidarrAlbumId !== null || source(j) === "lidarr")) return false;
@@ -261,7 +271,7 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
 async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promise<void> {
     const jobs = await prisma.downloadJob.findMany({
         where: { discoveryBatchId: { not: null }, status: { notIn: ["pending", "processing"] } },
-        select: { id: true, targetMbid: true, subject: true, metadata: true },
+        select: { id: true, targetMbid: true, subject: true, metadata: true, artistMbid: true },
     });
     const wanted = `${ref.artistName} ${ref.albumTitle}`;
     // A job that names a release group is this album's only by that id: another album of the same name keeps its own.
@@ -269,8 +279,9 @@ async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promis
         if (j.targetMbid !== null) return rgMbids.includes(j.targetMbid);
         const meta = j.metadata as { artistName?: string; albumTitle?: string } | null;
         return (
-            sameName(j.subject, wanted) ||
-            (!!meta?.artistName && !!meta?.albumTitle && sameName(`${meta.artistName} ${meta.albumTitle}`, wanted))
+            (sameName(j.subject, wanted) ||
+                (!!meta?.artistName && !!meta?.albumTitle && sameName(`${meta.artistName} ${meta.albumTitle}`, wanted))) &&
+            jobIsArtist(j, ref)
         );
     });
     if (naming.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: naming.map((j) => j.id) } } });
@@ -371,7 +382,7 @@ export async function clearSuggestion(suggestion: SuggestionRow): Promise<Sugges
 async function hasSuggestion(userId: string, ref: AlbumRef): Promise<boolean> {
     const mine = await prisma.discoveryAlbum.findMany({
         where: { userId },
-        select: { rgMbid: true, artistName: true, albumTitle: true },
+        select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true },
     });
     return mine.some((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref));
 }
@@ -395,9 +406,9 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
                 discoveryBatch: { status: { notIn: RUNNING_BATCH } },
             },
         }),
-        prisma.discoveryAlbum.findMany({ where: { userId, status: { in: ["LIKED", "MOVED"] } }, select: { artistName: true } }),
+        prisma.discoveryAlbum.findMany({ where: { userId, status: { in: ["LIKED", "MOVED"] } }, select: { artistName: true, artistMbid: true } }),
     ]);
-    const likedArtist = (name: string) => liked.some((a) => sameName(a.artistName, name));
+    const likedArtist = (ref: AlbumRef) => liked.some((a) => sameArtist(a, ref));
 
     const failures: ClearFailure[] = [];
     for (const job of jobs) {
@@ -408,7 +419,7 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
             albumTitle: metadata?.albumTitle || job.subject,
             artistMbid: job.artistMbid,
         };
-        if (ref.artistName && likedArtist(ref.artistName)) continue;
+        if (likedArtist(ref)) continue;
         if (await hasSuggestion(userId, ref)) continue;
         if (await findDiscoverAlbum(ref)) continue;
 
@@ -458,12 +469,16 @@ export interface OrphanFailure extends ClearFailure {
 /** The listeners whose suggestion (any status) or download job names the album, by id or by artist and title. */
 async function listenersNaming(ref: AlbumRef): Promise<string[]> {
     const [suggestions, jobs] = await Promise.all([
-        prisma.discoveryAlbum.findMany({ select: { userId: true, rgMbid: true, artistName: true, albumTitle: true } }),
-        prisma.downloadJob.findMany({ select: { userId: true, targetMbid: true, subject: true } }),
+        prisma.discoveryAlbum.findMany({ select: { userId: true, rgMbid: true, artistName: true, artistMbid: true, albumTitle: true } }),
+        prisma.downloadJob.findMany({ select: { userId: true, targetMbid: true, subject: true, artistMbid: true } }),
     ]);
     const named = [
         ...suggestions.filter((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref)),
-        ...jobs.filter((j) => j.targetMbid === ref.rgMbid || sameName(j.subject, `${ref.artistName} - ${ref.albumTitle}`)),
+        ...jobs.filter(
+            (j) =>
+                j.targetMbid === ref.rgMbid ||
+                (sameName(j.subject, `${ref.artistName} - ${ref.albumTitle}`) && jobIsArtist(j, ref)),
+        ),
     ];
     return [...new Set(named.map((r) => r.userId))];
 }
@@ -474,16 +489,16 @@ async function listenersNaming(ref: AlbumRef): Promise<string[]> {
  */
 async function discoverRecordNames(ref: AlbumRef): Promise<boolean> {
     const [suggestions, jobs] = await Promise.all([
-        prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, albumTitle: true } }),
+        prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true } }),
         prisma.downloadJob.findMany({
             where: { discoveryBatchId: { not: null } },
-            select: { targetMbid: true, subject: true },
+            select: { targetMbid: true, subject: true, artistMbid: true },
         }),
     ]);
     const wanted = `${ref.artistName} ${ref.albumTitle}`;
     return (
         suggestions.some((s) => s.rgMbid === ref.rgMbid || namesRecord(s, ref)) ||
-        jobs.some((j) => j.targetMbid === ref.rgMbid || sameName(j.subject, wanted))
+        jobs.some((j) => j.targetMbid === ref.rgMbid || (sameName(j.subject, wanted) && jobIsArtist(j, ref)))
     );
 }
 

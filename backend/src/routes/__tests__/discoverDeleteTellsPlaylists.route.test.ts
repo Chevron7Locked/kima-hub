@@ -118,6 +118,7 @@ describe("Discover deleting albums tells the playlists that held their songs", (
             id: rejected.record!.id,
             rgMbid: rejected.record!.rgMbid,
             artistName: rejected.record!.artistName,
+            artistMbid: rejected.record!.artistMbid,
             albumTitle: rejected.record!.albumTitle,
             lidarrAlbumId: null,
         });

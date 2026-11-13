@@ -198,7 +198,7 @@ describe("Lidarr has no album for a release-group id (recorded empty lookup)", (
         await startReplay("album-lookup-none", 3);
         const orphan = await addAlbum("lost", "Moon Music", NO_SUCH_RG);
 
-        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionId: null });
+        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionId: null });
 
         expect(result.cleared).toBe(false);
         expect(lidarr!.asked.map((a) => `${a.method} ${a.path}`)).toEqual([`GET /api/v1/album?foreignAlbumId=${NO_SUCH_RG}`]);

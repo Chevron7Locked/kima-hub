@@ -6,6 +6,7 @@ import { lidarrService } from '../lidarr';
 import { subWeeks } from 'date-fns';
 import { normalizeForMatching, stringSimilarity } from '../../utils/normalization';
 import { LIBRARY_LOCATION } from '../libraryFilters';
+import { hasRealArtistId } from './discoverEvidence';
 
 export interface SeedArtist {
     name: string;
@@ -79,7 +80,7 @@ export class DiscoverySeeding {
         for (const track of tracks) {
             const artist = track.album.artist;
             if (!artistMap.has(track.album.artistId)) {
-                if (this.isValidMbid(artist.mbid)) {
+                if (hasRealArtistId(artist.mbid)) {
                     artistMap.set(track.album.artistId, {
                         name: artist.name,
                         mbid: artist.mbid,
@@ -129,7 +130,7 @@ export class DiscoverySeeding {
                     trackCount,
                 };
             })
-            .filter(a => this.isValidMbid(a.artist.mbid))
+            .filter(a => hasRealArtistId(a.artist.mbid))
             .sort((a, b) => b.score - a.score)
             .slice(0, limit);
 
@@ -299,11 +300,6 @@ export class DiscoverySeeding {
         }
 
         return false;
-    }
-
-    /** An MBID that is present and not a temporary `temp-` id. */
-    private isValidMbid(mbid: string | null | undefined): mbid is string {
-        return !!mbid && !mbid.startsWith('temp-');
     }
 }
 

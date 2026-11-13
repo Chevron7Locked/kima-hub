@@ -204,7 +204,7 @@ describe("artist by name", () => {
 describe("Discover clearing finds the scanned album by name", () => {
     it.each(keys)("matches %s's album when the record's id differs and its case does not", async (k) => {
         const found = await findScannedAlbum(
-            { rgMbid: `${P}-no-such-id`, artistName: SHOUTED[k], albumTitle: TITLES[k].toUpperCase() },
+            { rgMbid: `${P}-no-such-id`, artistName: SHOUTED[k], artistMbid: null, albumTitle: TITLES[k].toUpperCase() },
             "DISCOVER",
         );
         expect(found?.id).toBe(albumId(k));
