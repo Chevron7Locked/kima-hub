@@ -1,5 +1,5 @@
 /**
- * The services that hold settings sign themselves up for the fields they read, so the settings save reloads exactly
+ * The modules that hold settings sign themselves up for the fields they read, so the settings save reloads exactly
  * the ones whose fields changed: Lidarr, Audiobookshelf, fanart, feature detection, and Soulseek, which reconnects
  * only for its own connection settings. Real database; each reload is watched, and Soulseek's reconnect is stood in for.
  */

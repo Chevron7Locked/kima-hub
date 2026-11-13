@@ -1,6 +1,6 @@
 /**
- * Who hears about a settings save. Services sign up here for the fields they read (`onSystemSettingsChange`), and
- * `saveSystemSettings` (utils/systemSettings.ts) tells them. Kept in a file of its own so a service can sign up
+ * Who hears about a settings save. Modules sign up here for the fields they read (`onSystemSettingsChange`), and
+ * `saveSystemSettings` (utils/systemSettings.ts) tells them. Kept in a file of its own so a module can sign up
  * without pulling in the database, and a test that stands in for the settings reader leaves the sign-ups alone.
  * In-process only: every process that reads settings runs its own save or none at all.
  */

@@ -108,6 +108,23 @@ it("the settings page sending every field back tells a subscriber only about wha
     }
 });
 
+it("turning Audiobookshelf off clears listening progress once; a later save with it still off leaves new progress alone", async () => {
+    const progress = { userId: ADMIN, audiobookshelfId: "zz-book", title: "zz-book" };
+    try {
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
+        await prisma.audiobookProgress.create({ data: progress });
+
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false }).expect(200);
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(0);
+
+        await prisma.audiobookProgress.create({ data: progress });
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false, transcodeCacheMaxGb: 11 }).expect(200);
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(1);
+    } finally {
+        await prisma.audiobookProgress.deleteMany({ where: { userId: ADMIN } });
+    }
+});
+
 it("has no download folder setting: downloads go to the music folder", async () => {
     const res = await request(app()).get("/system-settings").set("Authorization", asAdmin());
     expect(res.body).not.toHaveProperty("downloadPath");

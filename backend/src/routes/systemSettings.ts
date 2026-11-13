@@ -173,12 +173,12 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // Services that hold settings (Lidarr, Audiobookshelf, fanart, Soulseek, the feature list) reload what changed.
-    await saveSystemSettings(data);
+    // Modules that hold settings (Lidarr, Audiobookshelf, fanart, Soulseek, the feature list) reload what changed.
+    const changed = await saveSystemSettings(data);
     if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
 
-    // Audiobookshelf turned off: its listening progress goes with it. A failure here does not fail the save.
-    if (data.audiobookshelfEnabled === false) {
+    // Audiobookshelf turned off (not merely sent back off): its listening progress goes with it. A failure here does not fail the save.
+    if (data.audiobookshelfEnabled === false && changed.includes("audiobookshelfEnabled")) {
       try {
         const deletedProgress = await prisma.audiobookProgress.deleteMany({});
         logger.debug(`[SYSTEM SETTINGS] Audiobookshelf off: deleted ${deletedProgress.count} progress entries`);
