@@ -18,6 +18,8 @@
  * 2. Status counters: they count the whole library, missing files included, and show the count (counted and shown,
  *    never silent).
  * 3. Owner lookups by id: a read of the one song a request names, to say who owns it or what it is, never a pick.
+ *    Album identification reads the songs of the one album it is identifying in the same way (by album id, never to
+ *    offer them): it fingerprints files that are there, corrupt ones included, so it asks only `missingSince: null`.
  *
  * Discover's own song lookup is not a fourth exception. The Discover Weekly playlist builder looks up the songs of a
  * week's Discover albums, and there PLAYABLE_DISCOVER_SONG is the rule: the same file-there-and-read test, on a

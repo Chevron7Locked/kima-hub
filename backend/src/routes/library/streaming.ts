@@ -177,7 +177,7 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
       return res.status(404).json({ error: "Track not found" });
     }
 
-    if (!track.filePath || !track.fileModified || track.missingSince) {
+    if (!track.filePath || !track.fileModified || track.missingSince || track.corrupt) {
       return res.status(202).json({ ok: true });
     }
 

@@ -207,3 +207,13 @@ describe('a track flagged missing from disk', () => {
         expect(getAudioStreamingService).not.toHaveBeenCalled();
     });
 });
+
+describe('a track flagged corrupt', () => {
+    it('is not prewarmed, because the stream refuses it', async () => {
+        const id = await seedTrack('corrupt1', 'Artist/Album/corrupt1.mp3');
+        await prisma.track.update({ where: { id }, data: { corrupt: true } });
+        const res = await request(app).post(`/tracks/${id}/prewarm`);
+        expect(res.status).toBe(202);
+        expect(getAudioStreamingService).not.toHaveBeenCalled();
+    });
+});
