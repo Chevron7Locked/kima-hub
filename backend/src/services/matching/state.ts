@@ -1,6 +1,6 @@
 /**
  * The similarity enrichment step.
- * Per track it stores the feel probe's output for the sound vector it was computed
+ * Per playable song it stores the feel probe's output for the sound vector it was computed
  * from; per library it stores the formula's statistics, rebuilt in full whenever
  * the eligible tracks, their sound vectors or their artists' genres change.
  */
@@ -86,19 +86,29 @@ export async function loadMatchingState(): Promise<MatchingState | null> {
     };
 }
 
-/** Feel for every sound vector of the probe's model that has none, an older one, or one from another probe. */
+/**
+ * Feel for every playable song whose sound vector of the probe's model has none, an older one, or one from another
+ * probe; returns how many were written. A song that stopped being playable (Discover, missing, corrupt) loses its feel,
+ * and gets it again on the first run after it is playable.
+ */
 async function updateFeel(tx: Prisma.TransactionClient): Promise<number> {
     const valence = formatEmbedding(feelProbe.valence.weights);
     const arousal = formatEmbedding(feelProbe.arousal.weights);
+    await tx.$executeRaw`
+        DELETE FROM matching_feel f
+        WHERE NOT EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
+                          WHERE lt.id = f.track_id AND ${playableSongSql("lt", "la")})
+    `;
     return tx.$executeRaw`
         WITH stale AS MATERIALIZED (
             SELECT te.track_id
             FROM track_embeddings te
             LEFT JOIN matching_feel f ON f.track_id = te.track_id
             WHERE te.model_version = ${MATCHING_MODEL}
-              -- Library songs only: a Discover song is never scored.
+              AND vector_dims(te.embedding) = ${PROBE_DIMS} AND vector_norm(te.embedding) > 0
+              -- Playable songs only: a Discover, missing or corrupt song is never scored.
               AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
-                          WHERE lt.id = te.track_id AND la.location = 'LIBRARY')
+                          WHERE lt.id = te.track_id AND ${playableSongSql("lt", "la")})
               AND (f.track_id IS NULL
                    OR f.embedded_at IS DISTINCT FROM te.analyzed_at
                    OR f.probe IS DISTINCT FROM ${PROBE_ID})
@@ -109,7 +119,6 @@ async function updateFeel(tx: Prisma.TransactionClient): Promise<number> {
                LEAST(1, GREATEST(0, -(te.embedding <#> ${arousal}::vector) / vector_norm(te.embedding) + ${feelProbe.arousal.bias}::float8))
         FROM stale s
         JOIN track_embeddings te ON te.track_id = s.track_id
-        WHERE vector_dims(te.embedding) = ${PROBE_DIMS} AND vector_norm(te.embedding) > 0
         ON CONFLICT (track_id) DO UPDATE
         SET embedded_at = EXCLUDED.embedded_at,
             probe = EXCLUDED.probe,

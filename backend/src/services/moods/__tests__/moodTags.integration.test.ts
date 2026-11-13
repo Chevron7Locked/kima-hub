@@ -32,7 +32,7 @@ const trackId = (n: number) => `${P}t${String(n).padStart(2, "0")}`;
 const HAPPY = [1.5, 1.25, 1.25, -1.5, -1.25, -0.75, -0.5, 0, 0, 0];
 const SAD = [1.5, 1.24, 1.26, -1.5, -1.25, -0.75, -0.5, 0, 0, 0];
 const TAGS_BEFORE: string[][] = [["happy", "sad"], ["happy"], ["happy", "sad"], [], [], [], [], [], [], []];
-/** Scored, outside the statistics: a missing file. */
+/** A missing file, seeded with scores the step drops: a song that is not playable has none. */
 const GONE = `${P}gone`;
 /** No sound vector yet, carrying tags of its own. */
 const UNSCORED = `${P}unscored`;
@@ -161,15 +161,23 @@ describe("mood tags", () => {
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
 
-    it("take a song's tags away while it is missing or corrupt, and give them back when it returns", async () => {
+    it("take a song's tags and scores away while it is missing or corrupt, and score it again when it returns", async () => {
         // Without t00, happy: mean -0.167, SD 0.913, so the 1.25s are at z 1.552; sad: mean -0.167, SD 0.913, so t01's
         // 1.24 is at z 1.541 and t02's 1.26 at 1.563.
         const without = [[], ["happy", "sad"], ["happy", "sad"], [], [], [], [], [], [], []];
+        const scoreRows = async () => prisma.$queryRawUnsafe<unknown[]>(`SELECT 1 FROM track_moods WHERE track_id = $1`, trackId(0));
         for (const change of [{ missingSince: new Date() }, { corrupt: true }]) {
             await prisma.track.update({ where: { id: trackId(0) }, data: change });
             expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
             expect(await tagsOf(library(10))).toEqual(without);
+            expect(await scoreRows()).toHaveLength(0);
             await prisma.track.update({ where: { id: trackId(0) }, data: { missingSince: null, corrupt: false } });
+            expect(await pass()).toMatchObject({ scored: 1, stateChanged: true });
+            expect(await scoreRows()).toHaveLength(1);
+            // The step scored it from its own vector; this file's scores are written by hand, so put those back.
+            await prisma.$executeRawUnsafe(`DELETE FROM track_moods WHERE track_id = $1`, trackId(0));
+            await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, trackId(0));
+            await insertScores(trackId(0), { happy: HAPPY[0], sad: SAD[0] });
             expect(await pass()).toMatchObject({ scored: 0, stateChanged: true });
             expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
         }

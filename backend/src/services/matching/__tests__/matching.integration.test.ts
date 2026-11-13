@@ -257,11 +257,13 @@ const lockStateRow = (tx: Prisma.TransactionClient) =>
 
 describe("the similarity step", () => {
     it("computes feel for every sound vector of the probe's model and builds the state", async () => {
-        const modelVectors = Object.keys(ARTISTS).length * ALBUMS_PER_ARTIST * TRACKS_PER_ALBUM + 1;
+        // The song whose file is missing has a vector of the probe's model but is not playable, so it gets no feel.
+        const modelVectors = Object.keys(ARTISTS).length * ALBUMS_PER_ARTIST * TRACKS_PER_ALBUM;
         expect(await buildMatching()).toEqual({ feelUpdated: modelVectors, rebuilt: true });
 
         const stored = await prisma.matchingFeel.findMany({ where: { track_id: { startsWith: "cmatch" } } });
         expect(stored).toHaveLength(modelVectors);
+        expect(stored.some((row) => row.track_id === GONE)).toBe(false);
         for (const row of stored) {
             const [v, a] = probe(vectors.get(row.track_id)!);
             expect(Math.abs(row.valence - v)).toBeLessThan(1e-5);
@@ -286,6 +288,20 @@ describe("the similarity step", () => {
     });
 
     it("does nothing when nothing changed", async () => {
+        expect(await buildMatching()).toEqual({ feelUpdated: 0, rebuilt: false });
+    });
+
+    it("gives a song feel once its file is back, and takes it away when the file goes again", async () => {
+        const hasFeel = async () => (await prisma.matchingFeel.count({ where: { track_id: GONE } })) === 1;
+        await prisma.track.update({ where: { id: GONE }, data: { missingSince: null } });
+        try {
+            expect(await buildMatching()).toEqual({ feelUpdated: 1, rebuilt: true });
+            expect(await hasFeel()).toBe(true);
+        } finally {
+            await prisma.track.update({ where: { id: GONE }, data: { missingSince: new Date() } });
+        }
+        expect(await buildMatching()).toEqual({ feelUpdated: 0, rebuilt: true });
+        expect(await hasFeel()).toBe(false);
         expect(await buildMatching()).toEqual({ feelUpdated: 0, rebuilt: false });
     });
 });

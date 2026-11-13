@@ -33,9 +33,10 @@ const LIBRARY = 12;
 const trackId = (n: number) => `${P}t${String(n).padStart(2, "0")}`;
 /** A vector of another sound model: never scored. */
 const OTHER_MODEL = `${P}other`;
-/** Scored, but outside the statistics: a missing file, a corrupt file, unfinished analysis. */
+/** Not playable, so never scored: a missing file, a corrupt file. */
 const GONE = `${P}gone`;
 const CORRUPT = `${P}corrupt`;
+/** Scored, but outside the statistics: unfinished analysis. */
 const UNANALYSED = `${P}unanalysed`;
 /** In the statistics, but without CLAP's instrumental reading. */
 const NO_INSTRUMENTAL = `${P}noinstr`;
@@ -100,7 +101,7 @@ async function seed() {
     }
 }
 
-const SCORED = LIBRARY + 4 + reference.vectors.length;
+const SCORED = LIBRARY + 2 + reference.vectors.length;
 const ELIGIBLE = LIBRARY + 1 + reference.vectors.length;
 
 type StoredRow = { id: string; embedding: string; weights: string } & Record<Mood, number>;
@@ -152,6 +153,8 @@ describe("the mood step", () => {
         const rows = await stored();
         expect(rows.size).toBe(SCORED);
         expect(rows.has(OTHER_MODEL)).toBe(false);
+        expect(rows.has(GONE)).toBe(false);
+        expect(rows.has(CORRUPT)).toBe(false);
         for (const row of rows.values()) expect(row.weights).toBe(MOOD_HEADS.version);
         expect(maxScoreError(rows.values())).toBeLessThan(1e-4);
     });
@@ -211,13 +214,35 @@ describe("the mood step", () => {
 
     it("loses a track's scores with its sound vector", async () => {
         const doomed = `${P}doomed`;
-        await insertTrack(doomed, { missingSince: new Date() });
+        // Unanalysed: scored, but outside the statistics, so later tests' state is untouched.
+        await insertTrack(doomed, { analysisStatus: "pending" });
         await insertVector(doomed, vector());
         await buildMoods();
         expect((await stored()).has(doomed)).toBe(true);
         await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, doomed);
         expect((await stored()).has(doomed)).toBe(false);
         await prisma.track.delete({ where: { id: doomed } });
+    });
+
+    it("drops a song's scores when it stops being playable, and scores it again once it is", async () => {
+        const song = `${P}comesandgoes`;
+        // Unanalysed: scored, but outside the statistics, so later tests' state is untouched.
+        await insertTrack(song, { analysisStatus: "pending" });
+        await insertVector(song, vector());
+        try {
+            expect((await buildMoods()).scored).toBe(1);
+            for (const unplayable of [{ missingSince: new Date() }, { corrupt: true }]) {
+                await prisma.track.update({ where: { id: song }, data: unplayable });
+                expect((await buildMoods()).scored).toBe(0);
+                expect((await stored()).has(song)).toBe(false);
+                await prisma.track.update({ where: { id: song }, data: { missingSince: null, corrupt: false } });
+                expect((await buildMoods()).scored).toBe(1);
+                expect((await stored()).has(song)).toBe(true);
+            }
+        } finally {
+            await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, song);
+            await prisma.track.delete({ where: { id: song } });
+        }
     });
 });
 
@@ -286,8 +311,9 @@ describe("the library statistics", () => {
         await prisma.track.update({ where: { id: trackId(7) }, data: { corrupt: true } });
         expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
         expect((await loadMoodState())!.trackCount).toBe(ELIGIBLE - 1);
+        // Playable again, so scored again.
         await prisma.track.update({ where: { id: trackId(7) }, data: { corrupt: false } });
-        expect(await buildMoods()).toEqual({ scored: 0, stateChanged: true });
+        expect(await buildMoods()).toEqual({ scored: 1, stateChanged: true });
     });
 
     it("an unchanged library does not run the full hash, and a changed one still does", async () => {
@@ -342,8 +368,8 @@ describe("the library statistics", () => {
 
 describe("the mood step's progress", () => {
     it("counts playable songs with a sound vector of the heads' model, and those with current scores", async () => {
-        // The missing and the corrupt songs are scored but not playable, so the step owes them nothing.
-        const present = SCORED - 2;
+        // The missing and the corrupt songs are not playable: never scored, and the step owes them nothing.
+        const present = SCORED;
         expect(await moodProgress()).toEqual({ total: present, completed: present });
         await insertVector(trackId(8), vector());
         expect(await moodProgress()).toEqual({ total: present, completed: present - 1 });

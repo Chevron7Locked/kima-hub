@@ -158,6 +158,8 @@ describe("library eligibility at the read side", () => {
 
     it("brings the track back to everything when the file returns", async () => {
         await prisma.track.update({ where: { id: MISSING }, data: { missingSince: null } });
+        // Playable again, so owed feel: the similarity step's next run gives it some.
+        await buildMatching();
         const similar = await findSimilarTracks("trk_elig_0", 20);
         expect(similar.some((t) => t.id === MISSING)).toBe(true);
     });

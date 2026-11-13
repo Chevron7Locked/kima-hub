@@ -1,5 +1,5 @@
 /**
- * The mood enrichment step. Per track it stores the 22 learned mood scores (21 in use; RETIRED_MOODS are still
+ * The mood enrichment step. Per playable song it stores the 22 learned mood scores (21 in use; RETIRED_MOODS are still
  * scored) for the sound vector they were computed from; per library it stores the mean and spread of each mood and of
  * each reading the mixes blend with them, rebuilt whenever the eligible tracks, their sound vectors, their readings or
  * the weights change. The song tags are written from both (tags.ts).
@@ -39,8 +39,17 @@ export const READING_SQL: Record<Reading, string> = {
 
 const quoted = (names: readonly string[]) => Prisma.raw(names.map((name) => `"${name}"`).join(", "));
 
-/** Scores for every sound vector of the heads' model that has none, older ones, or ones from other weights. */
+/**
+ * Scores for every playable song whose sound vector of the heads' model has none, older ones, or ones from other
+ * weights; returns how many were written. A song that stopped being playable (Discover, missing, corrupt) loses its
+ * scores, and gets them again on the first run after it is playable.
+ */
 export async function updateMoods(tx: Prisma.TransactionClient): Promise<number> {
+    await tx.$executeRaw`
+        DELETE FROM track_moods m
+        WHERE NOT EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
+                          WHERE lt.id = m.track_id AND ${playableSongSql("lt", "la")})
+    `;
     // The heads were fitted on unit-length vectors, and the writer lets a stored one's length differ from 1 slightly.
     const scores = Prisma.join(
         MOODS.map((mood) => {
@@ -56,9 +65,10 @@ export async function updateMoods(tx: Prisma.TransactionClient): Promise<number>
             FROM track_embeddings te
             LEFT JOIN track_moods m ON m.track_id = te.track_id
             WHERE te.model_version = ${MOOD_HEADS.model}
-              -- Library songs only: a Discover song is never scored.
+              AND vector_dims(te.embedding) = ${MOOD_HEADS.dims} AND vector_norm(te.embedding) > 0
+              -- Playable songs only: a Discover, missing or corrupt song is never scored.
               AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId"
-                          WHERE lt.id = te.track_id AND la.location = 'LIBRARY')
+                          WHERE lt.id = te.track_id AND ${playableSongSql("lt", "la")})
               AND (m.track_id IS NULL
                    OR m.embedded_at IS DISTINCT FROM te.analyzed_at
                    OR m.weights IS DISTINCT FROM ${MOOD_HEADS.version})
@@ -67,7 +77,6 @@ export async function updateMoods(tx: Prisma.TransactionClient): Promise<number>
         SELECT te.track_id, te.analyzed_at, ${MOOD_HEADS.version}, ${scores}
         FROM stale s
         JOIN track_embeddings te ON te.track_id = s.track_id
-        WHERE vector_dims(te.embedding) = ${MOOD_HEADS.dims} AND vector_norm(te.embedding) > 0
         ON CONFLICT (track_id) DO UPDATE
         SET embedded_at = EXCLUDED.embedded_at, weights = EXCLUDED.weights, ${updates}
     `;
