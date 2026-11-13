@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 import { logger } from "../../utils/logger";
@@ -79,12 +79,32 @@ starredRouter.all("/setRating.view", wrap(async (req, res) => {
     return subsonicOk(req, res);
 }));
 
-// star.view — only track starring (Kima's LikedTrack model); albumId/artistId params silently ignored
+/**
+ * The song ids a star or unstar names, or null once the refusal is sent. Kima keeps song likes only, so an album or
+ * artist id is refused even beside song ids (an ok would show the app a star that is never stored), and a request
+ * naming nothing is missing its parameter.
+ */
+function songIdsOrRefuse(req: Request, res: Response): string[] | null {
+    const ids = parseRepeatedQueryParam(req.query.id);
+    if (parseRepeatedQueryParam(req.query.albumId).length > 0 || parseRepeatedQueryParam(req.query.artistId).length > 0) {
+        subsonicError(req, res, SubsonicError.GENERIC, "starring albums and artists isn't supported");
+        return null;
+    }
+    if (ids.length === 0) {
+        subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
+        return null;
+    }
+    return ids;
+}
+
 starredRouter.all("/star.view", wrap(async (req, res) => {
     const userId = req.user!.id;
+    const ids = songIdsOrRefuse(req, res);
+    if (!ids) return;
+
     // A song the app is never offered (Discover, missing, corrupt) is skipped like one that is not there.
-    const ids = (await prisma.track.findMany({
-        where: { id: { in: parseRepeatedQueryParam(req.query.id) }, ...PLAYABLE_SONG },
+    const playableIds = (await prisma.track.findMany({
+        where: { id: { in: ids }, ...PLAYABLE_SONG },
         select: { id: true },
     })).map((t) => t.id);
 
@@ -93,7 +113,7 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
     // success answers ok, and the upsert makes a retry safe.
     let anySucceeded = false;
     let realFailure = false;
-    for (const trackId of ids) {
+    for (const trackId of playableIds) {
         try {
             await prisma.likedTrack.upsert({
                 where: { userId_trackId: { userId, trackId } },
@@ -115,12 +135,11 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
 
 starredRouter.all("/unstar.view", wrap(async (req, res) => {
     const userId = req.user!.id;
-    const ids = parseRepeatedQueryParam(req.query.id);
+    const ids = songIdsOrRefuse(req, res);
+    if (!ids) return;
 
-    if (ids.length > 0) {
-        await prisma.likedTrack.deleteMany({
-            where: { userId, trackId: { in: ids } },
-        });
-    }
+    await prisma.likedTrack.deleteMany({
+        where: { userId, trackId: { in: ids } },
+    });
     return subsonicOk(req, res);
 }));

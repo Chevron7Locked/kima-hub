@@ -1123,3 +1123,54 @@ describe("Subsonic star and createShare", () => {
         expect(await prisma.shareLink.count({ where: { entityId: id } })).toBe(0);
     });
 });
+
+// Kima keeps song likes only, so starring an album or an artist answers an error rather than "ok" for a star never kept.
+describe("Subsonic star and unstar", () => {
+    const WHO = `${P}-starrer`;
+    const asWho = (route: string, query: Record<string, string | string[]>) =>
+        request(app).get(`/rest/${route}`).set("x-user", WHO).query({ u: WHO, f: "json", ...query });
+    const answer = async (route: string, query: Record<string, string | string[]>) => (await asWho(route, query).expect(200)).body["subsonic-response"];
+    const liked = async () => (await prisma.likedTrack.findMany({ where: { userId: WHO }, select: { trackId: true } })).map((l) => l.trackId).sort();
+    const NOT_SUPPORTED = { status: "failed", error: { code: 0, message: "starring albums and artists isn't supported" } };
+    const MISSING = { status: "failed", error: { code: 10 } };
+
+    beforeAll(async () => {
+        await prisma.user.create({ data: { id: WHO, username: WHO, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    });
+    beforeEach(async () => {
+        await prisma.likedTrack.deleteMany({ where: { userId: WHO } });
+    });
+
+    it.each(["star.view", "unstar.view"])("%s with no id, albumId or artistId answers a missing parameter", async (route) => {
+        expect(await answer(route, {})).toMatchObject(MISSING);
+    });
+
+    it.each([["albumId", `${SONG.playable}-al`], ["artistId", `${P}-ar`]])("star with an %s answers not supported and stores nothing", async (param, id) => {
+        expect(await answer("star.view", { [param]: id })).toMatchObject(NOT_SUPPORTED);
+        expect(await liked()).toEqual([]);
+    });
+
+    it.each([["albumId", `${SONG.playable}-al`], ["artistId", `${P}-ar`]])("star with an %s and a song id stores no like for the song either", async (param, id) => {
+        expect(await answer("star.view", { id: SONG.playable, [param]: id })).toMatchObject(NOT_SUPPORTED);
+        expect(await liked()).toEqual([]);
+    });
+
+    it.each([["albumId", `${SONG.playable}-al`], ["artistId", `${P}-ar`]])("unstar with an %s answers not supported and removes no like", async (param, id) => {
+        await prisma.likedTrack.create({ data: { userId: WHO, trackId: SONG.playable } });
+        expect(await answer("unstar.view", { [param]: id })).toMatchObject(NOT_SUPPORTED);
+        expect(await answer("unstar.view", { id: SONG.playable, [param]: id })).toMatchObject(NOT_SUPPORTED);
+        expect(await liked()).toEqual([SONG.playable]);
+    });
+
+    it("stars song ids alone as before: playable ones stored once however often they are asked, the others skipped", async () => {
+        const second = `${FILLERS[0]}-s1`;
+        const third = `${FILLERS[0]}-s2`;
+        expect((await answer("star.view", { id: [second, SONG.playable, ...UNPLAYABLE, `${P}-unknown`] })).status).toBe("ok");
+        expect(await liked()).toEqual([second, SONG.playable].sort());
+        // Asked again with one new song among the stored: nothing doubles, the new one is added.
+        expect((await answer("star.view", { id: [SONG.playable, third, second, second] })).status).toBe("ok");
+        expect(await liked()).toEqual([second, third, SONG.playable].sort());
+        expect((await answer("unstar.view", { id: [second, third] })).status).toBe("ok");
+        expect(await liked()).toEqual([SONG.playable]);
+    });
+});
