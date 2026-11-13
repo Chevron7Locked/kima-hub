@@ -1,7 +1,7 @@
 // A recount asked for while one runs is not dropped: the running recount runs once more when it finishes, however
 // many were asked for. Real database; the artist's counts are read back from its row.
 import { prisma } from "../../utils/db";
-import { backfillAllArtistCounts, isBackfillInProgress } from "../artistCountsService";
+import { backfillAllArtistCounts, isBackfillInProgress, updateArtistCounts } from "../artistCountsService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-recount";
@@ -58,4 +58,8 @@ it("runs once, with no second pass, when nothing was asked for meanwhile", async
     const total = await prisma.artist.count();
     const result = await backfillAllArtistCounts();
     expect(result.processed).toBe(total);
+});
+
+it("recounting an artist that is gone is nothing to do, not an error", async () => {
+    await expect(updateArtistCounts(`${P}-never-existed`)).resolves.toBeUndefined();
 });

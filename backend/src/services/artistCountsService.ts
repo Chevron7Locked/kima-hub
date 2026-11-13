@@ -49,7 +49,8 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
   try {
     const counts = await calculateArtistCounts(artistId);
 
-    await prisma.artist.update({
+    // updateMany: an artist deleted since it was asked for has no counts to keep.
+    await prisma.artist.updateMany({
       where: { id: artistId },
       data: {
         ...counts,
@@ -119,8 +120,8 @@ async function recountEveryArtist(
     // Fetch batch of artists using cursor pagination
     const artists = await prisma.artist.findMany({
       take: BATCH_SIZE,
-      skip: cursor ? 1 : 0,
-      cursor: cursor ? { id: cursor } : undefined,
+      // After the last id seen, not from its row: the scan's pruning may delete that artist mid-run.
+      where: cursor ? { id: { gt: cursor } } : undefined,
       orderBy: { id: "asc" },
       select: { id: true, name: true },
     });

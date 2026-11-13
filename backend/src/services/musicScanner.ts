@@ -4,6 +4,7 @@ import * as path from "path";
 import { parseFile, type IAudioMetadata, type ITag } from "music-metadata";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { config } from "../config";
 import PQueue from "p-queue";
 import { CoverArtExtractor } from "./coverArtExtractor";
 import { findAlbumArtwork } from "./artwork";
@@ -138,6 +139,22 @@ export class MusicScannerService {
      * mode) and prunes empty albums and artists.
      */
     async scanLibrary(musicPath: string): Promise<ScanResult> {
+        // The artists whose songs the scan moved (added, changed, flagged missing, brought back, marked corrupt, left
+        // for another artist, or retired): only their stored counts are recounted, in the background, even when the
+        // scan fails part-way, since the next scan skips the files this one already filed.
+        const touchedArtists = new Set<string>();
+        try {
+            return await this.scanFiles(musicPath, touchedArtists);
+        } finally {
+            if (touchedArtists.size > 0) {
+                this.recountInBackground([...touchedArtists]).catch((err) => {
+                    logger.error("[Scan] Artist counts update failed:", err);
+                });
+            }
+        }
+    }
+
+    private async scanFiles(musicPath: string, touchedArtists: Set<string>): Promise<ScanResult> {
         const startTime = Date.now();
         // What a scan decided about a joint credit holds for that scan only: the next asks again.
         this.groupFilings = new Map();
@@ -186,12 +203,12 @@ export class MusicScannerService {
             errors: [],
         };
 
-        // The artists whose songs this scan moved (added, changed, flagged missing, brought back, marked corrupt, or
-        // left for another artist): only their stored counts are recounted.
-        const touchedArtists = new Set<string>();
-        const artistsOfSongs = async (songIds: string[]) => {
-            const rows = await prisma.track.findMany({ where: { id: { in: songIds } }, select: { album: { select: { artistId: true } } } });
-            return rows.map((r) => r.album.artistId);
+        const touchArtistsWhere = async (where: Prisma.TrackWhereInput) => {
+            const rows = await prisma.track.findMany({ where, select: { album: { select: { artistId: true } } } });
+            for (const row of rows) touchedArtists.add(row.album.artistId);
+        };
+        const touchArtistsOf = async (songIds: string[]) => {
+            if (songIds.length > 0) await touchArtistsWhere({ id: { in: songIds } });
         };
 
         const markFailed = async (audioFile: string, err: any) => {
@@ -202,7 +219,7 @@ export class MusicScannerService {
 
             const existingTrack = tracksByPath.get(path.relative(musicPath, audioFile));
             if (existingTrack) {
-                (await artistsOfSongs([existingTrack.id])).forEach((id) => touchedArtists.add(id));
+                await touchArtistsOf([existingTrack.id]);
                 await prisma.track.update({ where: { id: existingTrack.id }, data: { corrupt: true } });
                 result.tracksCorrupt++;
                 logger.debug(`Marked track as corrupt: ${path.relative(musicPath, audioFile)}`);
@@ -287,7 +304,7 @@ export class MusicScannerService {
                     // Every recorded answer came from the old content, so every stage is asked again.
                     if (existingTrack) {
                         // The artist the song leaves, if the new tags credit another.
-                        (await artistsOfSongs([existingTrack.id])).forEach((id) => touchedArtists.add(id));
+                        await touchArtistsOf([existingTrack.id]);
                         await reopenStagesForChangedFile(existingTrack.id);
                     }
 
@@ -338,7 +355,7 @@ export class MusicScannerService {
         );
         if (returned.length > 0) {
             const returnedIds = returned.map((t) => t.id);
-            (await artistsOfSongs(returnedIds)).forEach((id) => touchedArtists.add(id));
+            await touchArtistsOf(returnedIds);
             await prisma.$transaction(async (tx) => {
                 await tx.track.updateMany({
                     where: { id: { in: returnedIds } },
@@ -362,10 +379,11 @@ export class MusicScannerService {
                 );
             }
 
+            // Only songs this scan flags move a count: one flagged by an earlier scan was counted out then.
+            await touchArtistsOf(vanished.filter((t) => !t.missingSince).map((t) => t.id));
+
             // Flag and stage records change together, so no reader sees a flagged track
             // whose questions are still owed.
-            // Only songs this scan flags move a count: one flagged by an earlier scan was counted out then.
-            (await artistsOfSongs(vanished.filter((t) => !t.missingSince).map((t) => t.id))).forEach((id) => touchedArtists.add(id));
             await prisma.$transaction(async (tx) => {
                 if (vanished.length > 0) {
                     // Only rows not already flagged change: the timestamp is when
@@ -394,6 +412,11 @@ export class MusicScannerService {
 
         // Retires tracks flagged by the previous scan and still gone (RemovalLog records them; the `flag` mode only
         // flags). Before the album and artist pruning below, so what it empties goes too.
+        // A retired song leaves its artist's counts (a Discover album counts while it holds a song, flagged or not,
+        // and the pruning below removes the album once its songs go), so those artists are recounted too.
+        if (config.music.reconcileMode === "delete") {
+            await touchArtistsWhere({ missingSince: { not: null, lt: new Date(startTime) } });
+        }
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
 
@@ -405,17 +428,19 @@ export class MusicScannerService {
             `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} removed:${result.tracksRemoved} (${result.duration}ms)`
         );
 
-        // The touched artists' stored counts, recomputed in the background. One the pruning removed has none to keep.
-        this.recountInBackground([...touchedArtists]).catch((err) => {
-            logger.error("[Scan] Artist counts update failed:", err);
-        });
-
         return result;
     }
 
+    /** One artist's failed recount does not stop the others. One the pruning removed has no counts to keep. */
     private async recountInBackground(artistIds: string[]): Promise<void> {
         const alive = await prisma.artist.findMany({ where: { id: { in: artistIds } }, select: { id: true } });
-        for (const { id } of alive) await updateArtistCounts(id);
+        for (const { id } of alive) {
+            try {
+                await updateArtistCounts(id);
+            } catch (err) {
+                logger.error(`[Scan] Artist counts update failed for ${id}:`, err);
+            }
+        }
     }
 
     /**
@@ -623,6 +648,7 @@ export class MusicScannerService {
         return (await this.jointFiler.file(chosen)).candidate;
     }
 
+    /** Files one song. Answers the id of the artist whose album it is filed under, for the scan's recount. */
     private async processAudioFile(
         absolutePath: string,
         relativePath: string,

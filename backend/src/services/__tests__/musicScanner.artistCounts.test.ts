@@ -174,3 +174,25 @@ it("recounts the artists a scan touched, the artist a song left included, and le
     expect(await row(`${P}-u`)).toMatchObject({ libraryAlbumCount: STALE, totalTrackCount: STALE, countsLastUpdated: LONG_AGO });
     expect(await row(`${P}-g`)).toMatchObject({ libraryAlbumCount: STALE, totalTrackCount: STALE, countsLastUpdated: LONG_AGO });
 });
+
+it("recounts the artist of a song the scan retires, when that empties a Discover album the artist leaves behind", async () => {
+    // Delete mode retires a song an earlier scan flagged and that is still gone; its Discover album is then pruned. The
+    // artist stays, holding a library song, and counted that Discover album while the flagged song was in it.
+    jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+    await seed("d", [{ file: `${P}/d.flac` }]);
+    putFile(`${P}/d.flac`);
+    await prisma.album.create({
+        data: {
+            id: `${P}-d-disc`, rgMbid: `${P}-d-disc-rg`, artistId: `${P}-d`, identityKey: `${P}-d-disc-ik`, title: `${P} d discover`,
+            primaryType: "Album", location: "DISCOVER",
+            tracks: { create: { id: `${P}-d-disc-t`, title: `${P} d disc`, trackNo: 1, duration: 100, filePath: `${P}/d-disc.flac`, fileModified: LONG_AGO, fileSize: 1, missingSince: LONG_AGO } },
+        },
+    });
+    await prisma.artist.update({ where: { id: `${P}-d` }, data: { discoveryAlbumCount: STALE } });
+
+    const result = await new MusicScannerService().scanLibrary(musicDir);
+    expect(result.tracksRemoved).toBe(1);
+
+    await until(() => recounted(`${P}-d`));
+    expect(await row(`${P}-d`)).toMatchObject({ discoveryAlbumCount: 0, libraryAlbumCount: 1, totalTrackCount: 1 });
+});
