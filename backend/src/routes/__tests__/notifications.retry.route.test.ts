@@ -37,7 +37,7 @@ import express from "express";
 import request from "supertest";
 import notificationRoutes from "../notifications";
 import { prisma } from "../../utils/db";
-import { mergeMetadata } from "../../services/downloads/jobs";
+import { mergeMetadata, whenIdle } from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const USER = "nrt_user";
@@ -130,6 +130,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
         expect(startedWith).not.toHaveProperty("failedAt");
         expect(startedWith).not.toHaveProperty("notificationSent");
         expect(newId).toBe(job.id);
+        await whenIdle();
         expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
     });
 
@@ -143,6 +144,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
         const job = await newJobOf(old.id, res.body.newJobId);
         expect(job).toMatchObject({ status: "failed", error: "No tracks found on Soulseek, no MBID for Lidarr fallback" });
         expect(meta(job)).toMatchObject({ spotifyImportJobId: IMPORT, failedAt: expect.any(String) });
+        await whenIdle();
         expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
     });
 
@@ -155,6 +157,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
         await waitFor(settled(res.body.newJobId), "new job settled");
 
         expect(await newJobOf(old.id, res.body.newJobId)).toMatchObject({ status: "failed", error: "Lidarr has no such album" });
+        await whenIdle();
         expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
     });
 
@@ -166,6 +169,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
         await waitFor(settled(res.body.newJobId), "new job settled");
 
         expect(await newJobOf(old.id, res.body.newJobId)).toMatchObject({ status: "failed", error: "slskd unreachable" });
+        await whenIdle();
         expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
     });
 });
