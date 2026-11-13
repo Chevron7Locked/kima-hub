@@ -30,7 +30,13 @@ export function retryJobTarget(pendingTrack: PlaylistPendingTrack): string {
     return pendingTrack.albumMbid || pendingTrack.artistMbid || `pendingTrack:${pendingTrack.id}`;
 }
 
-export function createRetryJob(userId: string, pendingTrack: PlaylistPendingTrack, extra: Record<string, unknown> = {}) {
+/** Opens the retry's job. Pass the transaction's client to open it together with the clearing of the failed one. */
+export function createRetryJob(
+    userId: string,
+    pendingTrack: PlaylistPendingTrack,
+    extra: Record<string, unknown> = {},
+    db?: Parameters<typeof downloadJobs.create>[1]
+) {
     return downloadJobs.create({
         userId,
         subject: `${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`,
@@ -49,7 +55,7 @@ export function createRetryJob(userId: string, pendingTrack: PlaylistPendingTrac
             albumMbid: pendingTrack.albumMbid,
             ...(extra as Record<string, never>),
         },
-    });
+    }, db);
 }
 
 export async function failRetryJob(jobId: string, error: string): Promise<void> {

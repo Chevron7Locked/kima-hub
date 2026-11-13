@@ -40,6 +40,7 @@ import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import playlistsRoutes from "../playlists";
 import { config, useMusicFolder } from "../../config";
+import * as downloadJobs from "../../services/downloads/jobs";
 
 const startFolder = config.music.musicPath;
 import notificationRoutes from "../notifications";
@@ -229,5 +230,30 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         await retryFromActivity(failed.id).expect(404);
 
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: failed.id } })).cleared).toBe(false);
+    });
+
+    it("leaves the failed row on the list when the new job cannot be created", async () => {
+        expectLog("error");
+        const pt = await pending("Lullaby");
+        const failed = await failedRetryOf(pt.id);
+        const create = jest.spyOn(downloadJobs, "create").mockRejectedValueOnce(new Error("database went away"));
+
+        await retryFromActivity(failed.id).expect(500);
+        create.mockRestore();
+
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: failed.id } })).cleared).toBe(false);
+        expect(await jobsFor(pt.id)).toHaveLength(1);
+    });
+
+    it("fails the new job, which stays on the list, when its Soulseek search throws", async () => {
+        expectLog("error");
+        const pt = await pending("Sunflower");
+        const failed = await failedRetryOf(pt.id);
+        mockSearch.mockRejectedValue(new Error("slskd exploded"));
+
+        await retryFromActivity(failed.id).expect(500);
+
+        const [, replacement] = await jobsFor(pt.id);
+        expect(replacement).toMatchObject({ status: "failed", error: "slskd exploded", cleared: false });
     });
 });

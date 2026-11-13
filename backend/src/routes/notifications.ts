@@ -4,6 +4,7 @@ import { notificationService } from "../services/notificationService";
 import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import * as downloadJobs from "../services/downloads/jobs";
 import {
@@ -20,6 +21,11 @@ const router = Router();
 
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
+
+/** Takes a failed download off the user's list. Done in the transaction that creates its replacement. */
+function clearFailedJob(id: string, db: Pick<Prisma.TransactionClient, "downloadJob"> = prisma) {
+    return db.downloadJob.update({ where: { id }, data: { cleared: true } });
+}
 
 /**
  * GET /notifications
@@ -345,11 +351,6 @@ router.post(
                 }
 
                 const target = await soulseekTarget();
-                await prisma.downloadJob.update({
-                    where: { id: failedJob.id },
-                    data: { cleared: true },
-                });
-
                 const existingActiveJob = await prisma.downloadJob.findFirst({
                     where: {
                         userId: req.user!.id,
@@ -359,6 +360,7 @@ router.post(
                     },
                 });
                 if (existingActiveJob) {
+                    await clearFailedJob(failedJob.id);
                     return res.json({
                         success: true,
                         newJobId: existingActiveJob.id,
@@ -366,7 +368,10 @@ router.post(
                     });
                 }
 
-                const job = await createRetryJob(req.user!.id, pendingTrack);
+                const job = await prisma.$transaction(async (tx) => {
+                    await clearFailedJob(failedJob.id, tx);
+                    return createRetryJob(req.user!.id, pendingTrack, {}, tx);
+                });
                 if ("problem" in target) {
                     await failRetryJob(job.id, target.problem);
                     return res.json({ success: false, newJobId: job.id, error: target.problem });
@@ -412,117 +417,124 @@ router.post(
                     }
                 }
 
-                await prisma.downloadJob.update({
-                    where: { id: failedJob.id },
-                    data: { cleared: true },
+                // The failed job leaves the list only together with the creation of its replacement.
+                const newJobRecord = await prisma.$transaction(async (tx) => {
+                    await clearFailedJob(failedJob.id, tx);
+                    return downloadJobs.create({
+                        userId: req.user!.id,
+                        type: "album",
+                        targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
+                        artistMbid: failedJob.artistMbid,
+                        subject: `${artistName} - ${albumTitle}`,
+                        status: "processing",
+                        metadata: {
+                            ...downloadJobs.withoutFailureMarks(metadata),
+                            retryAttempt: true,
+                        } as any,
+                    }, tx);
                 });
 
-                const newJobRecord = await downloadJobs.create({
-                    userId: req.user!.id,
-                    type: "album",
-                    targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
-                    artistMbid: failedJob.artistMbid,
-                    subject: `${artistName} - ${albumTitle}`,
-                    status: "processing",
-                    metadata: {
-                        ...downloadJobs.withoutFailureMarks(metadata),
-                        retryAttempt: true,
-                    } as any,
-                });
+                try {
+                    // Try Soulseek first (async)
+                    const { soulseekService } = await import(
+                        "../services/soulseek"
+                    );
+                    const { getSystemSettings } = await import(
+                        "../utils/systemSettings"
+                    );
 
-                // Try Soulseek first (async)
-                const { soulseekService } = await import(
-                    "../services/soulseek"
-                );
-                const { getSystemSettings } = await import(
-                    "../utils/systemSettings"
-                );
+                    const settings = await getSystemSettings();
+                    const musicPath = config.music.musicPath;
 
-                const settings = await getSystemSettings();
-                const musicPath = config.music.musicPath;
+                    // Build track from album info (single track search using album as title)
+                    const tracks = [
+                        {
+                            artist: artistName,
+                            title: albumTitle,
+                            album: albumTitle,
+                        },
+                    ];
 
-                // Build track from album info (single track search using album as title)
-                const tracks = [
-                    {
-                        artist: artistName,
-                        title: albumTitle,
-                        album: albumTitle,
-                    },
-                ];
+                    logger.debug(
+                        `[Retry] Trying Soulseek for ${artistName} - ${albumTitle}`
+                    );
 
-                logger.debug(
-                    `[Retry] Trying Soulseek for ${artistName} - ${albumTitle}`
-                );
-
-                // Run Soulseek search async
-                soulseekService
-                    .searchAndDownloadBatch(tracks, musicPath, settings?.soulseekConcurrentDownloads ?? 4)
-                    .then(async (result) => {
-                        if (result.successful > 0) {
-                            await downloadJobs.complete([newJobRecord], {
-                                source: "soulseek",
-                                tracksDownloaded: result.successful,
-                                files: result.files,
-                            });
-                            logger.debug(
-                                `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`
-                            );
-
-                            // Trigger library scan (full walk — the
-                            // download folder is not recorded, so there is
-                            // nothing narrower to scan)
-                            const { requestScan } = await import(
-                                "../workers/scanRequest"
-                            );
-                            await requestScan({
-                                userId: req.user!.id,
-                                source: "retry-spotify-import",
-                            });
-                        } else {
-                            // Soulseek failed, try Lidarr if we have an MBID
-                            logger.debug(
-                                `[Retry] Soulseek failed, trying Lidarr for ${artistName} - ${albumTitle}`
-                            );
-
-                            if (
-                                failedJob.targetMbid &&
-                                !failedJob.targetMbid.startsWith(NO_ALBUM_ID)
-                            ) {
-                                const { simpleDownloadManager } = await import(
-                                    "../services/simpleDownloadManager"
+                    // Run Soulseek search async
+                    soulseekService
+                        .searchAndDownloadBatch(tracks, musicPath, settings?.soulseekConcurrentDownloads ?? 4)
+                        .then(async (result) => {
+                            if (result.successful > 0) {
+                                await downloadJobs.complete([newJobRecord], {
+                                    source: "soulseek",
+                                    tracksDownloaded: result.successful,
+                                    files: result.files,
+                                });
+                                logger.debug(
+                                    `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`
                                 );
-                                const lidarrResult =
-                                    await simpleDownloadManager.startDownload(
-                                        newJobRecord.id,
-                                        artistName,
-                                        albumTitle,
-                                        failedJob.targetMbid,
-                                        false
-                                    );
 
-                                if (!lidarrResult.success) {
+                                // Trigger library scan (full walk — the
+                                // download folder is not recorded, so there is
+                                // nothing narrower to scan)
+                                const { requestScan } = await import(
+                                    "../workers/scanRequest"
+                                );
+                                await requestScan({
+                                    userId: req.user!.id,
+                                    source: "retry-spotify-import",
+                                });
+                            } else {
+                                // Soulseek failed, try Lidarr if we have an MBID
+                                logger.debug(
+                                    `[Retry] Soulseek failed, trying Lidarr for ${artistName} - ${albumTitle}`
+                                );
+
+                                if (
+                                    failedJob.targetMbid &&
+                                    !failedJob.targetMbid.startsWith(NO_ALBUM_ID)
+                                ) {
+                                    const { simpleDownloadManager } = await import(
+                                        "../services/simpleDownloadManager"
+                                    );
+                                    const lidarrResult =
+                                        await simpleDownloadManager.startDownload(
+                                            newJobRecord.id,
+                                            artistName,
+                                            albumTitle,
+                                            failedJob.targetMbid,
+                                            false
+                                        );
+
+                                    if (!lidarrResult.success) {
+                                        await downloadJobs.fail(
+                                            [newJobRecord],
+                                            lidarrResult.error || "Both Soulseek and Lidarr failed"
+                                        );
+                                    }
+                                } else {
                                     await downloadJobs.fail(
                                         [newJobRecord],
-                                        lidarrResult.error || "Both Soulseek and Lidarr failed"
+                                        "No tracks found on Soulseek, no MBID for Lidarr fallback"
                                     );
                                 }
-                            } else {
-                                await downloadJobs.fail(
-                                    [newJobRecord],
-                                    "No tracks found on Soulseek, no MBID for Lidarr fallback"
-                                );
                             }
-                        }
-                    })
-                    .catch(async (error) => {
-                        logger.error(`[Retry] Soulseek error:`, error);
-                        await downloadJobs.fail(
-                            [newJobRecord],
-                            error?.message || "Soulseek error"
-                        ).catch((failError) => logger.error(`[Retry] Could not fail job ${newJobRecord.id}:`, failError));
-                    });
+                        })
+                        .catch(async (error) => {
+                            logger.error(`[Retry] Soulseek error:`, error);
+                            await downloadJobs.fail(
+                                [newJobRecord],
+                                error?.message || "Soulseek error"
+                            ).catch((failError) => logger.error(`[Retry] Could not fail job ${newJobRecord.id}:`, failError));
+                        });
 
-                return res.json({ success: true, newJobId: newJobRecord.id });
+                    return res.json({ success: true, newJobId: newJobRecord.id });
+                } catch (error: any) {
+                    // The replacement could not start: it fails, so the user sees it and can retry again.
+                    logger.error(`[Retry] Could not start job ${newJobRecord.id}:`, error);
+                    const message = error?.message || "Retry could not start";
+                    await downloadJobs.fail([newJobRecord], message);
+                    return res.json({ success: false, newJobId: newJobRecord.id, error: message });
+                }
             }
 
             if (!failedJob.targetMbid) {
@@ -549,11 +561,6 @@ router.post(
                 });
             }
 
-            await prisma.downloadJob.update({
-                where: { id: failedJob.id },
-                data: { cleared: true },
-            });
-
             // Subject is typically "Artist - Album" format
             const subjectParts = failedJob.subject.split(" - ");
             const artistName = subjectParts[0] || failedJob.subject;
@@ -562,26 +569,38 @@ router.post(
                 subjectParts[1] ||
                 failedJob.subject;
 
-            const newJobRecord = await downloadJobs.create({
-                userId: req.user!.id,
-                type: failedJob.type,
-                targetMbid: failedJob.targetMbid,
-                artistMbid: failedJob.artistMbid,
-                subject: failedJob.subject,
-                metadata: downloadJobs.withoutFailureMarks(metadata) as any,
+            // The failed job leaves the list only together with the creation of its replacement.
+            const newJobRecord = await prisma.$transaction(async (tx) => {
+                await clearFailedJob(failedJob.id, tx);
+                return downloadJobs.create({
+                    userId: req.user!.id,
+                    type: failedJob.type,
+                    targetMbid: failedJob.targetMbid!,
+                    artistMbid: failedJob.artistMbid,
+                    subject: failedJob.subject,
+                    metadata: downloadJobs.withoutFailureMarks(metadata) as any,
+                }, tx);
             });
 
-            const { simpleDownloadManager } = await import(
-                "../services/simpleDownloadManager"
-            );
+            let result: { success: boolean; error?: string };
+            try {
+                const { simpleDownloadManager } = await import(
+                    "../services/simpleDownloadManager"
+                );
 
-            const result = await simpleDownloadManager.startDownload(
-                newJobRecord.id,
-                artistName,
-                albumTitle,
-                failedJob.targetMbid,
-                false // isDiscovery
-            );
+                result = await simpleDownloadManager.startDownload(
+                    newJobRecord.id,
+                    artistName,
+                    albumTitle,
+                    failedJob.targetMbid,
+                    false // isDiscovery
+                );
+            } catch (error: any) {
+                // The replacement could not start: it fails, so the user sees it and can retry again.
+                logger.error(`[Retry] Could not start job ${newJobRecord.id}:`, error);
+                result = { success: false, error: error?.message || "Retry could not start" };
+                await downloadJobs.fail([newJobRecord], result.error!);
+            }
 
             res.json({
                 success: result.success,

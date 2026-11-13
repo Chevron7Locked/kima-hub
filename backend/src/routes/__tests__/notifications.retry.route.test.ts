@@ -3,6 +3,8 @@
  * through the download-job module: a Soulseek success or failure completes or fails the job,
  * merging into the metadata it holds (a write that landed meanwhile survives) and telling the
  * Spotify import it belongs to. The failure marks of the old job do not follow the copy.
+ * A retry clears the failed job only together with creating its replacement, and a replacement that
+ * cannot start ends failed, so the user always sees one of them.
  * Real database and router; Soulseek, the download manager and the import are stood in for.
  */
 
@@ -34,6 +36,7 @@ import express from "express";
 import request from "supertest";
 import notificationRoutes from "../notifications";
 import { prisma } from "../../utils/db";
+import * as downloadJobs from "../../services/downloads/jobs";
 import { mergeMetadata, whenIdle } from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
@@ -91,6 +94,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+    jest.restoreAllMocks();
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
 });
@@ -187,5 +191,56 @@ describe("a retried library album", () => {
         expect(job.status).toBe("pending");
         expect(meta(job)).toEqual({ downloadType: "library", albumTitle: "Things We Lost in the Fire" });
         expect(mockStartDownload).toHaveBeenCalledWith(job.id, "Low", "Things We Lost in the Fire", MBID, false);
+    });
+});
+
+describe("a retry whose replacement cannot be created", () => {
+    const jobsOf = () => prisma.downloadJob.findMany({ where: { userId: USER }, orderBy: { createdAt: "asc" } });
+
+    it.each([
+        ["Spotify import album", () => failedJob()],
+        ["library album", () => failedJob({ metadata: { downloadType: "library", albumTitle: "Things We Lost in the Fire" } })],
+    ])("leaves the failed %s job on the user's list", async (_name, make) => {
+        expectLog("error");
+        const old = await make();
+        jest.spyOn(downloadJobs, "create").mockRejectedValueOnce(new Error("database went away"));
+
+        await retry(old.id).expect(500);
+
+        const rows = await jobsOf();
+        expect(rows.map((j) => j.id)).toEqual([old.id]);
+        expect(rows[0]).toMatchObject({ status: "failed", cleared: false });
+    });
+});
+
+describe("a retry whose replacement cannot start", () => {
+    it("fails the new Spotify import job with the reason, and the old one is cleared", async () => {
+        expectLog("error");
+        const old = await failedJob();
+        mockSearchAndDownloadBatch.mockImplementation(() => {
+            throw new Error("slskd exploded");
+        });
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body).toMatchObject({ success: false, newJobId: expect.any(String), error: "slskd exploded" });
+        const job = await newJobOf(old.id, res.body.newJobId);
+        expect(job).toMatchObject({ status: "failed", error: "slskd exploded", cleared: false });
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: old.id } })).cleared).toBe(true);
+        await whenIdle();
+        expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
+    });
+
+    it("fails the new library job with the reason, and the old one is cleared", async () => {
+        expectLog("error");
+        const old = await failedJob({ metadata: { downloadType: "library", albumTitle: "Things We Lost in the Fire" } });
+        mockStartDownload.mockRejectedValue(new Error("lidarr exploded"));
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body).toMatchObject({ success: false, newJobId: expect.any(String), error: "lidarr exploded" });
+        const job = await newJobOf(old.id, res.body.newJobId);
+        expect(job).toMatchObject({ status: "failed", error: "lidarr exploded", cleared: false });
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: old.id } })).cleared).toBe(true);
     });
 });
