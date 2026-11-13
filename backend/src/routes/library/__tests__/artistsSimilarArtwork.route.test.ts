@@ -80,7 +80,7 @@ const subjectInput = (id: string) => ({
     enrichmentStatus: "enriched" as const,
 });
 
-const clearSimilarCache = () => redisClient.del(`similar-artists:${SUBJECT_ID}`);
+const clearSimilarCache = () => redisClient.del(`similar-artists-list:${SUBJECT_ID}`);
 
 const setSimilarJson = (similarArtistsJson: unknown) =>
     prisma.artist.update({ where: { id: SUBJECT_ID }, data: { similarArtistsJson: similarArtistsJson as any } });
@@ -180,6 +180,34 @@ describe("the similar-artists strip and where its pictures come from", () => {
                 mbid: SIMILAR_MBID,
             });
             expect(similarFrom(res)[0]?.coverArt).toBe(FOUND);
+        });
+
+        it("caches the engine's list, not whether each artist is in the library", async () => {
+            await setSimilarJson(null);
+            mockGetSimilarArtists.mockResolvedValue([{ name: SIMILAR_NAME, mbid: SIMILAR_MBID, match: 0.9 }]);
+
+            const before = similarFrom(await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`));
+            expect(before[0]).toMatchObject({ name: SIMILAR_NAME, inLibrary: false });
+
+            await prisma.artist.create({
+                data: {
+                    id: KNOWN_ID,
+                    name: SIMILAR_NAME,
+                    normalizedName: normalizeArtistName(SIMILAR_NAME),
+                    identityKey: `${KNOWN_ID}-ik`,
+                    mbid: SIMILAR_MBID,
+                    albums: {
+                        create: {
+                            id: `${KNOWN_ID}-al`, rgMbid: `${KNOWN_ID}-rg`, identityKey: `${KNOWN_ID}-ak`, title: "album", primaryType: "Album", location: "LIBRARY",
+                            tracks: { create: { id: `${KNOWN_ID}-t`, title: "song", trackNo: 1, duration: 100, filePath: `${KNOWN_ID}-t.flac`, fileModified: new Date(), fileSize: 1 } },
+                        },
+                    },
+                },
+            });
+
+            const after = similarFrom(await request(makeApp()).get(`/library/artists/${SUBJECT_ID}`));
+            expect(mockGetSimilarArtists).toHaveBeenCalledTimes(1);
+            expect(after[0]).toMatchObject({ id: KNOWN_ID, inLibrary: true, ownedAlbumCount: 1 });
         });
     });
 });

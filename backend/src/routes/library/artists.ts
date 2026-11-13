@@ -793,7 +793,7 @@ router.get("/artists/:id", async (req, res) => {
     );
 
     let similarArtists: any[] = [];
-    const similarCacheKey = `similar-artists:${artist.id}`;
+    const similarCacheKey = `similar-artists-list:${artist.id}`;
 
     const enrichedSimilar = artist.similarArtistsJson as Array<{
       name: string;
@@ -801,27 +801,24 @@ router.get("/artists/:id", async (req, res) => {
       match: number;
     }> | null;
 
+    // The engine's list is cached; whether each artist is in the library is read on every request, so it follows
+    // the library.
     if (enrichedSimilar && enrichedSimilar.length > 0) {
       similarArtists = await resolveSimilarArtists(enrichedSimilar.slice(0, 10));
     } else {
-      const cachedSimilar = await redisClient.get(similarCacheKey);
-      if (cachedSimilar && cachedSimilar !== "NOT_FOUND") {
-        similarArtists = JSON.parse(cachedSimilar);
-      } else {
-        try {
-          const similar = await getSimilarArtists(isMbid(artist.mbid) ? artist.mbid : "", artist.name, 10);
-
-          similarArtists = await resolveSimilarArtists(similar);
-
-          await redisClient.setex(
-            similarCacheKey,
-            24 * 60 * 60,
-            JSON.stringify(similarArtists),
-          );
-        } catch (error) {
-          logger.error(`[Artist] Failed to fetch similar artists:`, error);
-          similarArtists = [];
+      try {
+        const cachedSimilar = await redisClient.get(similarCacheKey);
+        let similar: SimilarArtistSource[];
+        if (cachedSimilar) {
+          similar = JSON.parse(cachedSimilar);
+        } else {
+          similar = await getSimilarArtists(isMbid(artist.mbid) ? artist.mbid : "", artist.name, 10);
+          await redisClient.setex(similarCacheKey, 24 * 60 * 60, JSON.stringify(similar));
         }
+        similarArtists = await resolveSimilarArtists(similar);
+      } catch (error) {
+        logger.error(`[Artist] Failed to fetch similar artists:`, error);
+        similarArtists = [];
       }
     }
 
