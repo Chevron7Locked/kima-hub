@@ -33,8 +33,8 @@ let trackId: string;
 const clean = async () => {
     await prisma.shareLink.deleteMany({ where: { createdBy: { in: [OWNER, OTHER] } } });
     await prisma.user.deleteMany({ where: { id: { in: [OWNER, OTHER] } } });
-    await prisma.track.deleteMany({ where: { album: { rgMbid: TAG } } });
-    await prisma.album.deleteMany({ where: { rgMbid: TAG } });
+    await prisma.track.deleteMany({ where: { album: { rgMbid: { startsWith: TAG } } } });
+    await prisma.album.deleteMany({ where: { rgMbid: { startsWith: TAG } } });
     await prisma.artist.deleteMany({ where: { identityKey: TAG } });
 };
 
@@ -90,6 +90,34 @@ describe('POST /share -- create share link', () => {
             .set('Authorization', `Bearer ${userToken(OWNER)}`)
             .send({ entityType: 'track', entityId: `${TAG}-missing-track` });
         expect(res.status).toBe(404);
+        expect(await sharesBy(OWNER)).toHaveLength(0);
+    });
+
+    it('returns 404 for a song or album with nothing to play: Discover, missing or corrupt', async () => {
+        const artist = await prisma.artist.findFirstOrThrow({ where: { identityKey: TAG } });
+        const discover = await prisma.album.create({
+            data: { rgMbid: `${TAG}-d`, identityKey: `${TAG}-d`, artistId: artist.id, title: 'Suggested', primaryType: 'Album', location: 'DISCOVER' },
+        });
+        const library = await prisma.album.create({
+            data: { rgMbid: `${TAG}-gone`, identityKey: `${TAG}-gone`, artistId: artist.id, title: 'Gone', primaryType: 'Album', location: 'LIBRARY' },
+        });
+        const song = (albumId: string, n: number, data: object = {}) =>
+            prisma.track.create({ data: { albumId, title: `Song ${n}`, duration: 100, trackNo: n, filePath: `/${TAG}/${albumId}-${n}.flac`, fileModified: new Date(), fileSize: 1, ...data } });
+        const suggested = await song(discover.id, 1);
+        const missing = await song(library.id, 1, { missingSince: new Date() });
+        const corrupt = await song(library.id, 2, { corrupt: true });
+
+        const asks = [
+            { entityType: 'track', entityId: suggested.id },
+            { entityType: 'track', entityId: missing.id },
+            { entityType: 'track', entityId: corrupt.id },
+            { entityType: 'album', entityId: discover.id },
+            { entityType: 'album', entityId: library.id },
+        ];
+        for (const body of asks) {
+            const res = await request(app).post('/share').set('Authorization', `Bearer ${userToken(OWNER)}`).send(body);
+            expect([body.entityId, res.status]).toEqual([body.entityId, 404]);
+        }
         expect(await sharesBy(OWNER)).toHaveLength(0);
     });
 

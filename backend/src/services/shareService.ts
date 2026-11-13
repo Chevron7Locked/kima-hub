@@ -2,6 +2,8 @@
 
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
 type ShareEntityType = "playlist" | "track" | "album";
 
@@ -63,14 +65,15 @@ export async function createShareLink(
             throw new ShareError("Not the playlist owner", "FORBIDDEN");
         }
     } else if (entityType === "track") {
-        const track = await prisma.track.findUnique({
-            where: { id: entityId },
+        // A song or album with nothing to play (Discover, missing, corrupt) is not found, on the web and Subsonic alike.
+        const track = await prisma.track.findFirst({
+            where: { id: entityId, ...PLAYABLE_SONG },
             select: { id: true },
         });
         if (!track) throw new ShareError("Track not found", "NOT_FOUND");
     } else {
-        const album = await prisma.album.findUnique({
-            where: { id: entityId },
+        const album = await prisma.album.findFirst({
+            where: { id: entityId, ...PLAYABLE_ALBUM_WHERE },
             select: { id: true },
         });
         if (!album) throw new ShareError("Album not found", "NOT_FOUND");

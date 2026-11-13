@@ -196,7 +196,7 @@ async function artistPage(global: string[], user = USER) {
         image.mockRestore();
         similar.mockRestore();
         // The page keeps the artist's similar artists for a day; cleared after each read so no read sees another's.
-        await redisClient.del(`similar-artists:${P}-ar`);
+        await redisClient.del(`similar-artists-list:${P}-ar`);
     }
 }
 const popularSongs = async (global: string[], user = USER): Promise<string[]> =>
@@ -914,5 +914,40 @@ describe("the songs left out of a Subsonic list", () => {
         expect(idsOf((await reply("getPlaylist.view", { id: PLAYLIST })).playlist.entry)).toEqual([second, SONG.playable]);
         const kept = await prisma.playlistItem.findMany({ where: { playlistId: PLAYLIST }, orderBy: { rank: "asc" }, select: { trackId: true } });
         expect(kept.map((i) => i.trackId)).toEqual([second, SONG.playable, ...UNPLAYABLE]);
+    });
+});
+
+// A Subsonic app is never offered an unplayable song, so starring or sharing one answers as for an id that is not there.
+describe("Subsonic star and createShare", () => {
+    const asNight = (route: string, query: Record<string, string | string[]>) =>
+        request(app).get(`/rest/${route}`).set("x-user", NIGHT).query({ u: NIGHT, f: "json", ...query });
+
+    it("stars the playable song and skips the Discover, missing and corrupt ones", async () => {
+        const res = await asNight("star.view", { id: Object.values(SONG) }).expect(200);
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        const liked = await prisma.likedTrack.findMany({ where: { userId: NIGHT }, select: { trackId: true } });
+        expect(liked.map((l) => l.trackId)).toEqual([SONG.playable]);
+    });
+
+    it("rates only the playable song: a rating of a Discover, missing or corrupt one stores no like", async () => {
+        await prisma.likedTrack.deleteMany({ where: { userId: NIGHT } });
+        for (const id of Object.values(SONG)) {
+            const res = await asNight("setRating.view", { id, rating: "5" }).expect(200);
+            expect(res.body["subsonic-response"].status).toBe("ok");
+        }
+        const liked = await prisma.likedTrack.findMany({ where: { userId: NIGHT }, select: { trackId: true } });
+        expect(liked.map((l) => l.trackId)).toEqual([SONG.playable]);
+    });
+
+    it.each([SONG.playable, `${SONG.playable}-al`])("shares %s, the playable song or its album", async (id) => {
+        const res = await asNight("createShare.view", { id }).expect(200);
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        expect(await prisma.shareLink.count({ where: { entityId: id, createdBy: NIGHT } })).toBe(1);
+    });
+
+    it.each(UNPLAYABLE.flatMap((id) => [id, `${id}-al`]))("answers not-found when asked to share %s", async (id) => {
+        const res = await asNight("createShare.view", { id }).expect(200);
+        expect(res.body["subsonic-response"]).toMatchObject({ status: "failed", error: { code: 70 } });
+        expect(await prisma.shareLink.count({ where: { entityId: id } })).toBe(0);
     });
 });

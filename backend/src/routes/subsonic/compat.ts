@@ -115,7 +115,8 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
     }
 
     // Subsonic ids are opaque; resolve what each one actually is. Only the
-    // first is shared -- ShareLink covers a single entity.
+    // first is shared -- ShareLink covers a single entity. createShareLink
+    // answers not found for a song or album with nothing to play.
     const [id] = ids;
     const [track, album, playlist] = await Promise.all([
         prisma.track.findUnique({ where: { id }, select: { id: true } }),

@@ -60,7 +60,8 @@ starredRouter.all("/setRating.view", wrap(async (req, res) => {
     }
 
     const userId = req.user!.id;
-    const track = await prisma.track.findUnique({ where: { id }, select: { id: true } });
+    // A song the app is never offered (Discover, missing, corrupt) is skipped like one that is not there.
+    const track = await prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG }, select: { id: true } });
 
     // Kima stores binary preference (liked/unliked). Ratings 1..5 map to liked, 0 removes.
     if (track) {
@@ -81,9 +82,13 @@ starredRouter.all("/setRating.view", wrap(async (req, res) => {
 // star.view — only track starring (Kima's LikedTrack model); albumId/artistId params silently ignored
 starredRouter.all("/star.view", wrap(async (req, res) => {
     const userId = req.user!.id;
-    const ids = parseRepeatedQueryParam(req.query.id);
+    // A song the app is never offered (Discover, missing, corrupt) is skipped like one that is not there.
+    const ids = (await prisma.track.findMany({
+        where: { id: { in: parseRepeatedQueryParam(req.query.id) }, ...PLAYABLE_SONG },
+        select: { id: true },
+    })).map((t) => t.id);
 
-    // Star every id, skipping tracks that do not exist (P2003) and logging real
+    // Star every id, skipping tracks deleted meanwhile (P2003) and logging real
     // failures. Error only when a real failure left nothing starred; a partial
     // success answers ok, and the upsert makes a retry safe.
     let anySucceeded = false;
