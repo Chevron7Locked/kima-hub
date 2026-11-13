@@ -13,7 +13,7 @@ import { JointCreditFiler, leadingParts } from "./jointCredit";
 import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
-import { backfillAllArtistCounts } from "./artistCountsService";
+import { updateArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
 import { closeStagesForMissingTracks } from "./missingFileStages";
 import { runReconcile } from "./libraryReconcile";
@@ -186,6 +186,14 @@ export class MusicScannerService {
             errors: [],
         };
 
+        // The artists whose songs this scan moved (added, changed, flagged missing, brought back, marked corrupt, or
+        // left for another artist): only their stored counts are recounted.
+        const touchedArtists = new Set<string>();
+        const artistsOfSongs = async (songIds: string[]) => {
+            const rows = await prisma.track.findMany({ where: { id: { in: songIds } }, select: { album: { select: { artistId: true } } } });
+            return rows.map((r) => r.album.artistId);
+        };
+
         const markFailed = async (audioFile: string, err: any) => {
             const error = { file: audioFile, error: err.message || String(err) };
             result.errors.push(error);
@@ -194,6 +202,7 @@ export class MusicScannerService {
 
             const existingTrack = tracksByPath.get(path.relative(musicPath, audioFile));
             if (existingTrack) {
+                (await artistsOfSongs([existingTrack.id])).forEach((id) => touchedArtists.add(id));
                 await prisma.track.update({ where: { id: existingTrack.id }, data: { corrupt: true } });
                 result.tracksCorrupt++;
                 logger.debug(`Marked track as corrupt: ${path.relative(musicPath, audioFile)}`);
@@ -276,9 +285,13 @@ export class MusicScannerService {
 
                     const existingTrack = tracksByPath.get(relativePath);
                     // Every recorded answer came from the old content, so every stage is asked again.
-                    if (existingTrack) await reopenStagesForChangedFile(existingTrack.id);
+                    if (existingTrack) {
+                        // The artist the song leaves, if the new tags credit another.
+                        (await artistsOfSongs([existingTrack.id])).forEach((id) => touchedArtists.add(id));
+                        await reopenStagesForChangedFile(existingTrack.id);
+                    }
 
-                    await this.processAudioFile(audioFile, relativePath, musicPath, elected, parsed.get(audioFile));
+                    touchedArtists.add(await this.processAudioFile(audioFile, relativePath, musicPath, elected, parsed.get(audioFile)));
                     if (existingTrack) result.tracksUpdated++;
                     else result.tracksAdded++;
                 } catch (err: any) {
@@ -325,6 +338,7 @@ export class MusicScannerService {
         );
         if (returned.length > 0) {
             const returnedIds = returned.map((t) => t.id);
+            (await artistsOfSongs(returnedIds)).forEach((id) => touchedArtists.add(id));
             await prisma.$transaction(async (tx) => {
                 await tx.track.updateMany({
                     where: { id: { in: returnedIds } },
@@ -350,6 +364,8 @@ export class MusicScannerService {
 
             // Flag and stage records change together, so no reader sees a flagged track
             // whose questions are still owed.
+            // Only songs this scan flags move a count: one flagged by an earlier scan was counted out then.
+            (await artistsOfSongs(vanished.filter((t) => !t.missingSince).map((t) => t.id))).forEach((id) => touchedArtists.add(id));
             await prisma.$transaction(async (tx) => {
                 if (vanished.length > 0) {
                     // Only rows not already flagged change: the timestamp is when
@@ -389,12 +405,17 @@ export class MusicScannerService {
             `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} removed:${result.tracksRemoved} (${result.duration}ms)`
         );
 
-        // The artists' stored counts, recomputed in the background.
-        backfillAllArtistCounts().catch((err) => {
+        // The touched artists' stored counts, recomputed in the background. One the pruning removed has none to keep.
+        this.recountInBackground([...touchedArtists]).catch((err) => {
             logger.error("[Scan] Artist counts update failed:", err);
         });
 
         return result;
+    }
+
+    private async recountInBackground(artistIds: string[]): Promise<void> {
+        const alive = await prisma.artist.findMany({ where: { id: { in: artistIds } }, select: { id: true } });
+        for (const { id } of alive) await updateArtistCounts(id);
     }
 
     /**
@@ -608,7 +629,7 @@ export class MusicScannerService {
         musicPath: string,
         elected: ReadonlyMap<string, ArtistCandidate> = new Map(),
         read?: SlimMetadata
-    ): Promise<void> {
+    ): Promise<string> {
         // The tags the vote step already read; a file it could not read is read again, to report why. Nothing here
         // uses the embedded pictures (the cover is extracted from the file itself), so they are never read.
         const metadata = read ?? slimMetadata(await parseFile(absolutePath, { skipCovers: true }));
@@ -824,5 +845,8 @@ export class MusicScannerService {
             // Non-critical -- don't fail the scan for lyrics
             logger.debug(`[Scanner] Failed to extract lyrics for ${relativePath}:`, error);
         }
+
+        // The artist whose album the song is filed under, for the scan's recount.
+        return album.artistId;
     }
 }

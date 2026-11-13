@@ -1,7 +1,8 @@
 /**
  * Denormalised Artist counts for filtering without joins: libraryAlbumCount (library albums with a playable song),
  * discoveryAlbumCount (Discover albums with songs), and totalTrackCount (playable songs; Discover songs are not the
- * library's). The scan recounts every artist, so a file that goes missing or comes back moves them.
+ * library's). The scan recounts the artists whose songs it moved (musicScanner.ts), so a file that goes missing or comes
+ * back moves them.
  */
 
 import { prisma } from "../utils/db";

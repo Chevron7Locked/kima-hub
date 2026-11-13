@@ -40,6 +40,7 @@ export const artworkMock = () => ({
 
 export const artistCountsServiceMock = () => ({
     backfillAllArtistCounts: jest.fn().mockResolvedValue(undefined),
+    updateArtistCounts: jest.fn().mockResolvedValue(undefined),
 });
 
 export const imageStorageMock = () => ({
