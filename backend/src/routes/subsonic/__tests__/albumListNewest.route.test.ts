@@ -70,9 +70,10 @@ describe.each(['/getAlbumList2.view', '/getAlbumList.view'])('%s', (path) => {
 });
 
 it('pages newest albums without repeating or skipping one across pages', async () => {
-    // The whole table, a page at a time: this file's albums come out once each, in order.
+    // A page at a time from the top, until this file's albums have all appeared (their dates sort them first):
+    // each comes out once, in order.
     const seen: string[] = [];
-    for (let offset = 0; ; offset += 3) {
+    for (let offset = 0; seen.filter((x) => x.startsWith(P)).length < EXPECTED.length; offset += 3) {
         const body = await ask('/getAlbumList2.view', { type: 'newest', size: '3', offset: String(offset) });
         const page = list<{ id: string }>(body.albumList2?.album).map((a) => a.id);
         seen.push(...page);

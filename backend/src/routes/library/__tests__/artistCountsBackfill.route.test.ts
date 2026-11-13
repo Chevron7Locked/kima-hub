@@ -26,10 +26,16 @@ async function idle() {
 const passes = (count: jest.SpyInstance) => count.mock.calls.filter(([args]) => args === undefined).length;
 
 beforeAll(async () => {
-    await prisma.artist.create({ data: { id: `${P}-ar`, name: P, normalizedName: P, identityKey: `${P}-ik` } });
+    // A pass pauses between batches of 100 artists, so a few hundred rows keep it running while the asks arrive.
+    await prisma.artist.createMany({
+        data: Array.from({ length: 450 }, (_, i) => ({ id: `${P}-ar-${i}`, name: `${P}-${i}`, normalizedName: `${P}-${i}`, identityKey: `${P}-ik-${i}` })),
+    });
 });
 
-afterEach(idle);
+afterEach(async () => {
+    await idle();
+    jest.restoreAllMocks();
+});
 
 afterAll(async () => {
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
@@ -43,20 +49,17 @@ it("starts a recount when none is running", async () => {
     expect(res.body).toEqual({ message: "Backfill started", status: "processing" });
     await idle();
     expect(passes(count)).toBe(1);
-    count.mockRestore();
 });
 
 it("keeps asks made during a run: they are queued, and the run goes over the artists once more", async () => {
     const count = jest.spyOn(prisma.artist, "count");
     const first = await ask();
     expect(first.body.status).toBe("processing");
-    const second = await ask();
-    const third = await ask();
+    const [second, third] = await Promise.all([ask(), ask()]);
     for (const res of [second, third]) {
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ message: "Backfill queued: it runs once more when the current one finishes", status: "queued" });
     }
     await idle();
     expect(passes(count)).toBe(2);
-    count.mockRestore();
 });
