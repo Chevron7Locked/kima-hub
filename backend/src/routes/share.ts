@@ -1,11 +1,9 @@
 import { Router, Request, Response } from "express";
 import { createShareLink, ShareError } from "../services/shareService";
-import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack } from "../services/publicShare";
+import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover } from "../services/publicShare";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/libraryEligibility";
-import { PLAYABLE_ALBUM_WHERE } from "../services/libraryFilters";
-import type { Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
@@ -65,19 +63,6 @@ async function loadUsableShareLink(token: string, res: Response) {
     }
 
     return shareLink;
-}
-
-/** Whether `coverArtId` is the cover of an album the share holds: the song's album, the shared album, or the album of a playable song in the shared playlist. */
-async function shareHoldsCover(shareLink: { entityType: string; entityId: string }, coverArtId: string): Promise<boolean> {
-    const { entityType, entityId } = shareLink;
-    const holds: Prisma.AlbumWhereInput | null =
-        entityType === "track" ? { tracks: { some: { id: entityId, ...PLAYABLE_SONG } } }
-        : entityType === "album" ? { id: entityId, ...PLAYABLE_ALBUM_WHERE }
-        : entityType === "playlist" ? { tracks: { some: { ...PLAYABLE_SONG, playlistItems: { some: { playlistId: entityId } } } } }
-        : null;
-    if (!holds) return false;
-    const album = await prisma.album.findFirst({ where: { coverUrl: coverArtId, ...holds }, select: { id: true } });
-    return album !== null;
 }
 
 /**

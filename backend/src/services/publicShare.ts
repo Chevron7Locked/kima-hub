@@ -2,6 +2,7 @@
 // stays private until it is added to a list below. A stranger sees only playable songs: one that is missing, corrupt
 // or on a Discover album is not there for them either, so a share of it answers as if its content were gone.
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
@@ -46,6 +47,19 @@ function publicTrack(track: TrackRow) {
             artist: { name: track.album.artist.displayName || track.album.artist.name },
         },
     };
+}
+
+/** Whether `coverArtId` is the cover of an album the share holds: the song's album, the shared album, or the album of a playable song in the shared playlist. */
+export async function shareHoldsCover(share: { entityType: string; entityId: string }, coverArtId: string): Promise<boolean> {
+    const { entityType, entityId } = share;
+    const holds: Prisma.AlbumWhereInput | null =
+        entityType === "track" ? { tracks: { some: { id: entityId, ...PLAYABLE_SONG } } }
+        : entityType === "album" ? { id: entityId, ...PLAYABLE_ALBUM_WHERE }
+        : entityType === "playlist" ? { tracks: { some: { ...PLAYABLE_SONG, playlistItems: { some: { playlistId: entityId } } } } }
+        : null;
+    if (!holds) return false;
+    const album = await prisma.album.findFirst({ where: { coverUrl: coverArtId, ...holds }, select: { id: true } });
+    return album !== null;
 }
 
 export async function loadPublicTrack(id: string) {
