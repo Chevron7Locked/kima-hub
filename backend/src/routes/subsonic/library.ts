@@ -332,7 +332,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "newest":
             albums = await prisma.album.findMany({
                 where: { tracks: { some: PLAYABLE_SONG } },
-                orderBy: { lastSynced: "desc" },
+                orderBy: [{ createdAt: "desc" }, { id: "asc" }],
                 take: size,
                 skip: offset,
                 include: albumInclude,
@@ -465,7 +465,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         default:
             albums = await prisma.album.findMany({
                 where: { tracks: { some: PLAYABLE_SONG } },
-                orderBy: { lastSynced: "desc" },
+                orderBy: [{ createdAt: "desc" }, { id: "asc" }],
                 take: size,
                 skip: offset,
                 include: albumInclude,

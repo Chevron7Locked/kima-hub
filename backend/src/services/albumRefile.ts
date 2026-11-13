@@ -52,7 +52,7 @@ interface Song {
 
 const ALBUM_FIELDS = {
     id: true, artistId: true, rgMbid: true, rgMbidSource: true, identityKey: true, title: true, hasUserOverrides: true,
-    location: true, coverUrl: true, year: true, originalYear: true, genres: true, label: true,
+    location: true, createdAt: true, coverUrl: true, year: true, originalYear: true, genres: true, label: true,
     artist: { select: { mbid: true, identityKey: true, name: true, hasUserOverrides: true } },
 } satisfies Prisma.AlbumSelect;
 type AlbumRow = Prisma.AlbumGetPayload<{ select: typeof ALBUM_FIELDS }>;
@@ -325,9 +325,11 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 } else {
                     gained = true;
                     const source = involved[0];
+                    // The songs were already in the library: the new row arrived when the earliest of their albums did.
+                    const arrived = new Date(Math.min(...involved.map((row) => row.createdAt.getTime())));
                     keeper = await tx.album.create({
                         data: {
-                            artistId: target.id, title, identityKey, sortName: artistSortName(title), rgMbid: `temp-${Date.now()}-${Math.random()}`,
+                            artistId: target.id, createdAt: arrived, title, identityKey, sortName: artistSortName(title), rgMbid: `temp-${Date.now()}-${Math.random()}`,
                             primaryType: "Album", location: "LIBRARY", coverUrl: source.coverUrl, year: source.year,
                             originalYear: source.originalYear, genres: source.genres ?? undefined, label: source.label,
                         },
@@ -376,6 +378,8 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
     // Share links name an album by id with no foreign key: they follow the album to the survivor.
     await tx.shareLink.updateMany({ where: { entityType: "album", entityId: row.id }, data: { entityId: keeper.id } });
     const details = {
+        // The merged album arrived when its earlier copy did.
+        ...(row.createdAt < keeper.createdAt ? { createdAt: row.createdAt } : {}),
         ...(keeper.coverUrl ? {} : { coverUrl: row.coverUrl }),
         ...(keeper.year ? {} : { year: row.year }),
         ...(keeper.originalYear ? {} : { originalYear: row.originalYear }),

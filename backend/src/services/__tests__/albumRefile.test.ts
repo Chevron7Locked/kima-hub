@@ -271,6 +271,47 @@ describe("re-filing albums by their tags", () => {
         }
     });
 
+    it("keeps the earlier arrival time when two copies of an album merge, whichever row survives", async () => {
+        const OLD = new Date("2020-01-01T00:00:00Z");
+        const NEWER = new Date("2025-01-01T00:00:00Z");
+        for (const [strayAt, keptAt] of [[OLD, NEWER], [NEWER, OLD]]) {
+            await wipe();
+            const cut = await artist("Refile Cut");
+            const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+            const stray = await album(cut.id, "Refile Twin", { rgMbid: REAL_RG, createdAt: strayAt });
+            const kept = await album(full.id, "Refile Twin", { createdAt: keptAt });
+            await song(stray.id, "Refile Cut and Band/Refile Twin/01.flac", { album: "Refile Twin", artist: "Refile Cut & Band" });
+            await song(kept.id, "Refile Cut and Band/Refile Twin/02.flac", {
+                album: "Refile Twin", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+            });
+
+            await refileLibrary(musicDir);
+
+            const rows = await prisma.album.findMany({ where: { title: "Refile Twin" }, select: { createdAt: true } });
+            expect(rows).toEqual([{ createdAt: OLD }]);
+        }
+    });
+
+    it("gives an album it moves whole, or files anew, the time its songs' album first arrived", async () => {
+        const OLD = new Date("2020-01-01T00:00:00Z");
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Moved", { rgMbid: REAL_RG, createdAt: OLD });
+        await song(a.id, "Refile Cut and Band/Refile Moved/01.flac", {
+            album: "Refile Moved", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+        const mixed = await artist("Refile Mixed");
+        const shared = await album(mixed.id, "Refile Shared", { createdAt: OLD });
+        await song(shared.id, "Refile A/Refile Shared/01.flac", { album: "Refile Shared", albumartist: "Refile Tee" });
+        await song(shared.id, "Refile B/Refile Shared/01.flac", { album: "Refile Shared", albumartist: "Refile You" });
+
+        await refileLibrary(musicDir);
+
+        const rows = await prisma.album.findMany({ where: { title: { in: ["Refile Moved", "Refile Shared"] } }, select: { title: true, createdAt: true } });
+        expect(rows).toHaveLength(3);
+        for (const row of rows) expect(row.createdAt).toEqual(OLD);
+    });
+
     it("carries another artist's ownership, Discover's records and the album's details onto the surviving album", async () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
