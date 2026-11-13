@@ -12,16 +12,18 @@ jest.mock("../../utils/logger", () => ({
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
-import { generateRefreshToken, generateStreamTicket, generateToken, clearUserCache } from "../../middleware/auth";
+import jwt from "jsonwebtoken";
+import { generateRefreshToken, generateStreamTicket, generateToken, clearUserCache, JWT_SECRET_VALIDATED } from "../../middleware/auth";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { decrypt } from "../../utils/encryption";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import onboardingRoutes from "../onboarding";
+import authRoutes from "../auth";
 
 const P = "zz-onboarding";
 const ADMIN = `${P}-admin`;
 const NEW = `${P}-new`;
-const app = express().use(express.json()).use("/onboarding", onboardingRoutes);
+const app = express().use(express.json()).use("/onboarding", onboardingRoutes).use("/auth", authRoutes);
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 const asAdmin = () => bearer(generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 }));
 const CLOSED = "http://127.0.0.1:1";
@@ -88,6 +90,22 @@ describe("POST /onboarding/register", () => {
         const res = await request(app).post("/onboarding/register").send({ username: `${P}-r1`, password: "secret1" }).expect(200);
         expect(res.body.user).toMatchObject({ username: `${P}-r1`, role: "user", onboardingComplete: false });
         expect(res.body.token).toEqual(expect.any(String));
+    });
+
+    it("signs the new account in as login does, with a refresh token that renews its session", async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: { registrationOpen: true } });
+        const res = await request(app).post("/onboarding/register").send({ username: `${P}-r2`, password: "secret1" }).expect(200);
+        const account = await prisma.user.findUniqueOrThrow({ where: { username: `${P}-r2` } });
+        expect(jwt.verify(res.body.refreshToken, JWT_SECRET_VALIDATED)).toMatchObject({
+            userId: account.id,
+            tokenVersion: account.tokenVersion,
+            type: "refresh",
+        });
+
+        const renewed = await request(app).post("/auth/refresh").send({ refreshToken: res.body.refreshToken }).expect(200);
+        expect(renewed.body.token).toEqual(expect.any(String));
+        const me = await request(app).get("/onboarding/status").set(bearer(renewed.body.token)).expect(200);
+        expect(me.body.needsOnboarding).toBe(true);
     });
 });
 

@@ -86,10 +86,11 @@ export default function OnboardingPage() {
             }
             const response = await api.post<{
                 token: string;
+                refreshToken?: string;
                 user: { id: string; username: string };
             }>("/onboarding/register", { username, password });
             if (response.token) {
-                api.setToken(response.token);
+                api.setToken(response.token, response.refreshToken);
             }
             setStep(2);
         } catch (err: unknown) {

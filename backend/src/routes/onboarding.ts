@@ -7,7 +7,7 @@ import axios from "axios";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { encryptField } from "../utils/encryption";
 import { encryptSettings } from "../utils/encryptedFields";
-import { generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
+import { generateRefreshToken, generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { createLidarrClient } from "../services/lidarrClient";
 
@@ -98,7 +98,7 @@ const SAVED_UNTESTED = "Connection test failed but settings saved. You can test 
 
 /**
  * POST /onboarding/register
- * Step 1: Create user account - returns JWT token like regular login
+ * Step 1: Create user account - returns a JWT and a refresh token, like regular login
  */
 router.post("/register", async (req, res) => {
     try {
@@ -142,7 +142,7 @@ router.post("/register", async (req, res) => {
             data: defaultUserSettingsFor(user.id),
         });
 
-        // Generate JWT token (same as login)
+        // Sign the new account in as login does: a JWT and, below, a refresh token
         const token = generateToken({
             id: user.id,
             username: user.username,
@@ -153,6 +153,7 @@ router.post("/register", async (req, res) => {
         logger.debug("[ONBOARDING] User created successfully:", user.username);
         res.json({
             token,
+            refreshToken: generateRefreshToken({ id: user.id, tokenVersion: user.tokenVersion }),
             user: {
                 id: user.id,
                 username: user.username,
