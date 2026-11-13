@@ -1,141 +1,120 @@
 import { DiscoveryBatchLogger, BatchLogEntry } from '../discoveryBatchLogger';
 import { prisma } from '../../../utils/db';
 
-jest.mock('../../../utils/db', () => ({
-    prisma: {
-        discoveryBatch: {
-            findUnique: jest.fn(),
-            update: jest.fn(),
+const P = 'zz-batchLogger-';
+const USER = `${P}user`;
+const BATCH = `${P}batch`;
+
+async function wipe() {
+    await prisma.user.deleteMany({ where: { id: USER } }); // its batches go too
+}
+
+const storedLogs = async () =>
+    ((await prisma.discoveryBatch.findUnique({ where: { id: BATCH } }))?.logs ?? null) as BatchLogEntry[] | null;
+
+/** A batch whose log already holds `logs` (none at all when null). */
+const seedBatch = (logs: BatchLogEntry[] | null) =>
+    prisma.discoveryBatch.create({
+        data: {
+            id: BATCH, userId: USER, weekStart: new Date('2026-11-09T00:00:00Z'), targetSongCount: 10,
+            ...(logs ? { logs: logs as any } : {}),
         },
-    },
-}));
+    });
 
 describe('DiscoveryBatchLogger', () => {
-    const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+    beforeAll(wipe);
+    afterAll(wipe);
 
-    beforeEach(() => {
-        jest.clearAllMocks();
+    beforeEach(async () => {
+        jest.restoreAllMocks();
+        await wipe();
+        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: 'x' } });
     });
 
     describe('addLog', () => {
         it('should append log entry to existing logs', async () => {
-            const existingLogs: BatchLogEntry[] = [
-                { timestamp: '2024-01-01T00:00:00Z', level: 'info', message: 'Started' },
-            ];
-
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({
-                id: 'batch-123',
-                logs: existingLogs,
-            });
-
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
+            await seedBatch([{ timestamp: '2024-01-01T00:00:00Z', level: 'info', message: 'Started' }]);
 
             const logger = new DiscoveryBatchLogger();
-            await logger.addLog('batch-123', 'info', 'Test message');
+            await logger.addLog(BATCH, 'info', 'Test message');
 
-            expect(mockPrisma.discoveryBatch.update).toHaveBeenCalledWith({
-                where: { id: 'batch-123' },
-                data: {
-                    logs: expect.arrayContaining([
-                        expect.objectContaining({ level: 'info', message: 'Test message' }),
-                    ]),
-                },
-            });
+            const logs = (await storedLogs())!;
+            expect(logs.map((l) => l.message)).toEqual(['Started', 'Test message']);
+            expect(logs[1]).toMatchObject({ level: 'info', message: 'Test message' });
+            expect(Number.isNaN(Date.parse(logs[1].timestamp))).toBe(false);
         });
 
         it('should trim logs to 100 entries max', async () => {
-            const existingLogs: BatchLogEntry[] = Array.from({ length: 100 }, (_, i) => ({
-                timestamp: new Date().toISOString(),
-                level: 'info' as const,
-                message: `Log ${i}`,
-            }));
-
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({
-                id: 'batch-123',
-                logs: existingLogs,
-            });
-
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
-
-            const logger = new DiscoveryBatchLogger();
-            await logger.addLog('batch-123', 'info', 'New log');
-
-            const updateCall = (mockPrisma.discoveryBatch.update as jest.Mock).mock.calls[0][0];
-            expect((updateCall.data.logs as BatchLogEntry[]).length).toBe(100);
-        });
-
-        it('should handle missing batch gracefully', async () => {
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue(null);
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
-
-            const logger = new DiscoveryBatchLogger();
-            await logger.addLog('batch-123', 'info', 'Test message');
-
-            expect(mockPrisma.discoveryBatch.update).toHaveBeenCalledWith({
-                where: { id: 'batch-123' },
-                data: {
-                    logs: [expect.objectContaining({ level: 'info', message: 'Test message' })],
-                },
-            });
-        });
-
-        it('should not throw when database operation fails', async () => {
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockRejectedValue(
-                new Error('Database error')
+            await seedBatch(
+                Array.from({ length: 100 }, (_, i) => ({
+                    timestamp: new Date().toISOString(),
+                    level: 'info' as const,
+                    message: `Log ${i}`,
+                })),
             );
 
             const logger = new DiscoveryBatchLogger();
-            await expect(logger.addLog('batch-123', 'error', 'Test')).resolves.not.toThrow();
+            await logger.addLog(BATCH, 'info', 'New log');
+
+            const logs = (await storedLogs())!;
+            expect(logs).toHaveLength(100);
+            // the oldest entry went, the new one is last
+            expect(logs[0].message).toBe('Log 1');
+            expect(logs[99].message).toBe('New log');
+        });
+
+        it('should start the log when the batch has none yet', async () => {
+            await seedBatch(null);
+
+            const logger = new DiscoveryBatchLogger();
+            await logger.addLog(BATCH, 'info', 'Test message');
+
+            expect(await storedLogs()).toEqual([expect.objectContaining({ level: 'info', message: 'Test message' })]);
+        });
+
+        it('should handle missing batch gracefully', async () => {
+            const logger = new DiscoveryBatchLogger();
+
+            // There is no row to write to: the entry is dropped, and nothing is thrown or created.
+            await expect(logger.addLog(BATCH, 'info', 'Test message')).resolves.toBeUndefined();
+
+            expect(await prisma.discoveryBatch.count({ where: { id: BATCH } })).toBe(0);
+        });
+
+        it('should not throw when database operation fails', async () => {
+            await seedBatch([]);
+            jest.spyOn(prisma.discoveryBatch, 'findUnique').mockRejectedValueOnce(new Error('Database error'));
+
+            const logger = new DiscoveryBatchLogger();
+            await expect(logger.addLog(BATCH, 'error', 'Test')).resolves.toBeUndefined();
+
+            expect(await storedLogs()).toEqual([]);
         });
     });
 
     describe('convenience methods', () => {
-        it('info() should call addLog with info level', async () => {
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({ logs: [] });
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
+        it('info() should log at info level', async () => {
+            await seedBatch([]);
 
-            const logger = new DiscoveryBatchLogger();
-            await logger.info('batch-123', 'Info message');
+            await new DiscoveryBatchLogger().info(BATCH, 'Info message');
 
-            expect(mockPrisma.discoveryBatch.update).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    data: {
-                        logs: [expect.objectContaining({ level: 'info', message: 'Info message' })],
-                    },
-                })
-            );
+            expect(await storedLogs()).toEqual([expect.objectContaining({ level: 'info', message: 'Info message' })]);
         });
 
-        it('warn() should call addLog with warn level', async () => {
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({ logs: [] });
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
+        it('warn() should log at warn level', async () => {
+            await seedBatch([]);
 
-            const logger = new DiscoveryBatchLogger();
-            await logger.warn('batch-123', 'Warning message');
+            await new DiscoveryBatchLogger().warn(BATCH, 'Warning message');
 
-            expect(mockPrisma.discoveryBatch.update).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    data: {
-                        logs: [expect.objectContaining({ level: 'warn', message: 'Warning message' })],
-                    },
-                })
-            );
+            expect(await storedLogs()).toEqual([expect.objectContaining({ level: 'warn', message: 'Warning message' })]);
         });
 
-        it('error() should call addLog with error level', async () => {
-            (mockPrisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({ logs: [] });
-            (mockPrisma.discoveryBatch.update as jest.Mock).mockResolvedValue({});
+        it('error() should log at error level', async () => {
+            await seedBatch([]);
 
-            const logger = new DiscoveryBatchLogger();
-            await logger.error('batch-123', 'Error message');
+            await new DiscoveryBatchLogger().error(BATCH, 'Error message');
 
-            expect(mockPrisma.discoveryBatch.update).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    data: {
-                        logs: [expect.objectContaining({ level: 'error', message: 'Error message' })],
-                    },
-                })
-            );
+            expect(await storedLogs()).toEqual([expect.objectContaining({ level: 'error', message: 'Error message' })]);
         });
     });
 });

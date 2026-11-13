@@ -3,7 +3,6 @@
  * artist once folded and agreeing titles; a longer artist or album name that
  * merely contains the asked one is not the same album.
  */
-jest.mock("../../../utils/db", () => ({ prisma: {} }));
 jest.mock("../../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
