@@ -1,11 +1,16 @@
 /**
  * addAlbum: Discover adds only under an artist it tagged, only the exact MBID,
- * only without files; a library request untags the artist; every request
+ * only without files; a library request untags the artist; an untagged artist Kima's records show is Discover's gets
+ * its tag back first (that check is tested with the removal module); every request
  * accepts any edition; a search that grabs nothing is explained from Lidarr's
  * release list; a Lidarr outage is reported as one, never as "not found".
  */
 
 import { AcquisitionErrorType, lidarrService } from "../lidarr";
+import { ensureDiscoverTag } from "../discovery/lidarrRemoval";
+
+jest.mock("../discovery/lidarrRemoval", () => ({ ensureDiscoverTag: jest.fn() }));
+const ensureTag = ensureDiscoverTag as jest.Mock;
 
 const TAG = 22;
 const ARTIST_MBID = "artist-mbid";
@@ -39,6 +44,7 @@ beforeEach(() => {
     service.enabled = true;
     service.client = client;
     jest.spyOn(service, "getOrCreateDiscoveryTag").mockResolvedValue(TAG);
+    ensureTag.mockReset().mockResolvedValue("not Discover's");
 });
 
 const addForDiscover = (rgMbid: string, title: string) =>
@@ -49,7 +55,25 @@ it("leaves an artist the user already had in Lidarr alone", async () => {
     catalog = [album("rg-asked", "Antics")];
 
     expect(await addForDiscover("rg-asked", "Antics")).toBeNull();
+    expect(ensureTag).toHaveBeenCalledWith(expect.objectContaining({ id: 5 }), TAG);
     expect(client.put).not.toHaveBeenCalled();
+    expect(client.post).not.toHaveBeenCalled();
+});
+
+it("adds under an artist whose Discover tag an earlier cleanup took off, once the tag is back", async () => {
+    jest.spyOn(service, "getArtistList").mockResolvedValue([artist([])]);
+    ensureTag.mockResolvedValue("tagged");
+    catalog = [album("rg-asked", "Antics")];
+
+    expect(await addForDiscover("rg-asked", "Antics")).not.toBeNull();
+});
+
+it("does not add when Lidarr will not take the tag back", async () => {
+    jest.spyOn(service, "getArtistList").mockResolvedValue([artist([])]);
+    ensureTag.mockResolvedValue("refused");
+    catalog = [album("rg-asked", "Antics")];
+
+    expect(await addForDiscover("rg-asked", "Antics")).toBeNull();
     expect(client.post).not.toHaveBeenCalled();
 });
 

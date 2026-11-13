@@ -163,7 +163,10 @@ async function deleteAlbumRows(albumId: string | null, suggestionId: string | nu
     }
 }
 
-/** The Lidarr album id Kima recorded for an album, from any suggestion or download job that names it. */
+/**
+ * The Lidarr album id Discover recorded for an album: from a suggestion, else from a Discover download job, each
+ * naming it by release-group id or by artist and title (sameName). A listener's own download is never Discover's record.
+ */
 async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): Promise<number | null> {
     const recorded = await prisma.discoveryAlbum.findMany({
         where: { lidarrAlbumId: { not: null } },
@@ -172,10 +175,17 @@ async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): Promise<
     });
     const suggestion = recorded.find((r) => rgMbids.includes(r.rgMbid) || namesRecord(r, ref));
     if (suggestion?.lidarrAlbumId) return suggestion.lidarrAlbumId;
-    const job = await prisma.downloadJob.findFirst({
-        where: { lidarrAlbumId: { not: null }, targetMbid: { in: rgMbids } },
+    const jobs = await prisma.downloadJob.findMany({
+        where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null } },
         orderBy: { createdAt: "desc" },
-        select: { lidarrAlbumId: true },
+        select: { lidarrAlbumId: true, targetMbid: true, metadata: true },
+    });
+    const job = jobs.find((j) => {
+        const meta = j.metadata as { artistName?: string; albumTitle?: string } | null;
+        return (
+            (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) ||
+            (!!meta?.artistName && !!meta?.albumTitle && namesRecord({ artistName: meta.artistName, albumTitle: meta.albumTitle }, ref))
+        );
     });
     return job?.lidarrAlbumId ?? null;
 }

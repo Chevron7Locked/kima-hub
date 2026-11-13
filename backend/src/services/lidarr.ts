@@ -398,7 +398,13 @@ class LidarrService {
             // Discover manages only artists it added, which carry its tag; a library
             // request takes the tag off, so Discover's cleanup leaves the artist alone.
             const discoveryTagId = await this.getOrCreateDiscoveryTag();
-            const discoveryOwned = !!discoveryTagId && !!artist.tags?.includes(discoveryTagId);
+            let discoveryOwned = !!discoveryTagId && !!artist.tags?.includes(discoveryTagId);
+            if (isDiscovery && !discoveryOwned && discoveryTagId) {
+                // An earlier cleanup could take the tag off an artist that is Discover's by Kima's records; put it
+                // back here too, or Discover refuses that artist for good. Imported late: the removal module uses this one.
+                const { ensureDiscoverTag } = await import("./discovery/lidarrRemoval");
+                discoveryOwned = (await ensureDiscoverTag(artist, discoveryTagId)) === "tagged";
+            }
             if (isDiscovery && !discoveryOwned) {
                 logger.warn(
                     `   [Lidarr] ${artist.artistName} is in Lidarr outside Discover; not adding "${albumTitle}"`
@@ -1119,41 +1125,33 @@ class LidarrService {
         }
     }
 
-    async removeTagsFromArtist(
+    /** Adds tags to an artist, keeping the ones it has: false when Lidarr is off or refuses. */
+    async addTagsToArtist(artistId: number, tagIds: number[]): Promise<boolean> {
+        return this.changeArtistTags(artistId, "add", (tags) => [...new Set([...tags, ...tagIds])]);
+    }
+
+    /** Takes tags off an artist, keeping the rest: false when Lidarr is off or refuses. */
+    async removeTagsFromArtist(artistId: number, tagIds: number[]): Promise<boolean> {
+        return this.changeArtistTags(artistId, "remove", (tags) => tags.filter((t) => !tagIds.includes(t)));
+    }
+
+    /** Reads the artist, writes it back with its tags changed, and drops the cached artist list so the change shows. */
+    private async changeArtistTags(
         artistId: number,
-        tagIds: number[]
+        verb: "add" | "remove",
+        change: (tags: number[]) => number[],
     ): Promise<boolean> {
         await this.ensureInitialized();
-
-        if (!this.enabled || !this.client) {
-            return false;
-        }
-
+        if (!this.enabled || !this.client) return false;
         try {
-            const response = await this.client.get(
-                `/api/v1/artist/${artistId}`
-            );
-            const artist = response.data;
-
-            const existingTags = artist.tags || [];
-            const filteredTags = existingTags.filter(
-                (t: number) => !tagIds.includes(t)
-            );
-
-            await this.client.put(`/api/v1/artist/${artistId}`, {
-                ...artist,
-                tags: filteredTags,
-            });
-
-            logger.debug(
-                `[LIDARR] Removed tags ${tagIds} from artist ${artist.artistName}`
-            );
+            const artist = (await this.client.get(`/api/v1/artist/${artistId}`)).data;
+            const tags = change(artist.tags || []);
+            await this.client.put(`/api/v1/artist/${artistId}`, { ...artist, tags });
+            this.invalidateArtistCache();
+            logger.debug(`[LIDARR] Artist ${artist.artistName} now has tags [${tags}]`);
             return true;
         } catch (error: any) {
-            logger.error(
-                "[LIDARR] Failed to remove tags from artist:",
-                error.message
-            );
+            logger.error(`[LIDARR] Failed to ${verb} tags on artist:`, error.message);
             return false;
         }
     }

@@ -954,23 +954,12 @@ class DiscoverWeeklyService {
                     let discoveryAlbumId = createdAlbums.get(albumKey);
 
                     if (!discoveryAlbumId) {
+                        // By sameName: Lidarr's names keep accents and typographic marks the scanned names may not.
                         const job = completedJobs.find((j) => {
                             const metadata = j.metadata as any;
-                            const jobArtist = (metadata?.artistName || "")
-                                .toLowerCase()
-                                .trim();
-                            const jobAlbum = (metadata?.albumTitle || "")
-                                .toLowerCase()
-                                .trim();
-                            const trackArtist = track.album.artist.name
-                                .toLowerCase()
-                                .trim();
-                            const trackAlbum = track.album.title
-                                .toLowerCase()
-                                .trim();
                             return (
-                                jobArtist === trackArtist &&
-                                jobAlbum === trackAlbum
+                                sameName(metadata?.artistName, track.album.artist.name) &&
+                                sameName(metadata?.albumTitle, track.album.title)
                             );
                         });
 
