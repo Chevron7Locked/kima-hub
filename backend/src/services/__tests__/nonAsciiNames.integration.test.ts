@@ -238,11 +238,12 @@ describe("search", () => {
     it("filters tracks by a genre in another case and accent form", async () => {
         const genre = await prisma.genre.create({ data: { name: `${P}-Électro` } });
         await prisma.trackGenre.create({ data: { trackId: trackId("beyonce"), genreId: genre.id } });
-        const tracks = keys.map((k) => ({ id: trackId(k) })) as any;
-        const viaTrackGenre = await searchService.filterTracksByGenre(tracks, `${P}-ÉLECTRO`);
-        expect(viaTrackGenre.map((t: any) => t.id)).toEqual([trackId("beyonce")]);
-        const viaArtist = await searchService.filterTracksByGenre(tracks, "ÉLECTRONIQUE");
-        expect(viaArtist.map((t: any) => t.id)).toEqual([trackId("bjork")]);
+        const found = async (k: Key, wanted: string) =>
+            (await searchService.searchTracks({ query: TITLES[k].toUpperCase(), genre: wanted })).map((t) => t.id);
+        expect(await found("beyonce", `${P}-ÉLECTRO`)).toEqual([trackId("beyonce")]);
+        expect(await found("bjork", `${P}-ÉLECTRO`)).toEqual([]);
+        expect(await found("bjork", "ÉLECTRONIQUE")).toEqual([trackId("bjork")]);
+        expect(await found("beyonce", "ÉLECTRONIQUE")).toEqual([]);
     });
 });
 

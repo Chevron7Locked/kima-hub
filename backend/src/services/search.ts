@@ -1,9 +1,10 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
 import { PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
-import { artistTaggedWithGenre, genreKey } from "../utils/genreSql";
+import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
 import { searchRows } from "./textMatch";
 
 export function normalizeCacheQuery(query: string): string {
@@ -14,6 +15,44 @@ interface SearchOptions {
     query: string;
     limit?: number;
     offset?: number;
+}
+
+/** What a genre filter keeps: the songs of artists tagged with the genre, and the songs tagged with it themselves. */
+interface GenreScope {
+    artistIds: string[];
+    genreIds: string[];
+}
+
+/**
+ * The artists and song genres that answer to a genre. Both are matched as genreKeys here, not in SQL: on SQL_ASCII the
+ * database folds ASCII case only. A genre nothing carries has an empty scope, which keeps no song.
+ */
+async function genreScopeOf(genre: string): Promise<GenreScope> {
+    const wanted = genreKey(genre);
+    if (wanted === "") return { artistIds: [], genreIds: [] };
+    const [artistIds, genres] = await Promise.all([
+        libraryArtistIdsForGenre(genre),
+        prisma.genre.findMany({ select: { id: true, name: true } }),
+    ]);
+    return { artistIds, genreIds: genres.filter((g) => genreKey(g.name) === wanted).map((g) => g.id) };
+}
+
+/** The genre condition for a raw song query that names the song `t` and its album `a`; nothing when there is no scope. */
+function genreSql(scope: GenreScope | undefined): Prisma.Sql {
+    if (!scope) return Prisma.empty;
+    return Prisma.sql`AND (a."artistId" = ANY(${scope.artistIds}::text[])
+              OR EXISTS (SELECT 1 FROM "TrackGenre" tg WHERE tg."trackId" = t.id AND tg."genreId" = ANY(${scope.genreIds}::text[])))`;
+}
+
+/** The genre condition for a Prisma song query; nothing when there is no scope. */
+function genreWhere(scope: GenreScope | undefined) {
+    if (!scope) return {};
+    return {
+        OR: [
+            { album: { artistId: { in: scope.artistIds } } },
+            { trackGenres: { some: { genreId: { in: scope.genreIds } } } },
+        ],
+    };
 }
 
 const ARTIST_FIELDS = { id: true, name: true, mbid: true, heroUrl: true } as const;
@@ -343,22 +382,24 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<TrackSearchResult[]> {
+        scope,
+    }: SearchOptions & { scope?: GenreScope }): Promise<TrackSearchResult[]> {
         const results = await searchRows(
             query,
             limit,
             offset,
             ({ skip, take }) =>
                 prisma.track.findMany({
-                    where: { title: { contains: query, mode: "insensitive" }, ...PLAYABLE_SONG },
+                    where: { title: { contains: query, mode: "insensitive" }, ...PLAYABLE_SONG, ...genreWhere(scope) },
                     select: TRACK_FIELDS,
                     take,
                     skip,
                     orderBy: [{ title: "asc" }, { id: "asc" }],
                 }),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
-                SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
-                 WHERE t.title ~ ${pattern} AND ${playableSongSql("t", "al")}
+                SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+                 WHERE t.title ~ ${pattern} AND ${playableSongSql("t", "a")}
+                 ${genreSql(scope)}
                  ORDER BY t.title ASC, t.id ASC LIMIT ${take} OFFSET ${skip}`,
             (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }),
         );
@@ -376,16 +417,18 @@ export class SearchService {
         }));
     }
 
+    /**
+     * One page of song matches. With a `genre`, only that genre's songs are searched, before the page is cut.
+     */
     async searchTracks({
         query,
         limit = 20,
         offset = 0,
-    }: SearchOptions): Promise<TrackSearchResult[]> {
-        return this.ftsOrFallback(
-            query,
-            "Track",
-            async (tsquery) => {
-                const results = await prisma.$queryRaw<TrackSearchResult[]>`
+        genre,
+    }: SearchOptions & { genre?: string }): Promise<TrackSearchResult[]> {
+        if (!query || query.trim().length === 0) return [];
+        const scope = genre ? await genreScopeOf(genre) : undefined;
+        const ftsPage = (tsquery: string, skip: number, take: number) => prisma.$queryRaw<TrackSearchResult[]>`
             SELECT
               t.id,
               t.title,
@@ -401,13 +444,16 @@ export class SearchService {
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
             AND ${playableSongSql("t", "a")}
+            ${genreSql(scope)}
             ORDER BY rank DESC, t.title ASC
-            LIMIT ${limit}
-            OFFSET ${offset}
+            LIMIT ${take}
+            OFFSET ${skip}
           `;
-                return results;
-            },
-            () => this.searchTracksFallback({ query, limit, offset }),
+        return this.ftsOrFallback(
+            query,
+            "Track",
+            (tsquery) => ftsPage(tsquery, offset, limit),
+            () => this.searchTracksFallback({ query, limit, offset, scope }),
             true,
         );
     }
@@ -691,7 +737,7 @@ export class SearchService {
             await Promise.all([
                 this.searchArtists({ query, limit }),
                 this.searchAlbums({ query, limit }),
-                this.searchTracks({ query, limit }),
+                this.searchTracks({ query, limit, genre }),
                 this.searchPodcastsFTS({ query, limit, userId }),
                 this.searchAudiobooksFTS({ query, limit }),
                 this.searchEpisodes({ query, limit, userId }),
@@ -700,7 +746,7 @@ export class SearchService {
         const results = {
             artists,
             albums,
-            tracks: genre ? await this.filterTracksByGenre(tracks, genre) : tracks,
+            tracks,
             podcasts,
             audiobooks,
             episodes,
@@ -714,36 +760,6 @@ export class SearchService {
         }
 
         return results;
-    }
-
-    /**
-     * Filter tracks by genre
-     */
-    async filterTracksByGenre(
-        tracks: TrackSearchResult[],
-        genre: string
-    ): Promise<TrackSearchResult[]> {
-        if (tracks.length === 0) return [];
-
-        const trackIds = tracks.map((t) => t.id);
-        // Genre names are compared as genreKeys here, not in SQL: on SQL_ASCII the database folds ASCII case only.
-        const wanted = genreKey(genre);
-        const candidates = await prisma.track.findMany({
-            where: { id: { in: trackIds } },
-            select: {
-                id: true,
-                trackGenres: { select: { genre: { select: { name: true } } } },
-                album: { select: { artist: { select: { genres: true, userGenres: true } } } },
-            },
-        });
-        const tracksWithGenre = candidates.filter(
-            (t) =>
-                (wanted !== "" && t.trackGenres.some((tg) => genreKey(tg.genre.name) === wanted)) ||
-                artistTaggedWithGenre(t.album.artist.genres, t.album.artist.userGenres, genre),
-        );
-
-        const genreTrackIds = new Set(tracksWithGenre.map((t) => t.id));
-        return tracks.filter((t) => genreTrackIds.has(t.id));
     }
 
     /**
@@ -792,14 +808,9 @@ export class SearchService {
             case "albums":
                 results.albums = await this.searchAlbums({ query, limit, offset });
                 break;
-            case "tracks": {
-                let tracks = await this.searchTracks({ query, limit, offset });
-                if (genre) {
-                    tracks = await this.filterTracksByGenre(tracks, genre);
-                }
-                results.tracks = tracks;
+            case "tracks":
+                results.tracks = await this.searchTracks({ query, limit, offset, genre });
                 break;
-            }
             case "podcasts":
                 results.podcasts = await this.searchPodcastsFTS({ query, limit, offset, userId });
                 break;
