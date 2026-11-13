@@ -2,7 +2,8 @@
  * The weekly cron enqueues each user's discover job under the same lock as the
  * manual /generate path (`discover:generate:<userId>`), and removes a finished
  * job with the same id first, since BullMQ silently ignores a re-add. The cron
- * callback is captured from a node-cron mock and fired directly.
+ * callback is captured from a node-cron mock and fired directly. Real database
+ * for the users whose Discover is enabled; the calls of other files' users are ignored.
  */
 
 // Capture the scheduled callback so the test can fire it deterministically.
@@ -14,12 +15,6 @@ jest.mock('node-cron', () => ({
             scheduledCallback = cb;
             return { stop: jest.fn() };
         }),
-    },
-}));
-
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        userDiscoverConfig: { findMany: jest.fn() },
     },
 }));
 
@@ -47,6 +42,40 @@ import { prisma } from '../../utils/db';
 import { discoverQueue } from '../queues';
 import { distributedLock } from '../../utils/distributedLock';
 
+const P = 'zz-discoverCron-';
+const USER_A = `${P}a`;
+const USER_B = `${P}b`;
+
+async function wipe() {
+    await prisma.user.deleteMany({ where: { id: { startsWith: P } } }); // their Discover settings go too
+}
+
+/** Users with Discover enabled (or not) and their playlist size. */
+async function seedUsers(users: Array<{ id: string; playlistSize: number; enabled?: boolean }>) {
+    for (const u of users) {
+        await prisma.user.create({
+            data: {
+                id: u.id, username: u.id, passwordHash: 'x',
+                discoverConfig: { create: { playlistSize: u.playlistSize, enabled: u.enabled ?? true } },
+            },
+        });
+    }
+}
+
+const withLock = distributedLock.withLock as jest.Mock;
+const getJob = discoverQueue.getJob as jest.Mock;
+const add = discoverQueue.add as jest.Mock;
+
+/** The calls this file's users caused; the cron reads every enabled user in the database. */
+const lockCalls = () => withLock.mock.calls.filter((c) => String(c[0]).startsWith(`discover:generate:${P}`));
+const addCalls = () => add.mock.calls.filter((c) => String(c[1]?.userId).startsWith(P));
+/** When the first call matching `matches` happened, among all calls of every mock. */
+const firstOrder = (mock: jest.Mock, matches: (call: any[]) => boolean) =>
+    mock.mock.invocationCallOrder[mock.mock.calls.findIndex(matches)];
+const lockOrder = () => firstOrder(withLock, (c) => c[0] === `discover:generate:${USER_A}`);
+const addOrder = () => firstOrder(add, (c) => c[1]?.userId === USER_A);
+const getJobOrder = () => firstOrder(getJob, (c) => String(c[0]).includes(USER_A));
+
 function fakeJob(state: string) {
     return {
         id: `job-${state}`,
@@ -69,10 +98,8 @@ function tickCron(): () => Promise<void> {
 /** Tick the cron for one user whose job hash sits in `state`; return that job. */
 async function tickWithStaleJob(state: string) {
     const stale = fakeJob(state);
-    (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
-    (prisma.userDiscoverConfig.findMany as jest.Mock).mockResolvedValue([
-        { userId: 'user-a', playlistSize: 25 },
-    ]);
+    getJob.mockResolvedValue(stale);
+    await seedUsers([{ id: USER_A, playlistSize: 25 }]);
     await tickCron()();
     return stale;
 }
@@ -80,37 +107,35 @@ async function tickWithStaleJob(state: string) {
 /** remove() must beat add(): a re-add on a live hash is a silent no-op. */
 function expectRemoveBeforeAdd(stale: { remove: jest.Mock }) {
     const removeOrder = stale.remove.mock.invocationCallOrder[0];
-    const addOrder = (discoverQueue.add as jest.Mock).mock.invocationCallOrder[0];
-    expect(removeOrder).toBeLessThan(addOrder);
+    expect(removeOrder).toBeLessThan(addOrder());
 }
 
 describe('discoverCron enqueue -- lock + stale-hash guard', () => {
-    beforeEach(() => {
+    beforeAll(wipe);
+    afterAll(wipe);
+    beforeEach(async () => {
         jest.clearAllMocks();
-        (distributedLock.withLock as jest.Mock).mockImplementation(
+        await wipe();
+        withLock.mockImplementation(
             async (_k: string, _t: number, fn: () => Promise<unknown>) => fn()
         );
-        (discoverQueue.add as jest.Mock).mockResolvedValue({ id: 'new-job' });
-        (discoverQueue.getJob as jest.Mock).mockResolvedValue(null);
+        add.mockResolvedValue({ id: 'new-job' });
+        getJob.mockResolvedValue(null);
     });
 
     // The enqueue runs inside withLock under the manual path's key.
     it('takes distributedLock with the discover:generate:<userId> key around the enqueue', async () => {
-        (prisma.userDiscoverConfig.findMany as jest.Mock).mockResolvedValue([
-            { userId: 'user-a', playlistSize: 25 },
-        ]);
+        await seedUsers([{ id: USER_A, playlistSize: 25 }]);
 
         await tickCron()();
 
-        expect(distributedLock.withLock).toHaveBeenCalledTimes(1);
-        const [key, ttl] = (distributedLock.withLock as jest.Mock).mock.calls[0];
-        expect(key).toBe('discover:generate:user-a');
+        expect(lockCalls()).toHaveLength(1);
+        const [key, ttl] = lockCalls()[0];
+        expect(key).toBe(`discover:generate:${USER_A}`);
         expect(typeof ttl).toBe('number');
 
         // The enqueue must happen inside the lock: withLock is invoked before add.
-        const lockOrder = (distributedLock.withLock as jest.Mock).mock.invocationCallOrder[0];
-        const addOrder = (discoverQueue.add as jest.Mock).mock.invocationCallOrder[0];
-        expect(lockOrder).toBeLessThan(addOrder);
+        expect(lockOrder()).toBeLessThan(addOrder());
     });
 
     // A retained COMPLETED hash for this user's current week must be removed
@@ -120,7 +145,7 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         const stale = await tickWithStaleJob('completed');
 
         expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
+        expect(addCalls()).toHaveLength(1);
         expectRemoveBeforeAdd(stale);
     });
 
@@ -135,14 +160,11 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
 
     // A lock failure for one user skips only that user; the next is enqueued.
     it('a lock failure for one user does not block the others', async () => {
-        (prisma.userDiscoverConfig.findMany as jest.Mock).mockResolvedValue([
-            { userId: 'user-a', playlistSize: 25 },
-            { userId: 'user-b', playlistSize: 25 },
-        ]);
-        (distributedLock.withLock as jest.Mock).mockImplementation(
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25 }]);
+        withLock.mockImplementation(
             async (key: string, _t: number, fn: () => Promise<unknown>) => {
-                if (key === 'discover:generate:user-a') {
-                    throw new Error('Failed to acquire lock: discover:generate:user-a');
+                if (key === `discover:generate:${USER_A}`) {
+                    throw new Error(`Failed to acquire lock: discover:generate:${USER_A}`);
                 }
                 return fn();
             }
@@ -150,22 +172,18 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
 
         await tickCron()();
 
-        const addedUserIds = (discoverQueue.add as jest.Mock).mock.calls.map(
-            (c) => c[1]?.userId
-        );
-        expect(addedUserIds).not.toContain('user-a');
-        expect(addedUserIds).toContain('user-b');
+        const addedUserIds = addCalls().map((c) => c[1]?.userId);
+        expect(addedUserIds).not.toContain(USER_A);
+        expect(addedUserIds).toContain(USER_B);
     });
 
     // The lock is taken before getJob and remove, not only around add.
     it('looks up and removes the old job inside the lock, not before it', async () => {
         const stale = await tickWithStaleJob('completed');
 
-        const lockOrder = (distributedLock.withLock as jest.Mock).mock.invocationCallOrder[0];
-        const getJobOrder = (discoverQueue.getJob as jest.Mock).mock.invocationCallOrder[0];
         const removeOrder = stale.remove.mock.invocationCallOrder[0];
-        expect(lockOrder).toBeLessThan(getJobOrder);
-        expect(lockOrder).toBeLessThan(removeOrder);
+        expect(lockOrder()).toBeLessThan(getJobOrder());
+        expect(lockOrder()).toBeLessThan(removeOrder);
     });
 
     // A failed job blocks a re-add just as a completed one does.
@@ -173,7 +191,7 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         const stale = await tickWithStaleJob('failed');
 
         expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
+        expect(addCalls()).toHaveLength(1);
         expectRemoveBeforeAdd(stale);
     });
 
@@ -181,26 +199,31 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
     it('looks the job up by the same id that add() enqueues', async () => {
         await tickWithStaleJob('completed');
 
-        const lookedUpId = (discoverQueue.getJob as jest.Mock).mock.calls[0][0];
-        const enqueuedId = (discoverQueue.add as jest.Mock).mock.calls[0][2].jobId;
+        const lookedUpId = getJob.mock.calls.find((c) => String(c[0]).includes(USER_A))![0];
+        const enqueuedId = addCalls()[0][2].jobId;
         expect(lookedUpId).toBe(enqueuedId);
-        expect(lookedUpId).toMatch(/^discover-weekly-user-a-\d{4}-\d{2}-\d{2}$/);
+        expect(lookedUpId).toMatch(new RegExp(`^discover-weekly-${P}a-\\d{4}-\\d{2}-\\d{2}$`));
     });
 
     // Two enabled users, no stale hashes: each gets exactly one locked
     // enqueue with a week-keyed jobId.
     it('enqueues one locked job per enabled user with a week-keyed jobId', async () => {
-        (prisma.userDiscoverConfig.findMany as jest.Mock).mockResolvedValue([
-            { userId: 'user-a', playlistSize: 25 },
-            { userId: 'user-b', playlistSize: 30 },
-        ]);
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 30 }]);
 
         await tickCron()();
 
-        expect(distributedLock.withLock).toHaveBeenCalledTimes(2);
-        expect(discoverQueue.add).toHaveBeenCalledTimes(2);
-        for (const call of (discoverQueue.add as jest.Mock).mock.calls) {
-            expect(call[2].jobId).toMatch(/^discover-weekly-user-[ab]-\d{4}-\d{2}-\d{2}$/);
+        expect(lockCalls()).toHaveLength(2);
+        expect(addCalls()).toHaveLength(2);
+        for (const call of addCalls()) {
+            expect(call[2].jobId).toMatch(new RegExp(`^discover-weekly-${P}[ab]-\\d{4}-\\d{2}-\\d{2}$`));
         }
+    });
+
+    it('leaves out a user who has turned Discover off', async () => {
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25, enabled: false }]);
+
+        await tickCron()();
+
+        expect(addCalls().map((c) => c[1]?.userId)).toEqual([USER_A]);
     });
 });
