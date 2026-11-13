@@ -43,6 +43,7 @@ beforeEach(async () => {
             fanartApiKey: null,
             audiobookshelfEnabled: false,
             audiobookshelfApiKey: null,
+            soulseekEnabled: false,
             soulseekUsername: "user",
             soulseekPassword: null,
             soulseekMode: "p2p",
@@ -110,6 +111,7 @@ it("turning Audiobookshelf on or off is seen by the feature list at once", async
 
 describe("Soulseek", () => {
     it.each([
+        ["on-switch", { soulseekEnabled: true }],
         ["username", { soulseekUsername: "someone-else" }],
         ["password", { soulseekPassword: "secret" }],
         ["mode", { soulseekMode: "slskd" as const }],

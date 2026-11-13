@@ -3,7 +3,7 @@ import path from "path";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
-import { invalidateSystemSettingsCache } from "../utils/systemSettings";
+import { saveSystemSettings } from "../utils/systemSettings";
 import { gpuSupported } from "./gpuPlatform";
 import { featureDetection } from "./featureDetection";
 
@@ -139,13 +139,7 @@ export async function setGpuToggles(change: Partial<GpuToggles>) {
         ...(change.soundVectors !== undefined ? { gpuOnnxEnabled: change.soundVectors } : {}),
         ...(change.analysis !== undefined ? { gpuAnalysisEnabled: change.analysis } : {}),
     };
-    // upsert, not update: SystemSettings has no row until something writes one.
-    await prisma.systemSettings.upsert({
-        where: { id: "default" },
-        create: { id: "default", ...data },
-        update: data,
-    });
-    invalidateSystemSettingsCache();
+    await saveSystemSettings(data);
     const toggles = await readToggles();
     writeEnabledProjection(toggles);
     const wanted = toggles.soundVectors || toggles.analysis;

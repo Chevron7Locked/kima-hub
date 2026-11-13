@@ -1,6 +1,5 @@
 import axios from "axios";
-import { prisma } from "../utils/db";
-import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { logger } from "../utils/logger";
 import { APP_VERSION } from "../config";
 
@@ -48,7 +47,7 @@ function statusFrom(current: string, latest: string | null, lastCheckedAt: Date 
 let inFlight: Promise<UpdateStatus> | null = null;
 
 async function refresh(current: string): Promise<UpdateStatus> {
-    const settings = await getSystemSettings(true);
+    const settings = await getSystemSettings();
     let latest = settings?.latestKnownVersion ?? null;
 
     try {
@@ -72,12 +71,7 @@ async function refresh(current: string): Promise<UpdateStatus> {
     }
 
     const now = new Date();
-    await prisma.systemSettings.upsert({
-        where: { id: "default" },
-        create: { id: "default", lastUpdateCheck: now, latestKnownVersion: latest },
-        update: { lastUpdateCheck: now, latestKnownVersion: latest },
-    });
-    invalidateSystemSettingsCache();
+    await saveSystemSettings({ lastUpdateCheck: now, latestKnownVersion: latest });
     return statusFrom(current, latest, now);
 }
 

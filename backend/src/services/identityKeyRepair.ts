@@ -11,7 +11,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { getSystemSettings } from "../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { artistIdentityKey, artistSortName, normalizeArtistName } from "./artistIdentity";
 import { albumIdentityKey } from "./albumIdentity";
 
@@ -27,8 +27,7 @@ const shownName = (edited: string | null, canonical: string) => (edited?.trim() 
 export async function repairIdentityKeys(
     { pageSize = 1000 }: { pageSize?: number } = {},
 ): Promise<{ artists: number; albums: number; taken: string[] } | null> {
-    // Read fresh: the check marks itself done in the settings row, which is cached.
-    const settings = await getSystemSettings(true);
+    const settings = await getSystemSettings();
     // No settings row yet is a new install: the scanner keyed every row.
     if (!settings || settings.identityKeysCheckedAt) return null;
 
@@ -88,7 +87,7 @@ export async function repairIdentityKeys(
         after = page[page.length - 1].id;
     }
 
-    await prisma.systemSettings.update({ where: { id: settings.id }, data: { identityKeysCheckedAt: new Date() } });
+    await saveSystemSettings({ identityKeysCheckedAt: new Date() });
     if (artists || albums) logger.info(`[IdentityKeys] Corrected ${artists} artists and ${albums} albums`);
     if (taken.length) {
         logger.warn(`[IdentityKeys] Duplicates kept their old key; the older row holds the right one: ${taken.join(", ")}`);

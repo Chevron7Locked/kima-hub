@@ -15,7 +15,7 @@ import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import {
   getSystemSettings,
-  invalidateSystemSettingsCache,
+  saveSystemSettings,
 } from "../utils/systemSettings";
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
@@ -778,21 +778,7 @@ router.put("/concurrency", requireAuth, requireAdmin, async (req, res) => {
       Math.min(5, Math.floor(concurrency)),
     );
 
-    // Update system settings in database
-
-    await prisma.systemSettings.upsert({
-      where: { id: "default" },
-      create: {
-        id: "default",
-        enrichmentConcurrency: clampedConcurrency,
-      },
-      update: {
-        enrichmentConcurrency: clampedConcurrency,
-      },
-    });
-
-    // Invalidate cache so next read gets fresh value
-    invalidateSystemSettingsCache();
+    await saveSystemSettings({ enrichmentConcurrency: clampedConcurrency });
 
     // Update rate limiter concurrency multiplier
     rateLimiter.updateConcurrencyMultiplier(clampedConcurrency);

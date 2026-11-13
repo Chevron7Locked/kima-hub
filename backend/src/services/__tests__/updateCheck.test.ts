@@ -13,7 +13,7 @@ import { mocked } from "jest-mock";
 import axios from "axios";
 import { prisma } from "../../utils/db";
 import { compareVersions, getUpdateStatus } from "../updateCheck";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 
 const HOUR = 60 * 60 * 1000;
 /** Settings as a previous check left them. */
@@ -133,5 +133,19 @@ describe("getUpdateStatus", () => {
 
         expect(status).toMatchObject({ enabled: false, hasUpdate: false, latest: null });
         expect(get).not.toHaveBeenCalled();
+    });
+});
+
+describe("the check's own record", () => {
+    it("is saved through the settings save, so whoever reads it is told what changed", async () => {
+        const heard = jest.fn();
+        const signOff = onSystemSettingsChange(["lastUpdateCheck", "latestKnownVersion"], heard);
+        try {
+            get.mockResolvedValue({ status: 200, data: { tag_name: "v99.0.0" } });
+            await getUpdateStatus({ force: true });
+            expect(heard.mock.calls[0][0].sort()).toEqual(["lastUpdateCheck", "latestKnownVersion"]);
+        } finally {
+            signOff();
+        }
     });
 });

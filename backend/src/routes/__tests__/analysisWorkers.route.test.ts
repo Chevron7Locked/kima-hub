@@ -23,7 +23,7 @@ import request from 'supertest';
 import analysisRoutes from '../analysis';
 import { prisma } from '../../utils/db';
 import { redisClient, waitForRedisReady } from '../../utils/redis';
-import { invalidateSystemSettingsCache } from '../../utils/systemSettings';
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from '../../utils/systemSettings';
 import { closeEngineConnections } from '../../__tests__/helpers/engineConnections';
 
 const AUDIO_HEARTBEAT = 'audio:worker:heartbeat';
@@ -163,6 +163,19 @@ describe('analysis worker sliders', () => {
 
         expect(audio.body).toMatchObject({ workers: 5, analyzerOnline: false });
         expect(clap.body).toMatchObject({ workers: 7, analyzerOnline: true });
+    });
+
+    it('tells whoever reads a slider\'s setting that it changed, through the settings save', async () => {
+        const heard = jest.fn();
+        const signOff = onSystemSettingsChange(['audioAnalyzerWorkers', 'clapWorkers'], heard);
+        try {
+            await request(app).put('/analysis/workers').send({ workers: 4 }).expect(200);
+            expect(heard).toHaveBeenLastCalledWith(['audioAnalyzerWorkers']);
+            await request(app).put('/analysis/clap-workers').send({ workers: 5 }).expect(200);
+            expect(heard).toHaveBeenLastCalledWith(['clapWorkers']);
+        } finally {
+            signOff();
+        }
     });
 
     it('names the slider in its refusal', async () => {

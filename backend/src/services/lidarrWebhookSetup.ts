@@ -7,12 +7,10 @@
 
 import { AxiosInstance } from "axios";
 import crypto from "crypto";
-import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { encryptSettings } from "../utils/encryptedFields";
 import { createLidarrClient } from "./lidarrClient";
 import { lidarrWebhookSecretHeld } from "./lidarrWebhookSecret";
-import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { notificationService } from "./notificationService";
 
 export const WEBHOOK_SECRET_HEADER = "X-Webhook-Secret";
@@ -112,11 +110,7 @@ async function linkLidarr(lidarrUrl: string, apiKey: string): Promise<boolean> {
                 (secretRequired ? " and are refused until it sends the secret" : "")
         );
     } else if (secret !== storedSecret) {
-        await prisma.systemSettings.update({
-            where: { id: "default" },
-            data: encryptSettings({ lidarrWebhookSecret: secret }),
-        });
-        invalidateSystemSettingsCache();
+        await saveSystemSettings({ lidarrWebhookSecret: secret });
     }
 
     await checkLidarrReachesKima(lidarr, saved, webhookUrl);

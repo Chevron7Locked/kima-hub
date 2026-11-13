@@ -17,6 +17,8 @@ import { generateRefreshToken, generateStreamTicket, generateToken, clearUserCac
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { decrypt } from "../../utils/encryption";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { lidarrService } from "../../services/lidarr";
+import { audiobookshelfService } from "../../services/audiobookshelf";
 import onboardingRoutes from "../onboarding";
 import authRoutes from "../auth";
 
@@ -176,5 +178,78 @@ describe("the service steps", () => {
     it("a member cannot set up a service", async () => {
         const member = bearer(generateToken({ id: NEW, username: NEW, role: "user", tokenVersion: 3 }));
         await request(app).post("/onboarding/lidarr").set(member).send({ url: "", apiKey: "", enabled: false }).expect(403);
+    });
+});
+
+describe("a saved step reaches whatever holds the setting", () => {
+    const reload = {
+        lidarr: jest.spyOn(lidarrService, "reinitialize"),
+        audiobookshelf: jest.spyOn(audiobookshelfService, "reinitialize"),
+    };
+    let reconnect: jest.SpyInstance;
+    let soulseekService: typeof import("../../services/soulseek").soulseekService;
+
+    beforeAll(async () => {
+        // Soulseek starts connecting as it loads when it is enabled; it is not.
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", soulseekEnabled: false }, update: { soulseekEnabled: false } });
+        invalidateSystemSettingsCache();
+        ({ soulseekService } = await import("../../services/soulseek"));
+        reconnect = jest.spyOn(soulseekService, "resetAndReconnect").mockResolvedValue(undefined);
+    });
+
+    beforeEach(async () => {
+        await prisma.systemSettings.update({
+            where: { id: "default" },
+            data: { lidarrUrl: null, lidarrApiKey: null, audiobookshelfUrl: null, audiobookshelfApiKey: null, soulseekUsername: null, soulseekPassword: null },
+        });
+        invalidateSystemSettingsCache();
+        jest.clearAllMocks();
+    });
+
+    afterAll(() => soulseekService.disconnect());
+
+    it("Lidarr is reloaded by its own step, not by the last one", async () => {
+        await request(app).post("/onboarding/lidarr").set(asAdmin()).send({ url: CLOSED, apiKey: "k", enabled: true }).expect(200);
+
+        expect(reload.lidarr).toHaveBeenCalledTimes(1);
+        expect(reload.audiobookshelf).not.toHaveBeenCalled();
+    });
+
+    it("Audiobookshelf is reloaded by its own step", async () => {
+        await request(app).post("/onboarding/audiobookshelf").set(asAdmin()).send({ url: CLOSED, apiKey: "k", enabled: true }).expect(200);
+
+        expect(reload.audiobookshelf).toHaveBeenCalledTimes(1);
+        expect(reload.lidarr).not.toHaveBeenCalled();
+    });
+
+    it("finishing setup reloads nothing again", async () => {
+        await request(app).post("/onboarding/complete").set(asAdmin()).expect(200);
+
+        expect(reload.lidarr).not.toHaveBeenCalled();
+        expect(reload.audiobookshelf).not.toHaveBeenCalled();
+    });
+
+    it("a new Soulseek account reconnects once, not twice", async () => {
+        const res = await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+
+        expect(reconnect).toHaveBeenCalledTimes(1);
+        expect(res.body.tested).toBe(false);
+    });
+
+    it("the same Soulseek account sent again is tried again", async () => {
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+        reconnect.mockClear();
+
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+
+        expect(reconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("Soulseek turned off clears the account", async () => {
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ enabled: false }).expect(200);
+
+        expect(await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).toMatchObject({ soulseekUsername: null, soulseekPassword: null });
     });
 });

@@ -11,6 +11,7 @@ jest.mock("../../../services/notificationService", () => ({ notificationService:
 
 import type { Job } from "bullmq";
 import { prisma } from "../../../utils/db";
+import { onSystemSettingsChange } from "../../../utils/systemSettings";
 import { config } from "../../../config";
 import { processRefile } from "../refileProcessor";
 
@@ -65,4 +66,16 @@ it("still records a finished re-file when the notification cannot be sent", asyn
     mockNotify.mockRejectedValue(new Error("tray down"));
     await expect(processRefile(job)).resolves.toEqual(clean);
     expect(await stamped()).not.toBeNull();
+});
+
+it("records a finished re-file through the settings save, so whoever reads the marker is told", async () => {
+    mockRefile.mockResolvedValue(clean);
+    const heard = jest.fn();
+    const signOff = onSystemSettingsChange(["albumsRefiledAt"], heard);
+    try {
+        await processRefile(job);
+        expect(heard).toHaveBeenCalledWith(["albumsRefiledAt"]);
+    } finally {
+        signOff();
+    }
 });

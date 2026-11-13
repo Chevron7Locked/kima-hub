@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { eventBus } from "../services/eventBus";
 import { startEnrichmentNow } from "../workers/unifiedEnrichment";
 import * as stageRecords from "../services/stages/stageRecords";
@@ -160,13 +160,7 @@ function workerSlider(
                 });
             }
 
-            // upsert: SystemSettings has no row on a fresh install.
-            await prisma.systemSettings.upsert({
-                where: { id: "default" },
-                create: { id: "default", [slider.field]: workers },
-                update: { [slider.field]: workers },
-            });
-            invalidateSystemSettingsCache();
+            await saveSystemSettings({ [slider.field]: workers });
 
             const { online, delivered } = await dispatchWorkerCount(slider.channel, slider.running, workers);
 
@@ -354,13 +348,7 @@ router.put("/together", requireAuth, requireAdmin, async (req, res) => {
         return res.status(400).json({ error: "together (boolean) is required" });
     }
     try {
-        // upsert: SystemSettings has no row on a fresh install.
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: { id: "default", analysisAndVectorsTogether: together },
-            update: { analysisAndVectorsTogether: together },
-        });
-        invalidateSystemSettingsCache();
+        await saveSystemSettings({ analysisAndVectorsTogether: together });
         logger.info(`Audio analysis and sound vectors now run ${together ? "side by side" : "one after the other"}`);
         res.json({ together });
     } catch (error) {

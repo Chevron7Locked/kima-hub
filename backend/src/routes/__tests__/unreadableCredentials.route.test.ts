@@ -94,7 +94,8 @@ describe("a wrong key", () => {
 
         expect(res.status).toBe(200);
         for (const field of FIELDS) expect(res.body[field]).toBeNull();
-        expect(await getSystemSettings(true)).toMatchObject(Object.fromEntries(FIELDS.map((f) => [f, null])));
+        invalidateSystemSettingsCache();
+        expect(await getSystemSettings()).toMatchObject(Object.fromEntries(FIELDS.map((f) => [f, null])));
         expect(await storedCredentials()).toEqual(stored);
     });
 
@@ -107,7 +108,7 @@ describe("a wrong key", () => {
         expect(await storedCredentials()).toEqual(stored);
         expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).transcodeCacheMaxGb).toBe(9);
 
-        const restored = await restart(RIGHT_KEY).getSystemSettings(true);
+        const restored = await restart(RIGHT_KEY).getSystemSettings();
         expect(restored).toMatchObject(Object.fromEntries(FIELDS.map((f) => [f, plain(f)])));
     });
 
@@ -124,7 +125,7 @@ describe("a wrong key", () => {
 
         await save({ ...blanks, fanartApiKey: "a fresh key" });
 
-        expect(await getSystemSettings(true)).toMatchObject({ fanartApiKey: "a fresh key", slskdApiKey: null });
+        expect(await getSystemSettings()).toMatchObject({ fanartApiKey: "a fresh key", slskdApiKey: null });
         expect(await storedCredentials()).toEqual({ ...stored, fanartApiKey: expect.not.stringMatching(stored.fanartApiKey!) });
     });
 
@@ -164,7 +165,7 @@ describe("a readable credential", () => {
 
         await save({ fanartApiKey: "" });
 
-        expect(await getSystemSettings(true)).toMatchObject({ fanartApiKey: null });
+        expect(await getSystemSettings()).toMatchObject({ fanartApiKey: null });
         expect((await storedCredentials()).fanartApiKey).toBeFalsy();
     });
 

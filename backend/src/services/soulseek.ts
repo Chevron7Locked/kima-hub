@@ -2014,9 +2014,9 @@ class SoulseekService {
 
 export const soulseekService = new SoulseekService();
 
-// It reconnects only when what it connects with changed: the account, or the slskd backend and its folder.
+// It reconnects only when what it connects with changed: whether it is on, the account, or the slskd backend and its folder.
 onSystemSettingsChange(
-    ["soulseekUsername", "soulseekPassword", "soulseekMode", "slskdUrl", "slskdApiKey", "soulseekDownloadPath"],
+    ["soulseekEnabled", "soulseekUsername", "soulseekPassword", "soulseekMode", "slskdUrl", "slskdApiKey", "soulseekDownloadPath"],
     async () => {
         try {
             await soulseekService.resetAndReconnect();

@@ -16,7 +16,7 @@ import express from "express";
 import request from "supertest";
 import analysisRoutes from "../analysis";
 import { prisma } from "../../utils/db";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const app = express();
@@ -47,4 +47,18 @@ it("is off until an admin turns it on, and saves each change", async () => {
 it("refuses a value that is not true or false", async () => {
     expect((await request(app).put("/analysis/together").send({ together: "yes" })).status).toBe(400);
     expect((await request(app).put("/analysis/together").send({})).status).toBe(400);
+});
+
+it("tells whoever reads the setting that it changed, through the settings save", async () => {
+    const heard = jest.fn();
+    const signOff = onSystemSettingsChange(["analysisAndVectorsTogether"], heard);
+    try {
+        await request(app).put("/analysis/together").send({ together: true }).expect(200);
+        expect(heard).toHaveBeenCalledWith(["analysisAndVectorsTogether"]);
+        heard.mockClear();
+        await request(app).put("/analysis/together").send({ together: true }).expect(200);
+        expect(heard).not.toHaveBeenCalled();
+    } finally {
+        signOff();
+    }
 });

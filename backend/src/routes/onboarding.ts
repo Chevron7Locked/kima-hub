@@ -3,9 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import axios from "axios";
-import { invalidateSystemSettingsCache } from "../utils/systemSettings";
-import { encryptField } from "../utils/encryption";
-import { encryptSettings } from "../utils/encryptedFields";
+import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type SystemSettingsField } from "../utils/systemSettings";
 import { generateRefreshToken, generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
 import { signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
@@ -41,9 +39,7 @@ async function registrationOpen(): Promise<boolean> {
     return settings?.registrationOpen ?? false;
 }
 
-const settingsRow = () => prisma.systemSettings.findUnique({ where: { id: "default" } });
-
-type ServiceFields = { enabled: string; url: string; apiKey: string };
+type ServiceFields = { enabled: SystemSettingsField; url: SystemSettingsField; apiKey: SystemSettingsField };
 
 /**
  * A setup step that saves one service's address and key, admin only. A failed connection test still saves, with a
@@ -53,15 +49,12 @@ function serviceStep(name: string, fields: ServiceFields, connects: (url: string
     return async (req: Request, res: Response) => {
         try {
             const config = serviceConfigSchema.parse(req.body);
-            const data = config.enabled
-                ? encryptSettings(
-                      {
-                          [fields.enabled]: true,
-                          [fields.url]: config.url || null,
-                          [fields.apiKey]: config.apiKey ?? null,
-                      },
-                      await settingsRow(),
-                  )
+            const data: SystemSettingsChanges = config.enabled
+                ? {
+                      [fields.enabled]: true,
+                      [fields.url]: config.url || null,
+                      [fields.apiKey]: config.apiKey ?? null,
+                  }
                 : { [fields.enabled]: false };
             const tested = config.enabled && !!config.url && !!config.apiKey
                 ? await connects(config.url!, config.apiKey!).catch((error) => {
@@ -70,12 +63,7 @@ function serviceStep(name: string, fields: ServiceFields, connects: (url: string
                   })
                 : false;
 
-            await prisma.systemSettings.upsert({
-                where: { id: "default" },
-                create: { id: "default", ...data },
-                update: data,
-            });
-            invalidateSystemSettingsCache();
+            await saveSystemSettings(data);
 
             if (!config.enabled) return res.json({ success: true, tested: false });
             res.json({
@@ -181,13 +169,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
         const config = soulseekConfigSchema.parse(req.body);
 
         if (!config.enabled) {
-            const soulseekOff = encryptSettings({ soulseekUsername: null, soulseekPassword: null }, await settingsRow());
-            await prisma.systemSettings.upsert({
-                where: { id: "default" },
-                create: { id: "default", ...soulseekOff },
-                update: soulseekOff,
-            });
-            invalidateSystemSettingsCache();
+            await saveSystemSettings({ soulseekUsername: null, soulseekPassword: null });
             return res.json({ success: true, tested: false });
         }
 
@@ -197,25 +179,15 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        await prisma.systemSettings.upsert({
-            where: { id: "default" },
-            create: {
-                id: "default",
-                soulseekUsername: config.username,
-                soulseekPassword: encryptField(config.password),
-            },
-            update: {
-                soulseekUsername: config.username,
-                soulseekPassword: encryptField(config.password),
-            },
-        });
-        invalidateSystemSettingsCache();
+        const changed = await saveSystemSettings({ soulseekUsername: config.username, soulseekPassword: config.password });
 
-        // Reconnecting with the saved account is the connection test.
+        // Being connected with the saved account is the connection test. A changed account was already reconnected by
+        // the save; an unchanged one is tried again here.
         let connectionTested = false;
         try {
             const { soulseekService } = await import("../services/soulseek");
-            await soulseekService.resetAndReconnect();
+            if (changed.length === 0) await soulseekService.resetAndReconnect();
+            if (!soulseekService.isConnected()) throw new Error("not connected");
             connectionTested = true;
             logger.debug("[ONBOARDING] Soulseek connection test successful");
         } catch (error: any) {
@@ -251,27 +223,9 @@ router.post("/complete", requireAuth, async (req, res) => {
 
         logger.debug("[ONBOARDING] User completed onboarding:", req.user!.id);
 
-        // Ensure services pick up credentials saved during onboarding
-        invalidateSystemSettingsCache();
-
-        try {
-            const { lidarrService } = await import("../services/lidarr");
-            lidarrService.reinitialize();
-        } catch (err) {
-            logger.warn("[ONBOARDING] Could not reinitialize Lidarr service:", err);
-        }
-
-        try {
-            const { audiobookshelfService } = await import("../services/audiobookshelf");
-            audiobookshelfService.reinitialize();
-        } catch (err) {
-            logger.warn("[ONBOARDING] Could not reinitialize Audiobookshelf service:", err);
-        }
-
         // Fire-and-forget audiobook sync if Audiobookshelf was enabled
         (async () => {
             try {
-                const { getSystemSettings } = await import("../utils/systemSettings");
                 const settings = await getSystemSettings();
                 if (settings?.audiobookshelfEnabled) {
                     const { audiobookCacheService } = await import("../services/audiobookCache");

@@ -5,7 +5,7 @@
  * ask Lidarr.
  */
 import { prisma } from "../../utils/db";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "../../__tests__/helpers/lidarrReplay";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { sortDiscoverAlbums } from "../discovery/sortDiscoverAlbums";
@@ -298,6 +298,24 @@ describe("the sort itself", () => {
         await prisma.album.update({ where: { id: `${P}alb_gwam` }, data: { location: "LIBRARY" } });
         expect(await sortDiscoverAlbums()).toBeNull();
         expect(await location("gwam")).toBe("LIBRARY");
+    });
+
+    it("marks itself done through the settings save once its albums are filed, so whoever reads the marker is told", async () => {
+        await albums({ gwam: discoverDownload });
+        await discoverRecord("gwam", discoverDownload);
+        // A listener's failure is only logged, so what it saw is kept to check below.
+        const seen: string[] = [];
+        const heard = jest.fn(async () => {
+            seen.push(await location("gwam"));
+        });
+        const signOff = onSystemSettingsChange(["discoverAlbumsSortedAt"], heard);
+        try {
+            await sortDiscoverAlbums();
+            expect(heard).toHaveBeenCalledWith(["discoverAlbumsSortedAt"]);
+            expect(seen).toEqual(["DISCOVER"]);
+        } finally {
+            signOff();
+        }
     });
 
     it("needs no Lidarr: with Lidarr turned off the sort still follows Discover's records", async () => {

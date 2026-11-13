@@ -6,7 +6,7 @@
  */
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { getSystemSettings } from "../../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../../utils/systemSettings";
 import { updateArtistCounts } from "../artistCountsService";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import {
@@ -53,8 +53,7 @@ async function albumsListenersKept(ids: string[]): Promise<Set<string>> {
 }
 
 export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
-    // Read fresh: the sort marks itself done in the settings row, which is cached.
-    const settings = await getSystemSettings(true);
+    const settings = await getSystemSettings();
     // No settings row yet is a new install: nothing was filed by the old guesses.
     if (!settings || settings.discoverAlbumsSortedAt) return null;
 
@@ -140,8 +139,9 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
         for (const album of [...toDiscover, ...stayingInDiscover]) {
             await tx.ownedAlbum.deleteMany({ where: { artistId: album.artistId, rgMbid: album.rgMbid } });
         }
-        await tx.systemSettings.update({ where: { id: settings.id }, data: { discoverAlbumsSortedAt: new Date() } });
     });
+    // Done once its albums are filed (the save is not part of the transaction); a failure here reruns the sort, which files them the same way.
+    await saveSystemSettings({ discoverAlbumsSortedAt: new Date() });
     for (const artistId of new Set([...toLibrary, ...toDiscover].map((a) => a.artistId))) await updateArtistCounts(artistId);
 
     const result: DiscoverSortResult = {

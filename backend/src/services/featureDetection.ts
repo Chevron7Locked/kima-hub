@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { getSystemSettings } from "../utils/systemSettings";
 import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
 import { fpcalcService } from "./fpcalc";
 
@@ -115,10 +116,7 @@ class FeatureDetectionService {
 
     private async checkAudiobookshelf(): Promise<boolean> {
         try {
-            const settings = await prisma.systemSettings.findUnique({
-                where: { id: "default" },
-                select: { audiobookshelfEnabled: true },
-            });
+            const settings = await getSystemSettings();
             return settings?.audiobookshelfEnabled ?? false;
         } catch (error) {
             logger.error("[FEATURE-DETECTION] Error checking Audiobookshelf:", error);

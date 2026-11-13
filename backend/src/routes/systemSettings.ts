@@ -8,7 +8,7 @@ import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
-import { QUEUE_LENGTH, saveSystemSettings } from "../utils/systemSettings";
+import { QUEUE_LENGTH, getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { resolveEncryptedSettings } from "../utils/encryptedFields";
 import {
     getGpuStatus,
@@ -128,10 +128,12 @@ router.get("/", async (_req, res) => {
       where: { id: "default" },
     });
 
-    // A new server's row takes the schema's defaults.
+    // A new server's row takes the schema's defaults (saving no fields creates it).
     if (!settings) {
-      settings = await prisma.systemSettings.create({ data: { id: "default" } });
+      await saveSystemSettings({});
+      settings = await prisma.systemSettings.findUnique({ where: { id: "default" } });
     }
+    if (!settings) throw new Error("the settings row could not be created");
 
     // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
     const { unreadableFields: _unreadable, ...resolved } = await resolveEncryptedSettings({ ...settings }, lidarrSelfRepairingFields);
@@ -187,9 +189,12 @@ router.post("/", async (req, res) => {
       }
     }
 
-    if (data.lidarrEnabled && data.lidarrUrl && data.lidarrApiKey) {
+    // The webhook is set up only when Lidarr's on-switch, address or key changed, from what is now saved.
+    const lidarrChanged = changed.some((f) => f === "lidarrEnabled" || f === "lidarrUrl" || f === "lidarrApiKey");
+    const saved = lidarrChanged ? await getSystemSettings() : null;
+    if (saved?.lidarrEnabled && saved.lidarrUrl && saved.lidarrApiKey) {
       try {
-        await configureLidarrWebhook(data.lidarrUrl, data.lidarrApiKey);
+        await configureLidarrWebhook(saved.lidarrUrl, saved.lidarrApiKey);
       } catch (webhookError: any) {
         logger.error("Failed to configure the Lidarr webhook:", webhookError.message);
         if (webhookError.response?.data) {

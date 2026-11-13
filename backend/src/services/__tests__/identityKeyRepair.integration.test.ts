@@ -8,7 +8,7 @@
  */
 
 import { prisma } from "../../utils/db";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { repairIdentityKeys } from "../identityKeyRepair";
 import { albumIdentityKey } from "../albumIdentity";
 import { artistIdentityKey, artistSortName, normalizeArtistName } from "../artistIdentity";
@@ -145,5 +145,17 @@ describe("repairIdentityKeys", () => {
         const result = await repairIdentityKeys();
         expect(await rows()).toEqual(before);
         expect(ours(result!.taken).sort()).toEqual([`album ${P}a2 (группажж)`, `artist ${P}twin2 (${TWIN2})`]);
+    });
+
+    it("marks itself done through the settings save, so whoever reads the marker is told", async () => {
+        await notYetChecked();
+        const heard = jest.fn();
+        const signOff = onSystemSettingsChange(["identityKeysCheckedAt"], heard);
+        try {
+            await repairIdentityKeys();
+            expect(heard).toHaveBeenCalledWith(["identityKeysCheckedAt"]);
+        } finally {
+            signOff();
+        }
     });
 });

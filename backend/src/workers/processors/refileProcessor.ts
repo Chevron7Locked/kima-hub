@@ -1,7 +1,7 @@
 import type { Job } from "bullmq";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
-import { prisma } from "../../utils/db";
+import { saveSystemSettings } from "../../utils/systemSettings";
 import { notificationService } from "../../services/notificationService";
 import { refileLibrary, type RefileResult } from "../../services/albumRefile";
 
@@ -48,7 +48,7 @@ export async function processRefile(job: Job<RefileJobData>): Promise<RefileResu
         return result;
     }
     if (result.albumsFailed === 0) {
-        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", albumsRefiledAt: new Date() }, update: { albumsRefiledAt: new Date() } });
+        await saveSystemSettings({ albumsRefiledAt: new Date() });
     }
     await tell("system", "Albums re-filed by their tags", refileSummary(result));
     return result;

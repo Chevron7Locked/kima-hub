@@ -9,23 +9,18 @@ jest.mock("../lidarrClient", () => ({
     ...jest.requireActual("../lidarrClient"),
     createLidarrClient: () => lidarr,
 }));
-jest.mock("../../utils/db", () => ({ prisma: { systemSettings: { update: jest.fn() } } }));
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn(),
-    invalidateSystemSettingsCache: jest.fn(),
+    saveSystemSettings: jest.fn(),
 }));
 const notifyAdmins = jest.fn();
 const resolve = jest.fn();
 jest.mock("../notificationService", () => ({ notificationService: { notifyAdmins, resolve } }));
-jest.mock("../../utils/encryptedFields", () => ({
-    encryptSettings: (s: Record<string, string>) => ({ lidarrWebhookSecret: `enc:${s.lidarrWebhookSecret}` }),
-}));
 
-import { prisma } from "../../utils/db";
-import { getSystemSettings } from "../../utils/systemSettings";
+import { getSystemSettings, saveSystemSettings } from "../../utils/systemSettings";
 import { configureLidarrWebhook, WEBHOOK_SECRET_HEADER } from "../lidarrWebhookSetup";
 
-const update = prisma.systemSettings.update as jest.Mock;
+const save = saveSystemSettings as jest.Mock;
 const sentHeaders = (call: any[]) => call[1].fields.find((f: any) => f.name === "headers").value;
 const echo = (_url: string, body: any) => Promise.resolve({ data: body });
 
@@ -43,10 +38,7 @@ it("creates the webhook with a new secret and saves it once Lidarr keeps it", as
     const [header] = sentHeaders(lidarr.post.mock.calls[0]);
     expect(header.key).toBe(WEBHOOK_SECRET_HEADER);
     expect(header.value).toMatch(/^[0-9a-f]{64}$/);
-    expect(update).toHaveBeenCalledWith({
-        where: { id: "default" },
-        data: { lidarrWebhookSecret: `enc:${header.value}` },
-    });
+    expect(save).toHaveBeenCalledWith({ lidarrWebhookSecret: header.value });
 });
 
 it("reuses the stored secret on the existing webhook without saving again", async () => {
@@ -58,7 +50,7 @@ it("reuses the stored secret on the existing webhook without saving again", asyn
 
     expect(lidarr.put.mock.calls[0][0]).toBe("/api/v1/notification/3?forceSave=true");
     expect(sentHeaders(lidarr.put.mock.calls[0])).toEqual([{ key: WEBHOOK_SECRET_HEADER, value: "kept" }]);
-    expect(update).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
 });
 
 it("does not save a secret Lidarr dropped", async () => {
@@ -69,7 +61,7 @@ it("does not save a secret Lidarr dropped", async () => {
 
     await configureLidarrWebhook("http://lidarr", "key");
 
-    expect(update).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
 });
 
 describe("Lidarr's test event", () => {

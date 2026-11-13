@@ -21,6 +21,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpu-toggles-"));
 process.env.DATA_DIR = dataDir;
 
 import { prisma } from "../../utils/db";
+import { onSystemSettingsChange } from "../../utils/systemSettings";
 
 let gpu: typeof import("../gpuRuntime");
 const root = path.join(dataDir, "gpu-onnx");
@@ -120,4 +121,21 @@ describe("the two GPU switches", () => {
         mockGet.mockResolvedValueOnce(null);
         expect((await gpu.getGpuStatus()).installerUp).toBe(false);
     });
+});
+
+it("saves the switches through the settings save, so whoever reads them is told what changed", async () => {
+    await gpu.setGpuToggles({ soundVectors: false, analysis: false });
+    const heard = jest.fn();
+    const signOff = onSystemSettingsChange(["gpuOnnxEnabled", "gpuAnalysisEnabled"], heard);
+    try {
+        await gpu.setGpuToggles({ analysis: true });
+        expect(heard).toHaveBeenLastCalledWith(["gpuAnalysisEnabled"]);
+        await gpu.setGpuToggles({ analysis: true });
+        expect(heard).toHaveBeenCalledTimes(1);
+        await gpu.setGpuToggles({ soundVectors: true, analysis: false });
+        expect(heard.mock.calls.at(-1)[0].sort()).toEqual(["gpuAnalysisEnabled", "gpuOnnxEnabled"]);
+    } finally {
+        signOff();
+        await gpu.setGpuToggles({ soundVectors: false, analysis: false });
+    }
 });
