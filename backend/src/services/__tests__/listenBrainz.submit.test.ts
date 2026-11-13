@@ -13,7 +13,6 @@ jest.mock("../../utils/redis", () => ({
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
-jest.mock("../../utils/db", () => ({ prisma: { userSettings: { findUnique: jest.fn() } } }));
 jest.mock("../rateLimiter", () => ({
     rateLimiter: { execute: (_key: string, fn: () => unknown) => fn() },
 }));

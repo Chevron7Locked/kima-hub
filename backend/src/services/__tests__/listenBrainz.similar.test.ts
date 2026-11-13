@@ -16,7 +16,6 @@ jest.mock("../../utils/redis", () => ({
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
-jest.mock("../../utils/db", () => ({ prisma: {} }));
 jest.mock("../rateLimiter", () => ({
     INTERACTIVE_PRIORITY: 10,
     rateLimiter: { execute: (_key: string, fn: () => unknown) => fn() },

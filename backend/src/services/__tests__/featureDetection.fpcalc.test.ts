@@ -8,13 +8,6 @@ jest.mock("child_process", () => ({
     execFileSync: (...a: unknown[]) => mockExecFileSync(...a),
 }));
 jest.mock("../../utils/redis", () => ({ redisClient: { get: jest.fn().mockResolvedValue(null) } }));
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        track: { findFirst: jest.fn().mockResolvedValue(null) },
-        trackEmbedding: { count: jest.fn().mockResolvedValue(0) },
-        systemSettings: { findUnique: jest.fn().mockResolvedValue(null) },
-    },
-}));
 
 import { featureDetection } from "../featureDetection";
 

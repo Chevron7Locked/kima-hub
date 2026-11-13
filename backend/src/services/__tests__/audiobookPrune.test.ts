@@ -1,16 +1,8 @@
 /**
  * syncAll removes books absent from Audiobookshelf's list, refuses to prune on an
  * empty list, deletes isMissing books, and parses "(2008)" as 2008.
+ * Real database; Audiobookshelf is stubbed.
  */
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        audiobook: {
-            upsert: jest.fn().mockResolvedValue({}),
-            deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        },
-    },
-}));
 
 jest.mock("../../utils/logger", () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
@@ -28,8 +20,25 @@ import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
 import { prisma } from "../../utils/db";
 
-beforeEach(() => {
-    jest.clearAllMocks();
+const P = "zz-audiobookPrune-";
+
+// The prune pass deletes every row not in the stub's list, so a file starts and ends with no audiobooks.
+async function wipe() {
+    await prisma.audiobook.deleteMany({});
+}
+async function seed(id: string, title = "Seeded") {
+    await prisma.audiobook.create({
+        data: { id: `${P}${id}`, title, sortName: title.toLowerCase(), audioUrl: `${P}${id}` },
+    });
+}
+async function ids() {
+    return (await prisma.audiobook.findMany({ select: { id: true }, orderBy: { id: "asc" } })).map((b) => b.id);
+}
+beforeAll(wipe);
+afterAll(wipe);
+
+beforeEach(async () => {
+    await wipe();
     jest.spyOn(audiobookCacheService as any, "ensureCoverCacheDir").mockResolvedValue(false);
 });
 
@@ -37,7 +46,7 @@ afterEach(() => jest.restoreAllMocks());
 
 function minimalBook(id: string, title: string) {
     return {
-        id,
+        id: `${P}${id}`,
         libraryId: "lib1",
         media: { metadata: { title, authorName: "Some Author" } },
     };
@@ -45,44 +54,40 @@ function minimalBook(id: string, title: string) {
 
 describe("syncAll -- prune pass", () => {
     it("deletes rows whose ids are not in ABS's live set", async () => {
+        await seed("old-1");
+        await seed("old-2");
+        await seed("old-3");
         (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
             minimalBook("live-1", "Book One"),
         ]);
-        (prisma.audiobook.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
 
         const result = await audiobookCacheService.syncAll();
 
-        expect(prisma.audiobook.deleteMany).toHaveBeenCalledWith({
-            where: { id: { notIn: ["live-1"] } },
-        });
+        expect(await ids()).toEqual([`${P}live-1`]);
         expect(result.pruned).toBe(3);
     });
 
     it("refuses to prune when ABS returns an empty list (failed fetch must not wipe the library)", async () => {
+        await seed("kept-1");
         (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([]);
 
         const result = await audiobookCacheService.syncAll();
 
-        expect(prisma.audiobook.deleteMany).not.toHaveBeenCalledWith(
-            expect.objectContaining({ where: { id: expect.objectContaining({ notIn: [] }) } }),
-        );
+        expect(await ids()).toEqual([`${P}kept-1`]);
         expect(result.pruned).toBe(0);
     });
 
     it("deletes an isMissing book instead of skipping it", async () => {
+        await seed("gone-1", "Vanished");
         const missing = { ...minimalBook("gone-1", "Vanished"), isMissing: true };
         (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
             minimalBook("live-1", "Book One"),
             missing,
         ]);
-        (prisma.audiobook.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
 
         await audiobookCacheService.syncAll();
 
-        // the isMissing deletion is its own deleteMany on the exact id
-        expect(prisma.audiobook.deleteMany).toHaveBeenCalledWith({
-            where: { id: "gone-1" },
-        });
+        expect(await ids()).toEqual([`${P}live-1`]);
     });
 
     it("parses bracketed years: '(2008)' -> 2008, not null", async () => {
@@ -97,11 +102,6 @@ describe("syncAll -- prune pass", () => {
 
         await audiobookCacheService.syncAll();
 
-        expect(prisma.audiobook.upsert).toHaveBeenCalledWith(
-            expect.objectContaining({
-                where: { id: "y1" },
-                create: expect.objectContaining({ publishedYear: 2008 }),
-            }),
-        );
+        expect((await prisma.audiobook.findUnique({ where: { id: `${P}y1` } }))?.publishedYear).toBe(2008);
     });
 });
