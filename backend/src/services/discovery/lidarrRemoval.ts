@@ -10,7 +10,7 @@ import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { artistNamed } from "../artistIdentity";
-import { RUNNING_BATCH, sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, sameArtist, sameName } from "./discoverEvidence";
 import type { LidarrAlbum, LidarrArtist } from "../../types/lidarr";
 
 /** What names the album being removed, beyond the id Lidarr was asked about. */
@@ -176,9 +176,6 @@ export async function removeDiscoveryAlbum(
     }
 }
 
-/** Whether a suggestion's or job's artist id is missing or a `temp-` placeholder: the only case where its artist name stands in for the id. */
-const hasNoRealArtistId =(artistMbid: string | null | undefined): boolean => !artistMbid || artistMbid.startsWith("temp-");
-
 /**
  * Whether a listener kept a suggestion of this Lidarr artist (LIKED or MOVED): by its MusicBrainz id, or by name only
  * when the suggestion's own artist id is missing or a `temp-` placeholder. A suggestion with a real id for another
@@ -192,9 +189,7 @@ async function keptSuggestion(mbid: string, artistName: string): Promise<boolean
         },
         select: { artistMbid: true, artistName: true },
     });
-    return kept.some(
-        (r) => r.artistMbid === mbid || (hasNoRealArtistId(r.artistMbid) && sameName(r.artistName, artistName)),
-    );
+    return kept.some((r) => sameArtist(r, { artistMbid: mbid, artistName }));
 }
 
 /**
@@ -206,15 +201,12 @@ export async function otherSuggestionNeedsTag(
     kept: { id: string; artistMbid: string | null; artistName: string },
     artist: { foreignArtistId?: string; artistName?: string } | null,
 ): Promise<boolean> {
-    const mbids = [artist?.foreignArtistId, kept.artistMbid].filter((m): m is string => !!m && !hasNoRealArtistId(m));
-    const name = artist?.artistName ?? kept.artistName;
+    const identity = { artistMbid: artist?.foreignArtistId ?? kept.artistMbid, artistName: artist?.artistName ?? kept.artistName };
     const others = await prisma.discoveryAlbum.findMany({
         where: { status: "ACTIVE", id: { not: kept.id } },
         select: { artistMbid: true, artistName: true },
     });
-    return others.some(
-        (o) => (o.artistMbid !== null && mbids.includes(o.artistMbid)) || (hasNoRealArtistId(o.artistMbid) && sameName(o.artistName, name)),
-    );
+    return others.some((o) => sameArtist(o, identity));
 }
 
 /**
@@ -301,11 +293,12 @@ export async function discoveryArtistVerdict(
             select: { artistMbid: true, targetMbid: true, metadata: true },
         }),
     ]);
-    const names = (artistMbid: string | null, album: string | null, name: unknown, nameCounts: boolean) =>
-        artistMbid === mbid || (album !== null && withFiles.includes(album)) || (nameCounts && typeof name === "string" && sameName(name, artist.artistName));
+    const names = (artistMbid: string | null, album: string | null, name: unknown) =>
+        sameArtist({ artistMbid, artistName: typeof name === "string" ? name : null }, { artistMbid: mbid, artistName: artist.artistName }) ||
+        (album !== null && withFiles.includes(album));
     if (
-        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName, hasNoRealArtistId(r.artistMbid))) ||
-        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName, hasNoRealArtistId(j.artistMbid)))
+        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName)) ||
+        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName))
     ) {
         return "in use";
     }

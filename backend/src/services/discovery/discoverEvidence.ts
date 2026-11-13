@@ -35,6 +35,22 @@ export function sameName(a: string | null | undefined, b: string | null | undefi
     return key !== "" ? key === nameKey(b) : (a ?? "") === (b ?? "");
 }
 
+/** Whether an artist id is a MusicBrainz id: a missing id or a `temp-` placeholder is not one, and the artist's name stands in for it. */
+export const hasRealArtistId = (artistMbid: string | null | undefined): artistMbid is string =>
+    !!artistMbid && !artistMbid.startsWith("temp-");
+
+/**
+ * Whether two Discover records name the same artist: by MusicBrainz id when both have a real one (two artists with one
+ * name and different ids are namesakes), by name (sameName) only when either's id is missing or a `temp-` placeholder.
+ */
+export function sameArtist(
+    a: { artistMbid?: string | null; artistName?: string | null },
+    b: { artistMbid?: string | null; artistName?: string | null },
+): boolean {
+    if (hasRealArtistId(a.artistMbid) && hasRealArtistId(b.artistMbid)) return a.artistMbid === b.artistMbid;
+    return !!a.artistName && !!b.artistName && sameName(a.artistName, b.artistName);
+}
+
 /** An artist and title as one key for lookup, or null when either has no letters or digits. */
 const albumNameKey = (artist: string, title: string) => {
     const a = nameKey(artist);

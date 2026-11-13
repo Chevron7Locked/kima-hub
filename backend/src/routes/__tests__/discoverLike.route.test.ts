@@ -328,4 +328,82 @@ describe('POST /discover/like -- whose Lidarr artist loses the tag', () => {
 
         expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
     });
+
+    it("never takes the Lidarr id of a namesake's suggestion: the same names under another artist's MusicBrainz id", async () => {
+        await suggestWithoutLidarrId();
+        await otherSuggestion({ artistMbid: 'other-mbid', artistName: 'Dlk Artist', albumTitle: 'Dlk Album', lidarrAlbumId: 99, status: 'DELETED' });
+        lidarrKnowsAlbum();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(mockGetAlbum).not.toHaveBeenCalled();
+        expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
+    });
+
+    it("never takes the Lidarr id of a namesake's Discover download job", async () => {
+        await suggestWithoutLidarrId();
+        const batch = await prisma.discoveryBatch.create({ data: { userId: OTHER, weekStart: WEEK, targetSongCount: 10, status: 'completed' } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: OTHER, subject: 'Dlk Artist - Dlk Album', type: 'album', status: 'completed', targetMbid: `${P}rg-namesake`, lidarrAlbumId: 99,
+                artistMbid: 'other-mbid', discoveryBatchId: batch.id, metadata: { artistName: 'Dlk Artist', albumTitle: 'Dlk Album' },
+            },
+        });
+        lidarrKnowsAlbum();
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(mockGetAlbum).not.toHaveBeenCalled();
+    });
+
+    it.each([[null], ['temp-88']])("takes the Lidarr id of a same-name suggestion whose artist id is %s", async (artistMbid) => {
+        await suggestWithoutLidarrId();
+        await otherSuggestion({ artistMbid, artistName: 'DLK artist', albumTitle: 'dlk album', lidarrAlbumId: 41, status: 'DELETED' });
+        lidarrKnowsAlbum();
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(mockGetAlbum).toHaveBeenCalledWith(41);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
+    });
+});
+
+// Lidarr is the slow, fallible side: the album is the listener's before Lidarr is asked, and what Lidarr does cannot undo it.
+describe('POST /discover/like -- the library move comes before the Lidarr tag removal', () => {
+    it('has already moved the album into the library when Lidarr is asked', async () => {
+        await suggest();
+        await seedDiscoverAlbum();
+        let locationWhenAsked: string | null = null;
+        mockGetAlbum.mockImplementation(async () => {
+            locationWhenAsked = (await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location;
+            return { id: 41, artistId: 9 };
+        });
+        mockGetOrCreateDiscoveryTag.mockResolvedValue(22);
+        mockRemoveTagsFromArtist.mockResolvedValue(true);
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(locationWhenAsked).toBe('LIBRARY');
+    });
+
+    it.each([
+        ['looking up the album', () => mockGetAlbum.mockRejectedValue(new Error('lidarr is down'))],
+        ['taking the tag off', () => {
+            mockGetAlbum.mockResolvedValue({ id: 41, artistId: 9 });
+            mockGetOrCreateDiscoveryTag.mockResolvedValue(22);
+            mockRemoveTagsFromArtist.mockRejectedValue(new Error('lidarr is down'));
+        }],
+    ])('answers ok with the album in the library when Lidarr fails %s', async (_what, failLidarr) => {
+        await suggest();
+        await seedDiscoverAlbum();
+        failLidarr();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(await statusOf(`${P}da`)).toBe('LIKED');
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location).toBe('LIBRARY');
+    });
 });

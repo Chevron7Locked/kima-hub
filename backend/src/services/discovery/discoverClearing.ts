@@ -15,7 +15,7 @@ import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
-import { RUNNING_BATCH, lookupKey, sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, hasRealArtistId, lookupKey, sameArtist, sameName } from "./discoverEvidence";
 
 /** A suggestion row's names, for comparing with a record's. */
 interface NamedRow {
@@ -27,11 +27,15 @@ interface NamedRow {
 const namesRecord = (row: NamedRow, ref: NamedRow) =>
     sameName(row.artistName, ref.artistName) && sameName(row.albumTitle, ref.albumTitle);
 
-/** What names a Discover album: the suggestion's or download job's release-group id, artist and title. */
+/**
+ * What names a Discover album: the suggestion's or download job's release-group id, artist and title, and the artist's
+ * MusicBrainz id when it has one (missing or `temp-` means the artist is known by name only).
+ */
 export interface AlbumRef {
     rgMbid: string;
     artistName: string;
     albumTitle: string;
+    artistMbid?: string | null;
 }
 
 /** An album that was not deleted, with the reason in words for the listener. */
@@ -164,27 +168,47 @@ async function deleteAlbumRows(albumId: string | null, suggestionId: string | nu
 }
 
 /**
- * The Lidarr album id Discover recorded for an album: from a suggestion, else from a Discover download job, each
- * naming it by release-group id or by artist and title (sameName). A listener's own download is never Discover's record.
+ * The Lidarr album id Discover recorded for an album: by release-group id first (a suggestion, then a Discover download
+ * job), else by artist and title (sameName) with the same artist (sameArtist: a namesake under another MusicBrainz id
+ * never counts). A listener's own download is never Discover's record.
  */
 export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): Promise<number | null> {
-    const recorded = await prisma.discoveryAlbum.findMany({
-        where: { lidarrAlbumId: { not: null } },
+    const idSuggestion = await prisma.discoveryAlbum.findFirst({
+        where: { rgMbid: { in: rgMbids }, lidarrAlbumId: { not: null } },
         orderBy: { weekStartDate: "desc" },
-        select: { rgMbid: true, artistName: true, albumTitle: true, lidarrAlbumId: true },
+        select: { lidarrAlbumId: true },
     });
-    const suggestion = recorded.find((r) => rgMbids.includes(r.rgMbid) || namesRecord(r, ref));
+    if (idSuggestion?.lidarrAlbumId) return idSuggestion.lidarrAlbumId;
+    const idJob = await prisma.downloadJob.findFirst({
+        where: { targetMbid: { in: rgMbids }, lidarrAlbumId: { not: null }, discoveryBatchId: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: { lidarrAlbumId: true },
+    });
+    if (idJob?.lidarrAlbumId) return idJob.lidarrAlbumId;
+
+    // By name, only among records that could be this artist's: its id, or no real id.
+    const couldBeArtist = hasRealArtistId(ref.artistMbid)
+        ? { OR: [{ artistMbid: ref.artistMbid }, { artistMbid: null }, { artistMbid: { startsWith: "temp-" } }] }
+        : {};
+    const recorded = await prisma.discoveryAlbum.findMany({
+        where: { lidarrAlbumId: { not: null }, ...couldBeArtist },
+        orderBy: { weekStartDate: "desc" },
+        select: { artistMbid: true, artistName: true, albumTitle: true, lidarrAlbumId: true },
+    });
+    const suggestion = recorded.find((r) => namesRecord(r, ref) && sameArtist(r, ref));
     if (suggestion?.lidarrAlbumId) return suggestion.lidarrAlbumId;
     const jobs = await prisma.downloadJob.findMany({
-        where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null } },
+        where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null }, ...couldBeArtist },
         orderBy: { createdAt: "desc" },
-        select: { lidarrAlbumId: true, targetMbid: true, metadata: true },
+        select: { lidarrAlbumId: true, artistMbid: true, metadata: true },
     });
     const job = jobs.find((j) => {
         const meta = j.metadata as { artistName?: string; albumTitle?: string } | null;
         return (
-            (j.targetMbid !== null && rgMbids.includes(j.targetMbid)) ||
-            (!!meta?.artistName && !!meta?.albumTitle && namesRecord({ artistName: meta.artistName, albumTitle: meta.albumTitle }, ref))
+            !!meta?.artistName &&
+            !!meta?.albumTitle &&
+            namesRecord({ artistName: meta.artistName, albumTitle: meta.albumTitle }, ref) &&
+            sameArtist({ artistMbid: j.artistMbid, artistName: meta.artistName }, ref)
         );
     });
     return job?.lidarrAlbumId ?? null;
@@ -491,7 +515,7 @@ async function returnToLibrary(albumId: string): Promise<boolean> {
 export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; returned: number; failures: OrphanFailure[] }> {
     const albums = await prisma.album.findMany({
         where: { location: "DISCOVER" },
-        select: { id: true, rgMbid: true, title: true, artist: { select: { name: true } } },
+        select: { id: true, rgMbid: true, title: true, artist: { select: { name: true, mbid: true } } },
     });
     const running = await albumsInRunningBatches();
     const records = await prisma.discoveryAlbum.findMany({
@@ -509,7 +533,7 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
     for (const album of albums) {
         if (running.ids.has(album.rgMbid) || running.names.has(lookupKey(album.artist.name, album.title))) continue;
         if (await discoverAlbumIsCovered(album, suggested)) continue;
-        const ref = { rgMbid: album.rgMbid, artistName: album.artist.name, albumTitle: album.title };
+        const ref = { rgMbid: album.rgMbid, artistName: album.artist.name, albumTitle: album.title, artistMbid: album.artist.mbid };
         if (!(await discoverRecordNames(ref))) {
             if (await returnToLibrary(album.id)) returned++;
             continue;
