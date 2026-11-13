@@ -1,5 +1,5 @@
-// The metrics page shows the whole server's activity, so only admins read it. On the real
-// database with real tokens.
+// The metrics page shows the whole server's activity, so only admins read it, and a looping client is held by the
+// runaway limit. On the real database with real tokens.
 
 import express from "express";
 import request from "supertest";
@@ -52,5 +52,19 @@ describe("metrics are admin-only", () => {
     it("no session is unauthorised", async () => {
         const res = await request(app()).get("/api/metrics");
         expect(res.status).toBe(401);
+    });
+});
+
+describe("metrics carry the runaway limit", () => {
+    it("an admin's answer counts against the per-address limit, as the other admin reads do", async () => {
+        const res = await request(app()).get("/api/metrics").set("Authorization", as(ADMIN, "admin"));
+        expect(res.status).toBe(200);
+        expect(res.headers["ratelimit-limit"]).toBe("5000");
+    });
+
+    it("a request with no session counts too, because the limit comes before the sign-in check", async () => {
+        const res = await request(app()).get("/api/metrics");
+        expect(res.status).toBe(401);
+        expect(res.headers["ratelimit-limit"]).toBe("5000");
     });
 });
