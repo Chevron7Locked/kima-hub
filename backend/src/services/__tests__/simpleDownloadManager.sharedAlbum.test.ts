@@ -7,6 +7,7 @@
 import { prisma } from "../../utils/db";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { simpleDownloadManager } from "../simpleDownloadManager";
+import * as downloadJobs from "../downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const { unmonitored } = useLidarrCancelScenario();
@@ -79,6 +80,21 @@ it("completes every job on the album when the import names only the download", a
 
     expect((await row("sdm_a")).status).toBe("completed");
     expect((await row("sdm_b")).status).toBe("completed");
+});
+
+it("still names the job when another path completed it between the read and the move", async () => {
+    await job("sdm_a", ALICE, { lidarrRef: "dl-1" });
+    const realComplete = downloadJobs.complete;
+    const spy = jest.spyOn(downloadJobs, "complete").mockImplementationOnce(async (jobs, extra) => {
+        await realComplete(jobs, { by: "the-other-path" });
+        return realComplete(jobs, extra);
+    });
+
+    const result = await simpleDownloadManager.onDownloadComplete("dl-1");
+    spy.mockRestore();
+
+    expect(result.jobId).toBe("sdm_a");
+    expect((await row("sdm_a")).status).toBe("completed");
 });
 
 it("counts one failure against each job and keeps searching", async () => {

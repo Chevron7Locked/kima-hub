@@ -36,7 +36,7 @@ export type SettledJob = {
     metadata: Prisma.JsonValue;
 };
 
-export type Start = {
+export type StartInput = {
     correlationId: string;
     lidarrAlbumId: number | null;
     /** The download the job takes over, when it joins one already running. */
@@ -82,7 +82,7 @@ async function settle(
  * Lidarr. A job counts as a library download unless it already says otherwise.
  * Returns false when the job was not in a state to start.
  */
-export async function start(id: string, started: Start): Promise<boolean> {
+export async function start(id: string, started: StartInput):Promise<boolean> {
     const now = new Date();
     const patch = { ...started.metadata, startedAt: now.toISOString() };
     const count = await prisma.$executeRaw`

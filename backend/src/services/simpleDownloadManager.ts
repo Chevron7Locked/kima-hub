@@ -546,7 +546,16 @@ class SimpleDownloadManager {
         const completed = await downloadJobs.complete(jobs.matched);
         logger.debug(`   ${completed.length} job(s) marked complete`);
 
-        const first = jobs.replayed[0] ?? completed[0];
+        // A job another path completed first (a webhook replay, the reconciler) is still
+        // this download's job: the caller scans for its user, as it does for a replay.
+        const settledElsewhere =
+            completed.length === 0 && jobs.matched.length > 0
+                ? await prisma.downloadJob.findFirst({
+                      where: { id: { in: jobs.matched.map((j) => j.id) }, status: "completed" },
+                      orderBy: { createdAt: "asc" },
+                  })
+                : null;
+        const first = jobs.replayed[0] ?? completed[0] ?? settledElsewhere;
         if (!first) return {};
         const meta = first.metadata as any;
         return {
