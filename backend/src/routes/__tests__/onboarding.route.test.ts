@@ -256,6 +256,17 @@ describe("a saved step reaches whatever holds the setting", () => {
         expect(reconnect).toHaveBeenCalledTimes(1);
     });
 
+    it("finishing the Soulseek step turns the integration on, and turning it off turns it off", async () => {
+        const enabled = async () => (await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).soulseekEnabled;
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { soulseekEnabled: false } });
+
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+        expect(await enabled()).toBe(true);
+
+        await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ enabled: false }).expect(200);
+        expect(await enabled()).toBe(false);
+    });
+
     it("Soulseek turned off clears the account", async () => {
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
 

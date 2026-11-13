@@ -169,7 +169,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
         const config = soulseekConfigSchema.parse(req.body);
 
         if (!config.enabled) {
-            await saveSystemSettings({ soulseekUsername: null, soulseekPassword: null });
+            await saveSystemSettings({ soulseekEnabled: false, soulseekUsername: null, soulseekPassword: null });
             return res.json({ success: true, tested: false });
         }
 
@@ -179,7 +179,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
             });
         }
 
-        const changed = await saveSystemSettings({ soulseekUsername: config.username, soulseekPassword: config.password });
+        const changed = await saveSystemSettings({ soulseekEnabled: true, soulseekUsername: config.username, soulseekPassword: config.password });
 
         // Being connected with the saved account is the connection test. A changed account was already reconnected by
         // the save; an unchanged one is tried again here.
