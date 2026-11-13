@@ -15,7 +15,7 @@ import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/disco
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { lookupKey, relocateDiscoverAlbums, sameName } from "../services/discovery/discoverEvidence";
+import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -484,6 +484,24 @@ async function relabelSuggestionPlays(
     await prisma.play.updateMany({ where: { userId, trackId: { in: trackIds }, source: from }, data: { source: to } });
 }
 
+/** Takes Discover's tag off the Lidarr artist that owns the suggestion's Lidarr album record, and off no one else. */
+async function untagAlbumOwner(suggestion: { artistName: string; albumTitle: string; lidarrAlbumId: number | null }): Promise<void> {
+    const label = `${suggestion.artistName} - ${suggestion.albumTitle}`;
+    try {
+        const record = suggestion.lidarrAlbumId === null ? null : await lidarrService.getAlbum(suggestion.lidarrAlbumId);
+        if (!record) {
+            logger.warn(`[Discover] No Lidarr album record for ${label}; Discover's tag stays on every Lidarr artist`);
+            return;
+        }
+        const tagId = await lidarrService.getOrCreateDiscoveryTag();
+        if (tagId === null) return;
+        await lidarrService.removeTagsFromArtist(record.artistId, [tagId]);
+        logger.debug(`   Removed discovery tag from Lidarr artist ${record.artistId} (owner of ${label})`);
+    } catch (e: any) {
+        logger.warn(`[Discover] Discover's tag not removed for ${label}: ${e.message}`);
+    }
+}
+
 // Likes a track, which marks its whole album to keep.
 router.post("/like", async (req, res) => {
     try {
@@ -524,42 +542,10 @@ router.post("/like", async (req, res) => {
             });
         }
 
-        // Remove discovery tag from the artist in Lidarr
-        // This prevents the artist from being deleted during cleanup
-        logger.debug(
-            `   Removing discovery tag from artist: ${discoveryAlbum.artistName}`
-        );
-
-        // If artistMbid is a temp ID, we need to search Lidarr by artist name instead
-        if (
-            discoveryAlbum.artistMbid &&
-            !discoveryAlbum.artistMbid.startsWith("temp-")
-        ) {
-            await lidarrService.removeDiscoveryTagByMbid(
-                discoveryAlbum.artistMbid
-            );
-        } else {
-            try {
-                const lidarrArtists = await lidarrService.getArtists();
-                // Every artist of that name: removing the tag from a namesake only keeps it.
-                const namedArtists = lidarrArtists.filter((a) => sameName(a.artistName, discoveryAlbum.artistName));
-
-                if (namedArtists.length > 0) {
-                    const tagId = await lidarrService.getOrCreateDiscoveryTag();
-                    for (const lidarrArtist of namedArtists) {
-                        if (!tagId || !lidarrArtist.tags?.includes(tagId)) continue;
-                        await lidarrService.removeTagsFromArtist(lidarrArtist.id, [tagId]);
-                        logger.debug(`   Removed discovery tag from ${lidarrArtist.artistName} (found by name)`);
-                    }
-                } else {
-                    logger.debug(
-                        `   Artist ${discoveryAlbum.artistName} not found in Lidarr (may have been removed)`
-                    );
-                }
-            } catch (e: any) {
-                logger.debug(`   Failed to remove discovery tag: ${e.message}`);
-            }
-        }
+        // The Discover tag comes off the Lidarr artist that owns this album's record, so cleanup does not delete the
+        // artist. Only that artist: Lidarr artists sharing its name are other people's. Without a stored Lidarr album id,
+        // or when Lidarr cannot find the record, nobody is untagged.
+        await untagAlbumOwner(discoveryAlbum);
 
         // Only Discover's copy: a listener's own library album of the same name must not take the like's mark, or an
         // unlike would send it to Discover.

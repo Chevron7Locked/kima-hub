@@ -32,14 +32,12 @@ jest.mock('../../workers/queues', () => require('./helpers/discoverMocks').disco
 jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks').distributedLockMock());
 
 // The Lidarr tag-removal calls in the /like body; none may run on the 409 path.
-const mockRemoveDiscoveryTagByMbid = jest.fn();
-const mockGetArtists = jest.fn();
+const mockGetAlbum = jest.fn();
 const mockGetOrCreateDiscoveryTag = jest.fn();
 const mockRemoveTagsFromArtist = jest.fn();
 jest.mock('../../services/lidarr', () => ({
     lidarrService: {
-        removeDiscoveryTagByMbid: (...a: any[]) => mockRemoveDiscoveryTagByMbid(...a),
-        getArtists: (...a: any[]) => mockGetArtists(...a),
+        getAlbum: (...a: any[]) => mockGetAlbum(...a),
         getOrCreateDiscoveryTag: (...a: any[]) => mockGetOrCreateDiscoveryTag(...a),
         removeTagsFromArtist: (...a: any[]) => mockRemoveTagsFromArtist(...a),
     },
@@ -85,7 +83,7 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-// A real artistMbid (not "temp-") sends the success path through removeDiscoveryTagByMbid.
+// The stored Lidarr album id sends the success path to Lidarr's record for the album, whose artist loses the tag.
 async function suggest(userId = USER, id = `${P}da`) {
     return prisma.discoveryAlbum.create({
         data: {
@@ -93,6 +91,7 @@ async function suggest(userId = USER, id = `${P}da`) {
             userId,
             rgMbid: ALBUM_ID,
             artistMbid: 'art-mbid-1',
+            lidarrAlbumId: 41,
             artistName: 'Dlk Artist',
             albumTitle: 'Dlk Album',
             weekStartDate: WEEK,
@@ -164,8 +163,7 @@ describe('POST /discover/like -- claims the album only while it is ACTIVE', () =
         expect(row.likedAt).toBeNull();
 
         // No post-claim side effect (Lidarr tag removal, library move, ownership row) runs.
-        expect(mockRemoveDiscoveryTagByMbid).not.toHaveBeenCalled();
-        expect(mockGetArtists).not.toHaveBeenCalled();
+        expect(mockGetAlbum).not.toHaveBeenCalled();
         expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location).toBe('DISCOVER');
         expect(await prisma.ownedAlbum.count({ where: { artistId: `${P}art` } })).toBe(0);
@@ -174,7 +172,9 @@ describe('POST /discover/like -- claims the album only while it is ACTIVE', () =
     it('answers 200, marks the suggestion LIKED, takes the album into the library and removes the Lidarr tag', async () => {
         await suggest();
         await seedDiscoverAlbum();
-        mockRemoveDiscoveryTagByMbid.mockResolvedValue(true);
+        mockGetAlbum.mockResolvedValue({ id: 41, artistId: 9 });
+        mockGetOrCreateDiscoveryTag.mockResolvedValue(22);
+        mockRemoveTagsFromArtist.mockResolvedValue(true);
 
         const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
 
@@ -186,17 +186,21 @@ describe('POST /discover/like -- claims the album only while it is ACTIVE', () =
         expect(row.likedAt).toBeInstanceOf(Date);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}alb` } })).location).toBe('LIBRARY');
         expect((await prisma.ownedAlbum.findFirstOrThrow({ where: { artistId: `${P}art` } })).source).toBe('discovery_liked');
-        expect(mockRemoveDiscoveryTagByMbid).toHaveBeenCalledWith('art-mbid-1');
+        expect(mockGetAlbum).toHaveBeenCalledWith(41);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
     });
 
     it('answers 200 when no scanned album matches yet', async () => {
         await suggest();
-        mockRemoveDiscoveryTagByMbid.mockResolvedValue(true);
+        mockGetAlbum.mockResolvedValue({ id: 41, artistId: 9 });
+        mockGetOrCreateDiscoveryTag.mockResolvedValue(22);
+        mockRemoveTagsFromArtist.mockResolvedValue(true);
 
         const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
 
         expect(res.status).toBe(200);
         expect(await statusOf(`${P}da`)).toBe('LIKED');
-        expect(mockRemoveDiscoveryTagByMbid).toHaveBeenCalledWith('art-mbid-1');
+        expect(mockGetAlbum).toHaveBeenCalledWith(41);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
     });
 });
