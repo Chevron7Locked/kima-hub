@@ -24,6 +24,7 @@ import { spotifyImportService } from "../../services/spotifyImport";
 import { importQueue } from "../../workers/queues";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 
 const USER = "zz-dispatch-usr";
 const app = express().use(express.json()).use("/spotify", spotifyRoutes);
@@ -42,6 +43,9 @@ let processImport: jest.SpyInstance;
 const jobIds: string[] = [];
 
 beforeAll(async () => {
+    // A preview asks MusicBrainz about songs with no album when a Lidarr is configured, and this file stands in no
+    // MusicBrainz. The settings row is whatever an earlier file on this worker left, so the file says there is no Lidarr.
+    await useNoLidarr();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: "zz-dispatch-user", passwordHash: "x", role: "admin" } });
 });
