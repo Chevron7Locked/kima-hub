@@ -1,5 +1,7 @@
 import { logger } from "../utils/logger";
 import { UserFacingError } from "../utils/errors";
+import { prisma } from "../utils/db";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 import { SELF_SCORE, pairScore, slerpWeights } from "./matching/formula";
 import { libraryTracks, matchingContext, scoreLibrary, type LibraryTrack } from "./matching/rank";
 
@@ -44,7 +46,7 @@ function nearest<T extends { id: string; artistId: string }>(
 }
 
 /**
- * A path between two tracks on the matching formula: waypoints spaced evenly along
+ * A path between two playable songs (404 for an endpoint that is not one) on the matching formula: waypoints spaced evenly along
  * the arc from one to the other (more for distant pairs), each filled by one of the
  * closest unvisited tracks, with an artist diversity rule.
  */
@@ -54,6 +56,13 @@ export async function generateSongPath(
     options: { length?: number; mode?: "smooth" | "discovery" } = {}
 ): Promise<PathResult> {
     const mode = options.mode || "smooth";
+
+    // A path that starts or ends on a song that won't play would hand the listener a queue that breaks at its ends.
+    const endpoints = [...new Set([startTrackId, endTrackId])];
+    const playable = await prisma.track.count({ where: { id: { in: endpoints }, ...PLAYABLE_SONG } });
+    if (playable < endpoints.length) {
+        throw new UserFacingError("The start and end songs must be songs that play", 404);
+    }
 
     const ctx = await matchingContext([startTrackId, endTrackId]);
     const start = ctx?.tracks.get(startTrackId);
