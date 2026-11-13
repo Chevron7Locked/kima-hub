@@ -20,7 +20,7 @@ const router = Router();
 
 /** A retried job's copy of the old metadata, less the marks of the old job's failure, so its own outcome tells the user afresh. */
 function withoutFailureMarks(metadata: Record<string, unknown> | null): Record<string, unknown> {
-    const { notificationSent, failedAt, cancelled, parked, ...carried } = metadata ?? {};
+    const { notificationSent, failedAt, cancelled, parked, statusText, ...carried } = metadata ?? {};
     return carried;
 }
 

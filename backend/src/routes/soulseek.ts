@@ -399,7 +399,8 @@ router.post(
             }
         } catch (error) {
             if (jobId) {
-                await downloadJobs.fail([{ id: jobId }], error instanceof Error ? error.message : "Download failed").catch(() => {});
+                await downloadJobs.fail([{ id: jobId }], error instanceof Error ? error.message : "Download failed").catch((settleError) =>
+                    logger.warn(`[Soulseek] Could not fail download job ${jobId}:`, settleError));
             }
             safeError(res, "Soulseek download", error);
         }

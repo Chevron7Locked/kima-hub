@@ -367,7 +367,11 @@ async function processDownload(
 
 /** The jobs about to be removed stop first: Lidarr lets go of them, then they end as cancelled and their batch is told. */
 async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findMany>>): Promise<void> {
-    await simpleDownloadManager.cancelJobs(jobs);
+    try {
+        await simpleDownloadManager.cancelJobs(jobs);
+    } catch (error) {
+        logger.warn("Could not stop the downloads in Lidarr before removing them:", error);
+    }
     await downloadJobs.cancel(jobs);
 }
 

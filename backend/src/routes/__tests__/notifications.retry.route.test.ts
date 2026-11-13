@@ -173,7 +173,7 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
 describe("a retried library album", () => {
     it("starts a pending copy of the job without the old failure marks", async () => {
         const old = await failedJob({
-            metadata: { downloadType: "library", albumTitle: "Things We Lost in the Fire", notificationSent: true, failedAt: "2026-01-01T00:00:00.000Z", parked: "Tracks missing" },
+            metadata: { downloadType: "library", albumTitle: "Things We Lost in the Fire", notificationSent: true, failedAt: "2026-01-01T00:00:00.000Z", parked: "Tracks missing", statusText: "Tracks missing" },
         });
         mockStartDownload.mockResolvedValue({ success: true });
 
