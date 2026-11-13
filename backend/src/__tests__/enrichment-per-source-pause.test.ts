@@ -6,7 +6,8 @@
 
 import { prisma } from "../utils/db";
 import { sourcePauseController } from "../services/sourcePauseController";
-import { getNextWork, recordStageFailure, syncWaitingAlerts } from "../workers/unifiedEnrichment";
+import { getNextWork, syncWaitingAlerts } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
 const PREFIX = "pause";
@@ -165,7 +166,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         const err = Object.assign(new Error("Request failed with status code 429"), {
             response: { status: 429 },
         });
-        await recordStageFailure(id("a"), "recording", "musicbrainz", err);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", err);
 
         expect(await sourcePauseController.isPaused("musicbrainz")).toBe(true);
         expect(await sourcePauseController.isPaused("analyzer")).toBe(false);
@@ -177,7 +178,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         await putStage(id("a"), "recording", "working", { attempt: 1, source: "acoustid" });
 
         const err = Object.assign(new Error("HTTP 429 Too Many Requests"), { response: { status: 429 } });
-        await recordStageFailure(id("a"), "recording", "musicbrainz", err);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", err);
 
         // The dispatch checks the stored source's pause, so it must be the paused one.
         expect((await getRecord(id("a"), "recording")).source).toBe("musicbrainz");
@@ -189,7 +190,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         const err = Object.assign(new Error("HTTP 429 Too Many Requests"), {
             response: { status: 429 },
         });
-        await recordStageFailure(id("a"), "recording", "musicbrainz", err);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", err);
 
         const rec = await getRecord(id("a"), "recording");
         // Not counted as a failure: the attempt stays where it was and the
@@ -212,7 +213,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         const mb503 = Object.assign(new Error("Service Unavailable"), {
             response: { status: 503 },
         });
-        await recordStageFailure(id("a"), "recording", "musicbrainz", mb503);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", mb503);
         expect(await sourcePauseController.isPaused("musicbrainz")).toBe(true);
     });
 });
@@ -235,8 +236,8 @@ describe("a source that keeps enrichment waiting for a day", () => {
     });
 
     it("raises one alert for the source, not one per track", async () => {
-        await recordStageFailure(id("a"), "recording", "musicbrainz", tooMany());
-        await recordStageFailure(id("b"), "recording", "musicbrainz", tooMany());
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", tooMany());
+        await stageRecords.fail(id("b"), "recording", "musicbrainz", tooMany());
 
         const rows = await alerts();
         expect(rows).toHaveLength(1);
@@ -244,7 +245,7 @@ describe("a source that keeps enrichment waiting for a day", () => {
     });
 
     it("removes the alert once nothing waits on the source", async () => {
-        await recordStageFailure(id("a"), "recording", "musicbrainz", tooMany());
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", tooMany());
         await syncWaitingAlerts();
         expect(await alerts()).toHaveLength(1);
 

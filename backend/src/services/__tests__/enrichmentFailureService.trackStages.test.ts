@@ -25,7 +25,7 @@ jest.mock("../../utils/logger", () => ({
 
 import { prisma } from "../../utils/db";
 import { enrichmentFailureService } from "../enrichmentFailureService";
-import { recordStageSuccess } from "../../workers/unifiedEnrichment";
+import * as stageRecords from "../stages/stageRecords";
 
 const PREFIX = "fstrk";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -245,7 +245,7 @@ describe("one record per fact: success clears the failure with no second ledger"
         expect(before.track).toBe(1);
 
         // The engine's real success path settles the TrackStage record...
-        await recordStageSuccess(trackId, "recording", "musicbrainz", {
+        await stageRecords.answer(trackId, "recording", "musicbrainz", {
             recordingMbid: "mb-1",
         });
 

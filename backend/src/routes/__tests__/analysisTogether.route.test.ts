@@ -10,8 +10,6 @@ jest.mock("../../middleware/auth", () => ({
 jest.mock("../../workers/unifiedEnrichment", () => ({
     triggerEnrichmentNow: jest.fn(),
     startEnrichmentNow: jest.fn(),
-    recordStageSuccess: jest.fn(),
-    recordStageFailure: jest.fn(),
 }));
 
 import express from "express";

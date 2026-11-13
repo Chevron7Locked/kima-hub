@@ -5,13 +5,8 @@
  */
 
 import { prisma } from "../utils/db";
-import {
-    closeOrphanedDependents,
-    getNextWork,
-    recordStageAbsent,
-    recordStageFailure,
-    recordStageSuccess,
-} from "../workers/unifiedEnrichment";
+import { getNextWork } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../workers/stageRetry";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
@@ -113,7 +108,7 @@ describe("increasing waits for temporary errors", () => {
         const trackId = id("temp");
         await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
 
-        await recordStageFailure(trackId, "recording", "musicbrainz", new Error("connection reset by peer"));
+        await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("connection reset by peer"));
         const first = await getRecord(trackId, "recording");
         expect(first.status).toBe("failed");
         expect(first.retryable).toBe(true);
@@ -121,7 +116,7 @@ describe("increasing waits for temporary errors", () => {
         expect(new Date(first.nextRetryAt).getTime()).toBeGreaterThan(Date.now() - 1000);
 
         // Second failure: the wait must be LONGER than the first, not the same.
-        await recordStageFailure(trackId, "recording", "musicbrainz", new Error("connection reset by peer"));
+        await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("connection reset by peer"));
         const second = await getRecord(trackId, "recording");
         expect(second.attempt).toBe(2);
         expect(new Date(second.nextRetryAt).getTime()).toBeGreaterThan(
@@ -161,13 +156,13 @@ describe("no retry past the cap", () => {
         await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
 
         for (let attempt = 1; attempt <= 3; attempt++) {
-            await recordStageFailure(trackId, "recording", "musicbrainz", new Error("socket hang up"));
+            await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"));
             const rec = await getRecord(trackId, "recording");
             expect(rec.attempt).toBe(attempt);
             expect(rec.retryable).toBe(true);
         }
 
-        await recordStageFailure(trackId, "recording", "musicbrainz", new Error("socket hang up"));
+        await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"));
         const closed = await getRecord(trackId, "recording");
         expect(closed.attempt).toBe(4);
         expect(closed.status).toBe("failed");
@@ -182,7 +177,7 @@ describe("no retry past the cap", () => {
             offered.filter((w) => w.stage === "recording").map((w) => w.trackId),
         ).not.toContain(trackId);
 
-        await recordStageFailure(trackId, "recording", "musicbrainz", new Error("socket hang up"));
+        await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"));
         expect((await getRecord(trackId, "recording")).retryable).toBe(false);
     });
 });
@@ -203,11 +198,11 @@ describe("a question with an answer is never re-offered", () => {
         ).not.toContain(trackId);
     });
 
-    it("recordStageSuccess writes done with its evidence and source", async () => {
+    it("answer writes done with its evidence and source", async () => {
         const trackId = id("success");
         await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
 
-        await recordStageSuccess(trackId, "recording", "file_tag", {
+        await stageRecords.answer(trackId, "recording", "file_tag", {
             recordingMbid: "mb-123",
             reason: "tag carried the recording id",
         });
@@ -233,7 +228,7 @@ describe("a closed record always carries its start stamp", () => {
         await seedTrack(trackId, { recording: { status: "pending" } });
         expect((await getRecord(trackId, "recording")).startedAt).toBeNull();
 
-        await recordStageSuccess(trackId, "recording", "file_tag", { recordingMbid: "mb-1" });
+        await stageRecords.answer(trackId, "recording", "file_tag", { recordingMbid: "mb-1" });
 
         const rec = await getRecord(trackId, "recording");
         expect(rec.status).toBe("done");
@@ -247,7 +242,7 @@ describe("a closed record always carries its start stamp", () => {
         const trackId = id("stamp-absent");
         await seedTrack(trackId, { recording: { status: "pending" } });
 
-        await recordStageAbsent(trackId, "recording", "musicbrainz", {
+        await stageRecords.absent(trackId, "recording", "musicbrainz", {
             reason: "sources have no recording for this track",
         });
 
@@ -260,7 +255,7 @@ describe("a closed record always carries its start stamp", () => {
         const trackId = id("stamp-fail");
         await seedTrack(trackId, { recording: { status: "pending" } });
 
-        await recordStageFailure(trackId, "recording", "musicbrainz", new Error("socket hang up"));
+        await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"));
 
         const rec = await getRecord(trackId, "recording");
         expect(rec.status).toBe("failed");
@@ -277,7 +272,7 @@ describe("a closed record always carries its start stamp", () => {
             claimTime,
         );
 
-        await recordStageSuccess(trackId, "recording", "acoustid", { recordingMbid: "mb-2" });
+        await stageRecords.answer(trackId, "recording", "acoustid", { recordingMbid: "mb-2" });
 
         const rec = await getRecord(trackId, "recording");
         expect(new Date(rec.startedAt).getTime()).toBe(claimTime.getTime());
@@ -289,7 +284,7 @@ describe("a closed record always carries its start stamp", () => {
         await putStage(trackId, "analysis", "failed", { attempt: 4, retryable: false });
         await putStage(trackId, "embedding", "pending");
 
-        await closeOrphanedDependents();
+        await stageRecords.closeDependents();
 
         const rec = await getRecord(trackId, "embedding");
         expect(rec.status).toBe("failed");
@@ -316,14 +311,14 @@ describe("waiting is not failing", () => {
         const paused = Object.assign(new Error("HTTP 429 Too Many Requests"), { response: { status: 429 } });
 
         for (let wait = 0; wait < 6; wait++) {
-            await recordStageFailure(trackId, "recording", "musicbrainz", paused, {}, await claim(trackId));
+            await stageRecords.fail(trackId, "recording", "musicbrainz", paused, {}, await claim(trackId));
             const rec = await getRecord(trackId, "recording");
             expect(rec.status).toBe("pending");
             expect(rec.failures).toBe(0);
         }
 
         for (let failures = 1; failures <= STAGE_RETRY_CAP; failures++) {
-            await recordStageFailure(trackId, "recording", "musicbrainz", new Error("socket hang up"), {}, await claim(trackId));
+            await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"), {}, await claim(trackId));
             const rec = await getRecord(trackId, "recording");
             expect(rec.failures).toBe(failures);
             expect(rec.retryable).toBe(failures < STAGE_RETRY_CAP);

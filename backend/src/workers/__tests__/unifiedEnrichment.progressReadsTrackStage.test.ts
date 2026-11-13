@@ -25,11 +25,8 @@ import { prisma } from "../../utils/db";
 import { seedEmbedding, unitVectorAt } from "../../__tests__/helpers/embeddingFixtures";
 import { PROBE_ID } from "../../services/matching/state";
 import { buildMoods } from "../../services/moods/state";
-import {
-    closeOrphanedDependents,
-    getEnrichmentProgress,
-    invalidateEnrichmentProgress,
-} from "../../workers/unifiedEnrichment";
+import { getEnrichmentProgress, invalidateEnrichmentProgress } from "../../workers/unifiedEnrichment";
+import * as stageRecords from "../../services/stages/stageRecords";
 
 const PREFIX = "prog";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -265,7 +262,7 @@ describe("getEnrichmentProgress", () => {
         await settledLibrary(id("dismissed"));
         await putStage(id("dismissed"), "analysis", "blocked", { retryable: false });
         await putStage(id("dismissed"), "embedding", "pending");
-        await closeOrphanedDependents();
+        await stageRecords.closeDependents();
         invalidateEnrichmentProgress();
         const progress = await getEnrichmentProgress();
 

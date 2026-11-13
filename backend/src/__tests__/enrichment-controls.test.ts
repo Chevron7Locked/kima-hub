@@ -124,7 +124,7 @@ jest.mock("../services/sourcePauseController", () => ({
         isPaused: jest.fn().mockResolvedValue(false),
         open: jest.fn().mockResolvedValue(undefined),
         close: jest.fn().mockResolvedValue(undefined),
-        // recordStageFailure consults the pause controller on every failure;
+        // the stage-record fail move consults the pause controller on every failure;
         // a local fpcalc error is never source-caused.
         handleRateLimit: jest.fn().mockResolvedValue(false),
         getPause: jest.fn().mockResolvedValue(null),

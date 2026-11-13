@@ -13,7 +13,7 @@ import * as os from "os";
 import * as path from "path";
 import { prisma } from "../utils/db";
 import { config, useMusicFolder } from "../config";
-import { recordStageFailure } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { runReconcile } from "../services/libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "../services/libraryPrune";
 import { closeEngineConnections } from "./helpers/engineConnections";
@@ -74,7 +74,7 @@ afterAll(async () => {
 
 it("flags a song whose file is gone, closes its records and asks for a scan, which then removes it", async () => {
     const gone = await song("gone", `${P}/gone.flac`);
-    await recordStageFailure(gone, "embedding", "clap", notFound(`${P}/gone.flac`), undefined, job(gone));
+    await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/gone.flac`), undefined, job(gone));
 
     const track = await prisma.track.findUnique({ where: { id: gone } });
     expect(track?.missingSince).not.toBeNull();
@@ -94,7 +94,7 @@ it("flags a song whose file is gone, closes its records and asks for a scan, whi
 it("treats MusiCNN's report the same way", async () => {
     const gone = await song("gone2", `${P}/gone2.flac`);
     await prisma.trackStage.create({ data: { trackId: gone, stage: "analysis", status: "working", attempt: 1, retryable: true } });
-    await recordStageFailure(gone, "analysis", "analyzer", new Error("File not found"));
+    await stageRecords.fail(gone, "analysis", "analyzer", new Error("File not found"));
     expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).not.toBeNull();
     const analysis = await prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: gone, stage: "analysis" } } });
     expect(analysis).toMatchObject({ status: "failed", retryable: false, failureClass: "FILE_MISSING" });
@@ -103,7 +103,7 @@ it("treats MusiCNN's report the same way", async () => {
 it("notes a follow-up scan when one is already running, since that scan started before the flag", async () => {
     mockRequestScan.mockResolvedValueOnce({ queued: false, jobId: "scan-full", reason: "identical scan already active" });
     const gone = await song("midscan", `${P}/midscan.flac`);
-    await recordStageFailure(gone, "embedding", "clap", notFound(`${P}/midscan.flac`), undefined, job(gone));
+    await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/midscan.flac`), undefined, job(gone));
     expect(await redisClient.get(SCAN_AGAIN_KEY)).toBe("1");
 });
 
@@ -113,7 +113,7 @@ it("records an ordinary failure when the file cannot be read for another reason 
     const locked = await song("locked", `${P}/locked/song.flac`);
     fs.chmodSync(path.join(music, P, "locked"), 0o000);
     try {
-        await recordStageFailure(locked, "embedding", "clap", notFound(`${P}/locked/song.flac`), undefined, job(locked));
+        await stageRecords.fail(locked, "embedding", "clap", notFound(`${P}/locked/song.flac`), undefined, job(locked));
     } finally {
         fs.chmodSync(path.join(music, P, "locked"), 0o755);
     }
@@ -123,7 +123,7 @@ it("records an ordinary failure when the file cannot be read for another reason 
 
 it("records an ordinary failure when the file is there after all", async () => {
     const here = await song("here", `${P}/here.flac`);
-    await recordStageFailure(here, "embedding", "clap", notFound(`${P}/here.flac`), undefined, job(here));
+    await stageRecords.fail(here, "embedding", "clap", notFound(`${P}/here.flac`), undefined, job(here));
     expect((await prisma.track.findUnique({ where: { id: here } }))?.missingSince).toBeNull();
     expect((await stageOf(here))?.status).toBe("failed");
     expect((await stageOf(here))?.failureClass).not.toBe("FILE_MISSING");
@@ -133,7 +133,7 @@ it("records an ordinary failure when the file is there after all", async () => {
 it("ignores a stale report for a claim that was handed out again", async () => {
     const gone = await song("stale", `${P}/stale.flac`);
     await prisma.trackStage.update({ where: { trackId_stage: { trackId: gone, stage: "embedding" } }, data: { attempt: 2 } });
-    await recordStageFailure(gone, "embedding", "clap", notFound(`${P}/stale.flac`), undefined, job(gone, 1));
+    await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/stale.flac`), undefined, job(gone, 1));
     expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
     expect(mockRequestScan).not.toHaveBeenCalled();
 });
@@ -141,7 +141,7 @@ it("ignores a stale report for a claim that was handed out again", async () => {
 it("flags nothing when the music folder is empty: the drive is not mounted", async () => {
     const gone = await song("unmounted", `${P}/unmounted.flac`);
     fs.rmSync(path.join(music, P), { recursive: true, force: true });
-    await recordStageFailure(gone, "embedding", "clap", notFound(`${P}/unmounted.flac`), undefined, job(gone));
+    await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/unmounted.flac`), undefined, job(gone));
     expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
     expect(mockRequestScan).not.toHaveBeenCalled();
 });

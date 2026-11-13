@@ -9,7 +9,7 @@ import {
     classifyFailure,
     type FailureClass,
 } from "../services/enrichmentErrorCodeClassifier";
-import { recordStageFailure } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
 const PREFIX = "incon";
@@ -113,9 +113,9 @@ describe("classifyFailure — the four classes, matching classifier.py", () => {
 });
 
 describe("an unclassifiable error stays INCONCLUSIVE with its evidence", () => {
-    it("recordStageFailure writes failureClass=INCONCLUSIVE and keeps the raw message", async () => {
+    it("fail writes failureClass=INCONCLUSIVE and keeps the raw message", async () => {
         const err = new Error("probe said something weird (#37)");
-        await recordStageFailure(id("t1"), "analysis", "analyzer", err, {
+        await stageRecords.fail(id("t1"), "analysis", "analyzer", err, {
             probe: "ffmpeg -i /tmp/x.flac",
             rc: 1,
         });
@@ -133,7 +133,7 @@ describe("an unclassifiable error stays INCONCLUSIVE with its evidence", () => {
     });
 
     it("a terminal class stays non-retryable with the class recorded", async () => {
-        await recordStageFailure(id("t1"), "analysis", "analyzer", new Error("Audio file has more than 2 channels"));
+        await stageRecords.fail(id("t1"), "analysis", "analyzer", new Error("Audio file has more than 2 channels"));
 
         const rec = await getRecord(id("t1"), "analysis");
         expect(rec.status).toBe("failed");

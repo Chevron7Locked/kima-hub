@@ -8,7 +8,7 @@
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { prisma } from "../utils/db";
-import { closeStagesForMissingTracks, flagVanishedTrack } from "../services/missingFileStages";
+import { closeStagesForMissingTracks } from "../services/missingFileStages";
 import Redis from "ioredis";
 import { config } from "../config";
 import os from "os";
@@ -32,7 +32,17 @@ import {
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
-import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "./stageRetry";
+import * as stageRecords from "../services/stages/stageRecords";
+import {
+    STAGE_ORDER,
+    PREREQUISITE_STAGE,
+    STAGE_SOURCE,
+    STAGE_CLAIM_LEASE_MS,
+    STAGE_REDELIVERY_CAP,
+    WAITING_KEY_PREFIX,
+    type StageName,
+    type FailureOutcome,
+} from "../services/stages/stageRecords";
 import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { featureDetection } from "../services/featureDetection";
@@ -56,9 +66,6 @@ import { buildMoods, moodProgress } from "../services/moods/state";
 import { writeMoodTags } from "../services/moods/tags";
 import { updateMap } from "../services/matching/map";
 import { dependsOnMoods } from "../services/mixes/cacheKeys";
-import {
-    classifyFailure,
-} from "../services/enrichmentErrorCodeClassifier";
 import { isMbid } from "../services/artistIdentity";
 import type { Outcome } from "../utils/outcome";
 
@@ -68,66 +75,11 @@ import { embeddingsDeferredForGpu } from "../services/gpuRuntime";
 import { getSystemSettings } from "../utils/systemSettings";
 import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording } from "../services/recordingMatch";
 
-/** The three kinds that failed to answer anything, as opposed to `Absent`. */
-type FailureOutcome = Extract<
-    Outcome<unknown>,
-    { kind: "rateLimited" | "transient" | "permanent" }
->;
-
 // ── Per-track stage queue ────────────────────────────────────────────────
 
-/**
- * The four questions owed per track: which recording it is, its audio
- * analysis, its CLAP embedding, and its local AcoustID fingerprint. Each
- * stage waits only on what PREREQUISITE_STAGE declares for the same track.
- */
-export type StageName = "recording" | "analysis" | "embedding" | "fingerprint";
-
-export const STAGE_ORDER: readonly StageName[] = [
-    "recording",
-    "analysis",
-    "embedding",
-    "fingerprint",
-] as const;
-
-/** The source each stage asks; its records carry it, and a pause on it holds the stage. */
-const STAGE_SOURCE: Record<StageName, string> = {
-    recording: "musicbrainz",
-    analysis: "analyzer",
-    embedding: "clap",
-    fingerprint: "fpcalc",
-};
-
-/**
- * "output": the dependent stage reads the prerequisite's answer, so only `done` unblocks it.
- * "settled": the question only needs closing: `done`, a permanent failure, or set aside by a
- * person (`blocked`); a retryable failure or an open question does not count.
- */
-type StageWaitKind = "output" | "settled";
-
-export interface StagePrerequisite {
-    stage: StageName;
-    wait: StageWaitKind;
-}
-
-/**
- * What each stage actually reads from another stage for the same track. This
- * is the only place stages wait on each other; nothing polls at runtime.
- */
-export const PREREQUISITE_STAGE: Record<StageName, StagePrerequisite | null> = {
-    // The AcoustID step reads the stored fingerprint. A fingerprint closed as a
-    // permanent failure never produces one, so then the step is skipped and the
-    // skip is written into this stage's evidence.
-    recording: { stage: "fingerprint", wait: "settled" },
-    // Reads only the audio file (the Essentia analyzer decodes it itself).
-    analysis: null,
-    // CLAP reads the audio file, not the analysis's data — it needs no features MusiCNN writes. The wait is
-    // the one-at-a-time rule (analysisStillRunning) plus this record's lifecycle: a closed analysis closes this
-    // record too, and a later answer reopens it.
-    embedding: { stage: "analysis", wait: "output" },
-    // Reads only the audio file (fpcalc on the local binary).
-    fingerprint: null,
-};
+// The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
+export { STAGE_ORDER, PREREQUISITE_STAGE } from "../services/stages/stageRecords";
+export type { StageName, StagePrerequisite } from "../services/stages/stageRecords";
 
 /**
  * Exactly one producer per queue, so the same work cannot be queued twice under
@@ -159,13 +111,6 @@ export interface StageWork {
 
 /** The statuses a record can be due in by its `nextRetryAt`; a `working` record whose lease ran out is due as well. */
 const DUE_STATUSES = ["pending", "failed"] as const;
-
-/** How long a claim holds a record before the attempt is presumed dead. */
-const STAGE_CLAIM_LEASE_MS = 15 * 60 * 1000;
-
-/** Lease re-offers do not consume attempts; this many close the record so a
- * poison file cannot loop forever. */
-const STAGE_REDELIVERY_CAP = 3;
 
 /** An admin chose to run both heavy models side by side, accepting the load (Settings, under Library). */
 async function bothAtOnce(): Promise<boolean> {
@@ -510,490 +455,19 @@ async function drainCap(stage: "recording" | "analysis" | "embedding"): Promise<
     return Math.min(ceiling, Math.max(2 * workers, drainable));
 }
 
-/** Answer a track's stage `done` by `source`, with evidence; idempotent. */
-export async function recordStageSuccess(
-    trackId: string,
-    stage: StageName,
-    source: string,
-    evidence?: Record<string, unknown>,
-    jobId?: string,
-): Promise<void> {
-    const claim = claimOf(jobId);
-    const settled = claim
-        ? await prisma.$executeRawUnsafe(
-              `UPDATE "TrackStage"
-                  SET status = 'done',
-                      source = $2,
-                      "lastErrorCode" = NULL,
-                      "lastErrorMessage" = NULL,
-                      "failureClass" = NULL,
-                      retryable = true,
-                      "nextRetryAt" = NULL,
-                      evidence = $3::jsonb,
-                      "finishedAt" = now()
-                WHERE "trackId" = $1 AND stage = $6 AND status = 'working' AND attempt = $4 AND redelivered = $5`,
-              trackId,
-              source,
-              JSON.stringify(evidence ?? { reason: "answered" }),
-              claim.attempt,
-              claim.redelivered,
-              stage,
-          )
-        : await prisma.$executeRawUnsafe(
-              `INSERT INTO "TrackStage"
-                  (id, "trackId", stage, status, source, attempt, retryable,
-                   "nextRetryAt", evidence, "startedAt", "finishedAt")
-               VALUES ($1, $2, $3, 'done', $4, 1, true, NULL, $5::jsonb, now(), now())
-               ON CONFLICT ("trackId", stage) DO UPDATE
-                  SET status = 'done',
-                      source = EXCLUDED.source,
-                      "lastErrorCode" = NULL,
-                      "lastErrorMessage" = NULL,
-                      "failureClass" = NULL,
-                      retryable = true,
-                      "nextRetryAt" = NULL,
-                      evidence = EXCLUDED.evidence,
-                      "startedAt" = COALESCE("TrackStage"."startedAt", now()),
-                      "finishedAt" = now()
-                WHERE "TrackStage".status <> 'blocked'`,
-              `${trackId}__${stage}`,
-              trackId,
-              stage,
-              source,
-              JSON.stringify(evidence ?? { reason: "answered" }),
-          );
-    if (settled === 0) {
-        logger.debug(`[Enrichment] ${stage}: ignored a success for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
-        return;
-    }
-    // A dependent closed because this stage had failed for good can be answered now.
-    const dependents = STAGE_ORDER.filter((s) => PREREQUISITE_STAGE[s]?.stage === stage);
-    if (dependents.length > 0) {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage"
-                SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'dependency answered')
-              WHERE "trackId" = $1 AND stage = ANY($2::text[])
-                AND status = 'failed' AND "failureClass" = 'DEPENDENCY_CLOSED'`,
-            trackId,
-            dependents,
-        );
-    }
-    // The backend is the only writer of the status columns and of the shared
-    // valence/arousal pair; the stage record is the truth and these mirror it.
-    if (stage === "embedding") {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "vibeAnalysisStatus" = 'completed',
-                    "vibeAnalysisError" = NULL,
-                    "vibeAnalysisStatusUpdatedAt" = now()
-              WHERE id = $1`,
-            trackId,
-        );
-        await syncSharedValenceArousal(trackId);
-    } else if (stage === "analysis") {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "analysisStatus" = 'completed',
-                    "analysisError" = NULL,
-                    "analysisStartedAt" = NULL
-              WHERE id = $1`,
-            trackId,
-        );
-        await syncSharedValenceArousal(trackId);
-    }
-}
-
-/** The attempt a report answers, read from the per-attempt job id `<key>-<attempt>-r<redelivered>`. */
-export function claimOf(jobId: string | undefined): { attempt: number; redelivered: number } | null {
-    const match = jobId ? /-(\d+)-r(\d+)$/.exec(jobId) : null;
-    return match ? { attempt: Number(match[1]), redelivered: Number(match[2]) } : null;
-}
-
-/** Whether a job's claim is still the record's open one. A job whose claim was re-issued (a lease re-offer,
- * a wipe, a restart) does no work: its answer would be dropped as stale, and the asking costs the sources'
- * rate limits. A job with no claim in its id is always current. */
-export async function claimIsCurrent(trackId: string, stage: StageName, jobId: string | undefined): Promise<boolean> {
-    const claim = claimOf(jobId);
-    if (!claim) return true;
-    const row = await prisma.trackStage.findUnique({
-        where: { trackId_stage: { trackId, stage } },
-        select: { status: true, attempt: true, redelivered: true },
-    });
-    return row?.status === "working" && row.attempt === claim.attempt && row.redelivered === claim.redelivered;
-}
-
-/** The shared valence/arousal pair from both analyzers' raw answers: the blend when both
- * have answered, otherwise whichever has. */
-async function syncSharedValenceArousal(trackId: string): Promise<void> {
-    await prisma.$executeRawUnsafe(
-        `UPDATE "Track"
-            SET valence = COALESCE(ROUND((0.7 * "deamValence" + 0.3 * "clapValenceRaw")::numeric, 3)::float8,
-                                   "deamValence", "clapValenceRaw"),
-                arousal = COALESCE(ROUND((0.5 * "deamArousal" + 0.5 * "clapArousalRaw")::numeric, 3)::float8,
-                                   "deamArousal", "clapArousalRaw"),
-                -- Raw SQL does not move updatedAt by itself; the mood step reads it to see that a reading changed.
-                "updatedAt" = now()
-          WHERE id = $1`,
-        trackId,
-    );
-}
-
 /**
- * Whether a failure report may settle this record. An answered or closed record is
- * never reopened by a report, and a report for any attempt other than the open claim
- * is stale. Returns the record and the SQL condition holding the same rule at write
- * time, or null to drop the report.
+ * The stage-record moves, under the names the scheduler's other writers still use. Ticket 30 moves those callers to
+ * `stageRecords` and retires these aliases.
  */
-async function failureMaySettle(
-    trackId: string,
-    stage: StageName,
-    jobId: string | undefined,
-): Promise<{
-    current: { attempt: number; failures: number; retryable: boolean; status: string; redelivered: number; evidence: Record<string, unknown> | null } | undefined;
-    writeGuard: string;
-} | null> {
-    const [current] = await prisma.$queryRawUnsafe<
-        Array<{ attempt: number; failures: number; retryable: boolean; status: string; redelivered: number; evidence: Record<string, unknown> | null }>
-    >(
-        `SELECT attempt, failures, retryable, status, redelivered, evidence FROM "TrackStage"
-          WHERE "trackId" = $1 AND stage = $2`,
-        trackId,
-        stage,
-    );
-    const claim = claimOf(jobId);
-    const settled = current?.status === "done" || current?.status === "blocked"
-        || (current?.status === "failed" && !current.retryable);
-    const stale = claim !== null && !(current?.status === "working"
-        && current.attempt === claim.attempt && current.redelivered === claim.redelivered);
-    if (settled || stale) {
-        logger.debug(`[Enrichment] ${stage}: ignored a failure for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
-        return null;
-    }
-    const writeGuard = `"TrackStage".status NOT IN ('done', 'blocked')
-                AND NOT ("TrackStage".status = 'failed' AND "TrackStage".retryable = false)
-                ${claim ? `AND "TrackStage".status = 'working' AND "TrackStage".attempt = ${claim.attempt} AND "TrackStage".redelivered = ${claim.redelivered}` : ""}`;
-    return { current, writeGuard };
-}
-
-/**
- * Parks a stage on its source's rate limit until `until`: pending, no attempt used, the evidence kept. A sound-vector
- * stage's mirror on the track says pending too. `writeGuard` keeps a newer answer from being overwritten.
- */
-async function parkOnRateLimit(
-    trackId: string,
-    stage: StageName,
-    source: string,
-    until: Date,
-    message: string,
-    evidence: unknown,
-    writeGuard: string,
-): Promise<void> {
-    const parked = await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt, retryable,
-             "nextRetryAt", "lastErrorCode", "lastErrorMessage", evidence)
-         VALUES ($1, $2, $3, 'pending', $4, 0, true, $5, 'RATE_LIMITED', $6, $7::jsonb)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = 'pending',
-                source = EXCLUDED.source,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                "lastErrorCode" = 'RATE_LIMITED',
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                evidence = EXCLUDED.evidence
-          WHERE ${writeGuard}`,
-        `${trackId}__${stage}`,
-        trackId,
-        stage,
-        source,
-        until,
-        message,
-        JSON.stringify(evidence),
-    );
-    if (parked > 0 && stage === "embedding") {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "vibeAnalysisStatus" = 'pending',
-                    "vibeAnalysisError" = $2,
-                    "vibeAnalysisStatusUpdatedAt" = now()
-              WHERE id = $1`,
-            trackId,
-            message,
-        );
-    }
-}
-
-/**
- * Record a failed attempt. A rate limit pauses only that source and parks the
- * record `pending` without consuming an attempt. Any other error writes `failed`
- * with its class and a retry time, and closes the record at STAGE_RETRY_CAP.
- * A closed record is never reopened here.
- */
-/** What the analyzers and fpcalc say when a track's file is not on disk. */
-const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
-
-export async function recordStageFailure(
-    trackId: string,
-    stage: StageName,
-    source: string,
-    err: unknown,
-    evidence?: Record<string, unknown>,
-    jobId?: string,
-): Promise<void> {
-    const message = err instanceof Error ? err.message : String(err);
-    const open = await failureMaySettle(trackId, stage, jobId);
-    if (!open) return;
-    // A file an analyzer could not find: the song is flagged missing and a scan asked for, which removes it once it
-    // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure.
-    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage))) return;
-    const { current, writeGuard } = open;
-
-    if (await sourcePauseController.handleRateLimit(source, err, evidence)) {
-        // Source-caused, not work-caused: park the question until the
-        // pause lifts without consuming an attempt.
-        const pause = await sourcePauseController.getPause(source);
-        const until = pause?.until ?? new Date(Date.now() + sourcePauseController.windowMs);
-
-        // A question still waiting 24 h after it first parked raises its source's
-        // alert once and stays pending. The marker lives in the record's evidence,
-        // so restarts do not raise it again.
-        const prev = current?.evidence ?? {};
-        const waitingSince =
-            typeof prev.waitingSince === "string"
-                ? prev.waitingSince
-                : new Date().toISOString();
-        const waitEvidence: Record<string, unknown> = {
-            ...prev,
-            reason: "rate-limited",
-            error: message,
-            waitingSince,
-            ...evidence,
-        };
-        if (
-            Date.now() - new Date(waitingSince).getTime() >= 24 * 60 * 60_000 &&
-            waitEvidence.waitingAlerted !== true
-        ) {
-            waitEvidence.waitingAlerted = true;
-            const { notificationService } = await import("../services/notificationService");
-            await notificationService
-                .notifyAdmins({
-                    type: "system",
-                    title: `Enrichment waiting on ${source}`,
-                    message: `Some tracks have waited on ${source} for over 24 h. They stay pending until its rate limit lifts.`,
-                    groupKey: `${WAITING_KEY_PREFIX}${source}`,
-                })
-                .catch(() => undefined);
-        }
-
-        await parkOnRateLimit(trackId, stage, source, until, message, waitEvidence, writeGuard);
-        return;
-    }
-
-    const failureClass = classifyFailure(err);
-    // A `working` record's claim already named this attempt; anything else moves
-    // to the next one (at least 1). Only reported failures use up retries: terminal
-    // classes close the record at once; INCONCLUSIVE stays retryable until the cap.
-    const attempt =
-        current?.status === "working"
-            ? Math.max(current.attempt, 1)
-            : (current?.attempt ?? 0) + 1;
-    const failures = (current?.failures ?? 0) + 1;
-    const retryable = failureClass === "INCONCLUSIVE" && failures < STAGE_RETRY_CAP;
-    const nextRetryAt = retryable
-        ? new Date(Date.now() + computeStageRetryWaitMs(failures))
-        : null;
-
-    const written = await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt,
-             "lastErrorCode", "lastErrorMessage", "failureClass",
-             retryable, "nextRetryAt", evidence, "startedAt", "finishedAt", failures)
-         VALUES ($1, $2, $3, 'failed', $4, $5, $6, $7, $8, $9, $10, $11::jsonb, now(), now(), $12)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = 'failed',
-                source = EXCLUDED.source,
-                attempt = EXCLUDED.attempt,
-                failures = EXCLUDED.failures,
-                "lastErrorCode" = EXCLUDED."lastErrorCode",
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                "failureClass" = EXCLUDED."failureClass",
-                retryable = EXCLUDED.retryable,
-                "nextRetryAt" = EXCLUDED."nextRetryAt",
-                evidence = EXCLUDED.evidence,
-                "startedAt" = COALESCE("TrackStage"."startedAt", now()),
-                "finishedAt" = now()
-          WHERE ${writeGuard}`,
-        `${trackId}__${stage}`,
-        trackId,
-        stage,
-        source,
-        attempt,
-        failureClass,
-        message,
-        failureClass,
-        retryable,
-        nextRetryAt,
-        JSON.stringify({ error: message, ...evidence }),
-        failures,
-    );
-    if (written === 0) return;
-    if (stage === "embedding") {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "vibeAnalysisStatus" = $2,
-                    "vibeAnalysisError" = $3,
-                    "vibeAnalysisRetryCount" = $4,
-                    "vibeAnalysisStatusUpdatedAt" = now()
-              WHERE id = $1`,
-            trackId,
-            retryable ? "failed" : "permanently_failed",
-            message.slice(0, 500),
-            failures,
-        );
-    } else if (stage === "analysis") {
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "analysisStatus" = $2,
-                    "analysisError" = $3,
-                    "analysisRetryCount" = $4,
-                    "analysisStartedAt" = NULL
-              WHERE id = $1`,
-            trackId,
-            retryable ? "failed" : "permanently_failed",
-            message.slice(0, 500),
-            failures,
-        );
-    }
-}
-
-/** Record "the sources have nothing" as a `done` answer with evidence of what
- * was asked, so a correct "no" does not burn the retry ladder. */
-export async function recordStageAbsent(
-    trackId: string,
-    stage: StageName,
-    source: string,
-    evidence?: Record<string, unknown>,
-    jobId?: string,
-): Promise<void> {
-    await recordStageSuccess(trackId, stage, source, evidence ?? { reason: "sources have nothing" }, jobId);
-}
-
-/**
- * Close embedding records whose analysis record closed, since the embedding
- * can never be built. Idempotent; runs each cycle and never touches `blocked`
- * records or ones already closed.
- */
-export async function closeOrphanedDependents(): Promise<void> {
-    for (const [dependent, prerequisite] of Object.entries(PREREQUISITE_STAGE)) {
-        // Only a stage that needs the other's output is left unanswerable by its closing; one
-        // that waits for it to settle (identification after the fingerprint) still has its answer.
-        if (!prerequisite || prerequisite.wait !== "output") continue;
-        const source = STAGE_SOURCE[dependent as StageName];
-        const closed = await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage" dep
-                SET status = 'failed',
-                    source = $2,
-                    retryable = false,
-                    "nextRetryAt" = NULL,
-                    "startedAt" = COALESCE(dep."startedAt", now()),
-                    "finishedAt" = COALESCE(dep."finishedAt", now()),
-                    "failureClass" = 'DEPENDENCY_CLOSED',
-                    "lastErrorCode" = 'DEPENDENCY_CLOSED',
-                    "lastErrorMessage" = 'dependency ' || $3 || ' closed; this question can never be answered',
-                    evidence = jsonb_build_object(
-                        'reason',
-                        'dependency ' || $3 || ' closed: '
-                            || COALESCE(pre."failureClass", 'unknown'),
-                        'closure', 'dependency-closed'
-                    )
-               FROM "TrackStage" pre
-              WHERE dep."trackId" = pre."trackId"
-                AND dep.stage = $1
-                AND pre.stage = $3
-                AND ((pre.status = 'failed' AND pre.retryable = false) OR pre.status = 'blocked')
-                AND dep.status = 'pending'
-                AND dep.retryable = true`,
-            dependent,
-            source,
-            prerequisite.stage,
-        );
-        if (closed > 0) {
-            logger.debug(
-                `[Enrichment] Closed ${closed} '${dependent}' record(s) whose '${prerequisite.stage}' dependency is closed`,
-            );
-        }
-    }
-}
-
-/**
- * Record an external call's failure by its Outcome kind: rate limited parks with
- * no attempt consumed, permanent closes with `code`, transient takes the retry
- * ladder. `answered`/`absent` are answers and are the caller's to handle.
- */
-async function recordOutcomeFailure(
-    trackId: string,
-    stage: StageName,
-    source: string,
-    outcome: FailureOutcome,
-    evidence?: Record<string, unknown>,
-    jobId?: string,
-): Promise<void> {
-    if (outcome.kind !== "rateLimited" && outcome.kind !== "permanent") {
-        await recordStageFailure(
-            trackId,
-            stage,
-            source,
-            Object.assign(new Error(outcome.error.message), { code: outcome.error.code }),
-            { kind: "transient", ...evidence },
-            jobId,
-        );
-        return;
-    }
-    const open = await failureMaySettle(trackId, stage, jobId);
-    if (!open) return;
-    const { current, writeGuard } = open;
-    if (outcome.kind === "rateLimited") {
-        await parkOnRateLimit(
-            trackId,
-            stage,
-            source,
-            outcome.retryAfter,
-            `source '${source}' is paused until ${outcome.retryAfter.toISOString()}`,
-            outcome.evidence,
-            writeGuard,
-        );
-        return;
-    }
-    await prisma.$executeRawUnsafe(
-        `INSERT INTO "TrackStage"
-            (id, "trackId", stage, status, source, attempt,
-             "lastErrorCode", "lastErrorMessage", "failureClass",
-             retryable, "nextRetryAt", evidence, "startedAt", "finishedAt", failures)
-         VALUES ($1, $2, $3, 'failed', $4, $5, $6, $7, 'PERMANENT',
-                 false, NULL, $8::jsonb, now(), now(), $9)
-         ON CONFLICT ("trackId", stage) DO UPDATE
-            SET status = 'failed',
-                source = EXCLUDED.source,
-                failures = EXCLUDED.failures,
-                "lastErrorCode" = EXCLUDED."lastErrorCode",
-                "lastErrorMessage" = EXCLUDED."lastErrorMessage",
-                "failureClass" = 'PERMANENT',
-                retryable = false,
-                "nextRetryAt" = NULL,
-                evidence = EXCLUDED.evidence,
-                "startedAt" = COALESCE("TrackStage"."startedAt", now()),
-                "finishedAt" = now()
-          WHERE ${writeGuard}`,
-        `${trackId}__${stage}`,
-        trackId,
-        stage,
-        source,
-        current?.attempt ?? 0,
-        outcome.error.code,
-        outcome.error.message,
-        JSON.stringify({ reason: outcome.error.message, ...evidence }),
-        (current?.failures ?? 0) + 1,
-    );
-}
+export const recordStageSuccess = stageRecords.answer;
+export const recordStageFailure = stageRecords.fail;
+export const recordStageAbsent = stageRecords.absent;
+export const recordOutcomeFailure = stageRecords.failOutcome;
+export const claimOf = stageRecords.claimOf;
+export const claimIsCurrent = stageRecords.claimIsCurrent;
+export const closeOrphanedDependents = async (): Promise<void> => {
+    await stageRecords.closeDependents();
+};
 
 /** An ask that timed out or threw: a transient failure, so the record retries on its ladder. */
 function unansweredAsk(err: unknown, label: string): Outcome<never> {
@@ -1560,7 +1034,6 @@ export async function redecideEverything(): Promise<{ reopened: number }> {
 }
 
 const ENRICHMENT_FAILURES_KEY = "enrichment-failures";
-const WAITING_KEY_PREFIX = "enrichment-waiting:";
 
 /** Remove each source's waiting alert once no alerted record still waits on it. */
 export async function syncWaitingAlerts(): Promise<void> {

@@ -2,7 +2,7 @@ import Redis from "ioredis";
 import { vibeQueue } from "./enrichmentQueues";
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { recordStageFailure, recordStageSuccess } from "./unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 
 const CHANNEL = "audio:analysis:complete";
 
@@ -64,7 +64,7 @@ export async function startAudioCompletionSubscriber(): Promise<void> {
         // The analyzer writes no state; this event is its report, and the
         // stage record (and the status columns it mirrors) is settled here.
         if (event.status === "failed") {
-            await recordStageFailure(
+            await stageRecords.fail(
                 event.trackId,
                 "analysis",
                 "analyzer",
@@ -78,7 +78,7 @@ export async function startAudioCompletionSubscriber(): Promise<void> {
         }
         if (event.status !== "complete") return;
 
-        await recordStageSuccess(
+        await stageRecords.answer(
             event.trackId,
             "analysis",
             "analyzer",

@@ -5,7 +5,8 @@ import { redisClient } from "../utils/redis";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getSystemSettings, invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { eventBus } from "../services/eventBus";
-import { startEnrichmentNow, recordStageSuccess, recordStageFailure } from "../workers/unifiedEnrichment";
+import { startEnrichmentNow } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
 import { reopenable } from "../services/missingFileStages";
@@ -250,7 +251,7 @@ router.post("/vibe/failure", async (req, res) => {
         // reads TrackStage for track stages, so no EnrichmentFailure row is written.
         // Record the CLAP worker's failure on its retry ladder, so it closes when
         // the ladder runs out.
-        await recordStageFailure(
+        await stageRecords.fail(
             report.trackId,
             "embedding",
             "clap",
@@ -364,7 +365,7 @@ router.post("/vibe/success", async (req, res) => {
 
         // The embedding stage record is the failure record, so answering it here also
         // clears it from the failures list.
-        await recordStageSuccess(report.trackId, "embedding", "clap", { outcome: "embedded" }, report.jobId);
+        await stageRecords.answer(report.trackId, "embedding", "clap", { outcome: "embedded" }, report.jobId);
 
         res.json({ message: "Stale failures resolved" });
         eventBus.emit({ type: "enrichment:progress", userId: "*", payload: { phase: "vibe" } });

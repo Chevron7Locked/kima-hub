@@ -5,7 +5,7 @@
  */
 
 import { prisma } from "../utils/db";
-import { closeOrphanedDependents, recordStageSuccess } from "../workers/unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { closeStagesForMissingTracks } from "../services/missingFileStages";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
@@ -62,10 +62,10 @@ describe("a closed dependency that is later answered", () => {
     it("reopens the sound-vector record it had closed", async () => {
         await putStage(id("t"), "analysis", "failed", false, "PERMANENT");
         await putStage(id("t"), "embedding", "pending", true);
-        await closeOrphanedDependents();
+        await stageRecords.closeDependents();
         expect(await record(id("t"), "embedding")).toMatchObject({ status: "failed", failureClass: "DEPENDENCY_CLOSED" });
 
-        await recordStageSuccess(id("t"), "analysis", "analyzer", { answer: "completed" });
+        await stageRecords.answer(id("t"), "analysis", "analyzer", { answer: "completed" });
         expect(await record(id("t"), "embedding")).toMatchObject({ status: "pending", failureClass: null, retryable: true });
     });
 });
@@ -74,7 +74,7 @@ describe("a closed fingerprint", () => {
     it("leaves identification open: it waits for the fingerprint to settle, not for its output", async () => {
         await putStage(id("t"), "fingerprint", "failed", false, "PERMANENT");
         await putStage(id("t"), "recording", "pending", true);
-        await closeOrphanedDependents();
+        await stageRecords.closeDependents();
         expect(await record(id("t"), "recording")).toMatchObject({ status: "pending", retryable: true });
     });
 });
