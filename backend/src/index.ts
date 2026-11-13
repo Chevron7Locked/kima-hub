@@ -53,7 +53,8 @@ import {
 import { lidarrHealthMonitor } from "./services/lidarrHealth";
 import { combineAnalyzerStatus, heartbeatFresh } from "./utils/analyzerStatus";
 import { errorHandler } from "./middleware/errorHandler";
-import { requireAuth, requireAdmin, invalidateUserCache } from "./middleware/auth";
+import { requireAuth, requireAdmin } from "./middleware/auth";
+import { resetAdminPassword } from "./services/users/accounts";
 import {
     authLimiter,
     apiLimiter,
@@ -311,28 +312,7 @@ async function checkRedisConnection() {
 async function checkPasswordReset() {
     const resetPassword = process.env.ADMIN_RESET_PASSWORD;
     if (!resetPassword) return;
-
-    const bcrypt = await import("bcrypt");
-    const adminUser = await prisma.user.findFirst({
-        where: { role: "admin" },
-        select: { id: true },
-    });
-    if (!adminUser) {
-        logger.warn("[Password Reset] No admin user found");
-        return;
-    }
-
-    const hashedPassword = await bcrypt.hash(resetPassword, 10);
-    await prisma.user.update({
-        where: { id: adminUser.id },
-        data: {
-            passwordHash: hashedPassword,
-            // Revoke every session issued before the reset, as change-password does.
-            tokenVersion: { increment: 1 },
-        },
-    });
-    invalidateUserCache(adminUser.id);
-    logger.warn("[Password Reset] Admin password has been reset via ADMIN_RESET_PASSWORD env var. Remove this env var and restart.");
+    await resetAdminPassword(resetPassword);
 }
 
 async function runStartupTasks() {

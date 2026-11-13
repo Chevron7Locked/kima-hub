@@ -1,21 +1,20 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import bcrypt from "bcrypt";
 import { z } from "zod";
 import axios from "axios";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { encryptField } from "../utils/encryption";
 import { encryptSettings } from "../utils/encryptedFields";
 import { generateRefreshToken, generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
-import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
+import { signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
 
 const router = Router();
 
 const registerSchema = z.object({
     username: z.string().min(3).max(50),
-    password: z.string().min(6),
+    password: z.string(),
 });
 
 const serviceConfigSchema = z.object({
@@ -108,39 +107,16 @@ router.post("/register", async (req, res) => {
         );
         const { username, password } = registerSchema.parse(req.body);
 
-        // Check if any user exists (first user becomes admin)
-        const userCount = await prisma.user.count();
-        const isFirstUser = userCount === 0;
-
-        if (!isFirstUser && !(await registrationOpen())) {
-            return res.status(403).json({ error: "Registration is closed" });
+        const made = await signUp({ username, password, registrationOpen: await registrationOpen() });
+        if (!made.ok) {
+            if (made.reason === "registration-closed") return res.status(403).json({ error: "Registration is closed" });
+            if (made.reason === "username-taken") {
+                logger.debug("[ONBOARDING] Username already taken:", username);
+                return res.status(400).json({ error: "Username already taken" });
+            }
+            return res.status(400).json({ error: `Password must be at least ${made.minimum} characters` });
         }
-
-        // Check if username is taken
-        const existing = await prisma.user.findUnique({
-            where: { username },
-        });
-
-        if (existing) {
-            logger.debug("[ONBOARDING] Username already taken:", username);
-            return res.status(400).json({ error: "Username already taken" });
-        }
-
-        // Create user
-        const passwordHash = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: {
-                username,
-                passwordHash,
-                role: isFirstUser ? "admin" : "user",
-                onboardingComplete: false,
-            },
-        });
-
-        // Create default user settings
-        await prisma.userSettings.create({
-            data: defaultUserSettingsFor(user.id),
-        });
+        const user = made.user;
 
         // Sign the new account in as login does: a JWT and, below, a refresh token
         const token = generateToken({

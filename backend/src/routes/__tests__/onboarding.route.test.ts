@@ -107,6 +107,29 @@ describe("POST /onboarding/register", () => {
         const me = await request(app).get("/onboarding/status").set(bearer(renewed.body.token)).expect(200);
         expect(me.body.needsOnboarding).toBe(true);
     });
+
+    it("answers a name already in use with 'taken', and a short password with the rule", async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
+
+        const taken = await request(app).post("/onboarding/register").send({ username: ADMIN, password: "secret1" }).expect(400);
+        expect(taken.body.error).toBe("Username already taken");
+
+        const short = await request(app).post("/onboarding/register").send({ username: `${P}-short`, password: "12345" }).expect(400);
+        expect(short.body.error).toBe("Password must be at least 6 characters");
+        expect(await prisma.user.count({ where: { username: `${P}-short` } })).toBe(0);
+    });
+
+    it("answers two sign-ups for one name with one account and 'taken' for the other", async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
+
+        const replies = await Promise.all(
+            [1, 2, 3].map(() => request(app).post("/onboarding/register").send({ username: `${P}-race`, password: "secret1" })),
+        );
+
+        expect(replies.map((r) => r.status).sort()).toEqual([200, 400, 400]);
+        expect(replies.filter((r) => r.status === 400).every((r) => r.body.error === "Username already taken")).toBe(true);
+        expect(await prisma.user.count({ where: { username: `${P}-race` } })).toBe(1);
+    });
 });
 
 describe("the service steps", () => {

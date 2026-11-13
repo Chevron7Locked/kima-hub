@@ -2,13 +2,13 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
-import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
+import { changePassword, createAccount } from "../services/users/accounts";
 import {
     requireAuth,
     requireAdmin,
@@ -215,44 +215,22 @@ router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
                 .json({ error: "Current and new password are required" });
         }
 
-        if (newPassword.length < 6) {
-            return res
-                .status(400)
-                .json({ error: "New password must be at least 6 characters" });
-        }
-
-        // Verify current password
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-            select: { id: true, passwordHash: true },
-        });
-
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
-        const valid = await bcrypt.compare(currentPassword, user.passwordHash);
-        if (!valid) {
+        const changed = await changePassword({ userId: req.user!.id, currentPassword, newPassword });
+        if (!changed.ok) {
+            if (changed.reason === "password-too-short") {
+                return res
+                    .status(400)
+                    .json({ error: `New password must be at least ${changed.minimum} characters` });
+            }
+            if (changed.reason === "not-found") {
+                return res.status(404).json({ error: "User not found" });
+            }
             // 401 means "not signed in"; a wrong password from a signed-in user is a bad request.
             return res
                 .status(400)
                 .json({ error: "Current password is incorrect" });
         }
-
-        // A new tokenVersion signs out every other device; this one gets fresh tokens.
-        const newPasswordHash = await bcrypt.hash(newPassword, 10);
-        const updated = await prisma.user.update({
-            where: { id: req.user!.id },
-            data: {
-                passwordHash: newPasswordHash,
-                tokenVersion: { increment: 1 },
-            },
-            select: { id: true, username: true, role: true, tokenVersion: true },
-        });
-        // The auth layer caches the user row, and tokenVersion is what revokes
-        // issued tokens -- without this the old tokens keep working until the
-        // cache TTL elapses.
-        invalidateUserCache(req.user!.id);
+        const updated = changed.user;
 
         res.json({
             message: "Password changed successfully",
@@ -297,40 +275,26 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
                 .json({ error: "Username and password are required" });
         }
 
-        if (password.length < 6) {
-            return res
-                .status(400)
-                .json({ error: "Password must be at least 6 characters" });
-        }
-
         if (role && !["user", "admin"].includes(role)) {
             return res.status(400).json({ error: "Invalid role" });
         }
 
-        // Check if username exists
-        const existing = await prisma.user.findUnique({
-            where: { username },
+        // Skips onboarding: an admin made this account.
+        const made = await createAccount({
+            username,
+            password,
+            role: role || "user",
+            onboardingComplete: true,
         });
-
-        if (existing) {
-            return res.status(400).json({ error: "Username already taken" });
+        if (!made.ok) {
+            if (made.reason === "username-taken") {
+                return res.status(400).json({ error: "Username already taken" });
+            }
+            return res
+                .status(400)
+                .json({ error: `Password must be at least ${made.minimum} characters` });
         }
-
-        // Create user
-        const passwordHash = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: {
-                username,
-                passwordHash,
-                role: role || "user",
-                onboardingComplete: true, // Skip onboarding for created users
-            },
-        });
-
-        // Create default user settings
-        await prisma.userSettings.create({
-            data: defaultUserSettingsFor(user.id),
-        });
+        const user = made.user;
 
         res.json({
             id: user.id,
