@@ -63,85 +63,105 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
 
 // Track backfill state
 let isBackfillRunning = false;
+// A recount asked for while one runs: the running one goes over the artists once more when it finishes.
+let recountAsked = false;
 let backfillProgress = { processed: 0, total: 0, errors: 0 };
 
 export function isBackfillInProgress(): boolean {
   return isBackfillRunning;
 }
 
-/** Recounts every artist in small batches with pauses, so it is safe on a running server. */
+/**
+ * Recounts every artist in small batches with pauses, so it is safe on a running server. Asked for while a recount
+ * runs, it returns at once and the running one goes over the artists once more when it finishes: any number of asks
+ * cost one more pass, and the answer (processed, errors) of the running call covers every pass.
+ */
 export async function backfillAllArtistCounts(
   onProgress?: (processed: number, total: number) => void
 ): Promise<{ processed: number; errors: number }> {
   if (isBackfillRunning) {
-    logger.warn("[ArtistCounts] Backfill already in progress, skipping");
+    recountAsked = true;
+    logger.debug("[ArtistCounts] Backfill already in progress, will run once more when it finishes");
     return { processed: 0, errors: 0 };
   }
 
   isBackfillRunning = true;
-  backfillProgress = { processed: 0, total: 0, errors: 0 };
+  const answer = { processed: 0, errors: 0 };
 
   try {
-    const total = await prisma.artist.count();
-    backfillProgress.total = total;
-    let cursor: string | undefined;
-
-    logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
-
-    while (true) {
-      // Fetch batch of artists using cursor pagination
-      const artists = await prisma.artist.findMany({
-        take: BATCH_SIZE,
-        skip: cursor ? 1 : 0,
-        cursor: cursor ? { id: cursor } : undefined,
-        orderBy: { id: "asc" },
-        select: { id: true, name: true },
-      });
-
-      if (artists.length === 0) break;
-
-      // Process batch
-      for (const artist of artists) {
-        try {
-          await updateArtistCounts(artist.id);
-          backfillProgress.processed++;
-        } catch (error) {
-          logger.error(
-            `[ArtistCounts] Failed to update ${artist.name} (${artist.id}):`,
-            error
-          );
-          backfillProgress.errors++;
-        }
-      }
-
-      cursor = artists[artists.length - 1].id;
-
-      if (onProgress) {
-        onProgress(backfillProgress.processed, total);
-      }
-
-      // Log progress every 500 artists
-      if (backfillProgress.processed % 500 === 0) {
-        logger.info(
-          `[ArtistCounts] Progress: ${backfillProgress.processed}/${total} (${Math.round((backfillProgress.processed / total) * 100)}%)`
-        );
-      }
-
-      // Small delay to avoid overwhelming the database
-      await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
-    }
-
-    logger.info(
-      `[ArtistCounts] Backfill complete: ${backfillProgress.processed} processed, ${backfillProgress.errors} errors`
-    );
-
-    return {
-      processed: backfillProgress.processed,
-      errors: backfillProgress.errors,
-    };
+    do {
+      // Cleared as the pass starts, so an ask made during it earns one more pass.
+      recountAsked = false;
+      const pass = await recountEveryArtist(onProgress);
+      answer.processed += pass.processed;
+      answer.errors += pass.errors;
+    } while (recountAsked);
+    return answer;
   } finally {
     isBackfillRunning = false;
+    recountAsked = false;
   }
+}
+
+async function recountEveryArtist(
+  onProgress?: (processed: number, total: number) => void
+): Promise<{ processed: number; errors: number }> {
+  backfillProgress = { processed: 0, total: 0, errors: 0 };
+
+  const total = await prisma.artist.count();
+  backfillProgress.total = total;
+  let cursor: string | undefined;
+
+  logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
+
+  while (true) {
+    // Fetch batch of artists using cursor pagination
+    const artists = await prisma.artist.findMany({
+      take: BATCH_SIZE,
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
+      orderBy: { id: "asc" },
+      select: { id: true, name: true },
+    });
+
+    if (artists.length === 0) break;
+
+    // Process batch
+    for (const artist of artists) {
+      try {
+        await updateArtistCounts(artist.id);
+        backfillProgress.processed++;
+      } catch (error) {
+        logger.error(
+          `[ArtistCounts] Failed to update ${artist.name} (${artist.id}):`,
+          error
+        );
+        backfillProgress.errors++;
+      }
+    }
+
+    cursor = artists[artists.length - 1].id;
+
+    if (onProgress) {
+      onProgress(backfillProgress.processed, total);
+    }
+
+    // Log progress every 500 artists
+    if (backfillProgress.processed % 500 === 0) {
+      logger.info(
+        `[ArtistCounts] Progress: ${backfillProgress.processed}/${total} (${Math.round((backfillProgress.processed / total) * 100)}%)`
+      );
+    }
+
+    // Small delay to avoid overwhelming the database
+    await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+  }
+
+  logger.info(
+    `[ArtistCounts] Backfill complete: ${backfillProgress.processed} processed, ${backfillProgress.errors} errors`
+  );
+
+  return { processed: backfillProgress.processed, errors: backfillProgress.errors };
 }
 
 /** Whether any artist has never been counted (countsLastUpdated null). */
