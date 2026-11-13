@@ -67,6 +67,9 @@ const app = express();
 app.use(express.json());
 mountAsServer(app, "/api/analysis", analysisRouter, "/api/analysis");
 
+/** The job id of the claim `seedTrack` leaves open: attempt 1, no redelivery. */
+const claimJob = (trackId: string) => `track-${trackId}-embedding-1-r0`;
+
 async function seedTrack(n: string) {
     const trackId = id(n);
     const artist = await prisma.artist.create({ data: { id: id(`art_${n}`), name: "R", identityKey: id(`k_${n}`) } });
@@ -103,7 +106,7 @@ describe("vibe report endpoints", () => {
         const res = await request(app)
             .post("/api/analysis/vibe/success")
             .set("x-internal-secret", secret)
-            .send({ trackId });
+            .send({ trackId, jobId: claimJob(trackId) });
         expect(res.status).toBe(200);
 
         const record = await prisma.trackStage.findFirst({ where: { trackId, stage: "embedding" } });
@@ -119,7 +122,7 @@ describe("vibe report endpoints", () => {
         const res = await request(app)
             .post("/api/analysis/vibe/failure")
             .set("x-internal-secret", secret)
-            .send({ trackId, errorMessage: "onnx runtime aborted", errorCode: "VIBE_EMBEDDING_FAILED" });
+            .send({ trackId, jobId: claimJob(trackId), errorMessage: "onnx runtime aborted", errorCode: "VIBE_EMBEDDING_FAILED" });
         expect(res.status).toBe(200);
 
         const record = await prisma.trackStage.findFirst({ where: { trackId, stage: "embedding" } });
@@ -136,7 +139,7 @@ describe("vibe report endpoints", () => {
         await request(app)
             .post("/api/analysis/vibe/failure")
             .set("x-internal-secret", secret)
-            .send({ trackId, errorMessage: "corrupted audio data in decode", errorCode: "VIBE_EMBEDDING_FAILED" });
+            .send({ trackId, jobId: claimJob(trackId), errorMessage: "corrupted audio data in decode", errorCode: "VIBE_EMBEDDING_FAILED" });
 
         const record = await prisma.trackStage.findFirst({ where: { trackId, stage: "embedding" } });
         expect(record?.status).toBe("failed");
@@ -145,6 +148,20 @@ describe("vibe report endpoints", () => {
         const track = await prisma.track.findUnique({ where: { id: trackId } });
         expect(track?.vibeAnalysisStatus).toBe("permanently_failed");
         await unseed("dmg");
+    });
+
+    it("a report that names no claim is acknowledged and settles nothing", async () => {
+        const trackId = await seedTrack("noclaim");
+        const ok = await request(app).post("/api/analysis/vibe/success").set("x-internal-secret", secret).send({ trackId });
+        const failed = await request(app)
+            .post("/api/analysis/vibe/failure")
+            .set("x-internal-secret", secret)
+            .send({ trackId, errorMessage: "onnx runtime aborted" });
+        expect([ok.status, failed.status]).toEqual([200, 200]);
+
+        expect((await prisma.trackStage.findFirst({ where: { trackId, stage: "embedding" } }))?.status).toBe("working");
+        expect((await prisma.track.findUnique({ where: { id: trackId } }))?.vibeAnalysisStatus).toBe("processing");
+        await unseed("noclaim");
     });
 
     it("reports without this server's secret are refused and write nothing", async () => {

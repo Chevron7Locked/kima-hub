@@ -60,6 +60,8 @@ export async function startAudioCompletionSubscriber(): Promise<void> {
         }
 
         if (!event.trackId) return;
+        if (event.status !== "failed" && event.status !== "complete") return;
+        if (!stageRecords.reportNamesClaim(event.trackId, "analysis", event.jobId)) return;
 
         // The analyzer writes no state; this event is its report, and the
         // stage record (and the status columns it mirrors) is settled here.

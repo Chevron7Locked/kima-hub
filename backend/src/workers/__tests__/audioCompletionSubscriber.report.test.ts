@@ -47,6 +47,9 @@ import { startAudioCompletionSubscriber, stopAudioCompletionSubscriber } from ".
 
 jest.setTimeout(30_000);
 
+/** The job id of the claim `seedTrack` leaves open: attempt 1, no redelivery. */
+const job = (id: string) => `track-${id}-analysis-1-r0`;
+
 async function emit(event: Record<string, unknown>) {
     for (const listener of mockListeners) await listener("audio:analysis:complete", JSON.stringify(event));
 }
@@ -88,7 +91,7 @@ describe("audio completion reports: the analyzer reports, the backend writes", (
 
     it("a completion closes the record and mirrors the column", async () => {
         await seedTrack("trk_sub_done", "processing");
-        await emit({ trackId: "trk_sub_done", filePath: "/tmp/trk_sub_done.flac", status: "complete" });
+        await emit({ trackId: "trk_sub_done", filePath: "/tmp/trk_sub_done.flac", status: "complete", jobId: job("trk_sub_done") });
 
         const record = await prisma.trackStage.findFirst({ where: { trackId: "trk_sub_done", stage: "analysis" } });
         expect(record?.status).toBe("done");
@@ -100,7 +103,7 @@ describe("audio completion reports: the analyzer reports, the backend writes", (
 
     it("an inconclusive failure consumes the attempt and mirrors failed", async () => {
         await seedTrack("trk_sub_fail", "processing");
-        await emit({ trackId: "trk_sub_fail", status: "failed", error: "analysis exceeded 15 minutes" });
+        await emit({ trackId: "trk_sub_fail", status: "failed", error: "analysis exceeded 15 minutes", jobId: job("trk_sub_fail") });
 
         const record = await prisma.trackStage.findFirst({ where: { trackId: "trk_sub_fail", stage: "analysis" } });
         expect(record?.status).toBe("failed");
@@ -115,7 +118,7 @@ describe("audio completion reports: the analyzer reports, the backend writes", (
 
     it("a corruption signature closes the record and mirrors permanently_failed", async () => {
         await seedTrack("trk_sub_dmg", "processing");
-        await emit({ trackId: "trk_sub_dmg", status: "failed", error: "corrupted audio data [DAMAGED]" });
+        await emit({ trackId: "trk_sub_dmg", status: "failed", error: "corrupted audio data [DAMAGED]", jobId: job("trk_sub_dmg") });
 
         const record = await prisma.trackStage.findFirst({ where: { trackId: "trk_sub_dmg", stage: "analysis" } });
         expect(record?.status).toBe("failed");
@@ -126,10 +129,17 @@ describe("audio completion reports: the analyzer reports, the backend writes", (
         await unseed("trk_sub_dmg");
     });
 
-    it("a success after a failure reopens and closes the ladder", async () => {
+    it("a success on the retry after a failure closes the ladder", async () => {
         await seedTrack("trk_sub_retry", "processing");
-        await emit({ trackId: "trk_sub_retry", status: "failed", error: "decode frame failed: transient" });
-        await emit({ trackId: "trk_sub_retry", filePath: "/tmp/x.flac", status: "complete" });
+        await emit({ trackId: "trk_sub_retry", status: "failed", error: "decode frame failed: transient", jobId: job("trk_sub_retry") });
+        // The retry is claimed again (attempt 2) and answers.
+        await prisma.$executeRawUnsafe(
+            `UPDATE "TrackStage" SET status = 'working', attempt = 2 WHERE "trackId" = 'trk_sub_retry' AND stage = 'analysis'`,
+        );
+        await emit({
+            trackId: "trk_sub_retry", filePath: "/tmp/x.flac", status: "complete",
+            jobId: "track-trk_sub_retry-analysis-2-r0",
+        });
 
         const record = await prisma.trackStage.findFirst({ where: { trackId: "trk_sub_retry", stage: "analysis" } });
         expect(record?.status).toBe("done");
@@ -137,5 +147,28 @@ describe("audio completion reports: the analyzer reports, the backend writes", (
         expect(track?.analysisStatus).toBe("completed");
         expect(track?.analysisError).toBeNull();
         await unseed("trk_sub_retry");
+    });
+
+    it("ignores a report that names no claim: nothing is settled and no record is made", async () => {
+        await seedTrack("trk_sub_open", "processing");
+        await emit({ trackId: "trk_sub_open", status: "complete" });
+        await emit({ trackId: "trk_sub_open", status: "failed", error: "decode frame failed: transient" });
+        expect((await prisma.trackStage.findFirst({ where: { trackId: "trk_sub_open", stage: "analysis" } }))?.status).toBe("working");
+        await unseed("trk_sub_open");
+
+        // No record yet: a claim-less report must not create an answered one.
+        const artist = await prisma.artist.create({ data: { id: "art_trk_sub_new", name: "A new", identityKey: "k_trk_sub_new" } });
+        const album = await prisma.album.create({
+            data: { id: "alb_trk_sub_new", rgMbid: "rg_trk_sub_new", artistId: artist.id, title: "Alb new", primaryType: "Album" },
+        });
+        await prisma.track.create({
+            data: {
+                id: "trk_sub_new", albumId: album.id, title: "T new", trackNo: 1, duration: 200,
+                filePath: "/tmp/trk_sub_new.flac", fileModified: new Date(), fileSize: 1000,
+            },
+        });
+        await emit({ trackId: "trk_sub_new", status: "complete" });
+        expect(await prisma.trackStage.count({ where: { trackId: "trk_sub_new" } })).toBe(0);
+        await unseed("trk_sub_new");
     });
 });

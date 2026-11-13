@@ -204,6 +204,10 @@ router.post("/vibe/failure", async (req, res) => {
     try {
         const report = await analyzerReport(req, res);
         if (!report) return;
+        if (!stageRecords.reportNamesClaim(report.trackId, "embedding", report.jobId)) {
+            res.json({ message: "Report names no claim; ignored" });
+            return;
+        }
         const { trackName, errorMessage, errorCode } = req.body;
 
         // The stage record is the only record of this failure: the failures API
@@ -310,6 +314,10 @@ router.post("/vibe/success", async (req, res) => {
     try {
         const report = await analyzerReport(req, res);
         if (!report) return;
+        if (!stageRecords.reportNamesClaim(report.trackId, "embedding", report.jobId)) {
+            res.json({ message: "Report names no claim; ignored" });
+            return;
+        }
 
         // The embedding stage record is the failure record, so answering it here also
         // clears it from the failures list.

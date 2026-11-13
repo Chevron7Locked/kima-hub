@@ -117,12 +117,45 @@ const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retr
 /** What the analyzers and fpcalc say when a track's file is not on disk. */
 const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 
+// ── Deadlocks ────────────────────────────────────────────────────────────
+
+/** Postgres picked this transaction as a deadlock victim (SQLSTATE 40P01, through Prisma's raw-query or transaction error). */
+function isDeadlock(err: unknown): boolean {
+    const e = err as { code?: string; meta?: { code?: string }; message?: string } | null;
+    return e?.meta?.code === "40P01" || e?.code === "40P01" || e?.code === "P2034" || /deadlock detected/i.test(e?.message ?? "");
+}
+
+/**
+ * Runs a move's own transaction, and once more when Postgres picked it as a deadlock victim: the other transaction
+ * has finished by then and the rolled-back move left nothing behind. Any other failure, and a second deadlock, throw.
+ * A move that joins its caller's transaction does not use this: the caller owns the retry.
+ */
+async function retryOnDeadlock<T>(what: string, run: () => Promise<T>): Promise<T> {
+    try {
+        return await run();
+    } catch (err) {
+        if (!isDeadlock(err)) throw err;
+        logger.warn(`[Enrichment] ${what} lost a transaction conflict (deadlock); trying once more`);
+        return run();
+    }
+}
+
 // ── Claim ids ────────────────────────────────────────────────────────────
 
 /** The attempt a report answers, read from the per-attempt job id `<key>-<attempt>-r<redelivered>`. */
 export function claimOf(jobId: string | undefined): { attempt: number; redelivered: number } | null {
     const match = jobId ? /-(\d+)-r(\d+)$/.exec(jobId) : null;
     return match ? { attempt: Number(match[1]), redelivered: Number(match[2]) } : null;
+}
+
+/**
+ * Whether an analyzer's report names the claim it answers. A report that names none is logged and ignored by its
+ * caller: the analyzers run outside this process and only the claim says whose attempt they answer.
+ */
+export function reportNamesClaim(trackId: string, stage: StageName, jobId: string | undefined): boolean {
+    if (claimOf(jobId)) return true;
+    logger.warn(`[Enrichment] ${stage}: ignored a report for ${trackId} that names no claim (${jobId ?? "no job id"})`);
+    return false;
 }
 
 /**
@@ -382,7 +415,8 @@ export async function release(
 
 /**
  * Answers a question `done` by `source`, with evidence. With a job id it settles only that claim; without one it
- * creates or settles the record, unless a person parked it. Idempotent. A dependent closed because this stage had
+ * creates or settles the record, unless a person parked it or a claim is open on it (only the claim's holder can say
+ * its attempt is answered). Idempotent. A dependent closed because this stage had
  * failed for good (`DEPENDENCY_CLOSED`) is asked again, and a sound answer re-blends the song's valence and arousal.
  */
 export async function answer(
@@ -430,7 +464,7 @@ export async function answer(
                           evidence = EXCLUDED.evidence,
                           "startedAt" = COALESCE("TrackStage"."startedAt", now()),
                           "finishedAt" = now()
-                    WHERE "TrackStage".status <> 'blocked'`,
+                    WHERE "TrackStage".status NOT IN ('blocked', 'working')`,
                   recordId(trackId, stage),
                   trackId,
                   stage,
@@ -485,7 +519,7 @@ export async function settleLandedAnswers(stage: StageName): Promise<number> {
             ? `t."analyzedAt" >= ts."startedAt"`
             : `EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId" AND te.analyzed_at >= ts."startedAt")`;
     const syncedFrom = stage === "analysis" ? "Track.analyzedAt" : "track_embeddings";
-    return prisma.$transaction(async (tx) => {
+    return retryOnDeadlock(`${stage}: settling landed answers`, () => prisma.$transaction(async (tx) => {
         const answered = await tx.$queryRawUnsafe<Array<{ trackId: string }>>(
             `UPDATE "TrackStage" ts
                 SET status = 'done',
@@ -510,7 +544,7 @@ export async function settleLandedAnswers(stage: StageName): Promise<number> {
         );
         if (answered.length > 0) await afterAnswered(tx, stage, answered.map((r) => r.trackId));
         return answered.length;
-    }, BULK_TX);
+    }, BULK_TX));
 }
 
 /** Records "the sources have nothing" as a `done` answer with evidence of what was asked, so a correct "no" does not burn the retry ladder. */
@@ -526,12 +560,6 @@ export async function absent(
 
 
 // ── A file that is gone ──────────────────────────────────────────────────
-
-/** Postgres picked this transaction as a deadlock victim (SQLSTATE 40P01, through Prisma's raw-query or transaction error). */
-function isDeadlock(err: unknown): boolean {
-    const e = err as { code?: string; meta?: { code?: string }; message?: string } | null;
-    return e?.meta?.code === "40P01" || e?.code === "40P01" || e?.code === "P2034" || /deadlock detected/i.test(e?.message ?? "");
-}
 
 /**
  * An analyzer found no file for this track. It is flagged missing now and its stage records close (the reporting one
@@ -574,14 +602,7 @@ async function flagVanishedTrack(
         await closeForMissingFiles(tx, [trackId]);
         return true;
     };
-    let flagged: boolean;
-    try {
-        flagged = await prisma.$transaction(flag);
-    } catch (err) {
-        if (!isDeadlock(err)) throw err;
-        logger.warn(`[Enrichment] ${stage}: ${trackId} flag lost a transaction conflict (deadlock); trying once more`);
-        flagged = await prisma.$transaction(flag);
-    }
+    const flagged = await retryOnDeadlock(`${stage}: ${trackId} flag`, () => prisma.$transaction(flag));
     if (!flagged) {
         logger.debug(`[Enrichment] ${stage}: ignored a file-missing report for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
         return "stale";
@@ -608,15 +629,19 @@ interface OpenRecord {
     evidence: Record<string, unknown> | null;
 }
 
-/** A report answers nothing when its record is answered or closed, or when it names a claim other than the open one. */
+/**
+ * A report answers nothing when its record is answered or closed, when it names a claim other than the open one, or
+ * when it names no claim and one is open: only the claim's holder can say its attempt failed.
+ */
 function reportIsStale(
     current: Pick<OpenRecord, "status" | "retryable" | "attempt" | "redelivered"> | undefined,
     held: { attempt: number; redelivered: number } | null,
 ): boolean {
     const settled = current?.status === "done" || current?.status === "blocked"
         || (current?.status === "failed" && !current.retryable);
-    const stale = held !== null && !(current?.status === "working"
-        && current.attempt === held.attempt && current.redelivered === held.redelivered);
+    const stale = held === null
+        ? current?.status === "working"
+        : !(current?.status === "working" && current.attempt === held.attempt && current.redelivered === held.redelivered);
     return settled || stale;
 }
 
@@ -643,7 +668,7 @@ async function failureMaySettle(
     }
     const writeGuard = `"TrackStage".status NOT IN ('done', 'blocked')
                 AND NOT ("TrackStage".status = 'failed' AND "TrackStage".retryable = false)
-                ${held ? `AND "TrackStage".status = 'working' AND "TrackStage".attempt = ${held.attempt} AND "TrackStage".redelivered = ${held.redelivered}` : ""}`;
+                ${held ? `AND "TrackStage".status = 'working' AND "TrackStage".attempt = ${held.attempt} AND "TrackStage".redelivered = ${held.redelivered}` : `AND "TrackStage".status <> 'working'`}`;
     return { current, writeGuard };
 }
 
@@ -897,7 +922,7 @@ const BULK_TX = { timeout: 5 * 60_000, maxWait: 30_000 };
  * Returns how many it closed.
  */
 export async function closeDependents(): Promise<number> {
-    return prisma.$transaction(async (tx) => {
+    return retryOnDeadlock("closing dependents", () => prisma.$transaction(async (tx) => {
         let total = 0;
         for (const [dependent, prerequisite] of Object.entries(PREREQUISITE_STAGE)) {
             // Only a stage that needs the other's output is left unanswerable by its closing; one
@@ -941,7 +966,7 @@ export async function closeDependents(): Promise<number> {
             }
         }
         return total;
-    }, BULK_TX);
+    }, BULK_TX));
 }
 
 /**
@@ -975,7 +1000,7 @@ export async function closeForMissingFiles(within?: Tx, trackIds?: string[]): Pr
         await mirrorMoved(tx, closed);
         return closed.length;
     };
-    return within ? run(within) : prisma.$transaction(run, BULK_TX);
+    return within ? run(within) : retryOnDeadlock("closing records of missing files", () => prisma.$transaction(run, BULK_TX));
 }
 
 export type RecordStatus = "pending" | "working" | "done" | "failed" | "blocked";
@@ -1063,7 +1088,7 @@ export async function askAgain(spec: AskAgainSpec, within?: Tx): Promise<number>
         await mirrorMoved(tx, reopened);
         return reopened.length;
     };
-    return within ? run(within) : prisma.$transaction(run, BULK_TX);
+    return within ? run(within) : retryOnDeadlock("asking again", () => prisma.$transaction(run, BULK_TX));
 }
 
 /**

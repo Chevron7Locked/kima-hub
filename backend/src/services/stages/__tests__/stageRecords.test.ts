@@ -339,6 +339,17 @@ describe("answer", () => {
         await expectColumnsMatch(id);
     });
 
+    it("settles nothing on a working record when the report names no claim", async () => {
+        const id = await seedTrack("a8");
+        // The record is re-claimed (attempt 2): a report that names no claim cannot say whose attempt it answers.
+        await stageRecords.claim(id, "embedding", { jobKey: `track-${id}-embedding` });
+
+        await stageRecords.answer(id, "embedding", "clap", { outcome: "embedded" });
+
+        expect((await record(id, "embedding"))?.status).toBe("working");
+        await expectColumnsMatch(id);
+    });
+
     it("never overwrites a record a person parked", async () => {
         const id = await seedTrack("a4");
         await put(id, "analysis", "blocked", { retryable: false, decided: true });
@@ -447,6 +458,29 @@ describe("fail", () => {
         expect((await record(done, "analysis"))?.status).toBe("done");
         await expectColumnsMatch(stale);
         await expectColumnsMatch(done);
+    });
+
+    it("settles nothing on a working record when the report names no claim, whatever the error", async () => {
+        const id = await seedTrack("f10");
+        await stageRecords.claim(id, "analysis", { jobKey: `track-${id}-analysis` });
+
+        await stageRecords.fail(id, "analysis", "analyzer", new Error("upstream hiccup: transient"));
+        await stageRecords.fail(id, "analysis", "analyzer", new Error("corrupted audio data [DAMAGED]"));
+        await stageRecords.failOutcome(id, "analysis", "analyzer", { kind: "permanent", error: { code: "X", message: "no" } });
+
+        expect((await record(id, "analysis"))?.status).toBe("working");
+        await expectColumnsMatch(id);
+    });
+
+    it("still settles a record that is not working when the report names no claim", async () => {
+        const id = await seedTrack("f11");
+        await put(id, "analysis", "failed", { attempt: 1, failures: 1, retryable: true });
+        await setColumns(id, "failed", "pending");
+
+        await stageRecords.fail(id, "analysis", "analyzer", new Error("upstream hiccup: transient"));
+
+        expect(await record(id, "analysis")).toMatchObject({ status: "failed", failures: 2 });
+        await expectColumnsMatch(id);
     });
 
     it("parks a rate-limited question pending with no attempt used, and pauses only its source", async () => {
@@ -1022,5 +1056,101 @@ describe("decide", () => {
         await stageRecords.askAgain({ stages: ["analysis"], trackIds: [id], clearDecision: true, evidence: { reason: "undo" } });
         expect(await record(id, "analysis")).toMatchObject({ status: "pending", decidedAt: null, decidedBy: null });
         await expectColumnsMatch(id);
+    });
+});
+
+describe("a move that loses a deadlock", () => {
+    const deadlock = () => Object.assign(new Error("deadlock detected"), { code: "P2010", meta: { code: "40P01" } });
+    afterEach(() => jest.restoreAllMocks());
+
+    /** The four set-based moves, each with a song they have work on. */
+    const moves: Array<{
+        name: string;
+        seed: () => Promise<string>;
+        run: () => Promise<number>;
+        settled: (id: string) => Promise<void>;
+    }> = [
+        {
+            name: "settleLandedAnswers",
+            seed: async () => {
+                const id = await seedTrack("dl1");
+                await put(id, "analysis", "working", { attempt: 1, nextRetryAt: new Date(Date.now() + 600_000) });
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "TrackStage" SET "startedAt" = now() - interval '5 minutes' WHERE "trackId" = $1`, id,
+                );
+                await prisma.track.update({ where: { id }, data: { analyzedAt: new Date(), analysisStatus: "processing" } });
+                return id;
+            },
+            run: () => stageRecords.settleLandedAnswers("analysis"),
+            settled: async (id) => expect((await record(id, "analysis"))?.status).toBe("done"),
+        },
+        {
+            name: "closeDependents",
+            seed: async () => {
+                const id = await seedTrack("dl2");
+                await put(id, "analysis", "failed", { retryable: false, failureClass: "DAMAGED" });
+                await put(id, "embedding", "pending");
+                await setColumns(id, "permanently_failed", "pending");
+                return id;
+            },
+            run: () => stageRecords.closeDependents(),
+            settled: async (id) => expect((await record(id, "embedding"))?.failureClass).toBe("DEPENDENCY_CLOSED"),
+        },
+        {
+            name: "askAgain",
+            seed: async () => {
+                const id = await seedTrack("dl3");
+                await put(id, "analysis", "failed", { attempt: 3, failures: 3, retryable: false });
+                await setColumns(id, "permanently_failed", "pending");
+                return id;
+            },
+            run: () => stageRecords.askAgain({ stages: ["analysis"], trackIds: [`${PREFIX}_dl3`], evidence: { reason: "test" } }),
+            settled: async (id) => expect((await record(id, "analysis"))?.status).toBe("pending"),
+        },
+        {
+            name: "closeForMissingFiles",
+            seed: async () => {
+                const id = await seedTrack("dl4", { missing: true });
+                await put(id, "analysis", "pending");
+                return id;
+            },
+            run: () => stageRecords.closeForMissingFiles(),
+            settled: async (id) => expect((await record(id, "analysis"))?.failureClass).toBe("FILE_MISSING"),
+        },
+    ];
+
+    it.each(moves)("$name tries once more and lands", async ({ seed, run, settled }) => {
+        const id = await seed();
+        const spy = jest.spyOn(prisma, "$transaction").mockRejectedValueOnce(deadlock() as never);
+
+        expect(await run()).toBeGreaterThanOrEqual(1);
+
+        expect(spy).toHaveBeenCalledTimes(2);
+        await settled(id);
+        await expectColumnsMatch(id);
+    });
+
+    it.each(moves)("$name gives up after that one retry, and does not retry any other failure", async ({ seed, run }) => {
+        await seed();
+        const spy = jest.spyOn(prisma, "$transaction")
+            .mockRejectedValueOnce(deadlock() as never)
+            .mockRejectedValueOnce(deadlock() as never);
+        await expect(run()).rejects.toThrow("deadlock detected");
+        expect(spy).toHaveBeenCalledTimes(2);
+
+        spy.mockReset();
+        spy.mockRejectedValueOnce(new Error("connection reset") as never);
+        await expect(run()).rejects.toThrow("connection reset");
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the retry to the caller when the move joins the caller's transaction", async () => {
+        const id = await seedTrack("dl5", { missing: true });
+        await put(id, "analysis", "pending");
+        const spy = jest.spyOn(prisma, "$transaction");
+        await prisma.$transaction(async (tx) => {
+            await stageRecords.closeForMissingFiles(tx, [id]);
+        });
+        expect(spy).toHaveBeenCalledTimes(1);
     });
 });
