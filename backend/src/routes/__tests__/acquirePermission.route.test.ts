@@ -43,8 +43,8 @@ function app() {
 const as = (id: string, role: "user" | "admin") =>
     `Bearer ${generateToken({ id, username: id, role, tokenVersion: 0 })}`;
 
-// The one setting these cases read is the member-acquire toggle: beforeAll sets it off and afterAll puts it back,
-// so a row an earlier file on this worker left behind (a Lidarr, a public address) changes no answer here.
+// The one setting these cases read is the member-acquire toggle: beforeAll sets it off and afterAll puts back what
+// it found, so a row an earlier file on this worker left behind (a Lidarr, a public address) changes no answer here.
 const setToggle = async (allowMemberAcquire: boolean) => {
     await prisma.systemSettings.upsert({
         where: { id: "default" },
@@ -54,15 +54,18 @@ const setToggle = async (allowMemberAcquire: boolean) => {
     invalidateSystemSettingsCache();
 };
 
+let foundToggle: boolean | undefined;
+
 beforeAll(async () => {
+    foundToggle = (await prisma.systemSettings.findUnique({ where: { id: "default" } }))?.allowMemberAcquire;
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
     await prisma.user.create({ data: { id: ADMIN, username: ADMIN, passwordHash: "x", role: "admin", tokenVersion: 0 } });
     await setToggle(false);
 });
 
 afterAll(async () => {
-    // Leave the shared singleton exactly as a fresh install would have it.
-    await setToggle(false);
+    // Leave the shared singleton as it was found (a fresh install has the toggle off).
+    await setToggle(foundToggle ?? false);
     await prisma.user.deleteMany({ where: { id: { in: [USER, ADMIN] } } });
     await closeEngineConnections();
 });

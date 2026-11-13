@@ -4,7 +4,7 @@
  * monitoring this album" request carried.
  */
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "./lidarrReplay";
-import { useLidarr } from "./lidarrSettings";
+import { useLidarr, useNoLidarr } from "./lidarrSettings";
 
 export function useLidarrCancelScenario(): { unmonitored: () => any[] } {
     let lidarr!: LidarrReplay;
@@ -15,6 +15,9 @@ export function useLidarrCancelScenario(): { unmonitored: () => any[] } {
     });
 
     afterEach(() => lidarr.close());
+
+    // The settings row outlives the file on this worker: leave no Lidarr on it.
+    afterAll(useNoLidarr);
 
     return {
         unmonitored: () =>

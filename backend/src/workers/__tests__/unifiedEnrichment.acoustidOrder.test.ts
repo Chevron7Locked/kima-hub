@@ -323,12 +323,13 @@ describe("enrichSingleTrack: the identification order", () => {
             evidence: { fingerprint: FINGERPRINT },
         });
 
+        const before = await trackRow();
         const result = await enrichSingleTrack(TRACK_ID);
 
         // Nothing matched — an answer, not a failure: the record settles
         // `done` on the no-match evidence, and the Track row is not written.
         expect(result).toBe("no_match");
-        expect((await trackRow()).recordingMbid).toBeNull();
+        expect(await trackRow()).toEqual(before);
         expect(mockPersistAcoustidFingerprint).toHaveBeenCalledWith(TRACK_ID, FINGERPRINT);
         expect(await stageWrittenDone("acoustid")).toBe(true);
     });
