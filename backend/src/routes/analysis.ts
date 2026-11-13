@@ -85,8 +85,8 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
             reopenableOnly: true,
             evidence: { reopenedBy: "retry-failed" },
         });
-        const failedTracks = { count: await reopen(true) };
-        const permFailedTracks = { count: await reopen(false) };
+        const failed = await reopen(true);
+        const permanentlyFailed = await reopen(false);
 
         // Mark related enrichment failures as resolved
         await prisma.enrichmentFailure.updateMany({
@@ -100,12 +100,12 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
             },
         });
 
-        const totalReset = failedTracks.count + permFailedTracks.count;
+        const totalReset = failed + permanentlyFailed;
         res.json({
             message: `Reset ${totalReset} failed tracks to pending`,
             reset: totalReset,
-            failed: failedTracks.count,
-            permanentlyFailed: permFailedTracks.count,
+            failed,
+            permanentlyFailed,
         });
     } catch (error: any) {
         logger.error("Retry failed error:", error);

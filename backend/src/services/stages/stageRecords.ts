@@ -7,7 +7,7 @@
  * record and those columns in one transaction, so they cannot disagree. Analyzer reports, the retry and vibe-start
  * routes, restart, the scanner, album identification, the failure view and the missing-file closure go through here.
  * The scheduler's inline claim and column writes still write records themselves until they move behind these moves
- * (ticket 30).
+ * (the scheduler rework).
  *
  * Moves:
  * - `claim` / `release`: a worker is handed the question for a lease, or hands it back.
@@ -903,7 +903,8 @@ export async function askAgain(spec: AskAgainSpec, within?: Tx): Promise<number>
         ? ""
         : `, evidence = ${spec.evidence === null ? "NULL" : `${p(JSON.stringify(spec.evidence))}::jsonb`}`;
     const picked = `SELECT ts.id FROM "TrackStage" ts
-              WHERE ${where.join("\n                AND ")}${spec.limit !== undefined ? `\n              LIMIT ${Math.max(0, Math.floor(spec.limit))}` : ""}`;
+              WHERE ${where.join("\n                AND ")}${spec.limit !== undefined ? `\n              LIMIT ${Math.max(0, Math.floor(spec.limit))}` : ""}
+              FOR UPDATE OF ts`; // locks the picked rows and re-checks them, so a record claimed meanwhile is not reset
 
     const run = async (tx: Tx): Promise<number> => {
         const reopened = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
