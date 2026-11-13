@@ -55,6 +55,12 @@ compatRouter.all("/deleteInternetRadioStation.view", (req: Request, res: Respons
     notSupported(req, res, "Internet radio")
 );
 
+// Accounts are managed on the web, never over Subsonic (Kevin, 2026-11-11). getUser and getUsers still answer.
+compatRouter.all(
+    ["/changePassword.view", "/createUser.view", "/updateUser.view", "/deleteUser.view"],
+    (req: Request, res: Response) => notSupported(req, res, "Account management")
+);
+
 // Wrapped for the same reason as createShare below: the user lookup can reject
 // (a dropped connection, a pool timeout), and an unwrapped rejection in
 // Express 4 answers nothing at all.

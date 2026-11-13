@@ -1,7 +1,6 @@
 /**
  * Subsonic auth over real HTTP and Postgres: a 2FA account cannot log in with
- * `p=` alone, startScan.view needs an admin, and changePassword.view refuses a
- * change made with an API key.
+ * `p=` alone, and startScan.view needs an admin.
  */
 import express from "express";
 import request from "supertest";
@@ -179,85 +178,5 @@ describe("startScan.view admin check", () => {
         const body = res.body["subsonic-response"];
         // The scan job itself is queued; only the admin check is under test.
         expect(body.error?.code).not.toBe(50);
-    });
-});
-
-describe("changePassword.view with an API key", () => {
-    it("refuses a self-change made with an API key", async () => {
-        const user = await mkUser("selfApiKey");
-        const { key } = await createApiKey(user.id, "test device");
-
-        const res = await request(app)
-            .get("/rest/changePassword.view")
-            .query({ u: user.username, apiKey: key, username: user.username, password: "new-password", f: "json", v: "1.16.1", c: "test" });
-
-        const body = res.body["subsonic-response"];
-        expect(body.status).toBe("failed");
-        expect(body.error.code).toBe(50); // NOT_AUTHORIZED
-
-        // The stored password is unchanged.
-        const stillOldPassword = await bcrypt.compare(
-            PLAIN_PASSWORD,
-            (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).passwordHash,
-        );
-        expect(stillOldPassword).toBe(true);
-    });
-
-    // A key sent through p= is still a key, and gets the same restriction.
-    it("refuses a self-change made with an API key sent as p=", async () => {
-        const user = await mkUser("selfApiKeyViaP");
-        const { key } = await createApiKey(user.id, "test device");
-
-        const res = await request(app)
-            .get("/rest/changePassword.view")
-            .query({ u: user.username, p: key, username: user.username, password: "new-password", f: "json", v: "1.16.1", c: "test" });
-
-        const body = res.body["subsonic-response"];
-        expect(body.status).toBe("failed");
-        expect(body.error.code).toBe(50); // NOT_AUTHORIZED
-
-        const stillOldPassword = await bcrypt.compare(
-            PLAIN_PASSWORD,
-            (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).passwordHash,
-        );
-        expect(stillOldPassword).toBe(true);
-    });
-
-    it("accepts a self-change made with the account password", async () => {
-        const user = await mkUser("selfPassword");
-        const res = await request(app)
-            .get("/rest/changePassword.view")
-            .query({ u: user.username, p: PLAIN_PASSWORD, username: user.username, password: "new-password-2", f: "json", v: "1.16.1", c: "test" });
-
-        expect(res.body["subsonic-response"].status).toBe("ok");
-        const nowMatchesNew = await bcrypt.compare(
-            "new-password-2",
-            (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).passwordHash,
-        );
-        expect(nowMatchesNew).toBe(true);
-    });
-
-    it("lets an admin change another user's password with an API key", async () => {
-        seq += 1;
-        const admin = await prisma.user.create({
-            data: {
-                username: `subauth_admin2_${seq}`,
-                passwordHash: await bcrypt.hash(PLAIN_PASSWORD, 10),
-                role: "admin",
-            },
-        });
-        const { key } = await createApiKey(admin.id, "admin device");
-        const target = await mkUser("targetOfAdmin");
-
-        const res = await request(app)
-            .get("/rest/changePassword.view")
-            .query({ u: admin.username, apiKey: key, username: target.username, password: "admin-set-this", f: "json", v: "1.16.1", c: "test" });
-
-        expect(res.body["subsonic-response"].status).toBe("ok");
-        const targetNowMatches = await bcrypt.compare(
-            "admin-set-this",
-            (await prisma.user.findUniqueOrThrow({ where: { id: target.id } })).passwordHash,
-        );
-        expect(targetNowMatches).toBe(true);
     });
 });

@@ -10,8 +10,8 @@ declare global {
     // eslint-disable-next-line @typescript-eslint/no-namespace
     namespace Express {
         interface Request {
-            /** Which credential authenticated this Subsonic request. changePassword.view
-             * refuses a self-change made with an API key. */
+            /** Which credential authenticated this Subsonic request: an app key must not be able to do what
+             * only the account password may (no route reads this since Subsonic stopped managing accounts). */
             subsonicAuthMethod?: "password" | "apiKey";
         }
     }
