@@ -377,7 +377,14 @@ router.post(
                     return res.json({ success: false, newJobId: job.id, error: target.problem });
                 }
 
-                const matches = await findSources(job, pendingTrack);
+                let matches: Awaited<ReturnType<typeof findSources>>;
+                try {
+                    matches = await findSources(job, pendingTrack);
+                } catch (error: any) {
+                    // findSources has already failed the job: the user sees it and can retry again.
+                    logger.error(`[Retry] Soulseek search for job ${job.id} failed:`, error);
+                    return res.json({ success: false, newJobId: job.id, error: error?.message || "Soulseek search failed" });
+                }
                 if (matches.length === 0) {
                     return res.json({ success: false, newJobId: job.id, error: NO_SOURCES });
                 }
@@ -532,12 +539,13 @@ router.post(
                     // The replacement could not start: it fails, so the user sees it and can retry again.
                     logger.error(`[Retry] Could not start job ${newJobRecord.id}:`, error);
                     const message = error?.message || "Retry could not start";
-                    await downloadJobs.fail([newJobRecord], message);
+                    await downloadJobs.fail([newJobRecord], message).catch((failError) => logger.error(`[Retry] Could not fail job ${newJobRecord.id}:`, failError));
                     return res.json({ success: false, newJobId: newJobRecord.id, error: message });
                 }
             }
 
-            if (!failedJob.targetMbid) {
+            const targetMbid = failedJob.targetMbid;
+            if (!targetMbid) {
                 return res
                     .status(400)
                     .json({ error: "Cannot retry: missing album MBID" });
@@ -547,7 +555,7 @@ router.post(
             const existingActiveJob = await prisma.downloadJob.findFirst({
                 where: {
                     userId: req.user!.id,
-                    targetMbid: failedJob.targetMbid,
+                    targetMbid,
                     status: { in: ["pending", "processing"] },
                     cleared: { not: true },
                 },
@@ -575,7 +583,7 @@ router.post(
                 return downloadJobs.create({
                     userId: req.user!.id,
                     type: failedJob.type,
-                    targetMbid: failedJob.targetMbid!,
+                    targetMbid,
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     metadata: downloadJobs.withoutFailureMarks(metadata) as any,
@@ -592,14 +600,14 @@ router.post(
                     newJobRecord.id,
                     artistName,
                     albumTitle,
-                    failedJob.targetMbid,
+                    targetMbid,
                     false // isDiscovery
                 );
             } catch (error: any) {
                 // The replacement could not start: it fails, so the user sees it and can retry again.
                 logger.error(`[Retry] Could not start job ${newJobRecord.id}:`, error);
                 result = { success: false, error: error?.message || "Retry could not start" };
-                await downloadJobs.fail([newJobRecord], result.error!);
+                await downloadJobs.fail([newJobRecord], result.error!).catch((failError) => logger.error(`[Retry] Could not fail job ${newJobRecord.id}:`, failError));
             }
 
             res.json({

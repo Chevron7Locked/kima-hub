@@ -251,9 +251,24 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         const failed = await failedRetryOf(pt.id);
         mockSearch.mockRejectedValue(new Error("slskd exploded"));
 
-        await retryFromActivity(failed.id).expect(500);
+        const res = await retryFromActivity(failed.id).expect(200);
 
-        const [, replacement] = await jobsFor(pt.id);
-        expect(replacement).toMatchObject({ status: "failed", error: "slskd exploded", cleared: false });
+        expect(res.body).toMatchObject({ success: false, error: "slskd exploded" });
+        const [old, replacement] = await jobsFor(pt.id);
+        expect(replacement).toMatchObject({ id: res.body.newJobId, status: "failed", error: "slskd exploded", cleared: false });
+        expect(old.cleared).toBe(true);
+    });
+
+    it("fails the new job, which stays on the list, when Soulseek is not set up", async () => {
+        const pt = await pending("Dinosaur Act");
+        const failed = await failedRetryOf(pt.id);
+        mockAvailable.mockResolvedValue(false);
+
+        const res = await retryFromActivity(failed.id).expect(200);
+
+        expect(res.body).toMatchObject({ success: false, error: "Soulseek is turned off or not set up" });
+        const [old, replacement] = await jobsFor(pt.id);
+        expect(replacement).toMatchObject({ id: res.body.newJobId, status: "failed", cleared: false });
+        expect(old.cleared).toBe(true);
     });
 });
