@@ -3,7 +3,6 @@ import path from "path";
 import fs from "fs";
 import axios from "axios";
 import { logger } from "../utils/logger";
-import { requireAuth, requireAdmin } from "../middleware/auth";
 import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
@@ -24,7 +23,7 @@ import { safeError } from "../utils/errors";
 const router = Router();
 
 // Any signed-in user: the server's public address, and whether this user may start downloads.
-router.get("/public-config", requireAuth, async (req, res) => {
+router.get("/public-config", async (req, res) => {
   try {
     const settings = await prisma.systemSettings.findUnique({
       where: { id: "default" },
@@ -38,9 +37,6 @@ router.get("/public-config", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to get server config" });
   }
 });
-
-// Only admins can access system settings (requireAdmin includes auth check)
-router.use(requireAdmin);
 
 const systemSettingsSchema = z.object({
   // Download Services

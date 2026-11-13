@@ -22,10 +22,11 @@ import { config, useMusicFolder } from "../../config";
 import { eventBus } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const startFolder = config.music.musicPath;
 const ADMIN = "zz-slsk-job-admin";
-const app = express().use(express.json()).use("/soulseek", soulseekRoutes);
+const app = mountAsServer(express().use(express.json()), "/soulseek", soulseekRoutes, "/api/soulseek");
 const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 let folder: string;
 

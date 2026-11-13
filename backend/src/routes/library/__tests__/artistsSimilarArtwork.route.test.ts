@@ -48,6 +48,7 @@ import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
 import { normalizeArtistName } from "../../../services/artistIdentity";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-similar-art";
 
@@ -60,7 +61,7 @@ function makeApp() {
         req.user = { id: `${P}-user`, role: "admin" };
         next();
     });
-    app.use("/library", libraryArtistRoutes);
+    mountAsServer(app, "/library", libraryArtistRoutes, "/api/library", { standIn: true });
     return app;
 }
 

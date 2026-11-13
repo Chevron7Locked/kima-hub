@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAdmin } from "../../middleware/auth";
 import { logger } from "../../utils/logger";
 import {
   isImageBackfillNeeded,
@@ -26,7 +25,7 @@ router.get("/image-backfill/status", async (_req, res) => {
   }
 });
 
-router.post("/image-backfill/start", requireAdmin, async (_req, res) => {
+router.post("/image-backfill/start", async (_req, res) => {
   try {
     const progress = getImageBackfillProgress();
     if (progress.inProgress) {

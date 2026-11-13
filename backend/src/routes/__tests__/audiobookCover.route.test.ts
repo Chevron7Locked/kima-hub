@@ -54,6 +54,7 @@ import path from "path";
 import audiobookRoutes from "../../routes/audiobooks";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
+import { mountAsServer } from "./helpers/serverMount";
 
 const BOOK = "cover_rt_book";
 const MUSIC = config.music.musicPath;
@@ -79,7 +80,7 @@ function traversingId(): string {
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/", audiobookRoutes);
+    mountAsServer(app, "/", audiobookRoutes, "/api/audiobooks");
     return app;
 }
 

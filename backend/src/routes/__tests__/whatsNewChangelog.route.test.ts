@@ -39,6 +39,7 @@ import { generateToken } from "../../middleware/auth";
 import whatsNewRoutes from "../whatsNew";
 import { RELEASES } from "../../services/releases/catalog";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-changelog";
 const USER = `${P}-user`;
@@ -48,7 +49,7 @@ const OLD_DATE = new Date("2026-01-01T00:00:00Z");
 function app() {
     const a = express();
     a.use(express.json());
-    a.use("/whats-new", whatsNewRoutes);
+    mountAsServer(a, "/whats-new", whatsNewRoutes, "/api/whats-new");
     return a;
 }
 

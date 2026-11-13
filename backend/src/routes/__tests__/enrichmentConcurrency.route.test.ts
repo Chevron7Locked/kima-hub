@@ -23,8 +23,9 @@ import enrichmentRouter from "../enrichment";
 import { prisma } from "../../utils/db";
 import { getSystemSettings, invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
-const app = express().use(express.json()).use("/enrichment", enrichmentRouter);
+const app = mountAsServer(express().use(express.json()), "/enrichment", enrichmentRouter, "/api/enrichment");
 let before: { enrichmentConcurrency: number } | null;
 
 beforeAll(async () => {

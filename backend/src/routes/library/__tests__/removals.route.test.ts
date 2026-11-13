@@ -17,10 +17,11 @@ import request from 'supertest';
 import router from '../scan';
 import { requireAdmin } from '../../../middleware/auth';
 import { prisma } from '../../../utils/db';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 function makeApp() {
     const app = express();
-    app.use('/library', router);
+    mountAsServer(app, '/library', router, "/api/library", { standIn: true });
     return app;
 }
 

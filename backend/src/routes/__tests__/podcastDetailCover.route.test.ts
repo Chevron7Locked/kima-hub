@@ -8,11 +8,12 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import podcastRoutes from "../podcasts";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-pod-cover";
 const USER = `${P}-user`;
 const auth = `Bearer ${generateToken({ id: USER, username: USER, role: "user", tokenVersion: 0 })}`;
-const app = () => express().use(express.json()).use("/podcasts", podcastRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/podcasts", podcastRoutes, "/api/podcasts");
 const SHOW = "https://example.invalid/show.jpg";
 const EPISODE = "https://example.invalid/episode.jpg";
 

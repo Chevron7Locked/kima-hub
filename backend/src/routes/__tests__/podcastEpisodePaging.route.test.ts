@@ -13,6 +13,7 @@ import express from 'express';
 import request from 'supertest';
 import podcastRoutes from '../podcasts';
 import { prisma } from '../../utils/db';
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = 'u_podpaging';
 const SHOW = 'pod_paging_show';
@@ -48,7 +49,7 @@ afterAll(async () => {
 
 const app = express();
 app.use(express.json());
-app.use('/podcasts', podcastRoutes);
+mountAsServer(app, '/podcasts', podcastRoutes, "/api/podcasts");
 
 describe('podcast episode paging', () => {
     it('serves a bounded page, not every episode', async () => {

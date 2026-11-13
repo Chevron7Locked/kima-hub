@@ -9,10 +9,11 @@ import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
 import { episodeOnDay } from "./helpers/podcastRoute";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 const USER = "u_podlisten";
 const FOLLOWED = "pod_listen_followed";

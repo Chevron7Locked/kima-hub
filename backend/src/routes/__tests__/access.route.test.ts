@@ -10,6 +10,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { listRoutes, mountRoute, parseRouteKey, type AccessFamily, type Mount, type RouteListing } from "../access";
 import { apiMounts, mountApi } from "../mounts";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAccess } from "../mountAccess";
 
 const P = "zz-access";
 const MEMBER = `${P}-member`;
@@ -100,16 +101,58 @@ describe("the route listing", () => {
     it("every route a mount singles out is a route its router has", () => {
         const routes = new Set(rows.map((r) => `${r.method} ${r.mount} ${r.path}`));
         for (const mount of apiMounts(options)) {
-            for (const route of Object.keys(mount.access?.routes ?? {})) {
+            const named = [
+                ...Object.keys(mount.access?.routes ?? {}),
+                ...(Array.isArray(mount.access?.urlToken) ? mount.access.urlToken : []),
+            ];
+            for (const route of named) {
                 const { method, path } = parseRouteKey(route);
-                expect(routes.has(`${method} ${mount.path} ${path}`)).toBe(true);
+                expect(`${route} on ${mount.path}: ${routes.has(`${method} ${mount.path} ${path}`)}`).toBe(`${route} on ${mount.path}: true`);
             }
         }
     });
 
-    it("a route its router guards for admins is declared admin", () => {
-        const wrong = rows.filter((r) => r.adminInRouter && r.family !== "admin").map(key);
-        expect(wrong).toEqual([]);
+    it("every mounted path has its access declared, and every declaration has a mount", () => {
+        const mounted = apiMounts(options).map((m) => m.path);
+        expect(mounted.filter((path) => !mountAccess[path])).toEqual([]);
+        expect(Object.keys(mountAccess).filter((path) => !mounted.includes(path))).toEqual([]);
+    });
+
+    it("no router guards its own routes: access is declared at the mount only", () => {
+        const guards = new Set(["requireAuth", "requireAuthOrToken", "requireAdmin"]);
+        const found: string[] = [];
+        const walk = (mount: string, stack: Array<{ name: string; route?: { stack: Array<{ name: string }> }; handle: { stack?: any[] } }>) => {
+            for (const layer of stack) {
+                if (guards.has(layer.name)) found.push(`${mount} ${layer.name}`);
+                for (const inner of layer.route?.stack ?? []) if (guards.has(inner.name)) found.push(`${mount} ${inner.name}`);
+                if (layer.handle.stack) walk(mount, layer.handle.stack);
+            }
+        };
+        for (const mount of apiMounts(options)) {
+            const stack = (mount.router as unknown as { stack?: any[] }).stack;
+            if (stack) walk(mount.path, stack);
+        }
+        expect(found).toEqual([]);
+    });
+
+    it("the routes that take a query-string token are exactly these", () => {
+        const byMount = (path: string) =>
+            rows.filter((r) => r.urlToken && r.mount === path).map((r) => `${r.method} ${r.path}`).sort();
+        expect(byMount("/api/podcasts")).toEqual(
+            [
+                "GET /categories",
+                "GET /charts",
+                "GET /discover/top",
+                "GET /discover/genres",
+                "GET /discover/genre/:genreId",
+                "GET /preview/:itunesId/snippet",
+                "GET /:id/similar",
+                "GET /:id/cover",
+                "GET /episodes/:episodeId/cover",
+                "GET /:podcastId/episodes/:episodeId/stream",
+            ].sort(),
+        );
+        expect(byMount("/api/stats")).toEqual([]);
     });
 
     it("the routes outside signed-in and admin are exactly these", () => {
@@ -190,6 +233,16 @@ describe("the declared families are enforced in front of the routers", () => {
         const token = tokenOf(MEMBER, "user");
         expect((await request(app).get(`/api/downloads/failed?token=${token}`)).status).toBe(200);
         expect((await request(app).get(`/api/stats/hour?token=${token}`)).status).toBe(401);
+    });
+
+    it("podcast images and audio take the token in the address, its other routes do not", async () => {
+        const app = appWithServer();
+        const token = tokenOf(MEMBER, "user");
+        // The cover and the stream are reached with the token; the show list is not.
+        expect((await request(app).get(`/api/podcasts/none/cover?token=${token}`)).status).not.toBe(401);
+        expect((await request(app).get(`/api/podcasts/none/episodes/none/stream?token=${token}`)).status).not.toBe(401);
+        expect((await request(app).get(`/api/podcasts?token=${token}`)).status).toBe(401);
+        expect((await request(app).get(`/api/podcasts/none/cover`)).status).toBe(401);
     });
 
     it("a machine route answers by its own secret, not by a session", async () => {

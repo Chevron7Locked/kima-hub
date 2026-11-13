@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import {
     getSimilarArtists,
@@ -57,8 +56,6 @@ function transformSearchResults(serviceResults: SearchResults) {
         episodes: serviceResults.episodes,
     };
 }
-
-router.use(requireAuth);
 
 router.get("/", async (req, res) => {
     try {

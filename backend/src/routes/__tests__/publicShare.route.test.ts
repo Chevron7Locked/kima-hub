@@ -5,9 +5,10 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import shareRoutes from "../share";
+import { mountAsServer } from "./helpers/serverMount";
 
 const TAG = "zz-public-share";
-const app = express().use("/share", shareRoutes);
+const app = mountAsServer(express(), "/share", shareRoutes, "/api/share");
 const resolve = (token: string) => request(app).get(`/share/${token}`);
 
 let userId: string;

@@ -18,10 +18,11 @@ import { prisma } from "../../utils/db";
 import { acquisitionService } from "../../services/acquisitionService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import releasesRoutes from "../releases";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "rdl_user";
 const RG = "5b1b2c3d-1111-2222-3333-444455556666";
-const app = express().use(express.json()).use("/releases", releasesRoutes);
+const app = mountAsServer(express().use(express.json()), "/releases", releasesRoutes, "/api/releases");
 const tap = () => request(app).post(`/releases/download/${RG}`).send({ artistName: "Low", albumTitle: "Hey What" });
 const acquire = jest.spyOn(acquisitionService, "acquireAlbum");
 

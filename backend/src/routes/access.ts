@@ -1,6 +1,6 @@
 /**
  * Who may reach a route is declared where the route is mounted, and a mount that declares nothing refuses
- * everything.
+ * everything. The routers carry no guards of their own.
  *
  * A mount names one family for all of its routes. A route that differs from its mount lists itself in `routes`
  * ("GET /:id/cover" as the router writes it, relative to the mount). The families:
@@ -14,7 +14,9 @@
  *   subsonic     a Subsonic client, which the router signs in itself
  *
  * `signed-in` and `admin` are enforced here, in front of the router. The other families name a credential that only
- * their own module can check, so the router keeps that check; the family still has to be declared.
+ * their own module can check, so the router keeps that check; the family still has to be declared. A router still
+ * checks who the person is for what a route does (an acquire permission, whose item it is), never whether they may
+ * reach the route.
  */
 
 import { Router, type Express, type NextFunction, type Request, type RequestHandler, type Response } from "express";
@@ -26,8 +28,12 @@ export type AccessFamily = "public" | "signed-in" | "admin" | "internal" | "webh
 
 export interface Access {
     family: AccessFamily;
-    /** `signed-in` and `admin`: a token in the query string counts, as it does on streaming URLs. */
-    urlToken?: boolean;
+    /**
+     * `signed-in` and `admin`: a token in the query string counts, as it does on streaming URLs. `true` for every
+     * route of the mount, or the routes ("METHOD /path" as the router writes it) that take one; the rest want a
+     * session, key or header.
+     */
+    urlToken?: boolean | string[];
     /** Routes whose family differs from the mount's: "METHOD /path" exactly as the router writes it. */
     routes?: Record<string, AccessFamily>;
 }
@@ -41,12 +47,12 @@ export interface Mount {
     runawayLimit?: boolean;
 }
 
-function signedInGuard(urlToken: boolean | undefined): RequestHandler {
+function signedInGuard(urlToken: boolean): RequestHandler {
     return urlToken ? requireAuthOrToken : requireAuth;
 }
 
 /** The guards that run in front of a route of this family. */
-function guardsFor(family: AccessFamily, urlToken: boolean | undefined): RequestHandler[] {
+function guardsFor(family: AccessFamily, urlToken: boolean): RequestHandler[] {
     switch (family) {
         case "signed-in":
             return [signedInGuard(urlToken)];
@@ -64,21 +70,22 @@ export function parseRouteKey(key: string): { method: string; path: string } {
     return { method: match[1], path: match[2] };
 }
 
-/**
- * The family of a request path under a mount: an entry of `routes` when one matches, matched by Express's own router
- * so it answers as the real router would, else the mount's family.
- */
-export function familyResolver(access: Access): (method: string, url: string) => Promise<AccessFamily> {
-    const entries = Object.entries(access.routes ?? {});
-    if (entries.length === 0) return async () => access.family;
+/** What a mount declares for one route. */
+export interface Declared {
+    family: AccessFamily;
+    /** A token in the query string counts on this route. */
+    urlToken: boolean;
+}
 
+/** A lookup over route keys, matched by Express's own router so it answers as the real router would. */
+function routeTable(keys: string[]): (method: string, url: string) => Promise<string | undefined> {
     const table = Router();
-    for (const [key, family] of entries) {
+    for (const key of keys) {
         const { method, path } = parseRouteKey(key);
         (table as unknown as Record<string, (path: string, handler: RequestHandler) => void>)[method.toLowerCase()](
             path,
             (req, _res, next) => {
-                (req as Request & { declaredFamily?: AccessFamily }).declaredFamily = family;
+                (req as Request & { matchedKey?: string }).matchedKey = key;
                 next("router");
             },
         );
@@ -86,8 +93,8 @@ export function familyResolver(access: Access): (method: string, url: string) =>
 
     return (method, url) =>
         new Promise((resolve) => {
-            const stub = { method, url, headers: {} } as unknown as Request & { declaredFamily?: AccessFamily };
-            const finish = () => resolve(stub.declaredFamily ?? access.family);
+            const stub = { method, url, headers: {} } as unknown as Request & { matchedKey?: string };
+            const finish = () => resolve(stub.matchedKey);
             // A stray OPTIONS makes the router answer for itself; the answer is not ours to send.
             const res = { setHeader() {}, getHeader() {}, end: finish } as unknown as Response;
             (table as unknown as { handle: (req: Request, res: Response, done: () => void) => void }).handle(
@@ -96,6 +103,25 @@ export function familyResolver(access: Access): (method: string, url: string) =>
                 finish,
             );
         });
+}
+
+/**
+ * What a request path under a mount is declared as: an entry of `routes` when one matches, else the mount's family;
+ * and whether a query-string token counts there.
+ */
+export function declaredResolver(access: Access): (method: string, url: string) => Promise<Declared> {
+    const overrides = access.routes ?? {};
+    const byFamily = Object.keys(overrides).length > 0 ? routeTable(Object.keys(overrides)) : null;
+    const tokenRoutes = Array.isArray(access.urlToken) ? routeTable(access.urlToken) : null;
+    const allTokens = access.urlToken === true;
+
+    return async (method, url) => {
+        const key = byFamily ? await byFamily(method, url) : undefined;
+        return {
+            family: key ? overrides[key] : access.family,
+            urlToken: allTokens || (tokenRoutes ? (await tokenRoutes(method, url)) !== undefined : false),
+        };
+    };
 }
 
 /** Runs handlers one after another; stops at the first that answers, and passes a throw to `next`. */
@@ -117,13 +143,10 @@ async function runInOrder(handlers: RequestHandler[], req: Request, res: Respons
 }
 
 function accessCheck(access: Access): RequestHandler {
-    if (!access.routes || Object.keys(access.routes).length === 0) {
-        return (req, res, next) => runInOrder(guardsFor(access.family, access.urlToken), req, res, next);
-    }
-    const familyOf = familyResolver(access);
+    const declared = declaredResolver(access);
     return async (req, res, next) => {
-        const family = await familyOf(req.method, req.url);
-        return runInOrder(guardsFor(family, access.urlToken), req, res, next);
+        const { family, urlToken } = await declared(req.method, req.url);
+        return runInOrder(guardsFor(family, urlToken), req, res, next);
     };
 }
 
@@ -136,8 +159,8 @@ export interface RouteListing {
     path: string;
     /** Null when the mount declares no access, which is when it refuses. */
     family: AccessFamily | null;
-    /** A `requireAdmin` runs in front of the route inside its router. */
-    adminInRouter: boolean;
+    /** A token in the query string counts on this route. */
+    urlToken: boolean;
 }
 
 interface StackLayer {
@@ -152,26 +175,21 @@ function concretePath(path: string): string {
     return path.replace(/:[A-Za-z0-9_]+\??/g, "x").replace(/\*/g, "x") || "/";
 }
 
-type RouteInRouter = Omit<RouteListing, "mount" | "family">;
+type RouteInRouter = Pick<RouteListing, "method" | "path">;
 
-function collectRoutes(stack: StackLayer[], inheritedAdmin: boolean): Array<RouteInRouter> {
+function collectRoutes(stack: StackLayer[]): Array<RouteInRouter> {
     const found: Array<RouteInRouter> = [];
-    let adminInRouter = inheritedAdmin;
     for (const layer of stack) {
         if (layer.route) {
-            const names = layer.route.stack.map((entry) => entry.name);
-            const admin = adminInRouter || names.includes("requireAdmin");
             const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
             const methods = layer.route.methods._all
                 ? ["ALL"]
                 : Object.keys(layer.route.methods).filter((m) => layer.route!.methods[m]).map((m) => m.toUpperCase());
-            for (const path of paths) for (const method of methods) found.push({ method, path, adminInRouter: admin });
+            for (const path of paths) for (const method of methods) found.push({ method, path });
         } else if (layer.name === "router" && layer.handle.stack) {
             // Sub-routers here are all mounted at "/"; one at another prefix has to be listed by hand.
             if (!layer.regexp.fast_slash) throw new Error("A sub-router mounted at a path cannot be listed");
-            found.push(...collectRoutes(layer.handle.stack, adminInRouter));
-        } else if (layer.name === "requireAdmin") {
-            adminInRouter = true;
+            found.push(...collectRoutes(layer.handle.stack));
         }
     }
     return found;
@@ -186,10 +204,12 @@ export async function listRoutes(mounts: Mount[]): Promise<RouteListing[]> {
     for (const mount of mounts) {
         const stack = (mount.router as unknown as { stack?: StackLayer[] }).stack;
         if (!stack) throw new Error(`${mount.path} is not a router, so its routes cannot be listed`);
-        const familyOf = mount.access ? familyResolver(mount.access) : null;
-        for (const route of collectRoutes(stack, false)) {
-            const family = familyOf ? await familyOf(route.method === "ALL" ? "GET" : route.method, concretePath(route.path)) : null;
-            listing.push({ mount: mount.path, family, ...route });
+        const declaredOf = mount.access ? declaredResolver(mount.access) : null;
+        for (const route of collectRoutes(stack)) {
+            const declared = declaredOf
+                ? await declaredOf(route.method === "ALL" ? "GET" : route.method, concretePath(route.path))
+                : null;
+            listing.push({ mount: mount.path, family: declared?.family ?? null, urlToken: declared?.urlToken ?? false, ...route });
         }
     }
     return listing;
@@ -210,7 +230,8 @@ export function mountRoute(app: Express, mount: Mount): void {
     }
     const handlers: RequestHandler[] = [];
     if (mount.runawayLimit) handlers.push(apiLimiter);
-    if (guardsFor(mount.access.family, mount.access.urlToken).length > 0 || mount.access.routes) {
+    // A mount of one family that the router checks itself needs nothing in front of it.
+    if (mount.access.family === "signed-in" || mount.access.family === "admin" || mount.access.routes) {
         handlers.push(accessCheck(mount.access));
     }
     app.use(mount.path, ...handlers, mount.router);

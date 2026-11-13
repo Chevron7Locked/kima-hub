@@ -45,6 +45,7 @@ jest.mock("../../services/rateLimiter", () => ({ rateLimiter: {} }));
 import request from "supertest";
 import express from "express";
 import enrichmentRouter from "../enrichment";
+import { mountAsServer } from "./helpers/serverMount";
 
 describe("GET /enrichment/status", () => {
     let app: express.Express;
@@ -53,7 +54,7 @@ describe("GET /enrichment/status", () => {
         jest.clearAllMocks();
         app = express();
         app.use(express.json());
-        app.use("/enrichment", enrichmentRouter);
+        mountAsServer(app, "/enrichment", enrichmentRouter, "/api/enrichment");
     });
 
     it("returns hung=false when state is idle", async () => {

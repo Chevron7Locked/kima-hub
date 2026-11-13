@@ -3,7 +3,6 @@ import multer from "multer";
 import path from "path";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
@@ -25,9 +24,6 @@ const m3uUpload = multer({
         }
     },
 });
-
-// All routes require authentication
-router.use(requireAuthOrToken);
 
 const parseUrlSchema = z.object({
     // Not .url(): that refuses a link typed without https:// with a message that says nothing about the link.

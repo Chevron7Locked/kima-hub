@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
@@ -24,8 +24,6 @@ import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
 
 const router = Router();
-
-router.use(requireAuthOrToken);
 
 router.get("/batch-status", async (req, res) => {
     try {
@@ -951,7 +949,7 @@ router.delete("/clear", async (req, res) => {
 // Removes artists discovery added to Lidarr that nothing references any more. DESTRUCTIVE: removes
 // their files too. Dry run unless ?dryRun=false. Protection is global, because Lidarr is shared:
 // an artist survives if any user owns or liked their work.
-router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
+router.post("/cleanup-lidarr", async (req, res) => {
     try {
         const dryRun = req.query.dryRun !== "false";
 
@@ -1018,7 +1016,7 @@ router.post("/cleanup-lidarr", requireAdmin, async (req, res) => {
 
 // Re-tags albums wrongly marked LIBRARY as DISCOVER and deletes their OwnedAlbum rows; liked and
 // native library albums are left alone. DESTRUCTIVE. Dry run unless ?dryRun=false.
-router.post("/fix-tagging", requireAdmin, async (req, res) => {
+router.post("/fix-tagging", async (req, res) => {
     try {
         const dryRun = req.query.dryRun !== "false";
 

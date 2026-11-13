@@ -190,6 +190,7 @@ import {
 } from "../workers/unifiedEnrichment";
 import enrichmentRouter from "../routes/enrichment";
 import scanRouter from "../routes/library/scan";
+import { mountAsServer } from "../routes/__tests__/helpers/serverMount";
 
 const PREFIX = "ctrl";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -456,8 +457,8 @@ describe("POST /enrichment/re-decide-everything", () => {
     beforeEach(() => {
         app = express();
         app.use(express.json());
-        app.use("/enrichment", enrichmentRouter);
-        app.use("/library", scanRouter);
+        mountAsServer(app, "/enrichment", enrichmentRouter, "/api/enrichment");
+        mountAsServer(app, "/library", scanRouter, "/api/library");
     });
 
     it("answers 403 for a signed-in non-admin", async () => {
@@ -521,7 +522,7 @@ describe("DELETE /library/corrupt-tracks", () => {
     it("clears the corrupt flag and keeps the Track row", async () => {
         const app = express();
         app.use(express.json());
-        app.use("/library", scanRouter);
+        mountAsServer(app, "/library", scanRouter, "/api/library");
 
         await seedTrack(id("corrupt"), { analysis: "failed" });
         await prisma.track.update({ where: { id: id("corrupt") }, data: { corrupt: true } });
@@ -544,7 +545,7 @@ describe("DELETE /library/corrupt-tracks", () => {
     it("recounts the artist, since a cleared song plays again", async () => {
         const app = express();
         app.use(express.json());
-        app.use("/library", scanRouter);
+        mountAsServer(app, "/library", scanRouter, "/api/library");
 
         await seedTrack(id("corrupt3"), { analysis: "failed" });
         await prisma.track.update({ where: { id: id("corrupt3") }, data: { corrupt: true } });
@@ -561,7 +562,7 @@ describe("DELETE /library/corrupt-tracks", () => {
     it("lists the true state: the corrupt track shows up before the clear and not after", async () => {
         const app = express();
         app.use(express.json());
-        app.use("/library", scanRouter);
+        mountAsServer(app, "/library", scanRouter, "/api/library");
 
         await seedTrack(id("corrupt2"), { analysis: "failed" });
         await prisma.track.update({ where: { id: id("corrupt2") }, data: { corrupt: true } });

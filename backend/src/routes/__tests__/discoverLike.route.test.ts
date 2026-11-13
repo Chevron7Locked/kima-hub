@@ -47,6 +47,7 @@ import discoverRoutes from '../discover';
 import { prisma } from '../../utils/db';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = 'dlk_';
 const USER = `${P}user`;
@@ -56,7 +57,7 @@ const WEEK = new Date(Date.UTC(2026, 9, 19));
 
 const app = express();
 app.use(express.json());
-app.use('/discover', discoverRoutes);
+mountAsServer(app, '/discover', discoverRoutes, "/api/discover");
 
 async function cleanup() {
     await prisma.downloadJob.deleteMany({ where: { userId: { in: [USER, OTHER] } } });

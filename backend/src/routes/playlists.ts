@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { z } from "zod";
-import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { safeError } from "../utils/errors";
 import { toAudioFeaturesDTO } from "../utils/audioFeatures";
@@ -24,8 +24,6 @@ import { parseLimit } from "./library/paging";
 
 const router = Router();
 
-
-router.use(requireAuthOrToken);
 
 /**
  * The caller's pending song `:trackId` on playlist `:id`, or null once the refusal is sent: 404 when it is missing or on

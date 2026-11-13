@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAdmin } from "../../middleware/auth";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
@@ -11,7 +10,7 @@ import { updateArtistCounts } from "../../services/artistCountsService";
 
 const router = Router();
 
-router.post("/scan", requireAdmin, async (req, res) => {
+router.post("/scan", async (req, res) => {
   try {
     // Soulseek downloads are filed first; a failure there does not stop the scan.
     try {
@@ -60,7 +59,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
   }
 });
 
-router.post("/organize", requireAdmin, (_req, res) => {
+router.post("/organize", (_req, res) => {
   organizeSingles().catch((err) => {
     logger.error("Manual organization failed:", err);
   });
@@ -69,7 +68,7 @@ router.post("/organize", requireAdmin, (_req, res) => {
 
 // Files every library album again by its songs' own tags (albumRefile.ts), as a job on the scan queue so it never
 // runs beside a scan; the outcome goes to the admin's notification tray. One at a time.
-router.post("/refile", requireAdmin, async (req, res) => {
+router.post("/refile", async (req, res) => {
   try {
     const result = await requestRefile(req.user!.id);
     if (!result.queued) return res.status(409).json({ error: `Albums are already being re-filed (${result.reason})` });
@@ -80,7 +79,7 @@ router.post("/refile", requireAdmin, async (req, res) => {
   }
 });
 
-router.get("/corrupt-tracks", requireAdmin, async (_req, res) => {
+router.get("/corrupt-tracks", async (_req, res) => {
   try {
     const tracks = await prisma.track.findMany({
       where: { corrupt: true },
@@ -104,7 +103,7 @@ router.get("/corrupt-tracks", requireAdmin, async (_req, res) => {
   }
 });
 
-router.get("/missing-tracks", requireAdmin, async (_req, res) => {
+router.get("/missing-tracks", async (_req, res) => {
   try {
     // Tracks whose file is gone, and since when. The scan flags them rather than
     // deleting them and clears the flag when the file returns, so there is no
@@ -131,7 +130,7 @@ router.get("/missing-tracks", requireAdmin, async (_req, res) => {
   }
 });
 
-router.get("/removals", requireAdmin, async (req, res) => {
+router.get("/removals", async (req, res) => {
   try {
     // What the reconcile sweep retired, newest first. Rows outlive the tracks they
     // describe; this is the memory of the library that left.
@@ -160,7 +159,7 @@ router.get("/removals", requireAdmin, async (req, res) => {
   }
 });
 
-router.delete("/corrupt-tracks", requireAdmin, async (_req, res) => {
+router.delete("/corrupt-tracks", async (_req, res) => {
   try {
     // Clear the corrupt flag only, keeping the track and its stage records; the
     // next scan re-checks the file. The songs play again, so their artists are recounted.

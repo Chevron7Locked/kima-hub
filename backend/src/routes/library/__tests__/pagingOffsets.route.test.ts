@@ -11,6 +11,7 @@ import tracks from "../tracks";
 import { libraryRouter } from "../../subsonic/library";
 import { prisma } from "../../../utils/db";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-paging";
 const app = express();
@@ -18,7 +19,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: `${P}-user`, username: `${P}-user`, role: "admin" };
     next();
 });
-app.use("/library", albums, artists, tracks);
+for (const router of [albums, artists, tracks]) mountAsServer(app, "/library", router, "/api/library", { standIn: true });
 app.use("/rest", libraryRouter);
 
 beforeAll(async () => {

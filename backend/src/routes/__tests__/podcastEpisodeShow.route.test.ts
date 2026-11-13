@@ -18,6 +18,7 @@ import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
 import { episodeOnDay } from "./helpers/podcastRoute";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "u_podshow";
 const SHOW = "pod_show_own";
@@ -25,7 +26,7 @@ const OTHER_SHOW = "pod_show_other";
 const EP = `${SHOW}-ep`;
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 const saveProgress = (show: string) =>
     request(app).post(`/podcasts/${show}/episodes/${EP}/progress`).send({ currentTime: 42, duration: 600 });

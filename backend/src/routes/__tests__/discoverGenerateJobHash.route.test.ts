@@ -30,6 +30,7 @@ import { prisma } from '../../utils/db';
 import { discoverQueue } from '../../workers/queues';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = 'dgj_user';
 
@@ -50,7 +51,7 @@ afterAll(async () => {
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use('/discover', discoverRoutes);
+    mountAsServer(app, '/discover', discoverRoutes, "/api/discover");
     return app;
 }
 

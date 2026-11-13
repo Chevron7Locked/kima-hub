@@ -44,10 +44,11 @@ import { UserFacingError } from "../../utils/errors";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
 app.use(express.json());
-app.use("/downloads", downloadsRouter);
+mountAsServer(app, "/downloads", downloadsRouter, "/api/downloads");
 
 const USER = "dlc_user";
 const OTHER = "dlc_other";

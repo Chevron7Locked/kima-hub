@@ -11,12 +11,13 @@ import bcrypt from 'bcrypt';
 import authRoutes from '../../routes/auth';
 import { generateToken, generateRefreshToken, clearUserCache } from '../../middleware/auth';
 import { prisma } from '../../utils/db';
+import { mountAsServer } from "./helpers/serverMount";
 
 const TEST_SECRET = process.env.JWT_SECRET!;
 
 const app = express();
 app.use(express.json());
-app.use('/auth', authRoutes);
+mountAsServer(app, '/auth', authRoutes, "/api/auth");
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 

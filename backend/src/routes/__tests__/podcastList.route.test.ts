@@ -8,11 +8,12 @@ import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "u_podlist";
 const SHOWS = ["pod_list_old", "pod_list_new", "pod_list_empty"];
 const app = express();
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 const episode = (id: string, publishedAt: string) => ({ id, guid: id, title: id, audioUrl: `https://a.invalid/${id}.mp3`, duration: 60, publishedAt: new Date(publishedAt) });
 

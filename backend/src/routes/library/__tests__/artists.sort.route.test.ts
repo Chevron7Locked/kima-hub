@@ -9,6 +9,7 @@ import request from 'supertest';
 import artistRoutes from '../artists';
 import { prisma } from '../../../utils/db';
 import { closeEngineConnections } from '../../../__tests__/helpers/engineConnections';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = 'zz-artists-sort';
 
@@ -28,7 +29,7 @@ function makeApp() {
         req.user = { id: `${P}-user`, username: 'admin', role: 'admin' };
         next();
     });
-    app.use('/', artistRoutes);
+    mountAsServer(app, '/', artistRoutes, "/api/library", { standIn: true });
     return app;
 }
 

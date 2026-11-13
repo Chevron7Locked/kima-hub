@@ -25,9 +25,10 @@ import { importQueue } from "../../workers/queues";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { useLidarr, useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "zz-dispatch-usr";
-const app = express().use(express.json()).use("/spotify", spotifyRoutes);
+const app = mountAsServer(express().use(express.json()), "/spotify", spotifyRoutes, "/api/spotify");
 
 const DEEZER = "https://www.deezer.com/en/playlist/90210";
 const SPOTIFY = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M";

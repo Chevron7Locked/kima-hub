@@ -23,6 +23,7 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { mountAsServer } from "./helpers/serverMount";
 
 afterAll(async () => {
     // The router reaches jobs/queueCleaner, which enqueues through the real
@@ -34,7 +35,7 @@ afterAll(async () => {
 
 const app = express();
 app.use(express.json());
-app.use("/system-settings", systemSettingsRouter);
+mountAsServer(app, "/system-settings", systemSettingsRouter, "/api/system-settings");
 
 // System settings is one shared row: put the key back as the file found it.
 let original: { acoustidApiKey: string | null } | null;

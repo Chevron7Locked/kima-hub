@@ -15,10 +15,11 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
 app.use(express.json());
-app.use("/search", searchRoutes);
+mountAsServer(app, "/search", searchRoutes, "/api/search");
 let replay: ReplayServer;
 
 let restoreEnv = () => {};

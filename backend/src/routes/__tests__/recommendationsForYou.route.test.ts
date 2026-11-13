@@ -12,6 +12,7 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import recommendationRoutes from "../recommendations";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(60_000);
 
@@ -73,7 +74,7 @@ afterAll(cleanup);
 function appFor(user: string) {
     const a = express();
     a.use((req: any, _res, next) => { req.user = { id: user, username: user, role: "user" }; next(); });
-    a.use("/recommendations", recommendationRoutes);
+    mountAsServer(a, "/recommendations", recommendationRoutes, "/api/recommendations");
     return a;
 }
 

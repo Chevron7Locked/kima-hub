@@ -19,6 +19,7 @@ import downloadRoutes from "../downloads";
 import notificationRoutes from "../notifications";
 import releaseRoutes from "../releases";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-acquire";
 const USER = `${P}-member`;
@@ -32,10 +33,10 @@ function app() {
     a.post("/acquire-test", requireAuth, requireAcquirePermission, (_req, res) => {
         res.json({ acquired: true });
     });
-    a.use("/system-settings", systemSettingsRoutes);
-    a.use("/playlists", requireAuth, playlistRoutes);
-    a.use("/discover", requireAuth, discoverRoutes);
-    a.use("/spotify", requireAuth, spotifyRoutes);
+    mountAsServer(a, "/system-settings", systemSettingsRoutes, "/api/system-settings");
+    mountAsServer(a, "/playlists", playlistRoutes, "/api/playlists");
+    mountAsServer(a, "/discover", discoverRoutes, "/api/discover");
+    mountAsServer(a, "/spotify", spotifyRoutes, "/api/spotify");
     return a;
 }
 

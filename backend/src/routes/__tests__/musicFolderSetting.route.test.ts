@@ -17,11 +17,12 @@ import { soulseekTarget } from "../../services/pendingTrackRetry";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import systemSettingsRoutes from "../systemSettings";
 import { setEnv } from "../../__tests__/helpers/env";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.mock("../../services/soulseek", () => ({ soulseekService: { isAvailable: jest.fn().mockResolvedValue(true) } }));
 
 const ADMIN = "zz-musicfolder-admin";
-const app = express().use(express.json()).use("/system-settings", systemSettingsRoutes);
+const app = mountAsServer(express().use(express.json()), "/system-settings", systemSettingsRoutes, "/api/system-settings");
 const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 const save = (musicPath: string) => request(app).post("/system-settings").set("Authorization", asAdmin).send({ musicPath });
 const read = () => request(app).get("/system-settings").set("Authorization", asAdmin).expect(200);

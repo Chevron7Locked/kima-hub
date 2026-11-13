@@ -1,11 +1,8 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuth } from "../middleware/auth";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
 
 const router = Router();
-
-router.use(requireAuth);
 
 router.post("/", async (req, res) => {
     try {

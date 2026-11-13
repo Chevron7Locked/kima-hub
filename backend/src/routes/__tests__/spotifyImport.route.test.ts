@@ -30,8 +30,9 @@ jest.mock("../../services/spotifyImport", () => ({
 import express from "express";
 import request from "supertest";
 import spotifyRoutes from "../spotify";
+import { mountAsServer } from "./helpers/serverMount";
 
-const app = express().use(express.json()).use("/spotify", spotifyRoutes);
+const app = mountAsServer(express().use(express.json()), "/spotify", spotifyRoutes, "/api/spotify");
 const PREVIEW = { playlist: { id: "pl", name: "Mix" }, matches: [] };
 const importBody = { spotifyPlaylistId: "pl", playlistName: "Mix", albumMbidsToDownload: [], previewJobId: "pv-1" };
 

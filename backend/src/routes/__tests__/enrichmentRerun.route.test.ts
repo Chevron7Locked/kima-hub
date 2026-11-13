@@ -24,6 +24,7 @@ import { generateToken } from "../../middleware/auth";
 import enrichmentRouter from "../enrichment";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MEMBER = "rerun_route_member";
 const ADMIN = "rerun_route_admin";
@@ -31,7 +32,7 @@ const as = (id: string, role: "user" | "admin") => `Bearer ${generateToken({ id,
 
 const app = express();
 app.use(express.json());
-app.use("/enrichment", enrichmentRouter);
+mountAsServer(app, "/enrichment", enrichmentRouter, "/api/enrichment");
 const rerun = (step: unknown, who: string = ADMIN, role: "user" | "admin" = "admin") =>
     request(app).post("/enrichment/rerun").set("Authorization", as(who, role)).send({ step });
 

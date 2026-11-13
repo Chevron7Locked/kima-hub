@@ -8,6 +8,7 @@ import request from 'supertest';
 import router from '../albums';
 import { prisma } from '../../../utils/db';
 import { closeEngineConnections } from '../../../__tests__/helpers/engineConnections';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = 'zz-albums-sort';
 const ARTIST = `${P}-ar`;
@@ -26,7 +27,7 @@ function makeApp() {
         req.user = { id: `${P}-user`, username: 'admin', role: 'admin' };
         next();
     });
-    app.use('/', router);
+    mountAsServer(app, '/', router, "/api/library", { standIn: true });
     return app;
 }
 

@@ -13,11 +13,12 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { setEnv } from "../../__tests__/helpers/env";
+import { mountAsServer } from "./helpers/serverMount";
 
 const recording = loadRecording("apple", "catalog");
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 const USER = "u_poddisc";
 const SHOW = "pod_disc_dnd";

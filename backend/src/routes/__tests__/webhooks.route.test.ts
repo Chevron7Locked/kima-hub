@@ -19,6 +19,7 @@ import { whenWebhooksIdle } from "../../services/webhookHandlers";
 import * as downloadJobs from "../../services/downloads/jobs";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "webhook_route_user";
 const complete = loadScenario("complete");
@@ -29,7 +30,7 @@ const importFailure = loadScenario("missing-tracks").webhooks.find((w) => w.even
 function app() {
     const a = express();
     a.use(express.json());
-    a.use("/webhooks", webhookRoutes);
+    mountAsServer(a, "/webhooks", webhookRoutes, "/api/webhooks");
     return a;
 }
 

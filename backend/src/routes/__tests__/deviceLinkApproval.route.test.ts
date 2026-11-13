@@ -8,6 +8,7 @@ import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import authRoutes from "../auth";
 import deviceLinkRoutes from "../deviceLink";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(60_000);
 
@@ -16,8 +17,8 @@ const PASSWORD = "the right password";
 
 const app = express();
 app.use(express.json());
-app.use("/api/auth", authRoutes);
-app.use("/api/device-link", deviceLinkRoutes);
+mountAsServer(app, "/api/auth", authRoutes, "/api/auth");
+mountAsServer(app, "/api/device-link", deviceLinkRoutes, "/api/device-link");
 
 let users = 0;
 async function signedInUser() {

@@ -56,6 +56,7 @@ import {
     waitForFingerprintWork,
 } from "../../workers/unifiedEnrichment";
 import enrichmentRouter from "../../routes/enrichment";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 
 const PREFIX = "redec";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -242,7 +243,7 @@ describe("POST /enrichment/re-decide-everything and POST /enrichment/retry-faile
     beforeEach(() => {
         app = express();
         app.use(express.json());
-        app.use("/enrichment", enrichmentRouter);
+        mountAsServer(app, "/enrichment", enrichmentRouter, "/api/enrichment");
     });
 
     it("answers 403 for a signed-in non-admin on both controls", async () => {

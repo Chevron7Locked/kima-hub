@@ -18,11 +18,17 @@ import { audiobookshelfService } from "../../services/audiobookshelf";
 import onboardingRoutes from "../onboarding";
 import authRoutes from "../auth";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-onboarding";
 const ADMIN = `${P}-admin`;
 const NEW = `${P}-new`;
-const app = express().use(express.json()).use("/onboarding", onboardingRoutes).use("/auth", authRoutes);
+const app = mountAsServer(
+    mountAsServer(express().use(express.json()), "/onboarding", onboardingRoutes, "/api/onboarding"),
+    "/auth",
+    authRoutes,
+    "/api/auth",
+);
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 const asAdmin = () => bearer(generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 }));
 const CLOSED = "http://127.0.0.1:1";

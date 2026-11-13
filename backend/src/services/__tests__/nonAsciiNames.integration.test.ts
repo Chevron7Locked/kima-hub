@@ -33,6 +33,7 @@ import artistRoutes from "../../routes/library/artists";
 import { searchRouter } from "../../routes/subsonic/search";
 import { playbackRouter } from "../../routes/subsonic/playback";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 
 const P = "zz-nonascii";
 const USER = `${P}-user`;
@@ -85,7 +86,7 @@ function app() {
         req.user = { id: USER, username: USER, role: "admin" };
         next();
     });
-    a.use("/library", artistRoutes);
+    mountAsServer(a, "/library", artistRoutes, "/api/library", { standIn: true });
     a.use("/rest", searchRouter);
     a.use("/rest", playbackRouter);
     return a;

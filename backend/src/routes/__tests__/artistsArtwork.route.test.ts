@@ -74,11 +74,12 @@ import { redisClient } from "../../utils/redis";
 import express from "express";
 import request from "supertest";
 import artistRoutes from "../artists";
+import { mountAsServer } from "./helpers/serverMount";
 
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/artists", artistRoutes);
+    mountAsServer(app, "/artists", artistRoutes, "/api/artists");
     return app;
 }
 

@@ -23,6 +23,7 @@ import { consecutiveDates, datesOn } from "./helpers/dates";
 import type { ProgrammaticMix } from "../helpers";
 import * as mood from "../moodMixes";
 import radioRouter from "../../../routes/library/tracks";
+import { mountAsServer } from "../../../routes/__tests__/helpers/serverMount";
 
 jest.setTimeout(600_000);
 
@@ -191,7 +192,7 @@ describe.each(rules.map((r, idx) => ({ ...r, idx })))("$name", (rule) => {
 
 const app = express();
 app.use(express.json());
-app.use("/", radioRouter);
+mountAsServer(app, "/", radioRouter, "/api/library", { standIn: true });
 
 describe("radio cut-offs: decade", () => {
     // Decade 1990 means original year 1990-1999; with no original year the album year decides.

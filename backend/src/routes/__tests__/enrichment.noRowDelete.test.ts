@@ -160,6 +160,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import enrichmentRouter from "../../routes/enrichment";
 import { waitForFingerprintWork } from "../../workers/unifiedEnrichment";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "nodelete";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -244,7 +245,7 @@ beforeEach(async () => {
     await seedLibrary();
     app = express();
     app.use(express.json());
-    app.use("/enrichment", enrichmentRouter);
+    mountAsServer(app, "/enrichment", enrichmentRouter, "/api/enrichment");
 });
 
 afterAll(async () => {

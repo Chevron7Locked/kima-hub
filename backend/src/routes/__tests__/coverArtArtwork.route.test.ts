@@ -49,11 +49,12 @@ import request from "supertest";
 import libraryCoverArtRoutes from "../library/coverArt";
 import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/library", libraryCoverArtRoutes);
+    mountAsServer(app, "/library", libraryCoverArtRoutes, "/api/library", { standIn: true });
     return app;
 }
 

@@ -17,10 +17,11 @@ import express from 'express';
 import request from 'supertest';
 import router from '../scan';
 import { expectLog } from '../../../__tests__/helpers/expectedLogs';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 function makeApp() {
     const app = express();
-    app.use('/library', router);
+    mountAsServer(app, '/library', router, "/api/library", { standIn: true });
     return app;
 }
 

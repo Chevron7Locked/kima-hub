@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { notificationService } from "../services/notificationService";
-import { requireAuth, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -33,7 +33,6 @@ function clearFailedJob(id: string, db: Pick<Prisma.TransactionClient, "download
  */
 router.get(
     "/",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             logger.debug(
@@ -61,7 +60,6 @@ router.get(
  */
 router.get(
     "/unread-count",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             const count = await notificationService.getUnreadCount(
@@ -89,7 +87,7 @@ const CLIENT_ROWS_PER_USER = 50;
  * Record an outcome the browser saw. One row per title, so a repeat replaces it,
  * and only the newest 50 titles are kept.
  */
-router.post("/", requireAuth, async (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response) => {
     const parsed = clientNotificationSchema.safeParse(req.body);
     if (!parsed.success) {
         return res.status(400).json({ error: "Invalid notification" });
@@ -119,7 +117,6 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
  */
 router.post(
     "/:id/read",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await notificationService.markAsRead(req.params.id, req.user!.id);
@@ -139,7 +136,6 @@ router.post(
  */
 router.post(
     "/read-all",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await notificationService.markAllAsRead(req.user!.id);
@@ -159,7 +155,6 @@ router.post(
  */
 router.post(
     "/:id/clear",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await notificationService.clear(req.params.id, req.user!.id);
@@ -177,7 +172,6 @@ router.post(
  */
 router.post(
     "/clear-all",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await notificationService.clearAll(req.user!.id);
@@ -198,7 +192,6 @@ router.post(
  */
 router.get(
     "/downloads/history",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
@@ -234,7 +227,6 @@ router.get(
  */
 router.get(
     "/downloads/active",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
@@ -258,7 +250,6 @@ router.get(
  */
 router.post(
     "/downloads/:id/clear",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
@@ -282,7 +273,6 @@ router.post(
  */
 router.post(
     "/downloads/clear-all",
-    requireAuth,
     async (req: Request, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
@@ -307,7 +297,6 @@ router.post(
  */
 router.post(
     "/downloads/:id/retry",
-    requireAuth,
     requireAcquirePermission,
     async (req: Request, res: Response) => {
         try {

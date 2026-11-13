@@ -26,6 +26,7 @@ import { proxyPreviewStream } from "../../utils/previewProxy";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 type Reply = { status: number; body: string; type?: string };
 const replies = new Map<string, Reply[]>();
@@ -40,7 +41,7 @@ let host: http.Server;
 let base = "";
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 app.get("/preview-proxy", (_req, res) => proxyPreviewStream(res, `${base}/forbidden.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 app.get("/preview-proxy-busy", (_req, res) => proxyPreviewStream(res, `${base}/busy.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));
 app.get("/preview-proxy-internal", (_req, res) => proxyPreviewStream(res, `${base}/to-internal.mp3`, { notFoundMessage: "No preview", logLabel: "t" }));

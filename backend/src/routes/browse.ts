@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
 import { safeError } from "../utils/errors";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview } from "../services/deezer";
@@ -9,9 +8,6 @@ import { parseLimit } from "./library/paging";
 import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE } from "../services/musicLink";
 
 const router = Router();
-
-// All routes require authentication
-router.use(requireAuthOrToken);
 
 /**
  * Unified playlist preview type

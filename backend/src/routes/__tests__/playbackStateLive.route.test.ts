@@ -27,12 +27,13 @@ import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { getLiveState, isPublicListener, setLiveHidden } from "../../services/liveListening";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PUBLIC = "live_report_pub";
 
 const app = express();
 app.use(express.json());
-app.use("/api/playback-state", playbackStateRouter);
+mountAsServer(app, "/api/playback-state", playbackStateRouter, "/api/playback-state");
 
 beforeAll(async () => {
     await prisma.user.deleteMany({ where: { id: PUBLIC } });

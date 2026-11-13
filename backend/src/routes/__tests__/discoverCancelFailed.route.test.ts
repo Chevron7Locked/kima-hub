@@ -23,6 +23,7 @@ import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import * as downloadJobs from "../../services/downloads/jobs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-cancel";
 let listener: string;
@@ -33,7 +34,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: listener, username: `${MARK}-listener`, role: "user" };
     next();
 });
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 const THIS_WEEK = startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON });
 const LAST_WEEK = addWeeks(THIS_WEEK, -1);

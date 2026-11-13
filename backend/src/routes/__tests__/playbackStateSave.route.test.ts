@@ -16,12 +16,13 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "playback-state-save-test";
 
 const app = express();
 app.use(express.json());
-app.use("/api/playback-state", playbackStateRouter);
+mountAsServer(app, "/api/playback-state", playbackStateRouter, "/api/playback-state");
 
 async function cleanup() {
     await prisma.user.deleteMany({ where: { username: { startsWith: PREFIX } } });

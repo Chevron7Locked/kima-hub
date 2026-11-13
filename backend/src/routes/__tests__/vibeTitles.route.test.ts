@@ -21,9 +21,10 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import vibeRouter from "../vibe";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "vtitle";
-const app = express().use(express.json()).use("/vibe", vibeRouter);
+const app = mountAsServer(express().use(express.json()), "/vibe", vibeRouter, "/api/vibe");
 
 const row = (id: string) => ({
     id, title: "file title", duration: 200, trackNo: 1, distance: 0.1, similarity: 0.9,

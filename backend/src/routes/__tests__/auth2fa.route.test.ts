@@ -16,10 +16,11 @@ import { prisma } from "../../utils/db";
 import { generateToken, clearUserCache } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import authRoutes from "../auth";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "zz-2fa-user";
 const PASSWORD = "correct horse";
-const app = express().use(express.json()).use("/auth", authRoutes);
+const app = mountAsServer(express().use(express.json()), "/auth", authRoutes, "/api/auth");
 const bearer = () => `Bearer ${generateToken({ id: USER, username: USER, role: "user", tokenVersion: 0 })}`;
 const login = (token?: string) => request(app).post("/auth/login").send({ username: USER, password: PASSWORD, ...(token ? { token } : {}) });
 const secret = speakeasy.generateSecret({ length: 20 }).base32;

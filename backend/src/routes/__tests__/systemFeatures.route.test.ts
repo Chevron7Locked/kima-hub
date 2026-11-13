@@ -24,9 +24,10 @@ jest.mock("../../services/liveListening", () => ({
 }));
 import systemRouter from "../system";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
-app.use("/system", systemRouter);
+mountAsServer(app, "/system", systemRouter, "/api/system");
 
 beforeEach(() => mockIsPublicListener.mockReset());
 

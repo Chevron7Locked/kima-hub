@@ -18,6 +18,7 @@ import { webhookReconciliation } from "../../jobs/webhookReconciliation";
 import { WEBHOOK_SECRET_HEADER } from "../lidarrWebhookSetup";
 import { lidarrHealthMonitor } from "../lidarrHealth";
 import { sourcePauseController } from "../sourcePauseController";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 
 const ADMIN = "zz-link-repair-admin";
 // Sealed under a key this server does not hold.
@@ -32,7 +33,7 @@ const secretSent = (body: any): string | undefined =>
 let keepsSecret = true;
 let lidarr: LidarrReplay;
 
-const app = () => express().use(express.json()).use("/webhooks", webhookRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/webhooks", webhookRoutes, "/api/webhooks");
 const event = () => request(app()).post("/webhooks/lidarr").send({ eventType: "Test" });
 
 async function settings(data: Record<string, unknown>) {

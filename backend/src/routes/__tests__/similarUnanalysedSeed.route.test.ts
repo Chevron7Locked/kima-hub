@@ -46,6 +46,7 @@ import { prisma } from "../../utils/db";
 import vibeRouter from "../vibe";
 import { SELF_SCORE } from "../../services/matching/formula";
 import { MATCHING_MODEL, buildMatching } from "../../services/matching/state";
+import { mountAsServer } from "./helpers/serverMount";
 
 const UNANALYSED_ID = "ctrkuna000000000000000001"; // Track row, NO embedding
 const SEED_ID = "ctrkemb000000000000000001"; // embedded, drives the happy path
@@ -97,7 +98,7 @@ async function seedEmbedding(trackId: string, vector: string) {
 const UNIT_VECTOR = `[${["1", ...Array(511).fill("0")].join(",")}]`;
 
 const vibeApp = express();
-vibeApp.use("/api/vibe", vibeRouter);
+mountAsServer(vibeApp, "/api/vibe", vibeRouter, "/api/vibe");
 
 beforeAll(async () => {
     await seedTrack(UNANALYSED_ID);

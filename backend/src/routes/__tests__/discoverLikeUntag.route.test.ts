@@ -41,12 +41,13 @@ import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "lu_";
 const USER = `${P}user`;
 const app = express();
 app.use(express.json());
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 async function cleanup() {
     await prisma.discoveryAlbum.deleteMany({ where: { userId: USER } });

@@ -15,6 +15,7 @@ import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { searchService } from "../search";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 
 const P = "zz-followsearch";
 const A = `${P}-a`;
@@ -67,7 +68,7 @@ it("scopes the plain fallback the same way (a query full text search cannot use)
 it("finds a show right after following it, and loses it right after removing it, though the earlier answer was cached", async () => {
     const app = express();
     app.use(express.json());
-    app.use("/podcasts", podcastRoutes);
+    mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
     expect((await found(B, "wyvernquill")).shows).toEqual([]);
     const followed = await request(app).post("/podcasts/subscribe").send({ feedUrl: `https://feeds.example.invalid/${P}` });
     expect(followed.status).toBe(200);

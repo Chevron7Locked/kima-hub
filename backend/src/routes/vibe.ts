@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from "express";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { logger } from "../utils/logger";
-import { requireAuth } from "../middleware/auth";
 import { UserFacingError } from "../utils/errors";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import { getMoodSummary, getVibeMap, type MapResponse } from "../services/vibeMap";
@@ -50,7 +49,7 @@ async function sendMapJson(req: Request, res: Response, mapData: MapResponse) {
  * GET /api/vibe/map: every track's position and colour from the similarity
  * step; 202 while the first layout is pending.
  */
-router.get("/map", requireAuth, async (req, res) => {
+router.get("/map", async (req, res) => {
     try {
         const state = await getVibeMap();
         if (state.status === "computing") {
@@ -69,7 +68,7 @@ router.get("/map", requireAuth, async (req, res) => {
  * tracks and the mood each album and artist shares with its tracks. A few KB where the map is megabytes; 202 while
  * the first layout is pending, like the map.
  */
-router.get("/mood-summary", requireAuth, async (_req, res) => {
+router.get("/mood-summary", async (_req, res) => {
     try {
         const state = await getMoodSummary();
         if (state.status === "computing") {
@@ -93,7 +92,7 @@ async function editedTitles(ids: string[]): Promise<Map<string, string | null>> 
  * POST /api/vibe/path
  * Generate a smooth musical journey between two tracks.
  */
-router.post("/path", requireAuth, async (req, res) => {
+router.post("/path", async (req, res) => {
     try {
         const { startTrackId, endTrackId, length, mode } = req.body;
 
@@ -136,7 +135,7 @@ router.post("/path", requireAuth, async (req, res) => {
  * Tracks matching a blend on the matching formula: the add tracks weighted
  * 1/|add| each, the subtract tracks weighted -1/|subtract| each.
  */
-router.post("/alchemy", requireAuth, async (req, res) => {
+router.post("/alchemy", async (req, res) => {
     try {
         const { add, subtract, limit: requestedLimit } = req.body;
 
@@ -217,7 +216,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
  * GET /api/vibe/similar/:trackId
  * Tracks similar to a given track on the matching formula.
  */
-router.get("/similar/:trackId", requireAuth, async (req, res) => {
+router.get("/similar/:trackId", async (req, res) => {
     try {
         const { trackId } = req.params;
         const limit = parseLimit(req.query.limit, 20, 100);
@@ -269,7 +268,7 @@ function distanceToSimilarity(distance: number): number {
  * Returns the nearest `limit` tracks, best first, with no similarity cut-off
  * (see searchTracksByText for why a fixed or per-query floor does not work).
  */
-router.post("/search", requireAuth, async (req, res) => {
+router.post("/search", async (req, res) => {
     try {
         const { query, limit: requestedLimit } = req.body;
 
@@ -330,7 +329,7 @@ router.post("/search", requireAuth, async (req, res) => {
  * GET /api/vibe/mood/:trackId
  * The track's dominant mood, the same one that colours its star on the map.
  */
-router.get("/mood/:trackId", requireAuth, async (req, res) => {
+router.get("/mood/:trackId", async (req, res) => {
     try {
         const snap = await currentMoodSnapshot();
         res.json({ dominantMood: moodOutput(snap.views.get(req.params.trackId)).dominantMood });

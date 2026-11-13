@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuth, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import { staleJobCleanupService } from "../services/staleJobCleanup";
@@ -9,8 +8,6 @@ import { encryptField } from "../utils/encryption";
 import { isPublicListener, setLiveHidden } from "../services/liveListening";
 
 const router = Router();
-
-router.use(requireAuth);
 
 const settingsSchema = z.object({
     playbackQuality: z.enum(["original", "high", "medium", "low"]).optional(),
@@ -92,7 +89,7 @@ router.post("/", async (req, res) => {
 });
 
 // POST /settings/cleanup-stale-jobs
-router.post("/cleanup-stale-jobs", requireAdmin, async (_req, res) => {
+router.post("/cleanup-stale-jobs", async (_req, res) => {
     try {
         const result = await staleJobCleanupService.cleanupAll();
 

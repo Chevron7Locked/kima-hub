@@ -19,6 +19,7 @@ import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { eventBus, type SSEEvent } from "../../services/eventBus";
 import { clearSuggestion } from "../../services/discovery/discoverClearing";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-discover-delete";
 let listener: string;
@@ -32,7 +33,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: listener, username: `${MARK}-listener`, role: "admin" };
     next();
 });
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 async function cleanup(): Promise<void> {
     await prisma.downloadJob.deleteMany({ where: { user: { username: { startsWith: MARK } } } });

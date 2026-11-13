@@ -11,9 +11,10 @@ import artistsRouter from "../artists";
 import { prisma } from "../../../utils/db";
 import { isBackfillInProgress } from "../../../services/artistCountsService";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-counts-backfill";
-const app = express().use(express.json()).use("/library", artistsRouter);
+const app = mountAsServer(express().use(express.json()), "/library", artistsRouter, "/api/library", { standIn: true });
 const ask = () => request(app).post("/library/artist-counts/backfill");
 
 /** Waits for the running recount, and every pass it makes, to end. */

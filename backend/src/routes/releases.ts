@@ -5,14 +5,12 @@ import { logger } from "../utils/logger";
 import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
 import { ConfigurationError } from "../utils/errors";
-import { requireAuthOrToken, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { acquisitionService } from "../services/acquisitionService";
 import { withAlbumArtwork } from "../services/artwork";
 import { z } from "zod";
 
 const router = Router();
-router.use(requireAuthOrToken);
-
 // Lidarr's Cover Art Archive address is empty for most unowned albums, so ask
 // the library's artwork providers instead.
 function withReleaseArtwork<

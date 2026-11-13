@@ -14,12 +14,13 @@ import { queues } from "../../workers/queues";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(30_000);
 
 const app = express();
 app.use(express.json());
-app.use("/api/auth", authRoutes);
+mountAsServer(app, "/api/auth", authRoutes, "/api/auth");
 app.use("/rest", subsonicRouter);
 
 const PREFIX = "itapikey_";

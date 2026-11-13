@@ -30,6 +30,7 @@ import whatsNewRoutes from "../whatsNew";
 import { prisma } from "../../utils/db";
 import { GPU_CHOICE_KEY } from "../../services/releases/catalog";
 import { setGpuToggles } from "../../services/gpuRuntime";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "whatsnew-gpu-test";
 
@@ -38,7 +39,7 @@ const setGpuMock = setGpuToggles as jest.Mock;
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/whats-new", whatsNewRoutes);
+    mountAsServer(app, "/whats-new", whatsNewRoutes, "/api/whats-new");
     return app;
 }
 

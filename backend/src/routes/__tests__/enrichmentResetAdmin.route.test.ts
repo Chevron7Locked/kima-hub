@@ -8,6 +8,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import enrichmentRoutes from "../enrichment";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-reset-admin";
 const USER = `${P}-member`;
@@ -16,7 +17,7 @@ const ARTIST = `${P}-artist`;
 const ALBUM = `${P}-album`;
 const TRACK = `${P}-track`;
 
-const app = () => express().use(express.json()).use("/enrichment", enrichmentRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/enrichment", enrichmentRoutes, "/api/enrichment");
 const as = (id: string, role: "user" | "admin") =>
     `Bearer ${generateToken({ id, username: id, role, tokenVersion: 0 })}`;
 

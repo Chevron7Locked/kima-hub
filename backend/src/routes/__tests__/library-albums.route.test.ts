@@ -26,12 +26,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import albumRoutes from '../../routes/library/albums';
-import { requireAuthOrToken } from '../../middleware/auth';
 import { config, useMusicFolder } from '../../config';
 import { prisma } from '../../utils/db';
 import { lidarrService } from '../../services/lidarr';
 import { deezerService } from '../../services/deezer';
 import { expectLog } from '../../__tests__/helpers/expectedLogs';
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = 'zz-library-albums';
 const startFolder = config.music.musicPath;
@@ -39,8 +39,8 @@ const startFolder = config.music.musicPath;
 let base: string;
 let root: string;
 
-// The library router signs the listener in before these routes; here the real middleware does it.
-const app = express().use(express.json()).use(requireAuthOrToken).use('/', albumRoutes);
+// The library mount signs the listener in before these routes; here the real middleware does it.
+const app = mountAsServer(express().use(express.json()), '/', albumRoutes, '/api/library');
 const as = (userId: string, role: string) =>
     `Bearer ${jwt.sign({ userId, username: userId, role, tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: '1h' })}`;
 

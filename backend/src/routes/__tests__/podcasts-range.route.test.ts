@@ -30,6 +30,7 @@ import * as podcastDownload from '../../services/podcastDownload';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { USER_AGENT } from '../../config';
+import { mountAsServer } from "./helpers/serverMount";
 
 const SHOW = 'pod_range_show';
 const EP = 'pod_range_ep';
@@ -55,7 +56,7 @@ afterAll(async () => {
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use('/podcasts', podcastRoutes);
+    mountAsServer(app, '/podcasts', podcastRoutes, "/api/podcasts");
     return app;
 }
 

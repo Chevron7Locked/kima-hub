@@ -24,9 +24,10 @@ import libraryCoverArtRoutes from "../library/coverArt";
 import { BlockedAddressError, InvalidAddressError, UnresolvedAddressError } from "../../utils/ssrf";
 import { redisClient } from "../../utils/redis";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
-app.use("/library", libraryCoverArtRoutes);
+mountAsServer(app, "/library", libraryCoverArtRoutes, "/api/library", { standIn: true });
 
 const COVER = "https://covers.example.org/a.jpg";
 const cover = () => request(app).get(`/library/cover-art?url=${encodeURIComponent(COVER)}`);

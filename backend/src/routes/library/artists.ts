@@ -2,7 +2,6 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { artistNamed, isMbid, normalizeArtistName } from "../../services/artistIdentity";
-import { requireAdmin } from "../../middleware/auth";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
 import { AlbumLocation } from "@prisma/client";
 import { prisma, Prisma } from "../../utils/db";
@@ -272,7 +271,7 @@ router.get("/artist-counts/status", async (_req, res) => {
   }
 });
 
-router.post("/artist-counts/backfill", requireAdmin, async (_req, res) => {
+router.post("/artist-counts/backfill", async (_req, res) => {
   try {
     // Asked during a run, the recount goes over the artists once more when it finishes, so the ask is kept.
     const queued = isBackfillInProgress();
@@ -296,7 +295,7 @@ router.post("/artist-counts/backfill", requireAdmin, async (_req, res) => {
   }
 });
 
-router.post("/backfill-genres", requireAdmin, async (_req, res) => {
+router.post("/backfill-genres", async (_req, res) => {
   try {
     const artistsToBackfill = await prisma.artist.findMany({
       where: {
@@ -731,7 +730,7 @@ function removeEmptiedFolders(songPaths: string[]): void {
   }
 }
 
-router.delete("/artists/:id", requireAdmin, async (req, res) => {
+router.delete("/artists/:id", async (req, res) => {
   try {
     const artist = await prisma.artist.findUnique({
       where: { id: req.params.id },

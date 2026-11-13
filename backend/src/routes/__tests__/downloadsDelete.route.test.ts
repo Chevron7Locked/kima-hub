@@ -26,10 +26,11 @@ import downloadsRouter from "../downloads";
 import { prisma } from "../../utils/db";
 import * as downloadJobs from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "dld_user";
 const WEEK = new Date("2026-10-12T00:00:00.000Z");
-const app = express().use(express.json()).use("/downloads", downloadsRouter);
+const app = mountAsServer(express().use(express.json()), "/downloads", downloadsRouter, "/api/downloads");
 
 let batchId: string;
 const job = (id: string, status: string, data: Record<string, unknown> = {}) =>

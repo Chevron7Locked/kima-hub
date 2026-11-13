@@ -51,12 +51,13 @@ import request from "supertest";
 
 import { prisma } from "../../utils/db";
 import analysisRouter from "../analysis";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "vforce";
 const id = (n: string) => `${PREFIX}_${n}`;
 const app = express();
 app.use(express.json());
-app.use("/api/analysis", analysisRouter);
+mountAsServer(app, "/api/analysis", analysisRouter, "/api/analysis");
 
 async function seedAnalysedTrack(
     trackId: string,

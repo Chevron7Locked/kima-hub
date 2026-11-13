@@ -23,6 +23,7 @@ import { redisClient, waitForRedisReady } from '../../utils/redis';
 import { invalidateSystemSettingsCache, onSystemSettingsChange } from '../../utils/systemSettings';
 import { closeEngineConnections } from '../../__tests__/helpers/engineConnections';
 import { expectLog } from '../../__tests__/helpers/expectedLogs';
+import { mountAsServer } from "./helpers/serverMount";
 
 const AUDIO_HEARTBEAT = 'audio:worker:heartbeat';
 const CLAP_HEARTBEAT = 'clap:worker:heartbeat';
@@ -43,7 +44,7 @@ describe('analysis worker sliders', () => {
         await waitForRedisReady();
         app = express();
         app.use(express.json());
-        app.use('/analysis', analysisRoutes);
+        mountAsServer(app, '/analysis', analysisRoutes, "/api/analysis");
         before = await prisma.systemSettings.findUnique({
             where: { id: 'default' },
             select: { audioAnalyzerWorkers: true, clapWorkers: true },

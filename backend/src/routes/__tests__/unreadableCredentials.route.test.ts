@@ -16,6 +16,7 @@ import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const ADMIN = "zz-unreadable-admin";
 const RIGHT_KEY = "the-key-these-credentials-were-stored-under";
@@ -62,7 +63,12 @@ const store = async (data: Record<string, unknown>) => {
 };
 
 const app = () =>
-    express().use(express.json()).use("/system-settings", systemSettingsRoutes).use("/onboarding", onboardingRoutes);
+    mountAsServer(
+        mountAsServer(express().use(express.json()), "/system-settings", systemSettingsRoutes, "/api/system-settings"),
+        "/onboarding",
+        onboardingRoutes,
+        "/api/onboarding",
+    );
 const asAdmin = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 const get = () => request(app()).get("/system-settings").set("Authorization", asAdmin());
 const save = (body: object) => request(app()).post("/system-settings").set("Authorization", asAdmin()).send(body);

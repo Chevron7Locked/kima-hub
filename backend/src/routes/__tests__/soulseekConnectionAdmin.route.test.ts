@@ -12,12 +12,13 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import soulseekRoutes from "../soulseek";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-slsk-connection";
 const USER = `${P}-member`;
 const ADMIN = `${P}-admin`;
 
-const app = () => express().use(express.json()).use("/soulseek", soulseekRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/soulseek", soulseekRoutes, "/api/soulseek");
 const as = (id: string, role: "user" | "admin") =>
     `Bearer ${generateToken({ id, username: id, role, tokenVersion: 0 })}`;
 

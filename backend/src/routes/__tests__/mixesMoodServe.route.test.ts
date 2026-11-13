@@ -40,6 +40,7 @@ import {
     seedSyntheticLibrary,
     seedSyntheticMoods,
 } from "../../__tests__/fixtures/syntheticLibrary";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(300_000);
 
@@ -58,7 +59,7 @@ function makeApp() {
         req.user = { id: USER_ID, username: "mmsr-tester", role: "user" };
         next();
     });
-    app.use("/mixes", mixRoutes);
+    mountAsServer(app, "/mixes", mixRoutes, "/api/mixes");
     return app;
 }
 

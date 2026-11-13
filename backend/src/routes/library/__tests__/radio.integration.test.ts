@@ -26,6 +26,7 @@ import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { MOOD_HEADS } from "../../../services/moods/heads";
 import router from "../tracks";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 jest.setTimeout(600_000);
 
@@ -46,7 +47,7 @@ app.use((req, _res, next) => {
     req.user = { id: LISTENER } as typeof req.user;
     next();
 });
-app.use("/", router);
+mountAsServer(app, "/", router, "/api/library", { standIn: true });
 
 /** The recipe behind each station value, as the product names them; Wildcard has its own tests. */
 const STATIONS: [query: Record<string, string>, recipe: string][] = [

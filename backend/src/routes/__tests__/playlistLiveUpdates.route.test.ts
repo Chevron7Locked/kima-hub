@@ -13,12 +13,13 @@ import playlistsRoutes from "../playlists";
 import { prisma } from "../../utils/db";
 import type { SSEEvent } from "../../services/eventBus";
 import { cleanupMarked, listenTo, playlistAnnouncements, seedSongs } from "./helpers/liveEvents";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-playlist-live";
 
 const app = express();
 app.use(express.json());
-app.use("/playlists", playlistsRoutes);
+mountAsServer(app, "/playlists", playlistsRoutes, "/api/playlists");
 
 const tokenFor = (userId: string, username: string) =>
     jwt.sign({ userId, username, role: "user", tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: "1h" });

@@ -8,12 +8,17 @@ import tracksRouter from "../tracks";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { artistIdentityKey } from "../../../services/artistIdentity";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-recent-added";
 const app = () =>
-    express()
-        .use((req: any, _res, next) => { req.user = { id: `${P}-user`, role: "user" }; next(); })
-        .use("/library", tracksRouter);
+    mountAsServer(
+        express().use((req: any, _res, next) => { req.user = { id: `${P}-user`, role: "user" }; next(); }),
+        "/library",
+        tracksRouter,
+        "/api/library",
+        { standIn: true },
+    );
 
 const at = (minutesAgo: number) => new Date(Date.UTC(2031, 0, 1) - minutesAgo * 60_000);
 

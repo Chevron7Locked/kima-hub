@@ -1,7 +1,6 @@
 import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
-import { requireAuth } from "../middleware/auth";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
 
@@ -26,12 +25,12 @@ async function queueLimit(): Promise<number> {
 }
 
 /** The limit, for the client, so it does not have to guess. */
-router.get("/limit", requireAuth, async (_req, res) => {
+router.get("/limit", async (_req, res) => {
     res.json({ maxQueueLength: await queueLimit() });
 });
 
 // Get current playback state for the authenticated user
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", async (req, res) => {
     try {
         const userId = req.user!.id;
 
@@ -43,7 +42,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // Update current playback state for the authenticated user
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", async (req, res) => {
     try {
         const userId = req.user!.id;
         const {
@@ -148,7 +147,7 @@ function millis(value: unknown): number | null {
 
 // The web player's play/pause/seek/track changes, for the public live trip. Players only send
 // them when /system/features says so; anyone else still gets a 404, which silences them.
-router.post("/live", requireAuth, async (req, res) => {
+router.post("/live", async (req, res) => {
     try {
         if (!(await isPublicListener(req.user!.id))) {
             return res.status(404).json({ error: "Not available" });
@@ -174,7 +173,7 @@ router.post("/live", requireAuth, async (req, res) => {
 });
 
 // Clear playback state (when user stops playback completely)
-router.delete("/", requireAuth, async (req, res) => {
+router.delete("/", async (req, res) => {
     try {
         const userId = req.user!.id;
 

@@ -13,6 +13,7 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
 import { buildMoodState } from "../../services/moods/state";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "cvmood";
 const ANALYZED_AT = new Date("2026-10-23T00:00:00Z");
@@ -76,7 +77,7 @@ afterAll(async () => {
 
 function app() {
     const a = express();
-    a.use("/api/vibe", vibeRouter);
+    mountAsServer(a, "/api/vibe", vibeRouter, "/api/vibe");
     return a;
 }
 

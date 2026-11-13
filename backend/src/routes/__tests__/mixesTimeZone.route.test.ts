@@ -30,6 +30,7 @@ import mixRoutes from "../mixes";
 import { programmaticPlaylistService } from "../../services/mixes";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
+import { mountAsServer } from "./helpers/serverMount";
 
 const generate = programmaticPlaylistService.generateAllMixes as jest.Mock;
 const MIX = { id: "m1", name: "Mix One", trackIds: [] as string[] };
@@ -41,7 +42,7 @@ function app() {
         req.user = { id: "tz_user", username: "tz", role: "user" };
         next();
     });
-    a.use("/mixes", mixRoutes);
+    mountAsServer(a, "/mixes", mixRoutes, "/api/mixes");
     return a;
 }
 

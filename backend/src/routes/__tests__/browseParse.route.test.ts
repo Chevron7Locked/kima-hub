@@ -4,8 +4,9 @@ jest.mock("../../middleware/auth", () => ({ requireAuthOrToken: (_req: unknown, 
 import express from "express";
 import request from "supertest";
 import browseRoutes from "../browse";
+import { mountAsServer } from "./helpers/serverMount";
 
-const app = express().use(express.json()).use("/browse", browseRoutes);
+const app = mountAsServer(express().use(express.json()), "/browse", browseRoutes, "/api/browse");
 const parse = (body: unknown) => request(app).post("/browse/playlists/parse").send(body as object);
 const REFUSED = { error: "Invalid or unsupported URL. Please provide a Spotify, Deezer, or YouTube playlist URL." };
 

@@ -18,6 +18,7 @@ import { nightZone } from "../../services/mixes/nightPlays";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import type { SSEEvent } from "../../services/eventBus";
 import { cleanupMarked, listenTo, playlistAnnouncements, seedSongs } from "./helpers/liveEvents";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-mix-save";
 let userId: string;
@@ -31,7 +32,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: userId, username: `${MARK}-user`, role: "user" };
     next();
 });
-app.use("/mixes", mixRoutes);
+mountAsServer(app, "/mixes", mixRoutes, "/api/mixes");
 
 /** The user's cached mixes, as the mixes route stores them. */
 const cacheMixes = async (mixes: Array<{ id: string; name: string; trackIds: string[] }>) =>

@@ -10,8 +10,6 @@ import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
 import { changePassword, createAccount } from "../services/users/accounts";
 import {
-    requireAuth,
-    requireAdmin,
     generateToken,
     generateRefreshToken,
     generateStreamTicket,
@@ -180,7 +178,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
 });
 
 // GET /auth/me
-router.get("/me", requireAuth, async (req, res) => {
+router.get("/me", async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
@@ -205,7 +203,7 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 // POST /auth/change-password
-router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
+router.post("/change-password", authLimiter, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
@@ -244,7 +242,7 @@ router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
 });
 
 // GET /auth/users (Admin only)
-router.get("/users", requireAuth, requireAdmin, async (_req, res) => {
+router.get("/users", async (_req, res) => {
     try {
         const users = await prisma.user.findMany({
             select: {
@@ -265,7 +263,7 @@ router.get("/users", requireAuth, requireAdmin, async (_req, res) => {
 });
 
 // POST /auth/create-user (Admin only)
-router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
+router.post("/create-user", async (req, res) => {
     try {
         const { username, password, role } = req.body;
 
@@ -309,7 +307,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // DELETE /auth/users/:id (Admin only)
-router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/users/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -340,7 +338,7 @@ router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // POST /auth/2fa/setup - Generate 2FA secret and QR code
-router.post("/2fa/setup", requireAuth, async (req, res) => {
+router.post("/2fa/setup", async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
@@ -375,7 +373,7 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
 });
 
 // POST /auth/2fa/enable - Verify token and enable 2FA
-router.post("/2fa/enable", requireAuth, authLimiter, async (req, res) => {
+router.post("/2fa/enable", authLimiter, async (req, res) => {
     try {
         const { secret, token } = req.body;
 
@@ -432,7 +430,7 @@ router.post("/2fa/enable", requireAuth, authLimiter, async (req, res) => {
 });
 
 // POST /auth/2fa/disable - Disable 2FA
-router.post("/2fa/disable", requireAuth, authLimiter, async (req, res) => {
+router.post("/2fa/disable", authLimiter, async (req, res) => {
     try {
         const { password, token } = req.body;
 
@@ -483,7 +481,7 @@ router.post("/2fa/disable", requireAuth, authLimiter, async (req, res) => {
 // POST /auth/stream-ticket - Mint a short-lived, stream-scoped JWT for AVPlayer URLs.
 // Accepts the same header auth as other API calls (Bearer JWT or x-api-key).
 // Response: { ticket: string, expiresIn: number (seconds) }
-router.post("/stream-ticket", requireAuth, async (req, res) => {
+router.post("/stream-ticket", async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
@@ -503,7 +501,7 @@ router.post("/stream-ticket", requireAuth, async (req, res) => {
 });
 
 // DELETE /auth/account - Delete the current user's own account
-router.delete("/account", requireAuth, async (req, res) => {
+router.delete("/account", async (req, res) => {
     try {
         await prisma.$transaction(
             async (tx) => {
@@ -548,7 +546,7 @@ router.delete("/account", requireAuth, async (req, res) => {
 });
 
 // GET /auth/2fa/status - Check if 2FA is enabled
-router.get("/2fa/status", requireAuth, async (req, res) => {
+router.get("/2fa/status", async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },

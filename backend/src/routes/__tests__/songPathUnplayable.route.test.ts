@@ -13,12 +13,13 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import vibeRouter from "../vibe";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zzpathunplay";
 // The route takes cuid-shaped ids only.
 const id = (kind: string) => `c${P}${kind}`.padEnd(25, "0");
 const SONG = { playable: id("ok"), playable2: id("ok2"), discover: id("disc"), missing: id("miss"), corrupt: id("corr") };
-const app = express().use(express.json()).use("/vibe", vibeRouter);
+const app = mountAsServer(express().use(express.json()), "/vibe", vibeRouter, "/api/vibe");
 
 beforeAll(async () => {
     await prisma.artist.create({ data: { id: `${P}-ar`, name: P, normalizedName: P, identityKey: `${P}-ik` } });

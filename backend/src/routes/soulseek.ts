@@ -3,7 +3,7 @@
 import { logger } from "../utils/logger";
 import { safeError } from "../utils/errors";
 import { Router } from "express";
-import { requireAuth, requireAdmin, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
 import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
@@ -90,7 +90,7 @@ async function requireSoulseekConfigured(_req: any, res: any, next: any) {
  * GET /soulseek/status
  * Check connection status
  */
-router.get("/status", requireAuth, async (_req, res) => {
+router.get("/status", async (_req, res) => {
     try {
         const available = await soulseekService.isAvailable();
 
@@ -120,8 +120,6 @@ router.get("/status", requireAuth, async (_req, res) => {
  */
 router.post(
     "/connect",
-    requireAuth,
-    requireAdmin,
     requireSoulseekConfigured,
     async (_req, res) => {
         try {
@@ -144,7 +142,6 @@ router.post(
  */
 router.post(
     "/search",
-    requireAuth,
     requireSoulseekConfigured,
     async (req, res) => {
         try {
@@ -269,7 +266,7 @@ router.post(
  * GET /soulseek/search/:searchId
  * Get results for an ongoing search
  */
-router.get("/search/:searchId", requireAuth, async (req, res) => {
+router.get("/search/:searchId", async (req, res) => {
     try {
         const { searchId } = req.params;
         const session = searchSessions.get(searchId);
@@ -298,7 +295,6 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
  */
 router.post(
     "/download",
-    requireAuth,
     requireAcquirePermission,
     requireSoulseekConfigured,
     async (req, res) => {
@@ -401,7 +397,7 @@ router.post(
  * POST /soulseek/disconnect
  * Drops the server's one Soulseek connection, for every listener, so admins only.
  */
-router.post("/disconnect", requireAuth, requireAdmin, async (_req, res) => {
+router.post("/disconnect", async (_req, res) => {
     try {
         soulseekService.disconnect();
         res.json({ success: true, message: "Disconnected" });

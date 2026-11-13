@@ -15,12 +15,13 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "u_podsub";
 const STORED = "pod_sub_stored";
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 let feedHost: http.Server;
 let feedBase = "";

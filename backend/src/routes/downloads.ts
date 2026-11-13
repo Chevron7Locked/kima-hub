@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken, requireAdmin, requireAcquirePermission } from "../middleware/auth";
+import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import { lidarrService } from "../services/lidarr";
@@ -29,8 +29,6 @@ async function activeJobFor(tx: Prisma.TransactionClient, userId: string, mbid: 
     `;
     return job;
 }
-
-router.use(requireAuthOrToken);
 
 router.post("/", requireAcquirePermission, async (req, res) => {
     try {
@@ -406,7 +404,7 @@ router.delete("/clear-all", async (req, res) => {
     }
 });
 
-router.post("/clear-lidarr-queue", requireAdmin, async (_req, res) => {
+router.post("/clear-lidarr-queue", async (_req, res) => {
     try {
         const result = await sweepFailedDownloads();
         res.json({ success: true, removed: result.removed });

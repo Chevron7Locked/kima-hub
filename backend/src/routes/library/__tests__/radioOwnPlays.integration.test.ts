@@ -12,6 +12,7 @@ import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
 import router from "../tracks";
 import { selectRadioTracks } from "../../../services/mixes/stationSelection";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 jest.setTimeout(120_000);
 
@@ -30,7 +31,7 @@ function appFor(userId: string | undefined) {
         if (userId) req.user = { id: userId, username: userId, role: "user" } as typeof req.user;
         next();
     });
-    app.use("/", router);
+    mountAsServer(app, "/", router, "/api/library", { standIn: "preset" });
     return app;
 }
 

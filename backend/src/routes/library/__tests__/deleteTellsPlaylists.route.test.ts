@@ -18,13 +18,14 @@ import artistsRoutes from "../artists";
 import { prisma } from "../../../utils/db";
 import { eventBus, type SSEEvent } from "../../../services/eventBus";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const MARK = "zz-library-delete";
 const app = express();
 app.use(express.json());
-app.use("/", tracksRoutes);
-app.use("/", albumsRoutes);
-app.use("/", artistsRoutes);
+mountAsServer(app, "/", tracksRoutes, "/api/library", { standIn: true });
+mountAsServer(app, "/", albumsRoutes, "/api/library", { standIn: true });
+mountAsServer(app, "/", artistsRoutes, "/api/library", { standIn: true });
 
 let owner: string;
 const heard: SSEEvent[] = [];

@@ -27,10 +27,11 @@ import { prisma } from "../../../utils/db";
 import { config } from "../../../config";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import artistsRoutes from "../artists";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "adel";
 const MUSIC = path.resolve(config.music.musicPath);
-const app = () => express().use(express.json()).use("/", artistsRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/", artistsRoutes, "/api/library");
 
 let n = 0;
 /** An artist, and one album holding a scanned song at each of `files` (paths relative to the music root). */

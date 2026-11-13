@@ -40,11 +40,12 @@ import * as downloadJobs from "../../services/downloads/jobs";
 import { mergeMetadata, whenIdle } from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "nrt_user";
 const IMPORT = "nrt_import";
 const MBID = "e1e10000-1111-2222-3333-444455556666";
-const app = express().use(express.json()).use("/notifications", notificationRoutes);
+const app = mountAsServer(express().use(express.json()), "/notifications", notificationRoutes, "/api/notifications");
 
 const failedJob = (data: Record<string, unknown> = {}) =>
     prisma.downloadJob.create({

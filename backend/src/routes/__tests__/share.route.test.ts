@@ -13,6 +13,7 @@ import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
 import { coversBasePath } from '../../services/imageStorage';
 import { config } from '../../config';
+import { mountAsServer } from "./helpers/serverMount";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const TAG = 'zz-share-route';
@@ -22,7 +23,7 @@ const TOKEN = `${TAG}-token`;
 
 const app = express();
 app.use(express.json());
-app.use('/share', shareRoutes);
+mountAsServer(app, '/share', shareRoutes, "/api/share");
 
 /** A signed-in user's token; both users are seeded with token version 0. */
 function userToken(userId: string) {

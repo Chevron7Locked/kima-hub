@@ -17,13 +17,14 @@ import notificationRoutes from "../notifications";
 import { prisma } from "../../utils/db";
 import { eventBus } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "nrd_user";
 
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/notifications", notificationRoutes);
+    mountAsServer(app, "/notifications", notificationRoutes, "/api/notifications");
     return app;
 }
 

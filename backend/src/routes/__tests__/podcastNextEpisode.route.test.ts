@@ -9,12 +9,13 @@ import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
 import { episodeOnDay } from "./helpers/podcastRoute";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "u_podnext";
 const SHOW = "pod_next_show";
 const OTHER = "pod_next_other";
 const app = express();
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 const next = (episodeId: string, show = SHOW) => request(app).get(`/podcasts/${show}/episodes/${episodeId}/next`);
 
 beforeAll(async () => {

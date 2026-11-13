@@ -12,12 +12,13 @@ import searchRoutes from "../search";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { normalizeArtistName } from "../../services/artistIdentity";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "zz-srchgenre";
 const GENRE = "Zzgenrestyle";
 const app = express();
 app.use(express.json());
-app.use("/search", searchRoutes);
+mountAsServer(app, "/search", searchRoutes, "/api/search");
 
 const song = (n: string, albumId: string, title: string) => ({
     id: `${P}-t-${n}`, title, albumId, trackNo: 1, duration: 100,

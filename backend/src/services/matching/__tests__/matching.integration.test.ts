@@ -72,12 +72,13 @@ jest.mock("../../featureDetection", () => ({
 }));
 
 import vibeRouter from "../../../routes/vibe";
+import { mountAsServer } from "../../../routes/__tests__/helpers/serverMount";
 
 jest.setTimeout(60_000);
 
 const app = express();
 app.use(express.json());
-app.use("/api/vibe", vibeRouter);
+mountAsServer(app, "/api/vibe", vibeRouter, "/api/vibe");
 
 const ARTISTS: Record<string, string[]> = {
     cartmatcha00000000000: ["Rock", "Synth-Pop", "darkwave"],

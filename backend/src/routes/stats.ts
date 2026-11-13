@@ -7,7 +7,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config";
-import { requireAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
 import { hourDetail, listeningStats, regionDetail, trackPlayCount } from "../services/stats/listening";
 import { shelfStats } from "../services/stats/shelf";
@@ -25,8 +24,6 @@ import {
 } from "../services/playHistoryRepair";
 
 const router = Router();
-router.use(requireAuth);
-
 /**
  * GET /stats?tz=Europe/London
  *

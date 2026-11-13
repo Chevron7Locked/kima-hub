@@ -13,6 +13,7 @@ import { prisma } from "../../../utils/db";
 import artistRoutes from "../artists";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { artistIdentityKey } from "../../../services/artistIdentity";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-playtracks";
 
@@ -22,7 +23,7 @@ function makeApp() {
         req.user = { id: "test-user", username: "tester", role: "user" };
         next();
     });
-    app.use("/", artistRoutes);
+    mountAsServer(app, "/", artistRoutes, "/api/library", { standIn: true });
     return app;
 }
 

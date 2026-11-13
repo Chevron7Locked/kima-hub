@@ -1,12 +1,9 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuth } from "../middleware/auth";
 import { z } from "zod";
 import { recordPlay } from "../services/playRecording";
 
 const router = Router();
-
-router.use(requireAuth);
 
 const playSchema = z.object({
     trackId: z.string(),

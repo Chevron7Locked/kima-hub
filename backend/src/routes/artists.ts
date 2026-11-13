@@ -8,7 +8,6 @@ import { resolveArtistMbid } from "../services/artistCorrection";
 import { deezerService } from "../services/deezer";
 import { wikidataService } from "../services/wikidata";
 import { redisClient } from "../utils/redis";
-import { requireAuthOrToken } from "../middleware/auth";
 import {
     withAlbumArtwork,
     findAlbumArtwork,
@@ -19,8 +18,6 @@ import { proxyPreviewStream } from "../utils/previewProxy";
 import { failureCause } from "../utils/outcome";
 
 const router = Router();
-router.use(requireAuthOrToken);
-
 // Cache TTL for discovery content (shorter since it's not owned)
 const DISCOVERY_CACHE_TTL = 24 * 60 * 60; // 24 hours
 

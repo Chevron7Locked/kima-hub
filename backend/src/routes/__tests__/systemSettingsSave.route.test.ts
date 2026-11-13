@@ -17,6 +17,7 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { setEnv } from "../../__tests__/helpers/env";
+import { mountAsServer } from "./helpers/serverMount";
 
 const ADMIN = "zz-settings-save-admin";
 const ENV_FILES = [path.resolve(process.cwd(), "..", ".env"), path.resolve(process.cwd(), ".env")];
@@ -43,7 +44,7 @@ afterAll(async () => {
 
 it("a partial save writes no file, and startup loads the saved cache size", async () => {
     const files = snapshot();
-    const res = await request(express().use(express.json()).use("/system-settings", systemSettingsRoutes))
+    const res = await request(mountAsServer(express().use(express.json()), "/system-settings", systemSettingsRoutes, "/api/system-settings"))
         .post("/system-settings")
         .set("Authorization", `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`)
         .send({ transcodeCacheMaxGb: 7 });
@@ -59,7 +60,7 @@ it("a partial save writes no file, and startup loads the saved cache size", asyn
     }
 });
 
-const app = () => express().use(express.json()).use("/system-settings", systemSettingsRoutes);
+const app = () => mountAsServer(express().use(express.json()), "/system-settings", systemSettingsRoutes, "/api/system-settings");
 const asAdmin = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 
 it("a save answers only that it saved", async () => {

@@ -4,7 +4,6 @@ import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover }
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { requireAuth } from "../middleware/auth";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
@@ -68,7 +67,7 @@ async function loadUsableShareLink(token: string, res: Response) {
 /**
  * POST /api/share - Create a share link (authenticated)
  */
-router.post("/", requireAuth, async (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response) => {
     try {
         const { entityType, entityId } = req.body;
         if (!entityType || !entityId) {
@@ -276,7 +275,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 /**
  * DELETE /api/share/:token - Revoke a share link (authenticated, owner only)
  */
-router.delete("/:token", requireAuth, async (req: Request, res: Response) => {
+router.delete("/:token", async (req: Request, res: Response) => {
     try {
         const shareLink = await prisma.shareLink.findUnique({
             where: { token: req.params.token },

@@ -10,6 +10,7 @@ import router from '../enrichment';
 import { prisma } from '../../utils/db';
 import { generateToken } from '../../middleware/auth';
 import { closeEngineConnections } from '../../__tests__/helpers/engineConnections';
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = 'esn_';
 const ADMIN = `${P}admin`;
@@ -19,7 +20,7 @@ const SENTINEL = 'zz sentinel';
 
 const app = express();
 app.use(express.json());
-app.use('/enrichment', router);
+mountAsServer(app, '/enrichment', router, "/api/enrichment");
 const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: 'admin', tokenVersion: 0 })}`;
 const put = (path: string) => request(app).put(path).set('Authorization', asAdmin);
 const post = (path: string) => request(app).post(path).set('Authorization', asAdmin);

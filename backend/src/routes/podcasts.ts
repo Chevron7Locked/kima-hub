@@ -3,7 +3,6 @@ import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { forgetSearchesOf } from "../services/search";
 import { upstreamFailure, upstreamUnreachable } from "../utils/upstream";
-import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { prisma, Prisma } from "../utils/db";
 import { FeedReadError, rssParserService, type RSSEpisode as FeedEpisode } from "../services/rss-parser";
@@ -52,8 +51,6 @@ const progressOf = (p: { currentTime: number; duration: number; isFinished: bool
               lastPlayedAt: p.lastPlayedAt,
           }
         : null;
-
-router.use(requireAuthOrToken);
 
 function corsHeaders(corsOrigin: string | null) {
     return corsOrigin
@@ -107,7 +104,7 @@ function pipeUpstream(res: Response, upstream: Readable, label: string) {
  * GET /podcasts
  * Get all podcasts the user is subscribed to
  */
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", async (req, res) => {
     try {
         const subscriptions = await prisma.podcastSubscription.findMany({
             where: { userId: req.user!.id },
@@ -221,7 +218,7 @@ router.get("/charts", (req, res) =>
 );
 
 /** GET /podcasts/for-you — rows from the categories of the shows this user follows. */
-router.get("/for-you", requireAuth, async (req, res) => {
+router.get("/for-you", async (req, res) => {
     try {
         res.json(await forYou(req.user!.id));
     } catch (error) {
@@ -245,7 +242,7 @@ async function namedCategories(ids: number[]): Promise<Array<{ id: number; name:
  * GET /podcasts/listening — across every followed show: episodes in progress (most recently played first) and,
  * like a podcast app's "up next", each show's newest episode while it is still unplayed, newest first.
  */
-router.get("/listening", requireAuth, async (req, res) => {
+router.get("/listening", async (req, res) => {
     const userId = req.user!.id;
     const followed = { podcast: { subscriptions: { some: { userId } } } };
     try {
@@ -332,7 +329,7 @@ router.param("itunesId", (_req, res, next, itunesId: string) => {
  * GET /podcasts/preview/:itunesId
  * Preview a podcast by its Apple (iTunes) id, before following it
  */
-router.get("/preview/:itunesId", requireAuth, async (req, res) => {
+router.get("/preview/:itunesId", async (req, res) => {
     try {
         const { itunesId } = req.params;
         const show = (await lookupShows([itunesId])).get(itunesId);
@@ -433,7 +430,7 @@ router.get("/preview/:itunesId/snippet", async (req, res) => {
 });
 
 /** GET /podcasts/preview/:itunesId/similar — a show not followed yet: shows on its categories' charts, as /:id/similar. */
-router.get("/preview/:itunesId/similar", requireAuth, async (req, res) => {
+router.get("/preview/:itunesId/similar", async (req, res) => {
     const { itunesId } = req.params;
     try {
         const show = (await lookupShows([itunesId])).get(itunesId);
@@ -450,7 +447,7 @@ router.get("/preview/:itunesId/similar", requireAuth, async (req, res) => {
  * POST /podcasts/refresh-all
  * Queue refresh jobs for all of the user's subscribed podcasts
  */
-router.post("/refresh-all", requireAuth, async (req, res) => {
+router.post("/refresh-all", async (req, res) => {
     try {
         const userId = req.user!.id;
 
@@ -560,7 +557,7 @@ async function episodePage(
 }
 
 /** GET /podcasts/:id: a podcast the user subscribes to, with one page of episodes. */
-router.get("/:id", requireAuth, async (req, res) => {
+router.get("/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const { limit, offset } = parseEpisodePage(req.query);
@@ -610,7 +607,7 @@ router.get("/:id", requireAuth, async (req, res) => {
  * so the stable part can be cached. Offset-based: an episode arriving between
  * page fetches shows one duplicate.
  */
-router.get("/:id/episodes", requireAuth, async (req, res) => {
+router.get("/:id/episodes", async (req, res) => {
     try {
         const { id } = req.params;
         const { limit, offset } = parseEpisodePage(req.query);
@@ -634,7 +631,7 @@ router.get("/:id/episodes", requireAuth, async (req, res) => {
  * release date that this user has not finished, or `{ episode: null }` at the end of the show. 404 for an episode
  * that is not the show's.
  */
-router.get("/:podcastId/episodes/:episodeId/next", requireAuth, async (req, res) => {
+router.get("/:podcastId/episodes/:episodeId/next", async (req, res) => {
     try {
         const { podcastId, episodeId } = req.params;
         const userId = req.user!.id;
@@ -722,7 +719,7 @@ async function forgetSearches(userId: string) {
  * POST /podcasts/subscribe
  * Subscribe to a podcast by RSS feed URL or iTunes ID
  */
-router.post("/subscribe", requireAuth, async (req, res) => {
+router.post("/subscribe", async (req, res) => {
     try {
         const { feedUrl, itunesId } = req.body;
 
@@ -829,7 +826,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
  * DELETE /podcasts/:id/unsubscribe
  * Unsubscribe from a podcast
  */
-router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
+router.delete("/:id/unsubscribe", async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -890,7 +887,7 @@ router.delete("/:id/unsubscribe", requireAuth, async (req, res) => {
  * GET /podcasts/:id/refresh
  * Manually refresh podcast feed to check for new episodes
  */
-router.get("/:id/refresh", requireAuth, async (req, res) => {
+router.get("/:id/refresh", async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -913,7 +910,7 @@ router.get("/:id/refresh", requireAuth, async (req, res) => {
  * Stream a podcast episode (from local cache or RSS URL)
  * Auto-caches episodes in background for better seeking support
  */
-router.get("/:podcastId/episodes/:episodeId/stream", requireAuthOrToken, async (req, res) => {
+router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
     try {
         const { podcastId, episodeId } = req.params;
         const userId = req.user?.id;
@@ -1098,7 +1095,7 @@ const progressSchema = z.object({
  * POST /podcasts/:podcastId/episodes/:episodeId/progress
  * Update playback progress for a podcast episode
  */
-router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
+router.post("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
     try {
         const { podcastId, episodeId } = req.params;
         const body = progressSchema.safeParse(req.body);
@@ -1150,7 +1147,7 @@ router.post("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req,
  * DELETE /podcasts/:podcastId/episodes/:episodeId/progress
  * Remove/reset progress for a podcast episode
  */
-router.delete("/:podcastId/episodes/:episodeId/progress", requireAuth, async (req, res) => {
+router.delete("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
     try {
         const { podcastId, episodeId } = req.params;
 

@@ -22,6 +22,7 @@ import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { useMidWeekClock } from "./helpers/midWeekClock";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-curfall";
 let listener: string;
@@ -34,7 +35,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: acting, username: `${MARK}-listener`, role: "user" };
     next();
 });
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 useMidWeekClock();
 

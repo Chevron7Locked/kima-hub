@@ -33,12 +33,13 @@ import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "cl_";
 const USER = `${P}user`;
 const app = express();
 app.use(express.json());
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 async function cleanup() {
     await prisma.play.deleteMany({ where: { userId: USER } });

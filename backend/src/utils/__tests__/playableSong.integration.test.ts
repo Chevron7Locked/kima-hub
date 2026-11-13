@@ -35,6 +35,7 @@ import { playlistRouter } from "../../routes/subsonic/playlists";
 import { queueRouter } from "../../routes/subsonic/queue";
 import { lyricsRouter } from "../../routes/subsonic/lyrics";
 import { Prisma } from "@prisma/client";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 import { redisClient } from "../redis";
 import * as artistSimilarity from "../../services/artistSimilarity";
 import { sampleTrackIds, sampledMix, seededTrackIds, tracksByIds, unplayedTrackIds } from "../../services/mixes/helpers";
@@ -124,10 +125,10 @@ const app = express()
         req.user = { id, username: id, role: "user" };
         next();
     })
-    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter)
-    .use("/api/library", libraryTracksRouter, libraryArtistsRouter, libraryAlbumsRouter)
-    .use("/api/playlists", playlistsRouter)
-    .use("/api/recommendations", recommendationsRouter);
+    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter);
+for (const router of [libraryTracksRouter, libraryArtistsRouter, libraryAlbumsRouter]) mountAsServer(app, "/api/library", router, "/api/library");
+mountAsServer(app, "/api/playlists", playlistsRouter, "/api/playlists");
+mountAsServer(app, "/api/recommendations", recommendationsRouter, "/api/recommendations");
 /** A web route's JSON answer, asked as `user`. */
 const web = async (route: string, user = USER) => (await request(app).get(route).set("x-user", user).expect(200)).body;
 const subsonic = (route: string, query: Record<string, string | string[]>) =>

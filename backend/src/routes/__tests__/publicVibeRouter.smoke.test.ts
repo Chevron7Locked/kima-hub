@@ -33,10 +33,11 @@ import { searchTracksByText } from "../../services/textEmbeddingBridge";
 import { coversBasePath } from "../../services/imageStorage";
 import { reportLive, resetLive, setLiveHidden } from "../../services/liveListening";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
 app.use(express.json());
-app.use("/api/public/vibe", publicVibeRouter);
+mountAsServer(app, "/api/public/vibe", publicVibeRouter, "/api/public/vibe");
 const auth = { Authorization: `Bearer ${TOKEN}` };
 
 const TRACK = "ctrackaaaaaaaaaaaaaaaaaa1";

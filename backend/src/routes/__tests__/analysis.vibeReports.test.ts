@@ -50,6 +50,7 @@ import { prisma } from "../../utils/db";
 import analysisRouter from "../analysis";
 import { internalSecret } from "../../utils/internalSecret";
 import { waitForRedisReady } from "../../utils/redis";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(30_000);
 
@@ -64,7 +65,7 @@ const id = (n: string) => `${PREFIX}_${n}`;
 
 const app = express();
 app.use(express.json());
-app.use("/api/analysis", analysisRouter);
+mountAsServer(app, "/api/analysis", analysisRouter, "/api/analysis");
 
 async function seedTrack(n: string) {
     const trackId = id(n);

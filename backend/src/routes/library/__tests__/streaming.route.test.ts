@@ -28,6 +28,7 @@ import { prisma } from '../../../utils/db';
 import { config } from '../../../config';
 import { getAudioStreamingService } from '../../../services/audioStreaming';
 import { expectLog } from '../../../__tests__/helpers/expectedLogs';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = 'strm';
 const USER = `${P}_user`;
@@ -42,7 +43,7 @@ function makeApp() {
         req.user = { id: USER };
         next();
     });
-    app.use('/', streamingRoutes);
+    mountAsServer(app, '/', streamingRoutes, "/api/library", { standIn: true });
     return app;
 }
 const app = makeApp();

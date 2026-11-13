@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAdmin } from "../../middleware/auth";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -168,7 +167,7 @@ router.get("/albums/:id", async (req, res) => {
   }
 });
 
-router.delete("/albums/:id", requireAdmin, async (req, res) => {
+router.delete("/albums/:id", async (req, res) => {
   try {
     const album = await prisma.album.findUnique({
       where: { id: req.params.id },

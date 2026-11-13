@@ -14,6 +14,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { GuessLimit } from "../../services/users/guessLimits";
 import authRoutes from "../auth";
 import { subsonicRouter } from "../subsonic";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(60_000);
 
@@ -25,7 +26,7 @@ const app = express();
 trustOneProxyHop(app);
 app.use(express.json());
 app.use("/api/auth/login", authLimiter);
-app.use("/api/auth", authRoutes);
+mountAsServer(app, "/api/auth", authRoutes, "/api/auth");
 app.use("/rest", subsonicRouter);
 
 let address = 0;

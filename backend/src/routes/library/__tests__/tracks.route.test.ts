@@ -9,6 +9,7 @@ import tracksRoutes from '../tracks';
 import { prisma } from '../../../utils/db';
 import { toAudioFeaturesDTO } from '../../../utils/audioFeatures';
 import { closeEngineConnections } from '../../../__tests__/helpers/engineConnections';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ function makeApp() {
         req.user = { id: `${P}-user`, username: 'admin', role: 'admin' };
         next();
     });
-    app.use('/', tracksRoutes);
+    mountAsServer(app, '/', tracksRoutes, "/api/library", { standIn: true });
     return app;
 }
 

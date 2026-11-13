@@ -5,7 +5,6 @@ import { safeError, UserFacingError } from "../utils/errors";
 import { audiobookCacheService } from "../services/audiobookCache";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { prisma } from "../utils/db";
-import { requireAuthOrToken } from "../middleware/auth";
 import { getSystemSettings } from "../utils/systemSettings";
 import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
@@ -100,7 +99,6 @@ function toAudiobookDto(book: Audiobook, progress: AudiobookProgress | null) {
  */
 router.get(
     "/continue-listening",
-    requireAuthOrToken,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -148,7 +146,7 @@ router.get(
  * Manually trigger audiobook sync from Audiobookshelf
  * Fetches all audiobooks and caches metadata + cover images locally
  */
-router.post("/sync", requireAuthOrToken, async (_req, res) => {
+router.post("/sync", async (_req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -211,7 +209,7 @@ router.post("/sync", requireAuthOrToken, async (_req, res) => {
  * GET /audiobooks/search
  * Search audiobooks
  */
-router.get("/search", requireAuthOrToken, async (req, res) => {
+router.get("/search", async (req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -236,7 +234,7 @@ router.get("/search", requireAuthOrToken, async (req, res) => {
  * GET /audiobooks
  * Get all audiobooks from cached database (instant, no API calls)
  */
-router.get("/", requireAuthOrToken, async (req, res) => {
+router.get("/", async (req, res) => {
     logger.debug("[Audiobooks] GET / - fetching audiobooks list");
     try {
         const settings = await getSystemSettings();
@@ -291,7 +289,6 @@ router.get("/", requireAuthOrToken, async (req, res) => {
  */
 router.get(
     "/series/:seriesName",
-    requireAuthOrToken,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -457,7 +454,7 @@ router.get("/:id/cover", async (req, res) => {
  * GET /audiobooks/:id
  * Get a specific audiobook with full details (cache-only; syncs when missing/stale/no sections).
  */
-router.get("/:id", requireAuthOrToken, async (req, res) => {
+router.get("/:id", async (req, res) => {
     try {
         const settings = await getSystemSettings();
 
@@ -526,7 +523,7 @@ router.get("/:id", requireAuthOrToken, async (req, res) => {
  * GET /audiobooks/:id/stream
  * Proxy the audiobook stream with authentication
  */
-router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
+router.get("/:id/stream", async (req, res) => {
     try {
         logger.debug(
             `[Audiobook Stream] Request for audiobook: ${req.params.id}`
@@ -644,7 +641,6 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
  */
 router.post(
     "/:id/progress",
-    requireAuthOrToken,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();
@@ -788,7 +784,6 @@ router.post(
  */
 router.delete(
     "/:id/progress",
-    requireAuthOrToken,
     async (req, res) => {
         try {
             const settings = await getSystemSettings();

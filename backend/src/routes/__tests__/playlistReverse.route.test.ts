@@ -10,6 +10,7 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import playlistsRoutes from "../playlists";
 import { prisma } from "../../utils/db";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-playlist-reverse";
 const TEST_SECRET = process.env.JWT_SECRET!;
@@ -17,7 +18,7 @@ const TEST_SECRET = process.env.JWT_SECRET!;
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/playlists", playlistsRoutes);
+    mountAsServer(app, "/playlists", playlistsRoutes, "/api/playlists");
     return app;
 }
 

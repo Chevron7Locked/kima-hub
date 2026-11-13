@@ -73,12 +73,13 @@ import request from "supertest";
 
 import { prisma } from "../../utils/db";
 import enrichmentRouter from "../enrichment";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "frte";
 const id = (n: string) => `${PREFIX}_${n}`;
 const app = express();
 app.use(express.json());
-app.use("/api/enrichment", enrichmentRouter);
+mountAsServer(app, "/api/enrichment", enrichmentRouter, "/api/enrichment");
 
 async function seedFailedRecording(trackId: string): Promise<string> {
     await prisma.artist.create({

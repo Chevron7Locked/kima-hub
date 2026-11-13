@@ -20,6 +20,7 @@ import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
 import { resolveViewWeek, WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-unavail";
 let listener: string;
@@ -30,7 +31,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: listener, username: `${MARK}-listener`, role: "user" };
     next();
 });
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 const week = () => resolveViewWeek(startOfWeek(new Date(), { weekStartsOn: WEEK_STARTS_ON }), null).weekStart;
 

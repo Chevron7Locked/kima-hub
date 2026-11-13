@@ -11,6 +11,7 @@ import router from "../tracks";
 import { featureDetection } from "../../../services/featureDetection";
 import { warmRadioCovers } from "../../../services/mixes/radioRow";
 import * as stationSelection from "../../../services/mixes/stationSelection";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 jest.setTimeout(120_000);
 
@@ -28,7 +29,7 @@ function appFor(userId: string) {
         req.user = { id: userId, username: userId, role: "user" } as typeof req.user;
         next();
     });
-    app.use("/", router);
+    mountAsServer(app, "/", router, "/api/library", { standIn: true });
     return app;
 }
 

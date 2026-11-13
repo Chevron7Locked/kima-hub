@@ -18,10 +18,11 @@ import analysisRoutes from "../analysis";
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const app = express();
 app.use(express.json());
-app.use("/analysis", analysisRoutes);
+mountAsServer(app, "/analysis", analysisRoutes, "/api/analysis");
 
 afterEach(async () => {
     await prisma.systemSettings.updateMany({ where: { id: "default" }, data: { analysisAndVectorsTogether: false } });

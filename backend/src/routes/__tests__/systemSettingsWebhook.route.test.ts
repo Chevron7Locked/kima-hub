@@ -17,11 +17,12 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const ADMIN = "zz-settings-webhook-admin";
 const URL_A = "http://lidarr-a.test:8686";
 const URL_B = "http://lidarr-b.test:8686";
-const app = express().use(express.json()).use("/system-settings", systemSettingsRoutes);
+const app = mountAsServer(express().use(express.json()), "/system-settings", systemSettingsRoutes, "/api/system-settings");
 const asAdmin = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 const save = (body: Record<string, unknown>) => request(app).post("/system-settings").set("Authorization", asAdmin()).send(body).expect(200);
 

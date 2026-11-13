@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { featureDetection } from "../services/featureDetection";
 import { isPublicListener } from "../services/liveListening";
-import { requireAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -12,7 +11,7 @@ const router = Router();
  * for the public live feed: only on an instance with the public vibe switched on, and only for
  * its public user. Everywhere else the player sends nothing.
  */
-router.get("/features", requireAuth, async (req, res) => {
+router.get("/features", async (req, res) => {
     try {
         const features = await featureDetection.getFeatures();
         // A failed lookup means no reporting; it never costs the player its other features.

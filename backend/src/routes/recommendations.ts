@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -8,8 +7,6 @@ import { recentPlayArtists } from "../services/stats/listens";
 import type { Artist } from "@prisma/client";
 
 const router = Router();
-
-router.use(requireAuthOrToken);
 
 // GET /recommendations/for-you?limit=10
 router.get("/for-you", async (req, res) => {

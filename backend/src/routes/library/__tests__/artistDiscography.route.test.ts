@@ -32,6 +32,7 @@ import request from "supertest";
 import artistRoutes from "../artists";
 import { prisma } from "../../../utils/db";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const ARTIST = "disco_interpol";
 const MBID = "b23e8a63-8f47-4882-b55b-df2c92ef400e";
@@ -42,7 +43,7 @@ function makeApp() {
         req.user = { id: "disco_user", role: "user" };
         next();
     });
-    app.use("/", artistRoutes);
+    mountAsServer(app, "/", artistRoutes, "/api/library", { standIn: true });
     return app;
 }
 

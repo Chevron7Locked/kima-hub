@@ -23,6 +23,7 @@ import vibeRouter from "../vibe";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 afterAll(async () => {
     // The router pulls in services/featureDetection, which opens the shared
@@ -33,7 +34,7 @@ afterAll(async () => {
 
 function app() {
     const a = express();
-    a.use("/api/vibe", vibeRouter);
+    mountAsServer(a, "/api/vibe", vibeRouter, "/api/vibe");
     return a;
 }
 

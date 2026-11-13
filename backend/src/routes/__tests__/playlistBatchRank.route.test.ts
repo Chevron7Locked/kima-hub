@@ -10,9 +10,10 @@ import jwt from "jsonwebtoken";
 import playlistRoutes from "../playlists";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-playlist-batch-rank";
-const app = express().use(express.json()).use("/playlists", playlistRoutes);
+const app = mountAsServer(express().use(express.json()), "/playlists", playlistRoutes, "/api/playlists");
 const as = (userId: string) =>
     `Bearer ${jwt.sign({ userId, username: userId, role: "user", tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: "1h" })}`;
 

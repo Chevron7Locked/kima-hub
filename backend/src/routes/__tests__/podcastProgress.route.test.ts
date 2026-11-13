@@ -9,11 +9,12 @@ import express from "express";
 import request from "supertest";
 import podcastRoutes from "../podcasts";
 import { prisma } from "../../utils/db";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "pod_progress_route";
 const app = express();
 app.use(express.json());
-app.use("/podcasts", podcastRoutes);
+mountAsServer(app, "/podcasts", podcastRoutes, "/api/podcasts");
 
 beforeAll(async () => {
     await prisma.user.upsert({ where: { id: "u_podprog" }, create: { id: "u_podprog", username: "u_podprog", passwordHash: "x" }, update: {} });

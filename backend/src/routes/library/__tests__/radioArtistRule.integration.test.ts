@@ -11,13 +11,14 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
 import router from "../tracks";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 jest.setTimeout(120_000);
 
 const P = "rar_";
 const app = express();
 app.use(express.json());
-app.use("/", router);
+mountAsServer(app, "/", router, "/api/library", { standIn: true });
 
 async function artist(id: string) {
     await prisma.artist.create({

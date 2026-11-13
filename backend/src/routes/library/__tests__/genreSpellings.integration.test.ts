@@ -8,13 +8,14 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
 import router from "../tracks";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 jest.setTimeout(120_000);
 
 const P = "gsp_";
 const app = express();
 app.use(express.json());
-app.use("/", router);
+mountAsServer(app, "/", router, "/api/library", { standIn: true });
 
 /** Artist number, its one genre as tagged, how many library tracks it has. */
 const ARTISTS: [number, string, number][] = [

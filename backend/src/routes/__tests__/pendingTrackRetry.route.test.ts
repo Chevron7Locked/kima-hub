@@ -45,11 +45,17 @@ import * as downloadJobs from "../../services/downloads/jobs";
 const startFolder = config.music.musicPath;
 import notificationRoutes from "../notifications";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "ptr";
 const OWNER = `${P}_owner`;
 const OTHER = `${P}_other`;
-const app = express().use(express.json()).use("/playlists", playlistsRoutes).use("/notifications", notificationRoutes);
+const app = mountAsServer(
+    mountAsServer(express().use(express.json()), "/playlists", playlistsRoutes, "/api/playlists"),
+    "/notifications",
+    notificationRoutes,
+    "/api/notifications",
+);
 const as = (user: string) => ({ "x-user": user });
 const MATCH = [{ filename: "a.flac" }];
 

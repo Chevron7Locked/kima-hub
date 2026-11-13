@@ -6,10 +6,10 @@
 jest.mock("../../workers/unifiedEnrichment", () => ({
     triggerEnrichmentNow: jest.fn().mockResolvedValue({ artists: 0, tracks: 0, audioQueued: 0 }),
 }));
-// The like and unlike routes: a signed-in listener (named by a header here) and a Lidarr that is not set up.
+// The like and unlike routes: a signed-in listener (named by a header here, or already set on the request) and a Lidarr that is not set up.
 jest.mock("../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
-        req.user = { id: req.headers["x-test-user"], role: "admin" };
+        req.user ??= { id: req.headers["x-test-user"], role: "admin" };
         next();
     };
     return { requireAuthOrToken: signIn, requireAuth: signIn, requireAdmin: signIn, requireAcquirePermission: signIn };
@@ -34,6 +34,7 @@ import { searchService } from "../search";
 import discoverRouter from "../../routes/discover";
 import { returnToDiscover, takeIntoLibrary } from "../discovery/discoveryAlbumLifecycle";
 import { triggerEnrichmentNow } from "../../workers/unifiedEnrichment";
+import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 
 jest.setTimeout(120_000);
 
@@ -62,9 +63,9 @@ const app = (userId: string) => {
         req.user = { id: userId } as typeof req.user;
         next();
     });
-    a.use("/", albumsRouter);
-    a.use("/", artistsRouter);
-    a.use("/", tracksRouter);
+    mountAsServer(a, "/", albumsRouter, "/api/library");
+    mountAsServer(a, "/", artistsRouter, "/api/library");
+    mountAsServer(a, "/", tracksRouter, "/api/library");
     return a;
 };
 
@@ -139,7 +140,7 @@ afterAll(async () => {
 
 const discoverApp = express();
 discoverApp.use(express.json());
-discoverApp.use("/discover", discoverRouter);
+mountAsServer(discoverApp, "/discover", discoverRouter, "/api/discover");
 const like = (userId: string, rgMbid: string) =>
     request(discoverApp).post("/discover/like").set("x-test-user", userId).send({ albumId: rgMbid });
 const unlike = (userId: string, rgMbid: string) =>

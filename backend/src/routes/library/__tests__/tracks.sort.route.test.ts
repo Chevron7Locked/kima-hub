@@ -7,11 +7,12 @@ import express from 'express';
 import request from 'supertest';
 import router from '../tracks';
 import { prisma } from '../../../utils/db';
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = 'tsort';
 const app = express();
 app.use(express.json());
-app.use('/', router);
+mountAsServer(app, '/', router, "/api/library", { standIn: true });
 
 async function cleanup(): Promise<void> {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });

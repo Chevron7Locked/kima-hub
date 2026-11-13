@@ -17,6 +17,7 @@ import { closeClient } from "../../utils/closeRedisClient";
 import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
 import { buildMoodState } from "../../services/moods/state";
 import { LEGEND, summariseMoods } from "../../services/vibeMap";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "cvsum";
 const ANALYZED_AT = new Date("2026-10-23T00:00:00Z");
@@ -95,7 +96,7 @@ afterAll(async () => {
 
 function app() {
     const a = express();
-    a.use("/api/vibe", vibeRouter);
+    mountAsServer(a, "/api/vibe", vibeRouter, "/api/vibe");
     return a;
 }
 const auth = (r: request.Test) => r.set("Authorization", `Bearer ${token}`);

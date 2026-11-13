@@ -28,6 +28,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import whatsNewRoutes from "../whatsNew";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "whatsnew_reopen_user";
 const ADMIN = "whatsnew_reopen_admin";
@@ -35,7 +36,7 @@ const ADMIN = "whatsnew_reopen_admin";
 function app() {
     const a = express();
     a.use(express.json());
-    a.use("/whats-new", whatsNewRoutes);
+    mountAsServer(a, "/whats-new", whatsNewRoutes, "/api/whats-new");
     return a;
 }
 

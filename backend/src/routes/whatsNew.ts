@@ -6,7 +6,6 @@
 
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
 import {
     UnknownChoiceError,
@@ -29,8 +28,6 @@ import {
 } from "../services/releases/moodMixes";
 
 const router = Router();
-router.use(requireAuth);
-
 /** GET /whats-new/pending — the newest release, until this user closes it; older ones live on the changelog. */
 router.get("/pending", async (req, res) => {
     try {

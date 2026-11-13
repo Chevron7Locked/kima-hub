@@ -2,11 +2,8 @@ import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { randomUUID } from "crypto";
 import { redisClient } from "../utils/redis";
-import { requireAuthOrToken } from "../middleware/auth";
 
 const router = Router();
-
-router.use(requireAuthOrToken);
 
 router.post("/", asyncHandler(async (req, res) => {
   const userId = req.user?.id;

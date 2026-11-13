@@ -18,6 +18,7 @@ import express from "express";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import scanRouter from "../../routes/library/scan";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "corrupt";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -67,7 +68,7 @@ beforeEach(async () => {
     await seedLibrary();
     app = express();
     app.use(express.json());
-    app.use("/library", scanRouter);
+    mountAsServer(app, "/library", scanRouter, "/api/library");
 });
 
 afterAll(async () => {

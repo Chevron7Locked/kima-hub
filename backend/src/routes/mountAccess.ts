@@ -1,0 +1,189 @@
+/**
+ * Who may reach each mounted router, by mount path. The families are described in ./access; ./mounts pairs each
+ * path with its router. A mount with no entry here refuses everything. A route that differs from its mount is listed
+ * under `routes`, written as the router writes it.
+ *
+ * This file imports no router, so a test can mount one router with the access the server gives it.
+ */
+
+import type { Access } from "./access";
+
+export interface MountAccess {
+    access: Access;
+    /** The per-address runaway limit, in front of the access check. */
+    runawayLimit?: boolean;
+}
+
+const publicAccess: Access = { family: "public" };
+const signedIn: Access = { family: "signed-in" };
+/** Signed in, where streaming URLs carry the token in `?token=`. */
+const signedInByUrlToken: Access = { family: "signed-in", urlToken: true };
+
+export const mountAccess: Record<string, MountAccess> = {
+    "/api/auth": {
+        access: {
+            ...signedIn,
+            routes: {
+                "POST /login": "public",
+                "POST /logout": "public",
+                "POST /refresh": "public",
+                "GET /users": "admin",
+                "POST /create-user": "admin",
+                "DELETE /users/:id": "admin",
+            },
+        },
+    },
+    "/api/onboarding": {
+        access: {
+            ...signedIn,
+            routes: {
+                "POST /register": "public",
+                "GET /status": "public",
+                "POST /lidarr": "admin",
+                "POST /audiobookshelf": "admin",
+                "POST /soulseek": "admin",
+            },
+        },
+    },
+    "/api/share": {
+        access: {
+            family: "share-token",
+            routes: { "POST /": "signed-in", "DELETE /:token": "signed-in" },
+        },
+    },
+    "/api/api-keys": { access: signedIn, runawayLimit: true },
+    "/api/device-link": {
+        access: { ...signedInByUrlToken, routes: { "POST /verify": "public" } },
+        runawayLimit: true,
+    },
+    // The library router limits itself: cover art and the album cover search carry the image limit, and streaming carries none.
+    "/api/library": {
+        access: {
+            ...signedInByUrlToken,
+            routes: {
+                "POST /scan": "admin",
+                "POST /organize": "admin",
+                "POST /refile": "admin",
+                "GET /corrupt-tracks": "admin",
+                "GET /missing-tracks": "admin",
+                "GET /removals": "admin",
+                "DELETE /corrupt-tracks": "admin",
+                "POST /artist-counts/backfill": "admin",
+                "POST /backfill-genres": "admin",
+                "DELETE /artists/:id": "admin",
+                "DELETE /albums/:id": "admin",
+                "DELETE /tracks/:id": "admin",
+                "POST /image-backfill/start": "admin",
+            },
+        },
+    },
+    "/api/plays": { access: signedIn, runawayLimit: true },
+    "/api/whats-new": { access: signedIn, runawayLimit: true },
+    "/api/stats": { access: signedIn, runawayLimit: true },
+    "/api/settings": {
+        access: { ...signedIn, routes: { "POST /cleanup-stale-jobs": "admin" } },
+        runawayLimit: true,
+    },
+    "/api/system-settings": {
+        access: { family: "admin", routes: { "GET /public-config": "signed-in" } },
+        runawayLimit: true,
+    },
+    // No runaway limit: playback state syncs often.
+    "/api/playback-state": { access: signedIn },
+    "/api/playlists": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/search": { access: signedIn, runawayLimit: true },
+    "/api/recommendations": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/downloads": {
+        access: { ...signedInByUrlToken, routes: { "POST /clear-lidarr-queue": "admin" } },
+        runawayLimit: true,
+    },
+    "/api/notifications": { access: signedIn, runawayLimit: true },
+    // The router applies the webhook limit, which lets requests carrying the secret through.
+    "/api/webhooks": { access: { family: "webhook" } },
+    // The cover stays reachable without a session: lock-screen artwork requests it that way, so the runaway limit is
+    // its only bound. The stream route accepts a token in the URL.
+    "/api/audiobooks": {
+        access: {
+            ...signedInByUrlToken,
+            routes: { "GET /:id/cover": "public", "OPTIONS /:id/cover": "public" },
+        },
+        runawayLimit: true,
+    },
+    // Images and the audio routes take a token in the URL; the rest want a session, key or header.
+    "/api/podcasts": {
+        access: {
+            ...signedIn,
+            urlToken: [
+                "GET /categories",
+                "GET /charts",
+                "GET /discover/top",
+                "GET /discover/genres",
+                "GET /discover/genre/:genreId",
+                "GET /preview/:itunesId/snippet",
+                "GET /:id/similar",
+                "GET /:id/cover",
+                "GET /episodes/:episodeId/cover",
+                "GET /:podcastId/episodes/:episodeId/stream",
+            ],
+        },
+        runawayLimit: true,
+    },
+    "/api/artists": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/soulseek": {
+        access: { ...signedIn, routes: { "POST /connect": "admin", "POST /disconnect": "admin" } },
+        runawayLimit: true,
+    },
+    "/api/discover": {
+        access: {
+            ...signedInByUrlToken,
+            routes: { "POST /cleanup-lidarr": "admin", "POST /fix-tagging": "admin" },
+        },
+        runawayLimit: true,
+    },
+    "/api/mixes": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/enrichment": {
+        access: {
+            ...signedIn,
+            routes: {
+                "POST /pause": "admin",
+                "POST /resume": "admin",
+                "POST /stop": "admin",
+                "POST /retry-failed-and-blocked": "admin",
+                "POST /re-decide-everything": "admin",
+                "POST /rerun": "admin",
+                "POST /wipe-and-rerun": "admin",
+                "POST /sync": "admin",
+                "POST /retry": "admin",
+                "PUT /artists/:id/metadata": "admin",
+                "PUT /albums/:id/metadata": "admin",
+                "PUT /tracks/:id/metadata": "admin",
+                "POST /artists/:id/reset": "admin",
+                "POST /albums/:id/reset": "admin",
+                "POST /tracks/:id/reset": "admin",
+                "PUT /concurrency": "admin",
+            },
+        },
+        runawayLimit: true,
+    },
+    "/api/spotify": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/browse": { access: signedInByUrlToken, runawayLimit: true },
+    // The analyzers report here with the server's own secret.
+    "/api/analysis": {
+        access: { family: "admin", routes: { "POST /vibe/failure": "internal", "POST /vibe/success": "internal" } },
+        runawayLimit: true,
+    },
+    "/api/releases": { access: signedInByUrlToken, runawayLimit: true },
+    "/api/vibe": { access: signedIn, runawayLimit: true },
+    // Read-only public vibe feed, mounted only when KIMA_PUBLIC_VIBE=true.
+    "/api/public/vibe": { access: { family: "internal" }, runawayLimit: true },
+    "/api/system": { access: signedIn, runawayLimit: true },
+    "/api/events/ticket": { access: signedInByUrlToken, runawayLimit: true },
+    // Public: the stream proves itself with the one-time ticket the route reads; long-lived, so no runaway limit.
+    "/api/events": { access: publicAccess },
+    // Subsonic limits and signs in its own requests.
+    "/rest": { access: { family: "subsonic" } },
+    "/health": { access: publicAccess },
+    "/api/health": { access: publicAccess },
+    // The runaway limit comes first, so a looping client is held before the sign-in check.
+    "/api/metrics": { access: { family: "admin" }, runawayLimit: true },
+};

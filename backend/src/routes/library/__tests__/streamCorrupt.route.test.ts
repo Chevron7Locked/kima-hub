@@ -14,12 +14,17 @@ import { prisma } from "../../../utils/db";
 import { config } from "../../../config";
 import streamingRouter from "../streaming";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "zz-stream-corrupt";
 const BYTES = Buffer.from("fLaC-stream-corrupt-bytes");
-const app = express()
-    .use((req: any, _res, next) => { req.user = { id: `${P}-user`, role: "user" }; next(); })
-    .use("/library", streamingRouter);
+const app = mountAsServer(
+    express().use((req: any, _res, next) => { req.user = { id: `${P}-user`, role: "user" }; next(); }),
+    "/library",
+    streamingRouter,
+    "/api/library",
+    { standIn: true },
+);
 
 const KINDS = ["playable", "discover", "missing", "corrupt"] as const;
 

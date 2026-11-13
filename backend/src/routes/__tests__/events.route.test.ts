@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import eventsRoutes from "../events";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { announcePlaylistChange } from "../../services/playlistEvents";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "zz-events-route-user";
 let server: http.Server;
@@ -18,7 +19,7 @@ let base: string;
 beforeAll(async () => {
     await waitForRedisReady();
     const app = express();
-    app.use("/api/events", eventsRoutes);
+    mountAsServer(app, "/api/events", eventsRoutes, "/api/events");
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>((ready) => server.once("listening", () => ready()));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

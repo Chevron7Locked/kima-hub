@@ -33,8 +33,9 @@ import path from "path";
 import { prisma } from "../../utils/db";
 import libraryCoverArtRoutes from "../library/coverArt";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
-const app = express().use("/library", libraryCoverArtRoutes);
+const app = mountAsServer(express(), "/library", libraryCoverArtRoutes, "/api/library", { standIn: true });
 const COVERS = path.join(COVERS_PARENT, "covers");
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 const picture = () => ({ ok: true, status: 200, statusText: "OK", headers: new Headers({ "content-type": "image/png" }), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });

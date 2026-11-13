@@ -57,11 +57,12 @@ import express from 'express';
 import request from 'supertest';
 import { prisma } from '../../utils/db';
 import releaseRoutes from '../releases';
+import { mountAsServer } from "./helpers/serverMount";
 
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use('/releases', releaseRoutes);
+    mountAsServer(app, '/releases', releaseRoutes, "/api/releases");
     return app;
 }
 

@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
-import { requireAuthOrToken } from "../middleware/auth";
 import { programmaticPlaylistService } from "../services/mixes";
 import { nightZone } from "../services/mixes/nightPlays";
 import {
@@ -16,8 +15,6 @@ import { announcePlaylistChange } from "../services/playlistEvents";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 
 const router = Router();
-
-router.use(requireAuthOrToken);
 
 /**
  * The listener's IANA time zone from `?tz=`, as GET /stats takes it: the night mixes (Late Night, Midnight Drive) read

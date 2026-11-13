@@ -24,6 +24,7 @@ import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
 import { computeWaveformPeaks, PEAK_COUNT } from "../waveform";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "wavef";
 
@@ -121,7 +122,7 @@ function makeApp(): express.Application {
     });
     // Import the default export (router) from waveform.ts
     const waveformRouter = require("../waveform").default;
-    app.use("/api/library", waveformRouter);
+    mountAsServer(app, "/api/library", waveformRouter, "/api/library", { standIn: true });
     return app;
 }
 

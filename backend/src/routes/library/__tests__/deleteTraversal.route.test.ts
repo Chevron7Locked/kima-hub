@@ -28,6 +28,7 @@ import { closeEngineConnections } from "../../../__tests__/helpers/engineConnect
 import tracksRoutes from "../tracks";
 import artistsRoutes from "../artists";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
 const P = "dtrav";
 const MUSIC = path.resolve(config.music.musicPath);
@@ -38,8 +39,8 @@ const EVIL = `../${OUTSIDE_NAME}/evil`;
 
 const app = express();
 app.use(express.json());
-app.use("/", tracksRoutes);
-app.use("/", artistsRoutes);
+mountAsServer(app, "/", tracksRoutes, "/api/library");
+mountAsServer(app, "/", artistsRoutes, "/api/library");
 
 let n = 0;
 /** An artist with one album holding a song at each of `files` (paths as stored, relative to the music root). */

@@ -15,6 +15,7 @@ import express from "express";
 import request from "supertest";
 import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-discover-config";
 let listener: string;
@@ -25,7 +26,7 @@ app.use((req: any, _res, next) => {
     req.user = { id: listener, username: `${MARK}-listener`, role: "user" };
     next();
 });
-app.use("/discover", discoverRoutes);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
 
 const cleanup = () => prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
 

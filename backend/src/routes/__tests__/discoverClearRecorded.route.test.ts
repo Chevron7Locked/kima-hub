@@ -43,6 +43,7 @@ import { lidarrService } from "../../services/lidarr";
 import { clearDiscoverAlbum } from "../../services/discovery/discoverClearing";
 import discoverRoutes from "../discover";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 jest.setTimeout(120_000);
 
@@ -62,7 +63,7 @@ let lidarr: LidarrReplay | null = null;
 function app() {
     const a = express();
     a.use(express.json());
-    a.use("/discover", discoverRoutes);
+    mountAsServer(a, "/discover", discoverRoutes, "/api/discover");
     return a;
 }
 

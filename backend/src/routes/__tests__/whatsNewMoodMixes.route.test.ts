@@ -21,6 +21,7 @@ import whatsNewRoutes from "../whatsNew";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { eventBus, type SSEEvent } from "../../services/eventBus";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PREFIX = "whatsnew-moodmix-test";
 const GENERATED_AT = new Date("2026-09-01T12:00:00.000Z");
@@ -29,7 +30,7 @@ const MIX_ID = `your-mood-mix-${GENERATED_AT.getTime()}`;
 function makeApp() {
     const app = express();
     app.use(express.json());
-    app.use("/whats-new", whatsNewRoutes);
+    mountAsServer(app, "/whats-new", whatsNewRoutes, "/api/whats-new");
     return app;
 }
 

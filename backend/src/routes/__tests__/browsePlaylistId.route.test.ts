@@ -8,8 +8,9 @@ jest.mock("../../middleware/auth", () => ({ requireAuthOrToken: (_req: unknown, 
 import express from "express";
 import request from "supertest";
 import browseRoutes from "../browse";
+import { mountAsServer } from "./helpers/serverMount";
 
-const app = express().use("/browse", browseRoutes);
+const app = mountAsServer(express(), "/browse", browseRoutes, "/api/browse");
 
 beforeEach(() => mockGetPlaylist.mockReset());
 

@@ -21,13 +21,14 @@ import settingsRouter from "../settings";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { getLiveState, setLiveHidden } from "../../services/liveListening";
+import { mountAsServer } from "./helpers/serverMount";
 
 const PUBLIC = "live_share_pub";
 const OTHER = "live_share_other";
 
 const app = express();
 app.use(express.json());
-app.use("/api/settings", settingsRouter);
+mountAsServer(app, "/api/settings", settingsRouter, "/api/settings");
 
 beforeAll(async () => {
     await prisma.user.deleteMany({ where: { id: { in: [PUBLIC, OTHER] } } });

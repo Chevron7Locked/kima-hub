@@ -4,7 +4,7 @@ import { prisma } from "../utils/db";
 import { z } from "zod";
 import axios from "axios";
 import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type SystemSettingsField } from "../utils/systemSettings";
-import { generateRefreshToken, generateToken, requireAuth, requireAdmin, signedInUser } from "../middleware/auth";
+import { generateRefreshToken, generateToken, signedInUser } from "../middleware/auth";
 import { signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
 
@@ -140,8 +140,6 @@ router.post("/register", async (req, res) => {
 /** POST /onboarding/lidarr: step 2a, Lidarr. */
 router.post(
     "/lidarr",
-    requireAuth,
-    requireAdmin,
     serviceStep("Lidarr", { enabled: "lidarrEnabled", url: "lidarrUrl", apiKey: "lidarrApiKey" }, async (url, apiKey) =>
         (await createLidarrClient(url, apiKey, 5000).get("/api/v1/system/status")).status === 200
     )
@@ -150,8 +148,6 @@ router.post(
 /** POST /onboarding/audiobookshelf: step 2b, Audiobookshelf. */
 router.post(
     "/audiobookshelf",
-    requireAuth,
-    requireAdmin,
     serviceStep(
         "Audiobookshelf",
         { enabled: "audiobookshelfEnabled", url: "audiobookshelfUrl", apiKey: "audiobookshelfApiKey" },
@@ -164,7 +160,7 @@ router.post(
  * POST /onboarding/soulseek
  * Step 2c: Configure Soulseek integration (direct connection via soulseek-ts)
  */
-router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
+router.post("/soulseek", async (req, res) => {
     try {
         const config = soulseekConfigSchema.parse(req.body);
 
@@ -214,7 +210,7 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
  * POST /onboarding/complete
  * Final step: Mark onboarding as complete
  */
-router.post("/complete", requireAuth, async (req, res) => {
+router.post("/complete", async (req, res) => {
     try {
         await prisma.user.update({
             where: { id: req.user!.id },

@@ -64,11 +64,12 @@ import { audiobookCacheService } from "../../services/audiobookCache";
 import { audiobookshelfService } from "../../services/audiobookshelf";
 import audiobooksRoutes from "../audiobooks";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 function createApp() {
     const app = express();
     app.use(express.json());
-    app.use("/audiobooks", audiobooksRoutes);
+    mountAsServer(app, "/audiobooks", audiobooksRoutes, "/api/audiobooks");
     return app;
 }
 

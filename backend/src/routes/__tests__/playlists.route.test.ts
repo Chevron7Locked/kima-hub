@@ -9,9 +9,10 @@ import jwt from "jsonwebtoken";
 import playlistsRoutes from "../../routes/playlists";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-playlists-route";
-const app = express().use(express.json()).use("/playlists", playlistsRoutes);
+const app = mountAsServer(express().use(express.json()), "/playlists", playlistsRoutes, "/api/playlists");
 const as = (userId: string) =>
     `Bearer ${jwt.sign({ userId, username: userId, role: "user", tokenVersion: 0 }, process.env.JWT_SECRET!, { expiresIn: "24h" })}`;
 

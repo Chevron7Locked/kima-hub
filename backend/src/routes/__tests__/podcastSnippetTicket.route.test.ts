@@ -9,10 +9,11 @@ import podcastRoutes from "../podcasts";
 import { generateStreamTicket } from "../../middleware/auth";
 import { prisma } from "../../utils/db";
 import { waitForRedisReady } from "../../utils/redis";
+import { mountAsServer } from "./helpers/serverMount";
 
 const USER = "u_snippet_ticket";
 const app = express();
-app.use("/api/podcasts", podcastRoutes);
+mountAsServer(app, "/api/podcasts", podcastRoutes, "/api/podcasts");
 let ticket: string;
 
 beforeAll(async () => {
