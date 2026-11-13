@@ -25,6 +25,7 @@ import { AppleReplyError, chart, lookupShows } from "../../services/podcastCatal
 import { proxyPreviewStream } from "../../utils/previewProxy";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 type Reply = { status: number; body: string; type?: string };
 const replies = new Map<string, Reply[]>();
@@ -129,6 +130,7 @@ describe("routes answer with what happened", () => {
     });
 
     it("an Apple 4xx is a 404 and a garbled reply is a 502, never a 500", async () => {
+        expectLog("warn");
         answer("/WebObjects/MZStoreServices.woa/ws/genres", TREE);
         answer("/us/rss/toppodcasts/limit=200/genre=1495/json", { status: 403, body: "no" });
         expect((await request(app).get("/podcasts/charts?category=1495")).status).toBe(404);
@@ -142,23 +144,27 @@ describe("routes answer with what happened", () => {
     });
 
     it("Apple throttling is a 502, not 'no such chart'", async () => {
+        expectLog("warn");
         answer("/WebObjects/MZStoreServices.woa/ws/genres", TREE);
         answer("/us/rss/toppodcasts/limit=200/genre=1495/json", { status: 429, body: "slow down" });
         expect((await request(app).get("/podcasts/charts?category=1495")).status).toBe(502);
     }, 60_000); // the rate limiter retries a 429 twice, with growing waits, before giving up
 
     it("Apple down while previewing a show or its sample is a 502", async () => {
+        expectLog("warn");
         answer("/lookup", { status: 503, body: "down" });
         expect((await request(app).get("/podcasts/preview/12345")).status).toBe(502);
         expect((await request(app).get("/podcasts/preview/12345/snippet")).status).toBe(502);
     });
 
     it("a host throttling an episode or a preview is a 502", async () => {
+        expectLog("warn");
         expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_busy/stream")).status).toBe(502);
         expect((await request(app).get("/preview-proxy-busy")).status).toBe(502);
     });
 
     it("a host redirecting into the internal network is refused as unavailable, not a 500", async () => {
+        expectLog("warn");
         expect((await request(app).get("/podcasts/pod_fail/episodes/pod_fail_internal/stream")).status).toBe(404);
         expect((await request(app).get("/preview-proxy-internal")).status).toBe(404);
     });
@@ -172,6 +178,8 @@ describe("refreshing a followed show answers with what happened", () => {
     });
 
     it("a feed that is gone is a 404, a page that is not a feed a 502, a show not stored a 404", async () => {
+        expectLog("error");
+        expectLog("warn");
         const gone = await request(app).get("/podcasts/pod_refresh_gone/refresh");
         expect(gone.status).toBe(404);
         expect(gone.body.error).toBe("The show's feed is gone");
@@ -201,6 +209,7 @@ describe("several categories at once", () => {
 
 describe("following a show", () => {
     it("Apple answering with something that is not a lookup is a 502, not 'the feed could not be read'", async () => {
+        expectLog("warn");
         answer("/lookup", json({ errorMessage: "throttled" }));
         const res = await request(app).post("/podcasts/subscribe").send({ itunesId: "777" });
         expect(res.status).toBe(502);

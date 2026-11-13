@@ -22,11 +22,8 @@ const mockIsPublicListener = jest.fn();
 jest.mock("../../services/liveListening", () => ({
     isPublicListener: (userId: string) => mockIsPublicListener(userId),
 }));
-jest.mock("../../utils/logger", () => ({
-    logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-}));
-
 import systemRouter from "../system";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = express();
 app.use("/system", systemRouter);
@@ -51,6 +48,7 @@ describe("GET /system/features: live reporting", () => {
     });
 
     it("a failed lookup is off, and the other features still answer", async () => {
+        expectLog("warn");
         mockIsPublicListener.mockRejectedValue(new Error("connection terminated"));
 
         const res = await request(app).get("/system/features");

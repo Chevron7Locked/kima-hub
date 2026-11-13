@@ -4,10 +4,6 @@
  * under test), so a file gone from disk fails the way the real one does.
  */
 
-jest.mock('../../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock('../../../config', () => ({
     config: {
         music: {
@@ -31,6 +27,7 @@ import streamingRoutes from '../streaming';
 import { prisma } from '../../../utils/db';
 import { config } from '../../../config';
 import { getAudioStreamingService } from '../../../services/audioStreaming';
+import { expectLog } from '../../../__tests__/helpers/expectedLogs';
 
 const P = 'strm';
 const USER = `${P}_user`;
@@ -168,6 +165,7 @@ describe('a file gone from disk before a scan has flagged it', () => {
     });
 
     it('is not available when the fallback to the original finds it gone too', async () => {
+        expectLog('warn');
         const id = await seedTrack('gone2', 'Artist/Album/gone2.mp3', { onDisk: false });
         const noFfmpeg = Object.assign(new Error('no ffmpeg'), { code: 'FFMPEG_NOT_FOUND' });
         const service = fakeStreamingService();
@@ -182,6 +180,7 @@ describe('a file gone from disk before a scan has flagged it', () => {
     });
 
     it('stays a server error for anything else', async () => {
+        expectLog('error');
         const id = await seedTrack('denied', 'Artist/Album/denied.mp3');
         (getAudioStreamingService as jest.Mock).mockReturnValue(fakeStreamingService({
             getStreamFilePath: jest.fn().mockRejectedValue(Object.assign(new Error('nope'), { code: 'EACCES' })),

@@ -5,9 +5,6 @@
  * database and real files in a temporary music root.
  */
 
-jest.mock("../../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
         req.user = { id: "adel_admin", role: "admin" };

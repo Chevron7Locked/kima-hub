@@ -4,9 +4,6 @@
  * the control channel is stood in, so no analyzer on this machine is told anything.
  */
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock('../../middleware/auth', () => ({
     requireAuth: (_req: any, _res: any, next: any) => next(),
     requireAdmin: (_req: any, _res: any, next: any) => next(),
@@ -25,6 +22,7 @@ import { prisma } from '../../utils/db';
 import { redisClient, waitForRedisReady } from '../../utils/redis';
 import { invalidateSystemSettingsCache, onSystemSettingsChange } from '../../utils/systemSettings';
 import { closeEngineConnections } from '../../__tests__/helpers/engineConnections';
+import { expectLog } from '../../__tests__/helpers/expectedLogs';
 
 const AUDIO_HEARTBEAT = 'audio:worker:heartbeat';
 const CLAP_HEARTBEAT = 'clap:worker:heartbeat';
@@ -87,6 +85,7 @@ describe('analysis worker sliders', () => {
     });
 
     it('accepts every core on a 16-core machine, on both sliders', async () => {
+        expectLog('warn');
         for (const [path, field] of [['/analysis/workers', 'audioAnalyzerWorkers'], ['/analysis/clap-workers', 'clapWorkers']] as const) {
             const res = await request(app).put(path).send({ workers: 16 });
             expect(res.status).toBe(200);
@@ -106,6 +105,7 @@ describe('analysis worker sliders', () => {
 
     // The two sliders share one handler; each keeps its own setting, channel, heartbeat, floor and wording.
     it('keeps each slider on its own setting, channel and heartbeat', async () => {
+        expectLog('warn');
         for (const [path, field, other, channel, heartbeat, otherHeartbeat] of [
             ['/analysis/workers', 'audioAnalyzerWorkers', 'clapWorkers', 'audio:analysis:control', AUDIO_HEARTBEAT, CLAP_HEARTBEAT],
             ['/analysis/clap-workers', 'clapWorkers', 'audioAnalyzerWorkers', 'audio:clap:control', CLAP_HEARTBEAT, AUDIO_HEARTBEAT],

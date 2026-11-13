@@ -16,6 +16,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import soulseekRoutes from "../soulseek";
 import { config, useMusicFolder } from "../../config";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const startFolder = config.music.musicPath;
 
@@ -42,6 +43,7 @@ const download = (body: Record<string, string>) =>
 const savedTo = () => mockDownloadTrack.mock.calls[0][1] as string;
 
 it("saves as artist/album/file under the music folder, keeping real names", async () => {
+    expectLog("warn");
     await download({ filepath: "share\\Trail of Dead\\Source Tags\\01 - Days.flac", artist: "...And You Will Know Us", album: ".hack", filename: "01 - Days.flac" });
     expect(savedTo()).toBe(path.join("/srv/music", "...And You Will Know Us", ".hack", "01 - Days.flac"));
 });
@@ -51,17 +53,20 @@ it.each([
     [{ artist: "../..", album: "etc", filename: "passwd" }],
     [{ artist: "a", album: "b", filename: ".." }],
 ])("never saves outside the music folder (%p)", async (names) => {
+    expectLog("warn");
     await download({ filepath: "x", ...names });
     expect(savedTo().startsWith(path.resolve("/srv/music") + path.sep)).toBe(true);
 });
 
 it("takes the file name from the peer's path when none is given", async () => {
+    expectLog("warn");
     await download({ filepath: "share\\Low\\Things\\03 Sunflower.flac", artist: "Low", album: "Things" });
     expect(savedTo()).toBe(path.join("/srv/music", "Low", "Things", "03 Sunflower.flac"));
     expect(mockDownloadTrack.mock.calls[0][0]).toMatchObject({ username: "peer", filename: "03 Sunflower.flac" });
 });
 
 it("names the file track.mp3 when the peer's path ends in a slash and no name is given", async () => {
+    expectLog("warn");
     await download({ filepath: "share/Low/Things/", artist: "Low", album: "Things" });
     expect(savedTo()).toBe(path.join("/srv/music", "Low", "Things", "track.mp3"));
 });

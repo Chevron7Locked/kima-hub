@@ -6,9 +6,6 @@
  * auth, Lidarr, MusicBrainz and the download manager are stood in.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
@@ -46,6 +43,7 @@ import downloadsRouter from "../downloads";
 import { UserFacingError } from "../../utils/errors";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = express();
 app.use(express.json());
@@ -131,6 +129,7 @@ describe("POST /downloads", () => {
     });
 
     it("keeps the requested name when MusicBrainz is down", async () => {
+        expectLog("warn");
         mockGetReleaseGroup.mockResolvedValue({
             kind: "transient",
             error: { code: "ETIMEDOUT", message: "timeout" },

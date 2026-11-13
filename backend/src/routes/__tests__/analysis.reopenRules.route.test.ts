@@ -43,10 +43,6 @@ jest.mock("../../utils/systemSettings", () => ({
     invalidateSystemSettingsCache: jest.fn(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 import express from "express";
 import request from "supertest";
 

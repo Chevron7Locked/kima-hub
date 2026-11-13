@@ -52,10 +52,6 @@ jest.mock("ioredis", () => jest.fn().mockImplementation(() => mockRedis));
 jest.mock("../../config", () => ({
     config: { redisUrl: "redis://localhost:6379", music: { musicPath: "/music" } },
 }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 jest.mock("../../services/enrichmentState", () => ({
     enrichmentStateService: {
         updateState: jest.fn().mockResolvedValue({}),

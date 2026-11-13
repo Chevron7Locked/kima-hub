@@ -31,6 +31,7 @@ import { config, useMusicFolder } from '../../config';
 import { prisma } from '../../utils/db';
 import { lidarrService } from '../../services/lidarr';
 import { deezerService } from '../../services/deezer';
+import { expectLog } from '../../__tests__/helpers/expectedLogs';
 
 const MARK = 'zz-library-albums';
 const startFolder = config.music.musicPath;
@@ -356,6 +357,7 @@ describe('DELETE /albums/:id', () => {
     });
 
     it('refuses a track path and an album title that escape the music root', async () => {
+        expectLog('warn');
         // Artist.name and Album.title are ID3 tag values, so a file added to the watched folder chooses them.
         // Neither the album folder nor the track path may reach the folder delete or the file delete.
         const keep = path.join(base, 'outside', 'keep.txt');

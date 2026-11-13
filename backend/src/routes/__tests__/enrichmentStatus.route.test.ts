@@ -13,10 +13,6 @@ jest.mock("../../middleware/auth", () => ({
     },
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock("../../utils/redis", () => ({
     redisClient: { get: jest.fn(), setex: jest.fn(), del: jest.fn() },
 }));

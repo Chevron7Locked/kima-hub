@@ -8,9 +8,6 @@ jest.mock('../../../middleware/auth', () => ({
         next();
     }),
 }));
-jest.mock('../../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock('../../../workers/queues', () => ({ scanQueue: {} }));
 const mockRequestRefile = jest.fn();
 jest.mock('../../../workers/scanRequest', () => ({ requestScan: jest.fn(), requestRefile: (...a: unknown[]) => mockRequestRefile(...a) }));
@@ -19,6 +16,7 @@ jest.mock('../../../workers/organizeSingles', () => ({ organizeSingles: jest.fn(
 import express from 'express';
 import request from 'supertest';
 import router from '../scan';
+import { expectLog } from '../../../__tests__/helpers/expectedLogs';
 
 function makeApp() {
     const app = express();
@@ -43,6 +41,7 @@ it('refuses a second re-file while one is waiting or running, and says why', asy
 });
 
 it('answers 500 when the queue cannot be reached', async () => {
+    expectLog('error');
     mockRequestRefile.mockRejectedValue(new Error('redis down'));
     expect((await request(makeApp()).post('/library/refile')).status).toBe(500);
 });

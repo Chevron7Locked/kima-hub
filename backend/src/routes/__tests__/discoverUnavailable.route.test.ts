@@ -19,6 +19,7 @@ import { startOfWeek } from "date-fns";
 import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
 import { resolveViewWeek, WEEK_STARTS_ON } from "../../lib/discoveryWeek";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const MARK = "zz-unavail";
 let listener: string;
@@ -119,6 +120,7 @@ describe("a Discover clear that fails", () => {
     });
 
     it("tells the listener it failed without the server's own error text", async () => {
+        expectLog("error");
         const refusal = jest.spyOn(prisma.discoveryAlbum, "findMany").mockRejectedValueOnce(new Error("internal detail"));
         try {
             const res = await request(app).delete("/discover/clear").expect(500);

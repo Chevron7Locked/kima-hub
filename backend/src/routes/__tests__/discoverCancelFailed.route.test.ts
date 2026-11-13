@@ -4,10 +4,6 @@
  * and router; the Bull queues are stood in for, since nothing here is queued.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 // Sign-in is passed through; the app below sets the user.
 jest.mock("../../middleware/auth", () => ({
     ...jest.requireActual("../../middleware/auth"),

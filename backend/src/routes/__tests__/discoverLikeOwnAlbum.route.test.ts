@@ -2,7 +2,6 @@
  * A like on a suggestion whose release-group id is a listener's own LIBRARY album, on the real test database with the
  * real router. Only auth, queues, Lidarr and the enrichment wake-up are stood in.
  */
-jest.mock("../../utils/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
@@ -33,6 +32,7 @@ import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const P = "cl_";
 const USER = `${P}user`;
@@ -75,6 +75,7 @@ const location = async () => (await prisma.album.findUniqueOrThrow({ where: { id
 
 describe("like then unlike on a suggestion that names the listener's own library album", () => {
     it("an album with the scanner's ownership row: the like leaves its mark alone and unlike leaves it in the library", async () => {
+        expectLog("warn");
         await seed("native_scan");
         expect((await request(app).post("/discover/like").send({ albumId: `${P}rg` })).status).toBe(200);
         expect(await source()).toBe("native_scan");
@@ -83,6 +84,7 @@ describe("like then unlike on a suggestion that names the listener's own library
     });
 
     it("an album with no ownership row unlike must not send it to Discover", async () => {
+        expectLog("warn");
         await seed(null);
         await request(app).post("/discover/like").send({ albumId: `${P}rg` });
         await request(app).delete("/discover/unlike").send({ albumId: `${P}rg` });

@@ -14,6 +14,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const USER = "u_podsub";
 const STORED = "pod_sub_stored";
@@ -122,6 +123,7 @@ it("stores an Apple id only when Apple says it names the feed, so no one can cla
 }, 30_000);
 
 it("answers a feed that is not there 404, a host that is down 502, and a page that is not a feed 422", async () => {
+    expectLog("error");
     const follow = (path: string) => request(app).post("/podcasts/subscribe").send({ feedUrl: `${feedBase}${path}` });
     expect([(await follow("/gone.xml")).status, (await follow("/down.xml")).status, (await follow("/page.xml")).status]).toEqual([404, 502, 422]);
 });

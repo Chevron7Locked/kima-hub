@@ -6,10 +6,6 @@
 
 // All mocks before imports.
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn(),
 }));
@@ -67,6 +63,7 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { audiobookCacheService } from "../../services/audiobookCache";
 import { audiobookshelfService } from "../../services/audiobookshelf";
 import audiobooksRoutes from "../audiobooks";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 function createApp() {
     const app = express();
@@ -338,6 +335,7 @@ describe("POST /audiobooks/sync", () => {
     });
 
     it("returns 400 when Audiobookshelf is not configured", async () => {
+        expectLog("error");
         (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(
             new UserFacingError("Audiobookshelf is not configured — add the server URL and API key in Settings"),
         );
@@ -350,6 +348,7 @@ describe("POST /audiobooks/sync", () => {
     });
 
     it("returns 400 when Audiobookshelf rejects credentials (401)", async () => {
+        expectLog("error");
         const absError = Object.assign(new Error("Unauthorized"), {
             response: { status: 401 },
         });
@@ -363,6 +362,7 @@ describe("POST /audiobooks/sync", () => {
     });
 
     it("returns 400 when Audiobookshelf rejects credentials (403)", async () => {
+        expectLog("error");
         const absError = Object.assign(new Error("Forbidden"), {
             response: { status: 403 },
         });
@@ -376,6 +376,7 @@ describe("POST /audiobooks/sync", () => {
     });
 
     it("returns 502 for other upstream status codes", async () => {
+        expectLog("error");
         const absError = Object.assign(new Error("Bad Gateway"), {
             response: { status: 502 },
         });
@@ -389,6 +390,7 @@ describe("POST /audiobooks/sync", () => {
     });
 
     it("returns 500 without internal details for genuine internal errors", async () => {
+        expectLog("error");
         (audiobookCacheService.syncAll as jest.Mock).mockRejectedValue(
             new Error("EACCES: permission denied, mkdir '/data/covers/audiobooks'"),
         );

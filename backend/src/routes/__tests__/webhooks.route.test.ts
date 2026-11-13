@@ -16,6 +16,7 @@ import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { queues } from "../../workers/queues";
 import webhookRoutes from "../webhooks";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const USER = "webhook_route_user";
 const complete = loadScenario("complete");
@@ -101,6 +102,7 @@ it("refuses a missing or wrong secret once one is set, and takes the right one",
 });
 
 it("stores a grab, links the job waiting for its album and acts on a repeat only once", async () => {
+    expectLog("warn");
     const lidarrAlbumId = grab.albums[0].id;
     const job = await prisma.downloadJob.create({
         data: {

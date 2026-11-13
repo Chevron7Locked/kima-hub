@@ -4,10 +4,6 @@
  * Real router and database; auth, the queue, the lock and Lidarr are stood in.
  */
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock('../../middleware/auth', () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {

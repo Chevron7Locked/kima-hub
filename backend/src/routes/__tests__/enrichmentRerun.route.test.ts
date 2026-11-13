@@ -3,10 +3,6 @@
  * engine. Anything else is a 400, and a member is refused by the real admin check: only the re-run
  * itself and the engine are stood in for.
  */
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 const mockRerun = jest.fn();
 jest.mock("../../services/enrichmentRestart", () => ({
     wipeEnrichment: jest.fn(),
@@ -27,6 +23,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import enrichmentRouter from "../enrichment";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const MEMBER = "rerun_route_member";
 const ADMIN = "rerun_route_admin";
@@ -96,6 +93,7 @@ describe("POST /enrichment/rerun", () => {
     });
 
     it("reports a failed re-run as a 500 and starts nothing", async () => {
+        expectLog("error");
         mockRerun.mockRejectedValue(new Error("db gone"));
         const res = await rerun("artists");
         expect(res.status).toBe(500);

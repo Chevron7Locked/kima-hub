@@ -4,10 +4,6 @@
  * skips the Lidarr tag removal. Real router, real database; auth, queues, Lidarr and the enrichment wake-up are stood in.
  */
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 // Inject an authenticated user; the real middleware would 401 without a session.
 jest.mock('../../middleware/auth', () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,

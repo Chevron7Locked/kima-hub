@@ -4,10 +4,6 @@
  * Real router and database; Lidarr, the artwork sources and outside fetches are stubbed.
  */
 
-jest.mock('../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock('../../middleware/auth', () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {

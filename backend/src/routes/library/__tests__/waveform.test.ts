@@ -12,16 +12,6 @@ jest.mock("child_process", () => ({
     spawn: jest.fn(),
 }));
 
-// -- logger --
-jest.mock("../../../utils/logger", () => ({
-    logger: {
-        error: jest.fn(),
-        warn: jest.fn(),
-        info: jest.fn(),
-        debug: jest.fn(),
-    },
-}));
-
 /* ---------------------------------------------------------------------------
  * Imports (after all mocks are hoisted above).
  * --------------------------------------------------------------------------- */
@@ -33,6 +23,7 @@ import { EventEmitter } from "events";
 import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
 import { computeWaveformPeaks, PEAK_COUNT } from "../waveform";
+import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 const P = "wavef";
 
@@ -317,6 +308,7 @@ describe("GET /tracks/:id/waveform", () => {
     });
 
     it("returns 404 when the stored path leaves the music folder", async () => {
+        expectLog("warn");
         // The schema keeps filePath and fileModified non-null, so a path that climbs out is how a
         // song's audio is "unavailable" here.
         const id = await seedTrack("escape", "../../etc/passwd");
@@ -378,6 +370,7 @@ describe("GET /tracks/:id/waveform", () => {
     });
 
     it("returns 500 on ffmpeg failure", async () => {
+        expectLog("error");
         const id = await seedTrack("fail", "Artist/Album/fail.mp3");
 
         // A fake process that exits with an error.

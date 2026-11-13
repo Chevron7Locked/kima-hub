@@ -43,6 +43,7 @@ import { config, useMusicFolder } from "../../config";
 
 const startFolder = config.music.musicPath;
 import notificationRoutes from "../notifications";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const P = "ptr";
 const OWNER = `${P}_owner`;
@@ -138,6 +139,7 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
     });
 
     it("fails the job when the search itself fails", async () => {
+        expectLog("error");
         const pt = await pending("Monkey");
         mockSearch.mockRejectedValue(new Error("slskd is down"));
 

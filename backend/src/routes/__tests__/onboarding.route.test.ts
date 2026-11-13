@@ -5,10 +5,6 @@
  * connection tests reach a closed local port.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
@@ -21,6 +17,7 @@ import { lidarrService } from "../../services/lidarr";
 import { audiobookshelfService } from "../../services/audiobookshelf";
 import onboardingRoutes from "../onboarding";
 import authRoutes from "../auth";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const P = "zz-onboarding";
 const ADMIN = `${P}-admin`;
@@ -153,6 +150,7 @@ describe("the service steps", () => {
         ["lidarr", { lidarrEnabled: true, lidarrUrl: CLOSED }],
         ["audiobookshelf", { audiobookshelfEnabled: true, audiobookshelfUrl: CLOSED }],
     ] as const)("%s saves the address even when the connection test fails", async (step, saved) => {
+        expectLog("warn");
         const res = await request(app).post(`/onboarding/${step}`).set(asAdmin()).send({ url: CLOSED, apiKey: "k", enabled: true }).expect(200);
 
         expect(res.body).toMatchObject({ success: true, tested: false, warning: expect.stringMatching(/saved/) });
@@ -160,6 +158,7 @@ describe("the service steps", () => {
     });
 
     it("stores the API key encrypted", async () => {
+        expectLog("warn");
         await request(app).post("/onboarding/lidarr").set(asAdmin()).send({ url: CLOSED, apiKey: "the-key", enabled: true }).expect(200);
 
         const stored = (await settings()).lidarrApiKey!;

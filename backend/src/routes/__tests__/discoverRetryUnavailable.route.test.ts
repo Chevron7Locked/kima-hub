@@ -6,10 +6,6 @@
  * download and the completion flow are stood in for, since they talk to Lidarr.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 // Sign-in is passed through; the app below sets the user.
 jest.mock("../../middleware/auth", () => ({
     ...jest.requireActual("../../middleware/auth"),
@@ -40,6 +36,8 @@ import { prisma } from "../../utils/db";
 import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { useMidWeekClock } from "./helpers/midWeekClock";
 import { scanQueue } from "../../workers/queues";
+import { logger } from "../../utils/logger";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const MARK = "zz-retry";
 let listener: string;
@@ -69,6 +67,24 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, label: strin
 }
 
 const handedOff = () => mockCheckBatchCompletion.mock.calls.length > 0;
+
+// The route answers, then works on in the background with nothing to await. Its last act is one of two things: the
+// "handed to completion flow" line, or the crash handler's write of the failed status. Every case waits for that
+// before its cleanup deletes the user and the batch, so no background write lands on a deleted batch.
+let started: string | undefined;
+let infoLog: jest.SpyInstance;
+
+/** Posts the retry, checks the answer, and remembers the batch whose background work the case must outlast. */
+async function retry() {
+    const res = await request(app).post("/discover/retry-unavailable");
+    expect(res.status).toBe(200); // response already sent before background work
+    if (res.body.batchId) started = res.body.batchId;
+    return res;
+}
+
+const backgroundFinished = async (batchId: string) =>
+    infoLog.mock.calls.some(([line]) => String(line).includes(`Batch ${batchId} handed to completion flow`)) ||
+    (await batchRow(batchId)).errorMessage === "Retry processing crashed";
 const batchRow = (id: string) => prisma.discoveryBatch.findUniqueOrThrow({ where: { id } });
 
 async function cleanup() {
@@ -114,22 +130,33 @@ beforeEach(async () => {
     mockAcquireAlbum.mockReset();
     mockCheckBatchCompletion.mockReset();
     (scanQueue.add as jest.Mock).mockClear();
+    infoLog = jest.spyOn(logger, "info"); // not silenced: it is how the case sees the background work end
+    started = undefined;
+});
+
+afterEach(async () => {
+    try {
+        if (started) await waitFor(() => backgroundFinished(started!), "background work finished");
+    } finally {
+        infoLog.mockRestore();
+    }
 });
 
 describe("POST /discover/retry-unavailable -- routes through checkBatchCompletion", () => {
     it("catches a rejected checkBatchCompletion and marks the batch failed", async () => {
+        const logged = expectLog("error");
         await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockRejectedValue(new Error("reconcile exploded"));
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200); // response already sent before background work
+        const res = await retry();
 
         await waitFor(async () => (await batchRow(res.body.batchId)).status === "failed", "batch marked failed");
 
         const batch = await batchRow(res.body.batchId);
         expect(batch.errorMessage).toBe("Retry processing crashed");
         expect(batch.completedAt).toBeInstanceOf(Date);
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining("Background processing crashed"), expect.any(Error));
     });
 
     it("fails the album's download job through the download-job module when acquiring it throws", async () => {
@@ -154,8 +181,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        const res = await retry();
 
         await waitFor(handedOff, "checkBatchCompletion invoked");
         await sleep(50);
@@ -172,8 +198,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        await retry();
 
         await waitFor(handedOff, "checkBatchCompletion invoked");
 
@@ -189,8 +214,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         mockAcquireAlbum.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce({ success: false });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        const res = await retry();
 
         await waitFor(handedOff, "checkBatchCompletion invoked after partial failure");
         await sleep(50);
@@ -204,9 +228,8 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
+        const res = await retry();
 
-        expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
         expect(res.body.queued).toBe(1);
 
@@ -238,8 +261,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
             tallyAtHandoff = { completedAlbums, failedAlbums };
         });
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        await retry();
 
         await waitFor(() => tallyAtHandoff !== undefined, "handoff recorded");
 
@@ -257,8 +279,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
             order.push("handoff");
         });
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        await retry();
 
         await waitFor(() => order.includes("handoff"), "handoff after acquire");
 
@@ -266,6 +287,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
     });
 
     it("marks the batch failed when a failure comes before the handoff", async () => {
+        expectLog("error");
         await seed(ONE);
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
@@ -277,8 +299,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
             .mockRejectedValueOnce(new Error("count persist exploded"))
             .mockRejectedValueOnce(new Error("count persist exploded"));
         try {
-            const res = await request(app).post("/discover/retry-unavailable");
-            expect(res.status).toBe(200);
+            const res = await retry();
 
             await waitFor(async () => (await batchRow(res.body.batchId)).status === "failed", "pre-handoff crash marks batch failed");
 
@@ -294,8 +315,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         mockAcquireAlbum.mockResolvedValue({ success: true });
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        const res = await retry();
 
         await waitFor(handedOff, "checkBatchCompletion invoked");
         await waitFor(() => mockAcquireAlbum.mock.calls.length === 2, "both albums acquired");

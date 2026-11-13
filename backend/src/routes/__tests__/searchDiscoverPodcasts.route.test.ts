@@ -14,6 +14,7 @@ import { INTERACTIVE_PRIORITY, rateLimiter } from "../../services/rateLimiter";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { loadRecording, startReplayServer, type ReplayServer } from "../../__tests__/helpers/replayServer";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = express();
 app.use(express.json());
@@ -53,6 +54,7 @@ it("answers Apple's shows for the term, asked through the Apple queue ahead of b
 });
 
 it("answers an empty podcast section, and caches nothing, when Apple fails", async () => {
+    expectLog("warn");
     const restoreAppleUrl = setEnv({ ITUNES_BASE_URL: "http://127.0.0.1:9" });
     const res = await request(app).get("/search/discover?q=dungeons&type=podcasts&limit=5");
     restoreAppleUrl();
@@ -62,6 +64,7 @@ it("answers an empty podcast section, and caches nothing, when Apple fails", asy
 });
 
 it("answers within 5 s when Kima's Apple queue is holding requests back", async () => {
+    expectLog("warn");
     // Apple has been refusing requests, so the queue is waiting out its circuit breaker (up to a minute).
     const circuit = (rateLimiter as any).circuitBreakers.get("itunes");
     Object.assign(circuit, { isOpen: true, openedAt: Date.now(), resetAfterMs: 60_000 });

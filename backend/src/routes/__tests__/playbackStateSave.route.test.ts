@@ -4,9 +4,6 @@
  * from a user id with no row, which breaks the playback state's foreign key.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => {
         req.user = { id: req.headers["x-user"] };
@@ -17,7 +14,7 @@ jest.mock("../../middleware/auth", () => ({
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
-import { logger } from "../../utils/logger";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
 
 const PREFIX = "playback-state-save-test";
@@ -72,6 +69,7 @@ describe("POST /api/playback-state", () => {
     });
 
     it("answers 500 with only the generic message when the database refuses the save", async () => {
+        const logged = expectLog("error");
         const res = await request(app)
             .post("/api/playback-state")
             .set("x-user", "cplaybackstatenosuchuser0001")
@@ -79,7 +77,7 @@ describe("POST /api/playback-state", () => {
 
         expect(res.status).toBe(500);
         expect(res.body).toEqual({ error: "Failed to save playback state" });
-        expect(logger.error).toHaveBeenCalledWith(
+        expect(logged).toHaveBeenCalledWith(
             "Save playback state error:",
             expect.any(Error),
         );

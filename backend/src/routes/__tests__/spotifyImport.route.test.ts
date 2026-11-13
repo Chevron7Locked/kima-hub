@@ -3,9 +3,6 @@
  * preview (both the web and the app make one first), and an import job answers only its owner. The import service is
  * stood in for; the routes are real.
  */
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: req.headers["x-user"] || "me", role: "admin" };

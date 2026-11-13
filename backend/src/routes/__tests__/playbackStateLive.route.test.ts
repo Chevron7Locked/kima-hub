@@ -26,6 +26,7 @@ import playbackStateRouter from "../playbackState";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { getLiveState, isPublicListener, setLiveHidden } from "../../services/liveListening";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const PUBLIC = "live_report_pub";
 
@@ -77,6 +78,7 @@ describe("POST /api/playback-state/live", () => {
     });
 
     it("a failed lookup is a 500, never the 404 that would silence the player", async () => {
+        expectLog("error");
         (isPublicListener as jest.Mock).mockRejectedValueOnce(new Error("connection terminated"));
         const res = await request(app).post("/api/playback-state/live").send(BODY);
         expect(res.status).toBe(500);

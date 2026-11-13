@@ -4,10 +4,6 @@
  * outside the root is planted and requested. Real router and database.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue(null),
 }));

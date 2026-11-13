@@ -4,9 +4,6 @@
  * made by the acquisition service's own find-or-create; the acquisition itself is stood in for. Real database and
  * Redis lock.
  */
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {

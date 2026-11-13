@@ -8,9 +8,6 @@ jest.mock('../../../middleware/auth', () => ({
         next();
     }),
 }));
-jest.mock('../../../utils/logger', () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock('../../../workers/queues', () => ({ scanQueue: {} }));
 jest.mock('../../../workers/scanRequest', () => ({ requestScan: jest.fn() }));
 jest.mock('../../../workers/organizeSingles', () => ({ organizeSingles: jest.fn() }));

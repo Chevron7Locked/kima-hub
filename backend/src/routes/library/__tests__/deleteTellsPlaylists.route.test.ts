@@ -17,6 +17,7 @@ import albumsRoutes from "../albums";
 import artistsRoutes from "../artists";
 import { prisma } from "../../../utils/db";
 import { eventBus, type SSEEvent } from "../../../services/eventBus";
+import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 const MARK = "zz-library-delete";
 const app = express();
@@ -76,6 +77,7 @@ beforeEach(() => {
 
 describe("deleting from the library tells the playlists that held the songs", () => {
     it("a song", async () => {
+        expectLog("warn");
         const { songs } = await seedArtist("song");
         const holding = await playlistOf([songs[0]]);
         await playlistOf([songs[1]]);
@@ -86,6 +88,7 @@ describe("deleting from the library tells the playlists that held the songs", ()
     });
 
     it("an album", async () => {
+        expectLog("warn");
         const { album, songs } = await seedArtist("album");
         const holding = await playlistOf(songs);
         const other = await seedArtist("bystander");
@@ -98,6 +101,7 @@ describe("deleting from the library tells the playlists that held the songs", ()
     });
 
     it("an artist", async () => {
+        expectLog("warn");
         const { artist, songs } = await seedArtist("artist");
         const first = await playlistOf([songs[0]]);
         const second = await playlistOf([songs[1]]);

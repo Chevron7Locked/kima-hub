@@ -43,10 +43,6 @@ jest.mock("../../utils/systemSettings", () => ({
     invalidateSystemSettingsCache: jest.fn(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 import fs from "fs";
 import path from "path";
 

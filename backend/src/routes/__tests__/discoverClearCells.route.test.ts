@@ -4,9 +4,6 @@
  * Lidarr is off or a port nothing listens on; no test asks Lidarr to delete an album.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
         req.user = { id: "dcells_user", role: "admin" };
@@ -42,6 +39,7 @@ import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { discoveryAlbumLifecycle } from "../../services/discovery/discoveryAlbumLifecycle";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
 import { deadPort, discoverApp } from "./helpers/discoverClear";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 jest.setTimeout(120_000);
 
@@ -179,6 +177,7 @@ beforeEach(async () => {
 
 describe("clear with no suggestions", () => {
     it("looks at the downloads no suggestion names, and keeps the tray row until a clean clear", async () => {
+        expectLog("warn");
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
 
         const first = await request(discoverApp()).delete("/discover/clear");
@@ -193,6 +192,7 @@ describe("clear with no suggestions", () => {
     });
 
     it("words a failure on a download no suggestion names without saying it is in the playlist", async () => {
+        expectLog("warn");
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
         await request(discoverApp()).delete("/discover/clear");
         const tray = await trayRow();
@@ -201,6 +201,7 @@ describe("clear with no suggestions", () => {
     });
 
     it("clears the tray row once nothing fails", async () => {
+        expectLog("warn");
         await addExtraJob(RG_ORPHAN, "Loose Fetch");
         await request(discoverApp()).delete("/discover/clear");
         expect(await trayRow()).not.toBeNull();
@@ -269,6 +270,7 @@ describe("DISCOVER albums no suggestion covers", () => {
     });
 
     it("keeps an album Lidarr cannot be asked about, and says so in the tray", async () => {
+        expectLog("error");
         const orphan = await addAlbum({ key: "lid", rg: RG_ORPHAN });
         // Discover's own finished download of it, last fetched through Lidarr: the record that makes it Discover's to clear.
         await addSoulseekJob(RG_ORPHAN, "Album lid", { currentSource: "lidarr" });
@@ -287,6 +289,7 @@ describe("DISCOVER albums no suggestion covers", () => {
     });
 
     it("returns an album no Discover record names to the library, files kept, as the listener's own", async () => {
+        expectLog("error");
         const orphan = await addAlbum({ key: "norec", rg: RG_ORPHAN });
         await useLidarr(`http://127.0.0.1:${await deadPort()}`);
 
@@ -302,6 +305,7 @@ describe("DISCOVER albums no suggestion covers", () => {
     });
 
     it("keeps the Lidarr-held album a clear just kept, though its suggestion has another id and letter case", async () => {
+        expectLog("warn");
         const held = await addAlbum({
             key: "held",
             rg: `${P}_rg_held_scanned`,
@@ -363,6 +367,7 @@ describe("the weekly regeneration's cleanup", () => {
     });
 
     it("keeps a Lidarr-held album that Lidarr did not delete, and tells the listener in the tray", async () => {
+        expectLog("warn");
         const held = await addAlbum({ key: "wheld", rg: `${P}_rg_wheld`, suggestion: { lidarrAlbumId: 903 } });
         await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect(fs.existsSync(held.file)).toBe(true);
@@ -423,6 +428,7 @@ describe("which albums Kima deletes files of", () => {
     }
 
     it("keeps a suggested album with no download record, and reports why", async () => {
+        expectLog("warn");
         const album = await addAlbum({ key: "nojob", rg: `${P}_rg_nojob`, suggestion: {} });
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.activeDeleted).toBe(0);
@@ -442,6 +448,7 @@ describe("which albums Kima deletes files of", () => {
     });
 
     it("keeps an album whose last download attempt was Lidarr's", async () => {
+        expectLog("warn");
         const album = await addAlbum({ key: "lidsrc", rg: `${P}_rg_lidsrc`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_lidsrc`, "Album lidsrc", { currentSource: "lidarr" });
         const res = await request(discoverApp()).delete("/discover/clear");
@@ -450,6 +457,7 @@ describe("which albums Kima deletes files of", () => {
     });
 
     it("keeps an album when a Soulseek record is not enough: its download did not complete", async () => {
+        expectLog("warn");
         const album = await addAlbum({ key: "failed", rg: `${P}_rg_failed`, suggestion: {} });
         await prisma.downloadJob.create({
             data: { userId: USER, subject: `${ARTIST} - Album failed`, type: "album", targetMbid: `${P}_rg_failed`, status: "failed", metadata: { currentSource: "soulseek" } },
@@ -468,6 +476,7 @@ describe("which albums Kima deletes files of", () => {
     });
 
     it("keeps the album, its rows and its ACTIVE suggestion when a file cannot be deleted, and says the files that went stay gone", async () => {
+        expectLog("warn");
         const album = await addAlbum({ key: "perm", rg: `${P}_rg_perm`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_perm`, "Album perm");
         // A second song in a folder Kima can write to; the first song's folder is made read-only.
@@ -507,6 +516,7 @@ describe("which albums Kima deletes files of", () => {
     });
 
     it("the weekly regeneration also keeps an album with no download record and reports it", async () => {
+        expectLog("warn");
         const album = await addAlbum({ key: "wnojob", rg: `${P}_rg_wnojob`, suggestion: {} });
         await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         await expectKept(album);
@@ -516,6 +526,7 @@ describe("which albums Kima deletes files of", () => {
 
 describe("an album the listener's library holds", () => {
     it("is left alone, with Lidarr never asked to delete it, when its suggestion is still ACTIVE", async () => {
+        expectLog("error");
         // An unlike that keeps the album in the library leaves the suggestion ACTIVE, recorded under another id and case.
         const own = await addAlbum({
             key: "own",
@@ -555,6 +566,7 @@ describe("an error while clearing one album", () => {
     }
 
     it("keeps the tray row and names the album when a clear hits it", async () => {
+        expectLog("error");
         const album = await boomAlbum("boom");
         await prisma.notification.create({
             data: { userId: USER, groupKey: TRAY_KEY, type: "error", title: "1 Discover album not deleted", message: "from an earlier clear" },
@@ -573,6 +585,7 @@ describe("an error while clearing one album", () => {
     });
 
     it("also reaches the tray from the weekly regeneration", async () => {
+        expectLog("error");
         await boomAlbum("wboom");
         await discoveryAlbumLifecycle.processBeforeGeneration(USER);
         expect((await trayRow())!.message).toContain("Kima hit an error clearing this album");

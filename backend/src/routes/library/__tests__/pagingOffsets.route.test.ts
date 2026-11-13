@@ -3,10 +3,6 @@
  * never a database error answered as 500. Real routers and database; only the signed-in user is injected, as the
  * parent router would.
  */
-jest.mock("../../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 import express from "express";
 import request from "supertest";
 import albums from "../albums";

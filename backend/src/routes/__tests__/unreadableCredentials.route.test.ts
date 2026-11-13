@@ -15,6 +15,7 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const ADMIN = "zz-unreadable-admin";
 const RIGHT_KEY = "the-key-these-credentials-were-stored-under";
@@ -88,6 +89,7 @@ afterAll(async () => {
 
 describe("a wrong key", () => {
     it("reads as not set and changes nothing stored", async () => {
+        expectLog("warn");
         const stored = await storedCredentials();
 
         const res = await get();
@@ -100,6 +102,7 @@ describe("a wrong key", () => {
     });
 
     it("loses nothing when another setting is saved the way the settings page does, and the right key restores it all", async () => {
+        expectLog("warn");
         const stored = await storedCredentials();
 
         const res = await save({ ...blanks, transcodeCacheMaxGb: 9 });
@@ -113,6 +116,7 @@ describe("a wrong key", () => {
     });
 
     it("is treated the same when the save sends null", async () => {
+        expectLog("warn");
         const stored = await storedCredentials();
 
         await save(Object.fromEntries(FIELDS.map((f) => [f, null])));
@@ -121,6 +125,7 @@ describe("a wrong key", () => {
     });
 
     it("lets a new value replace what cannot be read, field by field", async () => {
+        expectLog("warn");
         const stored = await storedCredentials();
 
         await save({ ...blanks, fanartApiKey: "a fresh key" });
@@ -149,6 +154,7 @@ describe("the other two unreadable kinds", () => {
     ] as const;
 
     it.each(cases)("a value %s reads as not set, and survives a read and a blank save", async (_kind, value) => {
+        expectLog("warn");
         const unreadable = value();
         await store({ lidarrApiKey: unreadable });
 
@@ -184,6 +190,7 @@ describe("the notice to admins", () => {
     const row = async () => prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } });
 
     it("comes once per field per process, and says what to do without saying anything was cleared", async () => {
+        expectLog("warn");
         const server = restart();
 
         await server.resolveEncryptedSettings(await row(), () => []);
@@ -198,6 +205,7 @@ describe("the notice to admins", () => {
     });
 
     it("comes back after a restart, as one row per field", async () => {
+        expectLog("warn");
         await restart().resolveEncryptedSettings(await row(), () => []);
         await prisma.notification.updateMany({ where: { userId: ADMIN }, data: { cleared: true } });
 
@@ -208,6 +216,7 @@ describe("the notice to admins", () => {
     });
 
     it("goes away once the right key is back", async () => {
+        expectLog("warn");
         await restart().resolveEncryptedSettings(await row(), () => []);
         expect(await notices()).toHaveLength(FIELDS.length);
 
@@ -217,6 +226,7 @@ describe("the notice to admins", () => {
     });
 
     it("goes away when a new value replaces the unreadable one", async () => {
+        expectLog("warn");
         const server = restart();
         await server.resolveEncryptedSettings(await row(), () => []);
 

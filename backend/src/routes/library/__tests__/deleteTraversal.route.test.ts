@@ -4,9 +4,6 @@
  * root, with a sibling folder standing for "outside" whose files must survive.
  */
 
-jest.mock("../../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
         req.user = { id: "dtrav_admin", role: "admin" };
@@ -30,6 +27,7 @@ import { config } from "../../../config";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import tracksRoutes from "../tracks";
 import artistsRoutes from "../artists";
+import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 const P = "dtrav";
 const MUSIC = path.resolve(config.music.musicPath);
@@ -95,6 +93,7 @@ afterAll(async () => {
 
 describe("library delete routes stay inside the music root", () => {
     it("DELETE /tracks/:id leaves a file its stored path points to outside the root", async () => {
+        expectLog("warn");
         const { songs } = await artistWith("Radiohead", [`${EVIL}.flac`]);
 
         await request(app).delete(`/tracks/${songs[0]}`);
@@ -125,6 +124,7 @@ describe("library delete routes stay inside the music root", () => {
     });
 
     it("DELETE /artists/:id leaves the outside folder alone when the artist name and a song path climb out of the root", async () => {
+        expectLog("warn");
         // The name is a tag; it once reached rmSync(recursive, force) through a folder guess. The folder the name
         // points to (music root + name = OUTSIDE/evil) has to exist, with files in it, or deleting it would remove nothing.
         const nameFolder = path.join(MUSIC, EVIL);

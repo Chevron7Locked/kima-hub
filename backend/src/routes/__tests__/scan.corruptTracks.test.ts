@@ -9,9 +9,6 @@ jest.mock("../../workers/queues", () => ({
     scanQueue: { add: mockScanAdd, getJob: mockScanGetJob },
 }));
 jest.mock("../../workers/organizeSingles", () => ({ organizeSingles: jest.fn() }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
 // `../../utils/db` and `../../middleware/auth` stay real: the point is
 // that the ROW survives the handler and that requireAdmin is enforced.
 

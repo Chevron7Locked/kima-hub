@@ -7,10 +7,6 @@
 import express from "express";
 import request from "supertest";
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 // Any other export the routers' transitive imports reach for degrades to the
 // same authenticated passthrough instead of blowing up the mount.
 jest.mock("../../middleware/auth", () => {

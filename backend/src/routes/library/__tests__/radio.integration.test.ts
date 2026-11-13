@@ -25,6 +25,7 @@ import { pickRecipeStation } from "../../../__tests__/helpers/stationPicks";
 import { redisClient, waitForRedisReady } from "../../../utils/redis";
 import { MOOD_HEADS } from "../../../services/moods/heads";
 import router from "../tracks";
+import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 jest.setTimeout(600_000);
 
@@ -635,6 +636,7 @@ describe("radio: a station whose recipe the library cannot rank", () => {
     });
 
     it("still fails loudly on any other error", async () => {
+        expectLog("error");
         const spy = jest.spyOn(prisma, "$queryRaw").mockRejectedValueOnce(new Error("connection lost"));
         try {
             expect((await radio({ type: "mood", value: "late-night", limit: LIMIT })).status).toBe(500);

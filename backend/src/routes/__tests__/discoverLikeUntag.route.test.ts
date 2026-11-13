@@ -4,7 +4,6 @@
  * Lidarr cannot find the record, nobody is untagged. Real router and test database; auth, queues, Lidarr and the
  * enrichment wake-up are stood in.
  */
-jest.mock("../../utils/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
 jest.mock("../../middleware/auth", () => ({
     requireAcquirePermission: require("../../__tests__/helpers/acquireGateOff").acquireGateOff,
     requireAuthOrToken: (req: any, _res: any, next: any) => {
@@ -39,7 +38,7 @@ import express from "express";
 import request from "supertest";
 import discoverRoutes from "../discover";
 import { prisma } from "../../utils/db";
-import { logger } from "../../utils/logger";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 
@@ -93,23 +92,26 @@ describe("POST /discover/like untags only the artist that owns the album's Lidar
     });
 
     it("untags no one, and warns, when the suggestion has no stored Lidarr album id", async () => {
+        const logged = expectLog("warn");
         await suggest({ artistMbid: "temp-abc", lidarrAlbumId: null });
         expect((await like()).status).toBe(200);
         expect(untaggedIds()).toEqual([]);
         expect(mockLidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
-        expect(logger.warn).toHaveBeenCalled();
+        expect(logged).toHaveBeenCalled();
     });
 
     it("untags no one, and warns, when Lidarr cannot find the record", async () => {
+        const logged = expectLog("warn");
         mockLidarr.getAlbum.mockResolvedValue(null);
         await suggest({ artistMbid: "mbid-owner", lidarrAlbumId: 77 });
         expect((await like()).status).toBe(200);
         expect(untaggedIds()).toEqual([]);
         expect(mockLidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
-        expect(logger.warn).toHaveBeenCalled();
+        expect(logged).toHaveBeenCalled();
     });
 
     it("still keeps the album when Lidarr cannot be reached", async () => {
+        expectLog("warn");
         mockLidarr.getAlbum.mockRejectedValue(new Error("connect ECONNREFUSED"));
         await suggest({ artistMbid: "mbid-owner", lidarrAlbumId: 77 });
         expect((await like()).status).toBe(200);

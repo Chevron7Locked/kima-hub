@@ -7,9 +7,6 @@ import zlib from "zlib";
 
 const TOKEN = "s".repeat(40);
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
-}));
 // Stored covers live beside the transcode cache; this points them at a folder of this file's own.
 jest.mock("../../config", () => ({
     USER_AGENT: "kima-test",
@@ -35,6 +32,7 @@ import { latestLibraryExport } from "../../services/publicLibraryExport";
 import { searchTracksByText } from "../../services/textEmbeddingBridge";
 import { coversBasePath } from "../../services/imageStorage";
 import { reportLive, resetLive, setLiveHidden } from "../../services/liveListening";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = express();
 app.use(express.json());
@@ -133,18 +131,21 @@ describe("GET /library", () => {
 
 describe("live", () => {
     it("GET /live reports nothing playing before any report", async () => {
+        expectLog("warn");
         const res = await request(app).get("/api/public/vibe/live").set(auth);
         expect(res.status).toBe(200);
         expect(res.body).toMatchObject({ status: "stopped", trackId: null });
     });
 
     it("GET /live reports the playing track", async () => {
+        expectLog("warn");
         reportLive({ status: "playing", trackId: TRACK, position: 1_000, duration: 180_000, queue: [] });
         const res = await request(app).get("/api/public/vibe/live").set(auth);
         expect(res.body).toMatchObject({ status: "playing", trackId: TRACK, duration: 180_000 });
     });
 
     it("GET /live reads hidden while sharing is off, and the stream says so when it turns off", async () => {
+        expectLog("warn");
         reportLive({ status: "playing", trackId: TRACK, position: 0, duration: 180_000, queue: [] });
         const { body } = await readStream(300, () => setLiveHidden(true));
         expect(body.split("\n\n").filter(Boolean).map((frame) => frame.split("\n")[0])).toEqual([
@@ -156,6 +157,7 @@ describe("live", () => {
     });
 
     it("the event stream opens with the state, then carries each change", async () => {
+        expectLog("warn");
         const { status, body } = await readStream(300, () =>
             reportLive({ status: "playing", trackId: TRACK, position: 0, duration: 180_000, queue: [] }),
         );
@@ -166,6 +168,7 @@ describe("live", () => {
     });
 
     it("refuses a fifth stream before sending any stream headers", async () => {
+        expectLog("warn");
         const open = [0, 1, 2, 3].map(() => readStream(500));
         await new Promise((r) => setTimeout(r, 150));
         const res = await request(app).get("/api/public/vibe/live/events").set(auth);
@@ -194,6 +197,7 @@ describe("POST /search", () => {
     });
 
     it("answers 503 when the text model is down", async () => {
+        expectLog("error");
         (searchTracksByText as jest.Mock).mockRejectedValueOnce(new Error("analyzer offline"));
         const res = await request(app).post("/api/public/vibe/search").set(auth).send({ query: "slow rain" });
         expect(res.status).toBe(503);

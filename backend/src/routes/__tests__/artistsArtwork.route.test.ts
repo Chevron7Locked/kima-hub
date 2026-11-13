@@ -4,10 +4,6 @@
  * Archive address. Failure and boundary paths first, happy path last.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (req: any, _res: any, next: any) => {
         req.user = { id: "user-1" };

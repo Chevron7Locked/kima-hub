@@ -7,10 +7,6 @@
 import express from "express";
 import request from "supertest";
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (req: any, _res: any, next: any) => {
         req.user = { id: "user-1" };
@@ -26,6 +22,7 @@ jest.mock("../../services/vibeMap", () => ({
 import vibeRouter from "../vibe";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 afterAll(async () => {
     // The router pulls in services/featureDetection, which opens the shared
@@ -51,6 +48,7 @@ describe("GET /api/vibe/map", () => {
     beforeEach(() => mockState.mockReset());
 
     it("reports a failed read as a 500", async () => {
+        expectLog("error");
         mockState.mockRejectedValue(new Error("connection lost"));
         const res = await request(app()).get("/api/vibe/map");
         expect(res.status).toBe(500);

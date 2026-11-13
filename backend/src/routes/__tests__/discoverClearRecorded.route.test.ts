@@ -5,9 +5,6 @@
  * Lidarr delete Kima removes only its rows and the files in the temp folder stay.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
         req.user = { id: "dcrec_user", role: "admin" };
@@ -45,6 +42,7 @@ import { removeDiscoveryAlbum } from "../../services/discovery/lidarrRemoval";
 import { lidarrService } from "../../services/lidarr";
 import { clearDiscoverAlbum } from "../../services/discovery/discoverClearing";
 import discoverRoutes from "../discover";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 jest.setTimeout(120_000);
 
@@ -142,6 +140,7 @@ afterEach(async () => {
 
 describe("Lidarr deletes the album (recorded)", () => {
     it("clears the album's rows, leaves the files to Lidarr, and clears the tray row", async () => {
+        expectLog("error");
         await startReplay("discover-clear-delete", 31);
         const moon = await addAlbum("moon", "Moon Music", MOON_RG, { lidarrAlbumId: MOON_LIDARR_ID });
         await prisma.notification.create({
@@ -174,6 +173,8 @@ describe("Lidarr no longer has the album id (recorded 404)", () => {
     });
 
     it("keeps the album and reports it in the tray when a clear meets it", async () => {
+        expectLog("error");
+        expectLog("warn");
         await startReplay("album-not-found", 4);
         const moon = await addAlbum("stale", "Moon Music", MOON_RG, { lidarrAlbumId: NO_SUCH_LIDARR_ID });
 
@@ -195,6 +196,7 @@ describe("Lidarr has no album for a release-group id (recorded empty lookup)", (
     });
 
     it("keeps a DISCOVER album with no recorded id and no Soulseek evidence, and reports it", async () => {
+        expectLog("error");
         await startReplay("album-lookup-none", 3);
         const orphan = await addAlbum("lost", "Moon Music", NO_SUCH_RG);
 
@@ -224,6 +226,7 @@ describe("Lidarr has no album for a release-group id (recorded empty lookup)", (
 
 describe("a DISCOVER album no Discover record names", () => {
     it("goes back to the library with its files; nothing is deleted and Lidarr is not asked to delete", async () => {
+        expectLog("error");
         await startReplay("album-lookup-none", 3);
         const orphan = await addAlbum("norecord", "Moon Music", NO_SUCH_RG);
 

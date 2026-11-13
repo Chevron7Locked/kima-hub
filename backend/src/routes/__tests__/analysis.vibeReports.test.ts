@@ -19,9 +19,6 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({}),
     invalidateSystemSettingsCache: jest.fn(),
 }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
 jest.mock("../../workers/enrichmentQueues", () => {
     const queueStub = () => ({
         add: jest.fn(async () => ({ id: "job-1" })),

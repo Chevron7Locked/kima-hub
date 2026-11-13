@@ -5,10 +5,6 @@
  * nothing listens on; no test asks Lidarr to delete an album.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
-
 // Signed-in listener for every route on this router.
 jest.mock("../../middleware/auth", () => {
     const signIn = (req: any, _res: any, next: any) => {
@@ -60,6 +56,7 @@ import { config } from "../../config";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { deadPort, discoverApp } from "./helpers/discoverClear";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 jest.setTimeout(120_000);
 
@@ -282,6 +279,7 @@ beforeEach(async () => {
 
 describe("DELETE /discover/clear -- files, folders and traversal", () => {
     it("deletes the Soulseek album's files, then its empty folders, and the rows", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         // Six ACTIVE suggestions (the LIKED one is not among them). The five
@@ -314,6 +312,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("finds an album whose suggestion carries another id and letter case, and clears it", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.activeDeleted).toBe(5);
@@ -330,6 +329,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("moves a LIKED album the suggestion recorded under another id and letter case, never the library twin", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         expect(res.body.likedMoved).toBe(1);
@@ -353,6 +353,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("leaves the LIBRARY album with the same title and artist name untouched", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([
             { artistName: ARTIST_NAME, albumTitle: LIDARR_TITLE, reason: "Lidarr is turned off" },
@@ -369,6 +370,7 @@ describe("DELETE /discover/clear -- files, folders and traversal", () => {
     });
 
     it("refuses a filePath that climbs out of the music root and deletes nothing outside", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.body.lidarrFailed).toEqual([
             { artistName: ARTIST_NAME, albumTitle: LIDARR_TITLE, reason: "Lidarr is turned off" },
@@ -405,6 +407,7 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     }
 
     it("with Lidarr turned off: the album keeps its files and rows, the reply names it, the tray says so", async () => {
+        expectLog("warn");
         const res = await request(discoverApp()).delete("/discover/clear");
         expect(res.status).toBe(200);
         // The five suggestions without a lidarrAlbumId went; the Lidarr-held
@@ -428,6 +431,8 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     });
 
     it("when Lidarr answers with an error: the album keeps its files and rows, the reason carries the error", async () => {
+        expectLog("error");
+        expectLog("warn");
         // A real failure: Kima's Lidarr points at a port nothing listens on.
         const port = await deadPort();
         await useLidarr(`http://127.0.0.1:${port}`);
@@ -455,6 +460,8 @@ describe("DELETE /discover/clear -- a Lidarr that did not delete", () => {
     });
 
     it("a later clear in which the listener likes the album: the rows go and the tray row is cleared", async () => {
+        expectLog("error");
+        expectLog("warn");
         // First clear, against a port nothing listens on: Lidarr cannot be reached,
         // so the album stays and the tray row appears.
         const port = await deadPort();

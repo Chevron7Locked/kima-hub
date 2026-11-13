@@ -10,9 +10,6 @@ jest.mock("../../config", () => ({
     ...jest.requireActual("../../config"),
     config: { ...jest.requireActual("../../config").config, music: { transcodeCachePath: require("path").join(COVERS_PARENT, "transcodes") } },
 }));
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
 jest.mock("../../middleware/rateLimiter", () => ({
     imageLimiter: (_req: any, _res: any, next: any) => next(),
 }));
@@ -35,6 +32,7 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "../../utils/db";
 import libraryCoverArtRoutes from "../library/coverArt";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = express().use("/library", libraryCoverArtRoutes);
 const COVERS = path.join(COVERS_PARENT, "covers");
@@ -125,6 +123,7 @@ describe("a stored cover", () => {
 
     // Served through Kima, never a redirect off-site: the web app's service worker may only fetch Kima itself.
     it.each(["by query", "by path"])("whose file is gone is looked up again, remembered and served %s", async (how) => {
+        expectLog("warn");
         await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: `native:${P}_gone.jpg` } });
         mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
         mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
@@ -139,6 +138,7 @@ describe("a stored cover", () => {
     });
 
     it("whose file is gone is not written onto an album that does not use it", async () => {
+        expectLog("warn");
         await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: "https://covers.example.org/own.jpg" } });
         mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
 
@@ -150,6 +150,7 @@ describe("a stored cover", () => {
     });
 
     it("whose file is gone and found nowhere is a 404", async () => {
+        expectLog("warn");
         const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent("native:nothing-here.jpg")}`);
         expect(res.status).toBe(404);
     });

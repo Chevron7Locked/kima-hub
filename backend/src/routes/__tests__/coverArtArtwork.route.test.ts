@@ -4,10 +4,6 @@
  * searched by artist and title. Real router, real database; the artwork sources and outside fetches are stubbed.
  */
 
-jest.mock("../../utils/logger", () => ({
-    logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
-}));
-
 jest.mock("../../middleware/rateLimiter", () => ({
     imageLimiter: (_req: any, _res: any, next: any) => next(),
     apiLimiter: (_req: any, _res: any, next: any) => next(),
@@ -52,6 +48,7 @@ import express from "express";
 import request from "supertest";
 import libraryCoverArtRoutes from "../library/coverArt";
 import { prisma } from "../../utils/db";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 function makeApp() {
     const app = express();
@@ -94,6 +91,7 @@ describe("the cover-art route asks every source", () => {
 
     describe("GET /cover-art/:id when the stored file has gone", () => {
         it("gives up honestly when no source has a replacement", async () => {
+            expectLog("warn");
             const res = await request(makeApp()).get(
                 "/library/cover-art/" + encodeURIComponent(NATIVE),
             );
@@ -102,6 +100,8 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("asks with the release-group id as well as the name, not Deezer alone", async () => {
+            expectLog("error");
+            expectLog("warn");
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
 
             await request(makeApp()).get(
@@ -116,6 +116,7 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("answers 404 for a stored cover whose album is not in the library", async () => {
+            expectLog("warn");
             const res = await request(makeApp()).get("/library/cover-art/" + encodeURIComponent(`native:${P}_nosuch.jpg`));
 
             expect(res.status).toBe(404);
@@ -123,6 +124,7 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("remembers the replacement against the album and serves it through Kima", async () => {
+            expectLog("warn");
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
             mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
 
@@ -139,6 +141,7 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("does not overwrite a cover the album has been given since", async () => {
+            expectLog("warn");
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
             mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
             // The path asks for this album's old file, but the album now points elsewhere.

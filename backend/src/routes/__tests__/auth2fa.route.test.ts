@@ -3,9 +3,6 @@
  * recovery codes; signing in then needs a current code or one recovery code, once; turning it off needs the password
  * and a current code. Real database, real encryption, real codes from the secret.
  */
-jest.mock("../../utils/logger", () => ({
-    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
-}));
 jest.mock("../../middleware/rateLimiter", () => {
     const pass = (_req: any, _res: any, next: any) => next();
     return new Proxy({}, { get: () => pass });
