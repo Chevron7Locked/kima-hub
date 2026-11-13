@@ -107,7 +107,7 @@ export function apiMounts(options: MountOptions): Mount[] {
             runawayLimit: true,
         },
         {
-            // The library router limits itself: cover art and streaming skip the runaway limit.
+            // The library router limits itself: cover art and the album cover search carry the image limit, and streaming carries none.
             path: "/api/library",
             router: libraryRoutes,
             access: {

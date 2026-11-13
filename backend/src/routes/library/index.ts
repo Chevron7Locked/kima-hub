@@ -16,8 +16,8 @@ const router = Router();
 // All routes require auth (session or API key)
 router.use(requireAuthOrToken);
 
-// Apply API rate limiter to routes that need it
-// Skip rate limiting for high-traffic endpoints (cover art and the album cover search, which carry the image limit, and streaming)
+// Apply the runaway limit to routes that need it
+// Skip it for cover art and the album cover search (they carry the image limit) and for streaming
 router.use((req, res, next) => {
   if (req.path.startsWith("/cover-art") || req.path.startsWith("/album-cover")) {
     return next();
