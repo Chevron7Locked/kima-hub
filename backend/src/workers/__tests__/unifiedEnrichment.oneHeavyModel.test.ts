@@ -82,8 +82,7 @@ const bothAtOnce = async (on: boolean) => {
 
 afterEach(() => bothAtOnce(false));
 
-// Leave the published count at zero when the file's tests are done (an afterEach, not an
-// afterAll: the shared ioredis clients are closed before the file's afterAll hooks run).
+// Leave the published count at zero after each test.
 afterEach(() => inflightRedis.set(INFLIGHT_KEY, "0"));
 
 afterAll(async () => {

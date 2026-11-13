@@ -1,9 +1,9 @@
 /**
  * The node test environment. It does two jobs.
  *
- * 1. Closes the Prisma clients a test file opened once the file is finished. Its teardown runs after every afterAll
- *    of the file, including the file's own cleanup, which queries (and so reconnects) after any hook a setup file
- *    could register. clientReaper.cjs registers the clients as they are made.
+ * 1. Closes the Redis and Prisma clients a test file opened once the file is finished. Its teardown runs after every
+ *    afterAll of the file, including the file's own cleanup, which queries (and so reconnects) after any hook a setup
+ *    file could register. clientReaper.cjs registers the clients as they are made.
  *
  * 2. Refuses every outbound connection and name lookup that leaves this machine (net connects, dns.lookup and the
  *    dns resolve family, callback and promise forms). A test that reaches a real service (MusicBrainz, Deezer, ...)
@@ -158,8 +158,13 @@ class KimaTestEnvironment extends TestEnvironment {
     }
 
     async teardown() {
-        const clients = this.global.__prismaClients ?? [];
-        await Promise.all(clients.splice(0).map((client) => client.$disconnect().catch(() => {})));
+        try {
+            // Not guarded: if the reaper never loaded, teardown fails loudly instead of leaking clients.
+            await this.global.__reapRedisClients();
+        } finally {
+            const clients = this.global.__prismaClients ?? [];
+            await Promise.all(clients.splice(0).map((client) => client.$disconnect().catch(() => {})));
+        }
         for (const undo of this.restore ?? []) undo();
         await super.teardown();
         if (this.violations.length) throw new Error(`${this.violations.length} outbound network attempt(s):\n${this.violations.join('\n')}`);

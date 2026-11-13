@@ -25,7 +25,6 @@ beforeAll(async () => {
     await prisma.podcast.deleteMany({ where: { id: P } });
 });
 
-// The cache is cleared before each run, not after: the shared client reaper has closed Redis by then.
 afterAll(async () => {
     await prisma.podcast.deleteMany({ where: { id: P } });
     restoreEnv();

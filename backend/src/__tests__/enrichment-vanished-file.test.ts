@@ -61,7 +61,6 @@ beforeEach(async () => {
     useMusicFolder(music);
 });
 
-// In an afterEach: the shared Redis clients are closed before the file's afterAll hooks run.
 afterEach(async () => {
     await redisClient.del(SCAN_AGAIN_KEY);
     useMusicFolder(originalFolder);

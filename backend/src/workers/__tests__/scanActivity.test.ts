@@ -14,7 +14,6 @@ const remove = async (id: string) => (await scanQueue.getJob(id))?.remove();
 // This worker's own Redis database: other files queue scans here and leave them waiting.
 beforeAll(() => scanQueue.obliterate({ force: true }));
 
-// In an afterEach: the shared Redis clients are closed before the file's afterAll hooks run.
 afterEach(async () => {
     await remove(SCAN_ID);
     await remove(REFILE_ID);

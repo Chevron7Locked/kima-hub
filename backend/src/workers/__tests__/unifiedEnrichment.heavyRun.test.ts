@@ -71,7 +71,6 @@ beforeEach(async () => {
     await redis.set(RUN_KEY, "embedding");
 });
 
-// In an afterEach: the shared Redis clients are closed before the file's afterAll hooks run.
 afterEach(async () => {
     await redis.del(RUN_KEY);
     await redis.set(INFLIGHT_KEY, "0");

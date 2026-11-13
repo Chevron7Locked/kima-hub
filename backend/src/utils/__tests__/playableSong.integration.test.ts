@@ -191,7 +191,7 @@ async function artistPage(global: string[], user = USER) {
         top.mockRestore();
         image.mockRestore();
         similar.mockRestore();
-        // The page keeps the artist's similar artists for a day; cleared here, as the file's Redis client is closed before its afterAll.
+        // The page keeps the artist's similar artists for a day; cleared after each read so no read sees another's.
         await redisClient.del(`similar-artists:${P}-ar`);
     }
 }

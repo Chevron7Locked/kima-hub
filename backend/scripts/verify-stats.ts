@@ -7,6 +7,8 @@
 
 import { readFileSync } from "node:fs";
 import { prisma } from "../src/utils/db";
+import { redisClient } from "../src/utils/redis";
+import { closeClient } from "../src/utils/closeRedisClient";
 import { auditFalseStarts } from "../src/services/playHistoryRepair";
 import { listeningStats, trackPlayCount, PLAY_CREDIT_CAP_SECONDS } from "../src/services/stats/listening";
 import { shelfStats } from "../src/services/stats/shelf";
@@ -84,14 +86,16 @@ function localParts(d: Date, tz: string) {
 }
 
 async function main() {
-    // The busiest account, not the oldest -- a fresh admin with no plays
-    // verifies only the empty path.
+    // The account with the most plays, so the most checks compare real numbers.
     const busiest = await prisma.$queryRaw<Array<{ userId: string; n: number }>>`
         SELECT "userId", count(*)::int AS n FROM "Play" GROUP BY 1 ORDER BY 2 DESC LIMIT 1`;
-    const user = busiest.length
-        ? await prisma.user.findUnique({ where: { id: busiest[0].userId }, select: { id: true, username: true, role: true } })
-        : await prisma.user.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true, username: true, role: true } });
-    if (!user) { console.log("No users. Nothing to verify."); return; }
+    // With no plays every play-based check compares zeros, so a pass would prove nothing.
+    if (!busiest.length) {
+        console.log("No plays to verify against. Point DATABASE_URL at a database with listening history.");
+        process.exitCode = 1;
+        return;
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: busiest[0].userId }, select: { id: true, username: true, role: true } });
     console.log(`\nVerifying against user "${user.username}" (${user.role}), timezone ${TZ}\n`);
 
     const raw = await prisma.$queryRaw<Raw[]>`
@@ -355,4 +359,7 @@ async function main() {
     if (fail) { console.log("Failures:\n" + failures.join("\n")); process.exitCode = 1; }
 }
 
-main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());
+// Importing the stats modules opens Redis; closed here with Prisma so the script exits.
+main()
+    .catch((e) => { console.error(e); process.exitCode = 1; })
+    .finally(() => Promise.all([prisma.$disconnect(), closeClient(redisClient)]));

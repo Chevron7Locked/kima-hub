@@ -104,7 +104,7 @@ describe("the similar-artists strip and where its pictures come from", () => {
         await prisma.artist.deleteMany({ where: { id: KNOWN_ID } });
     });
 
-    // The engine path caches its answer; clear it here, as the file's Redis client is closed before afterAll.
+    // The engine path caches its answer; cleared after each test so no test sees another's.
     afterEach(clearSimilarCache);
 
     describe("built from the artist's own enriched data", () => {

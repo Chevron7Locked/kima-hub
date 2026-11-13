@@ -1,6 +1,8 @@
 // Imports can open long-lived ioredis clients. Each one is registered (on
 // `net`, the one object every test file's sandbox shares), told never to
-// reconnect, and closed when its file finishes, so the run can exit.
+// reconnect, and closed when its file finishes, so the run can exit. The close
+// runs from the test environment's teardown (test-environment.cjs), after every
+// afterAll of the file, so a file's own cleanup can still use Redis.
 const net = require('net');
 const { zeroDisconnectTimeout } = require('../utils/closeRedisClient');
 
@@ -18,6 +20,11 @@ const registry = net.__testRedisClients || (net.__testRedisClients = new Map());
 async function reap(client) {
     if (client.__reaped) return;
     client.__reaped = true;
+    // Jest freezes the console before teardown, so an error a forced close
+    // raises (a client cut off mid-handshake) would log "Cannot log after tests
+    // are done". The file is finished and nothing can act on it: mute it.
+    client.removeAllListeners('error');
+    client.on('error', () => {});
     // First: forbid reconnection. ioredis stops retrying when retryStrategy
     // returns null, and reconnectOnError false covers the error path. Without
     // this, disconnect() below just starts an endless retry loop whose socket
@@ -60,7 +67,8 @@ async function reap(client) {
     await new Promise((resolve) => realSetImmediate(resolve));
 }
 
-afterAll(async () => {
+// Called by test-environment.cjs at teardown.
+globalThis.__reapRedisClients = async () => {
     // Two passes: a client mid-handshake only settles into 'end' after the
     // first disconnect, and it can re-register between the passes.
     for (let pass = 0; pass < 2; pass++) {
@@ -68,7 +76,7 @@ afterAll(async () => {
         if (open.length === 0) break;
         await Promise.all(open.map(reap));
     }
-});
+};
 
 // Jest gives each test file its own module registry, so every file that loads utils/db gets
 // its own Prisma client and pool, and a worker kept every finished file's connections open
