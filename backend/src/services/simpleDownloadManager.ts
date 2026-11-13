@@ -415,7 +415,7 @@ class SimpleDownloadManager {
             return { matched: false };
         }
         logger.debug(`   ${taken.length} job(s) took the download`);
-        const first = jobs.find((j) => taken.some((t) => t.id === j.id)) ?? jobs[0];
+        const first = jobs.find((j) => taken.some((t) => t.id === j.id))!;
         return { matched: true, jobId: first.id };
     }
 

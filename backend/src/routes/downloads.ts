@@ -378,7 +378,6 @@ async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findM
 }
 
 const CHECK_READS_JOBS_MS = 2000;
-const JOB_STATUSES = downloadJobs.JOB_STATUSES;
 
 // Registered before /:id so "clear-all" is not read as an id.
 router.delete("/clear-all", async (req, res) => {
@@ -388,8 +387,8 @@ router.delete("/clear-all", async (req, res) => {
 
         const where: { userId: string; status?: string } = { userId };
         if (status !== undefined) {
-            if (typeof status !== "string" || !JOB_STATUSES.includes(status)) {
-                return res.status(400).json({ error: `status must be one of: ${JOB_STATUSES.join(", ")}` });
+            if (typeof status !== "string" || !downloadJobs.JOB_STATUSES.includes(status)) {
+                return res.status(400).json({ error: `status must be one of: ${downloadJobs.JOB_STATUSES.join(", ")}` });
             }
             where.status = status;
         }
