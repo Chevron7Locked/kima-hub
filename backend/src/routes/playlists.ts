@@ -232,7 +232,8 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             order.data === "rev" ||
             (order.data === undefined && playlist.reverseOrder);
 
-        const formattedItems = playlist.items.map((item) => ({
+        const markedItems = await playlistService.markUnavailable(playlist.items);
+        const formattedItems = markedItems.map((item) => ({
             ...item,
             type: "track" as const,
             track: {
@@ -418,16 +419,18 @@ router.post("/:id/items/batch", requirePlaylistOwner, async (req, res) => {
         const { trackIds } = parsed.data;
         const result = await addSongs(req, trackIds);
 
-        const items = await prisma.playlistItem.findMany({
-            where: {
-                playlistId: req.params.id,
-                trackId: { in: [...new Set(trackIds)] },
-            },
-            include: {
-                track: { include: { album: { include: { artist: true } } } },
-            },
-            orderBy: { rank: "asc" },
-        });
+        const items = await playlistService.markUnavailable(
+            await prisma.playlistItem.findMany({
+                where: {
+                    playlistId: req.params.id,
+                    trackId: { in: [...new Set(trackIds)] },
+                },
+                include: {
+                    track: { include: { album: { include: { artist: true } } } },
+                },
+                orderBy: { rank: "asc" },
+            })
+        );
 
         return res.json({
             added: result.added,

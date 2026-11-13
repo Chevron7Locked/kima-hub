@@ -1,6 +1,6 @@
 /**
- * addTracks accepts any real track, including ones on DISCOVER albums. Real
- * database, since the rule lives in a Prisma where-clause.
+ * addTracks takes in playable songs only: not a Discover song, a missing file or a corrupt one, and not an id that
+ * matches no song. Real database, since the rule lives in a Prisma where-clause.
  */
 
 import { prisma } from "../../utils/db";
@@ -13,8 +13,9 @@ function cleanup() {
     return deleteFixtures(PREFIX);
 }
 
-async function fixture(location: "LIBRARY" | "DISCOVER") {
+async function fixture(location: "LIBRARY" | "DISCOVER", flags: { missingSince?: Date; corrupt?: boolean } = {}) {
     const { tag, track, user } = await createTrackChain(PREFIX, location, { location });
+    if (Object.keys(flags).length > 0) await prisma.track.update({ where: { id: track.id }, data: flags });
     const playlist = await prisma.playlist.create({
         data: { userId: user.id, name: `${PREFIX}-${tag}-pl` },
     });
@@ -25,18 +26,17 @@ describe("playlistService.addTracks across album locations", () => {
     beforeAll(cleanup);
     afterAll(cleanup);
 
-    it("adds a track from a DISCOVER album", async () => {
-        const { track, playlist } = await fixture("DISCOVER");
+    it.each([
+        ["a DISCOVER album", "DISCOVER", {}],
+        ["a missing file", "LIBRARY", { missingSince: new Date() }],
+        ["a corrupt file", "LIBRARY", { corrupt: true }],
+    ] as const)("rejects a song on %s", async (_name, location, flags) => {
+        const { track, playlist } = await fixture(location, flags);
 
         const result = await addTracks(playlist.id, [track.id]);
 
-        expect(result).toMatchObject({ added: 1, duplicates: 0, rejected: [] });
-        const rows = await prisma.playlistItem.findMany({
-            where: { playlistId: playlist.id },
-        });
-        expect(rows).toHaveLength(1);
-        expect(rows[0].trackId).toBe(track.id);
-        expect(rows[0].rank).toBeTruthy();
+        expect(result).toEqual({ added: 0, duplicates: 0, rejected: [track.id] });
+        expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id } })).toBe(0);
     });
 
     it("adds a track from a LIBRARY album", async () => {
@@ -47,7 +47,7 @@ describe("playlistService.addTracks across album locations", () => {
         expect(result).toMatchObject({ added: 1, duplicates: 0, rejected: [] });
     });
 
-    it("rejects only ids that match no track at all", async () => {
+    it("rejects an id that matches no song", async () => {
         const { playlist } = await fixture("LIBRARY");
 
         const result = await addTracks(playlist.id, ["nonexistent-track-id"]);

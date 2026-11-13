@@ -7,6 +7,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { rankAfter, rankBetween, rankSequence } from "../utils/lexoRank";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 
 /** Cap on a single bulk operation, so one request cannot pin a connection. */
 const MAX_BULK_TRACKS = 1000;
@@ -15,7 +16,7 @@ export interface AddTracksResult {
     added: number;
     /** Already present in the playlist; not an error. */
     duplicates: number;
-    /** Requested but not a streamable library track. */
+    /** Requested but not a playable song: unknown, on a Discover album, missing or corrupt. */
     rejected: string[];
 }
 
@@ -114,8 +115,23 @@ export async function allocateAppendRanks(
 }
 
 /**
+ * Marks each playlist entry `unavailable` when its song is not playable (Discover, missing or corrupt). A playlist
+ * keeps listing such a song, so this only says which ones to grey out and skip in playback.
+ */
+export async function markUnavailable<T extends { trackId: string }>(
+    items: T[]
+): Promise<Array<T & { unavailable: boolean }>> {
+    const ids = [...new Set(items.map((item) => item.trackId))];
+    const playable = ids.length === 0
+        ? []
+        : await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, select: { id: true } });
+    const playableIds = new Set(playable.map((t) => t.id));
+    return items.map((item) => ({ ...item, unavailable: !playableIds.has(item.trackId) }));
+}
+
+/**
  * Append tracks in the given order. Tracks already present are reported as
- * duplicates, not errors; tracks that are not streamable library tracks are rejected.
+ * duplicates, not errors; ids that are not playable songs are rejected.
  */
 export async function addTracks(
     playlistId: string,
@@ -132,7 +148,7 @@ export async function addTracks(
     }
 
     const playable = await prisma.track.findMany({
-        where: { id: { in: requested } },
+        where: { id: { in: requested }, ...PLAYABLE_SONG },
         select: { id: true },
     });
     const playableIds = new Set(playable.map((t) => t.id));

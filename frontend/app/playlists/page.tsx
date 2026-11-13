@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { playlistTrackToAudio, type PlaylistTrack } from "@/lib/playlist-track";
+import { playablePlaylist } from "@/lib/playlist-track";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { usePlaylistsQuery } from "@/hooks/useQueries";
@@ -565,10 +565,8 @@ export default function PlaylistsPage() {
     const handlePlayPlaylist = async (playlistId: string) => {
         try {
             const playlist = await api.getPlaylist(playlistId);
-            if (playlist?.items && playlist.items.length > 0) {
-                const tracks = playlist.items.map((item: { track: PlaylistTrack }) => playlistTrackToAudio(item.track));
-                playTracks(tracks, 0);
-            }
+            const queue = playablePlaylist(playlist?.items ?? []);
+            if (queue) playTracks(queue.tracks, 0);
         } catch (error) {
             console.error("Failed to play playlist:", error);
         }

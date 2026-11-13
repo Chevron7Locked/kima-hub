@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
-import { playlistTrackToAudio } from "@/lib/playlist-track";
+import { playablePlaylist, playlistTrackToAudio, type PlaylistEntry } from "@/lib/playlist-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
@@ -115,6 +115,8 @@ interface PlaylistItem {
     track: Track;
     type?: "track";
     sort?: number;
+    /** The song stopped playing (missing or unreadable file, or its album left the library): listed, never played. */
+    unavailable?: boolean;
 }
 
 interface PendingTrack {
@@ -383,7 +385,7 @@ export default function PlaylistDetailPage() {
 
     const playlistTrackIds = useMemo(() => {
         return new Set(
-            playlist?.items?.map((item: PlaylistItem) => item.track.id) || []
+            playlist?.items?.filter((item: PlaylistItem) => !item.unavailable).map((item: PlaylistItem) => item.track.id) || []
         );
     }, [playlist?.items]);
 
@@ -397,7 +399,7 @@ export default function PlaylistDetailPage() {
         if (!playlist?.items) return 0;
         return playlist.items.reduce(
             (sum: number, item: PlaylistItem) =>
-                sum + (item.track.duration || 0),
+                item.unavailable ? sum : sum + (item.track.duration || 0),
             0
         );
     }, [playlist?.items]);
@@ -414,15 +416,15 @@ export default function PlaylistDetailPage() {
             return;
         }
 
-        const tracks = playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track));
-        playTracks(tracks, 0);
+        const queue = playablePlaylist(playlist.items as PlaylistEntry[]);
+        if (queue) playTracks(queue.tracks, 0);
     };
 
     const handlePlayTrack = (index: number) => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
-        const tracks = playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track));
-        playTracks(tracks, index);
+        const queue = playablePlaylist(playlist.items as PlaylistEntry[], index);
+        if (queue) playTracks(queue.tracks, queue.start);
     };
 
     const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);
@@ -630,7 +632,8 @@ export default function PlaylistDetailPage() {
         }
 
         const playlistItem = item as PlaylistItem;
-        const isCurrentlyPlaying = currentTrack?.id === playlistItem.track.id;
+        const isUnavailable = !!playlistItem.unavailable;
+        const isCurrentlyPlaying = !isUnavailable && currentTrack?.id === playlistItem.track.id;
         const trackIndex = playlist?.items?.findIndex(
             (i: PlaylistItem) => i.id === playlistItem.id
         ) ?? index;
@@ -657,6 +660,7 @@ export default function PlaylistDetailPage() {
                     "grid grid-cols-[40px_minmax(0,1fr)_96px]",
                     TRACK_GRID_MD,
                     "gap-2 md:gap-4 px-4 py-2 rounded-lg hover:bg-white/[0.03] transition-all group cursor-pointer border border-transparent hover:border-white/5 touch-manipulation",
+                    isUnavailable && "opacity-50 cursor-default",
                     draggedItemId === playlistItem.id && "opacity-50",
                     dragOverItemId === playlistItem.id && "border-brand/40 bg-brand/5",
                     isCurrentlyPlaying && "bg-white/5 border-brand/30"
@@ -668,12 +672,14 @@ export default function PlaylistDetailPage() {
                             e.stopPropagation();
                             handlePlayTrack(trackIndex);
                         }}
-                        className="w-8 h-8 flex items-center justify-center"
-                        aria-label={isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
+                        disabled={isUnavailable}
+                        className="w-8 h-8 flex items-center justify-center disabled:cursor-default"
+                        aria-label={isUnavailable ? "Unavailable" : isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
                     >
                         <span
                             className={cn(
-                                "text-xs group-hover:hidden",
+                                "text-xs",
+                                !isUnavailable && "group-hover:hidden",
                                 isCurrentlyPlaying
                                     ? "text-brand font-bold"
                                     : "text-[var(--text-muted)]"
@@ -685,7 +691,7 @@ export default function PlaylistDetailPage() {
                                 trackIndex + 1
                             )}
                         </span>
-                        <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                        {!isUnavailable && <Play className="w-4 h-4 text-white hidden group-hover:block" />}
                     </button>
                     {playlist?.isOwner && (
                         <button
@@ -743,6 +749,7 @@ export default function PlaylistDetailPage() {
                             )}
                         </p>
                         <p className="text-xs tabular-nums text-[var(--text-muted)] truncate">
+                            {isUnavailable && <span className="text-[var(--text-muted)]">unavailable · </span>}
                             {playlistItem.track.album.artist.name}
                             <span className="md:hidden">
                                 {" · "}
@@ -761,7 +768,7 @@ export default function PlaylistDetailPage() {
                 </span>
 
                 <div className="flex items-center justify-end gap-1">
-                    <RowIconButton label="Add to queue" onClick={() => handleAddToQueue(playlistItem.track)}>
+                    <RowIconButton label="Add to queue" disabled={isUnavailable} onClick={() => handleAddToQueue(playlistItem.track)}>
                         <ListPlus className="w-4 h-4" />
                     </RowIconButton>
                     {playlist?.isOwner && (
@@ -948,7 +955,10 @@ export default function PlaylistDetailPage() {
 
                     {playlist.items && playlist.items.length > 1 && (
                         <button
-                            onClick={() => playTracks(shuffleArray(playlist.items.map((item: PlaylistItem) => playlistTrackToAudio(item.track))), 0)}
+                            onClick={() => {
+                                const queue = playablePlaylist(playlist.items as PlaylistEntry[]);
+                                if (queue) playTracks(shuffleArray(queue.tracks), 0);
+                            }}
                             className="h-8 w-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-all"
                             title="shuffle play"
                         >

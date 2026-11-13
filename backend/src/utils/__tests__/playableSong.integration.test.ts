@@ -67,6 +67,7 @@ import { signature } from "../../services/stats/signature";
 import libraryTracksRouter from "../../routes/library/tracks";
 import libraryArtistsRouter, { resolveSimilarArtists } from "../../routes/library/artists";
 import libraryAlbumsRouter from "../../routes/library/albums";
+import playlistsRouter from "../../routes/playlists";
 import { updateArtistCounts } from "../../services/artistCountsService";
 import { libraryArtistIdsForGenre } from "../genreSql";
 import recommendationsRouter from "../../routes/recommendations";
@@ -113,6 +114,7 @@ const ENERGETIC: Partial<Record<Mood, number>> = {
 };
 
 const app = express()
+    .use(express.json())
     .use((req: any, _res, next) => {
         // The web routes can be asked as another user, named in `x-user`.
         const id = req.get("x-user") ?? USER;
@@ -121,6 +123,7 @@ const app = express()
     })
     .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter)
     .use("/api/library", libraryTracksRouter, libraryArtistsRouter, libraryAlbumsRouter)
+    .use("/api/playlists", playlistsRouter)
     .use("/api/recommendations", recommendationsRouter);
 /** A web route's JSON answer, asked as `user`. */
 const web = async (route: string, user = USER) => (await request(app).get(route).set("x-user", user).expect(200)).body;
@@ -792,6 +795,44 @@ describe("an artist with no playable song", () => {
         ]);
         const index = (await reply("getArtists.view", {})).artists.index ?? [];
         listed(index.flatMap((i: { artist: { id: string }[] }) => i.artist.map((a) => a.id)));
+    });
+});
+
+// A playlist keeps listing a song that stopped playing, marked unavailable, and refuses to take one in.
+describe("the web playlist", () => {
+    const shown = (items: { track: { id: string }; unavailable: boolean }[]) =>
+        Object.fromEntries(items.map((i) => [i.track.id, i.unavailable]));
+    const expected = { [SONG.playable]: false, [SONG.discover]: true, [SONG.missing]: true, [SONG.corrupt]: true };
+
+    it("lists every song it holds, marking the Discover, missing and corrupt ones unavailable", async () => {
+        const playlist = await web(`/api/playlists/${PLAYLIST}`);
+        expect(shown(playlist.items)).toEqual(expected);
+        expect(shown(playlist.mergedItems)).toEqual(expected);
+        expect(playlist.trackCount).toBe(4);
+    });
+
+    it("marks them in a reversed list too", async () => {
+        const playlist = await web(`/api/playlists/${PLAYLIST}?order=rev`);
+        expect(shown(playlist.items)).toEqual(expected);
+    });
+
+    it.each(UNPLAYABLE.map((id) => [id]))("refuses to take in %s", async (id) => {
+        const target = await prisma.playlist.create({ data: { userId: USER, name: `${P}-add-${id}` } });
+        const asked = (route: string, body: object) => request(app).post(`/api/playlists/${target.id}/${route}`).send(body);
+        await asked("items", { trackId: id }).expect(404);
+        const mixed = (await asked("items", { trackIds: [id, SONG.playable] }).expect(200)).body;
+        expect(mixed).toMatchObject({ added: 1, rejected: [id] });
+        const batch = (await asked("items/batch", { trackIds: [id, SONG.playable] }).expect(200)).body;
+        expect(batch).toMatchObject({ added: 0, skippedExisting: 1, skippedInvalid: 1 });
+        expect(batch.items.map((i: { trackId: string; unavailable: boolean }) => [i.trackId, i.unavailable])).toEqual([[SONG.playable, false]]);
+        const held = await prisma.playlistItem.findMany({ where: { playlistId: target.id }, select: { trackId: true } });
+        expect(held.map((i) => i.trackId)).toEqual([SONG.playable]);
+    });
+
+    it("marks the songs a batch add reads back, the ones it refused included when the playlist already holds them", async () => {
+        const batch = (await request(app).post(`/api/playlists/${PLAYLIST}/items/batch`).send({ trackIds: Object.values(SONG) }).expect(200)).body;
+        expect(batch).toMatchObject({ added: 0, skippedExisting: 1, skippedInvalid: 3 });
+        expect(Object.fromEntries(batch.items.map((i: { trackId: string; unavailable: boolean }) => [i.trackId, i.unavailable]))).toEqual(expected);
     });
 });
 
