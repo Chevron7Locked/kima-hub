@@ -84,6 +84,12 @@ jest.mock("../../utils/db", () => ({
         $executeRawUnsafe: jest.fn().mockResolvedValue(1),
     },
 }));
+// The claim is the stage-record module's (tested there); here only the job id it hands back matters.
+const mockClaim = jest.fn();
+jest.mock("../../services/stages/stageRecords", () => ({
+    ...jest.requireActual("../../services/stages/stageRecords"),
+    claim: (...args: unknown[]) => mockClaim(...args),
+}));
 // The in-flight cap reads each stage's worker count.
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({ enrichmentConcurrency: 5, audioAnalyzerWorkers: 2, clapWorkers: 2 }),
@@ -190,11 +196,11 @@ describe("enrichment phases -- job keys and backoff", () => {
         });
 
         it("keys each attempt with its own jobId, not the shared stage key", async () => {
-            mockQueryRawUnsafe.mockImplementation(async (sql: string, ...args: unknown[]) => {
-                // The claim UPDATE moves the record from its failed attempt 2
-                // onto attempt 3 (a `failed` claim consumes the next rung).
-                if (sql.includes("SET status = 'working'"))
-                    return [{ attempt: 3, redelivered: 0 }];
+            // The record's failed attempt 2 is claimed again as attempt 3.
+            mockClaim.mockImplementation(async (_trackId: string, _stage: string, opts: { jobKey: string }) => ({
+                kind: "claimed", attempt: 3, redelivered: 0, jobId: `${opts.jobKey}-3-r0`,
+            }));
+            mockQueryRawUnsafe.mockImplementation(async (_sql: string, ...args: unknown[]) => {
                 if (args[0] === "recording") return [stageRow("t1", "recording", 2)];
                 return [];
             });

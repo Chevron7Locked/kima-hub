@@ -1,11 +1,8 @@
 import { Worker, Job } from "bullmq";
 import { createWorkerConnection, QUEUE_NAMES } from "./enrichmentQueues";
 import { isEntityGone } from "./entityGone";
-import {
-    claimIsCurrent,
-    enrichSingleTrack,
-    recordStageFailure,
-} from "./unifiedEnrichment";
+import { enrichSingleTrack } from "./unifiedEnrichment";
+import * as stageRecords from "../services/stages/stageRecords";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 
@@ -22,7 +19,7 @@ export async function startTrackEnrichmentWorker(): Promise<Worker> {
         QUEUE_NAMES.TRACKS,
         async (job: Job<TrackJobData>) => {
             const { trackId, trackTitle } = job.data;
-            if (!(await claimIsCurrent(trackId, "recording", job.id))) {
+            if (!(await stageRecords.claimIsCurrent(trackId, "recording", job.id))) {
                 logger.debug(`[TrackWorker] ${trackId}: claim ${job.id} was re-issued; skipped`);
                 return;
             }
@@ -54,7 +51,7 @@ export async function startTrackEnrichmentWorker(): Promise<Worker> {
 
         // The stage record owns the attempt: its retry ladder decides when to stop
         // asking, and it is the only record of this failure the failures API reads.
-        await recordStageFailure(trackId, "recording", "musicbrainz", err, { queueJobId: job.id }, job.id).catch(
+        await stageRecords.fail(trackId, "recording", "musicbrainz", err, { queueJobId: job.id }, job.id).catch(
             (reportErr: Error) =>
                 logger.warn(`[TrackWorker] Could not record track ${trackId}'s failure: ${reportErr.message}`),
         );

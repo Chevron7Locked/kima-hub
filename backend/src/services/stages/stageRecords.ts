@@ -4,10 +4,9 @@
  * A stage record is one question asked of one song (`recording`, `analysis`, `embedding`, `fingerprint`) and what is
  * known of its answer. The record is the truth. `analysis` and `embedding` also show on the song as status columns
  * (`analysisStatus`, `vibeAnalysisStatus` and their error, retry count and start time); every move below writes the
- * record and those columns in one transaction, so they cannot disagree. Analyzer reports, the retry and vibe-start
- * routes, restart, the scanner, album identification, the failure view and the missing-file closure go through here.
- * The scheduler's inline claim and column writes still write records themselves until they move behind these moves
- * (the scheduler rework).
+ * record and those columns in one transaction, so they cannot disagree. Analyzer reports, the enrichment scheduler, the
+ * retry and vibe-start routes, restart, the scanner, album identification, the failure view and the missing-file
+ * closure all go through here.
  *
  * Moves:
  * - `claim` / `release`: a worker is handed the question for a lease, or hands it back.

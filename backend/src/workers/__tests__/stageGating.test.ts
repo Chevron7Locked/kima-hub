@@ -319,7 +319,7 @@ describe("per-track stage gating", () => {
         });
 
         it("declares exactly the four stages of the graph", async () => {
-            const { STAGE_ORDER, PREREQUISITE_STAGE } = await import("../unifiedEnrichment");
+            const { STAGE_ORDER, PREREQUISITE_STAGE } = await import("../../services/stages/stageRecords");
             expect(STAGE_ORDER).toEqual(["recording", "analysis", "embedding", "fingerprint"]);
             // Each stage lists what it reads. Recording needs the fingerprint
             // question settled (done, or closed as permanent); embedding needs a

@@ -77,8 +77,6 @@ import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording }
 // ── Per-track stage queue ────────────────────────────────────────────────
 
 // The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
-export { STAGE_ORDER, PREREQUISITE_STAGE } from "../services/stages/stageRecords";
-export type { StageName, StagePrerequisite } from "../services/stages/stageRecords";
 
 /**
  * Exactly one producer per queue, so the same work cannot be queued twice under
@@ -454,20 +452,6 @@ async function drainCap(stage: "recording" | "analysis" | "embedding"): Promise<
     return Math.min(ceiling, Math.max(2 * workers, drainable));
 }
 
-/**
- * The stage-record moves, under the names the scheduler's other writers still use. Ticket 30 moves those callers to
- * `stageRecords` and retires these aliases.
- */
-export const recordStageSuccess = stageRecords.answer;
-export const recordStageFailure = stageRecords.fail;
-export const recordStageAbsent = stageRecords.absent;
-export const recordOutcomeFailure = stageRecords.failOutcome;
-export const claimOf = stageRecords.claimOf;
-export const claimIsCurrent = stageRecords.claimIsCurrent;
-export const closeOrphanedDependents = async (): Promise<void> => {
-    await stageRecords.closeDependents();
-};
-
 /** An ask that timed out or threw: a transient failure, so the record retries on its ladder. */
 function unansweredAsk(err: unknown, label: string): Outcome<never> {
     const message = err instanceof Error ? err.message : String(err);
@@ -765,7 +749,8 @@ const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
     },
     analysis: async (item) => {
         // The analyzer consumes a plain Redis list, not a BullMQ queue. The job id names
-        // the claim, and the analyzer's report carries it back.
+        // the claim, and the analyzer's report carries it back. The claim already put the song's
+        // status column to `processing`; nothing is written after the push, so a fast report cannot be undone.
         await getRedis().rpush(
             STAGE_QUEUES.analysis,
             JSON.stringify({
@@ -775,27 +760,12 @@ const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
                 jobId: item.jobId,
             }),
         );
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "analysisStatus" = 'processing',
-                    "analysisStartedAt" = now()
-              WHERE id = $1`,
-            item.trackId,
-        );
     },
     embedding: async (item) => {
         await vibeQueue.add(
             "embed",
             { trackId: item.trackId, filePath: item.filePath, duration: item.duration },
             { jobId: item.jobId },
-        );
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track"
-                SET "vibeAnalysisStatus" = 'processing',
-                    "vibeAnalysisStartedAt" = now(),
-                    "vibeAnalysisStatusUpdatedAt" = now()
-              WHERE id = $1`,
-            item.trackId,
         );
     },
     fingerprint: async (item) => {
@@ -809,7 +779,7 @@ const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
 /**
  * Answer one fingerprint question with local fpcalc and store the fingerprint
  * whatever identification later finds, since dedupe uses it too. A stored
- * fingerprint is reused, never recomputed. Failures go through recordStageFailure.
+ * fingerprint is reused, never recomputed. Failures go through stageRecords.fail.
  */
 async function runFingerprintStageWork(item: StageWork): Promise<void> {
     try {
@@ -822,7 +792,7 @@ async function runFingerprintStageWork(item: StageWork): Promise<void> {
         }
 
         if (track.acoustidFingerprint) {
-            await recordStageSuccess(item.trackId, "fingerprint", "fpcalc", {
+            await stageRecords.answer(item.trackId, "fingerprint", "fpcalc", {
                 reason: "fingerprint already stored",
                 characters: track.acoustidFingerprint.length,
             }, item.jobId);
@@ -847,7 +817,7 @@ async function runFingerprintStageWork(item: StageWork): Promise<void> {
         const fingerprint = await fpcalcService.fingerprintFile(absolutePath);
 
         await persistAcoustidFingerprint(item.trackId, fingerprint.fingerprint);
-        await recordStageSuccess(item.trackId, "fingerprint", "fpcalc", {
+        await stageRecords.answer(item.trackId, "fingerprint", "fpcalc", {
             characters: fingerprint.fingerprint.length,
             duration: fingerprint.duration,
         }, item.jobId);
@@ -856,7 +826,7 @@ async function runFingerprintStageWork(item: StageWork): Promise<void> {
         logger.debug(
             `[Enrichment] Fingerprint failed for ${item.trackId}: ${(err as Error).message}`,
         );
-        await recordStageFailure(item.trackId, "fingerprint", "fpcalc", err, {
+        await stageRecords.fail(item.trackId, "fingerprint", "fpcalc", err, {
             paths: ["fpcalc"],
         }, item.jobId);
     }
@@ -905,7 +875,7 @@ function runFingerprintInPool(item: StageWork): void {
             logger.warn(
                 `[Enrichment] Fingerprint work for ${item.trackId} did not finish: ${(err as Error).message}`,
             );
-            return recordStageFailure(
+            return stageRecords.fail(
                 item.trackId,
                 "fingerprint",
                 "fpcalc",
@@ -949,16 +919,13 @@ const ACOUSTID_NOT_ASKED = "not asked: the file's fingerprint question closed";
  */
 async function reopenRecordingThatNeverAskedAcoustid(trackId: string): Promise<void> {
     try {
-        const reopened = await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage"
-                SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'fingerprint landed')
-              WHERE "trackId" = $1
-                AND stage = 'recording'
-                AND status = 'done'
-                AND evidence ->> 'acoustid' = $2`,
-            trackId,
-            ACOUSTID_NOT_ASKED,
-        );
+        const reopened = await stageRecords.askAgain({
+            stages: ["recording"],
+            trackIds: [trackId],
+            statuses: ["done"],
+            evidenceEquals: { acoustid: ACOUSTID_NOT_ASKED },
+            evidence: { reason: "fingerprint landed" },
+        });
         if (reopened > 0) {
             logger.debug(`[Enrichment] Fingerprint landed for ${trackId}: its recording question asks AcoustID now`);
         }
@@ -994,35 +961,17 @@ export async function retryFailedAndBlocked(
  * recordingMbid keeps its recording answer. No answer rows are deleted.
  */
 export async function redecideEverything(): Promise<{ reopened: number }> {
-    let reopened = 0;
-
-    for (const stage of STAGE_ORDER) {
-        reopened += await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage" ts
-                SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
-               FROM "Track" t
-              WHERE ts.stage = $1
-                AND t.id = ts."trackId"
-                -- AcoustID dedup guard: never re-ask a recording we found.
-                AND NOT (ts.stage = 'recording' AND t."recordingMbid" IS NOT NULL)`,
-            stage,
-        );
-    }
+    // The records and the status columns that show them move together; the missing-file closure after it closes (and
+    // mirrors) the records of songs whose file is gone.
+    let reopened = await stageRecords.askAgain({
+        stages: STAGE_ORDER,
+        clearDecision: true,
+        // AcoustID dedup guard: never re-ask a recording we found.
+        keepIdentifiedRecordings: true,
+        evidence: { reason: "re-decided" },
+    });
 
     reopened -= await stageRecords.closeForMissingFiles();
-
-    // Mirror the reopen onto the Track columns the analyzer claims and the UI reads;
-    // a column still saying `completed` would let reconcileStaleStageRecords close
-    // the reopened record again before anything answered it.
-    await prisma.track.updateMany({
-        // A missing file's columns were just mirrored closed with its records; they stay so.
-        where: { analysisStatus: { not: "pending" }, missingSince: null },
-        data: {
-            analysisStatus: "pending",
-            analysisStartedAt: null,
-            analysisRetryCount: 0,
-        },
-    });
 
     logger.debug(`[Enrichment] Re-deciding everything: ${reopened} stage records reopened`);
 
@@ -1200,7 +1149,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
     try {
         // Close dependents of closed prerequisites first, so they never sit `pending`.
-        await closeOrphanedDependents();
+        await stageRecords.closeDependents();
         await syncWaitingAlerts();
 
         // Run phases sequentially, halting if stopped/paused
@@ -1527,7 +1476,7 @@ export async function enrichSingleTrack(
             // AcoustID comes first and can be asked when its pause ends: the question waits until
             // then, uses up no retry, and no lower source answers in its place. A reply already
             // saved needs no request, so it is used even while paused.
-            await recordOutcomeFailure(track.id, "recording", "acoustid", {
+            await stageRecords.failOutcome(track.id, "recording", "acoustid", {
                 kind: "rateLimited",
                 retryAfter: pause.until,
                 evidence: { asked, acoustid: "paused" },
@@ -1665,7 +1614,7 @@ export async function enrichSingleTrack(
         } catch (err) {
             // A failed fingerprint write is a real failure: the record keeps the
             // actual error and the question stays open on its own schedule.
-            await recordStageFailure(track.id, "recording", "acoustid", err, {
+            await stageRecords.fail(track.id, "recording", "acoustid", err, {
                 stage: "persisting the fingerprint on Track",
             }, jobId);
             return "deferred";
@@ -1673,7 +1622,7 @@ export async function enrichSingleTrack(
     }
 
     if (failedAsk) {
-        await recordOutcomeFailure(
+        await stageRecords.failOutcome(
             track.id,
             "recording",
             failedAsk.source,
@@ -1688,7 +1637,7 @@ export async function enrichSingleTrack(
         // Every source that can be asked said "nothing" (AcoustID cannot be, when the
         // file's fingerprint question closed for good): close `done` with evidence
         // naming who was asked. A scan that finds the file changed asks again.
-        await recordStageAbsent(track.id, "recording", "acoustid", {
+        await stageRecords.absent(track.id, "recording", "acoustid", {
             reason: "no source has a recording that is this track",
             asked,
             ...(acoustidSkipped ? { acoustid: ACOUSTID_NOT_ASKED } : {}),
@@ -1698,7 +1647,7 @@ export async function enrichSingleTrack(
 
     const mbid = recordingMbid;
     // Asking took time: a claim re-issued meanwhile (a wipe, a changed file) owns the answer now.
-    if (!(await claimIsCurrent(track.id, "recording", jobId))) return "deferred";
+    if (!(await stageRecords.claimIsCurrent(track.id, "recording", jobId))) return "deferred";
     await prisma.track.update({
         where: { id: track.id },
         data: { recordingMbid: mbid },
@@ -1719,7 +1668,7 @@ export async function enrichSingleTrack(
             // The same fetch answers the album: original year, label, and genres,
             // filled only where the row is still blank, and only for the album the row names.
             if (rowAlbum) await fillAlbumFromCatalogue(track.album, rowAlbum);
-            await recordStageSuccess(track.id, "recording", answerSource, {
+            await stageRecords.answer(track.id, "recording", answerSource, {
                 recordingMbid: mbid,
                 reason: answerSource === "file_tag"
                     ? "the file's own recording id, found in the album's tracklist"
@@ -1737,7 +1686,7 @@ export async function enrichSingleTrack(
             }, jobId);
             return "identified";
         } catch (err) {
-            await recordStageFailure(track.id, "recording", "musicbrainz", err, {
+            await stageRecords.fail(track.id, "recording", "musicbrainz", err, {
                 recordingMbid: mbid,
                 stage: "writing the album-chain answer",
             }, jobId);
@@ -1772,19 +1721,19 @@ export async function enrichSingleTrack(
         if (genres.kind === "answered") {
             const topGenres = topVoted(genres.value.genres, 5);
             await trackIdentityService.populateTrackGenres(track.id, topGenres);
-            await recordStageSuccess(track.id, "recording", answerSource, { ...evidence, tags: topGenres }, jobId);
+            await stageRecords.answer(track.id, "recording", answerSource, { ...evidence, tags: topGenres }, jobId);
             return "identified";
         }
         if (genres.kind === "absent") {
             // Identified, and the recording has no genres: an answer, not a failure.
             await trackIdentityService.populateTrackGenres(track.id, []);
-            await recordStageSuccess(track.id, "recording", answerSource, {
+            await stageRecords.answer(track.id, "recording", answerSource, {
                 ...evidence,
                 reason: `identified via ${answerSource}, recording carries no genres`,
             }, jobId);
             return "identified";
         }
-        await recordOutcomeFailure(track.id, "recording", "musicbrainz", genres, {
+        await stageRecords.failOutcome(track.id, "recording", "musicbrainz", genres, {
             recordingMbid: mbid,
             stage: "fetching genres/isrc for an identified recording",
         }, jobId);
@@ -1792,7 +1741,7 @@ export async function enrichSingleTrack(
     } catch (err) {
         // An unexpected throw (a DB write, not a source answer): record it with its
         // real error so the question is re-asked on the record's own schedule.
-        await recordStageFailure(track.id, "recording", answerSource, err, {
+        await stageRecords.fail(track.id, "recording", answerSource, err, {
             recordingMbid: mbid,
             stage: "fetching genres/isrc for an identified recording",
         }, jobId);
@@ -1958,12 +1907,12 @@ export async function reconcileStaleStageRecords(stage: StageName): Promise<void
         );
         for (const row of rows) {
             if (row.answer === "completed") {
-                await recordStageSuccess(row.trackId, "analysis", "analyzer", {
+                await stageRecords.answer(row.trackId, "analysis", "analyzer", {
                     syncedFrom: "analysisStatus",
                     answer: "completed",
                 });
             } else {
-                await recordStageFailure(
+                await stageRecords.fail(
                     row.trackId,
                     "analysis",
                     "analyzer",
@@ -1998,12 +1947,12 @@ export async function reconcileStaleStageRecords(stage: StageName): Promise<void
     );
     for (const row of rows) {
         if (row.answer === "completed") {
-            await recordStageSuccess(row.trackId, "embedding", "clap", {
+            await stageRecords.answer(row.trackId, "embedding", "clap", {
                 syncedFrom: "track_embeddings",
                 answer: "completed",
             });
         } else {
-            await recordStageFailure(
+            await stageRecords.fail(
                 row.trackId,
                 "embedding",
                 "clap",
@@ -2079,90 +2028,27 @@ async function dispatchStageWork(
     }
 
     for (const item of owed) {
-        let claimed: Array<{ attempt: number; redelivered: number }> = [];
+        let claim: stageRecords.ClaimResult | undefined;
         try {
-            // Claim before queueing, so the next cycle does not re-offer the attempt. The
-            // lease re-offers a record whose worker died; each re-offer bumps `redelivered`,
-            // which closes the record at the cap. Only a reported failure uses up a retry
-            // (`failures`). The WHERE clause never claims an answered or closed record.
-            claimed = await prisma.$queryRawUnsafe<Array<{ attempt: number; redelivered: number }>>(
-                `INSERT INTO "TrackStage"
-                    (id, "trackId", stage, status, source, attempt, retryable, evidence,
-                     "startedAt", "nextRetryAt")
-                 VALUES ($1, $2, $3, 'working', $4, 1, true, $5::jsonb,
-                         now(), now() + make_interval(secs => $6))
-                 ON CONFLICT ("trackId", stage) DO UPDATE
-                    SET status = 'working',
-                        "startedAt" = now(),
-                        "nextRetryAt" = now() + make_interval(secs => $6),
-                        "attempt" = CASE WHEN "TrackStage".status = 'working'
-                                         THEN "TrackStage"."attempt"
-                                         ELSE "TrackStage"."attempt" + 1 END,
-                        "redelivered" = CASE WHEN "TrackStage".status = 'working'
-                                              THEN "TrackStage"."redelivered" + 1
-                                              ELSE 0 END
-                  WHERE ("TrackStage".status IN ('pending', 'failed')
-                         AND "TrackStage".retryable = true)
-                     OR ("TrackStage".status = 'working'
-                         AND "TrackStage"."nextRetryAt" IS NOT NULL
-                         AND "TrackStage"."nextRetryAt" <= now()
-                         AND "TrackStage"."redelivered" < ${STAGE_REDELIVERY_CAP})
-                 RETURNING attempt, "redelivered"`,
-                `${item.trackId}__${stage}`,
-                item.trackId,
-                stage,
-                source,
-                JSON.stringify({ question: item.jobKey }),
-                STAGE_CLAIM_LEASE_MS / 1000,
-            );
-            if (claimed.length === 0) {
-                // At the redelivery cap: close it with its evidence and
-                // stop offering it, or a poison file loops every cycle
-                // without ever consuming an attempt.
-                const closed = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-                    `UPDATE "TrackStage"
-                        SET status = 'failed',
-                            retryable = false,
-                            "lastErrorCode" = 'LOST_WORKER',
-                            "lastErrorMessage" = 'Kept losing its worker (${STAGE_REDELIVERY_CAP} lease expiries, no answer)',
-                            "failureClass" = 'INCONCLUSIVE',
-                            "nextRetryAt" = NULL,
-                            "finishedAt" = now()
-                      WHERE "trackId" = $1 AND stage = $2
-                        AND status = 'working'
-                        AND "redelivered" >= ${STAGE_REDELIVERY_CAP}
-                      RETURNING id`,
-                    item.trackId,
-                    stage,
+            // Claim before queueing, so the next cycle does not re-offer the attempt. The lease re-offers a
+            // record whose worker died; the module closes it at the redelivery cap so a poison file stops
+            // looping, and never claims an answered or closed record.
+            claim = await stageRecords.claim(item.trackId, stage, { jobKey: item.jobKey, source });
+            if (claim.kind === "closed") {
+                logger.warn(
+                    `[Enrichment] ${stage}: ${item.title} lost its worker ${STAGE_REDELIVERY_CAP} times — record closed until a human re-decides`,
                 );
-                if (closed.length > 0) {
-                    logger.warn(
-                        `[Enrichment] ${stage}: ${item.title} lost its worker ${STAGE_REDELIVERY_CAP} times — record closed until a human re-decides`,
-                    );
-                }
-                continue;
             }
-            // Each redelivery gets its own jobId so a re-offer never reuses
-            // the dead attempt's queue key; the attempt count stays put
-            // because the failed delivery was never an answer.
-            item.jobId = `${item.jobKey}-${claimed[0].attempt}-r${claimed[0].redelivered}`;
+            if (claim.kind !== "claimed") continue;
+            item.jobId = claim.jobId;
 
             await add(item);
             queued++;
         } catch (err) {
-            // Release the claim: the push never happened, so the record must
-            // stay due instead of parking in `working` past the lease.
-            if (claimed.length > 0) {
-                await prisma.$executeRawUnsafe(
-                    `UPDATE "TrackStage"
-                        SET status = 'pending', "startedAt" = NULL, "nextRetryAt" = NULL
-                      WHERE "trackId" = $1 AND stage = $2 AND status = 'working'
-                        AND attempt = $3 AND redelivered = $4`,
-                    item.trackId,
-                    stage,
-                    claimed[0].attempt,
-                    claimed[0].redelivered,
-                ).catch(() => undefined);
+            // Hand the claim back: the push never happened, so the record must stay due instead of parking in
+            // `working` past the lease.
+            if (claim?.kind === "claimed") {
+                await stageRecords.release(item.trackId, stage, claim).catch(() => undefined);
             }
             logger.warn(
                 `[Enrichment] Failed to queue ${stage} for ${item.trackId}: ${(err as Error).message}`,

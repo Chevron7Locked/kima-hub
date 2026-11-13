@@ -10,10 +10,8 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import {
   getNextWork,
   STAGE_QUEUES,
-  STAGE_ORDER,
-  PREREQUISITE_STAGE,
-  type StageName,
 } from "../unifiedEnrichment";
+import { STAGE_ORDER, PREREQUISITE_STAGE, type StageName } from "../../services/stages/stageRecords";
 
 jest.mock("../../utils/logger", () => ({
   logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
