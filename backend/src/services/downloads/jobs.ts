@@ -231,9 +231,19 @@ async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Pr
 /** The batch and import checks still running after the moves that started them answered. */
 const checking = new Set<Promise<void>>();
 
-/** Resolves when every batch and import check a move started has ended. For tests and a clean shutdown. */
-export async function whenIdle(): Promise<void> {
-    while (checking.size > 0) await Promise.allSettled([...checking]);
+/**
+ * Resolves when every batch and import check a move started has ended, or after `timeoutMs` when one is given. For
+ * tests, and for a route that removes the rows a check reads: a check reads its jobs as it starts, so a short wait
+ * lets it see them while one that goes on to wait for Lidarr does not hold the route.
+ */
+export async function whenIdle(timeoutMs?: number): Promise<void> {
+    const idle = (async () => {
+        while (checking.size > 0) await Promise.allSettled([...checking]);
+    })();
+    if (timeoutMs === undefined) return idle;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([idle, new Promise<void>((resolve) => (timer = setTimeout(resolve, timeoutMs)))]);
+    clearTimeout(timer);
 }
 
 /**

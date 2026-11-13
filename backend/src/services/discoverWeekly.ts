@@ -661,7 +661,7 @@ class DiscoverWeeklyService {
         eventBus.emit({
             type: "discover:progress",
             userId: batch.userId,
-            payload: { batchId, status: "downloading", completed, failed, total, progress: Math.round(((completed + failed + cancelled) / total) * 100) },
+            payload: { batchId, status: "downloading", completed, failed, total, progress: total > 0 ? Math.round(((completed + failed + cancelled) / total) * 100) : 100 },
         });
 
         logger.debug(

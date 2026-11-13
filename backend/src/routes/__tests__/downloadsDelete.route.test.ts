@@ -116,11 +116,11 @@ describe("DELETE /downloads/clear-all", () => {
         expect(mockCheckBatchCompletion).toHaveBeenCalledTimes(1);
         expect(mockCheckBatchCompletion).toHaveBeenCalledWith(batchId);
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
-        // Whatever the batch's check saw of the rows, the unfinished ones were cancelled, not left running.
-        for (const state of Object.values(seen)) expect(state).not.toMatch(/^(processing|pending)/);
+        // The batch's check read the rows before they were removed, the unfinished ones cancelled.
+        expect(seen).toEqual({ dld_a: "failed:Cancelled by user", dld_b: "failed:Cancelled by user", dld_c: "completed:null" });
     });
 
-    it("answers while the batch's check is still running", async () => {
+    it("does not wait past a moment for a batch's check that is still running", async () => {
         await job("dld_slow", "processing", { discoveryBatchId: batchId });
         let release!: () => void;
         mockCheckBatchCompletion.mockReturnValue(new Promise<void>((resolve) => (release = resolve)));
@@ -130,7 +130,7 @@ describe("DELETE /downloads/clear-all", () => {
         expect(res.body).toEqual({ success: true, deleted: 1 });
         release();
         await downloadJobs.whenIdle();
-    });
+    }, 15_000);
 
     it("refuses a status that is not one a job can have, and removes nothing", async () => {
         await job("dld_keep", "completed");

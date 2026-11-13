@@ -777,13 +777,14 @@ class AcquisitionService {
         error?: string,
         patch: Record<string, unknown> = {}
     ): Promise<void> {
-        const settled = error
-            ? await downloadJobs.fail([{ id: jobId }], error, patch)
+        const failed = error !== undefined;
+        const settled = failed
+            ? await downloadJobs.fail([{ id: jobId }], error || "Download failed", patch)
             : await downloadJobs.complete([{ id: jobId }], patch);
 
         logger.debug(
             `[Acquisition] Settled job ${jobId}: ${
-                settled.length === 0 ? "already settled" : error ? `failed, error=${error}` : "completed"
+                settled.length === 0 ? "already settled" : failed ? `failed, error=${error}` : "completed"
             }`
         );
     }

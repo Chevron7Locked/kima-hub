@@ -459,6 +459,23 @@ describe("settling answers promptly", () => {
         expect(idle).toBe(true);
     });
 
+    it("stops waiting for a check that is still running after the time it is given", async () => {
+        const { discoverWeeklyService } = await import("../../discoverWeekly");
+        let release!: () => void;
+        const checking = new Promise<void>((resolve) => (release = resolve));
+        jest.spyOn(discoverWeeklyService, "checkBatchCompletion").mockReturnValue(checking);
+        const batch = await batchOf(1);
+        const j = await job("dl_prompt_capped", { discoveryBatchId: batch.id });
+        await downloadJobs.fail([j], "gone");
+
+        const started = Date.now();
+        await downloadJobs.whenIdle(80);
+
+        expect(Date.now() - started).toBeLessThan(2000);
+        release();
+        await downloadJobs.whenIdle();
+    });
+
     it("returns before the import's completion check ends", async () => {
         const { spotifyImportService } = await import("../../spotifyImport");
         let release!: () => void;

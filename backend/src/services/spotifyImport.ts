@@ -1510,7 +1510,7 @@ class SpotifyImportService {
     const completed = downloadJobs.filter(
       (j) => j.status === "completed",
     ).length;
-    const failed = downloadJobs.filter((j) => j.status === "failed").length;
+    const failed = downloadJobs.filter((j) => j.status === "failed" || j.status === "exhausted").length;
     const pending = total - completed - failed;
 
     if (total === 0 && job.albumsTotal > 0) {

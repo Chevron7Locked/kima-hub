@@ -142,6 +142,15 @@ describe("a Lidarr album", () => {
         expect(row.metadata).toHaveProperty("failedAt");
     });
 
+    it("fails its job, not completes it, when Lidarr's reason is an empty string", async () => {
+        startDownload.mockResolvedValue({ success: false, error: "" });
+        const job = await newJob();
+
+        await lidarr(job);
+
+        expect(await read(job.id)).toMatchObject({ status: "failed" });
+    });
+
     it("fails its job when starting throws, and does not move back a job that was settled meanwhile", async () => {
         startDownload.mockRejectedValueOnce(new Error("socket hang up"));
         const job = await newJob();

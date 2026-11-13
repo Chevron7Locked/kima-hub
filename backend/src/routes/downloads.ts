@@ -373,8 +373,11 @@ async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findM
         logger.warn("Could not stop the downloads in Lidarr before removing them:", error);
     }
     await downloadJobs.cancel(jobs);
+    // The batch reads its jobs as its check starts; the rows are removed right after, so give it that moment.
+    await downloadJobs.whenIdle(CHECK_READS_JOBS_MS);
 }
 
+const CHECK_READS_JOBS_MS = 2000;
 const JOB_STATUSES = ["pending", "processing", "completed", "failed", "exhausted"];
 
 // Registered before /:id so "clear-all" is not read as an id.
