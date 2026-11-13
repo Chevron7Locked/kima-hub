@@ -36,7 +36,28 @@ export interface ShareLinkResult {
     url: string;
     /** True when an existing live link was reused rather than a new one minted. */
     existing: boolean;
+    /** The link as stored: for a reused link, its own dates and visit count, not the request's. */
+    createdAt: Date;
+    expiresAt: Date | null;
+    playCount: number;
 }
+
+export interface CreateShareOptions {
+    /** When a new link stops working; null or absent never. A reused link keeps the expiry it has. */
+    expiresAt?: Date | null;
+}
+
+const resultOf = (
+    link: { token: string; createdAt: Date; expiresAt: Date | null; playCount: number },
+    existing: boolean
+): ShareLinkResult => ({
+    token: link.token,
+    url: `/share/${link.token}`,
+    existing,
+    createdAt: link.createdAt,
+    expiresAt: link.expiresAt,
+    playCount: link.playCount,
+});
 
 /**
  * Create a share link, or reuse the caller's live link for the same entity.
@@ -46,7 +67,8 @@ export interface ShareLinkResult {
 export async function createShareLink(
     userId: string,
     entityType: string,
-    entityId: string
+    entityId: string,
+    options: CreateShareOptions = {}
 ): Promise<ShareLinkResult> {
     if (!SHARE_ENTITY_TYPES.includes(entityType as ShareEntityType)) {
         throw new ShareError(
@@ -89,13 +111,9 @@ export async function createShareLink(
                 const existing = await tx.shareLink.findFirst({
                     where: { entityType, entityId, createdBy: userId, ...live },
                 });
-                if (existing) {
-                    return {
-                        token: existing.token,
-                        url: `/share/${existing.token}`,
-                        existing: true,
-                    };
-                }
+                // A link the caller already has is reused as it is, expiry included: asking again with another
+                // expiry is not a request to change this one (updateShare does that).
+                if (existing) return resultOf(existing, true);
 
                 const count = await tx.shareLink.count({
                     where: { createdBy: userId, ...live },
@@ -113,14 +131,11 @@ export async function createShareLink(
                         entityType,
                         entityId,
                         createdBy: userId,
+                        expiresAt: options.expiresAt ?? null,
                     },
                 });
 
-                return {
-                    token: created.token,
-                    url: `/share/${created.token}`,
-                    existing: false,
-                };
+                return resultOf(created, false);
             },
             { isolationLevel: "Serializable" }
         );

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
-import { DIRECT_PARAMS, knownSuffix, parseRepeatedQueryParam, songFormat, transcodeParamsFor, wrap } from "./mappers";
+import { DIRECT_PARAMS, knownSuffix, mapSong, parseRepeatedQueryParam, songFormat, transcodeParamsFor, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
@@ -26,6 +26,41 @@ function shareFailure(req: Request, res: Response, error: unknown) {
         return subsonicError(req, res, code, error.message);
     }
     throw error;
+}
+
+/**
+ * The `expires` of createShare and updateShare: epoch milliseconds, 0 meaning never. Absent or empty is `undefined`
+ * (no say), 0 is null (never), anything that is not a number is refused.
+ */
+function parseExpires(value: unknown): { ok: true; expiresAt: Date | null | undefined } | { ok: false } {
+    const raw = typeof value === "string" ? value : undefined;
+    if (raw === undefined || raw === "") return { ok: true, expiresAt: undefined };
+    const ms = Number(raw);
+    if (!Number.isFinite(ms)) return { ok: false };
+    return { ok: true, expiresAt: ms === 0 ? null : new Date(ms) };
+}
+
+const SONG_WITH_ALBUM = { album: { include: { artist: true } } } as const;
+
+/** The playable songs a share covers, as Subsonic entries: a song itself, an album in disc and track order, a playlist by rank. */
+async function shareEntries(entityType: "track" | "album" | "playlist", entityId: string) {
+    const tracks =
+        entityType === "track"
+            ? await prisma.track.findMany({ where: { id: entityId, ...PLAYABLE_SONG }, include: SONG_WITH_ALBUM })
+            : entityType === "album"
+            ? await prisma.track.findMany({
+                  where: { albumId: entityId, ...PLAYABLE_SONG },
+                  orderBy: [{ discNumber: { sort: "asc", nulls: "first" } }, { trackNo: "asc" }],
+                  include: SONG_WITH_ALBUM,
+              })
+            : (
+                  await prisma.playlistItem.findMany({
+                      where: { playlistId: entityId, track: PLAYABLE_SONG },
+                      orderBy: { rank: "asc" },
+                      include: { track: { include: SONG_WITH_ALBUM } },
+                  })
+              ).map((item) => item.track);
+    return tracks.map((t) => mapSong(t, t.album, t.album.artist.displayName || t.album.artist.name, t.album.artist.id));
 }
 
 // Endpoints Kima does not implement answer with a real Subsonic error, never
@@ -119,9 +154,17 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
     if (ids.length === 0) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
+    // A share holds one item: sharing the first and dropping the rest would hand the app a link it did not ask for.
+    if (ids.length > 1) {
+        return subsonicError(req, res, SubsonicError.GENERIC, "a share holds one item");
+    }
 
-    // Subsonic ids are opaque; resolve what each one actually is. Only the
-    // first is shared -- ShareLink covers a single entity. createShareLink
+    const expires = parseExpires(req.query.expires);
+    if (!expires.ok) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
+    }
+
+    // Subsonic ids are opaque; resolve what the id actually is. createShareLink
     // answers not found for a song or album with nothing to play.
     const [id] = ids;
     const [track, album, playlist] = await Promise.all([
@@ -136,18 +179,21 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
     }
 
     try {
-        const share = await createShareLink(req.user!.id, entityType, id);
+        const share = await createShareLink(req.user!.id, entityType, id, { expiresAt: expires.expiresAt });
         const base = `${req.protocol}://${req.get("host")}`;
+        const entries = await shareEntries(entityType, id);
+        // The reply is the link as stored (a reused link shows its own dates and visits). No description: Kima stores none.
         return subsonicOk(req, res, {
             shares: {
                 share: [
                     {
                         "@_id": share.token,
                         "@_url": `${base}${share.url}`,
-                        "@_description": (req.query.description as string | undefined) || undefined,
                         "@_username": req.user!.username,
-                        "@_created": new Date().toISOString(),
-                        "@_visitCount": 0,
+                        "@_created": share.createdAt.toISOString(),
+                        "@_expires": share.expiresAt?.toISOString(),
+                        "@_visitCount": share.playCount,
+                        ...(entries.length > 0 ? { entry: entries } : {}),
                     },
                 ],
             },
@@ -173,19 +219,13 @@ compatRouter.all("/updateShare.view", wrap(async (req: Request, res: Response) =
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    // Subsonic sends expires as epoch millis; 0 means "never".
-    const raw = req.query.expires as string | undefined;
-    let expiresAt: Date | null | undefined;
-    if (raw !== undefined && raw !== "") {
-        const ms = Number(raw);
-        if (!Number.isFinite(ms)) {
-            return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
-        }
-        expiresAt = ms === 0 ? null : new Date(ms);
+    const expires = parseExpires(req.query.expires);
+    if (!expires.ok) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
     }
 
     try {
-        await updateShareLink(req.user!.id, id, { expiresAt });
+        await updateShareLink(req.user!.id, id, { expiresAt: expires.expiresAt });
         return subsonicOk(req, res);
     } catch (error) {
         return shareFailure(req, res, error);

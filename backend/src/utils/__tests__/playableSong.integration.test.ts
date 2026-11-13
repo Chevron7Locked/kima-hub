@@ -1124,6 +1124,108 @@ describe("Subsonic star and createShare", () => {
     });
 });
 
+describe("Subsonic createShare", () => {
+    const SHARER = `${P}-sharer`;
+    const SHARER_LIST = `${P}-sharer-list`;
+    const asSharer = (query: Record<string, string | string[]>) =>
+        request(app).get("/rest/createShare.view").set("x-user", SHARER).query({ u: SHARER, f: "json", ...query });
+    const create = async (query: Record<string, string | string[]>) => (await asSharer(query).expect(200)).body["subsonic-response"];
+    const links = () => prisma.shareLink.findMany({ where: { createdBy: SHARER } });
+    const shareOf = (body: { shares: { share: { id: string; entry?: { id: string }[] }[] } }) => body.shares.share[0];
+    const FUTURE = Date.now() + 3 * 3600_000;
+
+    beforeAll(async () => {
+        await prisma.user.create({ data: { id: SHARER, username: SHARER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+        await prisma.playlist.create({
+            data: {
+                id: SHARER_LIST,
+                userId: SHARER,
+                name: SHARER_LIST,
+                items: { create: [...Object.values(SONG), `${FILLERS[0]}-s1`].map((trackId, i) => ({ trackId, sort: i, rank: `a${i}` })) },
+            },
+        });
+    });
+    beforeEach(async () => {
+        await prisma.shareLink.deleteMany({ where: { createdBy: SHARER } });
+    });
+
+    it("expires the link when `expires` says, in epoch milliseconds", async () => {
+        const body = await create({ id: SONG.playable, expires: String(FUTURE) });
+        expect(body.status).toBe("ok");
+        const [link] = await links();
+        expect(link.expiresAt?.getTime()).toBe(FUTURE);
+        expect(shareOf(body)).toMatchObject({ id: link.token, expires: new Date(FUTURE).toISOString() });
+    });
+
+    it("never expires a link made with `expires` of 0, or with none", async () => {
+        for (const query of [{ expires: "0" }, {}] as Record<string, string>[]) {
+            await prisma.shareLink.deleteMany({ where: { createdBy: SHARER } });
+            const body = await create({ id: SONG.playable, ...query });
+            expect(body.status).toBe("ok");
+            expect((await links())[0].expiresAt).toBeNull();
+            expect(shareOf(body)).not.toHaveProperty("expires");
+        }
+    });
+
+    it("refuses an `expires` that is not a number, as updateShare does, and makes no link", async () => {
+        const body = await create({ id: SONG.playable, expires: "tomorrow" });
+        expect(body).toMatchObject({ status: "failed", error: { code: 10 } });
+        expect(await links()).toEqual([]);
+    });
+
+    it("leaves a reused link's expiry as it was", async () => {
+        await create({ id: SONG.playable });
+        const body = await create({ id: SONG.playable, expires: String(FUTURE) });
+        expect(body.status).toBe("ok");
+        const stored = await links();
+        expect(stored).toHaveLength(1);
+        expect(stored[0].expiresAt).toBeNull();
+        expect(shareOf(body)).not.toHaveProperty("expires");
+    });
+
+    it("answers that a share holds one item when several ids come, and makes no link", async () => {
+        const body = await create({ id: [SONG.playable, `${FILLERS[0]}-s1`] });
+        expect(body).toMatchObject({ status: "failed", error: { code: 0, message: "a share holds one item" } });
+        expect(await links()).toEqual([]);
+    });
+
+    it("carries the stored creation time and visit count, also when an existing link is reused", async () => {
+        await create({ id: SONG.playable });
+        const made = new Date(Date.now() - 5 * 86_400_000);
+        await prisma.shareLink.updateMany({ where: { createdBy: SHARER }, data: { createdAt: made, playCount: 7 } });
+        const body = await create({ id: SONG.playable });
+        expect(await links()).toHaveLength(1);
+        expect(shareOf(body)).toMatchObject({ created: made.toISOString(), visitCount: 7 });
+    });
+
+    it("does not echo a description, which is never stored", async () => {
+        const body = await create({ id: SONG.playable, description: "for you" });
+        expect(shareOf(body)).not.toHaveProperty("description");
+    });
+
+    it("lists a song share's song as its entry", async () => {
+        const body = await create({ id: SONG.playable });
+        expect(idsOf(shareOf(body).entry)).toEqual([SONG.playable]);
+    });
+
+    it("lists an album share's playable songs, in album order", async () => {
+        const body = await create({ id: `${FILLERS[0]}-al` });
+        const expected = await prisma.track.findMany({
+            where: { albumId: `${FILLERS[0]}-al`, ...PLAYABLE_SONG },
+            orderBy: [{ discNumber: { sort: "asc", nulls: "first" } }, { trackNo: "asc" }],
+            select: { id: true },
+        });
+        expect(expected.length).toBeGreaterThan(1);
+        expect(idsOf(shareOf(body).entry)).toEqual(expected.map((t) => t.id));
+    });
+
+    it("lists a playlist share's playable songs only, in playlist order", async () => {
+        const body = await create({ id: SHARER_LIST });
+        expect(body.status).toBe("ok");
+        expect(idsOf(shareOf(body).entry)).toEqual([SONG.playable, `${FILLERS[0]}-s1`]);
+    });
+});
+
 // Kima keeps song likes only, so starring an album or an artist answers an error rather than "ok" for a star never kept.
 describe("Subsonic star and unstar", () => {
     const WHO = `${P}-starrer`;
