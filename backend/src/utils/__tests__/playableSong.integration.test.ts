@@ -1230,6 +1230,38 @@ describe("Subsonic createShare", () => {
         expect(body.status).toBe("ok");
         expect(idsOf(shareOf(body).entry)).toEqual([SONG.playable, `${FILLERS[0]}-s1`]);
     });
+
+    describe("getShares", () => {
+        const list = async () =>
+            (await request(app).get("/rest/getShares.view").set("x-user", SHARER).query({ u: SHARER, f: "json" }).expect(200)).body["subsonic-response"];
+
+        it("lists each share's playable songs as its entry, the same as createShare answered", async () => {
+            const made: Record<string, { id: string; entry?: { id: string }[] }> = {};
+            for (const id of [SONG.playable, `${FILLERS[0]}-al`, SHARER_LIST]) made[id] = shareOf(await create({ id }));
+            expect(made[SONG.playable].entry).toHaveLength(1);
+            expect(made[`${FILLERS[0]}-al`].entry!.length).toBeGreaterThan(1);
+
+            const body = await list();
+            expect(body.status).toBe("ok");
+            expect(body.shares.share).toHaveLength(3);
+            for (const share of body.shares.share) {
+                const was = Object.values(made).find((m) => m.id === share.id)!;
+                expect(share.entry).toEqual(was.entry);
+            }
+        });
+
+        it("leaves the entry out of a share with nothing left to play", async () => {
+            await create({ id: SONG.playable });
+            await prisma.track.update({ where: { id: SONG.playable }, data: { corrupt: true } });
+            try {
+                const body = await list();
+                expect(body.shares.share).toHaveLength(1);
+                expect(body.shares.share[0]).not.toHaveProperty("entry");
+            } finally {
+                await prisma.track.update({ where: { id: SONG.playable }, data: { corrupt: false } });
+            }
+        });
+    });
 });
 
 // Kima keeps song likes only, so starring an album or an artist answers an error rather than "ok" for a star never kept.

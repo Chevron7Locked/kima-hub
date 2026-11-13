@@ -4,6 +4,8 @@ import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack } from "../service
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_ALBUM_WHERE } from "../services/libraryFilters";
+import type { Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
@@ -63,6 +65,19 @@ async function loadUsableShareLink(token: string, res: Response) {
     }
 
     return shareLink;
+}
+
+/** Whether `coverArtId` is the cover of an album the share holds: the song's album, the shared album, or the album of a playable song in the shared playlist. */
+async function shareHoldsCover(shareLink: { entityType: string; entityId: string }, coverArtId: string): Promise<boolean> {
+    const { entityType, entityId } = shareLink;
+    const holds: Prisma.AlbumWhereInput | null =
+        entityType === "track" ? { tracks: { some: { id: entityId, ...PLAYABLE_SONG } } }
+        : entityType === "album" ? { id: entityId, ...PLAYABLE_ALBUM_WHERE }
+        : entityType === "playlist" ? { tracks: { some: { ...PLAYABLE_SONG, playlistItems: { some: { playlistId: entityId } } } } }
+        : null;
+    if (!holds) return false;
+    const album = await prisma.album.findFirst({ where: { coverUrl: coverArtId, ...holds }, select: { id: true } });
+    return album !== null;
 }
 
 /**
@@ -141,6 +156,11 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
         const size = req.query.size as string | undefined;
 
         if (!coverArtId.startsWith("native:")) {
+            return res.status(404).json({ error: "Cover art not found" });
+        }
+
+        // A share shows only its own content: any other cover, an artist picture or another album's, is not found.
+        if (!(await shareHoldsCover(shareLink, coverArtId))) {
             return res.status(404).json({ error: "Cover art not found" });
         }
 

@@ -45,8 +45,10 @@ function parseExpires(value: unknown): { ok: true; expiresAt: Date | null | unde
 
 const SONG_WITH_ALBUM = { album: { include: { artist: true } } } as const;
 
+type ShareEntityType = "track" | "album" | "playlist";
+
 /** The playable songs a share covers, as Subsonic entries: a song itself, an album in disc and track order, a playlist by rank. */
-async function shareEntries(entityType: "track" | "album" | "playlist", entityId: string) {
+async function shareEntries(entityType: ShareEntityType, entityId: string) {
     const tracks =
         entityType === "track"
             ? await prisma.track.findMany({ where: { id: entityId, ...PLAYABLE_SONG }, include: SONG_WITH_ALBUM })
@@ -133,20 +135,21 @@ compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => 
 compatRouter.all("/getShares.view", wrap(async (req: Request, res: Response) => {
     const links = await listShareLinks(req.user!.id);
     const base = `${req.protocol}://${req.get("host")}`;
-    return subsonicOk(req, res, {
-        shares: links.length
-            ? {
-                  share: links.map((l) => ({
-                      "@_id": l.token,
-                      "@_url": `${base}/share/${l.token}`,
-                      "@_username": req.user!.username,
-                      "@_created": l.createdAt.toISOString(),
-                      "@_expires": l.expiresAt?.toISOString(),
-                      "@_visitCount": l.playCount,
-                  })),
-              }
-            : {},
-    });
+    const shares = await Promise.all(
+        links.map(async (l) => {
+            const entries = await shareEntries(l.entityType as ShareEntityType, l.entityId);
+            return {
+                "@_id": l.token,
+                "@_url": `${base}/share/${l.token}`,
+                "@_username": req.user!.username,
+                "@_created": l.createdAt.toISOString(),
+                "@_expires": l.expiresAt?.toISOString(),
+                "@_visitCount": l.playCount,
+                ...(entries.length > 0 ? { entry: entries } : {}),
+            };
+        })
+    );
+    return subsonicOk(req, res, { shares: shares.length ? { share: shares } : {} });
 }));
 
 // Creates a real share link through the web route's service. wrap() is

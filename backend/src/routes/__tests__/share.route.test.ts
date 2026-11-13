@@ -177,41 +177,136 @@ describe('DELETE /share/:token -- revoke share link', () => {
 });
 
 describe('GET /share/:token/cover-art/:coverArtId', () => {
-    const coverUrl = (id: string) => `/share/${TOKEN}/cover-art/${encodeURIComponent(id)}`;
+    const coverUrl = (id: string, token = TOKEN) => `/share/${token}/cover-art/${encodeURIComponent(id)}`;
     const made: string[] = [];
     const putFile = (full: string) => {
         fs.mkdirSync(path.dirname(full), { recursive: true });
         fs.writeFileSync(full, 'cover bytes');
         made.push(full);
     };
+    // The share's own album carries whichever cover a test is about; the file may or may not be on disk.
+    const setCover = (cover: string | null) => prisma.album.update({ where: { rgMbid: TAG }, data: { coverUrl: cover } });
 
     beforeEach(() => prisma.shareLink.create({ data: { token: TOKEN, entityType: 'track', entityId: trackId, createdBy: OWNER } }));
-    afterEach(() => {
+    afterEach(async () => {
         for (const full of made.splice(0)) fs.rmSync(full, { force: true });
+        await setCover(null);
     });
 
     it('answers a cover id holding a lone percent sign with 404, not a server error', async () => {
+        await setCover('native:50%off');
         const res = await request(app).get(coverUrl('native:50%off'));
         expect(res.status).toBe(404);
     });
 
     it('serves a stored cover whose name holds a lone percent sign', async () => {
         // The 404 above means "no such file" only if a file by that name is found when it exists.
+        const id = `native:albums/${TAG}-50%off.jpg`;
         putFile(path.join(coversBasePath(), 'albums', `${TAG}-50%off.jpg`));
+        await setCover(id);
 
-        const res = await request(app).get(coverUrl(`native:albums/${TAG}-50%off.jpg`));
+        const res = await request(app).get(coverUrl(id));
         expect(res.status).toBe(200);
     });
 
     it('refuses a cover id that climbs out of the covers folder, though a file is there', async () => {
-        // The file exists, so only the path guard can be the reason for the 404.
+        // The file exists and the share's album holds the id, so only the path guard can be the reason for the 404.
         const outside = path.join(coversBasePath(), '..', `${TAG}-outside-50%off.jpg`);
         putFile(outside);
         expect(fs.existsSync(outside)).toBe(true);
+        const id = `native:../${path.basename(outside)}`;
+        await setCover(id);
 
-        const res = await request(app).get(coverUrl(`native:../${path.basename(outside)}`));
+        const res = await request(app).get(coverUrl(id));
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'Cover art not found' });
+    });
+
+    describe('only what the share holds', () => {
+        const file = (name: string) => `native:albums/${TAG}-held-${name}.jpg`;
+        const stored = (name: string) => putFile(path.join(coversBasePath(), 'albums', `${TAG}-held-${name}.jpg`));
+        const links = { track: `${TAG}-c-track`, album: `${TAG}-c-album`, playlist: `${TAG}-c-playlist` };
+        let artistId: string;
+        let playlistId: string;
+        let heldAlbumId: string;
+        let heldTrackId: string;
+
+        const album = (key: string, data: object = {}) =>
+            prisma.album.create({
+                data: { rgMbid: `${TAG}-c-${key}`, identityKey: `${TAG}-c-${key}`, artistId, title: key, primaryType: 'Album', location: 'LIBRARY', coverUrl: file(key), ...data },
+            });
+        const song = (albumId: string, n: number, data: object = {}) =>
+            prisma.track.create({ data: { albumId, title: `Song ${n}`, duration: 100, trackNo: n, filePath: `/${TAG}/c-${albumId}-${n}.flac`, fileModified: new Date(), fileSize: 1, ...data } });
+
+        beforeAll(async () => {
+            artistId = (await prisma.artist.findFirstOrThrow({ where: { identityKey: TAG } })).id;
+            const held = await album('held');
+            const heldTrack = await song(held.id, 1);
+            // A playlist holding a playable song, a song of a Discover album, and a corrupt one.
+            const inPlaylist = await album('inplaylist');
+            const suggested = await album('suggested', { location: 'DISCOVER' });
+            const broken = await album('broken');
+            const playable = await song(inPlaylist.id, 1);
+            const hidden = await song(suggested.id, 1);
+            const corrupt = await song(broken.id, 1, { corrupt: true });
+            await album('elsewhere');
+            playlistId = (await prisma.playlist.create({ data: { userId: OWNER, name: `${TAG}-c` } })).id;
+            for (const [i, t] of [playable, hidden, corrupt].entries()) {
+                await prisma.playlistItem.create({ data: { playlistId, trackId: t.id, sort: i, rank: `c${i}` } });
+            }
+            heldAlbumId = held.id;
+            heldTrackId = heldTrack.id;
+        });
+        afterAll(async () => {
+            await prisma.playlist.deleteMany({ where: { id: playlistId } });
+            await prisma.track.deleteMany({ where: { album: { rgMbid: { startsWith: `${TAG}-c-` } } } });
+            await prisma.album.deleteMany({ where: { rgMbid: { startsWith: `${TAG}-c-` } } });
+        });
+        // Every file is on disk, so only the share can be the reason for a refusal. The outer afterEach removes them.
+        beforeEach(async () => {
+            // The file's top-level beforeEach has just removed the owner's links.
+            await prisma.shareLink.createMany({
+                data: [
+                    { token: links.track, entityType: 'track', entityId: heldTrackId, createdBy: OWNER },
+                    { token: links.album, entityType: 'album', entityId: heldAlbumId, createdBy: OWNER },
+                    { token: links.playlist, entityType: 'playlist', entityId: playlistId, createdBy: OWNER },
+                ],
+            });
+            for (const name of ['held', 'inplaylist', 'suggested', 'broken', 'elsewhere']) stored(name);
+            // Artist pictures are stored beside album covers.
+            putFile(path.join(coversBasePath(), 'artists', `${TAG}-artist.jpg`));
+        });
+
+        const get = (token: string, id: string) => request(app).get(coverUrl(id, token));
+
+        it("serves a song share's own album cover, an album share's cover, and a playlist's playable song's cover", async () => {
+            expect((await get(links.track, file('held'))).status).toBe(200);
+            expect((await get(links.album, file('held'))).status).toBe(200);
+            expect((await get(links.playlist, file('inplaylist'))).status).toBe(200);
+        });
+
+        it('answers 404 for a cover the share does not hold, though the file is there', async () => {
+            for (const token of Object.values(links)) {
+                for (const id of [file('elsewhere'), `native:artists/${TAG}-artist.jpg`]) {
+                    const res = await get(token, id);
+                    expect([token, id, res.status]).toEqual([token, id, 404]);
+                }
+            }
+            // One share's cover is not another's.
+            expect((await get(links.playlist, file('held'))).status).toBe(404);
+            expect((await get(links.track, file('inplaylist'))).status).toBe(404);
+            expect((await get(links.album, file('inplaylist'))).status).toBe(404);
+        });
+
+        it('answers 404 for the cover of a playlist song that cannot play: Discover or corrupt', async () => {
+            expect((await get(links.playlist, file('suggested'))).status).toBe(404);
+            expect((await get(links.playlist, file('broken'))).status).toBe(404);
+        });
+
+        it("answers 404 for a size request too when the cover is not the share's", async () => {
+            const res = await request(app).get(`${coverUrl(file('elsewhere'), links.track)}?size=500`);
+            expect(res.status).toBe(404);
+        });
     });
 });
 
