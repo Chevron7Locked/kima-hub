@@ -6,6 +6,7 @@ import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
+import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 
@@ -319,7 +320,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
     const artist = chosenId
         ? await prisma.artist.findUnique({
               where: { id: chosenId },
-              select: { id: true },
+              select: { id: true, name: true, mbid: true },
           })
         : null;
 
@@ -327,16 +328,9 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         return subsonicOk(req, res, { topSongs: {} });
     }
 
-    const rows = await prisma.$queryRaw<SongRow[]>`
-        SELECT ${SONG_COLUMNS}
-        FROM ${SONG_FROM}
-        CROSS JOIN LATERAL (SELECT COUNT(*)::int AS plays FROM "Play" pl WHERE pl."trackId" = t.id) p
-        WHERE ${PLAYABLE_SQL}
-          AND al."artistId" = ${artist.id}
-        ORDER BY p.plays DESC, LOWER(t.title) ASC, t.title ASC
-        LIMIT ${count}
-    `;
-    const songs = rows.map(songOf);
+    // The owned songs of the artist's popular-songs list, the order the web artist page shows them in.
+    const popular = await popularSongs({ artist, userId: req.user!.id, limit: count, previews: false });
+    const songs = (await playableSongsInOrder(popular.flatMap((p) => p.trackId ?? []))).map(songOf);
 
     return subsonicOk(req, res, {
         topSongs: songs.length > 0 ? { song: songs } : {},

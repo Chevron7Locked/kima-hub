@@ -341,7 +341,17 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     "Subsonic getRandomSongs": async () =>
         idsOf((await reply("getRandomSongs.view", { size: "500", fromYear: String(YEAR), toYear: String(YEAR) })).randomSongs.song),
     "Subsonic getSongsByGenre": async () => idsOf((await reply("getSongsByGenre.view", { genre: GENRE, count: "500" })).songsByGenre.song),
-    "Subsonic getTopSongs": async () => idsOf((await reply("getTopSongs.view", { artist: P, count: "500" })).topSongs.song),
+    "Subsonic getTopSongs": async () => {
+        // Deezer ranks every seeded song; Subsonic offers the playable one alone.
+        const top = jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue(
+            Object.keys(SONG).map((kind, i) => ({ title: `${P} ${kind}`, album: null, coverUrl: null, previewUrl: null, durationMs: 100_000, rank: 100 - i })) as never,
+        );
+        try {
+            return idsOf((await reply("getTopSongs.view", { artist: P, count: "500" })).topSongs.song);
+        } finally {
+            top.mockRestore();
+        }
+    },
     "Subsonic getSimilarSongs2": async () =>
         idsOf((await reply("getSimilarSongs2.view", { id: SONG.playable, count: "500" })).similarSongs2.song),
     "Subsonic getSimilarSongs": async () =>

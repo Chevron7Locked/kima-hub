@@ -11,6 +11,7 @@ import { prisma } from "../../../utils/db";
 import { searchRouter } from "../search";
 import { queueRouter } from "../queue";
 import { lyricsRouter } from "../lyrics";
+import { deezerService } from "../../../services/deezer";
 
 const MARK = "zz-songlists";
 const GENRE = `${MARK}-genre`;
@@ -58,6 +59,10 @@ beforeAll(async () => {
     await prisma.track.create({ data: { title: `${MARK} missing`, ...song(2, { missingSince: new Date() }) } });
     await prisma.track.create({ data: { title: `${MARK} corrupt`, ...song(3, { corrupt: true }) } });
 });
+
+// Deezer has nothing to say about the seeded artist: its top songs come in release order, and no request leaves the suite.
+beforeEach(() => void jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue([]));
+afterEach(() => jest.restoreAllMocks());
 
 afterAll(async () => {
     await cleanup();

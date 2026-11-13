@@ -8,7 +8,7 @@
  *
  * Two meanings are kept apart, each as its first readers had it:
  * - played: raw Play rows, repeats and skips included (`neverPlayedSql`,
- *   `playedMoreThanSql`, `mostPlayedTrackIds`, `recentPlayArtists`);
+ *   `playedMoreThanSql`, `mostPlayedTrackIds`, `playedCounts`, `recentPlayArtists`);
  * - listened: the folded listens (`listenRows`, `listenedMoreThanSql`).
  * Every question is scoped to one listener. Which songs count is the caller's
  * rule (the playable-song rule, usually), passed in or composed in its own SQL.
@@ -157,6 +157,23 @@ export async function mostPlayedTrackIds(
         take: args.take,
     });
     return counted.map((c) => c.trackId);
+}
+
+/**
+ * This listener's play rows per song among those `song` lets through, most played first and, among equal counts, the song
+ * played last first. Every Play row counts, as in `mostPlayedTrackIds`; only songs played at least once appear.
+ */
+export async function playedCounts(
+    userId: string,
+    args: { song: Prisma.TrackWhereInput },
+): Promise<Array<{ trackId: string; count: number }>> {
+    const counted = await prisma.play.groupBy({
+        by: ["trackId"],
+        where: { userId, track: args.song },
+        _count: { trackId: true },
+        orderBy: [{ _count: { trackId: "desc" } }, { _max: { playedAt: "desc" } }, { trackId: "asc" }],
+    });
+    return counted.map((c) => ({ trackId: c.trackId, count: c._count.trackId }));
 }
 
 /**

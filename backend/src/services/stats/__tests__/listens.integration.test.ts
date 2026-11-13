@@ -12,6 +12,7 @@ import {
     listenedMoreThanSql,
     mostPlayedTrackIds,
     neverPlayedSql,
+    playedCounts,
     playedMoreThanSql,
     recentPlayArtists,
 } from "../listens";
@@ -180,6 +181,24 @@ describe("most played", () => {
     it("applies the song filter it is given", async () => {
         const all = await mostPlayedTrackIds(A, { song: {}, take: 20 });
         expect(all).toEqual(expect.arrayContaining([id("d1"), id("m1")]));
+    });
+});
+
+describe("play counts", () => {
+    it("is each song's play rows, most played first, only for the songs the filter lets through", async () => {
+        expect(await playedCounts(A, { song: PLAYABLE_SONG })).toEqual([
+            { trackId: id("s1"), count: 5 }, { trackId: id("s2"), count: 4 },
+            { trackId: id("s5"), count: 3 }, { trackId: id("s3"), count: 1 },
+        ]);
+    });
+
+    it("puts the song played last first among equal counts", async () => {
+        const rows = await playedCounts(A, { song: { id: { in: [id("d1"), id("m1")] } } });
+        expect(rows).toEqual([{ trackId: id("d1"), count: 1 }, { trackId: id("m1"), count: 1 }]);
+    });
+
+    it("counts only this listener", async () => {
+        expect(await playedCounts(B, { song: PLAYABLE_SONG })).toEqual([{ trackId: id("s4"), count: 1 }]);
     });
 });
 

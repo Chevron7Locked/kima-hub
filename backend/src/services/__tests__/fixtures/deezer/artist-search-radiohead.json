@@ -1,0 +1,101 @@
+{
+ "source": "https://api.deezer.com/search/artist?q=Radiohead&limit=25",
+ "recordedAt": "2026-11-13",
+ "note": "Real reply, whole",
+ "status": 200,
+ "body": {
+  "data": [
+   {
+    "id": 399,
+    "name": "Radiohead",
+    "link": "https://www.deezer.com/artist/399",
+    "picture": "https://api.deezer.com/artist/399/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist/0d58cfbc90f2e776608bcdc0c45a4711/56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist/0d58cfbc90f2e776608bcdc0c45a4711/250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist/0d58cfbc90f2e776608bcdc0c45a4711/500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist/0d58cfbc90f2e776608bcdc0c45a4711/1000x1000-000000-80-0-0.jpg",
+    "nb_album": 45,
+    "nb_fan": 4122225,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/399/top?limit=50",
+    "type": "artist"
+   },
+   {
+    "id": 53477202,
+    "name": "DJ Radiohead",
+    "link": "https://www.deezer.com/artist/53477202",
+    "picture": "https://api.deezer.com/artist/53477202/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist/b58f051742ef450c20af6219fd4df2f1/56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist/b58f051742ef450c20af6219fd4df2f1/250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist/b58f051742ef450c20af6219fd4df2f1/500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist/b58f051742ef450c20af6219fd4df2f1/1000x1000-000000-80-0-0.jpg",
+    "nb_album": 31,
+    "nb_fan": 64,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/53477202/top?limit=50",
+    "type": "artist"
+   },
+   {
+    "id": 215702,
+    "name": "Robert Glasper",
+    "link": "https://www.deezer.com/artist/215702",
+    "picture": "https://api.deezer.com/artist/215702/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist/64db3f897347fa383ec678cae51ae500/56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist/64db3f897347fa383ec678cae51ae500/250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist/64db3f897347fa383ec678cae51ae500/500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist/64db3f897347fa383ec678cae51ae500/1000x1000-000000-80-0-0.jpg",
+    "nb_album": 32,
+    "nb_fan": 44161,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/215702/top?limit=50",
+    "type": "artist"
+   },
+   {
+    "id": 12189436,
+    "name": "Radio Head",
+    "link": "https://www.deezer.com/artist/12189436",
+    "picture": "https://api.deezer.com/artist/12189436/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist/a5cab3dee726326ea16c7f489c26b766/56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist/a5cab3dee726326ea16c7f489c26b766/250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist/a5cab3dee726326ea16c7f489c26b766/500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist/a5cab3dee726326ea16c7f489c26b766/1000x1000-000000-80-0-0.jpg",
+    "nb_album": 16,
+    "nb_fan": 437,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/12189436/top?limit=50",
+    "type": "artist"
+   },
+   {
+    "id": 14009761,
+    "name": "Radiohead Tribute Band",
+    "link": "https://www.deezer.com/artist/14009761",
+    "picture": "https://api.deezer.com/artist/14009761/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist/f69dea01fc82fac4a64074e71774d053/56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist/f69dea01fc82fac4a64074e71774d053/250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist/f69dea01fc82fac4a64074e71774d053/500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist/f69dea01fc82fac4a64074e71774d053/1000x1000-000000-80-0-0.jpg",
+    "nb_album": 1,
+    "nb_fan": 414,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/14009761/top?limit=50",
+    "type": "artist"
+   },
+   {
+    "id": 4674537,
+    "name": "Radiodread",
+    "link": "https://www.deezer.com/artist/4674537",
+    "picture": "https://api.deezer.com/artist/4674537/image",
+    "picture_small": "https://cdn-images.dzcdn.net/images/artist//56x56-000000-80-0-0.jpg",
+    "picture_medium": "https://cdn-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg",
+    "picture_big": "https://cdn-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg",
+    "picture_xl": "https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg",
+    "nb_album": 0,
+    "nb_fan": 25,
+    "radio": true,
+    "tracklist": "https://api.deezer.com/artist/4674537/top?limit=50",
+    "type": "artist"
+   }
+  ],
+  "total": 6
+ }
+}

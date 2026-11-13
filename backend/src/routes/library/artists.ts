@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { nameKey } from "../../services/nameFold";
 import fs from "fs";
 import path from "path";
 import { artistNamed, isMbid, normalizeArtistName } from "../../services/artistIdentity";
@@ -31,8 +30,6 @@ import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./t
 import { config } from "../../config";
 import { parseLimit, parseOffset } from "./paging";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
-import { listenBrainzService } from "../../services/listenBrainz";
-import { deezerService } from "../../services/deezer";
 import {
   CollectionFilter,
   PLAYABLE_ALBUM_WHERE,
@@ -42,7 +39,8 @@ import {
 } from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { popularSongs } from "../../services/popularSongs";
 
 /**
  * The artist list's order for `sortBy`; anything unknown sorts by name. Names sort on `sortName` (article-stripped,
@@ -422,20 +420,6 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
   }
 });
 
-/**
- * A song title without what follows a dash or bracket ("Song - Radio Edit", "Song (Live)"), folded by nameKey; a title
- * with no letters or digits keys on its lowercased text.
- */
-function bareTitle(title: string): string {
-  const bare = title.replace(/\s*[-–(].*$/, "");
-  return nameKey(bare) || bare.trim().toLowerCase();
-}
-
-/** A library song listed among an artist's top songs when nobody's plays rank it. */
-function unplayedTop<T extends { album: { coverUrl: string | null } }>(track: T) {
-  return { ...track, playCount: 0, listeners: 0, userPlayCount: 0, album: { ...track.album, coverArt: track.album.coverUrl } };
-}
-
 router.get("/artists/:id", async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -583,208 +567,52 @@ router.get("/artists/:id", async (req, res) => {
     }
 
     const allTracks = artist.albums.flatMap((a) => a.tracks);
-    let topTracks: any[];
 
-    const userId = req.user!.id;
-
-    // Popular tracks: real global popularity, not an echo of the user's own
-    // listens. ListenBrainz sitewide top recordings first (needs the user's
-    // scrobble token), Deezer's artist-top as the no-token fallback; both are
-    // joined against the owned library so owned rows play and unowned rows
-    // preview. When both sources are unavailable the local floor applies:
-    // the user's most played by this artist, then MB first-release date.
-    const ownedByMbid = new Map<string, any>();
-    const ownedByTitle = new Map<string, any>();
-    for (const t of allTracks) {
-      if (t.recordingMbid) ownedByMbid.set(t.recordingMbid, t);
-      const bare = bareTitle(t.title);
-      if (bare && !ownedByTitle.has(bare)) ownedByTitle.set(bare, t);
-    }
-    const joinOwned = (
-      rows: Array<{
-        key: string;
-        title: string;
-        albumName?: string | null;
-        coverUrl?: string | null;
-        previewUrl?: string | null;
-        durationMs?: number;
-        listeners: number;
-        playCount: number;
-      }>
-    ): any[] => {
-      const seen = new Set<string>();
-      const joined: any[] = [];
-      for (const r of rows) {
-        const owned =
-          ownedByMbid.get(r.key) ||
-          ownedByTitle.get(nameKey(r.title) || r.title.trim().toLowerCase()) ||
-          ownedByTitle.get(bareTitle(r.title));
-        // Two global rows can join to the same owned track (the Radio Edit
-        // and the album cut of one song): keep the first, higher-ranked one.
-        const dedupeKey = owned ? owned.id : `dz:${r.key}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-        if (owned) {
-          joined.push({
-            ...owned,
-            playCount: r.playCount,
-            listeners: r.listeners,
-            userPlayCount: owned.playCount ?? 0,
-            popularitySource: "global",
-            album: { ...owned.album, coverArt: owned.album?.coverUrl },
-          });
-        } else {
-          joined.push({
-            id: `dz:${r.key}`,
-            title: r.title,
-            duration: Math.round((r.durationMs || 0) / 1000) || 0,
-            playCount: r.playCount,
-            listeners: r.listeners,
+    // The popular songs are the popular-songs module's answer, with a preview for each ranked song the library lacks.
+    const trackById = new Map(allTracks.map((t) => [t.id, t]));
+    const popular = await popularSongs({
+      artist: { id: artist.id, name: artist.name, mbid: artist.mbid },
+      userId: req.user!.id,
+      limit: 10,
+      previews: true,
+    });
+    const topTracks = popular.flatMap((song): object[] => {
+      const popularitySource = song.source === "global" ? { popularitySource: "global" } : {};
+      if (song.trackId === null) {
+        const preview = song.preview!;
+        return [
+          {
+            id: `dz:${preview.key}`,
+            title: song.title,
+            duration: Math.round(preview.durationMs / 1000),
+            playCount: song.playCount,
+            listeners: song.listeners,
             userPlayCount: 0,
-            popularitySource: "global",
-            previewUrl: r.previewUrl || null,
+            ...popularitySource,
+            previewUrl: preview.previewUrl,
             album: {
               id: null,
-              title: r.albumName || "Unknown Album",
-              coverUrl: r.coverUrl || null,
-              coverArt: r.coverUrl || null,
+              title: preview.albumTitle || "Unknown Album",
+              coverUrl: preview.coverUrl,
+              coverArt: preview.coverUrl,
             },
-          });
-        }
-      }
-      return joined;
-    };
-
-    let global: any[] = [];
-    if (isMbid(artist.mbid)) {
-      try {
-        const lb = await listenBrainzService.getTopRecordingsForArtist(artist.mbid, userId, 10);
-        if (lb.length > 0) {
-          global = joinOwned(
-            lb.map((r) => ({
-              key: r.recordingMbid,
-              title: r.title,
-              albumName: r.releaseName,
-              durationMs: r.lengthMs,
-              listeners: r.listeners,
-              playCount: r.playCount,
-            }))
-          );
-        }
-      } catch (lbError) {
-        logger.warn(
-          `[Artist] ListenBrainz top recordings failed for ${artist.name}:`,
-          lbError
-        );
-      }
-    }
-    if (global.length === 0) {
-      try {
-        const dz = await deezerService.getArtistTopTracks(artist.name, 10);
-        if (dz.length > 0) {
-          global = joinOwned(
-            dz.map((r) => ({
-              key: r.title.toLowerCase(),
-              title: r.title,
-              albumName: r.album,
-              coverUrl: r.coverUrl,
-              previewUrl: r.previewUrl,
-              durationMs: r.durationMs,
-              listeners: 0,
-              playCount: r.rank,
-            }))
-          );
-        }
-      } catch (dzError) {
-        logger.warn(
-          `[Artist] Deezer top tracks failed for ${artist.name}:`,
-          dzError
-        );
-      }
-    }
-    topTracks = global;
-    if (topTracks.length === 0) {
-      const played = await prisma.$queryRaw<
-        Array<{
-          id: string;
-          title: string;
-          displayTitle: string | null;
-          duration: number;
-          albumId: string;
-          albumTitle: string;
-          albumCoverUrl: string | null;
-          artistId: string;
-          artistName: string;
-          playCount: bigint;
-        }>
-      >`
-        SELECT t.id, t.title, t."displayTitle", t.duration,
-               t."albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-               a."artistId", ar.name AS "artistName",
-               COUNT(p.id)::bigint AS "playCount"
-        FROM "Track" t
-        JOIN "Album" a ON a.id = t."albumId"
-        JOIN "Artist" ar ON ar.id = a."artistId"
-        JOIN "Play" p ON p."trackId" = t.id AND p."userId" = ${userId}
-        WHERE a."artistId" = ${artist.id} AND ${playableSongSql("t", "a")}
-        GROUP BY t.id, t.title, t."displayTitle", t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
-        HAVING COUNT(p.id) > 0
-        ORDER BY COUNT(p.id) DESC, MAX(p."playedAt") DESC
-        LIMIT 10
-      `;
-      if (played.length > 0) {
-        topTracks = played.map((t) => ({
-          ...t,
-          playCount: Number(t.playCount),
-          listeners: 0,
-          userPlayCount: Number(t.playCount),
-          album: {
-            id: t.albumId,
-            title: t.albumTitle,
-            artistId: t.artistId,
-            coverUrl: t.albumCoverUrl,
-            artist: { id: t.artistId, name: t.artistName, mbid: "" },
-            coverArt: t.albumCoverUrl,
           },
-        }));
-      } else {
-        // Cold start: earliest-released tracks per MusicBrainz, falling back
-        // to the plain first-10 slice when MB has nothing.
-        try {
-          const fetched = isMbid(artist.mbid)
-            ? await musicBrainzService.getReleaseGroups(artist.mbid, ["album"], 50)
-            : null;
-          const rgs = fetched?.kind === "answered" ? fetched.value : [];
-          const releaseDateByRg = new Map<string, string>();
-          for (const rg of rgs as Array<{
-            id: string;
-            "first-release-date"?: string;
-          }>) {
-            if (rg["first-release-date"]) {
-              releaseDateByRg.set(rg.id, rg["first-release-date"]);
-            }
-          }
-          const dated = allTracks
-            .map((t) => {
-              const album = artist.albums.find((a) => a.id === t.albumId);
-              const date =
-                (album && releaseDateByRg.get(album.rgMbid)) ||
-                (album?.year ? `${album.year}-01-01` : "9999");
-              return { t, date: String(date) };
-            })
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .slice(0, 10)
-            .map(({ t, date }) => ({ ...unplayedTop(t), releaseDate: date === "9999" ? null : date }));
-          topTracks = dated;
-        } catch (mbError) {
-          logger.warn(
-            `[Artist] MB first-release fallback failed for ${artist.name}:`,
-            mbError,
-          );
-          topTracks = allTracks.slice(0, 10).map(unplayedTop);
-        }
+        ];
       }
-    }
+      const track = trackById.get(song.trackId);
+      if (!track) return [];
+      return [
+        {
+          ...track,
+          playCount: song.playCount,
+          listeners: song.listeners,
+          userPlayCount: song.userPlayCount,
+          ...popularitySource,
+          ...(song.source === "release" ? { releaseDate: song.releaseDate } : {}),
+          album: { ...track.album, coverArt: track.album.coverUrl },
+        },
+      ];
+    });
 
     const heroUrl = await dataCacheService.getArtistImage(
       artist.id,

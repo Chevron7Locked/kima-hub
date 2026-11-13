@@ -27,6 +27,7 @@ import { findScannedAlbum } from "../discovery/discoverClearing";
 import { removeDiscoveryAlbum } from "../discovery/lidarrRemoval";
 import { lidarrService } from "../lidarr";
 import { searchService } from "../search";
+import { deezerService } from "../deezer";
 import { discoverWeeklyService } from "../discoverWeekly";
 import artistRoutes from "../../routes/library/artists";
 import { searchRouter } from "../../routes/subsonic/search";
@@ -248,6 +249,10 @@ describe("search", () => {
 });
 
 describe("Subsonic", () => {
+    // Deezer has nothing to say about these artists: the songs come in release order, and no request leaves the suite.
+    beforeEach(() => void jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue([]));
+    afterEach(() => jest.restoreAllMocks());
+
     it.each(keys)("getTopSongs finds %s by the name in the other case", async (k) => {
         const res = await request(app()).get("/rest/getTopSongs.view").query({ artist: SHOUTED[k], f: "json" });
         expect(res.status).toBe(200);
@@ -277,6 +282,7 @@ describe("Discover Weekly", () => {
 });
 
 describe("bounded lookups", () => {
+    beforeEach(() => void jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue([]));
     afterEach(() => jest.restoreAllMocks());
 
     it("getLyrics with an artist reads one track by id, never a list of tracks", async () => {

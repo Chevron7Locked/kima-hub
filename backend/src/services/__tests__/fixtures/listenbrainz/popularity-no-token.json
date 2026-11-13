@@ -1,0 +1,10 @@
+{
+ "source": "https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/a74b1b7f-71a5-4011-9441-d0b5e4122711?count=5",
+ "recordedAt": "2026-11-13",
+ "note": "Real reply, no token sent",
+ "status": 401,
+ "body": {
+  "code": 401,
+  "error": "Due to bad actors and AI scrapers causing undue traffic on our sites, you need to provide an Auth token for this endpoint. Sorry for this mess."
+ }
+}

@@ -1,0 +1,47 @@
+{
+ "source": "https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/a74b1b7f-71a5-4011-9441-d0b5e4122711",
+ "recordedAt": "2026-11-13",
+ "note": "Not a recorded reply: the endpoint answers only with a user token, which was not to hand. The field names are ListenBrainz's documented ones, the recording ids are MusicBrainz's real ones for Radiohead, the counts are made up. Replace with a real reply when a token is available.",
+ "status": 200,
+ "body": [
+  {
+   "artist_mbids": [
+    "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+   ],
+   "artist_name": "Radiohead",
+   "recording_mbid": "dfeb96a7-f78a-4b04-93ce-c39e28c9a173",
+   "recording_name": "Karma Police",
+   "release_mbid": "728aab3d-5cc1-4775-a183-8f6ce5becf0a",
+   "release_name": "OK Computer",
+   "length": 263000,
+   "total_listen_count": 5200000,
+   "total_user_count": 310000
+  },
+  {
+   "artist_mbids": [
+    "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+   ],
+   "artist_name": "Radiohead",
+   "recording_mbid": "6ee726c0-5958-4a1b-80b6-6548e63a68b5",
+   "recording_name": "No Surprises",
+   "release_mbid": "728aab3d-5cc1-4775-a183-8f6ce5becf0a",
+   "release_name": "OK Computer",
+   "length": 246000,
+   "total_listen_count": 4100000,
+   "total_user_count": 260000
+  },
+  {
+   "artist_mbids": [
+    "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+   ],
+   "artist_name": "Radiohead",
+   "recording_mbid": "369177ee-defa-4114-a36b-8ec5202a6fae",
+   "recording_name": "Paranoid Android",
+   "release_mbid": "728aab3d-5cc1-4775-a183-8f6ce5becf0a",
+   "release_name": "OK Computer",
+   "length": 383080,
+   "total_listen_count": 3900000,
+   "total_user_count": 240000
+  }
+ ]
+}
