@@ -165,6 +165,12 @@ jest.mock("../../utils/db", () => ({
         // Source pause reads and stage-record writes (SourceAttempt / TrackStage).
         $queryRawUnsafe: (...args: unknown[]) => mockQueryRawUnsafe(...args),
         $executeRawUnsafe: (...args: unknown[]) => mockExecuteRawUnsafe(...args),
+        // A stage-record move runs in one transaction; its statements land on the same spies.
+        $transaction: async (run: (tx: unknown) => Promise<unknown>) =>
+            run({
+                $queryRawUnsafe: (...args: unknown[]) => mockQueryRawUnsafe(...args),
+                $executeRawUnsafe: (...args: unknown[]) => mockExecuteRawUnsafe(...args),
+            }),
     },
 }));
 

@@ -190,6 +190,12 @@ jest.mock("../../utils/db", () => ({
         $queryRawUnsafe: mockQueryRaw,
         $executeRaw: jest.fn().mockResolvedValue(0),
         $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+        // A stage-record move runs in one transaction; its statements land on the same stubs.
+        $transaction: async (run: (tx: unknown) => Promise<unknown>) =>
+            run({
+                $queryRawUnsafe: mockQueryRaw,
+                $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+            }),
     },
 }));
 
