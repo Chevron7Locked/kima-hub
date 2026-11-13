@@ -18,11 +18,18 @@
  * 2. Status counters: they count the whole library, missing files included, and show the count (counted and shown,
  *    never silent).
  * 3. Owner lookups by id: a read of the one song a request names, to say who owns it or what it is, never a pick.
+ *
+ * Discover's own song lookup is not a fourth exception. The Discover Weekly playlist builder looks up the songs of a
+ * week's Discover albums, and there PLAYABLE_DISCOVER_SONG is the rule: the same file-there-and-read test, on a
+ * DISCOVER album instead of a library one. No other interface uses it.
  */
 import { Prisma } from "@prisma/client";
 
 /** The rule for a Prisma `where` on Track. */
 export const PLAYABLE_SONG = { missingSince: null, corrupt: false, album: { location: "LIBRARY" } } as const;
+
+/** Discover's own song lookup (the Discover Weekly playlist builder): the rule's file test, on a Discover album. */
+export const PLAYABLE_DISCOVER_SONG = { ...PLAYABLE_SONG, album: { location: "DISCOVER" } } as const;
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

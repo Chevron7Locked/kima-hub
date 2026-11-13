@@ -20,7 +20,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { mayAcquire } from "../utils/acquirePermission";
 import { isLidarrConfigured } from "./lidarrClient";
 import { prisma, Prisma } from "../utils/db";
-import { LIBRARY_ALBUM_WHERE, LIBRARY_LOCATION } from "./libraryFilters";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
@@ -305,17 +305,22 @@ function notifyImportFailed(job: ImportJob): void {
 
 
 /**
- * Library tracks whose artist's name begins with one of `words` (the candidate pool both import paths match against).
+ * Playable songs whose artist's name begins with one of `words` (the candidate pool both import paths match against).
  * `normalizedName` is stored already folded to lower case, and `words` are normalized the same way, so a plain
  * comparison is exact for every script.
  */
 function tracksOfArtistsStartingWith(words: string[]): Prisma.TrackWhereInput {
   return {
-    album: {
-      artist: {
-        OR: words.flatMap((w) => [{ normalizedName: w }, { normalizedName: { startsWith: `${w} ` } }]),
+    AND: [
+      PLAYABLE_SONG,
+      {
+        album: {
+          artist: {
+            OR: words.flatMap((w) => [{ normalizedName: w }, { normalizedName: { startsWith: `${w} ` } }]),
+          },
+        },
       },
-    },
+    ],
   };
 }
 
@@ -323,8 +328,9 @@ function tracksOfArtistsStartingWith(words: string[]): Prisma.TrackWhereInput {
 const TITLE_CANDIDATES_MAX = 500;
 
 /**
- * Library tracks whose title holds one of `terms`, in any letter case. The database folds case for ASCII only, so a
- * term with a non-ASCII letter is matched with a case-blind pattern (foldedPattern), at most the candidate limit of ids.
+ * Playable songs whose title holds one of `terms`, in any letter case. The database folds case for ASCII only, so a
+ * term with a non-ASCII letter is matched with a case-blind pattern (foldedPattern), at most the candidate limit of ids,
+ * counted among playable songs only so songs that cannot play never use up the places.
  */
 async function tracksTitledLike<I extends Prisma.TrackInclude>(terms: string[], include: I) {
   const asciiTerms = terms.filter((t) => !hasNonAscii(t));
@@ -336,12 +342,14 @@ async function tracksTitledLike<I extends Prisma.TrackInclude>(terms: string[], 
     const ids = new Set<string>();
     for (const term of otherTerms) {
       const rows = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "Track" WHERE title ~ ${foldedPattern(term)} ORDER BY id LIMIT ${TITLE_CANDIDATES_MAX}`;
+        SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+        WHERE t.title ~ ${foldedPattern(term)} AND ${playableSongSql("t", "a")}
+        ORDER BY t.id LIMIT ${TITLE_CANDIDATES_MAX}`;
       for (const row of rows) ids.add(row.id);
     }
     titleMatches.push({ id: { in: [...ids].slice(0, TITLE_CANDIDATES_MAX) } });
   }
-  return prisma.track.findMany({ where: { OR: titleMatches }, include, take: TITLE_CANDIDATES_MAX });
+  return prisma.track.findMany({ where: { AND: [PLAYABLE_SONG, { OR: titleMatches }] }, include, take: TITLE_CANDIDATES_MAX });
 }
 
 /** Titles this short ("Intro", "Home") are too common to match without the artist. */
@@ -380,10 +388,7 @@ class SpotifyImportService {
 
     if (spotifyTrack.isrc) {
       const rows = await prisma.track.findMany({
-        where: {
-          isrc: spotifyTrack.isrc,
-          album: { location: LIBRARY_LOCATION },
-        },
+        where: { AND: [PLAYABLE_SONG, { isrc: spotifyTrack.isrc }] },
         ...withAlbum,
       });
       add(rows.map(toMatchCandidate));
@@ -396,14 +401,10 @@ class SpotifyImportService {
 
     const artistRows = await prisma.track.findMany({
       where: {
-        album: {
-          ...LIBRARY_ALBUM_WHERE,
-          artist: {
-            normalizedName: {
-              in: [normalizedPrimaryArtist, dbNormalizedArtist],
-            },
-          },
-        },
+        AND: [
+          PLAYABLE_SONG,
+          { album: { artist: { normalizedName: { in: [normalizedPrimaryArtist, dbNormalizedArtist] } } } },
+        ],
       },
       ...withAlbum,
     });
@@ -419,10 +420,7 @@ class SpotifyImportService {
           (
             await prisma.track.findMany({
               where: {
-                album: {
-                  ...LIBRARY_ALBUM_WHERE,
-                  artist: { normalizedName: { contains: firstWord } },
-                },
+                AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { contains: firstWord } } } }],
               },
               ...withAlbum,
               take: 50,
@@ -435,17 +433,21 @@ class SpotifyImportService {
           (
             await prisma.track.findMany({
               where: {
-                album: {
-                  ...LIBRARY_ALBUM_WHERE,
-                  artist: {
-                    normalizedName: {
-                      startsWith: normalizedPrimaryArtist.substring(
-                        0,
-                        Math.min(5, normalizedPrimaryArtist.length),
-                      ),
+                AND: [
+                  PLAYABLE_SONG,
+                  {
+                    album: {
+                      artist: {
+                        normalizedName: {
+                          startsWith: normalizedPrimaryArtist.substring(
+                            0,
+                            Math.min(5, normalizedPrimaryArtist.length),
+                          ),
+                        },
+                      },
                     },
                   },
-                },
+                ],
               },
               ...withAlbum,
               take: 50,
@@ -458,14 +460,10 @@ class SpotifyImportService {
           (
             await prisma.track.findMany({
               where: {
-                album: {
-                  ...LIBRARY_ALBUM_WHERE,
-                  artist: {
-                    normalizedName: {
-                      contains: dbNormalizedArtist.split(" ")[0],
-                    },
-                  },
-                },
+                AND: [
+                  PLAYABLE_SONG,
+                  { album: { artist: { normalizedName: { contains: dbNormalizedArtist.split(" ")[0] } } } },
+                ],
               },
               ...withAlbum,
               take: 50,
@@ -1646,14 +1644,14 @@ class SpotifyImportService {
     jobLogger?.logPlaylistCreationStart();
     jobLogger?.logTrackMatchingStart();
 
-    // Verify pre-matched track ids
+    // Verify pre-matched track ids: one that stopped playing since the preview falls through to the matching below.
     const preMatchedIds = job.pendingTracks
       .map((t) => t.preMatchedTrackId)
       .filter((id): id is string => !!id);
     const verifiedPreMatched = preMatchedIds.length > 0
       ? new Map(
           (await prisma.track.findMany({
-            where: { id: { in: preMatchedIds } },
+            where: { AND: [PLAYABLE_SONG, { id: { in: preMatchedIds } }] },
             select: { id: true, title: true },
           })).map((t) => [t.id, t]),
         )
@@ -1698,7 +1696,7 @@ class SpotifyImportService {
     const isrcMatches = pendingIsrcs.length > 0
       ? new Map(
           (await prisma.track.findMany({
-            where: { isrc: { in: pendingIsrcs }, album: { location: LIBRARY_LOCATION } },
+            where: { AND: [PLAYABLE_SONG, { isrc: { in: pendingIsrcs } }] },
             select: { id: true, isrc: true, title: true },
           })).map((t) => [t.isrc!, t]),
         )
@@ -2118,11 +2116,7 @@ class SpotifyImportService {
     const allCandidates = uniqueArtists.length > 0
       ? await prisma.track.findMany({
           where: {
-            album: {
-              artist: {
-                normalizedName: { in: uniqueArtists },
-              },
-            },
+            AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { in: uniqueArtists } } } }],
           },
           include: { album: { include: { artist: true } } },
         })
@@ -2604,14 +2598,14 @@ class SpotifyImportService {
       }
 
       track = await prisma.track.findFirst({
-        where: { filePath: relativePath },
+        where: { AND: [PLAYABLE_SONG, { filePath: relativePath }] },
         select: { id: true },
       });
 
       // Also try the original path as-is (in case DB stores absolute paths)
       if (!track && relativePath !== entry.filePath) {
         track = await prisma.track.findFirst({
-          where: { filePath: entry.filePath },
+          where: { AND: [PLAYABLE_SONG, { filePath: entry.filePath }] },
           select: { id: true },
         });
       }
@@ -2621,7 +2615,7 @@ class SpotifyImportService {
         const basename = path.basename(entry.filePath, path.extname(entry.filePath));
         if (basename.length >= 3) {
           track = await prisma.track.findFirst({
-            where: { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } },
+            where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } }] },
             select: { id: true },
           });
         }
@@ -2631,7 +2625,7 @@ class SpotifyImportService {
       if (!track && entry.artist && entry.title) {
         // The artist by its stored identity key, the title by nameKey: both fold case and accents in TypeScript.
         const ofArtist = await prisma.track.findMany({
-          where: { album: { artist: artistNamed(entry.artist) } },
+          where: { AND: [PLAYABLE_SONG, { album: { artist: artistNamed(entry.artist) } }] },
           select: { id: true, title: true },
           orderBy: { id: "asc" },
         });
@@ -2644,13 +2638,7 @@ class SpotifyImportService {
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= 3) {
           const candidates = await prisma.track.findMany({
-            where: {
-              album: {
-                artist: {
-                  normalizedName: { contains: firstWord },
-                },
-              },
-            },
+            where: { AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { contains: firstWord } } } }] },
             include: {
               album: { include: { artist: { select: { name: true } } } },
             },

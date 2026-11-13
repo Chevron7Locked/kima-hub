@@ -37,7 +37,7 @@ import {
 import { shuffleArray } from "../utils/shuffle";
 import { config as appConfig } from "../config";
 import { eventBus } from "./eventBus";
-import { NOT_MISSING } from "../utils/libraryEligibility";
+import { PLAYABLE_DISCOVER_SONG } from "../utils/libraryEligibility";
 
 interface RecommendedAlbum {
     artistName: string;
@@ -102,7 +102,7 @@ function failBatchDownloads(batchId: string, error: string) {
 }
 
 class DiscoverWeeklyService {
-    /** The playable songs of the DISCOVER album an artist and title name, ignoring case and accents (nameKey). */
+    /** The songs whose files are there and were read, on the DISCOVER album an artist and title name, ignoring case and accents (nameKey). */
     private async findDiscoverTracksByName(artistName: string, albumTitle: string) {
         const albums = await prisma.album.findMany({
             where: { location: "DISCOVER", artist: artistNamed(artistName) },
@@ -111,7 +111,7 @@ class DiscoverWeeklyService {
         const albumIds = albums.filter((a) => sameName(a.title, albumTitle)).map((a) => a.id);
         if (albumIds.length === 0) return [];
         return prisma.track.findMany({
-            where: { ...NOT_MISSING, albumId: { in: albumIds } },
+            where: { AND: [PLAYABLE_DISCOVER_SONG, { albumId: { in: albumIds } }] },
             include: { album: { include: { artist: true } } },
         });
     }
@@ -124,7 +124,7 @@ class DiscoverWeeklyService {
     private async discoverAlbumTracks(c: { albumMbid?: string | null; artistName?: string; albumTitle?: string }): Promise<any[]> {
         if (c.albumMbid) {
             const byId = await prisma.track.findMany({
-                where: { ...NOT_MISSING, album: { rgMbid: c.albumMbid, location: "DISCOVER" } },
+                where: { AND: [PLAYABLE_DISCOVER_SONG, { album: { rgMbid: c.albumMbid } }] },
                 include: { album: { include: { artist: true } } },
             });
             if (byId.length > 0) return byId;
@@ -149,8 +149,8 @@ class DiscoverWeeklyService {
             .slice(0, 20)
             .map((a) => a.id);
         const album = await prisma.album.findFirst({
-            where: { id: { in: artistAlbumIds }, tracks: { some: NOT_MISSING } },
-            include: { artist: true, tracks: { where: NOT_MISSING } },
+            where: { id: { in: artistAlbumIds }, tracks: { some: PLAYABLE_DISCOVER_SONG } },
+            include: { artist: true, tracks: { where: PLAYABLE_DISCOVER_SONG } },
             orderBy: { title: "asc" },
         });
         return album ? album.tracks.map((t) => ({ ...t, album: { ...album, artist: album.artist } })) : [];
