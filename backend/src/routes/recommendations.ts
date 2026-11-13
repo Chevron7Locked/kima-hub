@@ -21,14 +21,14 @@ router.get("/for-you", async (req, res) => {
         // Get user's most played artists
         // Plays of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
         // missing or corrupt one nothing until it is back.
-        const recentPlays = await recentPlayArtists(userId, { song: PLAYABLE_SONG, take: 50 });
+        const playArtists = await recentPlayArtists(userId, { song: PLAYABLE_SONG, take: 50 });
 
         // Count plays per artist
         const artistPlayCounts = new Map<
             string,
             { artist: Artist; count: number }
         >();
-        for (const artist of recentPlays) {
+        for (const artist of playArtists) {
             const existing = artistPlayCounts.get(artist.id);
             if (existing) {
                 existing.count++;

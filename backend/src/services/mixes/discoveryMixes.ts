@@ -80,15 +80,15 @@ export async function generateRediscoverMix(
 export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    const recentPlays = await recentPlayArtists(userId, {
+    const playArtists = await recentPlayArtists(userId, {
         song: IN_LIBRARY,
         since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 
-    if (recentPlays.length === 0) return null;
+    if (playArtists.length === 0) return null;
 
     const artistPlayCounts = new Map<string, number>();
-    for (const artist of recentPlays) {
+    for (const artist of playArtists) {
         artistPlayCounts.set(artist.id, (artistPlayCounts.get(artist.id) || 0) + 1);
     }
 
