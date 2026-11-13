@@ -37,7 +37,10 @@ function parseExpires(value: unknown): { ok: true; expiresAt: Date | null | unde
     if (raw === undefined || raw === "") return { ok: true, expiresAt: undefined };
     const ms = Number(raw);
     if (!Number.isFinite(ms)) return { ok: false };
-    return { ok: true, expiresAt: ms === 0 ? null : new Date(ms) };
+    if (ms === 0) return { ok: true, expiresAt: null };
+    const date = new Date(ms);
+    // A number past the range of a date (1e20) is not a date: refused like a non-number, not left to fail later.
+    return Number.isNaN(date.getTime()) ? { ok: false } : { ok: true, expiresAt: date };
 }
 
 const SONG_WITH_ALBUM = { album: { include: { artist: true } } } as const;

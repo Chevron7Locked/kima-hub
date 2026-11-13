@@ -1,8 +1,6 @@
 // What a stranger holding a share link can see. Every field is named here; a field added to the schema later
-// stays private until it is added to a list below.
-
-// A stranger sees only playable songs: one that is missing, corrupt or on a Discover album is not there for them
-// either, so a share of it answers as if its content were gone.
+// stays private until it is added to a list below. A stranger sees only playable songs: one that is missing, corrupt
+// or on a Discover album is not there for them either, so a share of it answers as if its content were gone.
 
 import { prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/libraryEligibility";

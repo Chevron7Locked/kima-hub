@@ -121,7 +121,7 @@ starredRouter.all("/star.view", wrap(async (req, res) => {
             }
         }
     } catch (err) {
-        logger.warn(`[Subsonic] star failed:`, err);
+        logger.warn(`[Subsonic] star failed for ${ids.join(",")}:`, err);
         return subsonicError(req, res, SubsonicError.GENERIC, "Failed to star track");
     }
     return subsonicOk(req, res);

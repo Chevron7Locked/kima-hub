@@ -79,6 +79,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 
         // Creation lives in shareService so the Subsonic surface can create a
         // REAL share rather than fabricating one.
+        // Named fields only: the stored dates and play count in the result are for the Subsonic reply, not the web's.
         const { token, url, existing } = await createShareLink(req.user!.id, entityType, entityId);
         res.json({ token, url, existing });
     } catch (error: any) {

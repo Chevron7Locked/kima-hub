@@ -1173,6 +1173,12 @@ describe("Subsonic createShare", () => {
         expect(await links()).toEqual([]);
     });
 
+    it("refuses an `expires` too large to be a date, instead of failing with a server error", async () => {
+        const body = await create({ id: SONG.playable, expires: "1e20" });
+        expect(body).toMatchObject({ status: "failed", error: { code: 10 } });
+        expect(await links()).toEqual([]);
+    });
+
     it("leaves a reused link's expiry as it was", async () => {
         await create({ id: SONG.playable });
         const body = await create({ id: SONG.playable, expires: String(FUTURE) });
