@@ -1953,7 +1953,9 @@ async function dispatchStageWork(
             // Hand the claim back: the push never happened, so the record must stay due instead of parking in
             // `working` past the lease.
             if (claim?.kind === "claimed") {
-                await stageRecords.release(item.trackId, stage, claim).catch(() => undefined);
+                await stageRecords.release(item.trackId, stage, claim).catch((releaseErr) =>
+                    logger.warn(`[Enrichment] Could not hand ${stage} back for ${item.trackId}; its lease will expire: ${(releaseErr as Error).message}`),
+                );
             }
             logger.warn(
                 `[Enrichment] Failed to queue ${stage} for ${item.trackId}: ${(err as Error).message}`,

@@ -579,7 +579,7 @@ async function flagVanishedTrack(
         flagged = await prisma.$transaction(flag);
     } catch (err) {
         if (!isDeadlock(err)) throw err;
-        logger.warn(`[Enrichment] ${stage}: ${trackId} flag lost a deadlock; trying once more`);
+        logger.warn(`[Enrichment] ${stage}: ${trackId} flag lost a transaction conflict (deadlock); trying once more`);
         flagged = await prisma.$transaction(flag);
     }
     if (!flagged) {
