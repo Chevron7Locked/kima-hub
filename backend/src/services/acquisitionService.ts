@@ -6,6 +6,7 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { prisma } from "../utils/db";
+import * as downloadJobs from "./downloads/jobs";
 import { getSystemSettings } from "../utils/systemSettings";
 import { soulseekService } from "./soulseek";
 import { simpleDownloadManager } from "./simpleDownloadManager";
@@ -173,29 +174,10 @@ class AcquisitionService {
         const sourceLabel = source.charAt(0).toUpperCase() + source.slice(1);
         const statusText = `${sourceLabel} #${attemptNumber}`;
 
-        const job = await prisma.downloadJob.findUnique({
-            where: { id: jobId },
-            select: { metadata: true },
-        });
-        const existingMetadata = (job?.metadata as any) || {};
-
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                metadata: {
-                    ...existingMetadata,
-                    currentSource: source,
-                    lidarrAttempts:
-                        source === "lidarr"
-                            ? attemptNumber
-                            : existingMetadata.lidarrAttempts || 0,
-                    soulseekAttempts:
-                        source === "soulseek"
-                            ? attemptNumber
-                            : existingMetadata.soulseekAttempts || 0,
-                    statusText,
-                },
-            },
+        await downloadJobs.mergeMetadata(jobId, {
+            currentSource: source,
+            [source === "lidarr" ? "lidarrAttempts" : "soulseekAttempts"]: attemptNumber,
+            statusText,
         });
 
         logger.debug(`[Acquisition] Updated job ${jobId}: ${statusText}`);
@@ -525,11 +507,7 @@ class AcquisitionService {
                     logger.debug(
                         `[Acquisition/Soulseek] MusicBrainz has no tracks; no fallback source`
                     );
-                    await this.updateJobStatus(
-                        job.id,
-                        "failed",
-                        "Could not get track list from MusicBrainz"
-                    );
+                    await this.settleJob(job.id, "Could not get track list from MusicBrainz");
                     return {
                         success: false,
                         error: "Could not get track list from MusicBrainz",
@@ -538,7 +516,7 @@ class AcquisitionService {
                     // A failed lookup must not look like "the album has no
                     // tracks": the job fails with the real cause.
                     const cause = failureCause(mbTracks);
-                    await this.updateJobStatus(job.id, "failed", `Track list lookup failed: ${cause}`);
+                    await this.settleJob(job.id, `Track list lookup failed: ${cause}`);
                     return {
                         success: false,
                         error: `Track list lookup failed: ${cause}`,
@@ -560,11 +538,7 @@ class AcquisitionService {
             );
 
             if (batchResult.successful === 0) {
-                await this.updateJobStatus(
-                    job.id,
-                    "failed",
-                    `No tracks found on Soulseek (searched ${tracks.length} tracks)`
-                );
+                await this.settleJob(job.id, `No tracks found on Soulseek (searched ${tracks.length} tracks)`);
                 return {
                     success: false,
                     tracksTotal: tracks.length,
@@ -582,29 +556,11 @@ class AcquisitionService {
             );
 
             // Mark job as completed immediately (Soulseek doesn't use webhooks)
-            await this.updateJobStatus(
+            await this.settleJob(
                 job.id,
-                isSuccess ? "completed" : "failed",
-                isSuccess
-                    ? undefined
-                    : `Only ${batchResult.successful}/${tracks.length} tracks found`
+                isSuccess ? undefined : `Only ${batchResult.successful}/${tracks.length} tracks found`,
+                { tracksDownloaded: batchResult.successful, tracksTotal: tracks.length }
             );
-
-            // Read current metadata from DB (job object may be a stub with only id)
-            const currentJob = await prisma.downloadJob.findUnique({
-                where: { id: job.id },
-                select: { metadata: true },
-            });
-            await prisma.downloadJob.update({
-                where: { id: job.id },
-                data: {
-                    metadata: {
-                        ...((currentJob?.metadata as any) || {}),
-                        tracksDownloaded: batchResult.successful,
-                        tracksTotal: tracks.length,
-                    },
-                },
-            });
 
             return {
                 success: isSuccess,
@@ -619,17 +575,13 @@ class AcquisitionService {
         } catch (error: any) {
             if (error?.name === 'AbortError' || context.signal?.aborted) {
                 if (job) {
-                    await this.updateJobStatus(job.id, "failed", "Import cancelled").catch(() => {});
+                    await this.settleJob(job.id, "Import cancelled").catch(() => {});
                 }
                 return { success: false, error: 'Import cancelled' };
             }
             logger.error(`[Acquisition/Soulseek] Error: ${error.message}`);
             if (job) {
-                await this.updateJobStatus(
-                    job.id,
-                    "failed",
-                    error.message
-                ).catch((e) =>
+                await this.settleJob(job.id, error.message).catch((e) =>
                     logger.error(
                         `[Acquisition/Soulseek] Failed to update job status: ${e.message}`
                     )
@@ -692,7 +644,7 @@ class AcquisitionService {
                     `[Acquisition/Lidarr] Failed to start: ${result.error}`
                 );
 
-                await this.updateJobStatus(job.id, "failed", result.error);
+                await this.settleJob(job.id, result.error ?? "Lidarr could not start the download");
 
                 return {
                     success: false,
@@ -704,11 +656,7 @@ class AcquisitionService {
         } catch (error: any) {
             logger.error(`[Acquisition/Lidarr] Error: ${error.message}`);
             if (job) {
-                await this.updateJobStatus(
-                    job.id,
-                    "failed",
-                    error.message
-                ).catch((e) =>
+                await this.settleJob(job.id, error.message).catch((e) =>
                     logger.error(
                         `[Acquisition/Lidarr] Failed to update job status: ${e.message}`
                     )
@@ -820,27 +768,22 @@ class AcquisitionService {
         });
     }
 
-    /** Updates a download job's status, recording the error message when given. */
-    private async updateJobStatus(
+    /**
+     * Ends a download job through the download-job module: failed with the reason when one is given, completed
+     * otherwise. A job another path settled first is left as it is. `patch` joins the job's metadata.
+     */
+    private async settleJob(
         jobId: string,
-        status: string,
-        error?: string
+        error?: string,
+        patch: Record<string, unknown> = {}
     ): Promise<void> {
-        await prisma.downloadJob.update({
-            where: { id: jobId },
-            data: {
-                status,
-                error: error || null,
-                completedAt:
-                    status === "completed" || status === "failed"
-                        ? new Date()
-                        : undefined,
-            },
-        });
+        const settled = error
+            ? await downloadJobs.fail([{ id: jobId }], error, patch)
+            : await downloadJobs.complete([{ id: jobId }], patch);
 
         logger.debug(
-            `[Acquisition] Updated job ${jobId}: status=${status}${
-                error ? `, error=${error}` : ""
+            `[Acquisition] Settled job ${jobId}: ${
+                settled.length === 0 ? "already settled" : error ? `failed, error=${error}` : "completed"
             }`
         );
     }

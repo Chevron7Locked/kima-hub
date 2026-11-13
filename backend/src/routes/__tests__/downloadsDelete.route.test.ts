@@ -27,6 +27,7 @@ import express from "express";
 import request from "supertest";
 import downloadsRouter from "../downloads";
 import { prisma } from "../../utils/db";
+import * as downloadJobs from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const USER = "dld_user";
@@ -65,16 +66,11 @@ afterAll(async () => {
 describe("DELETE /downloads/:id", () => {
     it("cancels a running job of a batch before removing it, and tells the batch", async () => {
         await job("dld_run", "processing", { discoveryBatchId: batchId });
-        let seenByBatch: { status: string; error: string | null; metadata: any } | null = null;
-        mockCheckBatchCompletion.mockImplementation(async () => {
-            const row = await prisma.downloadJob.findUniqueOrThrow({ where: { id: "dld_run" } });
-            seenByBatch = { status: row.status, error: row.error, metadata: row.metadata };
-        });
 
         const res = await request(app).delete("/downloads/dld_run");
+        await downloadJobs.whenIdle();
 
         expect(res.body).toEqual({ success: true, deleted: true });
-        expect(seenByBatch).toMatchObject({ status: "failed", error: "Cancelled by user", metadata: { cancelled: true } });
         expect(mockCheckBatchCompletion).toHaveBeenCalledTimes(1);
         expect(mockCheckBatchCompletion).toHaveBeenCalledWith(batchId);
         expect(await prisma.downloadJob.count({ where: { id: "dld_run" } })).toBe(0);
@@ -114,11 +110,44 @@ describe("DELETE /downloads/clear-all", () => {
         });
 
         const res = await request(app).delete("/downloads/clear-all");
+        await downloadJobs.whenIdle();
 
         expect(res.body).toEqual({ success: true, deleted: 3 });
-        expect(seen).toEqual({ dld_a: "failed:Cancelled by user", dld_b: "failed:Cancelled by user", dld_c: "completed:null" });
         expect(mockCheckBatchCompletion).toHaveBeenCalledTimes(1);
         expect(mockCheckBatchCompletion).toHaveBeenCalledWith(batchId);
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
+        // Whatever the batch's check saw of the rows, the unfinished ones were cancelled, not left running.
+        for (const state of Object.values(seen)) expect(state).not.toMatch(/^(processing|pending)/);
+    });
+
+    it("answers while the batch's check is still running", async () => {
+        await job("dld_slow", "processing", { discoveryBatchId: batchId });
+        let release!: () => void;
+        mockCheckBatchCompletion.mockReturnValue(new Promise<void>((resolve) => (release = resolve)));
+
+        const res = await request(app).delete("/downloads/clear-all");
+
+        expect(res.body).toEqual({ success: true, deleted: 1 });
+        release();
+        await downloadJobs.whenIdle();
+    });
+
+    it("refuses a status that is not one a job can have, and removes nothing", async () => {
+        await job("dld_keep", "completed");
+
+        const res = await request(app).delete("/downloads/clear-all").query({ status: "not-a-status" });
+
+        expect(res.status).toBe(400);
+        expect(await prisma.downloadJob.count({ where: { id: "dld_keep" } })).toBe(1);
+    });
+
+    it("removes only the jobs of a status it is given", async () => {
+        await job("dld_old", "completed");
+        await job("dld_new", "processing");
+
+        const res = await request(app).delete("/downloads/clear-all").query({ status: "completed" });
+
+        expect(res.body).toEqual({ success: true, deleted: 1 });
+        expect(await prisma.downloadJob.findMany({ where: { userId: USER }, select: { id: true } })).toEqual([{ id: "dld_new" }]);
     });
 });

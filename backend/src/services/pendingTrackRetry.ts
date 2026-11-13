@@ -9,6 +9,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { soulseekService } from "./soulseek";
+import * as downloadJobs from "./downloads/jobs";
 import { requestScan } from "../workers/scanRequest";
 
 type Matches = Awaited<ReturnType<typeof soulseekService.searchTrack>>["allMatches"];
@@ -57,10 +58,7 @@ export function createRetryJob(userId: string, pendingTrack: PlaylistPendingTrac
 }
 
 export async function failRetryJob(jobId: string, error: string): Promise<void> {
-    await prisma.downloadJob.update({
-        where: { id: jobId },
-        data: { status: "failed", error, completedAt: new Date() },
-    });
+    await downloadJobs.fail([{ id: jobId }], error);
 }
 
 export const NO_SOURCES = "No matching files found";
@@ -109,14 +107,9 @@ export async function downloadSources(
             await failRetryJob(job.id, result.error || "Download failed");
             return;
         }
-        await prisma.downloadJob.update({
-            where: { id: job.id },
-            data: {
-                status: "completed",
-                completedAt: new Date(),
-                metadata: { ...(job.metadata as Record<string, unknown>), filePath: result.filePath },
-            },
-        });
+        const settled = await downloadJobs.complete([job], { filePath: result.filePath });
+        // A job cancelled while the file downloaded stays cancelled; the file is on disk, so the scan still finds it.
+        if (settled.length === 0) logger.debug(`[Pending retry] Job ${job.id} was settled before its download finished`);
         await requestScan({
             userId: job.userId,
             source: scanSource,

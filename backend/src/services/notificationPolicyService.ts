@@ -68,6 +68,11 @@ class NotificationPolicyService {
             };
         }
 
+        // A retry of a playlist's pending song is the user's own request, answered where they asked.
+        if (downloadType === "pending-track-retry") {
+            return { shouldNotify: false, reason: "Retry the user asked for" };
+        }
+
         // A download Lidarr is holding for a person: the user hears of it once, whatever the album's other jobs did.
         if (eventType === "parked") {
             return job.status === "processing"

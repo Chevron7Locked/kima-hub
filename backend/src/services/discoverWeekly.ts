@@ -37,6 +37,7 @@ import {
 import { shuffleArray } from "../utils/shuffle";
 import { config as appConfig } from "../config";
 import { eventBus } from "./eventBus";
+import * as downloadJobs from "./downloads/jobs";
 import { PLAYABLE_DISCOVER_SONG } from "../utils/libraryEligibility";
 
 interface RecommendedAlbum {
@@ -94,11 +95,12 @@ function discoveryAlbumDetails(
 }
 
 /** Fails a batch's downloads that are still waiting or running, with the reason. */
-function failBatchDownloads(batchId: string, error: string) {
-    return prisma.downloadJob.updateMany({
+async function failBatchDownloads(batchId: string, error: string) {
+    const waiting = await prisma.downloadJob.findMany({
         where: { discoveryBatchId: batchId, status: { in: ["pending", "processing"] } },
-        data: { status: "failed", error, completedAt: new Date() },
+        select: { id: true },
     });
+    return downloadJobs.fail(waiting, error);
 }
 
 class DiscoverWeeklyService {
@@ -381,15 +383,16 @@ class DiscoverWeeklyService {
                             1
                         );
 
-                        const newStatus = result.source === "soulseek" ? "completed" : "processing";
-                        await prisma.downloadJob.update({
-                            where: { id: job.id },
-                            data: {
-                                status: newStatus,
-                                lidarrRef: result.correlationId || null,
-                                completedAt: newStatus === "completed" ? new Date() : null,
-                            },
-                        });
+                        // A Soulseek album arrives complete. A Lidarr album is already running, started by
+                        // acquisition: only its reference is recorded, and only while it still runs.
+                        if (result.source === "soulseek") {
+                            await downloadJobs.complete([job]);
+                        } else if (result.correlationId) {
+                            await prisma.downloadJob.updateMany({
+                                where: { id: job.id, status: "processing" },
+                                data: { lidarrRef: result.correlationId },
+                            });
+                        }
                     } else {
                         downloadsFailed++;
                         discoveryLogger.error(
@@ -397,14 +400,7 @@ class DiscoverWeeklyService {
                             1
                         );
 
-                        await prisma.downloadJob.update({
-                            where: { id: job.id },
-                            data: {
-                                status: "failed",
-                                error: result.error,
-                                completedAt: new Date(),
-                            },
-                        });
+                        await downloadJobs.fail([job], result.error ?? "Acquisition failed");
 
                         await discoveryBatchLogger.error(
                             batch.id,
@@ -419,14 +415,7 @@ class DiscoverWeeklyService {
                         1
                     );
 
-                    await prisma.downloadJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: "failed",
-                            error: errorMsg,
-                            completedAt: new Date(),
-                        },
-                    });
+                    await downloadJobs.fail([job], errorMsg);
 
                     await discoveryBatchLogger.error(
                         batch.id,
@@ -440,9 +429,8 @@ class DiscoverWeeklyService {
 
             logger.info(`[Discover] Batch complete: ${downloadsStarted} succeeded, ${downloadsFailed} failed`);
 
-            // Soulseek downloads complete synchronously, so the batch is checked here.
-            logger.debug(`[Discovery] Checking batch completion (started: ${downloadsStarted}, failed: ${downloadsFailed})`);
-            await this.checkBatchCompletion(batch.id);
+            // Every job that completed or failed above told the batch. A batch with no jobs has nothing to tell it.
+            if (jobs.length === 0) await this.checkBatchCompletion(batch.id);
 
             discoveryLogger.section("GENERATION COMPLETE");
             discoveryLogger.table({
@@ -613,13 +601,13 @@ class DiscoverWeeklyService {
                     `   Completed: ${completedJobs.length}, Pending: ${pendingJobs.length}`
                 );
 
+                // Failing the jobs tells the batch, which moves on with what finished.
                 await failBatchDownloads(batch.id, "Batch timeout - download took too long");
 
                 logger.debug(
                     `   Marked ${pendingJobs.length} pending jobs as failed`
                 );
 
-                await this.checkBatchCompletion(batch.id);
                 forcedCount++;
             }
         }
@@ -654,25 +642,30 @@ class DiscoverWeeklyService {
         const completedJobs = batch.jobs.filter(
             (j) => j.status === "completed"
         );
-        const failedJobs = batch.jobs.filter(
+        const settledAsFailed = batch.jobs.filter(
             (j) => j.status === "failed" || j.status === "exhausted"
         );
+        // A job the user cancelled is not a failed album: it is never recorded as unavailable
+        // and does not count toward "All downloads failed".
+        const cancelledJobs = settledAsFailed.filter((j) => (j.metadata as any)?.cancelled === true);
+        const failedJobs = settledAsFailed.filter((j) => (j.metadata as any)?.cancelled !== true);
         const pendingJobs = batch.jobs.filter(
             (j) => j.status === "pending" || j.status === "processing"
         );
 
         const completed = completedJobs.length;
         const failed = failedJobs.length;
+        const cancelled = cancelledJobs.length;
         const total = batch.jobs.length;
 
         eventBus.emit({
             type: "discover:progress",
             userId: batch.userId,
-            payload: { batchId, status: "downloading", completed, failed, total, progress: Math.round(((completed + failed) / total) * 100) },
+            payload: { batchId, status: "downloading", completed, failed, total, progress: Math.round(((completed + failed + cancelled) / total) * 100) },
         });
 
         logger.debug(
-            `[BATCH ${batchId}] Status: ${completed} completed, ${failed} failed, ${pendingJobs.length} pending (total: ${total})`
+            `[BATCH ${batchId}] Status: ${completed} completed, ${failed} failed, ${cancelled} cancelled, ${pendingJobs.length} pending (total: ${total})`
         );
 
         if (pendingJobs.length > 0) {
@@ -704,6 +697,8 @@ class DiscoverWeeklyService {
         }
 
         logger.debug(`[BATCH ${batchId}] Transitioning to scan phase...`);
+
+        const allCancelled = completed === 0 && failed === 0 && cancelled > 0;
 
         await prisma.$transaction(async (tx) => {
             for (const job of failedJobs.filter((j) => j.targetMbid)) {
@@ -744,7 +739,7 @@ class DiscoverWeeklyService {
                         expectedStatus: "downloading",
                         completedAlbums: 0,
                         failedAlbums: failed,
-                        errorMessage: "All downloads failed",
+                        errorMessage: allCancelled ? "All downloads cancelled" : "All downloads failed",
                         completedAt: new Date(),
                     },
                     {},
@@ -766,8 +761,10 @@ class DiscoverWeeklyService {
         });
 
         if (completed === 0) {
-            logger.debug(`   All downloads failed`);
-            await discoveryBatchLogger.error(batchId, "All downloads failed");
+            const ending = allCancelled ? "All downloads cancelled" : "All downloads failed";
+            logger.debug(`   ${ending}`);
+            if (allCancelled) await discoveryBatchLogger.info(batchId, ending);
+            else await discoveryBatchLogger.error(batchId, ending);
 
             eventBus.emit({
                 type: "discover:complete",

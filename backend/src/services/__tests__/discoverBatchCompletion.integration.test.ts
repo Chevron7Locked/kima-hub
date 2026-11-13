@@ -61,3 +61,60 @@ it("records each failed album once, skips a job with no album id, and moves the 
     const unavailable = await prisma.unavailableAlbum.findMany({ where: { userId: USER, weekStartDate: WEEK } });
     expect(unavailable.map((u) => [u.albumMbid, u.attemptNumber])).toEqual([[ALBUMS.idk.mbid, 2]]);
 });
+
+describe("a job the user cancelled", () => {
+    const cancelled = async (batchId: string, album: { mbid: string; title: string }) => {
+        const j = await job(batchId, "failed", album);
+        return prisma.downloadJob.update({
+            where: { id: j.id },
+            data: { error: "Cancelled by user", metadata: { ...(j.metadata as object), cancelled: true } },
+        });
+    };
+    const batchOf = (week: string, total: number) =>
+        prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date(week), targetSongCount: total, totalAlbums: total, status: "downloading" },
+        });
+    const unavailable = (week: string) =>
+        prisma.unavailableAlbum.findMany({ where: { userId: USER, weekStartDate: new Date(week) } });
+
+    it("is never recorded as an unavailable album, and is not counted as a failure", async () => {
+        const week = "2026-10-12T00:00:00.000Z";
+        const batch = await batchOf(week, 2);
+        await job(batch.id, "completed", ALBUMS.gwam);
+        await cancelled(batch.id, ALBUMS.idk);
+
+        await discoverWeeklyService.checkBatchCompletion(batch.id);
+
+        expect(await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({
+            status: "scanning", completedAlbums: 1, failedAlbums: 0,
+        });
+        expect(await unavailable(week)).toEqual([]);
+    });
+
+    it("leaves a batch with one real failure and one cancel as 'all downloads failed', recording only the failure", async () => {
+        const week = "2026-10-19T00:00:00.000Z";
+        const batch = await batchOf(week, 2);
+        await job(batch.id, "failed", ALBUMS.gwam);
+        await cancelled(batch.id, ALBUMS.idk);
+
+        await discoverWeeklyService.checkBatchCompletion(batch.id);
+
+        expect(await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({
+            status: "failed", completedAlbums: 0, failedAlbums: 1, errorMessage: "All downloads failed",
+        });
+        expect((await unavailable(week)).map((u) => u.albumMbid)).toEqual([ALBUMS.gwam.mbid]);
+    });
+
+    it("ends a batch of only cancelled jobs as cancelled, not as 'all downloads failed'", async () => {
+        const week = "2026-10-26T00:00:00.000Z";
+        const batch = await batchOf(week, 1);
+        await cancelled(batch.id, ALBUMS.gwam);
+
+        await discoverWeeklyService.checkBatchCompletion(batch.id);
+
+        const row = await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } });
+        expect(row).toMatchObject({ status: "failed", failedAlbums: 0 });
+        expect(row.errorMessage).toBe("All downloads cancelled");
+        expect(await unavailable(week)).toEqual([]);
+    });
+});

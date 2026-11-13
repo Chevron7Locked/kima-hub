@@ -11,6 +11,12 @@
  * running while Lidarr holds its download for a person, and tells the user once. A job's attempt
  * count is kept through a retry: start sets it to 1 only for a job that has none.
  *
+ * A move answers once the rows and the user's notice are written. The Discover batch's
+ * and the import's completion checks run after it, detached (a batch check can wait
+ * 60 s for Lidarr), one at a time per batch and per import, with a failure logged.
+ * `whenIdle` waits for them, for tests and shutdown. `withoutFailureMarks` is the
+ * metadata of a job with what a failure left on it removed, for a retry or a re-queue.
+ *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
  * can see which of its jobs it was that settled.
@@ -181,8 +187,23 @@ export async function retry(jobs: JobRef[], patch: Record<string, unknown> = {})
         jobs,
         FAILED,
         Prisma.sql`status = 'pending', error = NULL, "completedAt" = NULL`,
-        { statusText: "Retrying", ...patch, notificationSent: null, failedAt: null, cancelled: null, parked: null }
+        {
+            statusText: "Retrying",
+            ...patch,
+            ...Object.fromEntries(FAILURE_MARKS.filter((mark) => mark !== "statusText").map((mark) => [mark, null])),
+        }
     );
+}
+
+/** The metadata fields a failure leaves on a job. A retry clears them, so the next outcome tells the user afresh. */
+export const FAILURE_MARKS = ["notificationSent", "failedAt", "cancelled", "parked", "statusText"] as const;
+
+/** A failed job's metadata without the marks of its failure: what a retry or a copy of the job starts from. */
+export function withoutFailureMarks(metadata: unknown): Record<string, unknown> {
+    const kept: Record<string, unknown> =
+        metadata && typeof metadata === "object" && !Array.isArray(metadata) ? { ...(metadata as Record<string, unknown>) } : {};
+    for (const mark of FAILURE_MARKS) delete kept[mark];
+    return kept;
 }
 
 type Outcome = "complete" | "failed" | "cancel" | "parked";
@@ -204,26 +225,66 @@ async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Pr
         if (outcome === "complete") await yieldToEventLoop();
     }
 
-    if (batches.size > 0) {
-        const { discoverWeeklyService } = await import("../discoverWeekly");
-        for (const batchId of batches) {
-            try {
-                await discoverWeeklyService.checkBatchCompletion(batchId);
-            } catch (batchError) {
-                logger.error(`Failed to tell batch ${batchId} of a settled download:`, batchError);
-            }
-        }
+    if (batches.size > 0 || imports.size > 0) tellBatchesAndImports(batches, imports);
+}
+
+/** The batch and import checks still running after the moves that started them answered. */
+const checking = new Set<Promise<void>>();
+
+/** Resolves when every batch and import check a move started has ended. For tests and a clean shutdown. */
+export async function whenIdle(): Promise<void> {
+    while (checking.size > 0) await Promise.allSettled([...checking]);
+}
+
+/**
+ * Starts the batch and import completion checks and returns. A check can run a scan and wait on a queue for a minute,
+ * which a user cancelling a download must not wait for. A check that throws is logged: the job has settled already.
+ */
+function tellBatchesAndImports(batches: Set<string>, imports: Set<string>): void {
+    const tasks: Promise<void>[] = [];
+    for (const batchId of batches) {
+        tasks.push(
+            inLane(`batch:${batchId}`, async () => {
+                try {
+                    const { discoverWeeklyService } = await import("../discoverWeekly");
+                    await discoverWeeklyService.checkBatchCompletion(batchId);
+                } catch (batchError) {
+                    logger.error(`Failed to tell batch ${batchId} of a settled download:`, batchError);
+                }
+            })
+        );
     }
-    if (imports.size > 0) {
-        const { spotifyImportService } = await import("../spotifyImport");
-        for (const importId of imports) {
-            try {
-                await spotifyImportService.checkImportCompletion(importId);
-            } catch (importError) {
-                logger.error(`Failed to tell import ${importId} of a settled download:`, importError);
-            }
-        }
+    for (const importId of imports) {
+        tasks.push(
+            inLane(`import:${importId}`, async () => {
+                try {
+                    const { spotifyImportService } = await import("../spotifyImport");
+                    await spotifyImportService.checkImportCompletion(importId);
+                } catch (importError) {
+                    logger.error(`Failed to tell import ${importId} of a settled download:`, importError);
+                }
+            })
+        );
     }
+    const run = Promise.all(tasks).then(() => undefined);
+    checking.add(run);
+    void run.finally(() => checking.delete(run));
+}
+
+/** The latest check queued for each batch or import. */
+const lanes = new Map<string, Promise<void>>();
+
+/**
+ * Runs checks of one batch or import one after another: jobs settle together, and two checks of one batch at once
+ * would both move it on. A task must not throw.
+ */
+function inLane(key: string, task: () => Promise<void>): Promise<void> {
+    const next = (lanes.get(key) ?? Promise.resolve()).then(task);
+    lanes.set(key, next);
+    void next.finally(() => {
+        if (lanes.get(key) === next) lanes.delete(key);
+    });
+    return next;
 }
 
 /**

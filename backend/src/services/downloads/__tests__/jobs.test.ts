@@ -162,6 +162,7 @@ describe("complete", () => {
         const j = await job("dl_done_batch", { discoveryBatchId: batch.id });
 
         await downloadJobs.complete([j]);
+        await downloadJobs.whenIdle();
 
         expect((await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe("scanning");
     });
@@ -175,6 +176,7 @@ describe("complete", () => {
 
         await downloadJobs.complete([j]);
         await downloadJobs.complete([j]);
+        await downloadJobs.whenIdle();
 
         expect(told.mock.calls).toEqual([["imp-1"]]);
     });
@@ -189,6 +191,7 @@ describe("complete", () => {
         const b = await job("dl_done_many_b", { discoveryBatchId: batch.id, metadata: { spotifyImportJobId: "imp-2" } });
 
         await downloadJobs.complete([a, b]);
+        await downloadJobs.whenIdle();
 
         expect(batchTold.mock.calls).toEqual([[batch.id]]);
         expect(importTold.mock.calls).toEqual([["imp-2"]]);
@@ -240,6 +243,7 @@ describe("fail", () => {
         const j = await job("dl_fail_batch", { discoveryBatchId: batch.id });
 
         await downloadJobs.fail([j], "gone");
+        await downloadJobs.whenIdle();
 
         expect((await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe("failed");
     });
@@ -251,6 +255,7 @@ describe("fail", () => {
 
         await downloadJobs.fail([j], "gone");
         await downloadJobs.fail([j], "gone again");
+        await downloadJobs.whenIdle();
 
         expect(told.mock.calls).toEqual([["imp-3"]]);
     });
@@ -291,6 +296,7 @@ describe("cancel", () => {
         const j = await job("dl_cancel_told", { discoveryBatchId: batch.id, metadata: { spotifyImportJobId: "imp-4" } });
 
         await downloadJobs.cancel([j]);
+        await downloadJobs.whenIdle();
 
         expect((await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe("failed");
         expect(importTold.mock.calls).toEqual([["imp-4"]]);
@@ -428,5 +434,82 @@ describe("mergeMetadata", () => {
         const j = await job("dl_merge", { metadata: { a: 1, b: 2 } });
         await downloadJobs.mergeMetadata(j.id, { b: null, c: 3, d: undefined });
         expect(await meta(j.id)).toEqual({ a: 1, c: 3 });
+    });
+});
+
+describe("settling answers promptly", () => {
+    it("returns before the batch's completion check ends, and the check still runs", async () => {
+        const { discoverWeeklyService } = await import("../../discoverWeekly");
+        let release!: () => void;
+        const checking = new Promise<void>((resolve) => (release = resolve));
+        const check = jest.spyOn(discoverWeeklyService, "checkBatchCompletion").mockReturnValue(checking);
+        const batch = await batchOf(1);
+        const j = await job("dl_prompt_batch", { discoveryBatchId: batch.id });
+
+        const settled = await downloadJobs.fail([j], "gone");
+
+        expect(settled).toHaveLength(1);
+        let idle = false;
+        const waiting = downloadJobs.whenIdle().then(() => (idle = true));
+        await new Promise((r) => setTimeout(r, 50));
+        expect(check.mock.calls).toEqual([[batch.id]]);
+        expect(idle).toBe(false);
+        release();
+        await waiting;
+        expect(idle).toBe(true);
+    });
+
+    it("returns before the import's completion check ends", async () => {
+        const { spotifyImportService } = await import("../../spotifyImport");
+        let release!: () => void;
+        const checking = new Promise<void>((resolve) => (release = resolve));
+        const check = jest.spyOn(spotifyImportService, "checkImportCompletion").mockReturnValue(checking);
+        const j = await job("dl_prompt_import", { metadata: { spotifyImportJobId: "imp-9" } });
+
+        await downloadJobs.complete([j]);
+
+        await new Promise((r) => setTimeout(r, 50));
+        expect(check.mock.calls).toEqual([["imp-9"]]);
+        release();
+        await downloadJobs.whenIdle();
+    });
+
+    it("logs a check that throws, and the move has still settled the job", async () => {
+        const { discoverWeeklyService } = await import("../../discoverWeekly");
+        const { logger } = await import("../../../utils/logger");
+        jest.spyOn(discoverWeeklyService, "checkBatchCompletion").mockRejectedValue(new Error("scan queue down"));
+        const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined);
+        const batch = await batchOf(1);
+        const j = await job("dl_prompt_throws", { discoveryBatchId: batch.id });
+
+        await expect(downloadJobs.fail([j], "gone")).resolves.toHaveLength(1);
+        await downloadJobs.whenIdle();
+
+        expect((await row(j.id)).status).toBe("failed");
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining(batch.id), expect.any(Error));
+    });
+});
+
+describe("withoutFailureMarks", () => {
+    it("drops the marks of a failure and keeps the rest", () => {
+        expect(
+            downloadJobs.withoutFailureMarks({
+                artistName: "Brad Sucks", notificationSent: true, failedAt: "t", cancelled: true, parked: "x", statusText: "boom",
+            })
+        ).toEqual({ artistName: "Brad Sucks" });
+        expect(downloadJobs.withoutFailureMarks(null)).toEqual({});
+    });
+
+    it("names the marks retry clears, so a retried job and a copy of a failed one carry the same", async () => {
+        const marks = { notificationSent: true, failedAt: "t", cancelled: true, parked: "x", statusText: "boom" };
+        const j = await job("dl_marks", { status: "failed", metadata: { artistName: "Brad Sucks", ...marks } });
+
+        await downloadJobs.retry([j]);
+
+        const kept = await meta(j.id);
+        expect(kept).toMatchObject({ artistName: "Brad Sucks", statusText: "Retrying" });
+        for (const mark of downloadJobs.FAILURE_MARKS) {
+            if (mark !== "statusText") expect(kept).not.toHaveProperty(mark);
+        }
     });
 });

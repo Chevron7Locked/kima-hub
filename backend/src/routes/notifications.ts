@@ -18,12 +18,6 @@ import {
 
 const router = Router();
 
-/** A retried job's copy of the old metadata, less the marks of the old job's failure, so its own outcome tells the user afresh. */
-function withoutFailureMarks(metadata: Record<string, unknown> | null): Record<string, unknown> {
-    const { notificationSent, failedAt, cancelled, parked, statusText, ...carried } = metadata ?? {};
-    return carried;
-}
-
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
 
@@ -435,7 +429,7 @@ router.post(
                         attempts: 1,
                         startedAt: new Date(),
                         metadata: {
-                            ...withoutFailureMarks(metadata),
+                            ...downloadJobs.withoutFailureMarks(metadata),
                             retryAttempt: true,
                         } as any,
                     },
@@ -581,7 +575,7 @@ router.post(
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     status: "pending",
-                    metadata: withoutFailureMarks(metadata) as any,
+                    metadata: downloadJobs.withoutFailureMarks(metadata) as any,
                 },
             });
 

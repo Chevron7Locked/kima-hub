@@ -1,6 +1,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { queues } from "../workers/queues";
+import * as downloadJobs from "./downloads/jobs";
 
 const STALE_THRESHOLDS = {
     discoveryBatch: 60 * 60 * 1000, // 1 hour
@@ -81,17 +82,14 @@ class StaleJobCleanupService {
         });
 
         // Also clean associated DownloadJobs that reference these batches
-        await prisma.downloadJob.updateMany({
+        const batchJobs = await prisma.downloadJob.findMany({
             where: {
                 discoveryBatchId: { in: ids },
                 status: { in: ["pending", "processing"] },
             },
-            data: {
-                status: "failed",
-                error: "Parent batch cleaned up as stale",
-                completedAt: new Date(),
-            },
+            select: { id: true },
         });
+        await downloadJobs.fail(batchJobs, "Parent batch cleaned up as stale");
 
         return { cleaned: ids.length, ids };
     }
@@ -112,17 +110,11 @@ class StaleJobCleanupService {
             return { cleaned: 0, ids: [] };
         }
 
-        const ids = staleJobs.map((j) => j.id);
-        logger.debug(`[STALE-CLEANUP] Cleaning ${ids.length} download jobs`);
+        logger.debug(`[STALE-CLEANUP] Cleaning ${staleJobs.length} download jobs`);
 
-        await prisma.downloadJob.updateMany({
-            where: { id: { in: ids } },
-            data: {
-                status: "failed",
-                error: "Cleaned up as stale by user request",
-                completedAt: new Date(),
-            },
-        });
+        // Settling tells each job's batch and import, so one that was waiting on a stale job can finish.
+        const settled = await downloadJobs.fail(staleJobs, "Cleaned up as stale by user request");
+        const ids = settled.map((j) => j.id);
 
         return { cleaned: ids.length, ids };
     }

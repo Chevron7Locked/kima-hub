@@ -24,6 +24,7 @@ import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
+import * as jobMoves from "./downloads/jobs";
 import { sourcePauseController } from "./sourcePauseController";
 import { artistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
@@ -1567,20 +1568,10 @@ class SpotifyImportService {
         `Download timeout: ${pending} pending after ${waitTimeMins}m, proceeding with available tracks`,
       );
 
-      await prisma.downloadJob.updateMany({
-        where: {
-          metadata: {
-            path: ["spotifyImportJobId"],
-            equals: importJobId,
-          },
-          status: { in: ["pending", "processing"] },
-        },
-        data: {
-          status: "failed",
-          error: "Timed out waiting for download",
-          completedAt: new Date(),
-        },
-      });
+      await jobMoves.fail(
+        downloadJobs.filter((j) => j.status === "pending" || j.status === "processing"),
+        "Timed out waiting for download",
+      );
     }
 
     // All downloads finished (completed or failed)
