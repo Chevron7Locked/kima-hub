@@ -640,6 +640,146 @@ describe("askAgain", () => {
     });
 });
 
+describe("askAgain, as the writers around it use it", () => {
+    it("keeps the evidence on the record when none is given", async () => {
+        const id = await seedTrack("w1");
+        await put(id, "analysis", "failed", { failures: 2, evidence: { error: "boom" } });
+        await setColumns(id, "failed", "pending");
+
+        await stageRecords.askAgain({ stages: ["analysis"], trackIds: [id] });
+
+        expect(await record(id, "analysis")).toMatchObject({ status: "pending", failures: 0 });
+        expect((await record(id, "analysis"))?.evidence).toEqual({ error: "boom" });
+        await expectColumnsMatch(id);
+    });
+
+    it("skips a song whose file is flagged missing, and reopens a parked one when told to", async () => {
+        const gone = await seedTrack("w2", { missing: true });
+        await put(gone, "analysis", "failed", { retryable: false });
+        const parked = await seedTrack("w3");
+        await put(parked, "analysis", "blocked", { retryable: false, decided: true });
+        for (const id of [gone, parked]) await setColumns(id, "permanently_failed", "pending");
+
+        const n = await stageRecords.askAgain({
+            stages: ["analysis"], trackIds: [gone, parked], statuses: ["failed", "blocked"], songFileThere: true, clearDecision: true,
+        });
+
+        expect(n).toBe(1);
+        expect((await record(gone, "analysis"))?.status).toBe("failed");
+        expect(await record(parked, "analysis")).toMatchObject({ status: "pending", decidedAt: null });
+        for (const id of [gone, parked]) await expectColumnsMatch(id);
+    });
+
+    it("reopens embeddings only for songs whose analysis is answered and which have no sound vector, up to a limit", async () => {
+        const ready: string[] = [];
+        for (const n of ["w4", "w5", "w6"]) {
+            const id = await seedTrack(n);
+            await put(id, "analysis", "done");
+            await put(id, "embedding", "done");
+            await setColumns(id, "completed", "completed");
+            ready.push(id);
+        }
+        const notAnalysed = await seedTrack("w7");
+        await put(notAnalysed, "analysis", "failed");
+        await put(notAnalysed, "embedding", "failed");
+        await setColumns(notAnalysed, "failed", "failed");
+
+        const n = await stageRecords.askAgain({
+            stages: ["embedding"], trackIds: [...ready, notAnalysed], afterAnswerOf: "analysis", withoutSoundVector: true, limit: 2,
+        });
+
+        expect(n).toBe(2);
+        const reopened = await prisma.trackStage.count({ where: { trackId: { in: ready }, stage: "embedding", status: "pending" } });
+        expect(reopened).toBe(2);
+        expect((await record(notAnalysed, "embedding"))?.status).toBe("failed");
+        for (const id of [...ready, notAnalysed]) await expectColumnsMatch(id);
+    });
+
+    it("does not reopen the embedding of a song that already has a sound vector", async () => {
+        const id = await seedTrack("w8");
+        await put(id, "analysis", "done");
+        await put(id, "embedding", "done");
+        await setColumns(id, "completed", "completed");
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, 'test', now())`,
+            id,
+            `[${Array.from({ length: 512 }, (_, i) => (i % 7) / 7).join(",")}]`,
+        );
+        try {
+            const n = await stageRecords.askAgain({
+                stages: ["embedding"], trackIds: [id], afterAnswerOf: "analysis", withoutSoundVector: true,
+            });
+            expect(n).toBe(0);
+        } finally {
+            await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, id);
+        }
+    });
+
+    it("joins a caller's transaction, so the whole reset commits or rolls back together", async () => {
+        const id = await seedTrack("w9");
+        await put(id, "analysis", "done");
+        await setColumns(id, "completed", "pending");
+
+        await expect(
+            prisma.$transaction(async (tx) => {
+                expect(await stageRecords.askAgain({ stages: ["analysis"], trackIds: [id] }, tx)).toBe(1);
+                throw new Error("the rest of the reset failed");
+            }),
+        ).rejects.toThrow("the rest of the reset failed");
+
+        expect((await record(id, "analysis"))?.status).toBe("done");
+        await expectColumnsMatch(id);
+    });
+});
+
+describe("closeForMissingFiles", () => {
+    it("closes the open records of a song flagged missing, with record and column saying the same thing", async () => {
+        const gone = await seedTrack("m1", { missing: true });
+        await put(gone, "analysis", "pending");
+        await put(gone, "embedding", "failed", { retryable: true, nextRetryAt: new Date(Date.now() - 1000) });
+        await put(gone, "recording", "pending");
+        await setColumns(gone, "pending", "failed");
+        const here = await seedTrack("m2");
+        await put(here, "analysis", "pending");
+        const answered = await seedTrack("m3", { missing: true });
+        await put(answered, "analysis", "done");
+        await setColumns(answered, "completed", "pending");
+
+        const closed = await stageRecords.closeForMissingFiles();
+
+        expect(closed).toBe(3);
+        for (const stage of ["analysis", "embedding", "recording"]) {
+            expect(await record(gone, stage)).toMatchObject({ status: "failed", retryable: false, failureClass: "FILE_MISSING" });
+        }
+        expect((await record(here, "analysis"))?.status).toBe("pending");
+        expect((await record(answered, "analysis"))?.status).toBe("done");
+        // The column carries the record's own words, not a second wording.
+        const message = (await record(gone, "analysis"))?.lastErrorMessage;
+        expect(message).toMatch(/file missing from the library/);
+        const track = await prisma.track.findUniqueOrThrow({ where: { id: gone } });
+        expect(track.analysisError).toBe(message);
+        expect(track.vibeAnalysisError).toBe(message);
+        for (const id of [gone, here, answered]) await expectColumnsMatch(id);
+        expect(await stageRecords.closeForMissingFiles()).toBe(0);
+    });
+
+    it("joins a caller's transaction", async () => {
+        const gone = await seedTrack("m4", { missing: true });
+        await put(gone, "analysis", "pending");
+        await setColumns(gone, "pending", "pending");
+
+        await expect(
+            prisma.$transaction(async (tx) => {
+                expect(await stageRecords.closeForMissingFiles(tx)).toBe(1);
+                throw new Error("rolled back");
+            }),
+        ).rejects.toThrow("rolled back");
+
+        expect((await record(gone, "analysis"))?.status).toBe("pending");
+        await expectColumnsMatch(gone);
+    });
+});
+
 describe("decide", () => {
     it("parks open and failed records as a person's decision, with the columns closed", async () => {
         const a = await seedTrack("p1");

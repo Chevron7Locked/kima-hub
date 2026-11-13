@@ -16,10 +16,9 @@ import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { updateArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage } from "./imageStorage";
-import { closeStagesForMissingTracks } from "./missingFileStages";
+import * as stageRecords from "./stages/stageRecords";
 import { runReconcile } from "./libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
-import { askedAgain } from "./stageReopen";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
 /**
@@ -28,14 +27,13 @@ import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./dis
  * too: the job on the old file then holds a stale claim, and its answer is dropped.
  */
 async function reopenStagesForChangedFile(trackId: string): Promise<void> {
-    const reopened = await prisma.$executeRaw`
-        UPDATE "TrackStage"
-           SET ${askedAgain},
-               "decidedAt" = NULL,
-               "decidedBy" = NULL,
-               evidence = jsonb_build_object('reason', 'file changed')
-         WHERE "trackId" = ${trackId}
-           AND status IN ('done', 'failed', 'pending', 'working')`;
+    const reopened = await stageRecords.askAgain({
+        stages: stageRecords.STAGE_ORDER,
+        trackIds: [trackId],
+        statuses: ["done", "failed", "pending", "working"],
+        clearDecision: true,
+        evidence: { reason: "file changed" },
+    });
     if (reopened > 0) {
         logger.debug(
             `[Scanner] Re-opened ${reopened} stage record(s) for ${trackId}: file changed`
@@ -48,18 +46,19 @@ async function reopenStagesForChangedFile(trackId: string): Promise<void> {
  * closed for other reasons, or re-decided by a human, stay as they are.
  */
 async function reopenStagesForReturnedTracks(
-    client: Pick<Prisma.TransactionClient, "$executeRaw">,
+    tx: Prisma.TransactionClient,
     trackIds: string[]
 ): Promise<void> {
     if (trackIds.length === 0) return;
-    const reopened = await client.$executeRaw`
-        UPDATE "TrackStage"
-           SET ${askedAgain}, evidence = jsonb_build_object('reason', 'file returned')
-         WHERE "trackId" = ANY(${trackIds}::text[])
-           AND status = 'failed'
-           AND NOT retryable
-           AND "failureClass" = 'FILE_MISSING'
-           AND "decidedAt" IS NULL`;
+    const reopened = await stageRecords.askAgain({
+        stages: stageRecords.STAGE_ORDER,
+        trackIds,
+        statuses: ["failed"],
+        retryable: false,
+        failureClass: "FILE_MISSING",
+        undecidedOnly: true,
+        evidence: { reason: "file returned" },
+    }, tx);
     if (reopened > 0) {
         logger.debug(
             `[Scanner] Re-opened ${reopened} stage record(s): files returned`
@@ -401,7 +400,7 @@ export class MusicScannerService {
                         `Flagged ${marked.count} track(s) missing (files not found on disk)`
                     );
                 }
-                const closed = await closeStagesForMissingTracks(tx);
+                const closed = await stageRecords.closeForMissingFiles(tx);
                 if (closed > 0) {
                     logger.debug(
                         `[Scanner] Closed ${closed} stage record(s) for files not in the library`

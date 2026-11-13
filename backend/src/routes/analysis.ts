@@ -9,8 +9,6 @@ import { startEnrichmentNow } from "../workers/unifiedEnrichment";
 import * as stageRecords from "../services/stages/stageRecords";
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
-import { reopenable } from "../services/missingFileStages";
-import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 import { featureDetection } from "../services/featureDetection";
 
 /**
@@ -78,49 +76,17 @@ const router = Router();
  */
 router.post("/retry-failed", requireAuth, requireAdmin, async (_req, res) => {
     try {
-        // Reopen analysis records: retryable failures become due now, and spent ones
-        // (retryable = false) reopen with a fresh budget. The first UPDATE must skip
-        // spent rows, or the second would never match them.
-        await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage"
-                SET status = 'pending', "nextRetryAt" = NULL, retryable = true,
-                    "lastErrorCode" = NULL, "lastErrorMessage" = NULL,
-                    "failureClass" = NULL, "startedAt" = NULL, "finishedAt" = NULL,
-                    evidence = jsonb_build_object('reopenedBy', 'retry-failed')
-              WHERE stage = 'analysis' AND status = 'failed' AND retryable = true
-                AND ${reopenable('"TrackStage"')}`,
-        );
-        await prisma.$executeRawUnsafe(
-            `UPDATE "TrackStage"
-                SET status = 'pending', failures = 0, "nextRetryAt" = NULL, retryable = true,
-                    "lastErrorCode" = NULL, "lastErrorMessage" = NULL,
-                    "failureClass" = NULL, "startedAt" = NULL, "finishedAt" = NULL,
-                    evidence = jsonb_build_object('reopenedBy', 'retry-failed')
-              WHERE stage = 'analysis' AND status = 'failed' AND retryable = false
-                AND ${reopenable('"TrackStage"')}`,
-        );
-
-        // Mirror the re-ask on the columns the analyzer claims and the UI
-        // reads, so record and columns agree while the retry runs.
-        const failedTracks = await prisma.track.updateMany({
-            where: { analysisStatus: "failed", missingSince: null },
-            data: {
-                analysisStatus: "pending",
-                analysisError: null,
-                analysisRetryCount: 0,
-                scanStatus: "pending",
-            },
+        // Reopen analysis records with a fresh budget, their Track columns mirrored in the same transaction. A song
+        // whose file is gone, a running record and one a person parked stay as they are.
+        const reopen = (retryable: boolean) => stageRecords.askAgain({
+            stages: ["analysis"],
+            statuses: ["failed"],
+            retryable,
+            reopenableOnly: true,
+            evidence: { reopenedBy: "retry-failed" },
         });
-
-        const permFailedTracks = await prisma.track.updateMany({
-            where: { analysisStatus: "permanently_failed", missingSince: null },
-            data: {
-                analysisStatus: "pending",
-                analysisError: null,
-                analysisRetryCount: 0,
-                scanStatus: "pending",
-            },
-        });
+        const failedTracks = { count: await reopen(true) };
+        const permFailedTracks = { count: await reopen(false) };
 
         // Mark related enrichment failures as resolved
         await prisma.enrichmentFailure.updateMany({
@@ -285,37 +251,26 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             // Force reopens every embedding question without deleting anything: the old
             // embeddings stay readable for the vibe map, and each is overwritten as its
             // new one lands.
-            await prisma.$executeRawUnsafe(
-                `UPDATE "TrackStage"
-                    SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
-                  WHERE stage = 'embedding'
-                    AND ${reopenable('"TrackStage"')}`,
-            );
+            await stageRecords.askAgain({
+                stages: ["embedding"],
+                reopenableOnly: true,
+                clearDecision: true,
+            });
             logger.info(
                 "Re-opened every vibe embedding question for re-generation (existing embeddings stay readable until each is overwritten)",
             );
         } else {
             // Reopen embedding questions for analysed tracks with no embedding row, so the
             // stage queue offers them. Gating reads the analysis record, not the column.
-            await prisma.$executeRawUnsafe(
-                `UPDATE "TrackStage" ts
-                    SET ${ASKED_AGAIN_SQL}, "decidedAt" = NULL, "decidedBy" = NULL
-                   FROM "TrackStage" a, "Track" t
-                  WHERE ts.stage = 'embedding'
-                    AND a."trackId" = ts."trackId" AND a.stage = 'analysis' AND a.status = 'done'
-                    AND t.id = ts."trackId"
-                    AND ts.status <> 'pending'
-                    AND ${reopenable("ts")}
-                    AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")
-                    AND ts.ctid IN (
-                        SELECT ts2.ctid FROM "TrackStage" ts2
-                        JOIN "TrackStage" a2 ON a2."trackId" = ts2."trackId" AND a2.stage = 'analysis' AND a2.status = 'done'
-                        WHERE ts2.stage = 'embedding'
-                          AND ts2.status <> 'pending'
-                          AND ${reopenable("ts2")}
-                          AND NOT EXISTS (SELECT 1 FROM track_embeddings te2 WHERE te2.track_id = ts2."trackId")
-                        LIMIT ${VIBE_START_BATCH})`,
-            );
+            await stageRecords.askAgain({
+                stages: ["embedding"],
+                statuses: ["done", "failed"],
+                reopenableOnly: true,
+                clearDecision: true,
+                afterAnswerOf: "analysis",
+                withoutSoundVector: true,
+                limit: VIBE_START_BATCH,
+            });
         }
 
         // Owed work: analysed library songs whose embedding question is open (Discover songs are never enriched). After a force,

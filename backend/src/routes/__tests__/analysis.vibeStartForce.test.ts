@@ -201,14 +201,14 @@ describe("POST /api/analysis/vibe/start force=true re-decides without deleting",
         expect(res.body.queued).toBe(2);
         expect(res.body.message).not.toBe("All tracks have vibe embeddings");
 
-        // 4. Nothing else was wiped: no status nulling, and the worker was
-        //    told to start.
+        // 4. The song's status column shows its record (pending), and the
+        //    worker was told to start.
         const tracks = await prisma.track.findMany({
             where: { id: { startsWith: PREFIX } },
             select: { vibeAnalysisStatus: true },
         });
         for (const track of tracks) {
-            expect(track.vibeAnalysisStatus).toBe("completed");
+            expect(track.vibeAnalysisStatus).toBe("pending");
         }
         expect(mockTriggerEnrichmentNow).toHaveBeenCalledTimes(1);
     });

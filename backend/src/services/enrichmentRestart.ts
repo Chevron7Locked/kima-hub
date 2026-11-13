@@ -9,8 +9,7 @@ import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
-import { closeStagesForMissingTracks } from "./missingFileStages";
-import { askedAgain } from "./stageReopen";
+import * as stageRecords from "./stages/stageRecords";
 import { RERUN_TIMEOUT_MS } from "./matching/state";
 
 export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "moods" | "similarity";
@@ -55,27 +54,33 @@ async function resetArtists(tx: Tx): Promise<number> {
     `;
 }
 
-function resetRecording(tx: Tx): Promise<unknown> {
+async function resetRecording(tx: Tx): Promise<void> {
     // Identification is asked again where it was answered or is being asked; a
-    // question closed for good or decided by a person stays as it is.
-    return tx.$executeRaw`
-        WITH reopened AS (
-            UPDATE "TrackStage"
-            SET ${askedAgain}, evidence = jsonb_build_object('reason', 'enrichment wiped')
+    // question closed for good or decided by a person stays as it is. The songs'
+    // identification is cleared first, while their records still say which were asked.
+    await tx.$executeRaw`
+        WITH asked AS (
+            SELECT "trackId" FROM "TrackStage"
             WHERE stage = 'recording' AND status IN ('done', 'working') AND "decidedAt" IS NULL
-            RETURNING "trackId"
         ), cleared AS (
-            DELETE FROM "TrackGenre" WHERE "trackId" IN (SELECT "trackId" FROM reopened) RETURNING 1
+            DELETE FROM "TrackGenre" WHERE "trackId" IN (SELECT "trackId" FROM asked) RETURNING 1
         )
         UPDATE "Track" t
         SET "recordingMbid" = NULL,
             isrc = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t.isrc END,
             "isrcSource" = CASE WHEN t."isrcSource" = 'musicbrainz' THEN NULL ELSE t."isrcSource" END
-        FROM reopened r WHERE t.id = r."trackId"
+        FROM asked r WHERE t.id = r."trackId"
     `;
+    await stageRecords.askAgain({
+        stages: ["recording"],
+        statuses: ["done", "working"],
+        undecidedOnly: true,
+        evidence: { reason: "enrichment wiped" },
+    }, tx);
 }
 
 async function resetAnalysis(tx: Tx): Promise<number> {
+    // The readings go here; the song's status columns follow its record, which is asked again just below.
     const tracks = await tx.$executeRaw`
         UPDATE "Track"
         SET bpm = NULL, "bpmConfidence" = NULL, "beatsCount" = NULL, key = NULL, "keyScale" = NULL, "keyStrength" = NULL,
@@ -85,16 +90,11 @@ async function resetAnalysis(tx: Tx): Promise<number> {
             instrumentalness = NULL, acousticness = NULL, speechiness = NULL,
             "danceabilityMl" = NULL,
             "moodTags" = '{}', "essentiaGenres" = '{}',
-            "analysisStatus" = 'pending', "analysisVersion" = NULL, "analysisMode" = NULL,
-            "analyzedAt" = NULL, "analysisError" = NULL, "analysisRetryCount" = 0, "analysisStartedAt" = NULL
+            "analysisVersion" = NULL, "analysisMode" = NULL, "analyzedAt" = NULL
         WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
                           WHERE s."trackId" = "Track".id AND s.stage = 'analysis' AND s."decidedAt" IS NOT NULL)
     `;
-    await tx.$executeRaw`
-        UPDATE "TrackStage"
-        SET ${askedAgain}, evidence = NULL
-        WHERE stage = 'analysis' AND "decidedAt" IS NULL
-    `;
+    await stageRecords.askAgain({ stages: ["analysis"], undecidedOnly: true, evidence: null }, tx);
     return tracks;
 }
 
@@ -104,18 +104,7 @@ async function resetVectors(tx: Tx): Promise<number> {
         WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
                           WHERE s."trackId" = e.track_id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
     `;
-    await tx.$executeRaw`
-        UPDATE "Track"
-        SET "vibeAnalysisStatus" = 'pending', "vibeAnalysisStartedAt" = NULL, "vibeAnalysisError" = NULL,
-            "vibeAnalysisRetryCount" = 0, "vibeAnalysisStatusUpdatedAt" = NULL
-        WHERE NOT EXISTS (SELECT 1 FROM "TrackStage" s
-                          WHERE s."trackId" = "Track".id AND s.stage = 'embedding' AND s."decidedAt" IS NOT NULL)
-    `;
-    await tx.$executeRaw`
-        UPDATE "TrackStage"
-        SET ${askedAgain}, evidence = NULL
-        WHERE stage = 'embedding' AND "decidedAt" IS NULL
-    `;
+    await stageRecords.askAgain({ stages: ["embedding"], undecidedOnly: true, evidence: null }, tx);
     return vectors;
 }
 
@@ -213,7 +202,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             if (clears.moods) await resetMoods(tx);
             if (clears.similarity) await resetSimilarity(tx);
             // A file that is gone cannot be re-run; its records wait for a scan to find it.
-            if (trackWork) await closeStagesForMissingTracks(tx);
+            if (trackWork) await stageRecords.closeForMissingFiles(tx);
             return { artists, tracks, vectors };
         },
         { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },

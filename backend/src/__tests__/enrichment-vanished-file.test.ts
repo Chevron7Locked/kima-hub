@@ -18,7 +18,7 @@ import { runReconcile } from "../services/libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "../services/libraryPrune";
 import { closeEngineConnections } from "./helpers/engineConnections";
 import { redisClient } from "../utils/redis";
-import { SCAN_AGAIN_KEY } from "../services/missingFileStages";
+import { SCAN_AGAIN_KEY } from "../services/stages/stageRecords";
 
 const P = "vanish";
 const id = (n: string) => `${P}_${n}`;

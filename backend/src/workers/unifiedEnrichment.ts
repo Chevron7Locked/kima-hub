@@ -8,7 +8,6 @@
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { prisma } from "../utils/db";
-import { closeStagesForMissingTracks } from "../services/missingFileStages";
 import Redis from "ioredis";
 import { config } from "../config";
 import os from "os";
@@ -40,10 +39,10 @@ import {
     STAGE_CLAIM_LEASE_MS,
     STAGE_REDELIVERY_CAP,
     WAITING_KEY_PREFIX,
+    ASKED_AGAIN_SQL,
     type StageName,
     type FailureOutcome,
 } from "../services/stages/stageRecords";
-import { ASKED_AGAIN_SQL } from "../services/stageReopen";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { featureDetection } from "../services/featureDetection";
 import { libraryScanRunning } from "./scanActivity";
@@ -1010,7 +1009,7 @@ export async function redecideEverything(): Promise<{ reopened: number }> {
         );
     }
 
-    reopened -= await closeStagesForMissingTracks(prisma);
+    reopened -= await stageRecords.closeForMissingFiles();
 
     // Mirror the reopen onto the Track columns the analyzer claims and the UI reads;
     // a column still saying `completed` would let reconcileStaleStageRecords close

@@ -4,18 +4,23 @@
  * A stage record is one question asked of one song (`recording`, `analysis`, `embedding`, `fingerprint`) and what is
  * known of its answer. The record is the truth. `analysis` and `embedding` also show on the song as status columns
  * (`analysisStatus`, `vibeAnalysisStatus` and their error, retry count and start time); every move below writes the
- * record and those columns in one transaction, so they cannot disagree. Analyzer reports go through here today. The
- * scheduler's inline claim and column writes, the retry and vibe-start routes, restart, the scanner, album
- * identification, the failure view and the missing-file closure still write records themselves until they move
- * behind these moves (tickets 30 and 31).
+ * record and those columns in one transaction, so they cannot disagree. Analyzer reports, the retry and vibe-start
+ * routes, restart, the scanner, album identification, the failure view and the missing-file closure go through here.
+ * The scheduler's inline claim and column writes still write records themselves until they move behind these moves
+ * (ticket 30).
  *
  * Moves:
  * - `claim` / `release`: a worker is handed the question for a lease, or hands it back.
  * - `answer` / `absent`: the question is answered (absent: the sources have nothing, which is an answer).
  * - `fail` / `failOutcome`: an attempt failed, was parked by a rate limit, or can never be answered.
  * - `closeDependents`: a question that needs a closed question's output is closed with it.
- * - `askAgain`: questions are opened again from the start (set-based, any number of songs).
+ * - `closeForMissingFiles`: the open questions of songs whose file is gone are closed, so nothing waits on them.
+ * - `askAgain`: questions are opened again from the start (set-based, any number of songs; it can join the caller's
+ *   transaction, so a reset that also clears answers commits as one).
  * - `decide`: a person parks questions as blocked.
+ *
+ * A song's file reported gone by an analyzer is flagged missing inside `fail`: the song is marked, its questions
+ * close in one transaction, and a library scan is asked for.
  *
  * A report that names its claim (the job id) applies only while that claim is the record's open one; a report for a
  * claim that was re-issued is dropped. An answered, closed or blocked record is never reopened by a report.
@@ -24,14 +29,16 @@
  * (the scheduler's `analysisStillRunning`).
  */
 
+import * as fs from "fs/promises";
+import * as path from "path";
 import type { Prisma } from "@prisma/client";
+import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { redisClient } from "../../utils/redis";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../../workers/stageRetry";
-import { ASKED_AGAIN_SQL } from "../stageReopen";
 import { classifyFailure } from "../enrichmentErrorCodeClassifier";
 import { sourcePauseController } from "../sourcePauseController";
-import { flagVanishedTrack, reopenable } from "../missingFileStages";
 import type { Outcome } from "../../utils/outcome";
 
 // ── Vocabulary ───────────────────────────────────────────────────────────
@@ -91,6 +98,17 @@ export const STAGE_REDELIVERY_CAP = 3;
 
 /** Admin notices for sources some question has waited on for 24 h are grouped under this prefix. */
 export const WAITING_KEY_PREFIX = "enrichment-waiting:";
+
+/** A scan was asked for while one ran: the scan that ran started before the flag, so another follows it (workers/index.ts). */
+export const SCAN_AGAIN_KEY = "scan:again-after-vanished-file";
+
+/**
+ * The columns a record takes when its question is asked again from the start: owed now, no failures counted, no
+ * claim, no error kept. Exported only for the scheduler's remaining inline SQL, until it moves behind `askAgain`.
+ */
+export const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retryable = true,
+    "nextRetryAt" = NULL, "startedAt" = NULL, "finishedAt" = NULL,
+    "lastErrorCode" = NULL, "lastErrorMessage" = NULL, "failureClass" = NULL`;
 
 /** What the analyzers and fpcalc say when a track's file is not on disk. */
 const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
@@ -196,6 +214,17 @@ async function syncSharedValenceArousal(tx: Tx, trackId: string): Promise<void> 
 }
 
 const recordId = (trackId: string, stage: string) => `${trackId}__${stage}`;
+
+/**
+ * A record a bulk re-ask may reopen: not running now, not parked by a person, and its file is present. `alias` names
+ * the TrackStage row in the SQL it joins.
+ */
+function reopenable(alias: string): string {
+    return `${alias}.status NOT IN ('working', 'blocked')
+        AND ${alias}."failureClass" IS DISTINCT FROM 'FILE_MISSING'
+        AND NOT EXISTS (SELECT 1 FROM "Track" gone
+                         WHERE gone.id = ${alias}."trackId" AND gone."missingSince" IS NOT NULL)`;
+}
 
 // ── Claim and release ────────────────────────────────────────────────────
 
@@ -395,6 +424,44 @@ export async function absent(
     jobId?: string,
 ): Promise<void> {
     await answer(trackId, stage, source, evidence ?? { reason: "sources have nothing" }, jobId);
+}
+
+
+// ── A file that is gone ──────────────────────────────────────────────────
+
+/**
+ * An analyzer found no file for this track. It is flagged missing now and its stage records close (the reporting one
+ * too), so nothing waits on it, and a library scan is asked for: the scan removes the song (and an album or artist it
+ * empties) when it confirms the file is gone, or clears the flag and re-opens its records when the file is there.
+ * Scans resolve paths the way the song was added and stand down when much of the library vanishes at once.
+ * Gone means "no such file" here, as the scanner counts it; any other error reading it (permissions, I/O) is another
+ * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). Returns whether it
+ * flagged the track.
+ */
+async function flagVanishedTrack(trackId: string, stage: string): Promise<boolean> {
+    const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
+    if (!track?.filePath) return false;
+    const root = config.music.musicPath;
+    if ((await fs.readdir(root).catch(() => [])).length === 0) return false;
+    const file = path.isAbsolute(track.filePath) ? track.filePath : path.join(root, track.filePath);
+    const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+    if (!gone) return false;
+
+    await prisma.$transaction(async (tx) => {
+        await tx.track.updateMany({ where: { id: trackId, missingSince: null }, data: { missingSince: new Date() } });
+        // The reporting record is in flight; as pending it is closed with the rest, its Track column mirrored.
+        await tx.trackStage.updateMany({ where: { trackId, stage }, data: { status: "pending", nextRetryAt: null } });
+        await closeForMissingFiles(tx);
+    });
+    logger.info(`[Enrichment] ${track.filePath}: no file found; flagged missing and a library scan asked for`);
+    const { requestScan } = await import("../../workers/scanRequest");
+    try {
+        // A scan already running started before this flag and cannot confirm it, so the next one is noted for after it.
+        if (!(await requestScan({ source: "vanished-file" })).queued) await redisClient.set(SCAN_AGAIN_KEY, "1");
+    } catch (err) {
+        logger.warn(`[Enrichment] Could not ask for a library scan: ${(err as Error).message}`);
+    }
+    return true;
 }
 
 // ── Failures ─────────────────────────────────────────────────────────────
@@ -734,6 +801,37 @@ export async function closeDependents(): Promise<number> {
     }, BULK_TX);
 }
 
+/**
+ * Closes every open record of a song flagged missing as FILE_MISSING, so `pending` always means work the sweep can do
+ * and the hang watchdog does not fire on files that are gone. Runs over every flagged song, not just new ones; an
+ * answered or parked record stays. A scan that finds the file again asks the records again (`askAgain`). Joins the
+ * caller's transaction when given one. Returns how many records it closed.
+ */
+export async function closeForMissingFiles(within?: Tx): Promise<number> {
+    const run = async (tx: Tx): Promise<number> => {
+        const closed = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
+            `UPDATE "TrackStage" ts
+                SET status = 'failed',
+                    retryable = false,
+                    "nextRetryAt" = NULL,
+                    "startedAt" = COALESCE(ts."startedAt", now()),
+                    "finishedAt" = COALESCE(ts."finishedAt", now()),
+                    "failureClass" = 'FILE_MISSING',
+                    "lastErrorCode" = 'FILE_MISSING',
+                    "lastErrorMessage" = 'file missing from the library; a scan that finds it again re-opens this record',
+                    evidence = jsonb_build_object('reason', 'file missing', 'closure', 'file-missing')
+              WHERE (ts.status = 'pending'
+                     OR (ts.status = 'failed' AND ts.retryable
+                         AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())))
+                AND ts."trackId" IN (SELECT id FROM "Track" WHERE "missingSince" IS NOT NULL)
+            RETURNING ts."trackId", ts.stage`,
+        );
+        await mirrorMoved(tx, closed);
+        return closed.length;
+    };
+    return within ? run(within) : prisma.$transaction(run, BULK_TX);
+}
+
 export type RecordStatus = "pending" | "working" | "done" | "failed" | "blocked";
 
 /** Which records to ask again, from which stages, and why. Every filter narrows; none given means every record of the stages. */
@@ -756,15 +854,24 @@ export interface AskAgainSpec {
     keepIdentifiedRecordings?: boolean;
     /** Only records a bulk re-ask may touch: not running, not parked by a person, file present. */
     reopenableOnly?: boolean;
-    /** The new evidence: what and why, or null for none. */
-    evidence: Record<string, unknown> | null;
+    /** Only songs whose file is not flagged missing (unlike `reopenableOnly`, a parked or running record may still match). */
+    songFileThere?: boolean;
+    /** Only songs whose record for this other stage is answered (an embedding is asked again only after its analysis). */
+    afterAnswerOf?: StageName;
+    /** Only songs with no stored sound vector. */
+    withoutSoundVector?: boolean;
+    /** At most this many records. */
+    limit?: number;
+    /** The new evidence: what and why, or null for none. Omitted, the record keeps the evidence it had. */
+    evidence?: Record<string, unknown> | null;
 }
 
 /**
  * Opens questions again from the start: owed now, no failures counted, no claim, no error kept, the status columns
- * pending. Set-based: one statement however many songs. Returns how many records it reopened.
+ * pending. Set-based: one statement however many songs. Joins the caller's transaction when given one (a reset that
+ * also clears answers commits or rolls back as one). Returns how many records it reopened.
  */
-export async function askAgain(spec: AskAgainSpec): Promise<number> {
+export async function askAgain(spec: AskAgainSpec, within?: Tx): Promise<number> {
     const params: unknown[] = [spec.stages];
     const p = (value: unknown): string => {
         params.push(value);
@@ -783,20 +890,33 @@ export async function askAgain(spec: AskAgainSpec): Promise<number> {
             SELECT 1 FROM "Track" known WHERE known.id = ts."trackId" AND known."recordingMbid" IS NOT NULL))`);
     }
     if (spec.reopenableOnly) where.push(reopenable("ts"));
-    const evidenceSql = spec.evidence === null ? "NULL" : `${p(JSON.stringify(spec.evidence))}::jsonb`;
+    if (spec.songFileThere) {
+        where.push(`NOT EXISTS (SELECT 1 FROM "Track" gone WHERE gone.id = ts."trackId" AND gone."missingSince" IS NOT NULL)`);
+    }
+    if (spec.afterAnswerOf) {
+        where.push(`EXISTS (SELECT 1 FROM "TrackStage" a WHERE a."trackId" = ts."trackId" AND a.stage = ${p(spec.afterAnswerOf)} AND a.status = 'done')`);
+    }
+    if (spec.withoutSoundVector) {
+        where.push(`NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")`);
+    }
+    const evidenceSql = spec.evidence === undefined
+        ? ""
+        : `, evidence = ${spec.evidence === null ? "NULL" : `${p(JSON.stringify(spec.evidence))}::jsonb`}`;
+    const picked = `SELECT ts.id FROM "TrackStage" ts
+              WHERE ${where.join("\n                AND ")}${spec.limit !== undefined ? `\n              LIMIT ${Math.max(0, Math.floor(spec.limit))}` : ""}`;
 
-    return prisma.$transaction(async (tx) => {
+    const run = async (tx: Tx): Promise<number> => {
         const reopened = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
-            `UPDATE "TrackStage" ts
-                SET ${ASKED_AGAIN_SQL}${spec.clearDecision ? `, "decidedAt" = NULL, "decidedBy" = NULL` : ""},
-                    evidence = ${evidenceSql}
-              WHERE ${where.join("\n                AND ")}
-          RETURNING ts."trackId", ts.stage`,
+            `UPDATE "TrackStage" target
+                SET ${ASKED_AGAIN_SQL}${spec.clearDecision ? `, "decidedAt" = NULL, "decidedBy" = NULL` : ""}${evidenceSql}
+              WHERE target.id IN (${picked})
+          RETURNING target."trackId", target.stage`,
             ...params,
         );
         await mirrorMoved(tx, reopened);
         return reopened.length;
-    }, BULK_TX);
+    };
+    return within ? run(within) : prisma.$transaction(run, BULK_TX);
 }
 
 /**

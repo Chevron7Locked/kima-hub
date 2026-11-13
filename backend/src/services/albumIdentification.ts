@@ -19,7 +19,7 @@ import { LIBRARY_LOCATION } from "./libraryFilters";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
 import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
-import { askedAgain } from "./stageReopen";
+import * as stageRecords from "./stages/stageRecords";
 import { NOT_MISSING } from "../utils/libraryEligibility";
 
 /** One song of the album: AcoustID's pick for it, or null when AcoustID has none. */
@@ -368,13 +368,15 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
         }
     }
     // Songs that found no recording before can now be named from the album's tracklist.
-    await prisma.$executeRaw`
-        UPDATE "TrackStage" ts
-           SET ${askedAgain}, evidence = jsonb_build_object('reason', 'album identified')
-          FROM "Track" t
-         WHERE ts."trackId" = t.id AND t."albumId" = ${album.id}
-           AND ts.stage = 'recording' AND ts.status = 'done'
-           AND t."recordingMbid" IS NULL AND ts."decidedAt" IS NULL`;
+    const unnamed = await prisma.track.findMany({ where: { albumId: album.id, recordingMbid: null }, select: { id: true } });
+    await stageRecords.askAgain({
+        stages: ["recording"],
+        trackIds: unnamed.map((t) => t.id),
+        statuses: ["done"],
+        undecidedOnly: true,
+        keepIdentifiedRecordings: true,
+        evidence: { reason: "album identified" },
+    });
     await remember("assigned");
     logger.info(
         `[AlbumIdentity] ${album.artist} — "${album.title}" is MusicBrainz album ${releaseGroupId} ` +

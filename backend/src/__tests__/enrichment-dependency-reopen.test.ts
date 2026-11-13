@@ -6,7 +6,6 @@
 
 import { prisma } from "../utils/db";
 import * as stageRecords from "../services/stages/stageRecords";
-import { closeStagesForMissingTracks } from "../services/missingFileStages";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
 const PREFIX = "depreopen";
@@ -83,7 +82,7 @@ describe("closing a missing file's records", () => {
     it("closes the open records and mirrors them on the Track", async () => {
         await putStage(id("gone"), "analysis", "pending", true);
         await putStage(id("gone"), "embedding", "pending", true);
-        const closed = await closeStagesForMissingTracks(prisma);
+        const closed = await stageRecords.closeForMissingFiles();
         expect(closed).toBe(2);
         expect(await record(id("gone"), "analysis")).toMatchObject({ status: "failed", failureClass: "FILE_MISSING" });
         const t = await prisma.track.findUniqueOrThrow({ where: { id: id("gone") } });
@@ -93,7 +92,7 @@ describe("closing a missing file's records", () => {
 
     it("leaves present files alone", async () => {
         await putStage(id("t"), "analysis", "pending", true);
-        expect(await closeStagesForMissingTracks(prisma)).toBe(0);
+        expect(await stageRecords.closeForMissingFiles()).toBe(0);
         expect(await record(id("t"), "analysis")).toMatchObject({ status: "pending" });
     });
 });

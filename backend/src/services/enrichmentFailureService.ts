@@ -6,6 +6,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { STAGE_RETRY_CAP } from "../workers/stageRetry";
+import * as stageRecords from "./stages/stageRecords";
 
 /** Each song stage's failure type, as the settings screen names it. */
 const ENTITY_TYPE_BY_STAGE: Record<string, "track" | "audio" | "vibe" | "scan"> = {
@@ -335,20 +336,7 @@ class EnrichmentFailureService {
     async resolveFailures(ids: string[]): Promise<number> {
         const { stageIds, ledgerIds } = await this.splitIds(ids);
 
-        let stageCount = 0;
-        if (stageIds.length > 0) {
-            const result = await prisma.trackStage.updateMany({
-                where: { id: { in: stageIds }, status: { in: ["failed", "pending", "working"] } },
-                data: {
-                    status: "blocked",
-                    retryable: false,
-                    nextRetryAt: null,
-                    decidedAt: new Date(),
-                    decidedBy: "resolved-via-failures-api",
-                },
-            });
-            stageCount = result.count;
-        }
+        const stageCount = await stageRecords.decide(stageIds, "resolved-via-failures-api");
 
         let ledgerCount = 0;
         if (ledgerIds.length > 0) {
@@ -365,31 +353,18 @@ class EnrichmentFailureService {
         return stageCount + ledgerCount;
     }
 
-    /** Restores the failures' retries: a stage record's `failures`, a ledger row's `retryCount`. */
+    /**
+     * Restores a ledger row's `retryCount`. A song's record gets its retries back when it is reopened
+     * (`retryStageFailures`); one that stays closed has nothing to restore.
+     */
     async resetRetryCount(ids: string[]): Promise<number> {
-        const { stageIds, ledgerIds } = await this.splitIds(ids);
-
-        let stageCount = 0;
-        if (stageIds.length > 0) {
-            const result = await prisma.trackStage.updateMany({
-                where: { id: { in: stageIds } },
-                data: { failures: 0 },
-            });
-            stageCount = result.count;
-        }
-
-        let ledgerCount = 0;
-        if (ledgerIds.length > 0) {
-            const result = await prisma.enrichmentFailure.updateMany({
-                where: { id: { in: ledgerIds } },
-                data: {
-                    retryCount: 0,
-                },
-            });
-            ledgerCount = result.count;
-        }
-
-        return stageCount + ledgerCount;
+        const { ledgerIds } = await this.splitIds(ids);
+        if (ledgerIds.length === 0) return 0;
+        const result = await prisma.enrichmentFailure.updateMany({
+            where: { id: { in: ledgerIds } },
+            data: { retryCount: 0 },
+        });
+        return result.count;
     }
 
     /**
@@ -399,24 +374,14 @@ class EnrichmentFailureService {
     async retryStageFailures(ids: string[]): Promise<number> {
         const { stageIds } = await this.splitIds(ids);
         if (stageIds.length === 0) return 0;
-        const result = await prisma.trackStage.updateMany({
-            // A file that is gone stays closed until a scan finds it again.
-            where: { id: { in: stageIds }, status: { in: ["failed", "blocked"] }, track: { missingSince: null } },
-            data: {
-                status: "pending",
-                failures: 0,
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                failureClass: null,
-                retryable: true,
-                nextRetryAt: null,
-                startedAt: null,
-                finishedAt: null,
-                decidedAt: null,
-                decidedBy: null,
-            },
+        // A file that is gone stays closed until a scan finds it again.
+        return stageRecords.askAgain({
+            stages: stageRecords.STAGE_ORDER,
+            recordIds: stageIds,
+            statuses: ["failed", "blocked"],
+            songFileThere: true,
+            clearDecision: true,
         });
-        return result.count;
     }
 
     /** Deletes ledger rows resolved more than `olderThanDays` ago. */
