@@ -1874,93 +1874,6 @@ export async function executeArtistsPhase(): Promise<number> {
 }
 
 /**
- * Sync `working` records with the answers the Python consumers write, since they never write the
- * record: an answer newer than the claim closes it. A claim no answer reaches is re-offered when its
- * lease runs out, which counts toward the redelivery cap, as in every stage.
- */
-export async function reconcileStaleStageRecords(stage: StageName): Promise<void> {
-    // Identification and fingerprinting run in this process and report even a timeout; a
-    // claim whose job died is re-offered by the claim lease. Their 30 s per-question limit
-    // is no measure of a dead claim: a job queued behind others waits longer than that.
-    if (stage === "recording" || stage === "fingerprint") return;
-
-    if (stage === "analysis") {
-        const rows = await prisma.$queryRawUnsafe<
-            Array<{ trackId: string; answer: string; error: string | null }>
-        >(
-            `SELECT ts."trackId",
-                    CASE WHEN t."analyzedAt" >= ts."startedAt" THEN 'completed'
-                         ELSE t."analysisStatus" END AS answer,
-                    t."analysisError" AS error
-               FROM "TrackStage" ts
-               JOIN "Track" t ON t.id = ts."trackId"
-              WHERE ts.stage = 'analysis'
-                AND ts.status = 'working'
-                AND ts."startedAt" IS NOT NULL
-                AND (t."analyzedAt" >= ts."startedAt"
-                     OR (t."analysisStatus" IN ('failed', 'permanently_failed')
-                         AND (t."analysisStartedAt" IS NULL
-                              OR t."analysisStartedAt" >= ts."startedAt")))`,
-        );
-        for (const row of rows) {
-            if (row.answer === "completed") {
-                await stageRecords.answer(row.trackId, "analysis", "analyzer", {
-                    syncedFrom: "analysisStatus",
-                    answer: "completed",
-                });
-            } else {
-                await stageRecords.fail(
-                    row.trackId,
-                    "analysis",
-                    "analyzer",
-                    new Error(row.error ?? "analysis failed"),
-                    { syncedFrom: "analysisStatus", answer: row.answer },
-                );
-            }
-        }
-        return;
-    }
-
-    // Only an embedding answer newer than the claim counts: an older row is the previous answer,
-    // kept readable for the vibe map. The claim's dispatch stamps the status columns, so a failure
-    // they record is this claim's.
-    const rows = await prisma.$queryRawUnsafe<
-        Array<{ trackId: string; answer: string; error: string | null }>
-    >(
-        `SELECT ts."trackId",
-                CASE WHEN te.track_id IS NOT NULL THEN 'completed'
-                     ELSE t."vibeAnalysisStatus" END AS answer,
-                t."vibeAnalysisError" AS error
-           FROM "TrackStage" ts
-           JOIN "Track" t ON t.id = ts."trackId"
-           LEFT JOIN track_embeddings te
-                  ON te.track_id = t.id AND te.analyzed_at >= ts."startedAt"
-          WHERE ts.stage = 'embedding'
-            AND ts.status = 'working'
-            AND ts."startedAt" IS NOT NULL
-            AND (te.track_id IS NOT NULL
-                 OR (t."vibeAnalysisStatus" IN ('failed', 'permanently_failed')
-                     AND t."vibeAnalysisStatusUpdatedAt" >= ts."startedAt"))`,
-    );
-    for (const row of rows) {
-        if (row.answer === "completed") {
-            await stageRecords.answer(row.trackId, "embedding", "clap", {
-                syncedFrom: "track_embeddings",
-                answer: "completed",
-            });
-        } else {
-            await stageRecords.fail(
-                row.trackId,
-                "embedding",
-                "clap",
-                new Error(row.error ?? "embedding failed"),
-                { syncedFrom: "vibeAnalysisStatus", answer: row.answer },
-            );
-        }
-    }
-}
-
-/**
  * Claim the owed records for `stage` and queue one job per track: the only
  * producer for each stage's queue.
  */
@@ -1975,7 +1888,7 @@ async function dispatchStageWork(
     // The record owns the answer: sync any record still `working` whose
     // answer has already landed in the columns before deciding what to
     // hand out.
-    await reconcileStaleStageRecords(stage);
+    await stageRecords.settleLandedAnswers(stage);
 
     // Defense in depth: getNextWork already skips a paused source, but a
     // pause opened between the offer and the dispatch must not hand out

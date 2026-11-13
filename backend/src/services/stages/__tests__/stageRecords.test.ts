@@ -126,6 +126,19 @@ async function setColumns(trackId: string, analysis: string, embedding: string):
     await prisma.track.update({ where: { id: trackId }, data: { analysisStatus: analysis, vibeAnalysisStatus: embedding } });
 }
 
+/** Waits until some statement in this database is blocked on a lock, so a test acts only once the move under test waits. */
+async function waitUntilBlocked(): Promise<void> {
+    for (let i = 0; i < 200; i++) {
+        const [row] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+              WHERE NOT l.granted AND a.datname = current_database()`,
+        );
+        if (row.n > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("nothing ever blocked on a lock");
+}
+
 async function wipe(): Promise<void> {
     await prisma.$executeRawUnsafe(`DELETE FROM "TrackStage" WHERE "trackId" LIKE $1`, `${PREFIX}_%`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE $1`, `${PREFIX}_%`);
@@ -154,7 +167,7 @@ describe("claim", () => {
         const id = await seedTrack("c1");
         const claim = await stageRecords.claim(id, "analysis", { jobKey: `track-${id}-analysis` });
 
-        expect(claim).toEqual({ kind: "claimed", attempt: 1, redelivered: 0, jobId: `track-${id}-analysis-1-r0` });
+        expect(claim).toEqual({ kind: "claimed", attempt: 1, redelivered: 0, jobId: `track-${id}-analysis-1-r0`, before: null });
         expect(claimOf((claim as { jobId: string }).jobId)).toEqual({ attempt: 1, redelivered: 0 });
         const row = await record(id, "analysis");
         expect(row?.status).toBe("working");
@@ -245,12 +258,48 @@ describe("release", () => {
         await expectColumnsMatch(id);
     });
 
+    it("hands a retryable failure back as it was: still failed, same attempt, same retry time", async () => {
+        const id = await seedTrack("r3");
+        const retryAt = new Date(Date.now() - 60_000);
+        await put(id, "analysis", "failed", { attempt: 2, failures: 2, retryable: true, nextRetryAt: retryAt });
+        await setColumns(id, "failed", "pending");
+        const claim = await stageRecords.claim(id, "analysis", { jobKey: `track-${id}-analysis` });
+        if (claim.kind !== "claimed") throw new Error("not claimed");
+        expect(claim.attempt).toBe(3);
+
+        await stageRecords.release(id, "analysis", claim);
+
+        const row = await record(id, "analysis");
+        expect(row).toMatchObject({ status: "failed", attempt: 2, retryable: true, failures: 2 });
+        expect(row?.nextRetryAt?.getTime()).toBe(retryAt.getTime());
+        await expectColumnsMatch(id);
+        // It is owed again, and the next claim is the attempt this one would have been.
+        expect(await stageRecords.claim(id, "analysis", { jobKey: "k" })).toMatchObject({ kind: "claimed", attempt: 3 });
+    });
+
+    it("hands back a lease re-offer as the expired claim it was, so it can be re-offered again", async () => {
+        const id = await seedTrack("r4");
+        const expired = new Date(Date.now() - 1000);
+        await put(id, "analysis", "working", { attempt: 1, redelivered: 1, nextRetryAt: expired });
+        await setColumns(id, "processing", "pending");
+        const claim = await stageRecords.claim(id, "analysis", { jobKey: `track-${id}-analysis` });
+        if (claim.kind !== "claimed") throw new Error("not claimed");
+        expect(claim.redelivered).toBe(2);
+
+        await stageRecords.release(id, "analysis", claim);
+
+        const row = await record(id, "analysis");
+        expect(row).toMatchObject({ status: "working", attempt: 1, redelivered: 1 });
+        expect(row?.nextRetryAt?.getTime()).toBe(expired.getTime());
+        await expectColumnsMatch(id);
+    });
+
     it("leaves a record alone when a newer claim holds it", async () => {
         const id = await seedTrack("r2");
         await put(id, "analysis", "working", { attempt: 2, nextRetryAt: new Date(Date.now() + 60_000) });
         await setColumns(id, "processing", "pending");
 
-        await stageRecords.release(id, "analysis", { attempt: 1, redelivered: 0 });
+        await stageRecords.release(id, "analysis", { attempt: 1, redelivered: 0, before: null });
         expect((await record(id, "analysis"))?.status).toBe("working");
         await expectColumnsMatch(id);
     });
@@ -784,13 +833,30 @@ describe("closeForMissingFiles", () => {
         });
         await held;
         const closing = stageRecords.closeForMissingFiles();
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await waitUntilBlocked();
         release();
         await claiming;
 
         expect(await closing).toBe(0);
         expect(await record(gone, "analysis")).toMatchObject({ status: "working", attempt: 1 });
         expect(await record(gone, "embedding")).toMatchObject({ status: "working", failureClass: null });
+    });
+
+    it("closes only the songs it is given, leaving other flagged songs to the sweep", async () => {
+        const first = await seedTrack("m6", { missing: true });
+        const second = await seedTrack("m7", { missing: true });
+        for (const id of [first, second]) {
+            await put(id, "analysis", "pending");
+            await setColumns(id, "pending", "pending");
+        }
+
+        expect(await stageRecords.closeForMissingFiles(undefined, [first])).toBe(1);
+
+        expect((await record(first, "analysis"))?.status).toBe("failed");
+        expect((await record(second, "analysis"))?.status).toBe("pending");
+        await expectColumnsMatch(first);
+        await expectColumnsMatch(second);
+        expect(await stageRecords.closeForMissingFiles()).toBe(1);
     });
 
     it("joins a caller's transaction", async () => {
@@ -807,6 +873,118 @@ describe("closeForMissingFiles", () => {
 
         expect((await record(gone, "analysis"))?.status).toBe("pending");
         await expectColumnsMatch(gone);
+    });
+});
+
+describe("settleLandedAnswers", () => {
+    /** A working record claimed five minutes ago, as the scheduler's claim would leave it. */
+    async function working(trackId: string, stage: "analysis" | "embedding"): Promise<void> {
+        await put(trackId, stage, "working", { attempt: 1, nextRetryAt: new Date(Date.now() + 10 * 60_000) });
+        await prisma.$executeRawUnsafe(
+            `UPDATE "TrackStage" SET "startedAt" = now() - interval '5 minutes' WHERE "trackId" = $1 AND stage = $2`,
+            trackId,
+            stage,
+        );
+        await setColumns(trackId, stage === "analysis" ? "processing" : "pending", stage === "embedding" ? "processing" : "pending");
+    }
+
+    it("answers a working analysis whose analyzer saved after the claim, columns and blended mood included", async () => {
+        const id = await seedTrack("s1");
+        await working(id, "analysis");
+        await prisma.track.update({
+            where: { id },
+            data: { analyzedAt: new Date(Date.now() - 60_000), deamValence: 0.4, deamArousal: 0.4 },
+        });
+
+        expect(await stageRecords.settleLandedAnswers("analysis")).toBe(1);
+
+        expect(await record(id, "analysis")).toMatchObject({ status: "done", source: "analyzer", nextRetryAt: null });
+        const track = await prisma.track.findUniqueOrThrow({ where: { id } });
+        expect(track.valence).toBeCloseTo(0.4, 3);
+        await expectColumnsMatch(id);
+    });
+
+    it("answers a working embedding whose vector was saved after the claim, and leaves an older vector alone", async () => {
+        const fresh = await seedTrack("s2");
+        const older = await seedTrack("s3");
+        await working(fresh, "embedding");
+        await working(older, "embedding");
+        const vector = `[${new Array(512).fill(0.1).join(",")}]`;
+        for (const [id, age] of [[fresh, "1 minute"], [older, "1 hour"]] as const) {
+            await prisma.$executeRawUnsafe(
+                `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at)
+                 VALUES ($1, $2::vector, 'test', now() - $3::interval)`,
+                id, vector, age,
+            );
+        }
+
+        expect(await stageRecords.settleLandedAnswers("embedding")).toBe(1);
+
+        expect(await record(fresh, "embedding")).toMatchObject({ status: "done", source: "clap" });
+        expect((await record(older, "embedding"))?.status).toBe("working");
+        await expectColumnsMatch(fresh);
+        await expectColumnsMatch(older);
+        await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id LIKE $1`, `${PREFIX}_%`);
+    });
+
+    it("leaves a working record with no answer yet, and a record that is not working", async () => {
+        const waiting = await seedTrack("s4");
+        await working(waiting, "analysis");
+        await prisma.track.update({ where: { id: waiting }, data: { analyzedAt: new Date(Date.now() - 3600_000) } });
+        const failed = await seedTrack("s5");
+        await put(failed, "analysis", "failed", { attempt: 1, failures: 1 });
+        await prisma.track.update({ where: { id: failed }, data: { analyzedAt: new Date() } });
+
+        expect(await stageRecords.settleLandedAnswers("analysis")).toBe(0);
+        expect((await record(waiting, "analysis"))?.status).toBe("working");
+        expect((await record(failed, "analysis"))?.status).toBe("failed");
+    });
+
+    it("asks again the embedding that was closed only because this analysis had failed", async () => {
+        const id = await seedTrack("s6");
+        await working(id, "analysis");
+        await put(id, "embedding", "failed", { retryable: false, failureClass: "DEPENDENCY_CLOSED" });
+        await setColumns(id, "processing", "permanently_failed");
+        await prisma.track.update({ where: { id }, data: { analyzedAt: new Date(Date.now() - 60_000) } });
+
+        await stageRecords.settleLandedAnswers("analysis");
+
+        expect(await record(id, "embedding")).toMatchObject({ status: "pending", retryable: true });
+        await expectColumnsMatch(id);
+    });
+
+    it("has nothing to settle for the stages that report in this process", async () => {
+        expect(await stageRecords.settleLandedAnswers("recording")).toBe(0);
+        expect(await stageRecords.settleLandedAnswers("fingerprint")).toBe(0);
+    });
+
+    it("leaves a record that was claimed again between the read and the settle working", async () => {
+        const id = await seedTrack("s7");
+        await working(id, "analysis");
+        await prisma.track.update({ where: { id }, data: { analyzedAt: new Date(Date.now() - 60_000) } });
+
+        // The scheduler re-claims the record in a transaction still open when the settle starts.
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => { finish = resolve; });
+        let locked!: () => void;
+        const held = new Promise<void>((resolve) => { locked = resolve; });
+        const reclaiming = prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "TrackStage" SET attempt = attempt + 1, "startedAt" = now() WHERE "trackId" = $1 AND stage = 'analysis'`,
+                id,
+            );
+            locked();
+            await gate;
+        });
+        await held;
+        const settling = stageRecords.settleLandedAnswers("analysis");
+        await waitUntilBlocked();
+        finish();
+        await reclaiming;
+
+        expect(await settling).toBe(0);
+        expect(await record(id, "analysis")).toMatchObject({ status: "working", attempt: 2 });
+        await expectColumnsMatch(id);
     });
 });
 

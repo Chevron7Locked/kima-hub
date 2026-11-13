@@ -54,6 +54,19 @@ async function song(name: string, filePath: string): Promise<string> {
     return id(name);
 }
 
+/** Waits until some statement in this database is blocked on a lock, so a test acts only once the move under test waits. */
+async function waitUntilBlocked(): Promise<void> {
+    for (let i = 0; i < 200; i++) {
+        const [row] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+            `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+              WHERE NOT l.granted AND a.datname = current_database()`,
+        );
+        if (row.n > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("nothing ever blocked on a lock");
+}
+
 const job = (trackId: string, attempt = 1) => `track-${trackId}-embedding-${attempt}-r0`;
 const notFound = (filePath: string) => new Error(`File not found: ${filePath}`);
 const stageOf = (trackId: string) => prisma.trackStage.findUnique({ where: { trackId_stage: { trackId, stage: "embedding" } } });
@@ -100,7 +113,7 @@ it("flags a song whose file is gone, closes its records and asks for a scan, whi
 it("treats MusiCNN's report the same way", async () => {
     const gone = await song("gone2", `${P}/gone2.flac`);
     await prisma.trackStage.create({ data: { trackId: gone, stage: "analysis", status: "working", attempt: 1, retryable: true } });
-    await stageRecords.fail(gone, "analysis", "analyzer", new Error("File not found"));
+    await stageRecords.fail(gone, "analysis", "analyzer", new Error("File not found"), undefined, `track-${gone}-analysis-1-r0`);
     expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).not.toBeNull();
     const analysis = await prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: gone, stage: "analysis" } } });
     expect(analysis).toMatchObject({ status: "failed", retryable: false, failureClass: "FILE_MISSING" });
@@ -176,6 +189,103 @@ describe("a report whose claim changes while the file is being checked", () => {
         expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
         expect((await stageOf(gone))?.status).toBe("done");
         expect(mockRequestScan).not.toHaveBeenCalled();
+    });
+});
+
+it("flags nothing for a file-missing report that names no claim, and records it as an ordinary failure", async () => {
+    const gone = await song("noclaim", `${P}/noclaim.flac`);
+    await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/noclaim.flac`));
+    expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
+    expect((await stageOf(gone))?.failureClass).not.toBe("FILE_MISSING");
+    expect(mockRequestScan).not.toHaveBeenCalled();
+});
+
+describe("flagging a song", () => {
+    /** A second flagged song whose open record the sweep, not this flag, is there to close. */
+    async function otherFlaggedSong(): Promise<string> {
+        const other = await song("other", `${P}/other.flac`);
+        await prisma.trackStage.update({
+            where: { trackId_stage: { trackId: other, stage: "embedding" } },
+            data: { status: "pending", nextRetryAt: null },
+        });
+        await prisma.track.update({ where: { id: other }, data: { missingSince: new Date() } });
+        return other;
+    }
+
+    it("closes only the flagged song's records; another flagged song waits for the sweep", async () => {
+        const other = await otherFlaggedSong();
+        const gone = await song("scoped", `${P}/scoped.flac`);
+
+        await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/scoped.flac`), undefined, job(gone));
+
+        expect((await stageOf(gone))?.failureClass).toBe("FILE_MISSING");
+        expect((await stageOf(other))?.status).toBe("pending");
+        expect(await stageRecords.closeForMissingFiles()).toBe(1);
+        expect((await stageOf(other))?.failureClass).toBe("FILE_MISSING");
+    });
+
+    it("takes the song's records before its Track row, as a claim does, so the two cannot deadlock", async () => {
+        const gone = await song("order", `${P}/order.flac`);
+        await prisma.trackStage.create({ data: { trackId: gone, stage: "analysis", status: "pending", retryable: true } });
+
+        // Another transaction holds the song's analysis record; the flag must wait there, not holding the Track row.
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let held!: () => void;
+        const ready = new Promise<void>((resolve) => { held = resolve; });
+        const holder = prisma.$transaction(async (tx) => {
+            await tx.$queryRawUnsafe(`SELECT 1 FROM "TrackStage" WHERE "trackId" = $1 AND stage = 'analysis' FOR UPDATE`, gone);
+            held();
+            await gate;
+        });
+        await ready;
+        const reporting = stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/order.flac`), undefined, job(gone));
+        try {
+            await waitUntilBlocked();
+            // NOWAIT fails at once if the flag already holds the Track row.
+            await expect(
+                prisma.$queryRawUnsafe(`SELECT 1 FROM "Track" WHERE id = $1 FOR UPDATE NOWAIT`, gone),
+            ).resolves.toBeDefined();
+        } finally {
+            release();
+            await holder;
+        }
+        await reporting;
+        expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).not.toBeNull();
+        expect((await stageOf(gone))?.failureClass).toBe("FILE_MISSING");
+    });
+
+    describe("when Postgres picks the flag as a deadlock victim", () => {
+        const deadlock = () => Object.assign(new Error("deadlock detected"), { code: "P2010", meta: { code: "40P01" } });
+        afterEach(() => jest.restoreAllMocks());
+
+        it("tries the flag once more", async () => {
+            const gone = await song("dead1", `${P}/dead1.flac`);
+            jest.spyOn(prisma, "$transaction").mockRejectedValueOnce(deadlock() as never);
+
+            await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/dead1.flac`), undefined, job(gone));
+
+            expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).not.toBeNull();
+            expect((await stageOf(gone))?.failureClass).toBe("FILE_MISSING");
+        });
+
+        it("gives up after that one retry, and a failure that is not a deadlock is not retried", async () => {
+            const gone = await song("dead2", `${P}/dead2.flac`);
+            const spy = jest.spyOn(prisma, "$transaction")
+                .mockRejectedValueOnce(deadlock() as never)
+                .mockRejectedValueOnce(deadlock() as never);
+            await expect(
+                stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/dead2.flac`), undefined, job(gone)),
+            ).rejects.toThrow("deadlock detected");
+            expect(spy).toHaveBeenCalledTimes(2);
+
+            spy.mockReset();
+            spy.mockRejectedValueOnce(new Error("connection reset") as never);
+            await expect(
+                stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/dead2.flac`), undefined, job(gone)),
+            ).rejects.toThrow("connection reset");
+            expect(spy).toHaveBeenCalledTimes(1);
+        });
     });
 });
 

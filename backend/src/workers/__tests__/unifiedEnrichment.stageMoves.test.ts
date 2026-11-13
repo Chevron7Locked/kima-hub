@@ -25,7 +25,6 @@ import {
     executeAudioPhase,
     executeFingerprintPhase,
     executeVibePhase,
-    reconcileStaleStageRecords,
     redecideEverything,
     waitForFingerprintWork,
 } from "../unifiedEnrichment";
@@ -169,28 +168,10 @@ describe("reading the analyzers' answers back", () => {
         await put("embedding", "failed", { failures: 1, lastErrorCode: "REQUEST_FAILED", lastErrorMessage: "earlier attempt" });
         await stageRecords.claim(T, "embedding", { jobKey: "k" });
 
-        await reconcileStaleStageRecords("embedding");
+        await stageRecords.settleLandedAnswers("embedding");
 
         expect((await record("embedding")).status).toBe("working");
         expect((await columns()).vibeAnalysisStatus).toBe("processing");
-    });
-
-    it("closes a working embedding whose analyzer wrote a failure after the claim", async () => {
-        await seedTrack({ analysisStatus: "completed" });
-        await put("analysis", "done");
-        await put("embedding", "pending");
-        await stageRecords.claim(T, "embedding", { jobKey: "k" });
-        await prisma.track.update({
-            where: { id: T },
-            data: { vibeAnalysisStatus: "permanently_failed", vibeAnalysisError: "decode failed", vibeAnalysisStatusUpdatedAt: new Date(Date.now() + 1000) },
-        });
-
-        await reconcileStaleStageRecords("embedding");
-
-        const row = await record("embedding");
-        expect(row.status).toBe("failed");
-        expect(row.failures).toBe(1);
-        expect(row.lastErrorMessage).toBe("decode failed");
     });
 });
 

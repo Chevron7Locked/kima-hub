@@ -6,7 +6,6 @@
  */
 
 import { prisma } from "../utils/db";
-import { reconcileStaleStageRecords } from "../workers/unifiedEnrichment";
 import * as stageRecords from "../services/stages/stageRecords";
 import { closeEngineConnections } from "./helpers/engineConnections";
 
@@ -66,7 +65,7 @@ describe("a sound-vector claim with no answer yet", () => {
             id("t"),
         );
 
-        await reconcileStaleStageRecords("embedding");
+        await stageRecords.settleLandedAnswers("embedding");
 
         const rows = await prisma.$queryRawUnsafe<any[]>(
             `SELECT status, attempt, redelivered, "nextRetryAt" <= now() AS due FROM "TrackStage" WHERE "trackId" = $1 AND stage = 'embedding'`,

@@ -9,8 +9,11 @@
  * closure all go through here.
  *
  * Moves:
- * - `claim` / `release`: a worker is handed the question for a lease, or hands it back.
+ * - `claim` / `release`: a worker is handed the question for a lease, or hands it back. A claim that was never
+ *   delivered leaves the record exactly as it was (status, attempt, redelivery count, claim time, retry time).
  * - `answer` / `absent`: the question is answered (absent: the sources have nothing, which is an answer).
+ * - `settleLandedAnswers`: working records whose analyzer saved its answer after the claim are answered, in one
+ *   statement guarded on the claim it read, for the analyzers that never write the record themselves.
  * - `fail` / `failOutcome`: an attempt failed, was parked by a rate limit, or can never be answered.
  * - `closeDependents`: a question that needs a closed question's output is closed with it.
  * - `closeForMissingFiles`: the open questions of songs whose file is gone are closed, so nothing waits on them.
@@ -18,8 +21,10 @@
  *   transaction, so a reset that also clears answers commits as one).
  * - `decide`: a person parks questions as blocked.
  *
- * A song's file reported gone by an analyzer is flagged missing inside `fail`: the song is marked, its questions
- * close in one transaction, and a library scan is asked for.
+ * A song's file reported gone by an analyzer is flagged missing inside `fail`, and only by a report that names its
+ * claim: the song is marked, its questions close in one transaction (the song's own, not the library's), and a
+ * library scan is asked for. The flag takes the song's records, then its Track row, the order every move uses; a
+ * deadlock Postgres still picks it for is retried once.
  *
  * A report that names its claim (the job id) applies only while that claim is the record's open one; a report for a
  * claim that was re-issued is dropped. An answered, closed or blocked record is never reopened by a report.
@@ -103,9 +108,9 @@ export const SCAN_AGAIN_KEY = "scan:again-after-vanished-file";
 
 /**
  * The columns a record takes when its question is asked again from the start: owed now, no failures counted, no
- * claim, no error kept. Exported only for the scheduler's remaining inline SQL, until it moves behind `askAgain`.
+ * claim, no error kept. Private to this module: `askAgain` and the answer's reopening of a dependent use it.
  */
-export const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retryable = true,
+const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retryable = true,
     "nextRetryAt" = NULL, "startedAt" = NULL, "finishedAt" = NULL,
     "lastErrorCode" = NULL, "lastErrorMessage" = NULL, "failureClass" = NULL`;
 
@@ -198,7 +203,7 @@ async function mirrorMoved(tx: Tx, moved: Array<{ trackId: string; stage: string
 }
 
 /** The shared valence/arousal pair from both analyzers' raw answers: the blend when both have answered, otherwise whichever has. */
-async function syncSharedValenceArousal(tx: Tx, trackId: string): Promise<void> {
+async function syncSharedValenceArousal(tx: Tx, trackIds: string[]): Promise<void> {
     await tx.$executeRawUnsafe(
         `UPDATE "Track"
             SET valence = COALESCE(ROUND((0.7 * "deamValence" + 0.3 * "clapValenceRaw")::numeric, 3)::float8,
@@ -207,8 +212,8 @@ async function syncSharedValenceArousal(tx: Tx, trackId: string): Promise<void> 
                                    "deamArousal", "clapArousalRaw"),
                 -- Raw SQL does not move updatedAt by itself; the mood step reads it to see that a reading changed.
                 "updatedAt" = now()
-          WHERE id = $1`,
-        trackId,
+          WHERE id = ANY($1::text[])`,
+        trackIds,
     );
 }
 
@@ -227,8 +232,24 @@ function reopenable(alias: string): string {
 
 // ── Claim and release ────────────────────────────────────────────────────
 
+/** What a record held before a claim took it: `release` puts exactly this back. */
+export interface PriorRecord {
+    status: string;
+    attempt: number;
+    redelivered: number;
+    startedAt: Date | null;
+    nextRetryAt: Date | null;
+}
+
 export type ClaimResult =
-    | { kind: "claimed"; attempt: number; redelivered: number; jobId: string }
+    | {
+          kind: "claimed";
+          attempt: number;
+          redelivered: number;
+          jobId: string;
+          /** The record as it was before this claim; null when the claim created it. */
+          before: PriorRecord | null;
+      }
     /** Answered, closed, parked by a person, or held by a live claim: nothing to hand out. */
     | { kind: "not-owed" }
     /** The claim's lease ran out for the last time: the record is closed so a poison file stops looping. */
@@ -245,6 +266,13 @@ export async function claim(
     opts: { jobKey: string; source?: string },
 ): Promise<ClaimResult> {
     return prisma.$transaction(async (tx) => {
+        // Read under the row's lock, so what `release` restores is what the claim below replaces.
+        const [before] = await tx.$queryRawUnsafe<PriorRecord[]>(
+            `SELECT status, attempt, redelivered, "startedAt", "nextRetryAt" FROM "TrackStage"
+              WHERE "trackId" = $1 AND stage = $2 FOR UPDATE`,
+            trackId,
+            stage,
+        );
         const claimed = await tx.$queryRawUnsafe<Array<{ attempt: number; redelivered: number }>>(
             `INSERT INTO "TrackStage"
                 (id, "trackId", stage, status, source, attempt, retryable, evidence,
@@ -279,7 +307,13 @@ export async function claim(
             await mirror(tx, stage, [trackId]);
             const { attempt, redelivered } = claimed[0];
             // Each redelivery gets its own job id so a re-offer never reuses the dead attempt's queue key.
-            return { kind: "claimed" as const, attempt, redelivered, jobId: `${opts.jobKey}-${attempt}-r${redelivered}` };
+            return {
+                kind: "claimed" as const,
+                attempt,
+                redelivered,
+                jobId: `${opts.jobKey}-${attempt}-r${redelivered}`,
+                before: before ?? null,
+            };
         }
         const closed = await tx.$queryRawUnsafe<Array<{ id: string }>>(
             `UPDATE "TrackStage"
@@ -307,24 +341,38 @@ export async function claim(
 }
 
 /**
- * Hands a claim back because the work never went out: the record is owed again, not parked in `working` until the
- * lease. A claim that was already re-issued is left alone.
+ * Hands a claim back because the work never went out: the record goes back exactly as the claim found it, so a
+ * retryable failure is still that failure (same attempt, same retry time) and a lease re-offer is still the expired
+ * claim it was. A claim that created the record leaves it pending with no attempt used. A claim that was already
+ * re-issued is left alone.
  */
 export async function release(
     trackId: string,
     stage: StageName,
-    held: { attempt: number; redelivered: number },
+    held: Pick<Extract<ClaimResult, { kind: "claimed" }>, "attempt" | "redelivered" | "before">,
 ): Promise<void> {
+    const back: PriorRecord = held.before ?? {
+        status: "pending",
+        attempt: 0,
+        redelivered: 0,
+        startedAt: null,
+        nextRetryAt: null,
+    };
     await prisma.$transaction(async (tx) => {
         const released = await tx.$executeRawUnsafe(
             `UPDATE "TrackStage"
-                SET status = 'pending', "startedAt" = NULL, "nextRetryAt" = NULL
+                SET status = $5, attempt = $6, redelivered = $7, "startedAt" = $8, "nextRetryAt" = $9
               WHERE "trackId" = $1 AND stage = $2 AND status = 'working'
                 AND attempt = $3 AND redelivered = $4`,
             trackId,
             stage,
             held.attempt,
             held.redelivered,
+            back.status,
+            back.attempt,
+            back.redelivered,
+            back.startedAt,
+            back.nextRetryAt,
         );
         if (released > 0) await mirror(tx, stage, [trackId]);
     });
@@ -390,28 +438,79 @@ export async function answer(
                   JSON.stringify(evidence ?? { reason: "answered" }),
               );
         if (written === 0) return false;
-
-        await mirror(tx, stage, [trackId]);
-        // A dependent closed because this stage had failed for good can be answered now.
-        const dependents = STAGE_ORDER.filter((s) => PREREQUISITE_STAGE[s]?.stage === stage);
-        if (dependents.length > 0) {
-            const reopened = await tx.$queryRawUnsafe<Array<{ stage: string }>>(
-                `UPDATE "TrackStage"
-                    SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'dependency answered')
-                  WHERE "trackId" = $1 AND stage = ANY($2::text[])
-                    AND status = 'failed' AND "failureClass" = 'DEPENDENCY_CLOSED'
-                  RETURNING stage`,
-                trackId,
-                dependents,
-            );
-            await mirrorMoved(tx, reopened.map((r) => ({ trackId, stage: r.stage })));
-        }
-        if (stage === "embedding" || stage === "analysis") await syncSharedValenceArousal(tx, trackId);
+        await afterAnswered(tx, stage, [trackId]);
         return true;
     });
     if (!settled) {
         logger.debug(`[Enrichment] ${stage}: ignored a success for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
     }
+}
+
+/**
+ * What an answer sets in motion, inside the answering transaction: a dependent closed because this stage had failed
+ * for good (`DEPENDENCY_CLOSED`) is asked again, the status columns follow, and a sound answer re-blends the songs'
+ * valence and arousal. The other records are taken before the Track rows, the order every move uses.
+ */
+async function afterAnswered(tx: Tx, stage: StageName, trackIds: string[]): Promise<void> {
+    const dependents = STAGE_ORDER.filter((s) => PREREQUISITE_STAGE[s]?.stage === stage);
+    if (dependents.length > 0) {
+        const reopened = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
+            `UPDATE "TrackStage"
+                SET ${ASKED_AGAIN_SQL}, evidence = jsonb_build_object('reason', 'dependency answered')
+              WHERE "trackId" = ANY($1::text[]) AND stage = ANY($2::text[])
+                AND status = 'failed' AND "failureClass" = 'DEPENDENCY_CLOSED'
+              RETURNING "trackId", stage`,
+            trackIds,
+            dependents,
+        );
+        await mirrorMoved(tx, reopened);
+    }
+    await mirror(tx, stage, trackIds);
+    if (stage === "embedding" || stage === "analysis") await syncSharedValenceArousal(tx, trackIds);
+}
+
+/**
+ * Answers the `working` records whose analyzer saved its answer after the claim. The Python analyzers never write the
+ * record, so a missed completion event leaves it `working` until the lease runs out: an analysis counts as answered
+ * when the song's `analyzedAt` is not before the claim, an embedding when its sound vector is. An older vector is the
+ * previous answer, kept readable for the vibe map, and answers nothing. One statement, guarded on the record still
+ * being `working` and on the claim time it read: a record claimed again meanwhile (the settle waits for that claim's
+ * lock and then re-reads the row) stays working. `recording` and `fingerprint` report in this process, so they have
+ * nothing to settle. Returns how many records it answered.
+ */
+export async function settleLandedAnswers(stage: StageName): Promise<number> {
+    if (stage !== "analysis" && stage !== "embedding") return 0;
+    const landed =
+        stage === "analysis"
+            ? `t."analyzedAt" >= ts."startedAt"`
+            : `EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId" AND te.analyzed_at >= ts."startedAt")`;
+    const syncedFrom = stage === "analysis" ? "Track.analyzedAt" : "track_embeddings";
+    return prisma.$transaction(async (tx) => {
+        const answered = await tx.$queryRawUnsafe<Array<{ trackId: string }>>(
+            `UPDATE "TrackStage" ts
+                SET status = 'done',
+                    source = $2,
+                    "lastErrorCode" = NULL,
+                    "lastErrorMessage" = NULL,
+                    "failureClass" = NULL,
+                    retryable = true,
+                    "nextRetryAt" = NULL,
+                    evidence = jsonb_build_object('syncedFrom', $3::text, 'answer', 'completed'),
+                    "finishedAt" = now()
+               FROM "Track" t
+              WHERE t.id = ts."trackId"
+                AND ts.stage = $1
+                AND ts.status = 'working'
+                AND ts."startedAt" IS NOT NULL
+                AND ${landed}
+            RETURNING ts."trackId"`,
+            stage,
+            STAGE_SOURCE[stage],
+            syncedFrom,
+        );
+        if (answered.length > 0) await afterAnswered(tx, stage, answered.map((r) => r.trackId));
+        return answered.length;
+    }, BULK_TX);
 }
 
 /** Records "the sources have nothing" as a `done` answer with evidence of what was asked, so a correct "no" does not burn the retry ladder. */
@@ -428,6 +527,12 @@ export async function absent(
 
 // ── A file that is gone ──────────────────────────────────────────────────
 
+/** Postgres picked this transaction as a deadlock victim (SQLSTATE 40P01, through Prisma's raw-query or transaction error). */
+function isDeadlock(err: unknown): boolean {
+    const e = err as { code?: string; meta?: { code?: string }; message?: string } | null;
+    return e?.meta?.code === "40P01" || e?.code === "40P01" || e?.code === "P2034" || /deadlock detected/i.test(e?.message ?? "");
+}
+
 /**
  * An analyzer found no file for this track. It is flagged missing now and its stage records close (the reporting one
  * too), so nothing waits on it, and a library scan is asked for: the scan removes the song (and an album or artist it
@@ -441,6 +546,7 @@ export async function absent(
 async function flagVanishedTrack(
     trackId: string,
     stage: StageName,
+    held: { attempt: number; redelivered: number },
     jobId: string | undefined,
 ): Promise<"flagged" | "file-present" | "stale"> {
     const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
@@ -451,22 +557,31 @@ async function flagVanishedTrack(
     const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
     if (!gone) return "file-present";
 
-    const flagged = await prisma.$transaction(async (tx) => {
-        // The claim is checked again here, under the record's lock: the reads above took time, and a report whose
-        // claim was re-issued or answered meanwhile must not flag the song.
-        const [current] = await tx.$queryRawUnsafe<OpenRecord[]>(
-            `SELECT attempt, failures, retryable, status, redelivered, evidence FROM "TrackStage"
-              WHERE "trackId" = $1 AND stage = $2 FOR UPDATE`,
+    const flag = async (tx: Tx): Promise<boolean> => {
+        // All of the song's records first, in one order, then its Track row: the order `claim` and every other move
+        // takes them, so the flag and a claim on any of the song's questions cannot wait on each other. The claim is
+        // checked here, under the lock: the reads above took time, and a report whose claim was re-issued or answered
+        // meanwhile must not flag the song.
+        const records = await tx.$queryRawUnsafe<Array<OpenRecord & { stage: string }>>(
+            `SELECT stage, attempt, failures, retryable, status, redelivered, evidence FROM "TrackStage"
+              WHERE "trackId" = $1 ORDER BY stage FOR UPDATE`,
             trackId,
-            stage,
         );
-        if (reportIsStale(current, claimOf(jobId))) return false;
+        if (reportIsStale(records.find((r) => r.stage === stage), held)) return false;
         await tx.track.updateMany({ where: { id: trackId, missingSince: null }, data: { missingSince: new Date() } });
         // The reporting record is in flight; as pending it is closed with the rest, its Track column mirrored.
         await tx.trackStage.updateMany({ where: { trackId, stage }, data: { status: "pending", nextRetryAt: null } });
-        await closeForMissingFiles(tx);
+        await closeForMissingFiles(tx, [trackId]);
         return true;
-    });
+    };
+    let flagged: boolean;
+    try {
+        flagged = await prisma.$transaction(flag);
+    } catch (err) {
+        if (!isDeadlock(err)) throw err;
+        logger.warn(`[Enrichment] ${stage}: ${trackId} flag lost a deadlock; trying once more`);
+        flagged = await prisma.$transaction(flag);
+    }
     if (!flagged) {
         logger.debug(`[Enrichment] ${stage}: ignored a file-missing report for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
         return "stale";
@@ -605,8 +720,10 @@ export async function fail(
     const open = await failureMaySettle(trackId, stage, jobId);
     if (!open) return;
     // A file an analyzer could not find: the song is flagged missing and a scan asked for, which removes it once it
-    // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure.
-    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage, jobId)) !== "file-present") return;
+    // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure, and so is
+    // a report that names no claim, since only a claim says whose attempt found the file gone.
+    const held = claimOf(jobId);
+    if (held && stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage, held, jobId)) !== "file-present") return;
     const { current, writeGuard } = open;
 
     if (await sourcePauseController.handleRateLimit(source, err, evidence)) {
@@ -831,9 +948,10 @@ export async function closeDependents(): Promise<number> {
  * Closes every open record of a song flagged missing as FILE_MISSING, so `pending` always means work the sweep can do
  * and the hang watchdog does not fire on files that are gone. Runs over every flagged song, not just new ones; an
  * answered or parked record stays. A scan that finds the file again asks the records again (`askAgain`). Joins the
- * caller's transaction when given one. Returns how many records it closed.
+ * caller's transaction when given one. With `trackIds`, only those songs' records are closed (the flag on one song
+ * leaves the rest to the sweep, so it does not lock the library). Returns how many records it closed.
  */
-export async function closeForMissingFiles(within?: Tx): Promise<number> {
+export async function closeForMissingFiles(within?: Tx, trackIds?: string[]): Promise<number> {
     const run = async (tx: Tx): Promise<number> => {
         const closed = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
             `UPDATE "TrackStage" ts
@@ -850,7 +968,9 @@ export async function closeForMissingFiles(within?: Tx): Promise<number> {
                      OR (ts.status = 'failed' AND ts.retryable
                          AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())))
                 AND ts."trackId" IN (SELECT id FROM "Track" WHERE "missingSince" IS NOT NULL)
+                AND ($1::text[] IS NULL OR ts."trackId" = ANY($1::text[]))
             RETURNING ts."trackId", ts.stage`,
+            trackIds ?? null,
         );
         await mirrorMoved(tx, closed);
         return closed.length;
