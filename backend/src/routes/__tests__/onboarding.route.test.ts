@@ -265,6 +265,8 @@ describe("a saved step reaches whatever holds the setting", () => {
 
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ enabled: false }).expect(200);
         expect(await enabled()).toBe(false);
+
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { soulseekEnabled: true } });
     });
 
     it("Soulseek turned off clears the account", async () => {
