@@ -19,6 +19,8 @@ export type AlbumRow = {
     coverUrl: string | null;
     userCoverUrl?: string | null;
     artistId: string;
+    /** When the album first arrived: AlbumID3 requires it as `created`. */
+    createdAt: Date;
     songCount?: number;
     duration?: number;
     genre?: string | null;
@@ -58,6 +60,7 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
         "@_duration": album.duration !== undefined ? Math.round(album.duration) : 0,
         "@_year": album.year || undefined,
         "@_genre": album.genre || undefined,
+        "@_created": album.createdAt.toISOString(),
     };
 }
 

@@ -291,6 +291,7 @@ type AlbumWithArtist = {
     coverUrl: string | null;
     userCoverUrl: string | null;
     artistId: string;
+    createdAt: Date;
     artist: {
         id: string;
         name: string;
@@ -307,7 +308,7 @@ type AlbumWithArtist = {
 // The four raw album-list queries read the same columns in the same row
 // shape; only the joins, filter and ordering differ.
 const ALBUM_LIST_SELECT = Prisma.sql`
-    SELECT a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
+    SELECT a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
            json_build_object('id', ar.id, 'name', ar.name, 'displayName', ar."displayName",
                'genres', ar.genres, 'userGenres', ar."userGenres") as artist,
            (SELECT COUNT(*)::int FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "songCount",
@@ -438,7 +439,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
-                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
+                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY MAX(p."playedAt") DESC
                 LIMIT ${size} OFFSET ${offset}
@@ -453,7 +454,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
-                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
+                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY COUNT(p.id) DESC
                 LIMIT ${size} OFFSET ${offset}

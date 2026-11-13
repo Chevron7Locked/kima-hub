@@ -63,3 +63,33 @@ it("keeps asks made during a run: they are queued, and the run goes over the art
     await idle();
     expect(passes(count)).toBe(2);
 });
+
+it("reports a queued extra pass as its own pass, so progress inside a pass never goes backwards", async () => {
+    // Polled while the run and its extra pass go on: (pass, processed) for every answer that says it is running.
+    const seen: { pass: number; processed: number }[] = [];
+    let polling = true;
+    const poll = (async () => {
+        while (polling) {
+            const body = (await request(app).get("/library/artist-counts/status")).body;
+            if (body.isRunning) seen.push({ pass: body.pass, processed: body.processed });
+            await new Promise((r) => setTimeout(r, 25));
+        }
+    })();
+
+    await ask();
+    await new Promise((r) => setTimeout(r, 120));
+    expect((await ask()).body.status).toBe("queued");
+    await idle();
+    polling = false;
+    await poll;
+
+    expect(seen.length).toBeGreaterThan(2);
+    // The ask is answered as the second pass, and each pass starts from zero under its own number.
+    expect(new Set(seen.map((s) => s.pass))).toEqual(new Set([1, 2]));
+    for (let i = 1; i < seen.length; i++) {
+        if (seen[i].pass === seen[i - 1].pass) expect(seen[i].processed).toBeGreaterThanOrEqual(seen[i - 1].processed);
+        else expect(seen[i].pass).toBe(seen[i - 1].pass + 1);
+    }
+    // Once it is over the status carries no pass.
+    expect((await request(app).get("/library/artist-counts/status")).body).toMatchObject({ isRunning: false, pass: 0 });
+}, 30_000);

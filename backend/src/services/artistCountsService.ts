@@ -67,7 +67,9 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
 let isBackfillRunning = false;
 // A recount asked for while one runs: the running one goes over the artists once more when it finishes.
 let recountAsked = false;
-let backfillProgress = { processed: 0, total: 0, errors: 0 };
+// The pass being counted, from 1: a queued extra pass starts from zero under the next number, so a status read never
+// sees one pass's progress go backwards.
+let backfillProgress = { pass: 0, processed: 0, total: 0, errors: 0 };
 
 export function isBackfillInProgress(): boolean {
   return isBackfillRunning;
@@ -89,14 +91,16 @@ export async function backfillAllArtistCounts(
 
   isBackfillRunning = true;
   const answer = { processed: 0, errors: 0 };
+  let pass = 0;
 
   try {
     do {
       // Cleared as the pass starts, so an ask made during it earns one more pass.
       recountAsked = false;
-      const pass = await recountEveryArtist(onProgress);
-      answer.processed += pass.processed;
-      answer.errors += pass.errors;
+      pass += 1;
+      const counted = await recountEveryArtist(pass, onProgress);
+      answer.processed += counted.processed;
+      answer.errors += counted.errors;
     } while (recountAsked);
     return answer;
   } finally {
@@ -106,9 +110,10 @@ export async function backfillAllArtistCounts(
 }
 
 async function recountEveryArtist(
+  pass: number,
   onProgress?: (processed: number, total: number) => void
 ): Promise<{ processed: number; errors: number }> {
-  backfillProgress = { processed: 0, total: 0, errors: 0 };
+  backfillProgress = { pass, processed: 0, total: 0, errors: 0 };
 
   const total = await prisma.artist.count();
   backfillProgress.total = total;
@@ -180,6 +185,8 @@ export async function getBackfillProgress(): Promise<{
   percent: number;
   isRunning: boolean;
   errors: number;
+  /** The pass being counted, from 1 (a queued extra pass is the next number); 0 when nothing runs. */
+  pass: number;
 }> {
   if (isBackfillRunning) {
     return {
@@ -193,6 +200,7 @@ export async function getBackfillProgress(): Promise<{
           : 0,
       isRunning: true,
       errors: backfillProgress.errors,
+      pass: backfillProgress.pass,
     };
   }
 
@@ -207,6 +215,7 @@ export async function getBackfillProgress(): Promise<{
     percent: total > 0 ? Math.round((processed / total) * 100) : 100,
     isRunning: false,
     errors: 0,
+    pass: 0,
   };
 }
 

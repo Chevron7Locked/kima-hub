@@ -64,8 +64,9 @@ function makeApp(userId: string) {
     return app;
 }
 
-function updateUrl(playlistId: string, params: { remove?: number[]; add?: string[] }) {
+function updateUrl(playlistId: string, params: { remove?: (number | string)[]; add?: string[]; name?: string }) {
     const query = new URLSearchParams({ f: "json", playlistId });
+    if (params.name !== undefined) query.append("name", params.name);
     for (const index of params.remove ?? []) query.append("songIndexToRemove", String(index));
     for (const id of params.add ?? []) query.append("songIdToAdd", id);
     return `/rest/updatePlaylist.view?${query.toString()}`;
@@ -124,5 +125,47 @@ describe("subsonic updatePlaylist on a real playlist", () => {
             tracks.map((t) => t.id).sort(),
         );
         expect(new Set(items.map((item) => item.rank)).size).toBe(items.length);
+    });
+
+    it.each(["", "   "])("leaves the name alone when name is blank (%j)", async (blank) => {
+        const { user, playlist } = await fixture(1);
+        const before = playlist.name;
+
+        const res = await request(makeApp(user.id)).get(updateUrl(playlist.id, { name: blank }));
+
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        expect((await prisma.playlist.findUniqueOrThrow({ where: { id: playlist.id } })).name).toBe(before);
+    });
+
+    it("renames the playlist when name is given", async () => {
+        const { user, playlist } = await fixture(1);
+
+        await request(makeApp(user.id)).get(updateUrl(playlist.id, { name: `${PREFIX}-renamed` }));
+
+        expect((await prisma.playlist.findUniqueOrThrow({ where: { id: playlist.id } })).name).toBe(`${PREFIX}-renamed`);
+    });
+
+    it.each(["2abc", "1.5", "1e0", "-1", "0x1", " 1", ""])(
+        "ignores songIndexToRemove=%j, which is not a whole number",
+        async (junk) => {
+            const { user, tracks, playlist } = await fixture(3);
+            await addTracks(playlist.id, tracks.map((t) => t.id));
+
+            const res = await request(makeApp(user.id)).get(updateUrl(playlist.id, { remove: [junk] }));
+
+            expect(res.body["subsonic-response"].status).toBe("ok");
+            expect((await itemsInOrder(playlist.id)).map((item) => item.trackId)).toEqual(tracks.map((t) => t.id));
+        },
+    );
+
+    it("removes a song once however many times its index is sent, and ignores an index past the end", async () => {
+        const { user, tracks, playlist } = await fixture(4);
+        const [a, b, c, d] = tracks;
+        await addTracks(playlist.id, [a.id, b.id, c.id, d.id]);
+
+        const res = await request(makeApp(user.id)).get(updateUrl(playlist.id, { remove: [1, "01", 1, 99] }));
+
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        expect((await itemsInOrder(playlist.id)).map((item) => item.trackId)).toEqual([a.id, c.id, d.id]);
     });
 });

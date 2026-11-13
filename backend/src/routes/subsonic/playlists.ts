@@ -199,7 +199,8 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
     const updateData: { name?: string; isPublic?: boolean } = {};
 
     const name = one(req, "name");
-    if (name !== undefined) {
+    // A blank name leaves the name as it is, as the reference server and Navidrome do.
+    if (name !== undefined && name.trim() !== "") {
         updateData.name = name;
     }
 
@@ -209,9 +210,14 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
     }
 
     const songIdsToAdd = many(req, "songIdToAdd");
-    const indexesToRemove = many(req, "songIndexToRemove")
-        .map((v) => parseInt(v, 10))
-        .filter((n) => !isNaN(n));
+    // Whole numbers only (`2abc` is not 2), each index once; one past the end is dropped where the entries are read.
+    const indexesToRemove = [
+        ...new Set(
+            many(req, "songIndexToRemove")
+                .filter((v) => /^\d+$/.test(v))
+                .map((v) => Number(v)),
+        ),
+    ];
 
     if (!(await allSongsPlayable(songIdsToAdd))) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
