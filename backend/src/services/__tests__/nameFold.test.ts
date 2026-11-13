@@ -4,8 +4,6 @@
  * different names written outside English letters are never one.
  */
 
-jest.mock("../../utils/db", () => ({ prisma: {} }));
-
 import { nameKey, nameWords } from "../nameFold";
 import { albumIdentityKey } from "../albumIdentity";
 import { artistIdentityKey } from "../artistIdentity";

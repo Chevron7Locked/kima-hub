@@ -2,18 +2,6 @@
  * nameKey (the shared name fold), normalizeArtistName and the artistNormalization utilities.
  */
 
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        artist: { findFirst: jest.fn() },
-        downloadJob: { findMany: jest.fn() },
-        discoveryAlbum: { findFirst: jest.fn() },
-        album: { findFirst: jest.fn() },
-        track: { findMany: jest.fn(), deleteMany: jest.fn(), update: jest.fn() },
-        playlistItem: { findMany: jest.fn() },
-        playlistPendingTrack: { upsert: jest.fn() },
-    },
-}));
-
 jest.mock('../../utils/logger', () => ({
     logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));

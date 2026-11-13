@@ -4,7 +4,6 @@
  * normalizeForSearch runs, because its edition stripping is part of the compare.
  */
 
-jest.mock("../../utils/db", () => ({ prisma: {} }));
 jest.mock("../../utils/redis", () => ({ redisClient: { get: jest.fn(), setEx: jest.fn() } }));
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },

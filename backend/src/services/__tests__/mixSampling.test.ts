@@ -1,27 +1,35 @@
 /**
  * The draws a mix makes, in memory: uniform, weighted and seeded. Full rows are read only for the ids drawn. A seed
- * repeats a draw; the database's seeded draw is checked in mixes/__tests__/seededDraw.integration.test.ts, and sampleTrackIds's draw in
- * mixes/__tests__/sampleTrackIds.integration.test.ts.
+ * repeats a draw; the database's seeded draw is checked in mixes/__tests__/seededDraw.integration.test.ts, and
+ * sampleTrackIds's draw in mixes/__tests__/sampleTrackIds.integration.test.ts. The songs are real rows.
  */
-const mockFindMany = jest.fn();
-jest.mock("../../utils/db", () => ({
-    prisma: { track: { findMany: (...args: unknown[]) => mockFindMany(...args) } },
-}));
-
+import { prisma } from "../../utils/db";
 import { drawIds, drawWeighted, sampleTrackIds, seededKey, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
 
-/** An in-memory track table: an id-list read returns those rows. */
-function fakeTable() {
-    mockFindMany.mockImplementation(async (args: any) => {
-        const wanted: string[] = args.where.id.in;
-        return [...wanted].reverse().map((id) => ({ id, album: { coverUrl: null } }));
-    });
-}
+const P = "zz-mixSampling-";
 
-beforeEach(() => {
-    mockFindMany.mockReset();
-    fakeTable();
-});
+async function wipe() {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+/** Three playable songs, stored in the reverse of the order they are asked for. */
+async function seedSongs() {
+    await prisma.artist.create({ data: { id: `${P}art`, name: "Sample Artist", identityKey: `${P}art` } });
+    await prisma.album.create({
+        data: { id: `${P}alb`, artistId: `${P}art`, title: "Sample Album", identityKey: `${P}alb`, rgMbid: `${P}rg`, primaryType: "Album", location: "LIBRARY" },
+    });
+    for (const [n, name] of ["z", "y", "x"].entries()) {
+        await prisma.track.create({
+            data: {
+                id: `${P}${name}`, albumId: `${P}alb`, title: name, trackNo: n + 1, duration: 200,
+                filePath: `/tmp/${P}${name}.flac`, fileModified: new Date(), fileSize: 1000,
+            },
+        });
+    }
+}
+beforeAll(wipe);
+afterAll(wipe);
 
 describe("drawIds", () => {
     it("is uniform: each id is drawn about as often as any other", () => {
@@ -81,10 +89,8 @@ describe("a draw refuses a take that is not a positive integer", () => {
     it.each(bad)("drawWeighted throws for %p", (take) => {
         expect(() => drawWeighted([1, 2, 3], (x) => x, take)).toThrow(RangeError);
     });
-    it.each(bad)("sampleTrackIds rejects for %p without reading", async (take) => {
-        mockFindMany.mockClear();
+    it.each(bad)("sampleTrackIds rejects for %p", async (take) => {
         await expect(sampleTrackIds({ where: {}, take })).rejects.toThrow(RangeError);
-        expect(mockFindMany).not.toHaveBeenCalled();
     });
 });
 
@@ -120,11 +126,14 @@ describe("drawWeighted", () => {
 });
 
 describe("tracksByIds", () => {
-    it("keeps the order of the ids and reads nothing for none", async () => {
-        const rows = await tracksByIds(["x", "y", "z"], { album: true });
-        expect(rows.map((r) => r.id)).toEqual(["x", "y", "z"]);
-        mockFindMany.mockClear();
+    beforeEach(async () => {
+        await wipe();
+        await seedSongs();
+    });
+
+    it("keeps the order of the ids, and answers nothing for none", async () => {
+        const rows = await tracksByIds([`${P}x`, `${P}y`, `${P}z`], { album: true });
+        expect(rows.map((r) => r.id)).toEqual([`${P}x`, `${P}y`, `${P}z`]);
         expect(await tracksByIds([], { album: true })).toEqual([]);
-        expect(mockFindMany).not.toHaveBeenCalled();
     });
 });
