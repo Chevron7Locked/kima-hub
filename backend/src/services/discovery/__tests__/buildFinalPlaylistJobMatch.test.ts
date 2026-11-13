@@ -2,25 +2,11 @@
  * buildFinalPlaylist links each Discover album to the download job that fetched it, so the suggestion records the
  * Lidarr album id Discover's clear later deletes by. Lidarr's names keep accents and typographic marks the scanned
  * names may lack (pairs recorded from a production library), so the link compares names by sameName.
+ * Real database; the stored suggestion's Lidarr id is what is checked.
  */
 import { discoverWeeklyService } from "../../discoverWeekly";
 import { prisma } from "../../../utils/db";
-
-jest.mock("../../discovery/optimisticBatchUpdate", () => ({
-    updateBatchStatus: jest.fn().mockResolvedValue({ success: true, retries: 0 }),
-}));
-
-jest.mock("../../../utils/db", () => ({
-    prisma: {
-        discoveryBatch: { findUnique: jest.fn(), update: jest.fn() },
-        downloadJob: { findMany: jest.fn().mockResolvedValue([]) },
-        track: { findMany: jest.fn().mockResolvedValue([]) },
-        // Read before the transaction; undefined makes the service use its default exclusion window.
-        userDiscoverConfig: { findUnique: jest.fn() },
-        $transaction: jest.fn(),
-        discoverExclusion: { upsert: jest.fn() },
-    },
-}));
+import { discoverBuildFixtures } from "../../../__tests__/helpers/discoverBuildFixtures";
 
 // getSeedArtists returns [] so only the popular fallback runs.
 jest.mock("../../discovery", () => ({
@@ -62,39 +48,34 @@ jest.mock("../../artistCountsService", () => ({
     updateArtistCounts: jest.fn(),
 }));
 
-const upsert = jest.fn().mockResolvedValue({ id: "da-1" });
-const tx = {
-    discoveryAlbum: { upsert },
-    discoverExclusion: { upsert: jest.fn() },
-    discoveryTrack: { create: jest.fn() },
-};
+const P = "zz-jobMatch-";
+const BATCH = `${P}batch`;
+const fx = discoverBuildFixtures(P);
+const SCANNED_MBID = "temp-1793617784650-0.26";
 
-/** A scanning batch with one completed job named as Lidarr named it, and one scanned track named as the files are. */
-function arrange(job: { artistName: string; albumTitle: string }, scanned: { artistName: string; albumTitle: string }) {
-    (prisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({
-        id: "batch-m", userId: "u1", status: "scanning", targetSongCount: 30,
-        weekStart: new Date("2026-11-02T00:00:00.000Z"), jobs: [],
-    });
-    (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
-        {
-            id: "job-m", discoveryBatchId: "batch-m", status: "completed", lidarrAlbumId: 36401,
-            targetMbid: "3372b3ce-c462-4937-9da3-011e93921b6b",
-            metadata: { ...job, albumMbid: "3372b3ce-c462-4937-9da3-011e93921b6b", similarity: 0.7, tier: "medium" },
-        },
+/**
+ * A scanning batch with one completed job named as Lidarr named it, and one scanned song named as the files are.
+ * By default the job's release-group id is not the scanned album's, so the song is found by name.
+ */
+async function arrange(
+    job: { artistName: string; albumTitle: string },
+    scanned: { artistName: string; albumTitle: string },
+    albumMbid = "3372b3ce-c462-4937-9da3-011e93921b6b",
+) {
+    await fx.seedScanningBatch(BATCH, [
+        { ...job, albumMbid, lidarrAlbumId: 36401, similarity: 0.7, tier: "medium" },
     ]);
-    (prisma.track.findMany as jest.Mock).mockResolvedValue([
-        {
-            id: "t1", title: "T", filePath: "/m/t1.flac",
-            album: { id: "alb-1", rgMbid: "temp-1793617784650-0.26", title: scanned.albumTitle, artist: { name: scanned.artistName } },
-        },
-    ]);
-    (prisma.$transaction as jest.Mock).mockImplementation((fn: (t: typeof tx) => unknown) => fn(tx));
+    await fx.seedDiscoverSong(BATCH, { ...scanned, rgMbid: SCANNED_MBID });
 }
 
-const recordedLidarrId = () => upsert.mock.calls[0]?.[0]?.create?.lidarrAlbumId;
+/** The Lidarr id the stored Discover suggestion for the scanned album recorded. */
+const recordedSuggestion = () =>
+    prisma.discoveryAlbum.findFirst({ where: { userId: fx.userId, rgMbid: SCANNED_MBID } });
 
 describe("buildFinalPlaylist links a Discover album to its download job", () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeAll(fx.wipe);
+    afterAll(fx.wipe);
+    beforeEach(fx.wipe);
 
     it.each([
         ["a curly apostrophe", { artistName: "Ed O’Brien", albumTitle: "Blue Morpho" }, { artistName: "Ed O'Brien", albumTitle: "Blue Morpho" }],
@@ -102,15 +83,23 @@ describe("buildFinalPlaylist links a Discover album to its download job", () => 
         ["a Unicode hyphen", { artistName: "Angèle", albumTitle: "Nonante‐cinq" }, { artistName: "Angèle", albumTitle: "Nonante-Cinq" }],
         ["an ellipsis character", { artistName: "Queens of the Stone Age", albumTitle: "In Times New Roman…" }, { artistName: "Queens Of The Stone Age", albumTitle: "In Times New Roman..." }],
     ])("records the job's Lidarr id when the names differ only by %s", async (_how, job, scanned) => {
-        arrange(job, scanned);
-        await discoverWeeklyService.buildFinalPlaylist("batch-m");
-        expect(recordedLidarrId()).toBe(36401);
+        await arrange(job, scanned);
+
+        await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+        const suggestion = await recordedSuggestion();
+        expect(suggestion?.lidarrAlbumId).toBe(36401);
+        expect(suggestion?.tier).toBe("medium");
     });
 
     it("records no Lidarr id for an album no job names", async () => {
-        arrange({ artistName: "Orelsan", albumTitle: "Civilisation" }, { artistName: "Orelsan", albumTitle: "La Fete Est Finie" });
-        await discoverWeeklyService.buildFinalPlaylist("batch-m");
-        expect(upsert).toHaveBeenCalled();
-        expect(recordedLidarrId() ?? null).toBeNull();
+        // The song is found by its release-group id, but no job carries its name.
+        await arrange({ artistName: "Orelsan", albumTitle: "Civilisation" }, { artistName: "Orelsan", albumTitle: "La Fete Est Finie" }, SCANNED_MBID);
+
+        await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+        const suggestion = await recordedSuggestion();
+        expect(suggestion).not.toBeNull();
+        expect(suggestion?.lidarrAlbumId).toBeNull();
     });
 });

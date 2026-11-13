@@ -1,25 +1,11 @@
 /**
  * buildFinalPlaylist marks the batch failed when the playlist transaction
- * throws. The fixture returns a track so the build reaches the transaction.
+ * throws. The fixture holds a Discover song so the build reaches the transaction.
+ * Real database; the batch's stored status and message are what is checked.
  */
 import { discoverWeeklyService } from "../../discoverWeekly";
-import { updateBatchStatus } from "../../discovery/optimisticBatchUpdate";
 import { prisma } from "../../../utils/db";
-
-jest.mock("../../discovery/optimisticBatchUpdate", () => ({
-    updateBatchStatus: jest.fn().mockResolvedValue({ success: true, retries: 0 }),
-}));
-
-jest.mock("../../../utils/db", () => ({
-    prisma: {
-        discoveryBatch: { findUnique: jest.fn(), update: jest.fn() },
-        downloadJob: { findMany: jest.fn().mockResolvedValue([]) },
-        track: { findMany: jest.fn().mockResolvedValue([]) },
-        // Read before the transaction; undefined makes the service use its default exclusion window.
-        userDiscoverConfig: { findUnique: jest.fn() },
-        $transaction: jest.fn(),
-    },
-}));
+import { discoverBuildFixtures } from "../../../__tests__/helpers/discoverBuildFixtures";
 
 // getSeedArtists returns [] so only the popular fallback runs.
 jest.mock("../../discovery", () => ({
@@ -61,173 +47,104 @@ jest.mock("../../artistCountsService", () => ({
     updateArtistCounts: jest.fn(),
 }));
 
-const statusCalls = (status: string) =>
-    (updateBatchStatus as jest.Mock).mock.calls.filter(
-        ([, data]) => data && data.status === status
-    );
+const P = "zz-buildFail-";
+const fx = discoverBuildFixtures(P);
 
-// The batch is `scanning`, so the already-completed/failed guard does not
-// short-circuit; `jobs: []` keeps the cleanup after the catch from throwing. The
-// completed job has the metadata the search criteria need, and the matching
-// track lets the build reach the playlist transaction.
-function arrangeBatchWithOneAlbum(batchId: string) {
-    (prisma.discoveryBatch.findUnique as jest.Mock).mockResolvedValue({
-        id: batchId,
-        userId: "u1",
-        status: "scanning",
-        targetSongCount: 30,
-        weekStart: new Date("2026-05-25T00:00:00.000Z"),
-        jobs: [],
-    });
-    (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([
-        {
-            id: `job-${batchId}`,
-            discoveryBatchId: batchId,
-            status: "completed",
-            metadata: {
-                artistName: "Test Artist",
-                albumTitle: "Test Album",
-                albumMbid: "mbid-123",
-            },
-        },
+/** A scanning batch whose one completed job has a matching Discover song, so the build reaches the playlist transaction. */
+async function arrangeBatchWithOneAlbum(batchId: string) {
+    await fx.seedScanningBatch(batchId, [
+        { artistName: "Test Artist", albumTitle: "Test Album", albumMbid: "mbid-123" },
     ]);
-    (prisma.track.findMany as jest.Mock).mockResolvedValue([
-        {
-            id: "t1",
-            title: "T",
-            filePath: "/m/t1.flac",
-            album: {
-                id: "alb-1",
-                rgMbid: "mbid-123",
-                title: "Test Album",
-                artist: { name: "Test Artist" },
-            },
-        },
-    ]);
+    await fx.seedDiscoverSong(batchId, { artistName: "Test Artist", albumTitle: "Test Album", rgMbid: "mbid-123" });
 }
 
+const failTransaction = (message: string) =>
+    jest.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error(message) as never);
+
 describe("buildFinalPlaylist failure handling", () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeAll(fx.wipe);
+    afterAll(fx.wipe);
+    beforeEach(async () => {
+        jest.restoreAllMocks();
+        await fx.wipe();
+    });
 
     it("marks the batch failed when the playlist transaction throws, not through the no-tracks exit", async () => {
-        arrangeBatchWithOneAlbum("batch-1");
-        (prisma.$transaction as jest.Mock).mockRejectedValue(
-            new Error("constraint violation")
-        );
+        const id = `${P}batch-1`;
+        await arrangeBatchWithOneAlbum(id);
+        failTransaction("constraint violation");
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-1");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(updateBatchStatus).toHaveBeenCalledWith(
-            "batch-1",
-            expect.objectContaining({
-                status: "failed",
-                errorMessage: expect.stringContaining("Playlist build failed"),
-            })
-        );
-        expect(updateBatchStatus).not.toHaveBeenCalledWith(
-            "batch-1",
-            expect.objectContaining({
-                errorMessage: "No tracks found after scan",
-            })
-        );
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("failed");
+        expect(batch?.errorMessage).toContain("Playlist build failed");
+        expect(batch?.errorMessage).not.toBe("No tracks found after scan");
     });
 
     it("sets completedAt so the failed batch is a terminal state", async () => {
-        arrangeBatchWithOneAlbum("batch-terminal");
-        (prisma.$transaction as jest.Mock).mockRejectedValue(
-            new Error("constraint violation")
-        );
+        const id = `${P}batch-terminal`;
+        await arrangeBatchWithOneAlbum(id);
+        failTransaction("constraint violation");
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-terminal");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(updateBatchStatus).toHaveBeenCalledWith(
-            "batch-terminal",
-            expect.objectContaining({
-                status: "failed",
-                completedAt: expect.any(Date),
-            })
-        );
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("failed");
+        expect(batch?.completedAt).toBeInstanceOf(Date);
     });
 
-    it("never marks the batch completed once the build transaction has thrown", async () => {
-        arrangeBatchWithOneAlbum("batch-noresurrect");
-        (prisma.$transaction as jest.Mock).mockRejectedValue(
-            new Error("constraint violation")
-        );
+    it("never marks the batch completed once the build transaction has thrown, and records the failure once", async () => {
+        const id = `${P}batch-once`;
+        await arrangeBatchWithOneAlbum(id);
+        failTransaction("constraint violation");
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-noresurrect");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(statusCalls("completed")).toEqual([]);
-        expect(statusCalls("failed").length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("marks the batch failed exactly once when the transaction throws", async () => {
-        arrangeBatchWithOneAlbum("batch-once");
-        (prisma.$transaction as jest.Mock).mockRejectedValue(
-            new Error("constraint violation")
-        );
-
-        await discoverWeeklyService.buildFinalPlaylist("batch-once");
-
-        expect(statusCalls("failed")).toHaveLength(1);
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("failed");
+        expect(batch?.finalSongCount).toBe(0);
+        // one write moved it from scanning: version 0 -> 1
+        expect(batch?.version).toBe(1);
+        expect(await prisma.discoveryAlbum.count({ where: { userId: fx.userId } })).toBe(0);
     });
 
     it("includes the transaction's error message in the failure reason", async () => {
-        arrangeBatchWithOneAlbum("batch-2");
-        (prisma.$transaction as jest.Mock).mockRejectedValue(
-            new Error("P2002 unique constraint failed")
-        );
+        const id = `${P}batch-2`;
+        await arrangeBatchWithOneAlbum(id);
+        failTransaction("P2002 unique constraint failed");
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-2");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(updateBatchStatus).toHaveBeenCalledWith(
-            "batch-2",
-            expect.objectContaining({
-                status: "failed",
-                errorMessage: expect.stringContaining(
-                    "P2002 unique constraint failed"
-                ),
-            })
-        );
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("failed");
+        expect(batch?.errorMessage).toContain("P2002 unique constraint failed");
     });
 
     it("a batch with no tracks fails with its own message, not the transaction failure's", async () => {
-        arrangeBatchWithOneAlbum("batch-3");
-        (prisma.downloadJob.findMany as jest.Mock).mockResolvedValue([]);
-        (prisma.track.findMany as jest.Mock).mockResolvedValue([]);
+        const id = `${P}batch-3`;
+        await fx.seedScanningBatch(id, []);
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-3");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(prisma.$transaction).not.toHaveBeenCalled();
-        expect(updateBatchStatus).toHaveBeenCalledWith(
-            "batch-3",
-            expect.objectContaining({
-                status: "failed",
-                errorMessage: "No tracks found after scan",
-            })
-        );
-        expect(updateBatchStatus).not.toHaveBeenCalledWith(
-            "batch-3",
-            expect.objectContaining({
-                errorMessage: expect.stringContaining("Playlist build failed"),
-            })
-        );
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("failed");
+        expect(batch?.errorMessage).toBe("No tracks found after scan");
     });
 
-    it("does not mark the batch failed when the transaction succeeds", async () => {
-        arrangeBatchWithOneAlbum("batch-4");
-        (prisma.$transaction as jest.Mock).mockResolvedValue({
-            albumCount: 1,
-            trackCount: 1,
-        });
+    it("completes the batch, with its album and song stored, when the transaction succeeds", async () => {
+        const id = `${P}batch-4`;
+        await arrangeBatchWithOneAlbum(id);
 
-        await discoverWeeklyService.buildFinalPlaylist("batch-4");
+        await discoverWeeklyService.buildFinalPlaylist(id);
 
-        expect(updateBatchStatus).not.toHaveBeenCalledWith(
-            "batch-4",
-            expect.objectContaining({
-                errorMessage: expect.stringContaining("Playlist build failed"),
-            })
-        );
+        const batch = await fx.batch(id);
+        expect(batch?.status).toBe("completed");
+        expect(batch?.errorMessage).toBeNull();
+        expect(batch?.finalSongCount).toBe(1);
+        const albums = await prisma.discoveryAlbum.findMany({ where: { userId: fx.userId }, include: { tracks: true } });
+        expect(albums).toHaveLength(1);
+        expect(albums[0].rgMbid).toBe("mbid-123");
+        expect(albums[0].tracks.map((t) => t.trackId)).toEqual([`${id}-t1`]);
     });
 });
