@@ -237,8 +237,8 @@ export function apiMounts(options: MountOptions): Mount[] {
         { path: "/rest", router: subsonicRouter, access: { family: "subsonic" } },
         { path: "/health", router: health, access: publicAccess },
         { path: "/api/health", router: health, access: publicAccess },
-        // The metrics router applies the runaway limit itself, before its admin check.
-        { path: "/api/metrics", router: metricsRoutes, access: { family: "admin" } },
+        // The runaway limit comes first, so a looping client is held before the sign-in check.
+        { path: "/api/metrics", router: metricsRoutes, access: { family: "admin" }, runawayLimit: true },
     ];
 }
 

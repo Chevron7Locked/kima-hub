@@ -7,7 +7,7 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { listRoutes, mountRoute, type AccessFamily, type Mount, type RouteListing } from "../access";
+import { listRoutes, mountRoute, parseRouteKey, type AccessFamily, type Mount, type RouteListing } from "../access";
 import { apiMounts, mountApi } from "../mounts";
 
 const P = "zz-access";
@@ -99,7 +99,7 @@ describe("the route listing", () => {
         const routes = new Set(rows.map((r) => `${r.method} ${r.mount} ${r.path}`));
         for (const mount of apiMounts(options)) {
             for (const route of Object.keys(mount.access?.routes ?? {})) {
-                const [method, path] = route.split(" ");
+                const { method, path } = parseRouteKey(route);
                 expect(routes.has(`${method} ${mount.path} ${path}`)).toBe(true);
             }
         }
@@ -206,9 +206,13 @@ describe("the declared families are enforced in front of the routers", () => {
         const app = appWithServer();
         expect((await request(app).get("/api/metrics")).status).toBe(401);
         expect((await request(app).get("/api/metrics").set("Authorization", as(MEMBER, "user"))).status).toBe(403);
-        const res = await request(app).get("/api/metrics").set("Authorization", as(ADMIN, "admin"));
-        expect(res.status).toBe(200);
-        expect(Number(res.headers["ratelimit-remaining"])).toBeGreaterThan(0);
+        const first = await request(app).get("/api/metrics").set("Authorization", as(ADMIN, "admin"));
+        expect(first.status).toBe(200);
+        const second = await request(app).get("/api/metrics").set("Authorization", as(ADMIN, "admin"));
+        expect(Number(second.headers["ratelimit-remaining"])).toBe(Number(first.headers["ratelimit-remaining"]) - 1);
+        // A stranger counts too: the limit comes before the sign-in check.
+        const stranger = await request(app).get("/api/metrics");
+        expect(Number(stranger.headers["ratelimit-remaining"])).toBe(Number(second.headers["ratelimit-remaining"]) - 1);
     });
 
     it("the public vibe feed exists only when asked for", async () => {

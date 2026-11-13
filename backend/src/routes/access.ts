@@ -58,7 +58,7 @@ function guardsFor(family: AccessFamily, urlToken: boolean | undefined): Request
 }
 
 /** Splits "GET /:id/cover" into its method and path. */
-function parseRouteKey(key: string): { method: string; path: string } {
+export function parseRouteKey(key: string): { method: string; path: string } {
     const match = /^([A-Z]+) (\/.*)$/.exec(key);
     if (!match) throw new Error(`Access route "${key}" must read "METHOD /path"`);
     return { method: match[1], path: match[2] };
@@ -152,8 +152,10 @@ function concretePath(path: string): string {
     return path.replace(/:[A-Za-z0-9_]+\??/g, "x").replace(/\*/g, "x") || "/";
 }
 
-function collectRoutes(stack: StackLayer[], inheritedAdmin: boolean): Array<Omit<RouteListing, "mount" | "family">> {
-    const found: Array<Omit<RouteListing, "mount" | "family">> = [];
+type RouteInRouter = Omit<RouteListing, "mount" | "family">;
+
+function collectRoutes(stack: StackLayer[], inheritedAdmin: boolean): Array<RouteInRouter> {
+    const found: Array<RouteInRouter> = [];
     let adminInRouter = inheritedAdmin;
     for (const layer of stack) {
         if (layer.route) {
@@ -200,10 +202,10 @@ function refuseUndeclared(path: string): RequestHandler {
 }
 
 /** The one way a router is mounted: its limit, then its access check, then the router. */
-export function mountRoute(app: Express | Router, mount: Mount): void {
+export function mountRoute(app: Express, mount: Mount): void {
     if (!mount.access) {
         logger.error(`[ACCESS] ${mount.path} declares no access; it refuses every request`);
-        (app as Express).use(mount.path, refuseUndeclared(mount.path));
+        app.use(mount.path, refuseUndeclared(mount.path));
         return;
     }
     const handlers: RequestHandler[] = [];
@@ -211,5 +213,5 @@ export function mountRoute(app: Express | Router, mount: Mount): void {
     if (guardsFor(mount.access.family, mount.access.urlToken).length > 0 || mount.access.routes) {
         handlers.push(accessCheck(mount.access));
     }
-    (app as Express).use(mount.path, ...handlers, mount.router);
+    app.use(mount.path, ...handlers, mount.router);
 }

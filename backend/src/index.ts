@@ -98,8 +98,6 @@ app.use(
     })
 );
 
-// Every router is mounted in ./routes/mounts, with the access it declares.
-
 // A beat older than this is a dead analyzer: CLAP beats every 30 s, MusiCNN every loop pass (1 to 5 s).
 const ANALYZER_HEARTBEAT_WITHIN_MS = 120_000;
 

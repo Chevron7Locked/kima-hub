@@ -7,13 +7,18 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { createApiKey } from "../../services/users/apiKeyStore";
 import metricsRoutes from "../metrics";
+import { mountRoute } from "../access";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-metrics-admin";
 const USER = `${P}-member`;
 const ADMIN = `${P}-admin`;
 
-const app = () => express().use("/api/metrics", metricsRoutes);
+const app = () => {
+    const server = express();
+    mountRoute(server, { path: "/api/metrics", router: metricsRoutes, access: { family: "admin" }, runawayLimit: true });
+    return server;
+};
 const as = (id: string, role: "user" | "admin") =>
     `Bearer ${generateToken({ id, username: id, role, tokenVersion: 0 })}`;
 
