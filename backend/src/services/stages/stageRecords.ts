@@ -435,24 +435,43 @@ export async function absent(
  * empties) when it confirms the file is gone, or clears the flag and re-opens its records when the file is there.
  * Scans resolve paths the way the song was added and stand down when much of the library vanishes at once.
  * Gone means "no such file" here, as the scanner counts it; any other error reading it (permissions, I/O) is another
- * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). Returns whether it
- * flagged the track.
+ * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). A report that no
+ * longer answers the record's open claim, checked again inside the flagging transaction, flags nothing and is dropped.
+ * Returns "flagged", "stale" (dropped) or "there" (the file is not gone: an ordinary failure).
  */
-async function flagVanishedTrack(trackId: string, stage: string): Promise<boolean> {
+async function flagVanishedTrack(
+    trackId: string,
+    stage: StageName,
+    jobId: string | undefined,
+): Promise<"flagged" | "there" | "stale"> {
     const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
-    if (!track?.filePath) return false;
+    if (!track?.filePath) return "there";
     const root = config.music.musicPath;
-    if ((await fs.readdir(root).catch(() => [])).length === 0) return false;
+    if ((await fs.readdir(root).catch(() => [])).length === 0) return "there";
     const file = path.isAbsolute(track.filePath) ? track.filePath : path.join(root, track.filePath);
     const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
-    if (!gone) return false;
+    if (!gone) return "there";
 
-    await prisma.$transaction(async (tx) => {
+    const flagged = await prisma.$transaction(async (tx) => {
+        // The claim is checked again here, under the record's lock: the reads above took time, and a report whose
+        // claim was re-issued or answered meanwhile must not flag the song.
+        const [current] = await tx.$queryRawUnsafe<OpenRecord[]>(
+            `SELECT attempt, failures, retryable, status, redelivered, evidence FROM "TrackStage"
+              WHERE "trackId" = $1 AND stage = $2 FOR UPDATE`,
+            trackId,
+            stage,
+        );
+        if (reportIsStale(current, claimOf(jobId))) return false;
         await tx.track.updateMany({ where: { id: trackId, missingSince: null }, data: { missingSince: new Date() } });
         // The reporting record is in flight; as pending it is closed with the rest, its Track column mirrored.
         await tx.trackStage.updateMany({ where: { trackId, stage }, data: { status: "pending", nextRetryAt: null } });
         await closeForMissingFiles(tx);
+        return true;
     });
+    if (!flagged) {
+        logger.debug(`[Enrichment] ${stage}: ignored a file-missing report for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
+        return "stale";
+    }
     logger.info(`[Enrichment] ${track.filePath}: no file found; flagged missing and a library scan asked for`);
     const { requestScan } = await import("../../workers/scanRequest");
     try {
@@ -461,7 +480,7 @@ async function flagVanishedTrack(trackId: string, stage: string): Promise<boolea
     } catch (err) {
         logger.warn(`[Enrichment] Could not ask for a library scan: ${(err as Error).message}`);
     }
-    return true;
+    return "flagged";
 }
 
 // ── Failures ─────────────────────────────────────────────────────────────
@@ -473,6 +492,18 @@ interface OpenRecord {
     status: string;
     redelivered: number;
     evidence: Record<string, unknown> | null;
+}
+
+/** A report answers nothing when its record is answered or closed, or when it names a claim other than the open one. */
+function reportIsStale(
+    current: Pick<OpenRecord, "status" | "retryable" | "attempt" | "redelivered"> | undefined,
+    held: { attempt: number; redelivered: number } | null,
+): boolean {
+    const settled = current?.status === "done" || current?.status === "blocked"
+        || (current?.status === "failed" && !current.retryable);
+    const stale = held !== null && !(current?.status === "working"
+        && current.attempt === held.attempt && current.redelivered === held.redelivered);
+    return settled || stale;
 }
 
 /**
@@ -492,11 +523,7 @@ async function failureMaySettle(
         stage,
     );
     const held = claimOf(jobId);
-    const settled = current?.status === "done" || current?.status === "blocked"
-        || (current?.status === "failed" && !current.retryable);
-    const stale = held !== null && !(current?.status === "working"
-        && current.attempt === held.attempt && current.redelivered === held.redelivered);
-    if (settled || stale) {
+    if (reportIsStale(current, held)) {
         logger.debug(`[Enrichment] ${stage}: ignored a failure for ${trackId} that answers no open claim (${jobId ?? "no job id"})`);
         return null;
     }
@@ -580,7 +607,7 @@ export async function fail(
     if (!open) return;
     // A file an analyzer could not find: the song is flagged missing and a scan asked for, which removes it once it
     // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure.
-    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage))) return;
+    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage, jobId)) !== "there") return;
     const { current, writeGuard } = open;
 
     if (await sourcePauseController.handleRateLimit(source, err, evidence)) {

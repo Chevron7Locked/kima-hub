@@ -763,6 +763,36 @@ describe("closeForMissingFiles", () => {
         expect(await stageRecords.closeForMissingFiles()).toBe(0);
     });
 
+    it("leaves a record with a live claim alone, even one claimed while the closing waited", async () => {
+        const gone = await seedTrack("m5", { missing: true });
+        await put(gone, "analysis", "working", { attempt: 1, nextRetryAt: new Date(Date.now() + 60_000) });
+        await put(gone, "embedding", "pending");
+        await setColumns(gone, "processing", "pending");
+
+        // A worker claims the embedding record in a transaction that is still open when the closing starts.
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let locked!: () => void;
+        const held = new Promise<void>((resolve) => { locked = resolve; });
+        const claiming = prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "TrackStage" SET status = 'working', attempt = attempt + 1 WHERE "trackId" = $1 AND stage = 'embedding'`,
+                gone,
+            );
+            locked();
+            await gate;
+        });
+        await held;
+        const closing = stageRecords.closeForMissingFiles();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        release();
+        await claiming;
+
+        expect(await closing).toBe(0);
+        expect(await record(gone, "analysis")).toMatchObject({ status: "working", attempt: 1 });
+        expect(await record(gone, "embedding")).toMatchObject({ status: "working", failureClass: null });
+    });
+
     it("joins a caller's transaction", async () => {
         const gone = await seedTrack("m4", { missing: true });
         await put(gone, "analysis", "pending");

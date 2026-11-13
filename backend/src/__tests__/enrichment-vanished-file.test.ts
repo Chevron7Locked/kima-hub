@@ -8,7 +8,13 @@
 const mockRequestScan = jest.fn().mockResolvedValue({ queued: true, jobId: "scan-full" });
 jest.mock("../workers/scanRequest", () => ({ requestScan: (req: unknown) => mockRequestScan(req) }));
 
+jest.mock("fs/promises", () => {
+    const real = jest.requireActual("fs/promises");
+    return { ...real, access: jest.fn(real.access) };
+});
+
 import * as fs from "fs";
+import * as fsPromises from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { prisma } from "../utils/db";
@@ -136,6 +142,41 @@ it("ignores a stale report for a claim that was handed out again", async () => {
     await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/stale.flac`), undefined, job(gone, 1));
     expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
     expect(mockRequestScan).not.toHaveBeenCalled();
+});
+
+describe("a report whose claim changes while the file is being checked", () => {
+    /** Runs `change` once the report has looked at the folder, before it flags anything. */
+    function changeDuringCheck(change: () => Promise<unknown>): void {
+        const realAccess = jest.requireActual<typeof fsPromises>("fs/promises").access;
+        (fsPromises.access as jest.Mock).mockImplementationOnce(async (...args: Parameters<typeof realAccess>) => {
+            await change();
+            return realAccess(...args);
+        });
+    }
+
+    it("flags nothing when the claim was handed out again meanwhile", async () => {
+        const gone = await song("race1", `${P}/race1.flac`);
+        changeDuringCheck(() =>
+            prisma.trackStage.update({ where: { trackId_stage: { trackId: gone, stage: "embedding" } }, data: { attempt: 2 } }),
+        );
+        await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/race1.flac`), undefined, job(gone, 1));
+
+        expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
+        expect(await stageOf(gone)).toMatchObject({ status: "working", attempt: 2 });
+        expect(mockRequestScan).not.toHaveBeenCalled();
+    });
+
+    it("flags nothing when the question was answered meanwhile", async () => {
+        const gone = await song("race2", `${P}/race2.flac`);
+        changeDuringCheck(() =>
+            prisma.trackStage.update({ where: { trackId_stage: { trackId: gone, stage: "embedding" } }, data: { status: "done" } }),
+        );
+        await stageRecords.fail(gone, "embedding", "clap", notFound(`${P}/race2.flac`), undefined, job(gone, 1));
+
+        expect((await prisma.track.findUnique({ where: { id: gone } }))?.missingSince).toBeNull();
+        expect((await stageOf(gone))?.status).toBe("done");
+        expect(mockRequestScan).not.toHaveBeenCalled();
+    });
 });
 
 it("flags nothing when the music folder is empty: the drive is not mounted", async () => {
