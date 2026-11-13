@@ -1,6 +1,6 @@
 /**
  * Who may reach a route is declared where the route is mounted, and a mount that declares nothing refuses
- * everything. The routers carry no guards of their own.
+ * everything. The routers carry no access checks of their own.
  *
  * A mount names one family for all of its routes. A route that differs from its mount lists itself in `routes`
  * ("GET /:id/cover" as the router writes it, relative to the mount). The families:
@@ -47,17 +47,17 @@ export interface Mount {
     runawayLimit?: boolean;
 }
 
-function signedInGuard(urlToken: boolean): RequestHandler {
+function signedInCheck(urlToken: boolean): RequestHandler {
     return urlToken ? requireAuthOrToken : requireAuth;
 }
 
-/** The guards that run in front of a route of this family. */
-function guardsFor(family: AccessFamily, urlToken: boolean): RequestHandler[] {
+/** The checks that run in front of a route of this family. */
+function checksFor(family: AccessFamily, urlToken: boolean): RequestHandler[] {
     switch (family) {
         case "signed-in":
-            return [signedInGuard(urlToken)];
+            return [signedInCheck(urlToken)];
         case "admin":
-            return [signedInGuard(urlToken), requireAdmin];
+            return [signedInCheck(urlToken), requireAdmin];
         default:
             return [];
     }
@@ -128,7 +128,7 @@ export function declaredResolver(access: Access): (method: string, url: string) 
 async function runInOrder(handlers: RequestHandler[], req: Request, res: Response, next: NextFunction): Promise<void> {
     for (const handler of handlers) {
         const outcome = await new Promise<{ passed: boolean; error?: unknown }>((resolve) => {
-            // A guard that answered the request never calls next, and its promise ends the wait.
+            // A check that answered the request never calls next, and its promise ends the wait.
             Promise.resolve()
                 .then(() => handler(req, res, (error?: unknown) => resolve({ passed: error === undefined, error })))
                 .then(
@@ -146,7 +146,7 @@ function accessCheck(access: Access): RequestHandler {
     const declared = declaredResolver(access);
     return async (req, res, next) => {
         const { family, urlToken } = await declared(req.method, req.url);
-        return runInOrder(guardsFor(family, urlToken), req, res, next);
+        return runInOrder(checksFor(family, urlToken), req, res, next);
     };
 }
 

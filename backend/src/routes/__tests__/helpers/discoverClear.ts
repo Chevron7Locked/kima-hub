@@ -1,6 +1,7 @@
 import express from "express";
 import net from "node:net";
 import discoverRoutes from "../../discover";
+import { mountAsServer } from "./serverMount";
 
 /** A TCP port nothing listens on: opens a server on a free port, reads the port, closes it. */
 export async function deadPort(): Promise<number> {
@@ -18,6 +19,6 @@ export async function deadPort(): Promise<number> {
 export function discoverApp() {
     const a = express();
     a.use(express.json());
-    a.use("/discover", discoverRoutes);
+    mountAsServer(a, "/discover", discoverRoutes, "/api/discover");
     return a;
 }
