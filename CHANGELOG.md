@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Imports pick only songs that play.** Importing a playlist from a link or an M3U file, and the weekly Discover playlist, no longer pick a song whose file is missing or unreadable, and an import no longer adds a Discover song to a playlist.
 - **Saving settings while Audiobookshelf is off no longer clears listening progress again.**
 - **Account sign-up and admin password reset answer plainly.** An `ADMIN_RESET_PASSWORD` shorter than 6 characters now logs a warning and leaves the admin password as it was; a sign-up that races another for the same name, or for the first account, gets a plain answer instead of "Failed to create account".
+- **A repeated notification shows the latest event.** Its details and link now come from the newest event, not the one before.
+- **The metrics page has the same runaway limit as the other admin reads,** so a client stuck in a loop can no longer hammer it.
+- **Random mixes and stations stay fast as the library grows.** Their songs are now drawn in the database instead of from every matching song.
 - **Discover tells same-name artists apart in Lidarr.** Keeping a Discover album takes Discover's tag off only the Lidarr artist that owns that album, not off other artists with the same name. And an unrelated artist with the same name as one of this week's suggestions no longer stops Discover clearing an artist it added.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
