@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, rankMatches } from "../matching/rank";
 import { safeZone } from "../stats/listening";
+import { playRowsSql } from "../stats/listens";
 import type { ProgrammaticMix } from "./helpers";
 import { mixFromTracks, type RecipeMixSpec } from "./recipeMix";
 import {
@@ -115,12 +116,11 @@ export async function nightSongs(
         WITH night AS (
             SELECT t.id, ${artistSql()} AS artist_key, lower(t.title) AS title_key,
                    ${Prisma.raw(PACE_SQL)} AS pace, t.arousal
-            FROM "Play" p
+            FROM (${playRowsSql(userId, { since, heard: true })}) p
             JOIN "Track" t ON t.id = p."trackId"
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
-            WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard
-              AND ${playableSongSql("t", "a")}
+            WHERE ${playableSongSql("t", "a")}
               AND (EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) >= ${NIGHT_START_HOUR}
                    OR EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) < ${NIGHT_END_HOUR})
         )

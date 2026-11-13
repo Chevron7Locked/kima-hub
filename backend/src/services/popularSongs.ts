@@ -27,7 +27,7 @@ import { nameKey } from "./nameFold";
 import { listenBrainzService } from "./listenBrainz";
 import { deezerService } from "./deezer";
 import { musicBrainzService } from "./musicbrainz";
-import { playedCounts } from "./stats/listens";
+import { playCounts } from "./stats/listens";
 
 /** How many songs each source is asked for, whatever the caller's limit. */
 const SOURCE_DEPTH = 50;
@@ -216,10 +216,10 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
             },
             orderBy: [{ album: { year: { sort: "desc", nulls: "last" } } }, { albumId: "asc" }, { discNumber: "asc" }, { trackNo: "asc" }, { id: "asc" }],
         }),
-        playedCounts(args.userId, { song: playable }),
+        playCounts(args.userId, { song: playable }),
         globalRanking(args, deadlineMs),
     ]);
-    const plays = new Map(listens.map((l) => [l.trackId, l.count]));
+    const plays = new Map(listens.map((l) => [l.trackId, l.plays]));
     const byId = new Map<string, OwnedSong>(owned.map((t) => [t.id, t]));
     const byMbid = new Map<string, OwnedSong>();
     const byTitle = new Map<string, OwnedSong>();
@@ -278,7 +278,7 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
         const song = byId.get(l.trackId);
         if (!song || listed.has(song.id)) continue;
         listed.add(song.id);
-        list.push(ownedSong(song, "own", { playCount: l.count }));
+        list.push(ownedSong(song, "own", { playCount: l.plays }));
     }
 
     // 3. First-release date, only asked for when the first two tiers left room.

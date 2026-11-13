@@ -7,6 +7,7 @@ import { subWeeks } from 'date-fns';
 import { normalizeForMatching, stringSimilarity } from '../../utils/normalization';
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { hasRealArtistId } from './discoverEvidence';
+import { playCounts } from '../stats/listens';
 
 export interface SeedArtist {
     name: string;
@@ -39,25 +40,18 @@ export class DiscoverySeeding {
         const twoWeeksAgo = subWeeks(new Date(), 2);
         const fourWeeksAgo = subWeeks(new Date(), 4);
 
-        const recentPlays = await prisma.play.groupBy({
-            by: ['trackId'],
-            where: {
-                userId,
-                playedAt: { gte: fourWeeksAgo },
-                source: { in: ['LIBRARY', 'DISCOVERY_KEPT'] },
-            },
-            _count: { id: true },
-            _max: { playedAt: true },
+        const recentPlays = await playCounts(userId, {
+            since: fourWeeksAgo,
+            sources: ['LIBRARY', 'DISCOVERY_KEPT'],
         });
 
         const weightedPlays = recentPlays
             .map(play => {
-                const isRecent = play._max.playedAt && play._max.playedAt >= twoWeeksAgo;
-                const weight = isRecent ? 2 : 1;
+                const weight = play.lastPlayedAt >= twoWeeksAgo ? 2 : 1;
                 return {
                     trackId: play.trackId,
-                    weightedCount: play._count.id * weight,
-                    rawCount: play._count.id,
+                    weightedCount: play.plays * weight,
+                    rawCount: play.plays,
                 };
             })
             .filter(p => p.rawCount >= this.MIN_PLAYS_THRESHOLD) // Filter <5 plays

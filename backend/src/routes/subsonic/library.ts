@@ -5,6 +5,7 @@ import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntPa
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { playRowsSql } from "../../services/stats/listens";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 
@@ -435,9 +436,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
-                JOIN "Play" p ON p."trackId" = t.id
-                WHERE p."userId" = ${userId}
-                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
+                JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
+                WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY MAX(p."playedAt") DESC
@@ -451,9 +451,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
-                JOIN "Play" p ON p."trackId" = t.id
-                WHERE p."userId" = ${userId}
-                  AND EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
+                JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
+                WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY COUNT(p.id) DESC

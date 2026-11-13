@@ -8,6 +8,7 @@
 
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/libraryEligibility";
+import { playRowsSql } from "./listens";
 
 const PLAYABLE_SQL = playableSongSql("t", "al");
 
@@ -37,10 +38,10 @@ export async function shelfStats(userId: string): Promise<ShelfStats> {
         SELECT count(DISTINCT t.id)::int             AS tracks,
                count(DISTINCT al.id)::int            AS albums,
                count(DISTINCT al."artistId")::int    AS artists
-        FROM "Play" p
+        FROM (${playRowsSql(userId)}) p
         JOIN "Track" t  ON t.id  = p."trackId"
         JOIN "Album" al ON al.id = t."albumId"
-        WHERE p."userId" = ${userId} AND ${PLAYABLE_SQL}`,
+        WHERE ${PLAYABLE_SQL}`,
 
         prisma.$queryRaw<Array<{ status: string; n: number }>>`
         SELECT t."analysisStatus" AS status, count(*)::int AS n
@@ -55,7 +56,7 @@ export async function shelfStats(userId: string): Promise<ShelfStats> {
                count(DISTINCT al.id) FILTER (WHERE pl.id IS NOT NULL)::int AS heard
         FROM "Album" al
         JOIN "Track" t ON t."albumId" = al.id
-        LEFT JOIN "Play"  pl ON pl."trackId" = t.id AND pl."userId" = ${userId}
+        LEFT JOIN (${playRowsSql(userId)}) pl ON pl."trackId" = t.id
         WHERE ${PLAYABLE_SQL} AND coalesce(al."displayYear", al.year) IS NOT NULL
         GROUP BY 1 ORDER BY 1`,
     ]);

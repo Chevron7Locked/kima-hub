@@ -3,13 +3,16 @@
  */
 
 import { listensOf, collapseCandidates } from "../playHistoryRepair";
+import { playHistory } from "../stats/listens";
 
 jest.mock("../../utils/db", () => ({
-    prisma: { play: { findMany: jest.fn(), deleteMany: jest.fn() } },
+    prisma: { play: { deleteMany: jest.fn() } },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { prisma } = require("../../utils/db");
+jest.mock("../stats/listens", () => ({
+    ...jest.requireActual("../stats/listens"),
+    playHistory: jest.fn(),
+}));
 
 const T0 = new Date("2026-03-01T12:00:00Z").getTime();
 
@@ -29,7 +32,7 @@ function play(id: string, atSeconds: number, duration: number, trackId = "t1", h
     };
 }
 
-const given = (rows: ReturnType<typeof play>[]) => prisma.play.findMany.mockResolvedValue(rows);
+const given = (rows: ReturnType<typeof play>[]) => (playHistory as jest.Mock).mockResolvedValue(rows);
 
 beforeEach(() => jest.clearAllMocks());
 

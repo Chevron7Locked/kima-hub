@@ -10,6 +10,7 @@ import { playableSongSql } from "../../utils/libraryEligibility";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, topScores } from "../matching/rank";
+import { playRowsSql } from "../stats/listens";
 import { FAMILIAR_KEY_PREFIX } from "./cacheKeys";
 
 /** Only plays this recent count: a taste is read from the recent past, and the bound lets the (user, play time) index serve the scan. */
@@ -58,10 +59,10 @@ export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
     const since = new Date(now.getTime() - FAMILIAR_LOOKBACK_DAYS * 86_400_000);
     return prisma.$queryRaw<SeedRow[]>`
         SELECT p."trackId" AS id, count(*)::int AS plays
-        FROM "Play" p
+        FROM (${playRowsSql(userId, { since, heard: true })}) p
         JOIN "Track" t ON t.id = p."trackId"
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE p."userId" = ${userId} AND p."playedAt" >= ${since} AND p.heard AND ${playableSongSql("t", "a")}
+        WHERE ${playableSongSql("t", "a")}
         GROUP BY p."trackId"
         ORDER BY plays DESC, max(p."playedAt") DESC, p."trackId"
         LIMIT ${FAMILIAR_SEEDS}

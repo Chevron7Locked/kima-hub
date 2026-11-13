@@ -9,6 +9,7 @@ import { ListenSource } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { listenBrainzService } from "./listenBrainz";
+import { hasPlayBetween } from "./stats/listens";
 
 /** A track at or below this length can never be scrobbled. Last.fm's floor. */
 export const MIN_TRACK_DURATION_SECONDS = 30;
@@ -165,19 +166,14 @@ export async function recordPlay(
     const outcome = await prisma.$transaction(async (tx) => {
         await lockPlayDedupe(tx, userId, trackId);
 
-        const recent = await tx.play.findFirst({
-            // Strict bounds on both sides: exactly one duration away, the song has
-            // finished, so that play is a genuine replay. Subsonic clients scrobble exact
-            // timestamps, which is where this edge happens.
-            where: {
-                userId,
-                trackId,
-                playedAt: {
-                    gt: new Date(anchor - window),
-                    lt: new Date(anchor + window),
-                },
-            },
-            select: { id: true },
+        // Strict bounds on both sides: exactly one duration away, the song has
+        // finished, so that play is a genuine replay. Subsonic clients scrobble exact
+        // timestamps, which is where this edge happens.
+        const recent = await hasPlayBetween(tx, {
+            userId,
+            trackId,
+            after: new Date(anchor - window),
+            before: new Date(anchor + window),
         });
         if (recent) return { recorded: false, reason: "duplicate" } as const;
 

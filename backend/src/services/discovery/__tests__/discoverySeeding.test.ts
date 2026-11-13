@@ -1,12 +1,10 @@
 import { DiscoverySeeding } from '../discoverySeeding';
 import { prisma } from '../../../utils/db';
 import { lidarrService } from '../../lidarr';
+import { playCounts } from '../../stats/listens';
 
 jest.mock('../../../utils/db', () => ({
     prisma: {
-        play: {
-            groupBy: jest.fn(),
-        },
         album: {
             groupBy: jest.fn(),
             findFirst: jest.fn(),
@@ -33,6 +31,10 @@ jest.mock('../../../utils/db', () => ({
     },
 }));
 
+jest.mock('../../stats/listens', () => ({
+    playCounts: jest.fn(),
+}));
+
 jest.mock('../../lidarr', () => ({
     lidarrService: {
         isAlbumAvailable: jest.fn(),
@@ -40,6 +42,7 @@ jest.mock('../../lidarr', () => ({
 }));
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+const mockPlayCounts = playCounts as jest.MockedFunction<typeof playCounts>;
 const mockLidarrService = lidarrService as jest.Mocked<typeof lidarrService>;
 
 describe('DiscoverySeeding', () => {
@@ -56,11 +59,11 @@ describe('DiscoverySeeding', () => {
         it('should return top played artists with valid MBIDs', async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [
-                { trackId: 'track-1', _count: { id: 10 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-2', _count: { id: 8 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-3', _count: { id: 7 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-4', _count: { id: 6 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-5', _count: { id: 5 }, _max: { playedAt: new Date() } },
+                { trackId: 'track-1', plays: 10, lastPlayedAt: new Date() },
+                { trackId: 'track-2', plays: 8, lastPlayedAt: new Date() },
+                { trackId: 'track-3', plays: 7, lastPlayedAt: new Date() },
+                { trackId: 'track-4', plays: 6, lastPlayedAt: new Date() },
+                { trackId: 'track-5', plays: 5, lastPlayedAt: new Date() },
             ];
 
             const tracks = [
@@ -101,7 +104,7 @@ describe('DiscoverySeeding', () => {
                 },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
             const result = await seeding.getSeedArtists(userId);
@@ -114,11 +117,11 @@ describe('DiscoverySeeding', () => {
         it('should filter out artists with temp- MBIDs', async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [
-                { trackId: 'track-1', _count: { id: 10 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-2', _count: { id: 8 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-3', _count: { id: 7 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-4', _count: { id: 6 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-5', _count: { id: 5 }, _max: { playedAt: new Date() } },
+                { trackId: 'track-1', plays: 10, lastPlayedAt: new Date() },
+                { trackId: 'track-2', plays: 8, lastPlayedAt: new Date() },
+                { trackId: 'track-3', plays: 7, lastPlayedAt: new Date() },
+                { trackId: 'track-4', plays: 6, lastPlayedAt: new Date() },
+                { trackId: 'track-5', plays: 5, lastPlayedAt: new Date() },
             ];
 
             const tracks = [
@@ -159,7 +162,7 @@ describe('DiscoverySeeding', () => {
                 },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
             const result = await seeding.getSeedArtists(userId);
@@ -173,11 +176,11 @@ describe('DiscoverySeeding', () => {
         it('should filter out artists with null MBIDs', async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [
-                { trackId: 'track-1', _count: { id: 10 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-2', _count: { id: 8 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-3', _count: { id: 7 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-4', _count: { id: 6 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-5', _count: { id: 5 }, _max: { playedAt: new Date() } },
+                { trackId: 'track-1', plays: 10, lastPlayedAt: new Date() },
+                { trackId: 'track-2', plays: 8, lastPlayedAt: new Date() },
+                { trackId: 'track-3', plays: 7, lastPlayedAt: new Date() },
+                { trackId: 'track-4', plays: 6, lastPlayedAt: new Date() },
+                { trackId: 'track-5', plays: 5, lastPlayedAt: new Date() },
             ];
 
             const tracks = [
@@ -218,7 +221,7 @@ describe('DiscoverySeeding', () => {
                 },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
             const result = await seeding.getSeedArtists(userId);
@@ -236,7 +239,7 @@ describe('DiscoverySeeding', () => {
                 { id: 'artist-2', name: 'Library Artist Two', mbid: 'lib-mbid-2', albums: [{ _count: { tracks: 3 } }] },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue([]);
+            mockPlayCounts.mockResolvedValue([]);
             (mockPrisma.artist.findMany as jest.Mock).mockResolvedValue(artists);
 
             const result = await seeding.getSeedArtists(userId);
@@ -248,7 +251,7 @@ describe('DiscoverySeeding', () => {
 
         it('should fall back to library when fewer than 5 recent plays', async () => {
             const recentPlays = [
-                { trackId: 'track-1', _count: { id: 2 }, _max: { playedAt: new Date() } },
+                { trackId: 'track-1', plays: 2, lastPlayedAt: new Date() },
             ];
 
             // getFallbackSeedArtists uses artist.findMany (not album.groupBy)
@@ -256,7 +259,7 @@ describe('DiscoverySeeding', () => {
                 { id: 'artist-1', name: 'Library Artist', mbid: 'lib-mbid-1', albums: [{ _count: { tracks: 5 } }] },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.artist.findMany as jest.Mock).mockResolvedValue(artists);
 
             const result = await seeding.getSeedArtists(userId);
@@ -268,8 +271,8 @@ describe('DiscoverySeeding', () => {
         it('should respect seedCount parameter', async () => {
             const recentPlays = Array.from({ length: 20 }, (_, i) => ({
                 trackId: `track-${i}`,
-                _count: { id: 20 - i },
-                _max: { playedAt: new Date() },
+                plays: 20 - i,
+                lastPlayedAt: new Date(),
             }));
 
             const tracks = Array.from({ length: 20 }, (_, i) => ({
@@ -280,7 +283,7 @@ describe('DiscoverySeeding', () => {
                 },
             }));
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
             const result = await seeding.getSeedArtists(userId, 5);
@@ -291,11 +294,11 @@ describe('DiscoverySeeding', () => {
         it('should deduplicate artists from multiple tracks', async () => {
             // Need at least 5 plays to not trigger fallback
             const recentPlays = [
-                { trackId: 'track-1', _count: { id: 10 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-2', _count: { id: 8 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-3', _count: { id: 5 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-4', _count: { id: 5 }, _max: { playedAt: new Date() } },
-                { trackId: 'track-5', _count: { id: 6 }, _max: { playedAt: new Date() } },
+                { trackId: 'track-1', plays: 10, lastPlayedAt: new Date() },
+                { trackId: 'track-2', plays: 8, lastPlayedAt: new Date() },
+                { trackId: 'track-3', plays: 5, lastPlayedAt: new Date() },
+                { trackId: 'track-4', plays: 5, lastPlayedAt: new Date() },
+                { trackId: 'track-5', plays: 6, lastPlayedAt: new Date() },
             ];
 
             const tracks = [
@@ -336,7 +339,7 @@ describe('DiscoverySeeding', () => {
                 },
             ];
 
-            (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(recentPlays);
+            mockPlayCounts.mockResolvedValue(recentPlays);
             (mockPrisma.track.findMany as jest.Mock).mockResolvedValue(tracks);
 
             const result = await seeding.getSeedArtists(userId);

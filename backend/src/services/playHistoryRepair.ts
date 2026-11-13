@@ -8,7 +8,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { requiredListenSeconds } from "./playRecording";
-import { MIN_LISTEN_WINDOW_SECONDS } from "./stats/listens";
+import { MIN_LISTEN_WINDOW_SECONDS, playHistory } from "./stats/listens";
 
 /*
  * Rows are grouped into listens first: rows for one track closer together than
@@ -51,26 +51,7 @@ function judge(span: number, gapAfter: number | null, required: number | null): 
  * Reads the whole history. That is why nothing calls it on a page load.
  */
 export async function listensOf(userId: string): Promise<Listen[]> {
-    const plays = await prisma.play.findMany({
-        where: { userId },
-        // The id is a tiebreaker, not decoration -- see the note in
-        // analysePlayHistory. Same reasoning, same consequence if omitted.
-        orderBy: [{ playedAt: "asc" }, { id: "asc" }],
-        select: {
-            id: true,
-            trackId: true,
-            playedAt: true,
-            heard: true,
-            track: {
-                select: {
-                    title: true,
-                    displayTitle: true,
-                    duration: true,
-                    album: { select: { artist: { select: { name: true, displayName: true } } } },
-                },
-            },
-        },
-    });
+    const plays = await playHistory(userId);
 
     // The gap to the next play of anything, in the order they happened. This is
     // the only thing that can bound a listen from above, so it is measured on

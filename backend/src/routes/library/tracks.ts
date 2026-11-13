@@ -15,6 +15,7 @@ import {
 } from "../../services/mixes/radioRow";
 import { songArtistKey } from "../../services/mixes/recipes";
 import { noOneKeys } from "../../services/mixes/artistCap";
+import { recentListenArtists } from "../../services/stats/listens";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
@@ -42,41 +43,15 @@ router.get("/recently-listened", async (req, res) => {
     const userId = req.user!.id;
     const limitNum = parseLimit(req.query.limit, 10, 100);
 
-    const [recentPlays, inProgressAudiobooks, inProgressPodcasts] =
+    const [recentArtists, inProgressAudiobooks, inProgressPodcasts] =
       await Promise.all([
-        prisma.play.findMany({
-          where: {
-            userId,
-            source: { in: ["LIBRARY", "DISCOVERY_KEPT"] },
-            // Various Artists and Unknown Artist name no one, so their plays give no artist card.
-            track: {
-              album: {
-                location: LIBRARY_LOCATION,
-                artist: { identityKey: { notIn: noOneKeys() } },
-              },
-            },
-          },
-          orderBy: { playedAt: "desc" },
-          take: limitNum * 3,
-          include: {
-            track: {
-              include: {
-                album: {
-                  include: {
-                    artist: {
-                      select: {
-                        id: true,
-                        mbid: true,
-                        name: true,
-                        heroUrl: true,
-                        userHeroUrl: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+        // Listens, not Play rows, and one entry per artist, so `limit` cards come back
+        // whenever that many artists were listened to. Various Artists and Unknown Artist
+        // name no one, so their listens give no artist card.
+        recentListenArtists(userId, {
+          take: limitNum,
+          sources: ["LIBRARY", "DISCOVERY_KEPT"],
+          where: Prisma.sql`al.location = ${LIBRARY_LOCATION}::"AlbumLocation" AND ar."identityKey" NOT IN (${Prisma.join(noOneKeys())})`,
         }),
         prisma.audiobookProgress.findMany({
           where: {
@@ -124,21 +99,18 @@ router.get("/recently-listened", async (req, res) => {
       })
       .slice(0, Math.ceil(limitNum / 3));
 
-    const artistsMap = new Map();
-
-    for (const play of recentPlays) {
-      const artist = play.track.album.artist;
-      if (!artistsMap.has(artist.id)) {
-        artistsMap.set(artist.id, {
-          ...artist,
-          type: "artist",
-          lastPlayedAt: play.playedAt,
-        });
-      }
-    }
+    const artistRows = await prisma.artist.findMany({
+      where: { id: { in: recentArtists.map((r) => r.artistId) } },
+      select: { id: true, mbid: true, name: true, heroUrl: true, userHeroUrl: true },
+    });
+    const artistById = new Map(artistRows.map((a) => [a.id, a]));
+    const artistCards = recentArtists.flatMap((r): any[] => {
+      const artist = artistById.get(r.artistId);
+      return artist ? [{ ...artist, type: "artist", lastPlayedAt: r.lastListenedAt }] : [];
+    });
 
     const combined = [
-      ...Array.from(artistsMap.values()),
+      ...artistCards,
       ...inProgressAudiobooks.map((ab: any) => {
         const coverArt =
           ab.coverUrl && !ab.coverUrl.startsWith("http")

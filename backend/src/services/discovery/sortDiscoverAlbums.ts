@@ -16,6 +16,7 @@ import {
     loadDiscoverRecords,
 } from "./discoverEvidence";
 import { nameKey } from "../nameFold";
+import { albumsPlayedAtLeast } from "../stats/listens";
 
 /** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
 const KEEP_PLAYS = 3;
@@ -46,10 +47,9 @@ async function albumsListenersKept(ids: string[]): Promise<Set<string>> {
         WHERE t."albumId" = ANY(${ids})
         GROUP BY t."albumId"
         HAVING bool_or(EXISTS (SELECT 1 FROM "LikedTrack" l WHERE l."trackId" = t.id))
-            OR bool_or(EXISTS (SELECT 1 FROM "PlaylistItem" p WHERE p."trackId" = t.id))
-            OR (SELECT count(*) FROM "Play" p JOIN "Track" pt ON pt.id = p."trackId" WHERE pt."albumId" = t."albumId") >= ${KEEP_PLAYS}
-               AND (SELECT count(DISTINCT p."trackId") FROM "Play" p JOIN "Track" pt ON pt.id = p."trackId" WHERE pt."albumId" = t."albumId") >= ${KEEP_SONGS}`;
-    return new Set(rows.map((r) => r.albumId));
+            OR bool_or(EXISTS (SELECT 1 FROM "PlaylistItem" p WHERE p."trackId" = t.id))`;
+    const played = await albumsPlayedAtLeast(ids, { plays: KEEP_PLAYS, songs: KEEP_SONGS });
+    return new Set([...rows.map((r) => r.albumId), ...played]);
 }
 
 export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {

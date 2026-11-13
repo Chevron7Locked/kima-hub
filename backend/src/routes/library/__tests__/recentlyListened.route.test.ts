@@ -64,3 +64,72 @@ it("leaves out Various Artists and Unknown Artist, which name no one", async () 
     const names = (res.body.items as { type: string; name?: string }[]).filter((i) => i.type === "artist").map((i) => i.name);
     expect(names).toEqual([`${P} Real`]);
 });
+
+describe("the page is full", () => {
+    const BUSY = `${P}-busy`;
+    const asBusy = () =>
+        express()
+            .use((req: any, _res, next) => { req.user = { id: BUSY, role: "user" }; next(); })
+            .use("/library", tracksRouter);
+    const FIRST = ["x", "y", "z"];
+
+    beforeAll(async () => {
+        await prisma.user.create({ data: { id: BUSY, username: BUSY, passwordHash: "x" } });
+        // x was played twenty times in the last hour; y and z once each, long before.
+        for (const [i, key] of FIRST.entries()) {
+            const artistId = `${P}-ar-${key}`;
+            await prisma.artist.create({ data: { id: artistId, name: `${P} ${key}`, normalizedName: `${P} ${key}`, identityKey: `${P}-ik-${key}` } });
+            made.push(artistId);
+            const albumId = `${P}-al-${key}`;
+            await prisma.album.create({
+                data: { id: albumId, rgMbid: `${albumId}-rg`, artistId, identityKey: `${albumId}-ik`, title: albumId, primaryType: "Album", location: "LIBRARY", lastSynced: at(0) },
+            });
+            await prisma.track.create({
+                data: { id: `${albumId}-t`, albumId, title: albumId, trackNo: 1, duration: 100, filePath: `${albumId}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            const plays = key === "x" ? 20 : 1;
+            await prisma.play.createMany({
+                data: Array.from({ length: plays }, (_, j) => ({
+                    id: `${albumId}-p${j}`, userId: BUSY, trackId: `${albumId}-t`, source: "LIBRARY" as const, heard: true,
+                    // x's plays are 3 minutes apart, so each is a listen of its own (the song is 100 s long).
+                    playedAt: key === "x" ? at(10 + j * 3) : at(1000 + i * 100),
+                })),
+            });
+        }
+        // A Discover song played most recently of all is no artist card.
+        const artistId = `${P}-ar-d`;
+        await prisma.artist.create({ data: { id: artistId, name: `${P} d`, normalizedName: `${P} d`, identityKey: `${P}-ik-d` } });
+        made.push(artistId);
+        await prisma.album.create({
+            data: { id: `${P}-al-d`, rgMbid: `${P}-al-d-rg`, artistId, identityKey: `${P}-al-d-ik`, title: `${P}-al-d`, primaryType: "Album", location: "DISCOVER", lastSynced: at(0) },
+        });
+        await prisma.track.create({
+            data: { id: `${P}-al-d-t`, albumId: `${P}-al-d`, title: "d", trackNo: 1, duration: 100, filePath: `${P}-al-d.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.play.create({ data: { id: `${P}-al-d-p`, userId: BUSY, trackId: `${P}-al-d-t`, playedAt: at(1), source: "LIBRARY" } });
+    });
+
+    afterAll(async () => {
+        await prisma.play.deleteMany({ where: { userId: BUSY } });
+        await prisma.user.deleteMany({ where: { id: BUSY } });
+    });
+
+    const artistsAsked = async (limit: number) => {
+        const res = await request(asBusy()).get(`/library/recently-listened?limit=${limit}`);
+        expect(res.status).toBe(200);
+        return (res.body.items as { type: string; name?: string }[]).filter((i) => i.type === "artist").map((i) => i.name);
+    };
+
+    it("holds as many artists as asked for when that many were listened to, however often one was", async () => {
+        // The newest nine plays are all the busy artist's.
+        expect(await artistsAsked(3)).toEqual([`${P} x`, `${P} y`, `${P} z`]);
+    });
+
+    it("keeps the most recent listen first and stops at the limit", async () => {
+        expect(await artistsAsked(2)).toEqual([`${P} x`, `${P} y`]);
+    });
+
+    it("gives no card for a song that lives in Discover", async () => {
+        expect(await artistsAsked(10)).not.toContain(`${P} d`);
+    });
+});

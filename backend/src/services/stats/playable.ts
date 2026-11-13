@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/libraryEligibility";
-import { listenRows, type Period } from "./listens";
+import { listenRows, neverPlayedSql, type Period } from "./listens";
 
 /** The shape the player wants. Matches what the library routes hand back. */
 export interface PlayableTrack {
@@ -112,7 +112,7 @@ export async function playableSlice(params: {
                 SELECT ${SELECT}
                 FROM "Track" t ${JOINS}
                 WHERE ${PLAYABLE_SQL}
-                  AND NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${userId})
+                  AND ${neverPlayedSql(userId, "t")}
                 ORDER BY random() LIMIT ${limit}`);
             return shape(rows);
         }

@@ -18,7 +18,7 @@ import { MOODS, NEUTRAL, UNANALYZED, refreshMoodSnapshot } from "./moodBucketSer
 import { SELF_SCORE } from "./matching/formula";
 import { neighbourListsInWorker } from "./matching/neighbours";
 import { matchingContext } from "./matching/rank";
-import { listenRows } from "./stats/listens";
+import { countPlaysBefore, listenRows } from "./stats/listens";
 
 const gzip = promisify(zlib.gzip);
 
@@ -73,8 +73,11 @@ interface Build {
 let cached: LibraryExport | null = null;
 let building: Build | null = null;
 
-/** Plays before today (UTC). A rebuild scores every pair of tracks, far too much to run after each song, so a listen reaches the export once its day has ended. */
-const SETTLED = Prisma.sql`"playedAt" < date_trunc('day', now() AT TIME ZONE 'UTC')`;
+/** The start of today (UTC). A rebuild scores every pair of tracks, far too much to run after each song, so a listen reaches the export once its day has ended: only plays before this moment count. */
+function startOfTodayUtc(): Date {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
 
 /** The user whose plays the export carries: none when they have turned off sharing what they play. */
 async function sharingUserId(): Promise<string | null> {
@@ -85,18 +88,16 @@ async function sharingUserId(): Promise<string | null> {
 async function settledPlays(): Promise<number> {
     const userId = await sharingUserId();
     if (!userId) return 0;
-    const [{ plays }] = await prisma.$queryRaw<Array<{ plays: number }>>`
-        SELECT COUNT(*)::int AS plays FROM "Play" WHERE "userId" = ${userId} AND ${SETTLED}
-    `;
-    return plays;
+    return countPlaysBefore(userId, startOfTodayUtc());
 }
 
 /** Listens per track by the stats page's rule, across every source: one song heard through once counts once. */
 async function listensByTrack(): Promise<Map<string, number>> {
     const userId = await sharingUserId();
     if (!userId) return new Map();
+    const before = startOfTodayUtc();
     const rows = await prisma.$queryRaw<Array<{ trackId: string; plays: number }>>(Prisma.sql`${listenRows(userId)}
-        SELECT p."trackId", COUNT(*)::int AS plays FROM p WHERE p.${SETTLED} GROUP BY 1`);
+        SELECT p."trackId", COUNT(*)::int AS plays FROM p WHERE p."playedAt" < ${before} GROUP BY 1`);
     return new Map(rows.map((r) => [r.trackId, r.plays]));
 }
 
