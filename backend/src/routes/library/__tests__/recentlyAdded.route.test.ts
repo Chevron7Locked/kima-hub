@@ -1,5 +1,5 @@
-// Recently added lists artists by their newest library album, as many as asked for, however many albums the newest
-// artist added. Real database; the router is mounted with a user on the request as the app's auth would put it.
+// Recently added lists artists by when their newest library album first arrived, as many as asked for, however many
+// albums the newest artist added. Real database; the router is mounted with a user on the request as the app's auth would put it.
 
 import express from "express";
 import request from "supertest";
@@ -21,7 +21,7 @@ async function album(artist: number | string, n: number, minutesAgo: number) {
     const id = `${P}-al-${artist}-${n}`;
     const artistId = typeof artist === "number" ? `${P}-ar-${artist}` : artist;
     await prisma.album.create({
-        data: { id, rgMbid: `${id}-rg`, artistId, identityKey: `${id}-ik`, title: id, primaryType: "Album", location: "LIBRARY", lastSynced: at(minutesAgo) },
+        data: { id, rgMbid: `${id}-rg`, artistId, identityKey: `${id}-ik`, title: id, primaryType: "Album", location: "LIBRARY", createdAt: at(minutesAgo), lastSynced: at(minutesAgo) },
     });
     await prisma.track.create({
         data: { id: `${id}-t`, albumId: id, title: id, trackNo: 1, duration: 100, filePath: `${id}.flac`, fileModified: new Date(), fileSize: 1 },
@@ -77,5 +77,12 @@ it("leaves out Various Artists and Unknown Artist, which name no one", async () 
     // Compilations and untagged albums added after everything else: newest, yet not shown.
     await album(await placeholder(VARIOUS_ARTISTS_CANONICAL), 0, -10);
     await album(await placeholder(UNKNOWN_ARTIST), 0, -20);
+    expect(await names("?limit=4")).toEqual([`${P} 0`, `${P} 1`, `${P} 2`, `${P} 3`]);
+});
+
+it("keeps the order albums first arrived when a rescan touches an old album", async () => {
+    // What a rescan does to an album it finds again: its sync time moves to now (after every seeded time, here).
+    // Its arrival time must not.
+    await prisma.album.update({ where: { id: `${P}-al-3-0` }, data: { lastSynced: new Date(Date.UTC(2032, 0, 1)) } });
     expect(await names("?limit=4")).toEqual([`${P} 0`, `${P} 1`, `${P} 2`, `${P} 3`]);
 });

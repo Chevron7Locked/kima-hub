@@ -215,13 +215,13 @@ router.get("/recently-added", async (req, res) => {
   try {
     const limitNum = parseLimit(req.query.limit, 10, 100);
 
-    // Artists ordered by their newest library album with a playable song, one row each; Various Artists and
-    // Unknown Artist name no one, so they are left out.
+    // Artists ordered by when their newest library album with a playable song first arrived (createdAt, which a
+    // rescan never moves), one row each; Various Artists and Unknown Artist name no one, so they are left out.
     const newest = await prisma.album.groupBy({
       by: ["artistId"],
       where: { ...PLAYABLE_ALBUM_WHERE, artist: { identityKey: { notIn: noOneKeys() } } },
-      _max: { lastSynced: true },
-      orderBy: { _max: { lastSynced: "desc" } },
+      _max: { createdAt: true },
+      orderBy: { _max: { createdAt: "desc" } },
       take: limitNum,
     });
     const artistRows = await prisma.artist.findMany({

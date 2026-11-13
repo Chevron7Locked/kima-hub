@@ -23,8 +23,10 @@ model Album {
   primaryType      String
   label            String?
   genres           Json?
+  /// When the album first arrived. Only the insert writes it; a rescan never moves it.
+  createdAt        DateTime                 @default(now())
   lastSynced       DateTime                 @default(now())
-  location         AlbumLocation            @default(LIBRARY)
+  location         AlbumLocation           @default(LIBRARY)
   searchVector     Unsupported("tsvector")?
   displayTitle     String?
   displayYear      Int?

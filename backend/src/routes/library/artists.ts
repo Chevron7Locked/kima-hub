@@ -274,14 +274,14 @@ router.get("/artist-counts/status", async (_req, res) => {
 
 router.post("/artist-counts/backfill", requireAdmin, async (_req, res) => {
   try {
-    if (isBackfillInProgress()) {
-      return res.json({
-        message: "Backfill already in progress",
-        status: "processing",
-      });
-    }
+    // Asked during a run, the recount goes over the artists once more when it finishes, so the ask is kept.
+    const queued = isBackfillInProgress();
 
-    res.json({ message: "Backfill started", status: "processing" });
+    res.json(
+      queued
+        ? { message: "Backfill queued: it runs once more when the current one finishes", status: "queued" }
+        : { message: "Backfill started", status: "processing" },
+    );
 
     backfillAllArtistCounts((processed, total) => {
       if (processed % 100 === 0) {
