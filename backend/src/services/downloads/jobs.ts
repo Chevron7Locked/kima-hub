@@ -18,7 +18,7 @@
  * A move answers once the rows and the user's notice are written. The Discover batch's
  * and the import's completion checks run after it, detached (a batch check can wait
  * 60 s for Lidarr), one at a time per batch and per import, with a failure logged.
- * `whenIdle` waits for them, for tests and shutdown. `withoutFailureMarks` is the
+ * `whenIdle` waits for them, and for any move still writing or telling, for tests and shutdown. `withoutFailureMarks` is the
  * metadata of a job with what a failure left on it removed, for a retry or a re-queue.
  *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
@@ -150,18 +150,20 @@ export async function start(id: string, started: StartInput):Promise<boolean> {
  * running and wait. A job parks once, however many paths reach it, and tells the user once, through the notification
  * policy, when it first waits. Returns the jobs it parked.
  */
-export async function park(jobs: JobRef[], reason: string): Promise<SettledJob[]> {
-    const why = reason.trim() || "Lidarr is holding it";
-    // A job is parked when it has the field, whatever its text says.
-    const parked = await settle(
-        jobs,
-        ["processing"],
-        Prisma.sql`status = status`,
-        { parked: why, statusText: `Waiting in Lidarr: ${why}` },
-        Prisma.sql`AND NOT (coalesce(metadata, '{}'::jsonb) ? 'parked')`
-    );
-    for (const job of parked) await tellUser(job, "parked", why);
-    return parked;
+export function park(jobs: JobRef[], reason: string): Promise<SettledJob[]> {
+    return moving(async () => {
+        const why = reason.trim() || "Lidarr is holding it";
+        // A job is parked when it has the field, whatever its text says.
+        const parked = await settle(
+            jobs,
+            ["processing"],
+            Prisma.sql`status = status`,
+            { parked: why, statusText: `Waiting in Lidarr: ${why}` },
+            Prisma.sql`AND NOT (coalesce(metadata, '{}'::jsonb) ? 'parked')`
+        );
+        for (const job of parked) await tellUser(job, "parked", why);
+        return parked;
+    });
 }
 
 /**
@@ -224,31 +226,35 @@ export async function grab(
  * The jobs complete. A job another path already settled is left alone, so nobody is
  * told twice. `extra` joins the jobs' metadata.
  */
-export async function complete(jobs: JobRef[], extra: Record<string, unknown> = {}): Promise<SettledJob[]> {
-    const completedAt = new Date();
-    const settled = await settle(
-        jobs,
-        ACTIVE,
-        Prisma.sql`status = 'completed', error = NULL, "completedAt" = ${completedAt}`,
-        { ...extra, parked: null, completedAt: completedAt.toISOString() }
-    );
-    await tell(settled, "complete");
-    return settled;
+export function complete(jobs: JobRef[], extra: Record<string, unknown> = {}): Promise<SettledJob[]> {
+    return moving(async () => {
+        const completedAt = new Date();
+        const settled = await settle(
+            jobs,
+            ACTIVE,
+            Prisma.sql`status = 'completed', error = NULL, "completedAt" = ${completedAt}`,
+            { ...extra, parked: null, completedAt: completedAt.toISOString() }
+        );
+        await tell(settled, "complete");
+        return settled;
+    });
 }
 
 /**
  * The jobs fail with `error`. A job another path already settled is left alone.
  * `patch` joins the jobs' metadata; its statusText replaces the default, which is the error.
  */
-export async function fail(jobs: JobRef[], error: string, patch: Record<string, unknown> = {}): Promise<SettledJob[]> {
-    const settled = await settle(
-        jobs,
-        ACTIVE,
-        Prisma.sql`status = 'failed', error = ${error}, "completedAt" = now()`,
-        { statusText: error, ...patch, failedAt: new Date().toISOString() }
-    );
-    await tell(settled, "failed", error);
-    return settled;
+export function fail(jobs: JobRef[], error: string, patch: Record<string, unknown> = {}): Promise<SettledJob[]> {
+    return moving(async () => {
+        const settled = await settle(
+            jobs,
+            ACTIVE,
+            Prisma.sql`status = 'failed', error = ${error}, "completedAt" = now()`,
+            { statusText: error, ...patch, failedAt: new Date().toISOString() }
+        );
+        await tell(settled, "failed", error);
+        return settled;
+    });
 }
 
 /**
@@ -257,15 +263,17 @@ export async function fail(jobs: JobRef[], error: string, patch: Record<string, 
  * notification policy keeps quiet for a cancel, as it asked for it. The caller does
  * the Lidarr side (the download manager's cancelJobs).
  */
-export async function cancel(jobs: JobRef[], reason = "Cancelled by user"): Promise<SettledJob[]> {
-    const settled = await settle(
-        jobs,
-        ACTIVE,
-        Prisma.sql`status = 'failed', error = ${reason}, "completedAt" = now()`,
-        { statusText: "Cancelled", cancelled: true, failedAt: new Date().toISOString() }
-    );
-    await tell(settled, "cancel", reason);
-    return settled;
+export function cancel(jobs: JobRef[], reason = "Cancelled by user"): Promise<SettledJob[]> {
+    return moving(async () => {
+        const settled = await settle(
+            jobs,
+            ACTIVE,
+            Prisma.sql`status = 'failed', error = ${reason}, "completedAt" = now()`,
+            { statusText: "Cancelled", cancelled: true, failedAt: new Date().toISOString() }
+        );
+        await tell(settled, "cancel", reason);
+        return settled;
+    });
 }
 
 /**
@@ -323,8 +331,21 @@ async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Pr
 const checking = new Set<Promise<void>>();
 
 /**
- * Resolves when every batch and import check a move started has ended, or after `timeoutMs` when one is given. For
- * tests, for shutdown (before the database closes), and for a route that removes the rows a check reads: a check
+ * Runs a move that ends or parks jobs and holds it in `checking` until it answers, so `whenIdle` also waits for a
+ * move that has written its rows but not yet told anyone. The batch and import checks it starts join `checking`
+ * before it answers, so the set is never empty between the move and its checks.
+ */
+async function moving<T>(move: () => Promise<T>): Promise<T> {
+    const run = move();
+    const held = run.then(() => undefined, () => undefined);
+    checking.add(held);
+    void held.finally(() => checking.delete(held));
+    return run;
+}
+
+/**
+ * Resolves when every move and every batch and import check it started has ended, or after `timeoutMs` when one is
+ * given. For tests, for shutdown (before the database closes), and for a route that removes the rows a check reads: a check
  * reads its jobs as it starts, so a short wait lets it see them while one that goes on to wait for Lidarr does not
  * hold the route.
  */

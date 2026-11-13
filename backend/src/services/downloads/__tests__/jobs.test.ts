@@ -641,6 +641,36 @@ describe("settling answers promptly", () => {
         await downloadJobs.whenIdle();
     });
 
+    it("whenIdle also waits for a move that has written the job but is still telling the user, and for the check that follows", async () => {
+        const { spotifyImportService } = await import("../../spotifyImport");
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let reached!: () => void;
+        const writing = new Promise<void>((resolve) => (reached = resolve));
+        // A Spotify import's job tells the user nothing, but the policy is still asked: the move waits there.
+        const evaluate = notificationPolicyService.evaluateNotification.bind(notificationPolicyService);
+        jest.spyOn(notificationPolicyService, "evaluateNotification").mockImplementation(async (...args) => {
+            reached();
+            await gate;
+            return evaluate(...args);
+        });
+        const told = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const j = await job("dl_idle_move", { metadata: { spotifyImportJobId: "imp-idle", artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+
+        const move = downloadJobs.complete([j]);
+        // The job is completed in the database and the move is held in the middle of telling the user.
+        await writing;
+        expect((await row(j.id)).status).toBe("completed");
+        expect(told).not.toHaveBeenCalled();
+
+        const idle = downloadJobs.whenIdle();
+        release();
+        await idle;
+
+        expect(told.mock.calls).toEqual([["imp-idle"]]);
+        await move;
+    });
+
     it("logs a check that throws, and the move has still settled the job", async () => {
         const { discoverWeeklyService } = await import("../../discoverWeekly");
         const { logger } = await import("../../../utils/logger");

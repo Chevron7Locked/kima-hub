@@ -22,8 +22,25 @@ async function idle() {
     expect(isBackfillInProgress()).toBe(false);
 }
 
-/** How many passes a recount made: each one opens by counting every artist. */
-const passes = (count: jest.SpyInstance) => count.mock.calls.filter(([args]) => args === undefined).length;
+/** Adds this file's prefix to an artist query's filter, so the recount sees only this file's artists. */
+const mine = (args: any) => ({ ...args, where: { AND: [args?.where ?? {}, { id: { startsWith: P } }] } });
+
+/**
+ * Scopes the recount's walk to this file's artists and counts its passes (each one opens by counting every artist,
+ * a call made with no filter). The recount walks every artist in the database and other suites fill it, so unscoped
+ * its time would depend on them; scoped, a pass costs 450 rows whatever else is stored. The real queries still run.
+ */
+function scopeRecount() {
+    const realCount: any = prisma.artist.count.bind(prisma.artist);
+    const realFindMany: any = prisma.artist.findMany.bind(prisma.artist);
+    let passes = 0;
+    jest.spyOn(prisma.artist, "count").mockImplementation(((args?: any) => {
+        if (args === undefined) passes++;
+        return realCount(mine(args));
+    }) as any);
+    jest.spyOn(prisma.artist, "findMany").mockImplementation(((args?: any) => realFindMany(mine(args))) as any);
+    return { passes: () => passes };
+}
 
 beforeAll(async () => {
     // A pass pauses between batches of 100 artists, so a few hundred rows keep it running while the asks arrive.
@@ -43,16 +60,16 @@ afterAll(async () => {
 });
 
 it("starts a recount when none is running", async () => {
-    const count = jest.spyOn(prisma.artist, "count");
+    const recount = scopeRecount();
     const res = await ask();
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: "Backfill started", status: "processing" });
     await idle();
-    expect(passes(count)).toBe(1);
+    expect(recount.passes()).toBe(1);
 });
 
 it("keeps asks made during a run: they are queued, and the run goes over the artists once more", async () => {
-    const count = jest.spyOn(prisma.artist, "count");
+    const recount = scopeRecount();
     const first = await ask();
     expect(first.body.status).toBe("processing");
     const [second, third] = await Promise.all([ask(), ask()]);
@@ -61,10 +78,11 @@ it("keeps asks made during a run: they are queued, and the run goes over the art
         expect(res.body).toEqual({ message: "Backfill queued: it runs once more when the current one finishes", status: "queued" });
     }
     await idle();
-    expect(passes(count)).toBe(2);
+    expect(recount.passes()).toBe(2);
 });
 
 it("reports a queued extra pass as its own pass, so progress inside a pass never goes backwards", async () => {
+    scopeRecount();
     // Polled while the run and its extra pass go on: (pass, processed) for every answer that says it is running.
     const seen: { pass: number; processed: number }[] = [];
     let polling = true;

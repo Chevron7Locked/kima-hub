@@ -15,6 +15,8 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { queues } from "../../workers/queues";
 import webhookRoutes from "../webhooks";
+import { whenWebhooksIdle } from "../../services/webhookHandlers";
+import * as downloadJobs from "../../services/downloads/jobs";
 import { setEnv } from "../../__tests__/helpers/env";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
@@ -40,13 +42,18 @@ async function settings(data: Record<string, unknown>) {
     invalidateSystemSettingsCache();
 }
 
+/** The event as it stands once every event the route answered for has been processed and has recorded its outcome. */
 async function processed(eventId: string) {
-    for (let i = 0; i < 50; i++) {
-        const row = await prisma.webhookEvent.findUniqueOrThrow({ where: { id: eventId } });
-        if (row.processed || row.error) return row;
-        await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error(`event ${eventId} was never processed`);
+    await whenIdle();
+    const row = await prisma.webhookEvent.findUniqueOrThrow({ where: { id: eventId } });
+    if (!row.processed && !row.error) throw new Error(`event ${eventId} was never processed`);
+    return row;
+}
+
+/** Every event the route answered for, and every job move it started, has ended: nothing writes after the case. */
+async function whenIdle() {
+    await whenWebhooksIdle();
+    await downloadJobs.whenIdle();
 }
 
 const lidarrEvents = () => prisma.webhookEvent.deleteMany({ where: { source: "lidarr" } });
@@ -62,6 +69,10 @@ beforeEach(async () => {
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await settings({});
 });
+
+// The route answers before it has processed the event it stored. A case that sends one waits for it here, so the
+// event's write cannot land after the case's cleanup has removed the row.
+afterEach(whenIdle);
 
 afterAll(async () => {
     await lidarr.close();
@@ -99,6 +110,15 @@ it("refuses a missing or wrong secret once one is set, and takes the right one",
     expect((await request(app()).post("/webhooks/lidarr").send(grab)).status).toBe(401);
     expect((await request(app()).post("/webhooks/lidarr").set("x-webhook-secret", "wrong").send(grab)).status).toBe(401);
     expect((await request(app()).post("/webhooks/lidarr").set("x-webhook-secret", "the-secret").send(grab)).status).toBe(200);
+});
+
+it("answers before the event is processed, and the module's idle hook waits until it has recorded its outcome", async () => {
+    const res = await request(app()).post("/webhooks/lidarr").send({ eventType: "Test" });
+    expect(res.status).toBe(200);
+
+    await whenWebhooksIdle();
+
+    expect(await prisma.webhookEvent.findUniqueOrThrow({ where: { id: res.body.eventId } })).toMatchObject({ processed: true, error: null });
 });
 
 it("stores a grab, links the job waiting for its album and acts on a repeat only once", async () => {

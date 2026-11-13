@@ -729,12 +729,13 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
             message: `Retrying ${retriableAlbums.length} unavailable albums`,
         });
 
-        const { acquisitionService } = await import("../services/acquisitionService");
-        const jobs = await prisma.downloadJob.findMany({
-            where: { discoveryBatchId: batch.id },
-        });
-
+        // Everything after the reply is the background function's, so a failure in it marks the batch failed below
+        // instead of reaching this route's catch, which would answer a second time.
         (async () => {
+            const { acquisitionService } = await import("../services/acquisitionService");
+            const jobs = await prisma.downloadJob.findMany({
+                where: { discoveryBatchId: batch.id },
+            });
             let completed = 0;
             let failed = 0;
 

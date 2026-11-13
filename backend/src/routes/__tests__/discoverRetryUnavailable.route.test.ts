@@ -159,6 +159,30 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         expect(logged).toHaveBeenCalledWith(expect.stringContaining("Background processing crashed"), expect.any(Error));
     });
 
+    it("answers 200 and marks the batch failed when the background work cannot read the batch's jobs", async () => {
+        const logged = expectLog("error");
+        await seed(ONE);
+        mockCheckBatchCompletion.mockResolvedValue(undefined);
+        // Only the background work's read of the new batch's jobs is refused; the route's own reads run for real.
+        const realFindMany: any = prisma.downloadJob.findMany.bind(prisma.downloadJob);
+        const refusal = jest.spyOn(prisma.downloadJob, "findMany").mockImplementation(((args?: any) =>
+            args?.where?.discoveryBatchId ? Promise.reject(new Error("jobs unreadable")) : realFindMany(args)) as any);
+        try {
+            const res = await retry();
+            expect(res.body).toMatchObject({ success: true, queued: 1 });
+
+            await waitFor(async () => (await batchRow(res.body.batchId)).status === "failed", "background failure marks batch failed");
+
+            expect((await batchRow(res.body.batchId)).errorMessage).toBe("Retry processing crashed");
+            expect(logged).toHaveBeenCalledWith(expect.stringContaining("Background processing crashed"), expect.any(Error));
+            // The failure came after the reply, so it is the background work's to report: the route sends nothing more.
+            expect(logged).not.toHaveBeenCalledWith("Retry unavailable albums error:", expect.anything());
+            expect(mockAcquireAlbum).not.toHaveBeenCalled();
+        } finally {
+            refusal.mockRestore();
+        }
+    });
+
     it("fails the album's download job through the download-job module when acquiring it throws", async () => {
         const errorLog = expectLog("error");
         await seed(ONE);
