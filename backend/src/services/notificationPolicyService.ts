@@ -14,7 +14,7 @@ const duplicateKey = (name: unknown) =>
 interface NotificationDecision {
     shouldNotify: boolean;
     reason: string;
-    notificationType?: "download_complete" | "download_failed";
+    notificationType?: "download_complete" | "download_failed" | "download_waiting";
 }
 
 const DEFAULT_RETRY_WINDOW_MINUTES = 30;
@@ -33,7 +33,7 @@ class NotificationPolicyService {
      */
     async evaluateNotification(
         jobId: string,
-        eventType: "complete" | "failed" | "retry" | "cancel"
+        eventType: "complete" | "failed" | "retry" | "cancel" | "parked"
     ): Promise<NotificationDecision> {
         logger.debug(
             `[NOTIFICATION-POLICY] Evaluating: ${jobId} (${eventType})`
@@ -66,6 +66,13 @@ class NotificationPolicyService {
                 shouldNotify: false,
                 reason: `${downloadType} download - batch notification only`,
             };
+        }
+
+        // A download Lidarr is holding for a person: the user hears of it once, whatever the album's other jobs did.
+        if (eventType === "parked") {
+            return job.status === "processing"
+                ? { shouldNotify: true, reason: "Download waiting in Lidarr", notificationType: "download_waiting" }
+                : { shouldNotify: false, reason: `Job is ${job.status}, not waiting` };
         }
 
         // Check if notification already sent for this job

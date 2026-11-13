@@ -9,7 +9,6 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { lidarrService, AcquisitionError, AcquisitionErrorType, albumComplete, downloadProgress, type ReconciliationSnapshot } from "./lidarr";
 import { musicBrainzService } from "./musicbrainz";
 import { getSystemSettings } from "../utils/systemSettings";
-import { notificationService } from "./notificationService";
 import * as downloadJobs from "./downloads/jobs";
 import { requestScan } from "../workers/scanRequest";
 import { config } from "../config";
@@ -715,18 +714,7 @@ class SimpleDownloadManager {
         const jobs = await prisma.downloadJob.findMany({
             where: { status: "processing", ...(onlyJobs ? { id: { in: onlyJobs } } : { lidarrRef: downloadId }) },
         });
-        let parked = 0;
-        for (const job of jobs) {
-            if ((job.metadata as any)?.parked) continue;
-            await downloadJobs.mergeMetadata(job.id, { parked: reason, statusText: `Waiting in Lidarr: ${reason}` });
-            parked++;
-            try {
-                await notificationService.notifyDownloadWaiting(job.userId, job.subject, reason);
-            } catch (notifError) {
-                logger.error("Failed to send parked-download notification:", notifError);
-            }
-        }
-        return parked;
+        return (await downloadJobs.park(jobs, reason)).length;
     }
 
     /**
@@ -767,14 +755,15 @@ class SimpleDownloadManager {
      */
     async onAlbumDeleted(lidarrAlbumId: number): Promise<string | undefined> {
         const jobs = await prisma.downloadJob.findMany({
-            where: { lidarrAlbumId, status: "processing" },
+            where: { lidarrAlbumId, status: { in: ["pending", "processing"] } },
+            orderBy: { createdAt: "asc" },
         });
-        await downloadJobs.fail(jobs, "Album removed from Lidarr");
+        const settled = new Set((await downloadJobs.fail(jobs, "Album removed from Lidarr")).map((j) => j.id));
         await prisma.discoveryAlbum.updateMany({
             where: { lidarrAlbumId },
             data: { lidarrAlbumId: null },
         });
-        return jobs[0]?.id;
+        return jobs.find((j) => settled.has(j.id))?.id;
     }
 
     /** A job is completed when another job brought in the same album id while this one was running. */

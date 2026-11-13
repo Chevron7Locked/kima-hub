@@ -1,5 +1,5 @@
 /**
- * A download job's status, through five moves: start, complete, fail, cancel, retry.
+ * A download job's status, through six moves: start, complete, fail, cancel, retry, park.
  *
  * Each move runs in one statement and only from a state it can leave, so a job two
  * paths reach is settled once and told once: start and complete leave pending or
@@ -7,7 +7,9 @@
  * merges its metadata into what the row holds (a null value clears a field), so a
  * webhook that wrote in between keeps what it wrote. The moves that end a job tell
  * the user through the notification policy, and the Discover batch and the Spotify
- * import the job belongs to; retry tells nobody, because nothing has finished.
+ * import the job belongs to; retry tells nobody, because nothing has finished. Park keeps a job
+ * running while Lidarr holds its download for a person, and tells the user once. A job's attempt
+ * count is kept through a retry: start sets it to 1 only for a job that has none.
  *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
@@ -25,7 +27,7 @@ import { notificationPolicyService } from "../notificationPolicyService";
 /** What a caller holds of a job it wants to move: only the id is read. */
 export type JobRef = { id: string };
 
-/** A job a move settled, as the move left it. */
+/** A job a move settled (or parked), as the move left it. */
 export type SettledJob = {
     id: string;
     userId: string;
@@ -93,7 +95,7 @@ export async function start(id: string, started: StartInput):Promise<boolean> {
             "lidarrAlbumId" = ${started.lidarrAlbumId}::int,
             "lidarrRef" = coalesce(${started.lidarrRef ?? null}::text, "lidarrRef"),
             "artistMbid" = coalesce(${started.artistMbid ?? null}::text, "artistMbid"),
-            attempts = 1,
+            attempts = greatest(attempts, 1),
             metadata = ${mergedMetadata(
                 patch,
                 Prisma.sql` || jsonb_build_object('downloadType', coalesce(nullif(metadata->>'downloadType', ''), 'library'))`
@@ -101,6 +103,24 @@ export async function start(id: string, started: StartInput):Promise<boolean> {
         WHERE id = ${id} AND status = ANY(${ACTIVE}::text[])
     `;
     return count > 0;
+}
+
+/**
+ * Lidarr parked the jobs' download for a person (tracks missing, or an import it only half did): the jobs stay
+ * running and wait. A job parks once, however many paths reach it, and tells the user once, through the notification
+ * policy, when it first waits. Returns the jobs it parked.
+ */
+export async function park(jobs: JobRef[], reason: string): Promise<SettledJob[]> {
+    const ids = [...new Set(jobs.map((j) => j.id))];
+    if (ids.length === 0) return [];
+    const parked = await prisma.$queryRaw<SettledJob[]>`
+        UPDATE "DownloadJob"
+        SET metadata = ${mergedMetadata({ parked: reason, statusText: `Waiting in Lidarr: ${reason}` })}
+        WHERE id = ANY(${ids}::text[]) AND status = 'processing' AND nullif(metadata->>'parked', '') IS NULL
+        RETURNING id, "userId", subject, "discoveryBatchId", status, error, metadata
+    `;
+    for (const job of parked) await tellUser(job, "parked", reason);
+    return parked;
 }
 
 /**
@@ -165,7 +185,7 @@ export async function retry(jobs: JobRef[], patch: Record<string, unknown> = {})
     );
 }
 
-type Outcome = "complete" | "failed" | "cancel";
+type Outcome = "complete" | "failed" | "cancel" | "parked";
 
 /** Tells the user of each settled job, then each batch and import that owns any of them, once. */
 async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Promise<void> {
@@ -206,12 +226,26 @@ async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Pr
     }
 }
 
-/** One tray row per album, when the notification policy says the user needs it. */
+/**
+ * One tray row per album, when the notification policy says the user needs it. A complete or failed job claims
+ * `notificationSent` first, in one conditional write, and tells only if it won, so two settlers that both passed the
+ * policy tell once. A claim whose tray row could not be made is given back. A parked job's claim is its parking.
+ */
 async function tellUser(job: SettledJob, outcome: Outcome, error?: string): Promise<void> {
+    let claimed = false;
     try {
         const decision = await notificationPolicyService.evaluateNotification(job.id, outcome);
         if (!decision.shouldNotify) {
             logger.debug(`   Suppressing ${outcome} notification: ${decision.reason}`);
+            return;
+        }
+        if (outcome === "parked") {
+            await notificationService.notifyDownloadWaiting(job.userId, job.subject, error ?? "");
+            return;
+        }
+        claimed = await claimNotification(job.id);
+        if (!claimed) {
+            logger.debug(`   Another settler already told the user of job ${job.id}`);
             return;
         }
         if (outcome === "complete") {
@@ -224,8 +258,19 @@ async function tellUser(job: SettledJob, outcome: Outcome, error?: string): Prom
         } else {
             await notificationService.notifyDownloadFailed(job.userId, job.subject, error);
         }
-        await mergeMetadata(job.id, { notificationSent: true });
     } catch (notifError) {
         logger.error(`Failed to evaluate/send ${outcome} notification:`, notifError);
+        if (claimed) await mergeMetadata(job.id, { notificationSent: null }).catch(() => undefined);
     }
+}
+
+/** Marks the job as told, if no one has. True for the one caller that did. */
+async function claimNotification(id: string): Promise<boolean> {
+    const won = await prisma.$queryRaw<{ id: string }[]>`
+        UPDATE "DownloadJob"
+        SET metadata = ${mergedMetadata({ notificationSent: true })}
+        WHERE id = ${id} AND coalesce(metadata->>'notificationSent', '') <> 'true'
+        RETURNING id
+    `;
+    return won.length > 0;
 }

@@ -44,3 +44,27 @@ it("fails the running job and clears the Discover album's Lidarr id", async () =
     const discovery = await prisma.discoveryAlbum.findFirstOrThrow({ where: { userId: USER } });
     expect(discovery.lidarrAlbumId).toBeNull();
 });
+
+it("fails a pending job on the album too, and names the first job it actually settled", async () => {
+    const job = (id: string, status: string, lidarrAlbumId: number, createdAt: Date) =>
+        prisma.downloadJob.create({
+            data: { id, userId: USER, subject: id, type: "album", status, targetMbid: `rg-${id}`, lidarrAlbumId, createdAt },
+        });
+    await job("sdm_del_settled", "completed", 44, new Date(Date.now() - 3000));
+    await job("sdm_del_pending", "pending", 44, new Date(Date.now() - 2000));
+    await job("sdm_del_proc", "processing", 44, new Date(Date.now() - 1000));
+
+    expect(await simpleDownloadManager.onAlbumDeleted(44)).toBe("sdm_del_pending");
+
+    const status = async (id: string) => (await prisma.downloadJob.findUniqueOrThrow({ where: { id } })).status;
+    expect(await status("sdm_del_pending")).toBe("failed");
+    expect(await status("sdm_del_proc")).toBe("failed");
+    expect(await status("sdm_del_settled")).toBe("completed");
+});
+
+it("names no job when none of the album's jobs was still active", async () => {
+    await prisma.downloadJob.create({
+        data: { id: "sdm_del_only_done", userId: USER, subject: "x", type: "album", status: "completed", targetMbid: "rg-x", lidarrAlbumId: 45 },
+    });
+    expect(await simpleDownloadManager.onAlbumDeleted(45)).toBeUndefined();
+});

@@ -83,6 +83,17 @@ describe("start", () => {
         expect(m).not.toHaveProperty("searchCommandId");
     });
 
+    it("keeps the attempt count of a job that was retried, and counts a first start as attempt 1", async () => {
+        const j = await job("dl_start_retried", { status: "failed", error: "boom", attempts: 3 });
+        await downloadJobs.retry([j]);
+        expect(await downloadJobs.start(j.id, { correlationId: "corr-r", lidarrAlbumId: 5, metadata: {} })).toBe(true);
+        expect((await row(j.id)).attempts).toBe(3);
+
+        await job("dl_start_first", { status: "pending", attempts: 0 });
+        await downloadJobs.start("dl_start_first", { correlationId: "corr-f", lidarrAlbumId: 6, metadata: {} });
+        expect((await row("dl_start_first")).attempts).toBe(1);
+    });
+
     it("takes over an existing download reference when given one", async () => {
         await job("dl_start_join", { status: "pending" });
         await downloadJobs.start("dl_start_join", { correlationId: "corr-3", lidarrAlbumId: 2, lidarrRef: "DL-9", metadata: {} });
@@ -324,6 +335,88 @@ describe("retry", () => {
             error: "boom",
             metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess", notificationSent: true },
         });
+        await downloadJobs.retry([j]);
+        await downloadJobs.fail([j], "boom again");
+        expect(await notices("download_failed")).toBe(1);
+    });
+});
+
+describe("park", () => {
+    it("parks a running job once, tells the user through the notification policy, and keeps the job running", async () => {
+        const j = await job("dl_park", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess", keep: "me" } });
+        const asked = jest.spyOn(notificationPolicyService, "evaluateNotification");
+
+        const parked = await downloadJobs.park([j], "Tracks missing");
+
+        expect(parked.map((p) => p.id)).toEqual([j.id]);
+        expect(asked).toHaveBeenCalledWith(j.id, "parked");
+        const r = await row(j.id);
+        expect(r.status).toBe("processing");
+        expect(await meta(j.id)).toMatchObject({ keep: "me", parked: "Tracks missing", statusText: "Waiting in Lidarr: Tracks missing" });
+        expect(await notices("download_waiting")).toBe(1);
+        expect(await meta(j.id)).not.toHaveProperty("notificationSent");
+    });
+
+    it("parks a job once, however many paths reach it at the same time", async () => {
+        const j = await job("dl_park_race", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+        const results = await Promise.all([
+            downloadJobs.park([j], "Tracks missing"),
+            downloadJobs.park([j], "Tracks missing"),
+            downloadJobs.park([j], "Tracks missing"),
+        ]);
+        expect(results.flat()).toHaveLength(1);
+        expect(await notices("download_waiting")).toBe(1);
+    });
+
+    it("leaves a job that is not running alone, and one the policy keeps quiet for gets no tray row", async () => {
+        const pending = await job("dl_park_pending", { status: "pending" });
+        expect(await downloadJobs.park([pending], "Tracks missing")).toHaveLength(0);
+        expect(await meta(pending.id)).not.toHaveProperty("parked");
+
+        const discover = await job("dl_park_discover", { metadata: { downloadType: "discovery" } });
+        expect(await downloadJobs.park([discover], "Tracks missing")).toHaveLength(1);
+        expect(await notices("download_waiting")).toBe(0);
+    });
+
+    it("lets a parked job tell the user when it completes", async () => {
+        const j = await job("dl_park_then_done", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+        await downloadJobs.park([j], "Tracks missing");
+        await downloadJobs.complete([j]);
+        expect(await notices("download_complete")).toBe(1);
+    });
+});
+
+describe("telling the user", () => {
+    it("tells once when two settlers of the same job both pass the policy before either has told", async () => {
+        const j = await job("dl_claim", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+        const real = notificationPolicyService.evaluateNotification.bind(notificationPolicyService);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let calls = 0;
+        jest.spyOn(notificationPolicyService, "evaluateNotification").mockImplementation(async (id, event) => {
+            const decision = await real(id, event);
+            if (++calls === 1) await gate;
+            return decision;
+        });
+
+        const first = downloadJobs.fail([j], "boom");
+        while (calls < 1) await new Promise((r) => setTimeout(r, 10));
+        await downloadJobs.retry([j]);
+        await downloadJobs.complete([j]);
+        release();
+        await first;
+
+        expect((await notices("download_complete")) + (await notices("download_failed"))).toBe(1);
+    });
+
+    it("gives the claim back when the tray row cannot be made, so a later settler can tell", async () => {
+        const j = await job("dl_claim_back", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+        const { notificationService } = await import("../../notificationService");
+        jest.spyOn(notificationService, "notifyDownloadFailed").mockRejectedValueOnce(new Error("tray down"));
+
+        await downloadJobs.fail([j], "boom");
+        expect(await meta(j.id)).not.toHaveProperty("notificationSent");
+
         await downloadJobs.retry([j]);
         await downloadJobs.fail([j], "boom again");
         expect(await notices("download_failed")).toBe(1);
