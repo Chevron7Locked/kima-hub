@@ -76,8 +76,8 @@ it("reports a queued extra pass as its own pass, so progress inside a pass never
         }
     })();
 
-    await ask();
-    await new Promise((r) => setTimeout(r, 120));
+    expect((await ask()).body.status).toBe("processing");
+    // Asked straight away, while the first pass (450 artists, paused between batches) is still counting.
     expect((await ask()).body.status).toBe("queued");
     await idle();
     polling = false;

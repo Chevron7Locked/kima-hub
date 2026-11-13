@@ -72,6 +72,14 @@ describe('scrobble.view records plays', () => {
         expect(rows[0].playedAt.getTime()).toBeLessThanOrEqual(Date.now());
     });
 
+    it.each(['1700abc', '0', '-5', 'soon'])('records a play with an unreadable time (%s) as played now', async (time) => {
+        const before = Date.now();
+        await request(app).get(`/rest/scrobble.view?id=${TRACK}&submission=true&time=${time}`);
+        const rows = await plays();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].playedAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
     it('writes nothing for a now-playing notification (submission=false)', async () => {
         const res = await request(app).get(`/rest/scrobble.view?id=${TRACK}&submission=false`);
         expect(res.status).toBe(200);

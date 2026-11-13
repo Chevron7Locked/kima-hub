@@ -347,10 +347,11 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
             if (!durations.has(id)) continue;
             // A client's scrobble counts as played (client-attested); the 30-second
             // floor and the duplicate window in playRecording.ts still apply.
-            // A client's clock can run ahead: a play is never dated after now.
+            // `time` is epoch milliseconds: a value that is not a whole number above zero is no time at all, and a
+            // client's clock can run ahead, so a play is never dated after now.
             const now = Date.now();
-            const timeMs = time !== undefined ? parseInt(time, 10) : now;
-            const playedAt = new Date(isNaN(timeMs) ? now : Math.min(timeMs, now));
+            const timeMs = time !== undefined && /^\d+$/.test(time) ? Number(time) : 0;
+            const playedAt = new Date(timeMs > 0 ? Math.min(timeMs, now) : now);
             await recordPlay({
                 userId,
                 trackId: id,
