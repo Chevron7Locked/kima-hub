@@ -182,21 +182,24 @@ export interface SearchResults {
 export class SearchService {
     /**
      * Full-text search first; the LIKE search when the query has no searchable words, when full-text search fails,
-     * and when it finds nothing (unless `fallbackOnEmpty` is false). An empty query finds nothing.
+     * and when it finds nothing and `fallbackOnEmpty` says so (true, or a function that answers for the query's
+     * tsquery). An empty query finds nothing.
      */
     private async ftsOrFallback<T>(
         query: string,
         label: string,
         fts: (tsquery: string) => Promise<T[]>,
         fallback: () => Promise<T[]>,
-        fallbackOnEmpty: boolean,
+        fallbackOnEmpty: boolean | ((tsquery: string) => Promise<boolean>),
     ): Promise<T[]> {
         if (!query || query.trim().length === 0) return [];
         const tsquery = this.queryToTsquery(query);
         if (!tsquery) return fallback();
         try {
             const results = await fts(tsquery);
-            return results.length > 0 || !fallbackOnEmpty ? results : fallback();
+            if (results.length > 0 || !fallbackOnEmpty) return results;
+            if (fallbackOnEmpty === true || (await fallbackOnEmpty(tsquery))) return fallback();
+            return results;
         } catch (error) {
             logger.error(`${label} search error:`, error);
             return fallback();
@@ -418,7 +421,9 @@ export class SearchService {
     }
 
     /**
-     * One page of song matches. With a `genre`, only that genre's songs are searched, before the page is cut.
+     * One page of song matches. Full-text search ranks them; the substring search answers only a search full-text
+     * search finds nothing for, on every page of it, so one search keeps one result set across its pages. With a
+     * `genre`, only that genre's songs are searched, before the page is cut.
      */
     async searchTracks({
         query,
@@ -445,7 +450,7 @@ export class SearchService {
             WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
             AND ${playableSongSql("t", "a")}
             ${genreSql(scope)}
-            ORDER BY rank DESC, t.title ASC
+            ORDER BY rank DESC, t.title ASC, t.id ASC
             LIMIT ${take}
             OFFSET ${skip}
           `;
@@ -454,7 +459,8 @@ export class SearchService {
             "Track",
             (tsquery) => ftsPage(tsquery, offset, limit),
             () => this.searchTracksFallback({ query, limit, offset, scope }),
-            true,
+            // A later page that is empty is the end of the full-text results, unless there were none at all.
+            offset === 0 ? true : async (tsquery) => (await ftsPage(tsquery, 0, 1)).length === 0,
         );
     }
 
