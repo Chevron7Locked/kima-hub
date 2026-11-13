@@ -18,8 +18,9 @@
  * A move answers once the rows and the user's notice are written. The Discover batch's
  * and the import's completion checks run after it, detached (a batch check can wait
  * 60 s for Lidarr), one at a time per batch and per import, with a failure logged.
- * `whenIdle` waits for them, and for any move still writing or telling, for tests and shutdown. `withoutFailureMarks` is the
- * metadata of a job with what a failure left on it removed, for a retry or a re-queue.
+ * `whenIdle` waits for them, and for any move that tells (park, complete, fail, cancel) still writing or
+ * telling, for tests and shutdown. `withoutFailureMarks` is the metadata of a job with what a failure left
+ * on it removed, for a retry or a re-queue.
  *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
@@ -327,19 +328,22 @@ async function tell(settled: SettledJob[], outcome: Outcome, error?: string): Pr
     if (batches.size > 0 || imports.size > 0) tellBatchesAndImports(batches, imports);
 }
 
-/** The batch and import checks still running after the moves that started them answered. */
-const checking = new Set<Promise<void>>();
+/**
+ * The moves that tell and the batch and import checks they started, still running. A move that tells must run
+ * inside `moving`, or `whenIdle` cannot see it.
+ */
+const inFlight = new Set<Promise<void>>();
 
 /**
- * Runs a move that ends or parks jobs and holds it in `checking` until it answers, so `whenIdle` also waits for a
- * move that has written its rows but not yet told anyone. The batch and import checks it starts join `checking`
+ * Runs a move that ends or parks jobs and holds it in `inFlight` until it answers, so `whenIdle` also waits for a
+ * move that has written its rows but not yet told anyone. The batch and import checks it starts join `inFlight`
  * before it answers, so the set is never empty between the move and its checks.
  */
 async function moving<T>(move: () => Promise<T>): Promise<T> {
     const run = move();
     const held = run.then(() => undefined, () => undefined);
-    checking.add(held);
-    void held.finally(() => checking.delete(held));
+    inFlight.add(held);
+    void held.finally(() => inFlight.delete(held));
     return run;
 }
 
@@ -351,7 +355,7 @@ async function moving<T>(move: () => Promise<T>): Promise<T> {
  */
 export async function whenIdle(timeoutMs?: number): Promise<void> {
     const idle = (async () => {
-        while (checking.size > 0) await Promise.allSettled([...checking]);
+        while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
     })();
     if (timeoutMs === undefined) return idle;
     let timer: NodeJS.Timeout | undefined;
@@ -390,8 +394,8 @@ function tellBatchesAndImports(batches: Set<string>, imports: Set<string>): void
         );
     }
     const run = Promise.all(tasks).then(() => undefined);
-    checking.add(run);
-    void run.finally(() => checking.delete(run));
+    inFlight.add(run);
+    void run.finally(() => inFlight.delete(run));
 }
 
 /** The latest check queued for each batch or import. */

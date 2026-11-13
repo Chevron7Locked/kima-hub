@@ -58,7 +58,7 @@ export async function dispatchWebhookEvent(
 /** The events being processed. The route answers before its event is, so it does not await them. */
 const processing = new Set<Promise<void>>();
 
-/** Resolves when every event being processed has ended and recorded its outcome, for tests and shutdown. */
+/** Resolves when every event being processed has ended and recorded its outcome, for tests. */
 export async function whenWebhooksIdle(): Promise<void> {
     while (processing.size > 0) await Promise.allSettled([...processing]);
 }
@@ -67,7 +67,8 @@ export async function whenWebhooksIdle(): Promise<void> {
 export function processStoredEvent(id: string, eventType: string, payload: any): Promise<void> {
     const run = processEvent(id, eventType, payload);
     processing.add(run);
-    void run.finally(() => processing.delete(run));
+    const forget = () => void processing.delete(run);
+    run.then(forget, forget);
     return run;
 }
 
