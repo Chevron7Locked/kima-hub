@@ -1387,24 +1387,6 @@ describe("Subsonic star and unstar", () => {
     });
 });
 
-// The More Like mix starts from the artist of a listener's recent plays; a play of a song that cannot play is no start.
-it("starts the More Like mix from plays of playable songs only", async () => {
-    const listener = `${P}-more-like`;
-    await prisma.user.create({ data: { id: listener, username: listener, passwordHash: "x", role: "user", tokenVersion: 0 } });
-    const artists = await prisma.artist.findMany({ where: { id: { startsWith: P } }, select: { name: true } });
-    const similar = jest.spyOn(artistSimilarity, "getSimilarArtists").mockResolvedValue(artists.map((a) => ({ name: a.name })) as never);
-    try {
-        await prisma.play.createMany({ data: UNPLAYABLE.map((trackId) => ({ userId: listener, trackId, playedAt: LISTENED, heard: true })) });
-        expect(await generateArtistSimilarMix(listener)).toBeNull();
-        await prisma.play.create({ data: { userId: listener, trackId: SONG.playable, playedAt: LISTENED, heard: true } });
-        const made = await mixSongs(generateArtistSimilarMix(listener));
-        expect(made).toContain(SONG.playable);
-        expect(made.filter((id) => UNPLAYABLE.includes(id))).toEqual([]);
-    } finally {
-        similar.mockRestore();
-    }
-});
-
 // A missing file is flagged, never deleted: the song is back in every interface when the file returns, with no other work.
 describe("a song whose missing file returns", () => {
     afterAll(async () => {

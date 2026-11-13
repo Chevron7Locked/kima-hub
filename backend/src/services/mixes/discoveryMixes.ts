@@ -81,7 +81,8 @@ export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
     const playArtists = await recentPlayArtists(userId, {
-        song: PLAYABLE_SONG,
+        // Plays of songs on a library album, missing or corrupt ones included: keeps this reader's old meaning pending Kevin's call.
+        song: { album: PLAYABLE_SONG.album },
         since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 
