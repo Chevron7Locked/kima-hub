@@ -4,7 +4,10 @@
  * A stage record is one question asked of one song (`recording`, `analysis`, `embedding`, `fingerprint`) and what is
  * known of its answer. The record is the truth. `analysis` and `embedding` also show on the song as status columns
  * (`analysisStatus`, `vibeAnalysisStatus` and their error, retry count and start time); every move below writes the
- * record and those columns in one transaction, so they cannot disagree. Nothing else writes either.
+ * record and those columns in one transaction, so they cannot disagree. Analyzer reports go through here today. The
+ * scheduler's inline claim and column writes, the retry and vibe-start routes, restart, the scanner, album
+ * identification, the failure view and the missing-file closure still write records themselves until they move
+ * behind these moves (tickets 30 and 31).
  *
  * Moves:
  * - `claim` / `release`: a worker is handed the question for a lease, or hands it back.
@@ -445,8 +448,8 @@ async function parkOnRateLimit(
     message: string,
     evidence: unknown,
     writeGuard: string,
-): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
         const parked = await tx.$executeRawUnsafe(
             `INSERT INTO "TrackStage"
                 (id, "trackId", stage, status, source, attempt, retryable,
@@ -469,7 +472,26 @@ async function parkOnRateLimit(
             JSON.stringify(evidence),
         );
         if (parked > 0) await mirror(tx, stage, [trackId]);
+        return parked > 0;
     });
+}
+
+/**
+ * The record's counts as they are now, with the row locked until the move's transaction ends, so two reports for the
+ * same record count one after the other. `seen` is what the earlier unlocked read found, for a record not yet written.
+ */
+async function lockedCounts(
+    tx: Tx,
+    trackId: string,
+    stage: StageName,
+    seen: OpenRecord | undefined,
+): Promise<{ attempt: number; failures: number; status: string | undefined }> {
+    const [row] = await tx.$queryRawUnsafe<Array<{ attempt: number; failures: number; status: string }>>(
+        `SELECT attempt, failures, status FROM "TrackStage" WHERE "trackId" = $1 AND stage = $2 FOR UPDATE`,
+        trackId,
+        stage,
+    );
+    return row ?? { attempt: seen?.attempt ?? 0, failures: seen?.failures ?? 0, status: seen?.status };
 }
 
 /**
@@ -510,8 +532,12 @@ export async function fail(
             waitingSince,
             ...evidence,
         };
-        if (Date.now() - new Date(waitingSince).getTime() >= 24 * 60 * 60_000 && waitEvidence.waitingAlerted !== true) {
-            waitEvidence.waitingAlerted = true;
+        const raiseAlert = Date.now() - new Date(waitingSince).getTime() >= 24 * 60 * 60_000 && waitEvidence.waitingAlerted !== true;
+        if (raiseAlert) waitEvidence.waitingAlerted = true;
+
+        // The alert goes out only once the park has landed: a park a newer answer dropped never marked it raised.
+        const parked = await parkOnRateLimit(trackId, stage, source, until, message, waitEvidence, writeGuard);
+        if (parked && raiseAlert) {
             const { notificationService } = await import("../notificationService");
             await notificationService
                 .notifyAdmins({
@@ -522,21 +548,19 @@ export async function fail(
                 })
                 .catch(() => undefined);
         }
-
-        await parkOnRateLimit(trackId, stage, source, until, message, waitEvidence, writeGuard);
         return;
     }
 
     const failureClass = classifyFailure(err);
-    // A `working` record's claim already named this attempt; anything else moves to the next one (at least 1). Only
-    // reported failures use up retries: terminal classes close the record at once; INCONCLUSIVE stays retryable
-    // until the cap.
-    const attempt = current?.status === "working" ? Math.max(current.attempt, 1) : (current?.attempt ?? 0) + 1;
-    const failures = (current?.failures ?? 0) + 1;
-    const retryable = failureClass === "INCONCLUSIVE" && failures < STAGE_RETRY_CAP;
-    const nextRetryAt = retryable ? new Date(Date.now() + computeStageRetryWaitMs(failures)) : null;
-
     await prisma.$transaction(async (tx) => {
+        // A `working` record's claim already named this attempt; anything else moves to the next one (at least 1).
+        // Only reported failures use up retries: terminal classes close the record at once; INCONCLUSIVE stays
+        // retryable until the cap.
+        const counts = await lockedCounts(tx, trackId, stage, current);
+        const attempt = counts.status === "working" ? Math.max(counts.attempt, 1) : counts.attempt + 1;
+        const failures = counts.failures + 1;
+        const retryable = failureClass === "INCONCLUSIVE" && failures < STAGE_RETRY_CAP;
+        const nextRetryAt = retryable ? new Date(Date.now() + computeStageRetryWaitMs(failures)) : null;
         const written = await tx.$executeRawUnsafe(
             `INSERT INTO "TrackStage"
                 (id, "trackId", stage, status, source, attempt,
@@ -617,6 +641,7 @@ export async function failOutcome(
         return;
     }
     await prisma.$transaction(async (tx) => {
+        const counts = await lockedCounts(tx, trackId, stage, current);
         const written = await tx.$executeRawUnsafe(
             `INSERT INTO "TrackStage"
                 (id, "trackId", stage, status, source, attempt,
@@ -641,11 +666,11 @@ export async function failOutcome(
             trackId,
             stage,
             source,
-            current?.attempt ?? 0,
+            counts.attempt,
             outcome.error.code,
             outcome.error.message,
             JSON.stringify({ reason: outcome.error.message, ...evidence }),
-            (current?.failures ?? 0) + 1,
+            counts.failures + 1,
         );
         if (written > 0) await mirror(tx, stage, [trackId]);
     });
