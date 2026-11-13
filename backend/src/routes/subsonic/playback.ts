@@ -313,8 +313,12 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 
 playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
     // A client may send several plays at once: `id` repeated, each with its own `time` in the same order.
-    const ids = many(req, "id");
-    const times = many(req, "time");
+    // Paired by position before blanks go, so a blank id or time never moves a later play onto the wrong time.
+    const times = many(req, "time", { keepBlank: true });
+    const plays = many(req, "id", { keepBlank: true })
+        .map((id, i) => ({ id, time: times[i] }))
+        .filter((p) => p.id !== "");
+    const ids = plays.map((p) => p.id);
     if (ids.length === 0) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     const userId = req.user!.id;
@@ -339,11 +343,11 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
     }
 
     if (submission) {
-        for (const [i, id] of ids.entries()) {
+        for (const { id, time } of plays) {
             if (!durations.has(id)) continue;
             // A client's scrobble counts as played (client-attested); the 30-second
             // floor and the duplicate window in playRecording.ts still apply.
-            const timeMs = times[i] !== undefined ? parseInt(times[i], 10) : Date.now();
+            const timeMs = time !== undefined ? parseInt(time, 10) : Date.now();
             const playedAt = isNaN(timeMs) ? new Date() : new Date(timeMs);
             await recordPlay({
                 userId,

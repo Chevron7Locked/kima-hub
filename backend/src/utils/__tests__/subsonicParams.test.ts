@@ -9,10 +9,10 @@ import { one, many } from "../subsonicParams";
 
 const app = express();
 app.get("/read", (req, res) => {
-    res.json({ one: one(req, "id") ?? null, many: many(req, "id") });
+    res.json({ one: one(req, "id") ?? null, many: many(req, "id"), kept: many(req, "id", { keepBlank: true }) });
 });
 
-async function read(queryString: string): Promise<{ one: string | null; many: string[] }> {
+async function read(queryString: string): Promise<{ one: string | null; many: string[]; kept: string[] }> {
     return (await request(app).get(`/read?${queryString}`)).body;
 }
 
@@ -59,5 +59,10 @@ describe("many", () => {
 
     it("ignores values that are not text", async () => {
         expect((await read("id[a]=b&id=abc")).many).toEqual(["abc"]);
+    });
+
+    it("keeps blank values, in place, when asked, so two lists sent side by side stay paired", async () => {
+        expect((await read("id=&id=abc&id=")).kept).toEqual(["", "abc", ""]);
+        expect((await read("other=1")).kept).toEqual([]);
     });
 });

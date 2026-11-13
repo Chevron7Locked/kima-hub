@@ -10,7 +10,9 @@ import type { Request } from "express";
  *
  * - `one` for a parameter the spec sends once: the first text value, or undefined. A blank value stays "".
  * - `many` for one the spec lets repeat (`id` on star, unstar, createShare, scrobble and the play queue; `time` on
- *   scrobble; `songId`; `songIdToAdd`; `songIndexToRemove`): every non-blank text value, in the order sent.
+ *   scrobble; `songId`; `songIdToAdd`; `songIndexToRemove`): every non-blank text value, in the order sent. Two
+ *   lists sent side by side (scrobble's `id` and `time`) pair by position, so a route reads them with
+ *   `{ keepBlank: true }` and drops the blank ones itself after pairing.
  */
 
 function textValues(raw: unknown): string[] {
@@ -22,6 +24,7 @@ export function one(req: Pick<Request, "query">, name: string): string | undefin
     return textValues(req.query[name])[0];
 }
 
-export function many(req: Pick<Request, "query">, name: string): string[] {
-    return textValues(req.query[name]).filter((v) => v !== "");
+export function many(req: Pick<Request, "query">, name: string, options: { keepBlank?: boolean } = {}): string[] {
+    const values = textValues(req.query[name]);
+    return options.keepBlank ? values : values.filter((v) => v !== "");
 }

@@ -146,6 +146,22 @@ describe("the parameters the Subsonic spec lets repeat act on every value", () =
             new Map([[songA, 1700000000000], [songB, 1700000100000]]),
         );
     });
+
+    it("scrobble keeps each time with its own id when one time is blank", async () => {
+        const res = await reply(`scrobble.view?id=${songA}&time=&id=${songB}&time=1700000100000`);
+        expect(res.status).toBe("ok");
+        const plays = await prisma.play.findMany({ where: { userId: USER } });
+        const at = new Map(plays.map((p) => [p.trackId, p.playedAt.getTime()]));
+        expect(at.get(songB)).toBe(1700000100000);
+        expect(Date.now() - (at.get(songA) as number)).toBeLessThan(60_000);
+    });
+
+    it("scrobble keeps each time with its own id when one id is blank", async () => {
+        const res = await reply(`scrobble.view?id=&time=1700000000000&id=${songB}&time=1700000100000`);
+        expect(res.status).toBe("ok");
+        const plays = await prisma.play.findMany({ where: { userId: USER } });
+        expect(plays.map((p) => [p.trackId, p.playedAt.getTime()])).toEqual([[songB, 1700000100000]]);
+    });
 });
 
 describe("a parameter the spec sends once answers for its first value when repeated", () => {

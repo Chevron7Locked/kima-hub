@@ -343,7 +343,8 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
 
     // The same plan stream.view and getTranscodeStream follow, so the stream is what this answer says.
     const source = songFormat(track);
-    const plan = await planSubsonicSong(format, one(req, "maxBitRate"), track, absolutePath);
+    const maxBitRate = one(req, "maxBitRate");
+    const plan = await planSubsonicSong(format, maxBitRate, track, absolutePath);
     const canDirectPlay = "direct" in plan && plan.direct;
 
     return subsonicOk(req, res, {
@@ -352,7 +353,7 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
             canTranscode: !("refused" in plan),
             transcodeReason: canDirectPlay
                 ? []
-                : [wanted && wanted !== source ? `source is ${source || "unknown"}, client asked for ${wanted}` : `client capped the bitrate at ${one(req, "maxBitRate")}`],
+                : [wanted && wanted !== source ? `source is ${source || "unknown"}, client asked for ${wanted}` : `client capped the bitrate at ${maxBitRate}`],
             errorReason: "refused" in plan ? plan.refused : "",
             // Direct play still gets a value: getTranscodeStream requires one.
             ...(canDirectPlay && { transcodeParams: DIRECT_PARAMS }),

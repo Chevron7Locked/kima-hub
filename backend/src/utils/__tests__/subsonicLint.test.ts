@@ -34,6 +34,15 @@ describe("the Subsonic parameter lint", () => {
         expect(lint("src/routes/subsonic/library.ts", `export const q = (req: any) => { const { query } = req; return query; };\n`).errors).toBe(1);
     });
 
+    it("fails a cast, a non-null, an alias, a parameter pattern or res.req", () => {
+        const errors = (source: string) => lint("src/routes/subsonic/library.ts", source).errors;
+        expect(errors(`export const q = (req: any) => (req as { query: { id: string } }).query.id;\n`)).toBe(1);
+        expect(errors(`export const q = (req?: any) => req!.query;\n`)).toBe(1);
+        expect(errors(`export const q = (req: any) => { const r = req; return r.query; };\n`)).toBe(1);
+        expect(errors(`export const q = ({ query }: any) => query;\n`)).toBe(1);
+        expect(errors(`export const q = (res: any) => res.req.query;\n`)).toBe(1);
+    });
+
     it("fails the Subsonic auth middleware and reply helper too", () => {
         expect(lint("src/middleware/subsonicAuth.ts", CAST).errors).toBe(1);
         expect(lint("src/utils/subsonicResponse.ts", CAST).errors).toBe(1);
