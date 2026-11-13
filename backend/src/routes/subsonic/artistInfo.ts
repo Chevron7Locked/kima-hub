@@ -3,14 +3,15 @@ import { normalizeArtistName } from "../../services/artistIdentity";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, parseIntParam } from "./mappers";
+import { one } from "../../utils/subsonicParams";
 
 export const artistInfoRouter = Router();
 
 artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
-    const count = Math.min(parseIntParam(req.query.count as string | undefined, 20), 50);
+    const count = Math.min(parseIntParam(one(req, "count"), 20), 50);
 
     const artist = await prisma.artist.findUnique({
         where: { id },

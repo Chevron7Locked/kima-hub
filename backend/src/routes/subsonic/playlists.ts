@@ -6,6 +6,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { mapSong, wrap } from "./mappers";
 import { announcePlaylistChange } from "../../services/playlistEvents";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { one, many } from "../../utils/subsonicParams";
 
 export const playlistRouter = Router();
 
@@ -76,7 +77,7 @@ function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlayl
 }
 
 playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "id is required");
     }
@@ -102,18 +103,11 @@ async function allSongsPlayable(ids: string[]): Promise<boolean> {
 }
 
 playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
-    const playlistId = req.query.playlistId as string | undefined;
-    const name = req.query.name as string | undefined;
+    const playlistId = one(req, "playlistId");
+    const name = one(req, "name");
     const userId = req.user!.id;
 
-    const rawSongIds = req.query.songId;
-    const songIds: string[] = (
-        Array.isArray(rawSongIds)
-            ? rawSongIds
-            : rawSongIds !== undefined
-            ? [rawSongIds]
-            : []
-    ).filter(Boolean) as string[];
+    const songIds = many(req, "songId");
     if (!(await allSongsPlayable(songIds))) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
     }
@@ -189,7 +183,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
 }));
 
 playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
-    const playlistId = req.query.playlistId as string | undefined;
+    const playlistId = one(req, "playlistId");
     if (!playlistId) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "playlistId is required");
     }
@@ -204,34 +198,19 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
 
     const updateData: { name?: string; isPublic?: boolean } = {};
 
-    const name = req.query.name as string | undefined;
+    const name = one(req, "name");
     if (name !== undefined) {
         updateData.name = name;
     }
 
-    const publicParam = req.query.public as string | undefined;
+    const publicParam = one(req, "public");
     if (publicParam !== undefined) {
         updateData.isPublic = publicParam === "true";
     }
 
-    const rawSongIdsToAdd = req.query.songIdToAdd;
-    const songIdsToAdd: string[] = (
-        Array.isArray(rawSongIdsToAdd)
-            ? rawSongIdsToAdd
-            : rawSongIdsToAdd !== undefined
-            ? [rawSongIdsToAdd]
-            : []
-    ).filter(Boolean) as string[];
-
-    const rawIndexesToRemove = req.query.songIndexToRemove;
-    const indexesToRemove: number[] = (
-        Array.isArray(rawIndexesToRemove)
-            ? rawIndexesToRemove
-            : rawIndexesToRemove !== undefined
-            ? [rawIndexesToRemove]
-            : []
-    )
-        .map((v) => parseInt(v as string, 10))
+    const songIdsToAdd = many(req, "songIdToAdd");
+    const indexesToRemove = many(req, "songIndexToRemove")
+        .map((v) => parseInt(v, 10))
         .filter((n) => !isNaN(n));
 
     if (!(await allSongsPlayable(songIdsToAdd))) {
@@ -288,7 +267,7 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
 }));
 
 playlistRouter.all("/deletePlaylist.view", wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "id is required");
     }

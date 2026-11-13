@@ -68,6 +68,10 @@ jobs:
                   npm ci
                   npm run typecheck
 
+            - name: Lint backend
+              working-directory: backend
+              run: npm run lint
+
     unit-tests:
         name: Backend Unit Tests
         runs-on: ubuntu-latest

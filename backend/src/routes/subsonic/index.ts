@@ -42,6 +42,7 @@ import { lyricsRouter } from "./lyrics";
 import { userManagementRouter } from "./userManagement";
 import { profileRouter } from "./profile";
 import { podcastRouter } from "./podcasts";
+import { one } from "../../utils/subsonicParams";
 
 export const subsonicRouter = Router();
 
@@ -61,7 +62,7 @@ subsonicRouter.use((req: Request, _res: Response, next) => {
 
 // OpenSubsonic tokenInfo is API key based and does not require Subsonic user auth.
 subsonicRouter.all("/tokenInfo.view", wrap(async (req: Request, res: Response) => {
-    const apiKey = req.query.apiKey as string | undefined;
+    const apiKey = one(req, "apiKey");
     if (!apiKey) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: apiKey");
     }

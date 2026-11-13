@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { XMLBuilder } from "fast-xml-parser";
 import { version } from "../../package.json";
+import { one } from "./subsonicParams";
 
 const SUBSONIC_API_VERSION = "1.16.1";
 const SERVER_TYPE = "Kima";
@@ -43,7 +44,8 @@ function buildEnvelope(status: "ok" | "failed", data?: object) {
 }
 
 function respond(req: Request, res: Response, envelope: ReturnType<typeof buildEnvelope>) {
-    if (req.query.f === "json" || req.query.f === "jsonp") {
+    const format = one(req, "f");
+    if (format === "json" || format === "jsonp") {
         return res.json(stripAttrPrefix(envelope));
     }
     res.set("Content-Type", "text/xml; charset=utf-8");

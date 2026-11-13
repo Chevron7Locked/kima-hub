@@ -6,6 +6,7 @@ import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { one } from "../../utils/subsonicParams";
 
 export const libraryRouter = Router();
 
@@ -60,7 +61,7 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
 // ===================== FOLDER BROWSING =====================
 
 libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -96,7 +97,7 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
 // ===================== ALBUMS =====================
 
 libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -214,7 +215,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
 }));
 
 libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -253,7 +254,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
 // ===================== SONGS =====================
 
 libraryRouter.all("/getSong.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -316,9 +317,9 @@ const ALBUM_LIST_SELECT = Prisma.sql`
 
 // getAlbumList2 is ID3-tagged; getAlbumList is the legacy folder-based alias
 libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req, res) => {
-    const type = (req.query.type as string) || "newest";
-    const size = clamp(parseIntParam(req.query.size as string | undefined, 10), 0, 500);
-    const offset = Math.max(0, parseIntParam(req.query.offset as string | undefined, 0));
+    const type = one(req, "type") || "newest";
+    const size = clamp(parseIntParam(one(req, "size"), 10), 0, 500);
+    const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
     const userId = req.user!.id;
 
     const albumInclude = {
@@ -362,8 +363,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             break;
 
         case "byYear": {
-            const fromYear = parseInt(req.query.fromYear as string, 10);
-            const toYear = parseInt(req.query.toYear as string, 10);
+            const fromYear = parseInt(one(req, "fromYear") ?? "", 10);
+            const toYear = parseInt(one(req, "toYear") ?? "", 10);
             if (isNaN(fromYear) || isNaN(toYear)) {
                 return subsonicError(req, res, SubsonicError.MISSING_PARAM, "byYear requires fromYear and toYear");
             }
@@ -384,7 +385,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         }
 
         case "byGenre": {
-            const genre = req.query.genre as string;
+            const genre = one(req, "genre");
             if (!genre) {
                 return subsonicError(req, res, SubsonicError.MISSING_PARAM, "byGenre requires genre");
             }

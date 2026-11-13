@@ -17,6 +17,7 @@ import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
+import { one, many } from "../../utils/subsonicParams";
 
 export const playbackRouter = Router();
 
@@ -131,7 +132,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
 // ===================== STREAMING =====================
 
 playbackRouter.all(["/hls.view", "/hls.m3u8"], wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -139,16 +140,15 @@ playbackRouter.all(["/hls.view", "/hls.m3u8"], wrap(async (req, res) => {
     const streamParams = new URLSearchParams();
     streamParams.set("id", id);
 
-    const bitRateRaw = req.query.bitRate;
-    const firstBitRate = Array.isArray(bitRateRaw) ? bitRateRaw[0] : bitRateRaw;
-    if (typeof firstBitRate === "string" && firstBitRate.trim()) {
+    const firstBitRate = one(req, "bitRate");
+    if (firstBitRate?.trim()) {
         const numeric = firstBitRate.split("@")[0];
         streamParams.set("maxBitRate", numeric);
     }
 
     for (const passthroughKey of ["u", "p", "t", "s", "v", "c", "f", "apiKey"]) {
-        const value = req.query[passthroughKey];
-        if (typeof value === "string" && value.length > 0) {
+        const value = one(req, passthroughKey);
+        if (value) {
             streamParams.set(passthroughKey, value);
         }
     }
@@ -161,9 +161,9 @@ playbackRouter.all(["/hls.view", "/hls.m3u8"], wrap(async (req, res) => {
 }));
 
 playbackRouter.all("/getTranscodeStream.view", wrap(async (req, res) => {
-    const mediaId = req.query.mediaId as string | undefined;
-    const mediaType = (req.query.mediaType as string | undefined)?.toLowerCase();
-    const transcodeParams = req.query.transcodeParams as string | undefined;
+    const mediaId = one(req, "mediaId");
+    const mediaType = one(req, "mediaType")?.toLowerCase();
+    const transcodeParams = one(req, "transcodeParams");
 
     if (!mediaId) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaId");
@@ -198,14 +198,14 @@ playbackRouter.all("/getTranscodeStream.view", wrap(async (req, res) => {
 }));
 
 playbackRouter.all("/stream.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     // The same rule as getTranscodeDecision (planSubsonicSong). A refusal is not an error here: older clients send a
     // format by habit and expect a stream, so they get what no format would have given them, and under a cap below
     // Kima's smallest MP3 they get that smallest one.
-    const format = req.query.format as string | undefined;
-    const maxBitRate = req.query.maxBitRate as string | undefined;
+    const format = one(req, "format");
+    const maxBitRate = one(req, "maxBitRate");
     const choose = async (track: SongTrack, absolutePath: string): Promise<"direct" | SubsonicServe> => {
         let plan = await planSubsonicSong(format, maxBitRate, track, absolutePath);
         if ("refused" in plan) plan = await planSubsonicSong(undefined, maxBitRate, track, absolutePath);
@@ -221,7 +221,7 @@ playbackRouter.all("/stream.view", wrap(async (req, res) => {
 }));
 
 playbackRouter.all("/download.view", wrap(async (req, res) => {
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     return streamTrackById(req, res, id, () => "direct");
@@ -230,7 +230,7 @@ playbackRouter.all("/download.view", wrap(async (req, res) => {
 // ===================== COVER ART =====================
 
 playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
-    const rawId = req.query.id as string;
+    const rawId = one(req, "id");
     if (!rawId) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     // Strip client-applied prefixes (ar-, al-, tr-)
@@ -313,13 +313,13 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 
 playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
     // A client may send several plays at once: `id` repeated, each with its own `time` in the same order.
-    const ids = ([] as unknown[]).concat(req.query.id ?? []).filter((v): v is string => typeof v === "string" && v !== "");
-    const times = ([] as unknown[]).concat(req.query.time ?? []);
+    const ids = many(req, "id");
+    const times = many(req, "time");
     if (ids.length === 0) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     const userId = req.user!.id;
     // submission=false is "now playing": it starts the public live trip, never a play.
-    const submission = req.query.submission !== "false";
+    const submission = one(req, "submission") !== "false";
 
     // Only a playable song can have been played here; any other is answered ok and not recorded, since a client
     // that saw an error would retry it.
@@ -343,7 +343,7 @@ playbackRouter.all("/scrobble.view", wrap(async (req, res) => {
             if (!durations.has(id)) continue;
             // A client's scrobble counts as played (client-attested); the 30-second
             // floor and the duplicate window in playRecording.ts still apply.
-            const timeMs = typeof times[i] === "string" ? parseInt(times[i] as string, 10) : Date.now();
+            const timeMs = times[i] !== undefined ? parseInt(times[i], 10) : Date.now();
             const playedAt = isNaN(timeMs) ? new Date() : new Date(timeMs);
             await recordPlay({
                 userId,
@@ -396,8 +396,8 @@ playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
 
 playbackRouter.all("/createBookmark.view", wrap(async (req, res) => {
     const userId = req.user!.id;
-    const id = req.query.id as string;
-    const positionRaw = req.query.position as string;
+    const id = one(req, "id");
+    const positionRaw = one(req, "position");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     if (positionRaw === undefined || positionRaw === "") {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: position");
@@ -408,7 +408,7 @@ playbackRouter.all("/createBookmark.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Invalid parameter: position");
     }
 
-    const comment = (req.query.comment as string) || undefined;
+    const comment = one(req, "comment") || undefined;
 
     if (!(await prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG }, select: { id: true } }))) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Song not found");
@@ -425,7 +425,7 @@ playbackRouter.all("/createBookmark.view", wrap(async (req, res) => {
 
 playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
     const userId = req.user!.id;
-    const id = req.query.id as string;
+    const id = one(req, "id");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
     await prisma.subsonicBookmark.deleteMany({
@@ -438,8 +438,8 @@ playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
 // ===================== LYRICS =====================
 
 playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
-    const artist = (req.query.artist as string | undefined)?.trim();
-    const title = (req.query.title as string | undefined)?.trim();
+    const artist = one(req, "artist")?.trim();
+    const title = one(req, "title")?.trim();
 
     if (!artist && !title) {
         return subsonicOk(req, res, { lyrics: {} });

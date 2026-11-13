@@ -3,6 +3,7 @@ import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { one, many } from "../../utils/subsonicParams";
 
 export const queueRouter = Router();
 
@@ -130,7 +131,7 @@ function storedIndex(ids: string[], stored: QueueTrack[], clientIndex: number): 
 
 /** The client writing the queue, stored so other devices see who changed it. */
 function clientName(req: Request): string {
-    const c = req.query.c as string | undefined;
+    const c = one(req, "c");
     return c && c.trim() ? c.trim().slice(0, 64) : "Kima";
 }
 
@@ -178,17 +179,10 @@ queueRouter.all("/getPlayQueueByIndex.view", wrap(async (req, res) => {
 queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     const userId = req.user!.id;
 
-    const rawIds = req.query.id;
-    const ids: string[] = (
-        Array.isArray(rawIds)
-            ? rawIds
-            : rawIds !== undefined
-            ? [rawIds]
-            : []
-    ).filter(Boolean) as string[];
+    const ids = many(req, "id");
 
-    const current = req.query.current as string | undefined;
-    const positionRaw = req.query.position as string | undefined;
+    const current = one(req, "current");
+    const positionRaw = one(req, "position");
     const position = positionRaw ? parseInt(positionRaw, 10) : 0;
     const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
 
@@ -240,17 +234,10 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
 queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     const userId = req.user!.id;
 
-    const rawIds = req.query.id;
-    const ids: string[] = (
-        Array.isArray(rawIds)
-            ? rawIds
-            : rawIds !== undefined
-            ? [rawIds]
-            : []
-    ).filter(Boolean) as string[];
+    const ids = many(req, "id");
 
-    const currentIndexRaw = req.query.currentIndex as string | undefined;
-    const positionRaw = req.query.position as string | undefined;
+    const currentIndexRaw = one(req, "currentIndex");
+    const positionRaw = one(req, "position");
     const position = positionRaw === undefined || positionRaw === ""
         ? 0
         : parseInt(positionRaw, 10);

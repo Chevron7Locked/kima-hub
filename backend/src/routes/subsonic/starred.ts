@@ -3,7 +3,8 @@ import { prisma } from "../../utils/db";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
 import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapSong, firstArtistGenre, wrap, parseRepeatedQueryParam } from "./mappers";
+import { mapSong, firstArtistGenre, wrap } from "./mappers";
+import { one, many } from "../../utils/subsonicParams";
 
 export const starredRouter = Router();
 
@@ -45,8 +46,8 @@ starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, re
 }));
 
 starredRouter.all("/setRating.view", wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
-    const ratingRaw = req.query.rating as string | undefined;
+    const id = one(req, "id");
+    const ratingRaw = one(req, "rating");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -85,8 +86,8 @@ starredRouter.all("/setRating.view", wrap(async (req, res) => {
  * naming nothing is missing its parameter.
  */
 function songIdsOrRefuse(req: Request, res: Response): string[] | null {
-    const ids = parseRepeatedQueryParam(req.query.id);
-    if (parseRepeatedQueryParam(req.query.albumId).length > 0 || parseRepeatedQueryParam(req.query.artistId).length > 0) {
+    const ids = many(req, "id");
+    if (many(req, "albumId").length > 0 || many(req, "artistId").length > 0) {
         subsonicError(req, res, SubsonicError.GENERIC, "starring albums and artists isn't supported");
         return null;
     }

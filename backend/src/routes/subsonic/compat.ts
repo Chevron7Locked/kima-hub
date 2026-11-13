@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
-import { DIRECT_PARAMS, knownSuffix, mapSong, parseRepeatedQueryParam, songFormat, transcodeParamsFor, wrap } from "./mappers";
+import { DIRECT_PARAMS, knownSuffix, mapSong, songFormat, transcodeParamsFor, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
@@ -13,6 +13,7 @@ import {
     updateShareLink,
 } from "../../services/shareService";
 import { logger } from "../../utils/logger";
+import { one, many } from "../../utils/subsonicParams";
 
 export const compatRouter = Router();
 
@@ -105,7 +106,7 @@ compatRouter.all(
 // (a dropped connection, a pool timeout), and an unwrapped rejection in
 // Express 4 answers nothing at all.
 compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => {
-    const username = req.query.username as string | undefined;
+    const username = one(req, "username");
     if (!username) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: username");
     }
@@ -156,7 +157,7 @@ compatRouter.all("/getShares.view", wrap(async (req: Request, res: Response) => 
 // required: the lookups below run outside the try, and Express 4 sends no
 // response for a rejected handler promise.
 compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) => {
-    const ids = parseRepeatedQueryParam(req.query.id);
+    const ids = many(req, "id");
     if (ids.length === 0) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -165,7 +166,7 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
         return subsonicError(req, res, SubsonicError.GENERIC, "a share holds one item");
     }
 
-    const expires = parseExpires(req.query.expires);
+    const expires = parseExpires(one(req, "expires"));
     if (!expires.ok) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
     }
@@ -220,12 +221,12 @@ compatRouter.all("/createShare.view", wrap(async (req: Request, res: Response) =
 }));
 
 compatRouter.all("/updateShare.view", wrap(async (req: Request, res: Response) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    const expires = parseExpires(req.query.expires);
+    const expires = parseExpires(one(req, "expires"));
     if (!expires.ok) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "expires must be a number");
     }
@@ -239,7 +240,7 @@ compatRouter.all("/updateShare.view", wrap(async (req: Request, res: Response) =
 }));
 
 compatRouter.all("/deleteShare.view", wrap(async (req: Request, res: Response) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -265,7 +266,7 @@ compatRouter.all("/getVideos.view", (req: Request, res: Response) => {
 });
 
 compatRouter.all("/getVideoInfo.view", (req: Request, res: Response) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -273,7 +274,7 @@ compatRouter.all("/getVideoInfo.view", (req: Request, res: Response) => {
 });
 
 compatRouter.all("/getCaptions.view", (req: Request, res: Response) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -286,7 +287,7 @@ compatRouter.all("/getCaptions.view", (req: Request, res: Response) => {
 
 // Jukebox mode plays on the server's own audio output, which Kima has none of.
 compatRouter.all("/jukeboxControl.view", (req: Request, res: Response) => {
-    const action = (req.query.action as string | undefined)?.toLowerCase();
+    const action = one(req, "action")?.toLowerCase();
     if (!action) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: action");
     }
@@ -296,8 +297,8 @@ compatRouter.all("/jukeboxControl.view", (req: Request, res: Response) => {
 // Answers from the track's real format. Kima transcodes only to MP3, so any other
 // asked-for format that is not the source's own can neither play directly nor be made.
 compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Response) => {
-    const mediaId = req.query.mediaId as string | undefined;
-    const mediaType = req.query.mediaType as string | undefined;
+    const mediaId = one(req, "mediaId");
+    const mediaType = one(req, "mediaType");
     if (!mediaId) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaId");
     }
@@ -305,7 +306,7 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: mediaType");
     }
 
-    const format = req.query.format as string | undefined;
+    const format = one(req, "format");
     const wanted = format?.toLowerCase();
 
     // A podcast episode is served from its own feed as it is (getTranscodeStream redirects to it), never transcoded.
@@ -342,7 +343,7 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
 
     // The same plan stream.view and getTranscodeStream follow, so the stream is what this answer says.
     const source = songFormat(track);
-    const plan = await planSubsonicSong(format, req.query.maxBitRate as string | undefined, track, absolutePath);
+    const plan = await planSubsonicSong(format, one(req, "maxBitRate"), track, absolutePath);
     const canDirectPlay = "direct" in plan && plan.direct;
 
     return subsonicOk(req, res, {
@@ -351,7 +352,7 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
             canTranscode: !("refused" in plan),
             transcodeReason: canDirectPlay
                 ? []
-                : [wanted && wanted !== source ? `source is ${source || "unknown"}, client asked for ${wanted}` : `client capped the bitrate at ${req.query.maxBitRate}`],
+                : [wanted && wanted !== source ? `source is ${source || "unknown"}, client asked for ${wanted}` : `client capped the bitrate at ${one(req, "maxBitRate")}`],
             errorReason: "refused" in plan ? plan.refused : "",
             // Direct play still gets a value: getTranscodeStream requires one.
             ...(canDirectPlay && { transcodeParams: DIRECT_PARAMS }),

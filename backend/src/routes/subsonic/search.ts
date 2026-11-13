@@ -9,6 +9,7 @@ import { searchService } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong } from "./mappers";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { one } from "../../utils/subsonicParams";
 
 export const searchRouter = Router();
 
@@ -75,14 +76,14 @@ async function playableSongsInOrder(ids: string[]): Promise<SongRow[]> {
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
-    const query = (req.query.query as string | undefined) ?? "";
+    const query = one(req, "query") ?? "";
 
-    const artistCount = clamp(parseIntParam(req.query.artistCount as string | undefined, 20), 0, 500);
-    const albumCount  = clamp(parseIntParam(req.query.albumCount  as string | undefined, 20), 0, 500);
-    const songCount   = clamp(parseIntParam(req.query.songCount   as string | undefined, 20), 0, 500);
-    const artistOffset = Math.max(0, parseIntParam(req.query.artistOffset as string | undefined, 0));
-    const albumOffset  = Math.max(0, parseIntParam(req.query.albumOffset  as string | undefined, 0));
-    const songOffset   = Math.max(0, parseIntParam(req.query.songOffset   as string | undefined, 0));
+    const artistCount = clamp(parseIntParam(one(req, "artistCount"), 20), 0, 500);
+    const albumCount  = clamp(parseIntParam(one(req, "albumCount"), 20), 0, 500);
+    const songCount   = clamp(parseIntParam(one(req, "songCount"), 20), 0, 500);
+    const artistOffset = Math.max(0, parseIntParam(one(req, "artistOffset"), 0));
+    const albumOffset  = Math.max(0, parseIntParam(one(req, "albumOffset"), 0));
+    const songOffset   = Math.max(0, parseIntParam(one(req, "songOffset"), 0));
 
     const responseKey = req.path.startsWith("/search3")
         ? "searchResult3"
@@ -208,14 +209,12 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
 // ===================== RANDOM SONGS =====================
 
 searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
-    const size  = clamp(parseIntParam(req.query.size as string | undefined, 10), 1, 500);
-    const genre = req.query.genre as string | undefined;
-    const fromYear = req.query.fromYear !== undefined && req.query.fromYear !== ""
-        ? parseInt(req.query.fromYear as string, 10)
-        : undefined;
-    const toYear = req.query.toYear !== undefined && req.query.toYear !== ""
-        ? parseInt(req.query.toYear as string, 10)
-        : undefined;
+    const size  = clamp(parseIntParam(one(req, "size"), 10), 1, 500);
+    const genre = one(req, "genre");
+    const fromYearRaw = one(req, "fromYear");
+    const toYearRaw = one(req, "toYear");
+    const fromYear = fromYearRaw ? parseInt(fromYearRaw, 10) : undefined;
+    const toYear = toYearRaw ? parseInt(toYearRaw, 10) : undefined;
 
     const whereConditions: Prisma.Sql[] = [PLAYABLE_SQL];
 
@@ -257,13 +256,13 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
 // ===================== SONGS BY GENRE =====================
 
 searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
-    const genre = req.query.genre as string | undefined;
+    const genre = one(req, "genre");
     if (!genre) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: genre");
     }
 
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
-    const offset = Math.max(0, parseIntParam(req.query.offset as string | undefined, 0));
+    const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
+    const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
 
     // The artists carrying the genre, matched by genreKey exactly as the web's genre filters do;
     // a genre nothing carries has no songs.
@@ -287,12 +286,12 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
 // ===================== TOP SONGS =====================
 
 searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
-    const artistParam = req.query.artist as string | undefined;
+    const artistParam = one(req, "artist");
     if (!artistParam) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: artist");
     }
 
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
+    const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
 
     // The exact name is found by its identity key (indexed, built in TypeScript); a display name is compared the same
     // way over the few artists that have one; otherwise the text is matched inside a name with a case-blind pattern,
@@ -340,12 +339,12 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
 // ===================== SIMILAR SONGS =====================
 
 searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 50), 1, 500);
+    const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
     const responseKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
 
     // `id` may be an artist, album or song; clients usually send a song id.

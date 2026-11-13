@@ -5,16 +5,17 @@ import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
 import { subsonicGuesses } from "../services/users/guessLimits";
+import { one } from "../utils/subsonicParams";
 
 export async function subsonicAuth(
     req: Request,
     res: Response,
     next: NextFunction
 ): Promise<void> {
-    const username = req.query.u as string | undefined;
-    const apiKey = req.query.apiKey as string | undefined;
-    const password = req.query.p as string | undefined;
-    const tokenMd5 = req.query.t as string | undefined;
+    const username = one(req, "u");
+    const apiKey = one(req, "apiKey");
+    const password = one(req, "p");
+    const tokenMd5 = one(req, "t");
 
     if (!username) {
         subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: u");

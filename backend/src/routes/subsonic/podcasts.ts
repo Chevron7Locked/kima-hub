@@ -3,6 +3,7 @@ import { refreshPodcastFeed } from "../podcasts";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, clamp, parseIntParam } from "./mappers";
+import { one } from "../../utils/subsonicParams";
 
 export const podcastRouter = Router();
 
@@ -47,7 +48,7 @@ function mapPodcastEpisode(episode: {
 }
 
 podcastRouter.all("/getPodcastEpisode.view", wrap(async (req, res) => {
-    const id = req.query.id as string | undefined;
+    const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
@@ -81,8 +82,8 @@ podcastRouter.all("/getPodcastEpisode.view", wrap(async (req, res) => {
 }));
 
 podcastRouter.all("/getPodcasts.view", wrap(async (req, res) => {
-    const includeEpisodes = (req.query.includeEpisodes as string | undefined) !== "false";
-    const id = req.query.id as string | undefined;
+    const includeEpisodes = one(req, "includeEpisodes") !== "false";
+    const id = one(req, "id");
     const userId = req.user!.id;
 
     const subscriptions = await prisma.podcastSubscription.findMany({
@@ -123,7 +124,7 @@ podcastRouter.all("/getPodcasts.view", wrap(async (req, res) => {
 }));
 
 podcastRouter.all("/getNewestPodcasts.view", wrap(async (req, res) => {
-    const count = clamp(parseIntParam(req.query.count as string | undefined, 20), 1, 500);
+    const count = clamp(parseIntParam(one(req, "count"), 20), 1, 500);
 
     const episodes = await prisma.podcastEpisode.findMany({
         where: {
