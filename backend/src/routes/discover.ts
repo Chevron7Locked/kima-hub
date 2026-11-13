@@ -494,9 +494,15 @@ async function untagAlbumOwner(suggestion: { artistName: string; albumTitle: str
             return;
         }
         const tagId = await lidarrService.getOrCreateDiscoveryTag();
-        if (tagId === null) return;
-        await lidarrService.removeTagsFromArtist(record.artistId, [tagId]);
-        logger.debug(`   Removed discovery tag from Lidarr artist ${record.artistId} (owner of ${label})`);
+        if (tagId === null) {
+            logger.warn(`[Discover] Lidarr has no Discover tag to remove for ${label}`);
+            return;
+        }
+        if (await lidarrService.removeTagsFromArtist(record.artistId, [tagId])) {
+            logger.debug(`   Removed discovery tag from Lidarr artist ${record.artistId} (owner of ${label})`);
+        } else {
+            logger.warn(`[Discover] Lidarr did not take Discover's tag off its artist ${record.artistId} for ${label}`);
+        }
     } catch (e: any) {
         logger.warn(`[Discover] Discover's tag not removed for ${label}: ${e.message}`);
     }

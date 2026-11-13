@@ -133,7 +133,7 @@ describe('POST /discover/like -- claims the album only while it is ACTIVE', () =
         expect(res.status).toBe(404);
         expect(liked.status).toBe(404);
         expect(await statusOf(`${P}da-other`)).toBe('ACTIVE');
-        expect(mockRemoveDiscoveryTagByMbid).not.toHaveBeenCalled();
+        expect(mockGetAlbum).not.toHaveBeenCalled();
     });
 
     it('answers 409 ALBUM_GONE and skips the Lidarr tag removal when cleanup claims the row first', async () => {
