@@ -1,5 +1,6 @@
 /**
  * A play is recorded by the Last.fm rule, not by hitting the stream endpoint.
+ * Real database: the song, the user and the plays are rows. ListenBrainz is stubbed.
  */
 
 import { ListenSource } from "@prisma/client";
@@ -9,21 +10,7 @@ import {
     recordPlay,
     requiredListenSeconds,
 } from "../playRecording";
-
-jest.mock("../../utils/db", () => {
-    // Typed as a bag of functions on purpose: `prisma` appears inside its own
-    // initializer (the transaction stub hands the callback the same object),
-    // which TS refuses to infer a type for otherwise.
-    const prisma: Record<string, any> = {
-        track: { findUnique: jest.fn() },
-        play: { findFirst: jest.fn(), create: jest.fn() },
-        // recordPlay checks and inserts in one transaction under an advisory
-        // lock; the mock runs the callback on this same object.
-        $transaction: jest.fn((fn: any) => fn(prisma)),
-        $executeRaw: jest.fn(async () => 1),
-    };
-    return { prisma };
-});
+import { prisma } from "../../utils/db";
 
 // The ListenBrainz mirror must never hit the network from tests. Pin the
 // service; each test decides whether it resolves or rejects.
@@ -35,16 +22,44 @@ jest.mock("../listenBrainz", () => ({
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { prisma } = require("../../utils/db");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { listenBrainzService } = require("../listenBrainz");
 
-const track = (duration: number) => ({ id: "t1", duration });
+const P = "zz-playRecording-";
+const USER = `${P}u1`;
+const TRACK = `${P}t1`;
 
-beforeEach(() => {
+async function wipe() {
+    await prisma.user.deleteMany({ where: { id: USER } }); // plays go with the user
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+/** The song a play is of, `duration` seconds long. */
+async function seedTrack(duration: number, title = "Windowless Pane") {
+    await prisma.track.create({
+        data: {
+            id: TRACK, albumId: `${P}alb`, title, trackNo: 1, duration,
+            filePath: `/tmp/${TRACK}.flac`, fileModified: new Date(), fileSize: 1000,
+        },
+    });
+}
+const plays = () => prisma.play.findMany({ where: { userId: USER }, orderBy: { playedAt: "asc" } });
+/** A report of the song, with the user and track filled in. */
+const report = (rest: Record<string, unknown>) => recordPlay({ userId: USER, trackId: TRACK, ...rest } as never);
+const earlierPlay = () =>
+    prisma.play.create({ data: { userId: USER, trackId: TRACK, playedAt: new Date(Date.now() - 60_000) } });
+
+beforeAll(wipe);
+afterAll(wipe);
+
+beforeEach(async () => {
     jest.clearAllMocks();
-    prisma.play.findFirst.mockResolvedValue(null);
-    prisma.play.create.mockResolvedValue({ id: "p1" });
+    await wipe();
+    await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x" } });
+    await prisma.artist.create({ data: { id: `${P}art`, name: "The Glazier", identityKey: `${P}art` } });
+    await prisma.album.create({
+        data: { id: `${P}alb`, artistId: `${P}art`, title: "Glass Works", identityKey: `${P}alb`, rgMbid: `${P}alb`, primaryType: "Album" },
+    });
     // Default: no token configured — the real service skips and resolves
     // false. Individual tests override when they want a submit to happen.
     listenBrainzService.submitListens.mockResolvedValue(false);
@@ -88,123 +103,113 @@ describe("requiredListenSeconds", () => {
 
 describe("recordPlay", () => {
     it("writes a row once the listening earns it", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 100 });
-        expect(out).toEqual({ recorded: true, playId: "p1" });
-        expect(prisma.play.create).toHaveBeenCalledTimes(1);
+        await seedTrack(200);
+        const out = await report({ secondsListened: 100 });
+        const rows = await plays();
+        expect(rows).toHaveLength(1);
+        expect(out).toEqual({ recorded: true, playId: rows[0].id });
+        expect(rows[0]).toMatchObject({ trackId: TRACK, source: ListenSource.LIBRARY, heard: true });
     });
 
     it("writes nothing when the track was barely played", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 5 });
+        await seedTrack(200);
+        const out = await report({ secondsListened: 5 });
         expect(out).toEqual({ recorded: false, reason: "not-enough-listened" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(0);
     });
 
     it("rejects listening just under the required amount, and nonsense values", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        const short = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 99.9 });
+        await seedTrack(200);
+        const short = await report({ secondsListened: 99.9 });
         expect(short).toEqual({ recorded: false, reason: "not-enough-listened" });
         for (const secondsListened of [Number.NaN, -10]) {
-            const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened });
+            const out = await report({ secondsListened });
             expect(out).toEqual({ recorded: false, reason: "not-enough-listened" });
         }
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(0);
     });
 
     it("writes nothing for a track under the 30-second floor", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(20));
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 20 });
+        await seedTrack(20);
+        const out = await report({ secondsListened: 20 });
         expect(out).toEqual({ recorded: false, reason: "too-short" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(0);
     });
 
     it("makes an unscanned track the hardest to scrobble, not the easiest", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(0));
-        expect(await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 239 }))
-            .toEqual({ recorded: false, reason: "not-enough-listened" });
-        expect(await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 240 }))
-            .toEqual({ recorded: true, playId: "p1" });
+        await seedTrack(0);
+        expect(await report({ secondsListened: 239 })).toEqual({ recorded: false, reason: "not-enough-listened" });
+        expect(await report({ secondsListened: 240 })).toMatchObject({ recorded: true });
     });
 
     it("collapses a repeat inside the dedup window to one row", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        prisma.play.findFirst.mockResolvedValue({ id: "already" });
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
+        await seedTrack(200);
+        await earlierPlay();
+        const out = await report({ secondsListened: 150 });
         expect(out).toEqual({ recorded: false, reason: "duplicate" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(1);
     });
 
-    it("pins the duplicate window to ±one duration around the reported play", async () => {
-        // Both edges: a one-sided window lets any newer play veto a
-        // late-synced scrobble as a duplicate.
-        prisma.track.findUnique.mockResolvedValue(track(200));
+    it("pins the duplicate window to ±one duration around the reported play, edges excluded", async () => {
+        // Both edges: a one-sided window lets any newer play veto a late-synced scrobble as a duplicate,
+        // and exactly one duration away the song has finished, so that play is a genuine replay.
+        await seedTrack(200);
         const at = new Date("2026-09-25T12:00:00.000Z");
+        await prisma.play.create({ data: { userId: USER, trackId: TRACK, playedAt: at } });
 
-        await recordPlay({
-            userId: "u1",
-            trackId: "t1",
-            playedAt: at,
-            clientAttestedComplete: true,
-        });
-
-        expect(prisma.play.findFirst).toHaveBeenCalledWith({
-            where: {
-                userId: "u1",
-                trackId: "t1",
-                playedAt: {
-                    gt: new Date(at.getTime() - 200_000),
-                    lt: new Date(at.getTime() + 200_000),
-                },
-            },
-            select: { id: true },
-        });
+        for (const offset of [-199_999, 199_999]) {
+            const inside = await report({ playedAt: new Date(at.getTime() + offset), clientAttestedComplete: true });
+            expect(inside).toEqual({ recorded: false, reason: "duplicate" });
+        }
+        for (const offset of [-200_000, 200_000]) {
+            const when = new Date(at.getTime() + offset);
+            expect((await report({ playedAt: when, clientAttestedComplete: true })).recorded).toBe(true);
+            await prisma.play.deleteMany({ where: { userId: USER, playedAt: when } });
+        }
     });
 
-    it("takes no isolation level, because REPEATABLE READ would restore the race", async () => {
-        // The transaction must use the default READ COMMITTED; a stricter
-        // isolation level would let a second writer miss the first insert.
-        prisma.track.findUnique.mockResolvedValue(track(200));
+    it("lets a late-synced play through when a newer play of the track is already stored", async () => {
+        await seedTrack(200);
+        await prisma.play.create({ data: { userId: USER, trackId: TRACK, playedAt: new Date() } });
+        const out = await report({ playedAt: new Date(Date.now() - 5 * 3600_000), clientAttestedComplete: true });
+        expect(out.recorded).toBe(true);
+        expect(await plays()).toHaveLength(2);
+    });
 
-        await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
-
-        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-        expect(prisma.$transaction.mock.calls[0]).toHaveLength(1);
+    it("writes one row when the same play is reported several times at once", async () => {
+        // The lock: the duplicate check and the insert are one decision, so concurrent reports cannot both write.
+        await seedTrack(200);
+        const outcomes = await Promise.all([1, 2, 3, 4].map(() => report({ secondsListened: 150 })));
+        expect(outcomes.filter((o) => o.recorded)).toHaveLength(1);
+        expect(outcomes.filter((o) => !o.recorded)).toEqual(Array(3).fill({ recorded: false, reason: "duplicate" }));
+        expect(await plays()).toHaveLength(1);
     });
 
     it("reads the duration from the database, never from the caller", async () => {
         // A client claiming a 3-second jingle is an hour long must not be able to
         // scrobble it on two seconds of audio.
-        prisma.track.findUnique.mockResolvedValue(track(3));
-        const out = await recordPlay({
-            userId: "u1",
-            trackId: "t1",
-            secondsListened: 2,
-            source: ListenSource.SUBSONIC,
-        });
+        await seedTrack(3);
+        const out = await report({ secondsListened: 2, source: ListenSource.SUBSONIC });
         expect(out).toEqual({ recorded: false, reason: "too-short" });
     });
 
     it("reports an unknown track rather than inventing one", async () => {
-        prisma.track.findUnique.mockResolvedValue(null);
-        const out = await recordPlay({ userId: "u1", trackId: "nope", secondsListened: 999 });
+        const out = await recordPlay({ userId: USER, trackId: `${P}nope`, secondsListened: 999 });
         expect(out).toEqual({ recorded: false, reason: "unknown-track" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(0);
     });
 
     it("carries the source through, so the cutover stays auditable", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        await recordPlay({
-            userId: "u1",
-            trackId: "t1",
-            secondsListened: 150,
-            source: ListenSource.SUBSONIC,
-        });
-        expect(prisma.play.create).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({ source: ListenSource.SUBSONIC }),
-            }),
-        );
+        await seedTrack(200);
+        await report({ secondsListened: 150, source: ListenSource.SUBSONIC });
+        expect((await plays())[0].source).toBe(ListenSource.SUBSONIC);
+    });
+
+    it("stores the play at the time it is reported for", async () => {
+        await seedTrack(200);
+        const playedAt = new Date("2026-05-01T08:30:00.000Z");
+        await report({ secondsListened: 150, playedAt });
+        expect((await plays())[0].playedAt).toEqual(playedAt);
     });
 });
 
@@ -212,71 +217,55 @@ describe("recordPlay with a client-attested play (Subsonic scrobble)", () => {
     it("records a scrobble the client says was played, with no seconds reported", async () => {
         // The play is attested, not timed: it must not be dropped by the
         // finite-seconds guard.
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        const out = await recordPlay({
-            userId: "u1",
-            trackId: "t1",
-            clientAttestedComplete: true,
-            source: ListenSource.SUBSONIC,
-        });
-        expect(out).toEqual({ recorded: true, playId: "p1" });
-        expect(prisma.play.create).toHaveBeenCalledTimes(1);
+        await seedTrack(200);
+        const out = await report({ clientAttestedComplete: true, source: ListenSource.SUBSONIC });
+        expect(out.recorded).toBe(true);
+        expect(await plays()).toHaveLength(1);
     });
 
     it("still refuses a track under the 30-second floor, whatever the client claims", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(20));
-        const out = await recordPlay({ userId: "u1", trackId: "t1", clientAttestedComplete: true });
+        await seedTrack(20);
+        const out = await report({ clientAttestedComplete: true });
         expect(out).toEqual({ recorded: false, reason: "too-short" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(0);
     });
 
     it("still collapses a repeat inside the dedup window", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        prisma.play.findFirst.mockResolvedValue({ id: "already" });
-        const out = await recordPlay({ userId: "u1", trackId: "t1", clientAttestedComplete: true });
+        await seedTrack(200);
+        await earlierPlay();
+        const out = await report({ clientAttestedComplete: true });
         expect(out).toEqual({ recorded: false, reason: "duplicate" });
-        expect(prisma.play.create).not.toHaveBeenCalled();
+        expect(await plays()).toHaveLength(1);
     });
 
     it("does not let a measured caller pass Infinity to skip the listening rule", async () => {
-        prisma.track.findUnique.mockResolvedValue(track(200));
-        const out = await recordPlay({
-            userId: "u1",
-            trackId: "t1",
-            secondsListened: Number.POSITIVE_INFINITY,
-        });
+        await seedTrack(200);
+        const out = await report({ secondsListened: Number.POSITIVE_INFINITY });
         expect(out).toEqual({ recorded: false, reason: "not-enough-listened" });
     });
 });
 
 describe("ListenBrainz mirror", () => {
-    const fullTrack = {
-        id: "t1",
-        duration: 200,
-        title: "Windowless Pane",
-        album: { title: "Glass Works", artist: { name: "The Glazier" } },
-    };
-
     /** Let the fire-and-forget submit settle before asserting. */
     const flush = () => new Promise((r) => setTimeout(r, 0));
 
     it("records the play even when no token is configured (submit self-skips)", async () => {
         // The service's documented no-token path: resolves false, never
         // throws. The play log must not care either way.
-        prisma.track.findUnique.mockResolvedValue(fullTrack);
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
-        expect(out).toEqual({ recorded: true, playId: "p1" });
+        await seedTrack(200);
+        const out = await report({ secondsListened: 150 });
+        expect(out.recorded).toBe(true);
         await flush();
     });
 
     it("mirrors a recorded play with artist, track and release", async () => {
-        prisma.track.findUnique.mockResolvedValue(fullTrack);
+        await seedTrack(200);
         listenBrainzService.submitListens.mockResolvedValue(true);
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
+        const out = await report({ secondsListened: 150 });
         expect(out.recorded).toBe(true);
         await flush();
         expect(listenBrainzService.submitListens).toHaveBeenCalledTimes(1);
-        expect(listenBrainzService.submitListens).toHaveBeenCalledWith("u1", [
+        expect(listenBrainzService.submitListens).toHaveBeenCalledWith(USER, [
             expect.objectContaining({
                 artist: "The Glazier",
                 track: "Windowless Pane",
@@ -286,27 +275,28 @@ describe("ListenBrainz mirror", () => {
     });
 
     it("a dead or rejecting ListenBrainz never fails the play", async () => {
-        prisma.track.findUnique.mockResolvedValue(fullTrack);
+        await seedTrack(200);
         listenBrainzService.submitListens.mockRejectedValue(new Error("LB down"));
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
-        expect(out).toEqual({ recorded: true, playId: "p1" });
+        const out = await report({ secondsListened: 150 });
+        expect(out.recorded).toBe(true);
         await flush(); // let the rejection land in the swallow, not in jest
+        expect(await plays()).toHaveLength(1);
     });
 
     it("does not mirror a play that was not recorded", async () => {
-        prisma.track.findUnique.mockResolvedValue(fullTrack);
-        prisma.play.findFirst.mockResolvedValue({ id: "already" });
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
+        await seedTrack(200);
+        await earlierPlay();
+        const out = await report({ secondsListened: 150 });
         expect(out).toEqual({ recorded: false, reason: "duplicate" });
         await flush();
         expect(listenBrainzService.submitListens).not.toHaveBeenCalled();
     });
 
-    it("does not mirror when the track row carries no usable metadata", async () => {
-        // Half-enriched library rows have no title/album: the mirror skips,
+    it("does not mirror when the song has no title", async () => {
+        // A song scanned without a title has nothing to name to ListenBrainz: the mirror skips,
         // the play still counts.
-        prisma.track.findUnique.mockResolvedValue({ id: "t1", duration: 200 });
-        const out = await recordPlay({ userId: "u1", trackId: "t1", secondsListened: 150 });
+        await seedTrack(200, "");
+        const out = await report({ secondsListened: 150 });
         expect(out.recorded).toBe(true);
         await flush();
         expect(listenBrainzService.submitListens).not.toHaveBeenCalled();
