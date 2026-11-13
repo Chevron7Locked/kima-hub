@@ -1,24 +1,29 @@
 /**
- * The shared MBID reassignment helper's artist half and its error type. The album half moves rows
- * across several tables and is tested against the real database (mbidReassign.db.test.ts).
+ * The shared MBID reassignment helper's artist half and its error type, on the real database. The album half moves
+ * rows across several tables (mbidReassign.db.test.ts).
  */
 
 import { prisma } from "../../utils/db";
 import { DuplicateMbidError, reassignArtistMbid } from "../mbidReassign";
 
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        artist: {
-            update: jest.fn(),
-        },
-    },
-}));
-
-const mockArtistUpdate = prisma.artist.update as jest.Mock;
-
-const ARTIST_ID = "artist-456";
+const P = "zz-mbidReassign";
+const ARTIST_ID = `${P}-artist-456`;
+const OTHER_ARTIST_ID = `${P}-artist-789`;
 const NEW_RGMBID = "new-rgmbid-uuid";
 const ARTIST_MBID = "artist-mbid-uuid";
+
+async function wipe() {
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+async function seedArtist(id: string, mbid: string | null = null) {
+    await prisma.artist.create({ data: { id, name: id, identityKey: id, mbid } });
+}
+beforeAll(wipe);
+beforeEach(async () => {
+    await wipe();
+    await seedArtist(ARTIST_ID);
+});
+afterAll(wipe);
 
 describe("DuplicateMbidError", () => {
     it("should have the correct error message format", () => {
@@ -42,40 +47,27 @@ describe("DuplicateMbidError", () => {
 });
 
 describe("reassignArtistMbid", () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
+    afterEach(() => jest.restoreAllMocks());
 
-    it("should update Artist.mbid via prisma.artist.update", async () => {
-        mockArtistUpdate.mockResolvedValue({ id: ARTIST_ID, mbid: ARTIST_MBID });
-
+    it("stores the new mbid on the artist", async () => {
         await reassignArtistMbid(ARTIST_ID, ARTIST_MBID);
 
-        expect(mockArtistUpdate).toHaveBeenCalledTimes(1);
-        expect(mockArtistUpdate).toHaveBeenCalledWith({
-            where: { id: ARTIST_ID },
-            data: { mbid: ARTIST_MBID },
-        });
+        expect((await prisma.artist.findUnique({ where: { id: ARTIST_ID } }))?.mbid).toBe(ARTIST_MBID);
     });
 
-    it("should throw DuplicateMbidError on P2002", async () => {
-        const p2002Error = new Error("Unique constraint failed") as any;
-        p2002Error.code = "P2002";
-        mockArtistUpdate.mockRejectedValue(p2002Error);
+    it("should throw DuplicateMbidError when another artist holds the mbid, and change nothing", async () => {
+        await seedArtist(OTHER_ARTIST_ID, ARTIST_MBID);
 
-        await expect(
-            reassignArtistMbid(ARTIST_ID, ARTIST_MBID)
-        ).rejects.toThrow(DuplicateMbidError);
-        expect(mockArtistUpdate).toHaveBeenCalledTimes(1);
+        await expect(reassignArtistMbid(ARTIST_ID, ARTIST_MBID)).rejects.toThrow(DuplicateMbidError);
+
+        expect((await prisma.artist.findUnique({ where: { id: ARTIST_ID } }))?.mbid).toBeNull();
     });
 
     it("should re-throw non-P2002 errors", async () => {
-        const otherError = new Error("Some other error") as any;
-        otherError.code = "P2025";
-        mockArtistUpdate.mockRejectedValue(otherError);
+        jest.spyOn(prisma.artist, "update").mockRejectedValueOnce(
+            Object.assign(new Error("Some other error"), { code: "P2025" }) as never,
+        );
 
-        await expect(
-            reassignArtistMbid(ARTIST_ID, ARTIST_MBID)
-        ).rejects.toThrow("Some other error");
+        await expect(reassignArtistMbid(ARTIST_ID, ARTIST_MBID)).rejects.toThrow("Some other error");
     });
 });
