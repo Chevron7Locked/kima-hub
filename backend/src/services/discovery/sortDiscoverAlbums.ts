@@ -140,7 +140,8 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
             await tx.ownedAlbum.deleteMany({ where: { artistId: album.artistId, rgMbid: album.rgMbid } });
         }
     });
-    // Done once its albums are filed (the save is not part of the transaction); a failure here reruns the sort, which files them the same way.
+    // Marked done just after its albums are filed (Kevin, 2026-11-11): the save cannot join the transaction. If it fails,
+    // the marker stays unset and the next start sorts again from the albums as now filed.
     await saveSystemSettings({ discoverAlbumsSortedAt: new Date() });
     for (const artistId of new Set([...toLibrary, ...toDiscover].map((a) => a.artistId))) await updateArtistCounts(artistId);
 

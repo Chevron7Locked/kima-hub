@@ -236,6 +236,17 @@ describe("a saved step reaches whatever holds the setting", () => {
         expect(res.body.tested).toBe(false);
     });
 
+    it("a Soulseek account the save connected is reported as tested", async () => {
+        const connected = jest.spyOn(soulseekService, "isConnected").mockReturnValue(true);
+        try {
+            const res = await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
+
+            expect(res.body).toMatchObject({ success: true, tested: true, warning: null });
+        } finally {
+            connected.mockRestore();
+        }
+    });
+
     it("the same Soulseek account sent again is tried again", async () => {
         await request(app).post("/onboarding/soulseek").set(asAdmin()).send({ username: "me", password: "pw", enabled: true }).expect(200);
         reconnect.mockClear();
