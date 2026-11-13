@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, firstArtistGenre, wrap } from "./mappers";

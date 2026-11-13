@@ -43,17 +43,3 @@ export function playableSongSql(song: string, album: string): Prisma.Sql {
     }
     return Prisma.raw(`"${album}".location = 'LIBRARY' AND "${song}".corrupt = false AND "${song}"."missingSince" IS NULL`);
 }
-
-// Parts of the rule, left only until every caller uses the whole of it.
-
-/** For Prisma `where` clauses on Track. */
-export const NOT_MISSING = { missingSince: PLAYABLE_SONG.missingSince } as const;
-
-/** A track that can be streamed: its file is there and was read. For Prisma `where` clauses on Track. */
-export const PLAYABLE = { ...NOT_MISSING, corrupt: PLAYABLE_SONG.corrupt } as const;
-
-/** A song on a library album, not a Discover suggestion. */
-export const IN_LIBRARY = { album: PLAYABLE_SONG.album } as const;
-
-/** The whole rule, under its old name. */
-export const LIBRARY_PLAYABLE = PLAYABLE_SONG;

@@ -4,7 +4,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
 const albumTrackFields = {

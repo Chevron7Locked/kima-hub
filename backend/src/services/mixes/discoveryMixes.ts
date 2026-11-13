@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { normalizeArtistName } from "../artistIdentity";
 import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
-import { IN_LIBRARY, PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { mostPlayedTrackIds, playedMoreThanSql, recentPlayArtists } from "../stats/listens";
 import {
     ProgrammaticMix,
@@ -81,7 +81,7 @@ export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
     const playArtists = await recentPlayArtists(userId, {
-        song: IN_LIBRARY,
+        song: PLAYABLE_SONG,
         since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 

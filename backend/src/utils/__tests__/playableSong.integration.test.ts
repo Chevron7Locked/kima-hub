@@ -24,7 +24,7 @@ import path from "path";
 import { prisma } from "../db";
 import { artistIdentityKey, normalizeArtistName } from "../../services/artistIdentity";
 import { config } from "../../config";
-import { PLAYABLE_SONG, playableSongSql } from "../libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { compatRouter } from "../../routes/subsonic/compat";
 import { playbackRouter } from "../../routes/subsonic/playback";
@@ -45,7 +45,7 @@ import { nightMixTracks, nightSongs } from "../../services/mixes/nightPlays";
 import { generateMinorKeyMix } from "../../services/mixes/moodMixes";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { stationCovers, type CoverStationType } from "../../services/mixes/stationCovers";
-import { libraryDecades, libraryGenres } from "../../services/mixes/radioRow";
+import { libraryDecades, libraryGenres, radioRow } from "../../services/mixes/radioRow";
 import { nightStationPool } from "../../services/mixes/nightPlays";
 import { featureDetection } from "../../services/featureDetection";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
@@ -164,12 +164,12 @@ async function station(type: string, value?: string): Promise<string[]> {
     if ("reply" in picked) throw new Error(`the ${type} station answered ${picked.reply.status}`);
     return picked.trackIds;
 }
-/** The song whose album is USER's cover for a station today; only the seeded songs' albums have covers. */
-async function stationCover(type: CoverStationType, value?: string): Promise<string[]> {
+/** USER's cover for a station, picked afresh (the day's pick is kept in Redis, so it is cleared first). */
+async function stationCover(type: CoverStationType, value?: string): Promise<string | null> {
     const keys = await redisClient.keys(`radiocover:${USER}:*`);
     if (keys.length) await redisClient.del(...keys);
     const [cover] = await stationCovers([{ type, value }], USER, "UTC");
-    return Object.values(SONG).filter((id) => coverOf(id) === cover);
+    return cover;
 }
 const STATION_TYPES: [string, string | undefined][] = [
     ["all", undefined], ["discovery", undefined], ["favorites", undefined], ["decade", "1900"], ["genre", GENRE], ["artist", `${P}-ar`],
@@ -391,12 +391,6 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     "Minor Key Mondays mix": () => mixSongs(generateMinorKeyMix(USER, TODAY)),
     "a similar artist's station": () => station("artist", `${FILLERS[0]}-ar`),
     ...Object.fromEntries(STATION_TYPES.map(([type, value]) => [`the ${type} station`, () => station(type, value)])),
-    ...Object.fromEntries(
-        STATION_TYPES.filter(([type]) => type !== "artist").map(([type, value]) => [
-            `the ${value ?? type} station's cover`,
-            () => stationCover(type as CoverStationType, value),
-        ]),
-    ),
     "the Late Night station's cold start, filled with songs like a listener's one night song": async () =>
         (await nightStationPool(NIGHT, "UTC", "late-night")).map((s) => s.id),
     "similar songs": async () => {
@@ -595,11 +589,11 @@ const LISTENED = (() => {
  * seeded year, a library album per song unless it says otherwise. Every derived field a picker filters on is filled, so
  * no filter passes on an empty default. Each song is played (a finished listen) and liked by USER.
  */
-async function seedArtist(artist: { id: string; name: string }, albums: { id: string; location?: "LIBRARY" | "DISCOVER"; cover?: string; songs: { id: string; title: string; filePath: string; missingSince?: Date | null; corrupt?: boolean; arousal?: number }[] }[]) {
+async function seedArtist(artist: { id: string; name: string; genre?: string; year?: number }, albums: { id: string; location?: "LIBRARY" | "DISCOVER"; cover?: string; songs: { id: string; title: string; filePath: string; missingSince?: Date | null; corrupt?: boolean; arousal?: number }[] }[]) {
     await prisma.artist.create({
-        data: { id: artist.id, name: artist.name, normalizedName: normalizeArtistName(artist.name), identityKey: artistIdentityKey(artist.name), libraryAlbumCount: albums.length, genres: [GENRE] },
+        data: { id: artist.id, name: artist.name, normalizedName: normalizeArtistName(artist.name), identityKey: artistIdentityKey(artist.name), libraryAlbumCount: albums.length, genres: [artist.genre ?? GENRE] },
     });
-    const genre = await prisma.genre.upsert({ where: { name: GENRE }, create: { name: GENRE }, update: {} });
+    const genre = await prisma.genre.upsert({ where: { name: artist.genre ?? GENRE }, create: { name: artist.genre ?? GENRE }, update: {} });
     for (const album of albums) {
         await prisma.album.create({
             data: {
@@ -609,8 +603,8 @@ async function seedArtist(artist: { id: string; name: string }, albums: { id: st
                 artistId: artist.id,
                 title: album.songs[0].title,
                 primaryType: "Album",
-                year: YEAR,
-                originalYear: YEAR,
+                year: artist.year ?? YEAR,
+                originalYear: artist.year ?? YEAR,
                 coverUrl: album.cover ?? null,
                 location: album.location ?? "LIBRARY",
             },
@@ -676,7 +670,7 @@ async function seedSoundAndMoods() {
     await updateMap(true);
 }
 
-/** The cover of a seeded song's album; the fillers have none, so a station's cover can only be one of these. */
+/** The cover of a seeded song's album (a filler's song too), so a station's cover is the cover of whichever playable song it picked. */
 const coverOf = (id: string) => `${id}-cover`;
 
 beforeAll(async () => {
@@ -696,7 +690,7 @@ beforeAll(async () => {
     // playable song, 19 songs by 10 artists: fewer than a mix holds, so a mix made holds the playable song.
     for (const id of FILLERS) {
         await seedArtist({ id: `${id}-ar`, name: `${P} ${id.slice(P.length + 1)}` }, [
-            { id: `${id}-al`, songs: [1, 2].map((n) => ({ id: `${id}-s${n}`, title: `${P} ${id} ${n}`, filePath: `${P}/${id}-${n}.flac` })) },
+            { id: `${id}-al`, cover: coverOf(`${id}-al`), songs: [1, 2].map((n) => ({ id: `${id}-s${n}`, title: `${P} ${id} ${n}`, filePath: `${P}/${id}-${n}.flac` })) },
         ]);
     }
     // The first filler's artist radio fills its similar share from the seeded songs' artist.
@@ -748,6 +742,23 @@ describe.each(Object.entries(PICKERS))("%s", (_name, pick) => {
     });
 });
 
+// A station's cover is the album of the first song it would play that has one. Every seeded album has a cover, so a cover
+// that is an unplayable song's album could only come from a station that picked that song. The station shuffles, so each is
+// asked afresh 25 times.
+describe.each(STATION_TYPES.filter(([type]) => type !== "artist"))("the %s station's cover (%s)", (type, value) => {
+    const unplayable = UNPLAYABLE.map(coverOf);
+    const playable = [coverOf(SONG.playable), ...FILLERS.map((id) => coverOf(`${id}-al`))];
+
+    it("is the album of a playable song, never of a Discover, missing or corrupt one", async () => {
+        for (let ask = 0; ask < 25; ask++) {
+            const cover = await stationCover(type as CoverStationType, value);
+            expect(cover).not.toBeNull();
+            expect(unplayable).not.toContain(cover);
+            expect(playable).toContain(cover);
+        }
+    });
+});
+
 describe("Discover Weekly's song lookup", () => {
     const lookup = (c: object): Promise<string[]> =>
         (discoverWeeklyService as any).discoverAlbumTracks(c).then((songs: { id: string }[]) => songs.map((s) => s.id));
@@ -788,6 +799,57 @@ describe.each(Object.entries(STREAMS))("Subsonic %s", (_name, { ask, plays }) =>
 it("counts only playable songs for the radio row's genre and decade stations", async () => {
     expect((await libraryGenres()).find((g) => g.genre === GENRE)?.count).toBe(19);
     expect((await libraryDecades()).find((d) => d.decade === 1900)?.count).toBe(19);
+});
+
+// A genre and a decade need 15 songs to be a station. This artist has 19 songs in its own genre and decade (the seeded
+// ones are 1900s), but only 10 play: with the unplayable ones counted it would be a station, so it is left out of the row.
+describe("a genre and a decade whose playable songs fall short of the radio row's threshold", () => {
+    const THIN_GENRE = `${P}-thin-genre`;
+    const THIN_YEAR = 1801;
+    const unplayableSong = (kind: string, n: number) => ({
+        id: `${P}-thin-${kind}-${n}`, title: `${P} thin ${kind} ${n}`, filePath: `${P}/thin-${kind}-${n}.flac`,
+        ...(kind === "missing" && { missingSince: new Date() }), ...(kind === "corrupt" && { corrupt: true }),
+    });
+    const songs = (kind: string, count: number) => Array.from({ length: count }, (_, n) => unplayableSong(kind, n));
+
+    beforeAll(async () => {
+        await seedArtist({ id: `${P}-thin-ar`, name: `${P} thin`, genre: THIN_GENRE, year: THIN_YEAR }, [
+            { id: `${P}-thin-al`, songs: [...songs("ok", 10), ...songs("missing", 3), ...songs("corrupt", 3)] },
+            { id: `${P}-thin-discover-al`, location: "DISCOVER", songs: songs("discover", 3) },
+        ]);
+    });
+    afterAll(async () => {
+        await prisma.track.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });
+        await prisma.album.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });
+        await prisma.artist.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });
+        await prisma.genre.deleteMany({ where: { name: THIN_GENRE } });
+    });
+
+    it("holds 19 songs in all, 10 of them playable", async () => {
+        const where = { id: { startsWith: `${P}-thin` } };
+        expect(await prisma.track.count({ where })).toBe(19);
+        expect(await prisma.track.count({ where: { ...where, ...PLAYABLE_SONG } })).toBe(10);
+    });
+
+    it("is neither a genre nor a decade station", async () => {
+        expect((await libraryGenres()).map((g) => g.genre)).not.toContain(THIN_GENRE);
+        expect((await libraryDecades()).map((d) => d.decade)).not.toContain(1800);
+    });
+
+    it("is left out of the row itself", async () => {
+        const features = jest.spyOn(featureDetection, "getFeatures").mockResolvedValue({ vibeEmbeddings: true } as never);
+        try {
+            const stations = await radioRow(USER, "UTC", "all");
+            expect(stations.some((s) => s.type === "genre" && s.value === THIN_GENRE)).toBe(false);
+            expect(stations.some((s) => s.type === "decade" && s.value === "1800")).toBe(false);
+            // The seeded genre and decade, 19 playable songs each, are in it.
+            expect(stations.find((s) => s.type === "genre" && s.value === GENRE)?.count).toBe(19);
+            expect(stations.find((s) => s.type === "decade" && s.value === "1900")?.count).toBe(19);
+        } finally {
+            features.mockRestore();
+            await redisClient.del(`radiocover:tz:${USER}`);
+        }
+    });
 });
 
 // The stats page's figures are counted over the whole library; the seeded songs are most of it.
@@ -1322,5 +1384,40 @@ describe("Subsonic star and unstar", () => {
         expect(await liked()).toEqual([second, third, SONG.playable].sort());
         expect((await answer("unstar.view", { id: [second, third] })).status).toBe("ok");
         expect(await liked()).toEqual([SONG.playable]);
+    });
+});
+
+// The More Like mix starts from the artist of a listener's recent plays; a play of a song that cannot play is no start.
+it("starts the More Like mix from plays of playable songs only", async () => {
+    const listener = `${P}-more-like`;
+    await prisma.user.create({ data: { id: listener, username: listener, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    const artists = await prisma.artist.findMany({ where: { id: { startsWith: P } }, select: { name: true } });
+    const similar = jest.spyOn(artistSimilarity, "getSimilarArtists").mockResolvedValue(artists.map((a) => ({ name: a.name })) as never);
+    try {
+        await prisma.play.createMany({ data: UNPLAYABLE.map((trackId) => ({ userId: listener, trackId, playedAt: LISTENED, heard: true })) });
+        expect(await generateArtistSimilarMix(listener)).toBeNull();
+        await prisma.play.create({ data: { userId: listener, trackId: SONG.playable, playedAt: LISTENED, heard: true } });
+        const made = await mixSongs(generateArtistSimilarMix(listener));
+        expect(made).toContain(SONG.playable);
+        expect(made.filter((id) => UNPLAYABLE.includes(id))).toEqual([]);
+    } finally {
+        similar.mockRestore();
+    }
+});
+
+// A missing file is flagged, never deleted: the song is back in every interface when the file returns, with no other work.
+describe("a song whose missing file returns", () => {
+    afterAll(async () => {
+        await prisma.track.update({ where: { id: SONG.missing }, data: { missingSince: new Date() } });
+        await buildMatching();
+    });
+
+    it("is offered again by the rule, the lists and the matching", async () => {
+        const returning = ["the rule as a Prisma where piece", "the rule as a SQL fragment", "Subsonic search3 by title", "the web song list", "Subsonic getAlbum"];
+        for (const name of returning) expect(await PICKERS[name]()).not.toContain(SONG.missing);
+        await prisma.track.update({ where: { id: SONG.missing }, data: { missingSince: null } });
+        // Playable again, so owed feel: the similarity step's next run gives it some.
+        await buildMatching();
+        for (const name of [...returning, "similar songs"]) expect(await PICKERS[name]()).toContain(SONG.missing);
     });
 });

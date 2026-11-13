@@ -8,7 +8,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import { getEffectiveDecadeWhereClause } from "../../../utils/dateFilters";
-import { NOT_MISSING } from "../../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../../utils/playableSong";
 import { drawIds, getSeededRandom, sampledMix, seededOrder, seededTrackIds } from "../helpers";
 import { generateRandomDiscoveryMix, generateRediscoverMix } from "../discoveryMixes";
 import {
@@ -106,13 +106,10 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-/**
- * The ids of this file's library songs matching a Prisma filter.
- * Library songs only: Discover songs live only in Discover.
- */
+/** The ids of this file's playable songs matching a Prisma filter. */
 async function idsWhere(where: Prisma.TrackWhereInput): Promise<string[]> {
     const rows = await prisma.track.findMany({
-        where: { AND: [where, { id: { startsWith: PREFIX } }, { album: { location: "LIBRARY" } }] },
+        where: { AND: [where, { id: { startsWith: PREFIX } }, PLAYABLE_SONG] },
         select: { id: true },
     });
     return rows.map((r) => r.id);
@@ -142,7 +139,7 @@ async function capped(ordered: string[], limit = 20): Promise<string[]> {
 
 describe("the database draw and the in-memory draw", () => {
     it("pick the same songs in the same order, for any seed and size", async () => {
-        const every = await idsWhere(NOT_MISSING);
+        const every = await idsWhere({});
         expect(every.length).toBeGreaterThan(500);
         for (const seed of [1, 42, 123456789, getSeededRandom(`rediscover-${DAY}`)]) {
             for (const take of [1, 20, 200, TRACKS]) {
@@ -181,7 +178,7 @@ describe("each mix that draws in the database picks what its Prisma filter picks
 
     it("Rediscover: this listener's songs played two times or fewer, in the library", async () => {
         const counts = await prisma.track.findMany({
-            where: { ...NOT_MISSING, album: { location: "LIBRARY" }, id: { startsWith: PREFIX } },
+            where: { ...PLAYABLE_SONG, id: { startsWith: PREFIX } },
             select: { id: true, _count: { select: { plays: { where: { userId: USER } } } } },
         });
         const underplayed = counts.filter((t) => t._count.plays <= 2).map((t) => t.id);
@@ -194,7 +191,7 @@ describe("each mix that draws in the database picks what its Prisma filter picks
         // Deep Cuts is the listener's own: songs USER has not played.
         const unplayed = (
             await prisma.track.findMany({
-                where: { ...NOT_MISSING, id: { startsWith: PREFIX }, album: { location: "LIBRARY" }, plays: { none: { userId: USER } } },
+                where: { ...PLAYABLE_SONG, id: { startsWith: PREFIX }, plays: { none: { userId: USER } } },
                 select: { id: true },
                 orderBy: { id: "asc" },
             })
@@ -211,7 +208,7 @@ describe("each mix that draws in the database picks what its Prisma filter picks
         await prisma.play.createMany({ data: unplayed.map((id) => ({ id: `${PREFIX}x_${id}`, userId: USER, trackId: id })) });
         try {
             const counts = await prisma.track.findMany({
-                where: { ...NOT_MISSING, id: { startsWith: PREFIX }, album: { location: "LIBRARY" } },
+                where: { ...PLAYABLE_SONG, id: { startsWith: PREFIX } },
                 select: { id: true, _count: { select: { plays: { where: { userId: USER } } } } },
             });
             const lowPlay = counts.filter((t) => t._count.plays <= 3).map((t) => t.id);
@@ -223,7 +220,7 @@ describe("each mix that draws in the database picks what its Prisma filter picks
 
     it("Random Discovery: the songs of the day's first album by each of ten artists, at 2 per artist", async () => {
         const albums = await prisma.album.findMany({
-            where: { location: "LIBRARY", tracks: { some: NOT_MISSING }, id: { startsWith: PREFIX } },
+            where: { location: "LIBRARY", tracks: { some: PLAYABLE_SONG }, id: { startsWith: PREFIX } },
             select: { id: true, artistId: true },
         });
         const seen = new Set<string>();
@@ -232,14 +229,14 @@ describe("each mix that draws in the database picks what its Prisma filter picks
             .slice(0, 10)
             .map((a) => a.id);
         expect(picked).toHaveLength(10);
-        const songs = await idsWhere({ ...NOT_MISSING, albumId: { in: picked } });
+        const songs = await idsWhere({ albumId: { in: picked } });
         const mix = await generateRandomDiscoveryMix(USER, DAY);
         expect(mix?.trackIds).toEqual(await capped(seededOrder(songs, seedOf(`random-discovery-${DAY}`), (id) => id)));
         expect(mix?.trackIds).toHaveLength(20);
     });
 
     it("Vocal Detox: the analysed instrumental songs", async () => {
-        const matching = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", instrumentalness: { gte: 0.75 } });
+        const matching = await idsWhere({ analysisStatus: "completed", instrumentalness: { gte: 0.75 } });
         expect((await generateVocalDetox(USER, DAY))?.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`vocal-detox-${DAY}`))));
     });
 
@@ -247,9 +244,8 @@ describe("each mix that draws in the database picks what its Prisma filter picks
         const [{ median }] = await prisma.$queryRaw<Array<{ median: number }>>`
             SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY arousal) AS median
             FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-            WHERE t."missingSince" IS NULL AND t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL
-              AND a.location = 'LIBRARY'`;
-        const matching = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", keyScale: "minor", arousal: { gte: median } });
+            WHERE ${playableSongSql("t", "a")} AND t."analysisStatus" = 'completed' AND t.arousal IS NOT NULL`;
+        const matching = await idsWhere({ analysisStatus: "completed", keyScale: "minor", arousal: { gte: median } });
         expect((await generateMinorKeyMix(USER, DAY))?.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`minor-key-${DAY}`))));
     });
 
@@ -260,13 +256,13 @@ describe("each mix that draws in the database picks what its Prisma filter picks
             const mix = await generateEraMix(USER, d <= 30 ? day : `2026-12-${String(d - 30).padStart(2, "0")}`);
             const decade = Number(/^era-(\d+)-/.exec(mix!.id)![1]);
             decades.add(decade);
-            const matching = await idsWhere({ ...NOT_MISSING, album: getEffectiveDecadeWhereClause(decade) });
+            const matching = await idsWhere({ album: getEffectiveDecadeWhereClause(decade) });
             expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(mix!.id))));
         }
         // A decade is offered when it has 15 songs and its artists can fill 8 songs at 2 each; worked out here from every
         // library song. Every decade picked is one of those, and the 40 days reach several.
         const tracks = await prisma.track.findMany({
-            where: { ...NOT_MISSING, album: { location: "LIBRARY" } },
+            where: PLAYABLE_SONG,
             select: { album: { select: { artistId: true, displayYear: true, originalYear: true, year: true } } },
         });
         const perDecade = new Map<number, Map<string, number>>();
@@ -291,18 +287,18 @@ describe("each mix that draws in the database picks what its Prisma filter picks
     it("Genre: the songs of the day's genre", async () => {
         const mix = await generateGenreMix(USER, DAY);
         const genre = /^genre-(.+)-\d{4}-\d{2}-\d{2}$/.exec(mix!.id)![1];
-        const matching = await idsWhere({ ...NOT_MISSING, trackGenres: { some: { genreId: genre } } });
+        const matching = await idsWhere({ trackGenres: { some: { genreId: genre } } });
         expect(mix!.trackIds).toEqual(await capped(drawIds(matching, matching.length, seedOf(`genre-${genre}-${DAY}`))));
     });
 
     it("Key Journey and Tempo Flow: every song from the day's draw of their Prisma filters", async () => {
-        const keyed = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", key: { not: null } });
+        const keyed = await idsWhere({ analysisStatus: "completed", key: { not: null } });
         const keyDraw = new Set(drawIds(keyed, 200, seedOf(`key-journey-${DAY}`)));
         const journey = await generateKeyJourney(USER, DAY);
         expect(journey?.trackIds.length).toBeGreaterThanOrEqual(15);
         expect(journey!.trackIds.filter((id) => !keyDraw.has(id))).toEqual([]);
 
-        const steady = await idsWhere({ ...NOT_MISSING, analysisStatus: "completed", bpm: { not: null }, bpmConfidence: { gte: STEADY_BEAT } });
+        const steady = await idsWhere({ analysisStatus: "completed", bpm: { not: null }, bpmConfidence: { gte: STEADY_BEAT } });
         const tempoDraw = new Set(drawIds(steady, 200, seedOf(`tempo-flow-${DAY}`)));
         const flow = await generateTempoFlow(USER, DAY);
         expect(flow?.trackIds.length).toBeGreaterThanOrEqual(15);

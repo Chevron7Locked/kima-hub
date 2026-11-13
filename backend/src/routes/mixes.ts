@@ -13,7 +13,7 @@ import { redisClient } from "../utils/redis";
 import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 import { rankForPosition } from "../utils/lexoRank";
 import { announcePlaylistChange } from "../services/playlistEvents";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 
 const router = Router();
 

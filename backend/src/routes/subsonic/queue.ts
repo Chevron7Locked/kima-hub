@@ -2,7 +2,7 @@ import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { one, many } from "../../utils/subsonicParams";
 
 export const queueRouter = Router();

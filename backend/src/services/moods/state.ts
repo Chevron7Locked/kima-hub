@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { Prisma, type MoodState as MoodStateRow } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { formatEmbedding } from "../../utils/embedding";
 import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
 import { MOODS, MOOD_HEADS, type Mood } from "./heads";

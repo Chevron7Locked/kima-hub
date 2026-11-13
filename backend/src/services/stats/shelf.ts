@@ -7,7 +7,7 @@
  */
 
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { playRowsSql } from "./listens";
 
 const PLAYABLE_SQL = playableSongSql("t", "al");

@@ -39,7 +39,7 @@ import {
 } from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { popularSongs } from "../../services/popularSongs";
 
 /**

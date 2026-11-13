@@ -4,7 +4,7 @@
  * a tag, a statistic and a mix disagree about which songs exist.
  */
 import { Prisma } from "@prisma/client";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { MOOD_HEADS } from "./heads";
 
 /**

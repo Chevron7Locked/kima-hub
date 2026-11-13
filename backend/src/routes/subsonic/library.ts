@@ -4,7 +4,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { playRowsSql } from "../../services/stats/listens";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";

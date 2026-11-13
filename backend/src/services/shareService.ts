@@ -2,7 +2,7 @@
 
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
 type ShareEntityType = "playlist" | "track" | "album";

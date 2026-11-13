@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
 import { searchRows } from "./textMatch";

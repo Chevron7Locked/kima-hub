@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { parseEmbedding } from "../../utils/embedding";
 import { feelVector, unit, type MatchTrack } from "./formula";
 import type { LaidOutMap, PlacedTracks } from "./mapCompute";

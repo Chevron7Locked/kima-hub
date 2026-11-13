@@ -15,7 +15,7 @@ import { foldedPattern, hasNonAscii } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
 import { one, many } from "../../utils/subsonicParams";
 

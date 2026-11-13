@@ -7,7 +7,7 @@
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { playableSongSql } from "../utils/libraryEligibility";
+import { playableSongSql } from "../utils/playableSong";
 import { albumCoverUrls, getMixColor, tracksByIds } from "./mixes/helpers";
 import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
 import { MOOD_HEADS, type Mood } from "./moods/heads";

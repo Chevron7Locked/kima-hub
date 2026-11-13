@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { formatEmbedding, parseEmbedding } from "../../utils/embedding";
 import {
     FEEL_WEIGHT,

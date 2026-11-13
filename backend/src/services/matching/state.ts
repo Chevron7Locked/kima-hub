@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { formatEmbedding } from "../../utils/embedding";
 import { getMergedGenres } from "../../utils/metadataOverrides";
 import feelProbe from "./feelProbe.json";

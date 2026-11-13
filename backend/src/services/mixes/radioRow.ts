@@ -8,7 +8,7 @@ import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { computeGenreTotals } from "../../utils/genreSql";
 import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { featureDetection } from "../featureDetection";
 import { moodStationList } from "./stations";
 import { nightZone } from "./nightPlays";

@@ -10,7 +10,7 @@ import { promisify } from "util";
 import zlib from "zlib";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { playableSongSql } from "../utils/libraryEligibility";
+import { playableSongSql } from "../utils/playableSong";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getLiveState, publicUserId } from "./liveListening";

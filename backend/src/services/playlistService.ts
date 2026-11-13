@@ -7,7 +7,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { rankAfter, rankBetween, rankSequence } from "../utils/lexoRank";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 
 /** Cap on a single bulk operation, so one request cannot pin a connection. */
 const MAX_BULK_TRACKS = 1000;

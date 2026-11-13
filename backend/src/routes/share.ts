@@ -3,7 +3,7 @@ import { createShareLink, ShareError } from "../services/shareService";
 import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover } from "../services/publicShare";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { requireAuth } from "../middleware/auth";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";

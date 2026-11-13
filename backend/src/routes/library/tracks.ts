@@ -20,7 +20,7 @@ import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE } from "../../services/libraryFilters";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";

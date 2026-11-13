@@ -6,7 +6,7 @@
  */
 import crypto from "crypto";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, topScores } from "../matching/rank";

@@ -5,7 +5,7 @@ import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, wrap } from "./mappers";
 import { announcePlaylistChange } from "../../services/playlistEvents";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { one, many } from "../../utils/subsonicParams";
 
 export const playlistRouter = Router();

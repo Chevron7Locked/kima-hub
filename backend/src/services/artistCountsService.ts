@@ -8,7 +8,7 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;

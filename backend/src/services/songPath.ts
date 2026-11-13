@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 import { UserFacingError } from "../utils/errors";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { SELF_SCORE, pairScore, slerpWeights } from "./matching/formula";
 import { libraryTracks, matchingContext, scoreLibrary, type LibraryTrack } from "./matching/rank";
 

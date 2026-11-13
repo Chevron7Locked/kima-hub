@@ -4,7 +4,7 @@ import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicRe
 import { DIRECT_PARAMS, knownSuffix, mapSong, songFormat, transcodeParamsFor, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { resolveWithinMusicRoot } from "../library/trackPath";
-import { PLAYABLE_SONG } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import {
     createShareLink,
     deleteShareLink,

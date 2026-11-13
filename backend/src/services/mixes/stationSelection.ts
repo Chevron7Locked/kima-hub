@@ -21,7 +21,7 @@ import { pickNightStationPage } from "../mixes/nightPlays";
 import { SEED_PATTERN, emptyPage } from "../mixes/stationOrder";
 import { resolveMoodStation } from "../mixes/stations";
 import { listenRows } from "../stats/listens";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 
 /** A recipe station's refill; no songs when the library cannot rank its songs for the recipe. */
 async function recipeStationPage(recipe: string, request: StationRequest): Promise<StationPage> {

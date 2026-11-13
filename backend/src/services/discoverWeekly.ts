@@ -38,7 +38,7 @@ import { shuffleArray } from "../utils/shuffle";
 import { config as appConfig } from "../config";
 import { eventBus } from "./eventBus";
 import * as downloadJobs from "./downloads/jobs";
-import { PLAYABLE_DISCOVER_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_DISCOVER_SONG } from "../utils/playableSong";
 
 interface RecommendedAlbum {
     artistName: string;

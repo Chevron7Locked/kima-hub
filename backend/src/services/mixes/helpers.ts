@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { neverPlayedSql } from "../stats/listens";
 import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 

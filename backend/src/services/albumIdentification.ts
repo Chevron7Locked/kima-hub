@@ -20,7 +20,6 @@ import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
 import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
 import * as stageRecords from "./stages/stageRecords";
-import { NOT_MISSING } from "../utils/libraryEligibility";
 
 /** One song of the album: AcoustID's pick for it, or null when AcoustID has none. */
 export interface AlbumSongAnswer {
@@ -246,7 +245,7 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
     if (memo && memoSignature(memo) === signature) return "already-decided";
 
     const tracks = await prisma.track.findMany({
-        where: { albumId: album.id, ...NOT_MISSING },
+        where: { albumId: album.id, missingSince: null },
         select: { id: true, title: true, filePath: true, duration: true, acoustidFingerprint: true, fileModified: true },
         orderBy: { id: "asc" },
     });

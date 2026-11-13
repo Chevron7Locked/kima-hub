@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";

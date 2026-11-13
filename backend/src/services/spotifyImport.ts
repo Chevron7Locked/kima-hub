@@ -20,7 +20,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { mayAcquire } from "../utils/acquirePermission";
 import { isLidarrConfigured } from "./lidarrClient";
 import { prisma, Prisma } from "../utils/db";
-import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 import { redisClient } from "../utils/redis";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";

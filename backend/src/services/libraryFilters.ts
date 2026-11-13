@@ -5,7 +5,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG, playableSongSql } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 
 /** `Album.location` for owned albums. */
 export const LIBRARY_LOCATION = "LIBRARY";

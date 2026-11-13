@@ -5,7 +5,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { playableSongSql } from "../../utils/libraryEligibility";
+import { playableSongSql } from "../../utils/playableSong";
 import { listenRows, neverPlayedSql, type Period } from "./listens";
 
 /** The shape the player wants. Matches what the library routes hand back. */

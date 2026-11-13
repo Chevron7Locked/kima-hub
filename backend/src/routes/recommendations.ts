@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { recentPlayArtists } from "../services/stats/listens";
 import type { Artist } from "@prisma/client";
 

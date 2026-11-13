@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { playableSongSql } from "../utils/libraryEligibility";
+import { playableSongSql } from "../utils/playableSong";
 import { redisClient } from "../utils/redis";
 import { withTimeout } from "../utils/timeout";
 import { logger } from "../utils/logger";

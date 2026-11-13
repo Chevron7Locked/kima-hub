@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { playableSongSql } from "../utils/libraryEligibility";
+import { playableSongSql } from "../utils/playableSong";
 import { featureDetection } from "./featureDetection";
 import { MATCHING_MODEL } from "./matching/state";
 import { MOODS, currentMoodSnapshot, moodOutput } from "./moodBucketService";

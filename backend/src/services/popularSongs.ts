@@ -21,7 +21,7 @@
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
-import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { isMbid } from "./artistIdentity";
 import { nameKey } from "./nameFold";
 import { listenBrainzService } from "./listenBrainz";
