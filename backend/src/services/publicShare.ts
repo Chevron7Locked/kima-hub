@@ -1,7 +1,12 @@
 // What a stranger holding a share link can see. Every field is named here; a field added to the schema later
 // stays private until it is added to a list below.
 
+// A stranger sees only playable songs: one that is missing, corrupt or on a Discover album is not there for them
+// either, so a share of it answers as if its content were gone.
+
 import { prisma } from "../utils/db";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
 const albumTrackFields = {
     id: true,
@@ -27,7 +32,7 @@ const trackFields = {
 
 type TrackRow = NonNullable<Awaited<ReturnType<typeof findTrack>>>;
 
-const findTrack = (id: string) => prisma.track.findUnique({ where: { id }, select: trackFields });
+const findTrack = (id: string) => prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG }, select: trackFields });
 
 function publicTrack(track: TrackRow) {
     return {
@@ -51,8 +56,8 @@ export async function loadPublicTrack(id: string) {
 }
 
 export async function loadPublicAlbum(id: string) {
-    const album = await prisma.album.findUnique({
-        where: { id },
+    const album = await prisma.album.findFirst({
+        where: { id, ...PLAYABLE_ALBUM_WHERE },
         select: {
             id: true,
             title: true,
@@ -60,6 +65,7 @@ export async function loadPublicAlbum(id: string) {
             coverUrl: true,
             artist: { select: { name: true, displayName: true } },
             tracks: {
+                where: PLAYABLE_SONG,
                 orderBy: [{ discNumber: { sort: "asc", nulls: "first" } }, { trackNo: "asc" }],
                 select: albumTrackFields,
             },
@@ -88,7 +94,11 @@ export async function loadPublicPlaylist(id: string) {
         select: {
             id: true,
             name: true,
-            items: { select: { id: true, sort: true, track: { select: trackFields } }, orderBy: { rank: "asc" } },
+            items: {
+                where: { track: PLAYABLE_SONG },
+                select: { id: true, sort: true, track: { select: trackFields } },
+                orderBy: { rank: "asc" },
+            },
         },
     });
     if (!playlist) return null;

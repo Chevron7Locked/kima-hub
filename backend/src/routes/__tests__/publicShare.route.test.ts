@@ -183,3 +183,81 @@ it("unknown, expired, spent and emptied links answer as before", async () => {
     const gone = await resolve(await link("track", `${TAG}-no-such-track`));
     expect([gone.status, gone.body]).toEqual([404, { error: "Shared content no longer exists" }]);
 });
+
+// A link made before a song stopped playing, or after a like moved nothing, shows only what plays. The song's file is
+// there in every case, so only the playable-song rule can be the reason for a refusal.
+describe("a share of songs that do not play", () => {
+    const track = (albumId: string, n: number, data: object = {}) =>
+        prisma.track.create({
+            data: { albumId, title: `Song ${n}`, duration: 100, trackNo: n, filePath: `/${TAG}/${albumId}-${n}.flac`, fileModified: new Date(), fileSize: 1, ...data },
+        }).then((t) => t.id);
+    const albumOf = (suffix: string, location: "LIBRARY" | "DISCOVER" = "LIBRARY") =>
+        prisma.album.create({ data: { rgMbid: `${TAG}-${suffix}`, identityKey: `${TAG}-${suffix}`, artistId, title: suffix, primaryType: "Album", location } }).then((a) => a.id);
+
+    let mixedAlbum: string;
+    let deadAlbum: string;
+    let discoverAlbum: string;
+    let playable: string;
+    let missing: string;
+    let corrupt: string;
+    let suggested: string;
+    let deadSong: string;
+
+    beforeAll(async () => {
+        mixedAlbum = await albumOf("mixed");
+        playable = await track(mixedAlbum, 1);
+        missing = await track(mixedAlbum, 2, { missingSince: new Date() });
+        corrupt = await track(mixedAlbum, 3, { corrupt: true });
+        deadAlbum = await albumOf("dead");
+        deadSong = await track(deadAlbum, 1, { corrupt: true });
+        discoverAlbum = await albumOf("discover", "DISCOVER");
+        suggested = await track(discoverAlbum, 1);
+    });
+
+    const asRefused = { status: 404, body: { error: "Shared content no longer exists" } };
+    const refusal = async (type: string, id: string) => {
+        const res = await resolve(await link(type, id));
+        return { status: res.status, body: res.body };
+    };
+
+    it.each(["missing", "corrupt", "suggested"])("a track share of the %s song answers as for a deleted one", async (kind) => {
+        const id = { missing, corrupt, suggested }[kind as "missing"];
+        expect(await refusal("track", id)).toEqual(asRefused);
+    });
+
+    it("a track share of the playable song still shows it", async () => {
+        const res = await resolve(await link("track", playable));
+        expect(res.status).toBe(200);
+        expect(res.body.entity.id).toBe(playable);
+    });
+
+    it("an album share lists only its playable songs", async () => {
+        const res = await resolve(await link("album", mixedAlbum));
+        expect(res.status).toBe(200);
+        expect(res.body.entity.tracks.map((t: { id: string }) => t.id)).toEqual([playable]);
+    });
+
+    it.each(["dead", "discover"])("an album share of an album with nothing to play (%s) answers as for a deleted one", async (kind) => {
+        expect(await refusal("album", kind === "dead" ? deadAlbum : discoverAlbum)).toEqual(asRefused);
+    });
+
+    it("a playlist share lists only its playable songs, in the app's order", async () => {
+        const list = (await prisma.playlist.create({ data: { userId, name: "Mixed", isPublic: false } })).id;
+        for (const [i, trackId] of [suggested, playable, missing, corrupt, firstTrack].entries()) {
+            await prisma.playlistItem.create({ data: { playlistId: list, trackId, sort: i, rank: `m${i}` } });
+        }
+        const res = await resolve(await link("playlist", list));
+        expect(res.status).toBe(200);
+        expect(res.body.entity.items.map((i: { track: { id: string } }) => i.track.id)).toEqual([playable, firstTrack]);
+    });
+
+    it("a playlist share with nothing to play shows an empty list", async () => {
+        const list = (await prisma.playlist.create({ data: { userId, name: "Nothing plays", isPublic: false } })).id;
+        for (const [i, trackId] of [suggested, missing, corrupt, deadSong].entries()) {
+            await prisma.playlistItem.create({ data: { playlistId: list, trackId, sort: i, rank: `n${i}` } });
+        }
+        const res = await resolve(await link("playlist", list));
+        expect(res.status).toBe(200);
+        expect(res.body.entity).toEqual({ id: list, name: "Nothing plays", items: [] });
+    });
+});

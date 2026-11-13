@@ -12,6 +12,7 @@ import path from 'path';
 import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
 import { coversBasePath } from '../../services/imageStorage';
+import { config } from '../../config';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const TAG = 'zz-share-route';
@@ -211,5 +212,78 @@ describe('GET /share/:token/cover-art/:coverArtId', () => {
         const res = await request(app).get(coverUrl(`native:../${path.basename(outside)}`));
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'Cover art not found' });
+    });
+});
+
+describe('GET /share/:token/stream/:trackId -- only a playable song streams', () => {
+    // Every file is on disk, so only the playable-song rule can be the reason for a refusal.
+    const DIR = `${TAG}-stream`;
+    const BYTES = Buffer.from('fLaC-share-stream-bytes');
+    const stream = (token: string, id: string) =>
+        request(app).get(`/share/${token}/stream/${id}`).buffer(true).parse((r, cb) => {
+            r.on('data', () => undefined);
+            r.on('end', () => cb(null, undefined));
+        });
+
+    let albumId: string;
+    let discoverId: string;
+    const songs = {} as Record<'playable' | 'missing' | 'corrupt' | 'suggested', string>;
+    let playlistId: string;
+
+    beforeAll(async () => {
+        const artist = await prisma.artist.findFirstOrThrow({ where: { identityKey: TAG } });
+        albumId = (await prisma.album.create({ data: { rgMbid: `${TAG}-s`, identityKey: `${TAG}-s`, artistId: artist.id, title: 'Streams', primaryType: 'Album', location: 'LIBRARY' } })).id;
+        discoverId = (await prisma.album.create({ data: { rgMbid: `${TAG}-sd`, identityKey: `${TAG}-sd`, artistId: artist.id, title: 'Streams suggested', primaryType: 'Album', location: 'DISCOVER' } })).id;
+        const song = async (kind: keyof typeof songs, album: string, n: number, data: object = {}) => {
+            const filePath = `${DIR}/${kind}.flac`;
+            const full = path.join(config.music.musicPath, filePath);
+            fs.mkdirSync(path.dirname(full), { recursive: true });
+            fs.writeFileSync(full, BYTES);
+            songs[kind] = (await prisma.track.create({ data: { albumId: album, title: kind, duration: 100, trackNo: n, filePath, fileModified: new Date(), fileSize: BYTES.length, ...data } })).id;
+        };
+        await song('playable', albumId, 1);
+        await song('missing', albumId, 2, { missingSince: new Date() });
+        await song('corrupt', albumId, 3, { corrupt: true });
+        await song('suggested', discoverId, 1);
+        playlistId = (await prisma.playlist.create({ data: { userId: OWNER, name: TAG } })).id;
+        for (const [i, id] of Object.values(songs).entries()) {
+            await prisma.playlistItem.create({ data: { playlistId, trackId: id, sort: i, rank: `s${i}` } });
+        }
+    });
+
+    afterAll(async () => {
+        await prisma.playlist.deleteMany({ where: { id: playlistId } });
+        fs.rmSync(path.join(config.music.musicPath, DIR), { recursive: true, force: true });
+    });
+
+    const covering = (entityType: string, entityId: string) =>
+        prisma.shareLink.create({ data: { token: `${TAG}-${entityType}-${entityId}`, entityType, entityId, createdBy: OWNER } }).then((l) => l.token);
+
+    it('streams the playable song through a link to the song, to its album and to a playlist holding it', async () => {
+        for (const [type, id] of [['track', songs.playable], ['album', albumId], ['playlist', playlistId]]) {
+            const res = await stream(await covering(type, id), songs.playable);
+            expect([type, res.status]).toEqual([type, 200]);
+        }
+    });
+
+    it.each(['missing', 'corrupt', 'suggested'] as const)('answers 404 for the %s song, whatever the link covers', async (kind) => {
+        const id = songs[kind];
+        const links = [await covering('track', id), await covering('playlist', playlistId)];
+        if (kind !== 'suggested') links.push(await covering('album', albumId));
+        for (const token of links) {
+            const res = await stream(token, id);
+            expect([token, res.status]).toEqual([token, 404]);
+        }
+    });
+
+    it('still answers 403 for a song the link does not cover', async () => {
+        const res = await stream(await covering('track', songs.playable), songs.corrupt);
+        expect(res.status).toBe(403);
+    });
+
+    it('counts a visit only for a song that streams', async () => {
+        const token = await covering('track', songs.corrupt);
+        await stream(token, songs.corrupt);
+        expect((await prisma.shareLink.findUniqueOrThrow({ where: { token } })).playCount).toBe(0);
     });
 });

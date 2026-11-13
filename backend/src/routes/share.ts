@@ -3,6 +3,7 @@ import { createShareLink, ShareError } from "../services/shareService";
 import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack } from "../services/publicShare";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 import { requireAuth } from "../middleware/auth";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
@@ -200,8 +201,9 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             return res.status(403).json({ error: "Track not in shared content" });
         }
 
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
+        // Whatever the link covers, only a playable song streams: a missing, corrupt or Discover song is not found.
+        const track = await prisma.track.findFirst({
+            where: { id: trackId, ...PLAYABLE_SONG },
             select: { filePath: true },
         });
 
