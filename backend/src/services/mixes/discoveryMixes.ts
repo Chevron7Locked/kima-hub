@@ -5,6 +5,7 @@ import { normalizeArtistName } from "../artistIdentity";
 import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
 import { IN_LIBRARY, PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { mostPlayedTrackIds, playedMoreThanSql, recentPlayArtists } from "../stats/listens";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -22,19 +23,13 @@ import {
 export async function generateTopTracksMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    const playStats = await prisma.play.groupBy({
-        by: ["trackId"],
-        where: { userId, track: PLAYABLE_SONG },
-        _count: { trackId: true },
-        orderBy: { _count: { trackId: "desc" } },
-        take: TRACK_LIMIT,
-    });
+    // Counted over plays of playable songs only; tracksByIds keeps their most-played order.
+    const mostPlayed = await mostPlayedTrackIds(userId, { song: PLAYABLE_SONG, take: TRACK_LIMIT });
 
-    if (playStats.length < 5) return null;
+    if (mostPlayed.length < 5) return null;
 
-    // The plays already count only present library songs; tracksByIds keeps their most-played order.
     const orderedTracks = await tracksByIds(
-        playStats.map((p) => p.trackId),
+        mostPlayed,
         { album: { select: { coverUrl: true } } },
     );
 
@@ -59,8 +54,7 @@ export async function generateRediscoverMix(
     // The library's songs this listener has played two times or fewer: every song but the few played more, looked up
     // in one hashed list (counting each song's plays instead took 2.2 s at 500,000 songs).
     const underplayedIds = await seededTrackIds(
-        Prisma.sql`t.id NOT IN (SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId}
-                         GROUP BY p."trackId" HAVING count(*) > 2)`,
+        Prisma.sql`t.id NOT IN (${playedMoreThanSql(userId, 2)})`,
         200,
         getSeededRandom(`rediscover-${today}`)
     );
@@ -86,33 +80,17 @@ export async function generateRediscoverMix(
 export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    const recentPlays = await prisma.play.findMany({
-        where: {
-            userId,
-            playedAt: {
-                gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-            },
-            track: IN_LIBRARY,
-        },
-        include: {
-            track: {
-                include: {
-                    album: { select: { artistId: true } },
-                },
-            },
-        },
+    const recentPlays = await recentPlayArtists(userId, {
+        song: IN_LIBRARY,
+        since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 
     if (recentPlays.length === 0) return null;
 
     const artistPlayCounts = new Map<string, number>();
-    recentPlays.forEach((play) => {
-        const artistId = play.track.album.artistId;
-        artistPlayCounts.set(
-            artistId,
-            (artistPlayCounts.get(artistId) || 0) + 1
-        );
-    });
+    for (const artist of recentPlays) {
+        artistPlayCounts.set(artist.id, (artistPlayCounts.get(artist.id) || 0) + 1);
+    }
 
     const topArtistId = Array.from(artistPlayCounts.entries()).sort(
         (a, b) => b[1] - a[1]

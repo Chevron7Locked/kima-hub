@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
+import { neverPlayedSql } from "../stats/listens";
 import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 
 export interface ProgrammaticMix {
@@ -361,7 +362,7 @@ export async function unplayedTrackIds(args: { userId: string }): Promise<string
         SELECT t.id
         FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${args.userId})
+        WHERE ${neverPlayedSql(args.userId)}
           AND ${PLAYABLE_SONG_SQL}
         ORDER BY t.id
     `;

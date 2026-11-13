@@ -4,6 +4,8 @@ import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG } from "../utils/libraryEligibility";
+import { recentPlayArtists } from "../services/stats/listens";
+import type { Artist } from "@prisma/client";
 
 const router = Router();
 
@@ -19,30 +21,14 @@ router.get("/for-you", async (req, res) => {
         // Get user's most played artists
         // Plays of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
         // missing or corrupt one nothing until it is back.
-        const recentPlays = await prisma.play.findMany({
-            where: { userId, track: PLAYABLE_SONG },
-            orderBy: { playedAt: "desc" },
-            take: 50,
-            include: {
-                track: {
-                    include: {
-                        album: {
-                            include: {
-                                artist: true,
-                            },
-                        },
-                    },
-                },
-            },
-        });
+        const recentPlays = await recentPlayArtists(userId, { song: PLAYABLE_SONG, take: 50 });
 
         // Count plays per artist
         const artistPlayCounts = new Map<
             string,
-            { artist: any; count: number }
+            { artist: Artist; count: number }
         >();
-        for (const play of recentPlays) {
-            const artist = play.track.album.artist;
+        for (const artist of recentPlays) {
             const existing = artistPlayCounts.get(artist.id);
             if (existing) {
                 existing.count++;

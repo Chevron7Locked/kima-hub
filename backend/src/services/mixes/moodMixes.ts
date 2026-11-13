@@ -15,7 +15,7 @@ import { recipeMixGenerator } from "./recipeMix";
 import { weekdayOf } from "./mixDay";
 import { STEADY_BEAT } from "./recipes";
 import { spellingsOf } from "../stats/playable";
-import { listenRows } from "../stats/listens";
+import { listenedMoreThanSql, neverPlayedSql } from "../stats/listens";
 
 const WEEKLY_TRACK_LIMIT = 20;
 
@@ -176,13 +176,11 @@ export async function generateDeepCuts(
     return (
         (await sampledMix({
             ...spec,
-            where: Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${userId})`,
+            where: neverPlayedSql(userId),
         })) ??
         sampledMix({
             ...spec,
-            where: Prisma.sql`t.id NOT IN (
-                ${listenRows(userId)}
-                SELECT p."trackId" FROM p GROUP BY p."trackId" HAVING count(*) > 3)`,
+            where: Prisma.sql`t.id NOT IN (${listenedMoreThanSql(userId, 3)})`,
         })
     );
 }

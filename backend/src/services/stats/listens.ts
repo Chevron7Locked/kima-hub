@@ -1,11 +1,29 @@
 /**
- * One row per actual listen. A Play row joins the listen in progress while the
- * song could still be playing, measured from where that listen began. Rows
- * further apart than the track's length always split, so the recursive walk
- * only runs inside short bursts. Leaves relation `p`.
+ * The listens module: every question about what a person has played.
+ *
+ * A Play row is one recorded play. A listen is what those rows fold into: a row
+ * joins the listen in progress while the song could still be playing, measured
+ * from where that listen began. Rows further apart than the track's length
+ * always split, so the recursive walk only runs inside short bursts.
+ *
+ * Two meanings are kept apart, each as its first readers had it:
+ * - played: raw Play rows, repeats and skips included (`neverPlayedSql`,
+ *   `playedMoreThanSql`, `mostPlayedTrackIds`, `recentPlayArtists`);
+ * - listened: the folded listens (`listenRows`, `listenedMoreThanSql`).
+ * Every question is scoped to one listener. Which songs count is the caller's
+ * rule (the playable-song rule, usually), passed in or composed in its own SQL.
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type Artist } from "@prisma/client";
+import { prisma } from "../../utils/db";
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** A table alias written in code, checked before it goes into SQL text. */
+function alias(name: string, fn: string): Prisma.Sql {
+    if (!IDENTIFIER.test(name)) throw new Error(`${fn}: "${name}" is not a table alias`);
+    return Prisma.raw(`"${name}"`);
+}
 
 /**
  * The window clause, or nothing at all for "all". The interval text comes from a
@@ -100,4 +118,60 @@ export function listenRows(
                        AND r.seq = w.seq + 1
         ),
         p AS (SELECT * FROM walk WHERE starts_listen ${window(period)})`;
+}
+
+/**
+ * Ever played: true of a song this listener has no Play row for. A fragment for the song's `WHERE`, the song being the
+ * query's `Track` under `song`. As an anti-join, because `plays: { none: {} }` becomes a per-song rescan once Play is
+ * too large to hash.
+ */
+export function neverPlayedSql(userId: string, song = "t"): Prisma.Sql {
+    const t = alias(song, "neverPlayedSql");
+    return Prisma.sql`NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = ${t}.id AND p."userId" = ${userId})`;
+}
+
+/**
+ * The ids of songs this listener has played more than `count` times, counting every Play row. A subquery to put after
+ * `IN` or `NOT IN`; the `NOT IN` form reads the few over-played songs into one hashed list, where counting every song's
+ * plays took 2.2 s at 500,000 songs.
+ */
+export function playedMoreThanSql(userId: string, count: number): Prisma.Sql {
+    return Prisma.sql`SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId} GROUP BY p."trackId" HAVING count(*) > ${count}`;
+}
+
+/** The ids of songs this listener has listened to more than `count` times, counting listens, not rows. A subquery, as `playedMoreThanSql`. */
+export function listenedMoreThanSql(userId: string, count: number): Prisma.Sql {
+    return Prisma.sql`${listenRows(userId)} SELECT p."trackId" FROM p GROUP BY p."trackId" HAVING count(*) > ${count}`;
+}
+
+/** The ids of this listener's most played songs among those `song` lets through, most played first, counting every Play row. */
+export async function mostPlayedTrackIds(
+    userId: string,
+    args: { song: Prisma.TrackWhereInput; take: number },
+): Promise<string[]> {
+    const counted = await prisma.play.groupBy({
+        by: ["trackId"],
+        where: { userId, track: args.song },
+        _count: { trackId: true },
+        orderBy: { _count: { trackId: "desc" } },
+        take: args.take,
+    });
+    return counted.map((c) => c.trackId);
+}
+
+/**
+ * The artist of each of this listener's plays of songs `song` lets through, newest play first: one entry per Play row, so
+ * an artist played often appears often. `since` drops plays before it; `take` stops after that many plays.
+ */
+export async function recentPlayArtists(
+    userId: string,
+    args: { song: Prisma.TrackWhereInput; since?: Date; take?: number },
+): Promise<Artist[]> {
+    const plays = await prisma.play.findMany({
+        where: { userId, track: args.song, ...(args.since && { playedAt: { gte: args.since } }) },
+        orderBy: { playedAt: "desc" },
+        take: args.take,
+        select: { track: { select: { album: { select: { artist: true } } } } },
+    });
+    return plays.map((p) => p.track.album.artist);
 }
