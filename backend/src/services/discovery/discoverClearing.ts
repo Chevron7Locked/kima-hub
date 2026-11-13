@@ -15,7 +15,7 @@ import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
-import { RUNNING_BATCH, hasRealArtistId, lookupKey, sameArtist, sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, couldBeArtist, lookupKey, sameArtist, sameName } from "./discoverEvidence";
 
 /** A suggestion row's names, for comparing with a record's. */
 interface NamedRow {
@@ -187,18 +187,15 @@ export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): P
     if (idJob?.lidarrAlbumId) return idJob.lidarrAlbumId;
 
     // By name, only among records that could be this artist's: its id, or no real id.
-    const couldBeArtist = hasRealArtistId(ref.artistMbid)
-        ? { OR: [{ artistMbid: ref.artistMbid }, { artistMbid: null }, { artistMbid: { startsWith: "temp-" } }] }
-        : {};
     const recorded = await prisma.discoveryAlbum.findMany({
-        where: { lidarrAlbumId: { not: null }, ...couldBeArtist },
+        where: { lidarrAlbumId: { not: null }, ...couldBeArtist(ref.artistMbid) },
         orderBy: { weekStartDate: "desc" },
         select: { artistMbid: true, artistName: true, albumTitle: true, lidarrAlbumId: true },
     });
     const suggestion = recorded.find((r) => namesRecord(r, ref) && sameArtist(r, ref));
     if (suggestion?.lidarrAlbumId) return suggestion.lidarrAlbumId;
     const jobs = await prisma.downloadJob.findMany({
-        where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null }, ...couldBeArtist },
+        where: { lidarrAlbumId: { not: null }, discoveryBatchId: { not: null }, ...couldBeArtist(ref.artistMbid) },
         orderBy: { createdAt: "desc" },
         select: { lidarrAlbumId: true, artistMbid: true, metadata: true },
     });
@@ -409,6 +406,7 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
             rgMbid: job.targetMbid as string,
             artistName: metadata?.artistName ?? "",
             albumTitle: metadata?.albumTitle || job.subject,
+            artistMbid: job.artistMbid,
         };
         if (ref.artistName && likedArtist(ref.artistName)) continue;
         if (await hasSuggestion(userId, ref)) continue;

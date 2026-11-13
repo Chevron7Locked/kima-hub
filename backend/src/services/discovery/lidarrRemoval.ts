@@ -10,7 +10,7 @@ import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { artistNamed } from "../artistIdentity";
-import { RUNNING_BATCH, sameArtist, sameName } from "./discoverEvidence";
+import { RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
 import type { LidarrAlbum, LidarrArtist } from "../../types/lidarr";
 
 /** What names the album being removed, beyond the id Lidarr was asked about. */
@@ -183,10 +183,7 @@ export async function removeDiscoveryAlbum(
  */
 async function keptSuggestion(mbid: string, artistName: string): Promise<boolean> {
     const kept = await prisma.discoveryAlbum.findMany({
-        where: {
-            status: { in: ["LIKED", "MOVED"] },
-            OR: [{ artistMbid: mbid }, { artistMbid: null }, { artistMbid: { startsWith: "temp-" } }],
-        },
+        where: { status: { in: ["LIKED", "MOVED"] }, ...couldBeArtist(mbid) },
         select: { artistMbid: true, artistName: true },
     });
     return kept.some((r) => sameArtist(r, { artistMbid: mbid, artistName }));

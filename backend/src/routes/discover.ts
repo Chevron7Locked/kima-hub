@@ -580,12 +580,12 @@ router.post("/like", async (req, res) => {
             );
         }
 
-        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY", "DISCOVERY_KEPT");
-
         // The Discover tag comes off the Lidarr artist that owns this album's record, so cleanup does not delete the
         // artist. Only that artist: Lidarr artists sharing its name are other people's. When no record names the
         // album's Lidarr id, or Lidarr cannot find it, nobody is untagged. A failure is logged and the like stands.
         await untagAlbumOwner(discoveryAlbum, [...new Set([discoveryAlbum.rgMbid, ...(dbAlbum ? [dbAlbum.rgMbid] : [])])]);
+
+        await relabelSuggestionPlays(userId, discoveryAlbum.id, "DISCOVERY", "DISCOVERY_KEPT");
 
         res.json({ success: true });
     } catch (error) {

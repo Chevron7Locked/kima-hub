@@ -51,6 +51,15 @@ export function sameArtist(
     return !!a.artistName && !!b.artistName && sameName(a.artistName, b.artistName);
 }
 
+/**
+ * The same rule as a Prisma `where` piece, for a table with an `artistMbid` column: only rows that could be this
+ * artist's (its id, or no real id). With no real id for the artist, any row could be, so the piece is empty.
+ */
+export const couldBeArtist = (artistMbid: string | null | undefined) =>
+    hasRealArtistId(artistMbid)
+        ? { OR: [{ artistMbid }, { artistMbid: null }, { artistMbid: { startsWith: "temp-" } }] }
+        : {};
+
 /** An artist and title as one key for lookup, or null when either has no letters or digits. */
 const albumNameKey = (artist: string, title: string) => {
     const a = nameKey(artist);
