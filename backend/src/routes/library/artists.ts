@@ -36,7 +36,7 @@ import { deezerService } from "../../services/deezer";
 import { CollectionFilter, LIBRARY_LOCATION, collectionFilter, yourDiscoverRgMbids } from "../../services/libraryFilters";
 import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
-import { PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 
 /**
  * The artist list's order for `sortBy`; anything unknown sorts by name. Names sort on `sortName` (article-stripped,
@@ -366,7 +366,7 @@ router.get("/artists/:id/play-tracks", async (req, res) => {
             displayYear: true,
             year: true,
             tracks: {
-              where: PLAYABLE,
+              where: PLAYABLE_SONG,
               select: {
                 id: true,
                 title: true,
@@ -440,13 +440,14 @@ router.get("/artists/:id", async (req, res) => {
   try {
     const idParam = req.params.id;
 
-    // The page shows the artist's library albums; their Discover albums live in Discover.
+    // The page shows the artist's library albums with their playable songs; their Discover albums live in Discover.
     const artistInclude = {
       albums: {
         where: { location: AlbumLocation.LIBRARY },
         orderBy: { year: Prisma.SortOrder.desc },
         include: {
           tracks: {
+            where: PLAYABLE_SONG,
             orderBy: { trackNo: Prisma.SortOrder.asc },
             include: {
               album: {
@@ -722,7 +723,7 @@ router.get("/artists/:id", async (req, res) => {
         JOIN "Album" a ON a.id = t."albumId"
         JOIN "Artist" ar ON ar.id = a."artistId"
         JOIN "Play" p ON p."trackId" = t.id AND p."userId" = ${userId}
-        WHERE a."artistId" = ${artist.id} AND a.location = 'LIBRARY'
+        WHERE a."artistId" = ${artist.id} AND ${playableSongSql("t", "a")}
         GROUP BY t.id, t.title, t."displayTitle", t.duration, t."albumId", a.title, a."coverUrl", a."artistId", ar.name
         HAVING COUNT(p.id) > 0
         ORDER BY COUNT(p.id) DESC, MAX(p."playedAt") DESC

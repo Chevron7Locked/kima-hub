@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { PLAYABLE_SONG } from "../utils/libraryEligibility";
 
 const router = Router();
 
@@ -16,9 +17,10 @@ router.get("/for-you", async (req, res) => {
         const limitNum = parseInt(limit as string, 10);
 
         // Get user's most played artists
-        // Plays of library songs only: a Discover song feeds nothing until its album is liked into the library.
+        // Plays of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
+        // missing or corrupt one nothing until it is back.
         const recentPlays = await prisma.play.findMany({
-            where: { userId, track: { album: { location: "LIBRARY" } } },
+            where: { userId, track: PLAYABLE_SONG },
             orderBy: { playedAt: "desc" },
             take: 50,
             include: {

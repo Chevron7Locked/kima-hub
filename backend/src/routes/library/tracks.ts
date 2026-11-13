@@ -19,7 +19,7 @@ import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
-import { IN_LIBRARY, LIBRARY_PLAYABLE } from "../../utils/libraryEligibility";
+import { PLAYABLE_SONG, playableSongSql } from "../../utils/libraryEligibility";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
@@ -266,6 +266,9 @@ router.get("/recently-added", async (req, res) => {
 router.get("/tracks", async (req, res) => {
   try {
     const { albumId, sortBy = "name" } = req.query;
+    if (albumId !== undefined && typeof albumId !== "string") {
+      return res.status(400).json({ error: "albumId must be given once" });
+    }
     const limit = parseLimit(req.query.limit, 100);
     const offset = parseOffset(req.query.offset);
 
@@ -276,9 +279,9 @@ router.get("/tracks", async (req, res) => {
       orderBy = TRACK_SORT_MAP[sortBy as string] ?? { title: "asc" as const };
     }
 
-    const where: any = { ...IN_LIBRARY };
+    const where: Prisma.TrackWhereInput = { ...PLAYABLE_SONG };
     if (albumId) {
-      where.albumId = albumId as string;
+      where.albumId = albumId;
     }
 
     const [tracksData, total] = await Promise.all([
@@ -312,38 +315,26 @@ router.get("/tracks/shuffle", async (req, res) => {
   try {
     const limit = parseLimit(req.query.limit, 100);
 
-    const totalTracks = await prisma.track.count({ where: LIBRARY_PLAYABLE });
+    const totalTracks = await prisma.track.count({ where: PLAYABLE_SONG });
 
     if (totalTracks === 0) {
       return res.json({ tracks: [], total: 0 });
     }
 
-    let tracksData;
-    if (totalTracks <= limit) {
-      tracksData = await prisma.track.findMany({
-        where: LIBRARY_PLAYABLE,
+    // Random ids are drawn in SQL; the rows come back in no set order, so they are shuffled again.
+    const randomIds = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT t.id FROM "Track" t
+      JOIN "Album" a ON a.id = t."albumId"
+      WHERE ${playableSongSql("t", "a")}
+      ORDER BY random()
+      LIMIT ${limit}
+    `;
+    const tracksData = shuffleArray(
+      await prisma.track.findMany({
+        where: { id: { in: randomIds.map((r) => r.id) } },
         include: WITH_ALBUM_ARTIST,
-      });
-      tracksData = shuffleArray(tracksData);
-    } else {
-      // Random ids are drawn in SQL, so the playable rule is written out here.
-      const randomIds = await prisma.$queryRaw<{ id: string }[]>`
-                SELECT id FROM "Track"
-                WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = "Track"."albumId" AND a.location = 'LIBRARY')
-                  AND "Track"."missingSince" IS NULL AND "Track".corrupt = false
-                ORDER BY RANDOM()
-                LIMIT ${limit}
-            `;
-
-      tracksData = await prisma.track.findMany({
-        where: {
-          id: { in: randomIds.map((r) => r.id) },
-        },
-        include: WITH_ALBUM_ARTIST,
-      });
-
-      tracksData = shuffleArray(tracksData);
-    }
+      }),
+    );
 
     const tracks = tracksData.slice(0, limit).map((track) => ({
       ...track,

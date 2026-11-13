@@ -150,6 +150,12 @@ describe('GET /tracks/:id -- track detail', () => {
     });
 });
 
+describe('GET /tracks -- album filter', () => {
+    it('refuses an albumId given more than once', async () => {
+        await request(makeApp()).get('/tracks?albumId=a&albumId=b').expect(400);
+    });
+});
+
 describe('toAudioFeaturesDTO -- field mapping (direct unit tests; NOT the /radio route integration)', () => {
     it('returns the exact 8-field shape for an analyzed track', () => {
         const result = toAudioFeaturesDTO(ANALYZED_TRACK);

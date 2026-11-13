@@ -5,6 +5,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { listenRows, type Period } from "./listens";
 
 /** The shape the player wants. Matches what the library routes hand back. */
@@ -67,6 +68,9 @@ const JOINS = Prisma.sql`
     JOIN "Album"  al ON al.id = t."albumId"
     JOIN "Artist" ar ON ar.id = al."artistId"`;
 
+/** Every slice hands the player playable songs only, whatever the listens behind it were. */
+const PLAYABLE_SQL = playableSongSql("t", "al");
+
 export async function playableSlice(params: {
     userId: string;
     slice: Slice;
@@ -94,6 +98,7 @@ export async function playableSlice(params: {
                 ${listenRows(userId, period)}
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
+                WHERE ${PLAYABLE_SQL}
                 GROUP BY t.id, t."displayTitle", t.title, t.duration, ar.id, ar."displayName", ar.name,
                          al.id, al."displayTitle", al.title, al."userCoverUrl", al."coverUrl"
                 ORDER BY n DESC LIMIT ${limit}`);
@@ -106,7 +111,7 @@ export async function playableSlice(params: {
             const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
                 SELECT ${SELECT}
                 FROM "Track" t ${JOINS}
-                WHERE al.location = 'LIBRARY'
+                WHERE ${PLAYABLE_SQL}
                   AND NOT EXISTS (SELECT 1 FROM "Play" p WHERE p."trackId" = t.id AND p."userId" = ${userId})
                 ORDER BY random() LIMIT ${limit}`);
             return shape(rows);
@@ -121,7 +126,7 @@ export async function playableSlice(params: {
                 ${listenRows(userId, period)}
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
-                WHERE t.key IN (${Prisma.join(pitches)}) AND t."keyScale" = ${scale}
+                WHERE ${PLAYABLE_SQL} AND t.key IN (${Prisma.join(pitches)}) AND t."keyScale" = ${scale}
                 GROUP BY t.id, t."displayTitle", t.title, t.duration, ar.id, ar."displayName", ar.name,
                          al.id, al."displayTitle", al.title, al."userCoverUrl", al."coverUrl"
                 ORDER BY n DESC LIMIT ${limit}`);
@@ -133,7 +138,7 @@ export async function playableSlice(params: {
             const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
                 SELECT ${SELECT}
                 FROM "Track" t ${JOINS}
-                WHERE al.location = 'LIBRARY'
+                WHERE ${PLAYABLE_SQL}
                   AND coalesce(al."displayYear", al.year) BETWEEN ${decade} AND ${decade + 9}
                 ORDER BY random() LIMIT ${limit}`);
             return shape(rows);

@@ -5,6 +5,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { playableSongSql } from "../../utils/libraryEligibility";
 import { listenRows, type Period } from "./listens";
 import { spellingsOf } from "./playable";
 import { safeZone } from "./listening";
@@ -91,7 +92,7 @@ export async function signature(
             SELECT avg(t.energy)::float8 AS energy, avg(t.valence)::float8 AS valence,
                    avg(t.bpm)::float8 AS bpm, avg(t.instrumentalness)::float8 AS inst
             FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-            WHERE a.location = 'LIBRARY' AND t.energy IS NOT NULL`,
+            WHERE ${playableSongSql("t", "a")} AND t.energy IS NOT NULL`,
 
         prisma.$queryRaw<Array<{ energy: number; valence: number; bpm: number; inst: number }>>(Prisma.sql`
             ${listenRows(userId, period)}

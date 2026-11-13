@@ -10,6 +10,11 @@ jest.mock("../../config", () => {
     Object.assign(actual.config.music, { musicPath: `${base}/music`, transcodeCachePath: `${base}/cache` });
     return actual;
 });
+// The web routers sit behind the sign-in check; here the test's own user stands in for a signed-in one.
+jest.mock("../../middleware/auth", () => {
+    const actual = jest.requireActual("../../middleware/auth");
+    return { ...actual, requireAuthOrToken: (req: any, res: any, next: any) => (req.user ? next() : actual.requireAuthOrToken(req, res, next)) };
+});
 
 import express from "express";
 import request from "supertest";
@@ -55,6 +60,14 @@ import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
 import { buildMoodState } from "../../services/moods/state";
 import { writeMoodTags } from "../../services/moods/tags";
 import { currentMoodSnapshot, refreshMoodSnapshot } from "../../services/moodBucketService";
+import { playableSlice, type Slice } from "../../services/stats/playable";
+import { shelfStats } from "../../services/stats/shelf";
+import { signature } from "../../services/stats/signature";
+import libraryTracksRouter from "../../routes/library/tracks";
+import libraryArtistsRouter from "../../routes/library/artists";
+import recommendationsRouter from "../../routes/recommendations";
+import { deezerService } from "../../services/deezer";
+import { dataCacheService } from "../../services/dataCache";
 
 jest.setTimeout(120_000);
 
@@ -65,6 +78,8 @@ const UNPLAYABLE: string[] = [SONG.discover, SONG.missing, SONG.corrupt];
 const BYTES = Buffer.from("fLaC-playable-song-bytes");
 /** A year and a genre only the seeded songs carry, so a list narrowed by them holds only these. */
 const YEAR = 1901;
+/** Every seeded song's key, so the stats page's key slice holds them all. */
+const KEY = "A";
 const GENRE = `${P}-genre`;
 const PLAYLIST = `${P}-playlist`;
 /** The other library artists, each with one album of two playable songs. */
@@ -95,10 +110,16 @@ const ENERGETIC: Partial<Record<Mood, number>> = {
 
 const app = express()
     .use((req: any, _res, next) => {
-        req.user = { id: USER, username: USER, role: "user" };
+        // The web routes can be asked as another user, named in `x-user`.
+        const id = req.get("x-user") ?? USER;
+        req.user = { id, username: id, role: "user" };
         next();
     })
-    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter);
+    .use("/rest", compatRouter, playbackRouter, searchRouter, libraryRouter, starredRouter, playlistRouter, queueRouter, lyricsRouter)
+    .use("/api/library", libraryTracksRouter, libraryArtistsRouter)
+    .use("/api/recommendations", recommendationsRouter);
+/** A web route's JSON answer, asked as `user`. */
+const web = async (route: string, user = USER) => (await request(app).get(route).set("x-user", user).expect(200)).body;
 const subsonic = (route: string, query: Record<string, string | string[]>) =>
     request(app).get(`/rest/${route}`).query({ u: USER, f: "json", ...query });
 
@@ -151,6 +172,31 @@ async function matching() {
     if (!ctx) throw new Error("the seeded song has no matching data");
     return { ctx, inputs: [{ trackId: NEAR, weight: 1 }] };
 }
+/** A stats-page slice's songs, asked as `userId`. */
+const slice = async (slice: Slice, userId = USER, extra: { key?: string; decade?: number } = {}) =>
+    (await playableSlice({ userId, slice, limit: 100, ...extra })).map((t) => t.id);
+/**
+ * The web artist page, asked as `user`. `global` is the top list Deezer answers with, as titles of the seeded songs; an
+ * empty one sends its popular songs to the listener's own plays, then (for a listener with none) to release order.
+ */
+async function artistPage(global: string[], user = USER) {
+    const top = jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue(
+        global.map((title, i) => ({ title, album: title, coverUrl: null, previewUrl: null, durationMs: 100_000, rank: 100 - i })) as never,
+    );
+    const image = jest.spyOn(dataCacheService, "getArtistImage").mockResolvedValue(null);
+    const similar = jest.spyOn(artistSimilarity, "getSimilarArtists").mockResolvedValue([]);
+    try {
+        return await web(`/api/library/artists/${P}-ar`, user);
+    } finally {
+        top.mockRestore();
+        image.mockRestore();
+        similar.mockRestore();
+        // The page keeps the artist's similar artists for a day; cleared here, as the file's Redis client is closed before its afterAll.
+        await redisClient.del(`similar-artists:${P}-ar`);
+    }
+}
+const popularSongs = async (global: string[], user = USER): Promise<string[]> =>
+    (await artistPage(global, user)).topTracks.map((t: { id: string }) => t.id);
 const ALBUM_LIST_TYPES = ["newest", "alphabeticalByName", "alphabeticalByArtist", "byYear", "byGenre", "starred", "random", "recent", "frequent"];
 
 /** Every interface that lists songs, each answering the ids it offers. */
@@ -326,6 +372,25 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     "web song search": async () => (await searchService.searchTracks({ query: "playable", limit: 500 })).map((t) => t.id),
     "web song search by a name full-text search cannot read": async () =>
         (await searchService.searchTracks({ query: P, limit: 500 })).map((t) => t.id),
+    "the stats page's never-played slice": () => slice("never", listenerOf("playable")),
+    "the stats page's decade slice": () => slice("decade", USER, { decade: 1900 }),
+    "the stats page's top slice": () => slice("top"),
+    "the stats page's core slice": () => slice("core"),
+    "the stats page's key slice": () => slice("key", USER, { key: `${KEY} minor` }),
+    "the web song list": async () => (await web("/api/library/tracks?limit=10000")).tracks.map((t: { id: string }) => t.id),
+    "the web song list of each seeded album": async () =>
+        (await Promise.all(Object.values(SONG).map((id) => web(`/api/library/tracks?albumId=${id}-al`)))).flatMap((r) =>
+            r.tracks.map((t: { id: string }) => t.id),
+        ),
+    "the web shuffle": async () => (await web("/api/library/tracks/shuffle?limit=10000")).tracks.map((t: { id: string }) => t.id),
+    "the web artist page's play queue": async () => (await web(`/api/library/artists/${P}-ar/play-tracks`)).tracks.map((t: { id: string }) => t.id),
+    "the web artist page's album songs": async () =>
+        (await artistPage([])).albums.flatMap((a: { tracks: { id: string }[] }) => a.tracks.map((t) => t.id)),
+    // The page matches a top-list title to an owned song by its part before any dash, and every seeded title starts
+    // "zz-playable", so each of the four names whichever seeded song the page holds: it must hold only the playable one.
+    "the web artist page's popular songs from a global top list": () => popularSongs(Object.keys(SONG).map((kind) => `${P} ${kind}`)),
+    "the web artist page's popular songs from the listener's own plays": () => popularSongs([]),
+    "the web artist page's popular songs for a listener with no plays": () => popularSongs([], listenerOf("playable")),
     "Subsonic getLyrics by artist and title": async () => {
         const found = await Promise.all(
             Object.entries(SONG).map(async ([kind, id]) =>
@@ -428,11 +493,13 @@ async function seedArtist(artist: { id: string; name: string }, albums: { id: st
                     // One analysis for every song, so a picker that keeps "the upper half" or "minor key" keeps them all.
                     analysisStatus: "completed",
                     arousal: song.arousal ?? 0.5,
+                    key: KEY,
                     keyScale: "minor",
                     bpm: 120,
                     energy: 0.5,
                     valence: 0.5,
                     danceability: 0.5,
+                    instrumentalness: 0.5,
                 },
             });
             await prisma.play.create({ data: { userId: USER, trackId: song.id, playedAt: LISTENED, heard: true } });
@@ -562,6 +629,59 @@ describe.each(Object.entries(STREAMS))("Subsonic %s", (_name, { ask, plays }) =>
 it("counts only playable songs for the radio row's genre and decade stations", async () => {
     expect((await libraryGenres()).find((g) => g.genre === GENRE)?.count).toBe(19);
     expect((await libraryDecades()).find((d) => d.decade === 1900)?.count).toBe(19);
+});
+
+// The stats page's figures are counted over the whole library; the seeded songs are most of it.
+it("counts only playable songs on the stats page's shelf", async () => {
+    const playable = (extra: Prisma.TrackWhereInput = {}) => prisma.track.count({ where: { ...PLAYABLE_SONG, ...extra } });
+    const albumsWithPlayable = (extra: Prisma.AlbumWhereInput = {}) => prisma.album.count({ where: { ...extra, tracks: { some: PLAYABLE_SONG } } });
+    const unheard = await shelfStats(listenerOf("playable"));
+    expect(unheard.tracks.total).toBe(await playable());
+    expect(unheard.neverPlayed).toBe(unheard.tracks.total);
+    expect(unheard.albums.total).toBe(await albumsWithPlayable());
+    expect(unheard.artists.total).toBe(await prisma.artist.count({ where: { albums: { some: { tracks: { some: PLAYABLE_SONG } } } } }));
+    const heard = await shelfStats(USER);
+    expect(heard.tracks.heard).toBe(await playable({ plays: { some: { userId: USER } } }));
+    expect(heard.albums.heard).toBe(await albumsWithPlayable({ tracks: { some: { ...PLAYABLE_SONG, plays: { some: { userId: USER } } } } }));
+    // The decade strip leaves out the years before 1910, so the seeded albums move to the 1990s while it is read.
+    const seeded = { id: { startsWith: P } };
+    await prisma.album.updateMany({ where: seeded, data: { year: 1991 } });
+    try {
+        const nineties = (await shelfStats(USER)).decades.find((d) => d.decade === 1990);
+        expect(nineties?.albums).toBe(await albumsWithPlayable({ year: { gte: 1990, lte: 1999 }, displayYear: null }));
+    } finally {
+        await prisma.album.updateMany({ where: seeded, data: { year: YEAR } });
+    }
+});
+
+it("measures the shelf's sound in the stats page's signature from playable songs only", async () => {
+    // The three unplayable songs turned all the way up, so counted they would pull the shelf's averages up.
+    await prisma.track.updateMany({ where: { id: { in: UNPLAYABLE } }, data: { energy: 1, valence: 1, bpm: 300, instrumentalness: 1 } });
+    try {
+        const owned = Object.fromEntries((await signature(USER)).ownedVsPlayed.map((r) => [r.label, r.owned]));
+        const shelf = await prisma.track.aggregate({
+            where: { ...PLAYABLE_SONG, energy: { not: null } },
+            _avg: { energy: true, valence: true, bpm: true, instrumentalness: true },
+        });
+        expect(owned.energy).toBeCloseTo(shelf._avg.energy!, 6);
+        expect(owned.brightness).toBeCloseTo(shelf._avg.valence!, 6);
+        expect(owned.bpm).toBeCloseTo(shelf._avg.bpm!, 6);
+        expect(owned.instrumental).toBeCloseTo(shelf._avg.instrumentalness!, 6);
+    } finally {
+        await prisma.track.updateMany({ where: { id: { in: UNPLAYABLE } }, data: { energy: 0.5, valence: 0.5, bpm: 120, instrumentalness: 0.5 } });
+    }
+});
+
+it("recommends artists from plays of playable songs only", async () => {
+    const listener = `${P}-recs`;
+    const stranger = `${P}-stranger-ar`;
+    await prisma.artist.create({ data: { id: stranger, name: `${P} stranger`, normalizedName: normalizeArtistName(`${P} stranger`), identityKey: stranger } });
+    await prisma.similarArtist.create({ data: { fromArtistId: `${P}-ar`, toArtistId: stranger } });
+    await prisma.user.create({ data: { id: listener, username: listener, passwordHash: "x", role: "user", tokenVersion: 0 } });
+    await prisma.play.createMany({ data: UNPLAYABLE.map((trackId) => ({ userId: listener, trackId, playedAt: LISTENED, heard: true })) });
+    expect((await web("/api/recommendations/for-you", listener)).artists).toEqual([]);
+    await prisma.play.create({ data: { userId: listener, trackId: SONG.playable, playedAt: LISTENED, heard: true } });
+    expect((await web("/api/recommendations/for-you", listener)).artists.map((a: { id: string }) => a.id)).toEqual([stranger]);
 });
 
 // An artist whose every song is missing still has a radio: the similar artists' share.
