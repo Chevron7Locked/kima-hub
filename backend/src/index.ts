@@ -8,42 +8,8 @@ import { redisClient, waitForRedisReady } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 
-import authRoutes from "./routes/auth";
-import onboardingRoutes from "./routes/onboarding";
-import libraryRoutes from "./routes/library";
-import playsRoutes from "./routes/plays";
-import whatsNewRoutes from "./routes/whatsNew";
-import statsRoutes from "./routes/stats";
-import settingsRoutes from "./routes/settings";
-import systemSettingsRoutes from "./routes/systemSettings";
-import playbackStateRoutes from "./routes/playbackState";
-import playlistsRoutes from "./routes/playlists";
-import searchRoutes from "./routes/search";
-import recommendationsRoutes from "./routes/recommendations";
-import downloadsRoutes from "./routes/downloads";
-import webhooksRoutes from "./routes/webhooks";
-import audiobooksRoutes from "./routes/audiobooks";
-import podcastsRoutes from "./routes/podcasts";
-import artistsRoutes from "./routes/artists";
-import soulseekRoutes from "./routes/soulseek";
-import discoverRoutes from "./routes/discover";
-import apiKeysRoutes from "./routes/apiKeys";
-import mixesRoutes from "./routes/mixes";
-import enrichmentRoutes from "./routes/enrichment";
-import deviceLinkRoutes from "./routes/deviceLink";
-import spotifyRoutes from "./routes/spotify";
-import notificationsRoutes from "./routes/notifications";
-import browseRoutes from "./routes/browse";
-import analysisRoutes from "./routes/analysis";
-import releasesRoutes from "./routes/releases";
-import vibeRoutes from "./routes/vibe";
-import publicVibeRoutes from "./routes/publicVibe";
-import systemRoutes from "./routes/system";
-import shareRoutes from "./routes/share";
-import eventsRoutes from "./routes/events";
-import eventsTicketRoutes from "./routes/eventsTicket";
-import metricsRoutes from "./routes/metrics";
-import { subsonicRouter } from "./routes/subsonic/index";
+import { mountApi } from "./routes/mounts";
+import { mountRoute } from "./routes/access";
 import { dataCacheService } from "./services/dataCache";
 import { enrichmentStateService } from "./services/enrichmentState";
 import {
@@ -53,13 +19,8 @@ import {
 import { lidarrHealthMonitor } from "./services/lidarrHealth";
 import { combineAnalyzerStatus, heartbeatFresh } from "./utils/analyzerStatus";
 import { errorHandler } from "./middleware/errorHandler";
-import { requireAuth, requireAdmin } from "./middleware/auth";
 import { resetAdminPassword } from "./services/users/accounts";
-import {
-    authLimiter,
-    apiLimiter,
-    trustOneProxyHop,
-} from "./middleware/rateLimiter";
+import { trustOneProxyHop } from "./middleware/rateLimiter";
 const app = express();
 
 // Middleware
@@ -137,60 +98,7 @@ app.use(
     })
 );
 
-// Routes - All API routes prefixed with /api for clear separation from frontend
-// Apply rate limiting to auth routes
-app.use("/api/auth/login", authLimiter);
-app.use("/api/auth", authRoutes);
-app.use("/api/onboarding/register", authLimiter);
-app.use("/api/onboarding", onboardingRoutes);
-
-// Public share routes (GET/stream are unauthenticated; POST/DELETE self-protect with requireAuth)
-app.use("/api/share", shareRoutes);
-
-// Apply general API rate limiting to all API routes
-app.use("/api/api-keys", apiLimiter, apiKeysRoutes);
-app.use("/api/device-link", apiLimiter, deviceLinkRoutes);
-// NOTE: /api/library has its own rate limiting (imageLimiter for cover-art, apiLimiter for others)
-app.use("/api/library", libraryRoutes);
-app.use("/api/plays", apiLimiter, playsRoutes);
-app.use("/api/whats-new", apiLimiter, whatsNewRoutes);
-app.use("/api/stats", apiLimiter, statsRoutes);
-app.use("/api/settings", apiLimiter, settingsRoutes);
-app.use("/api/system-settings", apiLimiter, systemSettingsRoutes);
-app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
-app.use("/api/playlists", apiLimiter, playlistsRoutes);
-app.use("/api/search", apiLimiter, searchRoutes);
-app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
-app.use("/api/downloads", apiLimiter, downloadsRoutes);
-app.use("/api/notifications", apiLimiter, notificationsRoutes);
-app.use("/api/webhooks", webhooksRoutes); // Excluded from apiLimiter; the router applies webhookLimiter
-// /api/audiobooks gets apiLimiter like every other mount. The cover route stays
-// unauthenticated by design (lockscreen artwork requests it without a session),
-// so the limiter is its only bound; the stream route accepts a token in the URL.
-app.use("/api/audiobooks", apiLimiter, audiobooksRoutes);
-app.use("/api/podcasts", apiLimiter, podcastsRoutes);
-app.use("/api/artists", apiLimiter, artistsRoutes);
-app.use("/api/soulseek", apiLimiter, soulseekRoutes);
-app.use("/api/discover", apiLimiter, discoverRoutes);
-app.use("/api/mixes", apiLimiter, mixesRoutes);
-app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
-app.use("/api/spotify", apiLimiter, spotifyRoutes);
-app.use("/api/browse", apiLimiter, browseRoutes);
-app.use("/api/analysis", apiLimiter, analysisRoutes);
-app.use("/api/releases", apiLimiter, releasesRoutes);
-app.use("/api/vibe", apiLimiter, vibeRoutes);
-// Read-only public vibe feed; it does not exist unless KIMA_PUBLIC_VIBE=true.
-if (config.publicVibe) {
-    app.use("/api/public/vibe", apiLimiter, publicVibeRoutes);
-}
-app.use("/api/system", apiLimiter, systemRoutes);
-// SSE ticket endpoint (must be registered before /api/events)
-app.use("/api/events/ticket", apiLimiter, eventsTicketRoutes);
-// SSE - no rate limit, long-lived connections
-app.use("/api/events", eventsRoutes);
-
-// Subsonic-compatible API — rate limiting is internal to the router
-app.use("/rest", subsonicRouter);
+// Every router is mounted in ./routes/mounts, with the access it declares.
 
 // A beat older than this is a dead analyzer: CLAP beats every 30 s, MusiCNN every loop pass (1 to 5 s).
 const ANALYZER_HEARTBEAT_WITHIN_MS = 120_000;
@@ -260,11 +168,8 @@ async function healthHandler(_req: express.Request, res: express.Response) {
     });
 }
 
-app.get("/health", healthHandler);
-app.get("/api/health", healthHandler);
-
-// The metrics router applies the runaway limit itself, before its admin check.
-app.use("/api/metrics", metricsRoutes);
+// Routes - All API routes prefixed with /api for clear separation from frontend
+mountApi(app, { health: healthHandler, publicVibe: Boolean(config.publicVibe) });
 
 // Error handler
 app.use(errorHandler);
@@ -474,12 +379,11 @@ async function main() {
         serverAdapter,
     });
 
-    app.use(
-        "/api/admin/queues",
-        requireAuth,
-        requireAdmin,
-        serverAdapter.getRouter()
-    );
+    mountRoute(app, {
+        path: "/api/admin/queues",
+        router: serverAdapter.getRouter(),
+        access: { family: "admin" },
+    });
     logger.debug(
         "Bull Board dashboard available at /api/admin/queues (admin-only)"
     );
