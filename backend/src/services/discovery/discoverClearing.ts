@@ -167,7 +167,7 @@ async function deleteAlbumRows(albumId: string | null, suggestionId: string | nu
  * The Lidarr album id Discover recorded for an album: from a suggestion, else from a Discover download job, each
  * naming it by release-group id or by artist and title (sameName). A listener's own download is never Discover's record.
  */
-async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): Promise<number | null> {
+export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): Promise<number | null> {
     const recorded = await prisma.discoveryAlbum.findMany({
         where: { lidarrAlbumId: { not: null } },
         orderBy: { weekStartDate: "desc" },

@@ -468,6 +468,52 @@ describe("removeDiscoveryArtist", () => {
         expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("in use");
     });
 
+    it("does not hold an artist in use for a running download of a same-name artist with another MusicBrainz id", async () => {
+        await discovered("rg-1", "DELETED");
+        const batch = await prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-26"), targetSongCount: 10, status: "downloading" },
+        });
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - Namesake", type: "album", status: "processing", targetMbid: "rg-namesake", artistMbid: "other-artist-mbid", metadata: { artistName: "Interpol" }, discoveryBatchId: batch.id },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("delete");
+    });
+
+    it.each([[null], ["temp-123"]])("still holds an artist in use for a running download of its name whose artist id is %s", async (artistMbid) => {
+        await discovered("rg-1", "DELETED");
+        const batch = await prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-26"), targetSongCount: 10, status: "downloading" },
+        });
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: "Interpol - Arriving", type: "album", status: "processing", targetMbid: "rg-arriving", artistMbid, metadata: { artistName: "interpol" }, discoveryBatchId: batch.id },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("in use");
+    });
+
+    it.each([[null], ["temp-123"]])("keeps an artist as a listener's when a kept album's suggestion had artist id %s and the artist's name", async (artistMbid) => {
+        await discovered("rg-1", "DELETED");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: "rg-kept", artistName: "INTERPOL", artistMbid, albumTitle: "Kept", weekStartDate: new Date("2026-10-26"), status: "LIKED" },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("theirs");
+    });
+
+    it("does not count a kept album of a same-name artist with another MusicBrainz id as this artist's", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: "rg-namesake", artistName: "Interpol", artistMbid: "other-artist-mbid", albumTitle: "Namesake", weekStartDate: new Date("2026-10-26"), status: "MOVED" },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("delete");
+    });
+
     it("deletes once the batch that was downloading its album has finished", async () => {
         await discovered("rg-1", "DELETED");
         const batch = await prisma.discoveryBatch.create({

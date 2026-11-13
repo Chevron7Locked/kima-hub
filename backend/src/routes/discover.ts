@@ -11,11 +11,11 @@ import { discoverQueue } from "../workers/queues";
 import { requestScan } from "../workers/scanRequest";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
-import { discoveryArtistVerdict, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
+import { discoveryArtistVerdict, hasNoRealArtistId, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
-import { findDiscoverAlbum, findScannedAlbum, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
+import { lookupKey, relocateDiscoverAlbums, sameName } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -486,11 +486,34 @@ async function relabelSuggestionPlays(
     await prisma.play.updateMany({ where: { userId, trackId: { in: trackIds }, source: from }, data: { source: to } });
 }
 
-/** Takes Discover's tag off the Lidarr artist that owns the suggestion's Lidarr album record, and off no one else. */
-async function untagAlbumOwner(suggestion: { artistName: string; albumTitle: string; lidarrAlbumId: number | null }): Promise<void> {
+/**
+ * Whether another current suggestion still needs Discover's tag on this Lidarr artist: one with its MusicBrainz id, or,
+ * when that suggestion's artist id is missing or a `temp-` placeholder, its name. `liked` is the suggestion being kept.
+ */
+async function otherSuggestionNeedsTag(liked: { id: string; artistMbid: string | null; artistName: string }, artist: { foreignArtistId?: string; artistName?: string } | null): Promise<boolean> {
+    const mbids = [artist?.foreignArtistId, liked.artistMbid].filter((m): m is string => !!m && !hasNoRealArtistId(m));
+    const names = [artist?.artistName ?? liked.artistName];
+    const others = await prisma.discoveryAlbum.findMany({
+        where: { status: "ACTIVE", id: { not: liked.id } },
+        select: { artistMbid: true, artistName: true },
+    });
+    return others.some((o) => (o.artistMbid ? mbids.includes(o.artistMbid) : false) || (hasNoRealArtistId(o.artistMbid) && names.some((n) => sameName(o.artistName, n))));
+}
+
+/**
+ * Takes Discover's tag off the Lidarr artist that owns the suggestion's Lidarr album record, and off no one else: the
+ * album's Lidarr id is the stored one, else the one Discover's records name (a suggestion or Discover download job, by
+ * release-group id or name; `rgMbids` are the ids the album is known by). The tag stays while another current suggestion
+ * still needs it.
+ */
+async function untagAlbumOwner(
+    suggestion: { id: string; artistName: string; artistMbid: string | null; albumTitle: string; rgMbid: string; lidarrAlbumId: number | null },
+    rgMbids: string[],
+): Promise<void> {
     const label = `${suggestion.artistName} - ${suggestion.albumTitle}`;
     try {
-        const record = suggestion.lidarrAlbumId === null ? null : await lidarrService.getAlbum(suggestion.lidarrAlbumId);
+        const lidarrAlbumId = suggestion.lidarrAlbumId ?? (await recordedLidarrAlbumId(suggestion, rgMbids));
+        const record = lidarrAlbumId === null ? null : await lidarrService.getAlbum(lidarrAlbumId);
         if (!record) {
             logger.warn(`[Discover] No Lidarr album record for ${label}; Discover's tag stays on every Lidarr artist`);
             return;
@@ -498,6 +521,11 @@ async function untagAlbumOwner(suggestion: { artistName: string; albumTitle: str
         const tagId = await lidarrService.getOrCreateDiscoveryTag();
         if (tagId === null) {
             logger.warn(`[Discover] Lidarr has no Discover tag to remove for ${label}`);
+            return;
+        }
+        const artist = await lidarrService.getArtistById(record.artistId);
+        if (await otherSuggestionNeedsTag(suggestion, artist)) {
+            logger.debug(`[Discover] Discover's tag stays on Lidarr artist ${record.artistId}: another current suggestion needs it (${label} kept)`);
             return;
         }
         if (await lidarrService.removeTagsFromArtist(record.artistId, [tagId])) {
@@ -550,14 +578,14 @@ router.post("/like", async (req, res) => {
             });
         }
 
-        // The Discover tag comes off the Lidarr artist that owns this album's record, so cleanup does not delete the
-        // artist. Only that artist: Lidarr artists sharing its name are other people's. Without a stored Lidarr album id,
-        // or when Lidarr cannot find the record, nobody is untagged.
-        await untagAlbumOwner(discoveryAlbum);
-
         // Only Discover's copy: a listener's own library album of the same name must not take the like's mark, or an
         // unlike would send it to Discover.
         const dbAlbum = await findDiscoverAlbum(discoveryAlbum);
+
+        // The Discover tag comes off the Lidarr artist that owns this album's record, so cleanup does not delete the
+        // artist. Only that artist: Lidarr artists sharing its name are other people's. When no record names the
+        // album's Lidarr id, or Lidarr cannot find it, nobody is untagged.
+        await untagAlbumOwner(discoveryAlbum, [...new Set([discoveryAlbum.rgMbid, ...(dbAlbum ? [dbAlbum.rgMbid] : [])])]);
 
         if (dbAlbum) {
             await takeIntoLibrary(dbAlbum);

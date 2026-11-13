@@ -176,6 +176,27 @@ export async function removeDiscoveryAlbum(
     }
 }
 
+/** Whether a suggestion's or job's artist id is missing or a `temp-` placeholder: the only case where its artist name stands in for the id. */
+export const hasNoRealArtistId = (artistMbid: string | null | undefined): boolean => !artistMbid || artistMbid.startsWith("temp-");
+
+/**
+ * Whether a listener kept a suggestion of this Lidarr artist (LIKED or MOVED): by its MusicBrainz id, or by name only
+ * when the suggestion's own artist id is missing or a `temp-` placeholder. A suggestion with a real id for another
+ * artist is a namesake.
+ */
+async function keptSuggestion(mbid: string, artistName: string): Promise<boolean> {
+    const kept = await prisma.discoveryAlbum.findMany({
+        where: {
+            status: { in: ["LIKED", "MOVED"] },
+            OR: [{ artistMbid: mbid }, { artistMbid: null }, { artistMbid: { startsWith: "temp-" } }],
+        },
+        select: { artistMbid: true, artistName: true },
+    });
+    return kept.some(
+        (r) => r.artistMbid === mbid || (hasNoRealArtistId(r.artistMbid) && sameName(r.artistName, artistName)),
+    );
+}
+
 /**
  * Whose a Lidarr artist is by Kima's records: "theirs" when a listener liked, holds or asked for any of its albums
  * (including a request still downloading, which has no files yet); "discover" when it has files and every album with
@@ -188,10 +209,7 @@ async function artistOwner(
     const mbid = artist.foreignArtistId;
     if (mbid) {
         const [liked, library, owned, openRequest] = await Promise.all([
-            prisma.discoveryAlbum.findFirst({
-                where: { artistMbid: mbid, status: { in: ["LIKED", "MOVED"] } },
-                select: { id: true },
-            }),
+            keptSuggestion(mbid, artist.artistName),
             prisma.album.findFirst({
                 where: { artist: { mbid }, location: LIBRARY_LOCATION },
                 select: { id: true },
@@ -266,8 +284,8 @@ export async function discoveryArtistVerdict(
     const names = (artistMbid: string | null, album: string | null, name: unknown, nameCounts: boolean) =>
         artistMbid === mbid || (album !== null && withFiles.includes(album)) || (nameCounts && typeof name === "string" && sameName(name, artist.artistName));
     if (
-        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName, !r.artistMbid || r.artistMbid.startsWith("temp-"))) ||
-        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName, true))
+        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName, hasNoRealArtistId(r.artistMbid))) ||
+        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName, hasNoRealArtistId(j.artistMbid)))
     ) {
         return "in use";
     }

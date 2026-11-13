@@ -35,9 +35,11 @@ jest.mock('../../utils/distributedLock', () => require('./helpers/discoverMocks'
 const mockGetAlbum = jest.fn();
 const mockGetOrCreateDiscoveryTag = jest.fn();
 const mockRemoveTagsFromArtist = jest.fn();
+const mockGetArtistById = jest.fn();
 jest.mock('../../services/lidarr', () => ({
     lidarrService: {
         getAlbum: (...a: any[]) => mockGetAlbum(...a),
+        getArtistById: (...a: any[]) => mockGetArtistById(...a),
         getOrCreateDiscoveryTag: (...a: any[]) => mockGetOrCreateDiscoveryTag(...a),
         removeTagsFromArtist: (...a: any[]) => mockRemoveTagsFromArtist(...a),
     },
@@ -61,6 +63,8 @@ app.use(express.json());
 app.use('/discover', discoverRoutes);
 
 async function cleanup() {
+    await prisma.downloadJob.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
     await prisma.discoveryAlbum.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
     await prisma.ownedAlbum.deleteMany({ where: { artistId: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
@@ -70,6 +74,9 @@ async function cleanup() {
 
 beforeEach(async () => {
     jest.clearAllMocks();
+    for (const m of [mockGetAlbum, mockGetOrCreateDiscoveryTag, mockRemoveTagsFromArtist, mockGetArtistById]) m.mockReset();
+    // Lidarr's artist 9 is the one the suggestion's album record belongs to.
+    mockGetArtistById.mockResolvedValue({ id: 9, artistName: 'Dlk Artist', foreignArtistId: 'art-mbid-1' });
     await cleanup();
     for (const id of [USER, OTHER]) await prisma.user.create({ data: { id, username: id, passwordHash: 'x' } });
 });
@@ -201,6 +208,114 @@ describe('POST /discover/like -- claims the album only while it is ACTIVE', () =
         expect(res.status).toBe(200);
         expect(await statusOf(`${P}da`)).toBe('LIKED');
         expect(mockGetAlbum).toHaveBeenCalledWith(41);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
+    });
+});
+
+// The like finds the album's Lidarr record the way Discover's clearing does, and keeps the tag while another current
+// suggestion needs it.
+describe('POST /discover/like -- whose Lidarr artist loses the tag', () => {
+    const lidarrKnowsAlbum = () => {
+        mockGetAlbum.mockResolvedValue({ id: 41, artistId: 9 });
+        mockGetOrCreateDiscoveryTag.mockResolvedValue(22);
+        mockRemoveTagsFromArtist.mockResolvedValue(true);
+    };
+
+    // A suggestion of another album by the same artist (or one the test overrides), left ACTIVE for the week.
+    const otherSuggestion = (data: Record<string, unknown>) =>
+        prisma.discoveryAlbum.create({
+            data: {
+                userId: OTHER, rgMbid: `${P}rg-other`, artistName: 'Dlk Artist', artistMbid: 'art-mbid-1',
+                albumTitle: 'Other Album', weekStartDate: WEEK, status: 'ACTIVE', ...data,
+            } as any,
+        });
+
+    async function suggestWithoutLidarrId() {
+        await prisma.discoveryAlbum.create({
+            data: { id: `${P}da`, userId: USER, rgMbid: ALBUM_ID, artistMbid: 'art-mbid-1', artistName: 'Dlk Artist', albumTitle: 'Dlk Album', weekStartDate: WEEK, status: 'ACTIVE' },
+        });
+    }
+
+    it("untags by the Lidarr id of the album's Discover download job when the suggestion stored none", async () => {
+        await suggestWithoutLidarrId();
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: 'completed' } });
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: 'Dlk Artist - Dlk Album', type: 'album', status: 'completed', targetMbid: ALBUM_ID, lidarrAlbumId: 41, discoveryBatchId: batch.id },
+        });
+        lidarrKnowsAlbum();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(mockGetAlbum).toHaveBeenCalledWith(41);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
+    });
+
+    it("untags by the Lidarr id another listener's suggestion of the same album stored", async () => {
+        await suggestWithoutLidarrId();
+        await otherSuggestion({ rgMbid: ALBUM_ID, lidarrAlbumId: 41, status: 'DELETED' });
+        lidarrKnowsAlbum();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
+    });
+
+    it("does not use a listener's own download of that album as Discover's record, and untags nobody with no record", async () => {
+        await suggestWithoutLidarrId();
+        await prisma.downloadJob.create({
+            data: { userId: USER, subject: 'Dlk Artist - Dlk Album', type: 'album', status: 'completed', targetMbid: ALBUM_ID, lidarrAlbumId: 41 },
+        });
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(await statusOf(`${P}da`)).toBe('LIKED');
+        expect(mockGetAlbum).not.toHaveBeenCalled();
+        expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
+    });
+
+    it("keeps the tag while another listener's current suggestion carries the same artist id", async () => {
+        await suggest();
+        await otherSuggestion({ artistName: 'Spelled Otherwise' });
+        lidarrKnowsAlbum();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(await statusOf(`${P}da`)).toBe('LIKED');
+        expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
+    });
+
+    it.each([[null], ['temp-77']])("keeps the tag while another listener's current suggestion of the artist's name has artist id %s", async (artistMbid) => {
+        await suggest();
+        await otherSuggestion({ artistName: 'DLK artist', artistMbid });
+        lidarrKnowsAlbum();
+
+        const res = await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(res.status).toBe(200);
+        expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
+    });
+
+    it('takes the tag off when the other suggestion is a same-name artist with another MusicBrainz id', async () => {
+        await suggest();
+        await otherSuggestion({ artistMbid: 'other-mbid' });
+        lidarrKnowsAlbum();
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
+    });
+
+    it.each([['LIKED'], ['DELETED'], ['MOVED']])('takes the tag off when the other suggestion of the artist is %s', async (status) => {
+        await suggest();
+        await otherSuggestion({ status });
+        lidarrKnowsAlbum();
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
         expect(mockRemoveTagsFromArtist).toHaveBeenCalledWith(9, [22]);
     });
 });
