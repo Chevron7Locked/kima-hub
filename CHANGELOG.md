@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Subsonic apps no longer manage accounts.** Changing a password or creating, editing or deleting users from a Subsonic app now answers "not supported"; manage accounts in the web app.
 - **Saving settings reloads only what changed.** Changing one setting no longer drops the Soulseek connection or reloads Lidarr, Audiobookshelf and fanart; each reloads only when its own settings change, and turning Audiobookshelf on or off takes effect at once.
 - **Playlists mark songs that can't play.** A playlist keeps listing a song whose file went missing or unreadable, or that now sits only in Discover, marked "unavailable"; play, shuffle and add to queue skip it. Adding such a song to a playlist is refused.
+- **Subsonic stars songs only.** Starring an album or artist from a Subsonic app now answers an error saying it isn't supported, instead of a star Kima never kept; a star or unstar with no id answers a missing parameter. Starring many songs at once is faster.
+- **A Subsonic share holds one item.** Asking a Subsonic app to share several items at once is now told a share holds one item, instead of quietly sharing only the first.
 
 ### Fixed
 
@@ -32,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A song path needs two songs that play.** A start or end song that is missing, unreadable or in Discover is refused as not found, instead of building a queue that breaks at its ends.
 - **Artist counts catch up after a busy recount.** An artist whose songs change while the library recounts is counted again right after, so counts no longer stay stale until the next scan.
 - **Library scans finish their artist counts faster.** Only the artists whose songs were added, changed, lost or brought back are recounted.
+- **Subsonic shares keep their expiry and say what they hold.** A share made from a Subsonic app with an expiry now lapses when it should instead of living forever, and the app is told when it was made, when it expires, how often it was played and which songs it holds. A link you already had keeps its expiry.
+- **Share links offer only songs that play.** A share link to a song that went missing or unreadable, or that is only a Discover suggestion, now answers as deleted; an album or playlist share lists and plays only the songs that play.
 - **Discover tells same-name artists apart in Lidarr.** Keeping a Discover album takes Discover's tag off only the Lidarr artist that owns that album, not off other artists with the same name. And an unrelated artist with the same name as one of this week's suggestions no longer stops Discover clearing an artist it added.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
