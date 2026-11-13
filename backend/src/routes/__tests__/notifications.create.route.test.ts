@@ -84,6 +84,26 @@ describe("POST /notifications", () => {
         expect(all[0].message).toBe("Timed out");
     });
 
+    it("a repeat without a link drops the link of the one before it", async () => {
+        const app = makeApp();
+        await request(app).post("/notifications").send({ type: "error", title: "Failed to move track", href: "/playlist/p1" });
+        await request(app).post("/notifications").send({ type: "error", title: "Failed to move track" });
+
+        const all = await rows();
+        expect(all).toHaveLength(1);
+        expect(all[0].metadata).toBeNull();
+    });
+
+    it("a repeat with a link stores exactly that link", async () => {
+        const app = makeApp();
+        await request(app).post("/notifications").send({ type: "error", title: "Failed to move track", href: "/playlist/p1" });
+        await request(app).post("/notifications").send({ type: "error", title: "Failed to move track", href: "/playlist/p2" });
+
+        const all = await rows();
+        expect(all).toHaveLength(1);
+        expect(all[0].metadata).toEqual({ href: "/playlist/p2" });
+    });
+
     it("brings a dismissed failure back when it happens again", async () => {
         const app = makeApp();
         await request(app).post("/notifications").send({ type: "error", title: "Failed to move track" });

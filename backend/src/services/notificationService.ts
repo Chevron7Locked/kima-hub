@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { eventBus } from "./eventBus";
 
@@ -45,7 +45,8 @@ class NotificationService {
                 existing.message === (message ?? null) &&
                 sameData(existing.metadata, metadata);
             if (!renotify && identical) return existing;
-            const fields = { type, title, message: message ?? null, metadata };
+            // A repeat shows what the new event says: with no data, the row stores none, never the last event's.
+            const fields = { type, title, message: message ?? null, metadata: metadata ?? Prisma.DbNull };
             notification = await prisma.notification.upsert({
                 where,
                 create: { userId, groupKey, ...fields },

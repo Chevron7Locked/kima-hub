@@ -1,6 +1,7 @@
 /**
  * A grouped alert drops only an identical repeat, judged by its data whatever
- * the key order; a new type, link or value replaces the row and brings it back unread.
+ * the key order; a new type, link or value replaces the row and brings it back unread. A repeat
+ * stores exactly the data it came with, none when it came with none.
  */
 
 import { prisma } from "../../utils/db";
@@ -75,5 +76,34 @@ describe("comparing data", () => {
         await withData({ albumTitle: "Blue", href: "/settings#lidarr", nested: { a: [2, 1] } });
 
         expect(await only()).toMatchObject({ read: false, metadata: { nested: { a: [2, 1] } } });
+    });
+});
+
+describe("a repeat shows what the new event says", () => {
+    const send = (metadata?: Record<string, unknown>) =>
+        notificationService.create({ userId: USER, type: "error", title: "Lidarr", message: "Check it", metadata, groupKey: "nsg" });
+
+    it("stores no data when the repeat comes with none", async () => {
+        await send({ href: "/settings#lidarr", albumTitle: "Blue" });
+        await send();
+
+        const row = await only();
+        expect(row.metadata).toBeNull();
+        expect(row.read).toBe(false);
+    });
+
+    it("stores exactly the new data, none of the old", async () => {
+        await send({ href: "/settings#lidarr", albumTitle: "Blue" });
+        await send({ href: "/settings#downloads" });
+
+        expect((await only()).metadata).toEqual({ href: "/settings#downloads" });
+    });
+
+    it("still drops an identical repeat that came with no data", async () => {
+        await send();
+        await markRead();
+        await send();
+
+        expect((await only()).read).toBe(true);
     });
 });
