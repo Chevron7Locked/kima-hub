@@ -1,20 +1,20 @@
 /**
  * The live trip's event sequence: what each player report turns into, and the
- * stopped event that ends a trip nobody reports on any more.
+ * stopped event that ends a trip nobody reports on any more. The public user is looked up in the real database.
  */
 jest.mock("../../utils/logger", () => ({
     logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
-const LISTENER = { token: "t".repeat(32), username: "listener" };
+const P = "zz-liveListening-";
+const LISTENER = { token: "t".repeat(32), username: `${P}listener` };
 const mockConfig: { publicVibe: typeof LISTENER | null } = { publicVibe: LISTENER };
 jest.mock("../../config", () => ({
     get config() {
         return mockConfig;
     },
 }));
-const findUnique = jest.fn();
-jest.mock("../../utils/db", () => ({ prisma: { user: { findUnique: (...a: unknown[]) => findUnique(...a) } } }));
 
+import { prisma } from "../../utils/db";
 import {
     LiveEvent,
     getLiveState,
@@ -31,12 +31,28 @@ const B = "ctrackbbbbbbbbbbbbbbbbbb1";
 
 let events: LiveEvent[];
 
-beforeEach(() => {
+const wipe = () => prisma.user.deleteMany({ where: { id: { startsWith: P } } });
+beforeAll(wipe);
+afterAll(wipe);
+
+/** The public user, as a person's account with their sharing choice (none: no settings row). */
+async function seedListener(share?: boolean) {
+    await prisma.user.create({
+        data: {
+            id: `${P}u1`,
+            username: LISTENER.username,
+            passwordHash: "x",
+            ...(share === undefined ? {} : { settings: { create: { shareLiveListening: share } } }),
+        },
+    });
+}
+
+beforeEach(async () => {
+    await wipe();
     jest.useFakeTimers({ now: new Date("2026-10-02T12:00:00Z") });
     resetLive();
     events = [];
     subscribeLive((e) => events.push(e));
-    findUnique.mockReset();
     mockConfig.publicVibe = LISTENER;
 });
 
@@ -171,38 +187,53 @@ describe("live listening", () => {
         expect(types()).toEqual(["hidden", "state", "started"]);
         expect(events[1]).toMatchObject({ status: "stopped", trackId: null });
     });
+});
+
+// These look the user up in the database, which a fully faked clock would leave waiting: only the date is faked.
+function fakeOnlyTheDate() {
+    jest.useFakeTimers({
+        now: new Date("2026-10-02T12:00:00Z"),
+        doNotFake: [
+            "hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate",
+            "setInterval", "clearInterval", "setTimeout", "clearTimeout",
+        ],
+    });
+    resetLive();
+}
+
+describe("the public user", () => {
+    beforeEach(fakeOnlyTheDate);
 
     it("reads the public user's sharing choice when it looks them up", async () => {
-        findUnique.mockResolvedValueOnce({ id: "u1", settings: { shareLiveListening: false } });
+        await seedListener(false);
         await publicUserId();
         expect(getLiveState().status).toBe("hidden");
     });
 
     it("looks the public user up by name, and again a minute after a miss", async () => {
-        findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "u1" });
         expect(await publicUserId()).toBeNull();
+        await seedListener();
         expect(await publicUserId()).toBeNull();
         jest.advanceTimersByTime(60_000);
-        expect(await publicUserId()).toBe("u1");
-        expect(await publicUserId()).toBe("u1");
-        expect(findUnique).toHaveBeenCalledTimes(2);
-        expect(findUnique).toHaveBeenCalledWith({
-            where: { username: "listener" },
-            select: { id: true, settings: { select: { shareLiveListening: true } } },
-        });
+        expect(await publicUserId()).toBe(`${P}u1`);
+        // Once found, the answer is kept: no second lookup.
+        await wipe();
+        expect(await publicUserId()).toBe(`${P}u1`);
     });
 });
 
 describe("isPublicListener", () => {
+    beforeEach(fakeOnlyTheDate);
+
     it("is the public user, and nobody else", async () => {
-        findUnique.mockResolvedValue({ id: "u1" });
-        expect(await isPublicListener("u1")).toBe(true);
-        expect(await isPublicListener("u2")).toBe(false);
+        await seedListener();
+        expect(await isPublicListener(`${P}u1`)).toBe(true);
+        expect(await isPublicListener(`${P}u2`)).toBe(false);
     });
 
     it("is nobody on an instance without the public vibe, whatever the database holds", async () => {
         mockConfig.publicVibe = null;
-        findUnique.mockResolvedValue({ id: "u1" });
-        expect(await isPublicListener("u1")).toBe(false);
+        await seedListener();
+        expect(await isPublicListener(`${P}u1`)).toBe(false);
     });
 });
