@@ -91,6 +91,13 @@ router.get("/tracks/:id/stream", async (req, res) => {
       return res.status(404).json({ error: "Track not available" });
     }
 
+    // A file that could not be read would only stall the player. A Discover song still plays: the Discover page
+    // plays through this route (the playable-song rule's first exception).
+    if (track.corrupt) {
+      logger.debug(`[STREAM] Track ${track.id} could not be read`);
+      return res.status(404).json({ error: "Track not available" });
+    }
+
     // Streaming bytes is not listening: plays are recorded through POST /plays and
     // Subsonic's scrobble.view, judged in services/playRecording.ts.
 

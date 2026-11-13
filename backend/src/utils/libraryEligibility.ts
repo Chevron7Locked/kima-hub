@@ -13,8 +13,8 @@
  *
  * Exactly three exceptions read songs without the rule:
  *
- * 1. Web stream by id: the Discover page plays Discover songs through it. Of the rule it checks only that the file
- *    is not missing.
+ * 1. Web stream by id, Discover included; corrupt refused: the Discover page plays Discover songs through it. Of the
+ *    rule it refuses a missing file and a corrupt one, and asks nothing of the album.
  * 2. Status counters: they count the whole library, missing files included, and show the count (counted and shown,
  *    never silent).
  * 3. Owner lookups by id: a read of the one song a request names, to say who owns it or what it is, never a pick.
