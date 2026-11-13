@@ -1,23 +1,10 @@
 /**
- * requireAuth, requireAdmin and requireAuthOrToken, branch by branch. Prisma is
- * mocked; JWTs are really signed with the test secret from test-env.cjs.
+ * requireAuth, requireAdmin and requireAuthOrToken, branch by branch, against the
+ * real database; JWTs are really signed with the test secret from test-env.cjs.
  */
 
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-
-// Must be declared before auth import -- jest.mock is hoisted
-jest.mock('../../utils/db', () => ({
-    prisma: {
-        user: {
-            findUnique: jest.fn(),
-        },
-        apiKey: {
-            findUnique: jest.fn(),
-            update: jest.fn(),
-        },
-    },
-}));
 
 jest.mock('../../utils/logger', () => ({
     logger: {
@@ -37,6 +24,33 @@ import {
 import { prisma } from '../../utils/db';
 
 const TEST_SECRET = process.env.JWT_SECRET!;
+
+const P = 'zz-auth-';
+const USER = `${P}user`;
+const ADMIN = `${P}admin`;
+
+async function wipe() {
+    await prisma.user.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+/** The two accounts the tokens below are signed for. */
+const seedUsers = () =>
+    prisma.user.createMany({
+        data: [
+            { id: USER, username: USER, passwordHash: 'x', role: 'user', tokenVersion: 1 },
+            { id: ADMIN, username: ADMIN, passwordHash: 'x', role: 'admin', tokenVersion: 1 },
+        ],
+    });
+
+beforeAll(wipe);
+afterAll(wipe);
+beforeEach(async () => {
+    await wipe();
+    await seedUsers();
+    // The auth layer caches the user row across requests; without this the
+    // previous test's user leaks into this one.
+    clearUserCache();
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +79,7 @@ function mockNext(): NextFunction {
 }
 
 function validToken(
-    userId = 'user-123',
+    userId = USER,
     tokenVersion = 1,
     role = 'user'
 ): string {
@@ -76,7 +90,7 @@ function validToken(
     );
 }
 
-function expiredToken(userId = 'user-123', tokenVersion = 1): string {
+function expiredToken(userId = USER, tokenVersion = 1): string {
     // expiresIn: 1 (one second): expired by the time the test uses it
     return jwt.sign(
         { userId, username: 'testuser', role: 'user', tokenVersion },
@@ -85,20 +99,9 @@ function expiredToken(userId = 'user-123', tokenVersion = 1): string {
     );
 }
 
-const DB_USER = { id: 'user-123', username: 'testuser', role: 'user', tokenVersion: 1 };
-
 // ── requireAuth ───────────────────────────────────────────────────────────────
 
 describe('requireAuth', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        // The auth layer caches the user row across requests; without this the
-        // previous test's user leaks into this one.
-        clearUserCache();
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
     it('returns 401 when no Authorization header is present', async () => {
         const req = mockReq();
         const { res, status, json } = mockRes();
@@ -135,7 +138,7 @@ describe('requireAuth', () => {
     });
 
     it('returns 401 when JWT is expired', async () => {
-        const token = expiredToken('user-123', 1);
+        const token = expiredToken(USER, 1);
         // Wait for the 1-second token to expire
         await new Promise(r => setTimeout(r, 1100));
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
@@ -146,17 +149,12 @@ describe('requireAuth', () => {
 
         expect(status).toHaveBeenCalledWith(401);
         expect(next).not.toHaveBeenCalled();
-        // prisma should not be called -- jwt.verify rejects before DB lookup
-        expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
 
     it('returns 401 when tokenVersion in token does not match DB (password was changed)', async () => {
         // Token has tokenVersion: 1, DB has tokenVersion: 2 (password was changed)
-        const staleToken = validToken('user-123', 1);
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            ...DB_USER,
-            tokenVersion: 2, // incremented when password changed
-        });
+        const staleToken = validToken(USER, 1);
+        await prisma.user.update({ where: { id: USER }, data: { tokenVersion: 2 } }); // incremented when password changed
 
         const req = mockReq({ headers: { authorization: `Bearer ${staleToken}` } });
         const { res, status, json } = mockRes();
@@ -172,11 +170,10 @@ describe('requireAuth', () => {
     it('returns 401 when token has no tokenVersion claim (legacy token format)', async () => {
         // A token without a tokenVersion claim
         const legacyToken = jwt.sign(
-            { userId: 'user-123', username: 'testuser', role: 'user' }, // no tokenVersion
+            { userId: USER, username: 'testuser', role: 'user' }, // no tokenVersion
             TEST_SECRET,
             { expiresIn: '24h' }
         );
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
 
         const req = mockReq({ headers: { authorization: `Bearer ${legacyToken}` } });
         const { res, status } = mockRes();
@@ -190,8 +187,7 @@ describe('requireAuth', () => {
     });
 
     it('returns 401 when JWT userId does not exist in DB', async () => {
-        const token = validToken('deleted-user-id');
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null); // user deleted
+        const token = validToken('deleted-user-id'); // no such user
 
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const { res, status } = mockRes();
@@ -204,8 +200,7 @@ describe('requireAuth', () => {
     });
 
     it('calls next and sets req.user when token and tokenVersion are valid', async () => {
-        const token = validToken('user-123', 1);
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken(USER, 1);
 
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const { res } = mockRes();
@@ -214,12 +209,11 @@ describe('requireAuth', () => {
         await requireAuth(req, res, next);
 
         expect(next).toHaveBeenCalledTimes(1);
-        expect(req.user).toEqual({ id: 'user-123', username: 'testuser', role: 'user' });
+        expect(req.user).toEqual({ id: USER, username: USER, role: 'user' });
     });
 
     it('req.user does not contain tokenVersion or passwordHash (no sensitive data leaked into request context)', async () => {
-        const token = validToken('user-123', 1);
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken(USER, 1);
 
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const { res } = mockRes();
@@ -233,17 +227,8 @@ describe('requireAuth', () => {
 // ── requireAdmin ──────────────────────────────────────────────────────────────
 
 describe('requireAdmin', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        // The auth layer caches the user row across requests; without this the
-        // previous test's user leaks into this one.
-        clearUserCache();
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
     it('returns 403 when authenticated user has role "user"', async () => {
-        const token = validToken('user-123', 1, 'user');
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken(USER, 1, 'user');
 
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const { res, status, json } = mockRes();
@@ -257,9 +242,7 @@ describe('requireAdmin', () => {
     });
 
     it('calls next when authenticated user has role "admin"', async () => {
-        const adminToken = validToken('admin-123', 1, 'admin');
-        const adminUser = { ...DB_USER, id: 'admin-123', role: 'admin' };
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(adminUser);
+        const adminToken = validToken(ADMIN, 1, 'admin');
 
         const req = mockReq({ headers: { authorization: `Bearer ${adminToken}` } });
         const { res } = mockRes();
@@ -272,7 +255,6 @@ describe('requireAdmin', () => {
     });
 
     it('returns 401 (not 403) when no token provided -- unauthenticated vs unauthorized are distinct', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
         const req = mockReq();
         const { res, status } = mockRes();
         const next = mockNext();
@@ -288,17 +270,8 @@ describe('requireAdmin', () => {
 // ── requireAuthOrToken (streaming / query-param auth) ─────────────────────────
 
 describe('requireAuthOrToken', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        // The auth layer caches the user row across requests; without this the
-        // previous test's user leaks into this one.
-        clearUserCache();
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
     it('authenticates via token query param when no Authorization header present', async () => {
-        const token = validToken('user-123', 1);
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
+        const token = validToken(USER, 1);
 
         const req = mockReq({ query: { token } });
         const { res } = mockRes();
@@ -307,17 +280,14 @@ describe('requireAuthOrToken', () => {
         await requireAuthOrToken(req, res, next);
 
         expect(next).toHaveBeenCalledTimes(1);
-        expect(req.user?.id).toBe('user-123');
+        expect(req.user?.id).toBe(USER);
     });
 
     it('returns 401 for query token with mismatched tokenVersion (revoked streaming URL)', async () => {
         // Streaming URLs with embedded tokens are long-lived -- tokenVersion check
         // prevents a stolen URL from working after a password change
-        const staleToken = validToken('user-123', 1);
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            ...DB_USER,
-            tokenVersion: 2,
-        });
+        const staleToken = validToken(USER, 1);
+        await prisma.user.update({ where: { id: USER }, data: { tokenVersion: 2 } });
 
         const req = mockReq({ query: { token: staleToken } });
         const { res, status } = mockRes();
@@ -331,7 +301,7 @@ describe('requireAuthOrToken', () => {
 
     describe('stream-scoped tickets', () => {
         const ticket = () => jwt.sign(
-            { userId: 'user-123', username: 'testuser', role: 'user', tokenVersion: 1, scope: 'stream' },
+            { userId: USER, username: 'testuser', role: 'user', tokenVersion: 1, scope: 'stream' },
             TEST_SECRET,
             { expiresIn: '5m' }
         );
@@ -340,7 +310,6 @@ describe('requireAuthOrToken', () => {
             '/tracks/t1/stream',
             '/preview/123456/snippet',
         ])('accepts a ticket on the audio route %s', async (path) => {
-            (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
             const req = mockReq({ path, query: { token: ticket() } });
             const { res } = mockRes();
             const next = mockNext();
@@ -348,7 +317,7 @@ describe('requireAuthOrToken', () => {
             await requireAuthOrToken(req, res, next);
 
             expect(next).toHaveBeenCalledTimes(1);
-            expect(req.user?.id).toBe('user-123');
+            expect(req.user?.id).toBe(USER);
         });
 
         it.each([
@@ -358,7 +327,6 @@ describe('requireAuthOrToken', () => {
             '/snippet',
             '/preview/a/b/snippet',
         ])('refuses a ticket on the non-audio route %s', async (path) => {
-            (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
             const req = mockReq({ path, query: { token: ticket() } });
             const { res, status } = mockRes();
             const next = mockNext();
@@ -374,31 +342,25 @@ describe('requireAuthOrToken', () => {
 // ── user cache ────────────────────────────────────────────────────────────────
 
 describe('user row cache', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        clearUserCache();
-        (prisma.apiKey.findUnique as jest.Mock).mockResolvedValue(null);
-    });
-
-    it('hits the database once across repeated requests', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
-        const token = validToken('user-123', 1);
+    it('serves repeated requests from the cache: the account can vanish and the token still passes', async () => {
+        const token = validToken(USER, 1);
+        const results: boolean[] = [];
 
         for (let i = 0; i < 5; i += 1) {
             const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
             const { res } = mockRes();
-            await requireAuth(req, res, mockNext());
+            const next = mockNext();
+            await requireAuth(req, res, next);
+            results.push((next as jest.Mock).mock.calls.length === 1);
+            // After the first request has read the row, it is gone from the database.
+            if (i === 0) await prisma.user.delete({ where: { id: USER } });
         }
 
-        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+        expect(results).toEqual([true, true, true, true, true]);
     });
 
     it('requireAdmin reuses an already-authenticated request', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            ...DB_USER,
-            role: 'admin',
-        });
-        const token = validToken('user-123', 1, 'admin');
+        const token = validToken(ADMIN, 1, 'admin');
 
         const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const { res } = mockRes();
@@ -407,16 +369,14 @@ describe('user row cache', () => {
         // The real chain: app.use(path, requireAuth, requireAdmin, ...)
         await requireAuth(req, res, next);
         clearUserCache(); // prove the reuse, not the cache
+        await prisma.user.delete({ where: { id: ADMIN } }); // nothing to read a second time
         await requireAdmin(req, res, next);
 
         expect(next).toHaveBeenCalledTimes(2);
-        // With req.user already populated, requireAdmin must not query again.
-        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
     });
 
     it('revocation takes effect immediately once the cache is invalidated', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(DB_USER);
-        const token = validToken('user-123', 1);
+        const token = validToken(USER, 1);
 
         const first = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const r1 = mockRes();
@@ -425,11 +385,8 @@ describe('user row cache', () => {
         expect(n1).toHaveBeenCalledTimes(1);
 
         // Password changed: tokenVersion bumped, and the route invalidates.
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue({
-            ...DB_USER,
-            tokenVersion: 2,
-        });
-        invalidateUserCache('user-123');
+        await prisma.user.update({ where: { id: USER }, data: { tokenVersion: 2 } });
+        invalidateUserCache(USER);
 
         const second = mockReq({ headers: { authorization: `Bearer ${token}` } });
         const r2 = mockRes();
@@ -441,15 +398,21 @@ describe('user row cache', () => {
     });
 
     it('caches a missing user so a bad token cannot hammer the database', async () => {
-        (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-        const token = validToken('deleted-user', 1);
+        const token = validToken(`${P}ghost`, 1);
+        const statuses: number[] = [];
 
         for (let i = 0; i < 4; i += 1) {
             const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
-            const { res } = mockRes();
+            const { res, status } = mockRes();
             await requireAuth(req, res, mockNext());
+            statuses.push(status.mock.calls[0][0]);
+            // The account appears after the first miss: the cached miss still answers.
+            if (i === 0) {
+                await prisma.user.create({ data: { id: `${P}ghost`, username: `${P}late`, passwordHash: 'x', tokenVersion: 1 } });
+            }
         }
 
-        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+        expect(statuses).toEqual([401, 401, 401, 401]);
+        await prisma.user.delete({ where: { id: `${P}ghost` } });
     });
 });

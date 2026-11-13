@@ -9,18 +9,6 @@ import { AudioStreamingService } from "../audioStreaming";
 // Module mocks
 // ---------------------------------------------------------------------------
 
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        transcodedFile: {
-            findFirst: jest.fn(),
-            findMany: jest.fn(),
-            upsert: jest.fn(),
-            update: jest.fn(),
-            delete: jest.fn(),
-        },
-    },
-}));
-
 jest.mock("music-metadata");
 
 const mockSettings = jest.fn();
@@ -53,7 +41,38 @@ jest.mock("@ffmpeg-installer/ffmpeg", () => ({ path: "/fake/ffmpeg" }));
 
 import { prisma } from "../../utils/db";
 
-const mockPrisma = prisma.transcodedFile as jest.Mocked<typeof prisma.transcodedFile>;
+const P = "zz-audioStream-";
+const TRACKS = ["t1", "wd", "dbl"].map((n) => `${P}${n}`);
+
+async function wipe() {
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } }); // cached transcodes go with the song
+    await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+}
+
+/** The songs a transcode can be cached for: the cache rows belong to a song. */
+async function seedSongs() {
+    await prisma.artist.create({ data: { id: `${P}art`, name: "Stream Artist", identityKey: `${P}art` } });
+    await prisma.album.create({
+        data: { id: `${P}alb`, artistId: `${P}art`, title: "Record", identityKey: `${P}alb`, rgMbid: `${P}alb`, primaryType: "Album" },
+    });
+    for (const id of TRACKS) {
+        await prisma.track.create({
+            data: {
+                id, albumId: `${P}alb`, title: id, trackNo: 1, duration: 200,
+                filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1000,
+            },
+        });
+    }
+}
+
+beforeAll(async () => {
+    await wipe();
+    await seedSongs();
+});
+afterAll(wipe);
+
+const cachedRowsFor = (trackId: string) => prisma.transcodedFile.findMany({ where: { trackId } });
 
 function makeTmpFile(dir: string, content: string = "audio data"): string {
     const p = path.join(dir, `file-${Math.random().toString(36).slice(2)}.mp3`);
@@ -452,12 +471,13 @@ describe("getCachedTranscode freshness", () => {
     let svc: AudioStreamingService;
     let sourcePath: string;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-fresh-"));
         svc = new AudioStreamingService(tmpDir, 10);
         sourcePath = path.join(tmpDir, "source.flac");
         fs.writeFileSync(sourcePath, "Z".repeat(2000));
         jest.clearAllMocks();
+        await prisma.transcodedFile.deleteMany({ where: { trackId: { startsWith: P } } });
     });
 
     afterEach(() => {
@@ -474,7 +494,7 @@ describe("getCachedTranscode freshness", () => {
             sourceSize: BigInt(sourceStat.size),
             cacheSize: BigInt(8),
             quality: "high",
-            trackId: "t1",
+            trackId: `${P}t1`,
             lastAccessed: new Date(),
             createdAt: new Date(),
             ...overrides,
@@ -483,39 +503,37 @@ describe("getCachedTranscode freshness", () => {
 
     async function lookup(row: ReturnType<typeof cachedRow>) {
         fs.writeFileSync(path.join(tmpDir, row.cachePath), "mp3 data");
-        mockPrisma.findFirst.mockResolvedValue(row);
-        mockPrisma.update.mockResolvedValue({} as any);
-        mockPrisma.delete.mockResolvedValue({} as any);
+        await prisma.transcodedFile.create({ data: row });
         return (svc as any).getCachedTranscode(
-            "t1", "high", fs.statSync(sourcePath).mtime, sourcePath
+            `${P}t1`, "high", fs.statSync(sourcePath).mtime, sourcePath
         );
     }
 
     it("same mtime + same size -> cache hit (does not delete)", async () => {
-        const result = await lookup(cachedRow("row-1", {}));
-        expect(result).toBe(path.join(tmpDir, "row-1.mp3"));
-        expect(mockPrisma.delete).not.toHaveBeenCalled();
+        const result = await lookup(cachedRow(`${P}row-1`, {}));
+        expect(result).toBe(path.join(tmpDir, `${P}row-1.mp3`));
+        expect(await cachedRowsFor(`${P}t1`)).toHaveLength(1);
     });
 
     it("same mtime but different size -> cache miss and row deleted", async () => {
         const result = await lookup(
-            cachedRow("row-2", { sourceSize: BigInt(fs.statSync(sourcePath).size + 999) })
+            cachedRow(`${P}row-2`, { sourceSize: BigInt(fs.statSync(sourcePath).size + 999) })
         );
         expect(result).toBeNull();
-        expect(mockPrisma.delete).toHaveBeenCalledWith({ where: { id: "row-2" } });
+        expect(await cachedRowsFor(`${P}t1`)).toEqual([]);
     });
 
     it("sourceSize 0 (legacy row) -> cache miss and row deleted", async () => {
-        const result = await lookup(cachedRow("row-3", { sourceSize: 0n }));
+        const result = await lookup(cachedRow(`${P}row-3`, { sourceSize: 0n }));
         expect(result).toBeNull();
-        expect(mockPrisma.delete).toHaveBeenCalledWith({ where: { id: "row-3" } });
+        expect(await cachedRowsFor(`${P}t1`)).toEqual([]);
     });
 
     it("different mtime -> cache miss and row deleted", async () => {
         const olderMtime = new Date(fs.statSync(sourcePath).mtime.getTime() - 10000);
-        const result = await lookup(cachedRow("row-4", { sourceModified: olderMtime }));
+        const result = await lookup(cachedRow(`${P}row-4`, { sourceModified: olderMtime }));
         expect(result).toBeNull();
-        expect(mockPrisma.delete).toHaveBeenCalledWith({ where: { id: "row-4" } });
+        expect(await cachedRowsFor(`${P}t1`)).toEqual([]);
     });
 });
 
@@ -551,7 +569,7 @@ describe("transcodeToCache watchdog", () => {
 
         const sourcePath = makeTmpFile(tmpDir);
         const promise = (svc as any).transcodeToCache(
-            "track-watchdog", "high", sourcePath, new Date()
+            `${P}wd`, "high", sourcePath, new Date()
         );
 
         jest.advanceTimersByTime(120_001);
@@ -562,7 +580,8 @@ describe("transcodeToCache watchdog", () => {
             message: expect.stringContaining("timed out"),
         });
 
-        expect(mockPrisma.upsert).not.toHaveBeenCalled();
+        jest.useRealTimers(); // the database is read on the real clock
+        expect(await cachedRowsFor(`${P}wd`)).toEqual([]);
     });
 
     it("partial cache file is unlinked on watchdog timeout", async () => {
@@ -602,7 +621,7 @@ describe("transcodeToCache watchdog", () => {
 
         const sourcePath = makeTmpFile(tmpDir);
         const promise = (svc as any).transcodeToCache(
-            "track-double", "high", sourcePath, new Date()
+            `${P}dbl`, "high", sourcePath, new Date()
         );
 
         jest.advanceTimersByTime(120_001);
@@ -616,7 +635,9 @@ describe("transcodeToCache watchdog", () => {
             code: ErrorCode.TRANSCODE_FAILED,
             message: expect.stringContaining("timed out"),
         });
-        expect(mockPrisma.upsert).not.toHaveBeenCalled();
+
+        jest.useRealTimers(); // the database is read on the real clock
+        expect(await cachedRowsFor(`${P}dbl`)).toEqual([]);
     });
 });
 
