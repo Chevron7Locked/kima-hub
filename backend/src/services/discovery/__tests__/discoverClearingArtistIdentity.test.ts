@@ -331,6 +331,13 @@ describe("clearOrphanedDiscoverAlbums' two coverage checks", () => {
         expect((await clearOrphanedDiscoverAlbums()).returned).toBe(1);
     });
 
+    it.each(NO_REAL_ID)("is held back by a namesake-id download in a running batch when the album's artist id is %s", async (id) => {
+        await scannedAlbum(id);
+        await discoverJob(NAMESAKE, { batchStatus: "downloading" });
+
+        expect(await clearOrphanedDiscoverAlbums()).toEqual({ cleared: 0, returned: 0, failures: [] });
+    });
+
     it.each(SAME_OR_NONE)("is held back by a download in a running batch under artist id %s", async (id) => {
         await scannedAlbum(ARTIST);
         await discoverJob(id, { batchStatus: "downloading" });

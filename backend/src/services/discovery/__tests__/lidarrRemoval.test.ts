@@ -345,10 +345,10 @@ describe("removeDiscoveryAlbum", () => {
         expect(lidarr.deleteAlbumById).not.toHaveBeenCalled();
     });
 
-    it("keeps the files of a library album matching by artist and title when the library artist has no id", async () => {
+    it.each([[null], ["temp-1792991402890-0.92"]])("keeps the files of a library album matching by artist and title when the library artist id is %s", async (libraryId) => {
         await discovered("rg-asked", "DELETED");
         await inLibrary("rg-unrelated");
-        await prisma.artist.update({ where: { id: ARTIST }, data: { mbid: null } });
+        await prisma.artist.update({ where: { id: ARTIST }, data: { mbid: libraryId } });
         lidarr.getAlbum.mockResolvedValue(lidarrAlbum("rg-asked"));
 
         const kept = await removeDiscoveryAlbum(7, "rg-asked", { artistName: "Interpol", artistMbid: "artist-mbid", albumTitle: "owned" });

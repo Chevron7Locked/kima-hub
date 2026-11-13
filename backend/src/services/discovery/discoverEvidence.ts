@@ -148,7 +148,8 @@ function marksOf(album: RecordedAlbum, records: DiscoverRecords): Mark[] {
         (records.byName.get(albumNameKey(artistName, album.title) ?? "") ?? []).filter((m) =>
             sameArtist(m, { artistMbid: album.artistMbid, artistName }),
         );
-    return [...(album.rgMbid && records.byId.has(album.rgMbid) ? [records.byId.get(album.rgMbid)!] : []), ...named(album.artistName), ...named(primary)];
+    const byRelease = album.rgMbid ? records.byId.get(album.rgMbid) : undefined;
+    return [...new Set([...(byRelease ? [byRelease] : []), ...named(album.artistName), ...named(primary)])];
 }
 
 /** Whether a Discover download asked for this album (a suggestion alone is not a download). */
