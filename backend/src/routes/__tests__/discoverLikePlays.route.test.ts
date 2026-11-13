@@ -34,6 +34,7 @@ import tracksRouter from "../library/tracks";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { mountAsServer } from "./helpers/serverMount";
 
 const P = "dlp_";
 const USER = `${P}user`;
@@ -43,8 +44,8 @@ app.use((req: any, _res, next) => {
     req.user = { id: USER, role: "admin" };
     next();
 });
-app.use("/discover", discoverRoutes);
-app.use("/library", tracksRouter);
+mountAsServer(app, "/discover", discoverRoutes, "/api/discover");
+mountAsServer(app, "/library", tracksRouter, "/api/library");
 
 async function cleanup() {
     await prisma.play.deleteMany({ where: { userId: USER } });
