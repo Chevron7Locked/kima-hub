@@ -7,7 +7,7 @@
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "../../__tests__/helpers/lidarrReplay";
-import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
+import { useLidarr, useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { sortDiscoverAlbums } from "../discovery/sortDiscoverAlbums";
 
 jest.setTimeout(60_000);
@@ -118,7 +118,8 @@ afterEach(async () => {
 
 afterAll(async () => {
     await cleanup();
-    await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null, lidarrEnabled: false } });
+    await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null } });
+    await useNoLidarr();
     await prisma.$disconnect();
 });
 

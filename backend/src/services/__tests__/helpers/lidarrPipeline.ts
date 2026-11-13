@@ -34,6 +34,8 @@ export async function clearDownloads(userId: string) {
 }
 
 export async function tearDownPipeline(userId: string, mb: ReplayServer) {
+    // The settings row is shared by the files a worker runs in turn: leave no Lidarr on it.
+    await (await import("../../../__tests__/helpers/lidarrSettings")).useNoLidarr();
     await prisma.user.deleteMany({ where: { id: userId } });
     await mb.close();
     restoreEnv();

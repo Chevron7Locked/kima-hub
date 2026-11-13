@@ -8,7 +8,7 @@
 
 import { prisma } from "../../utils/db";
 import { loadScenario, startLidarrReplay, type LidarrReplay, type LidarrScenario } from "../../__tests__/helpers/lidarrReplay";
-import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
+import { useLidarr, useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { judgeQueueItem, rejectSingleTrackPost, removeFailedDownload, sweepFailedDownloads } from "../lidarrFailures";
 import { lidarrService } from "../lidarr";
@@ -52,6 +52,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+    await useNoLidarr();
     await prisma.user.deleteMany({ where: { id: USER } });
     await closeEngineConnections();
 });

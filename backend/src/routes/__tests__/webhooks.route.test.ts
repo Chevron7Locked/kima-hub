@@ -12,6 +12,7 @@ import { encryptField } from "../../utils/encryption";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "../../__tests__/helpers/lidarrReplay";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { queues } from "../../workers/queues";
 import webhookRoutes from "../webhooks";
@@ -77,6 +78,7 @@ afterEach(whenIdle);
 
 afterAll(async () => {
     await lidarr.close();
+    await useNoLidarr();
     await lidarrEvents();
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.user.deleteMany({ where: { id: USER } });

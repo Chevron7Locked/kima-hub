@@ -43,6 +43,8 @@ function app() {
 const as = (id: string, role: "user" | "admin") =>
     `Bearer ${generateToken({ id, username: id, role, tokenVersion: 0 })}`;
 
+// The one setting these cases read is the member-acquire toggle: beforeAll sets it off and afterAll puts it back,
+// so a row an earlier file on this worker left behind (a Lidarr, a public address) changes no answer here.
 const setToggle = async (allowMemberAcquire: boolean) => {
     await prisma.systemSettings.upsert({
         where: { id: "default" },

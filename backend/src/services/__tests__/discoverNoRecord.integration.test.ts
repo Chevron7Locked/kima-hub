@@ -10,7 +10,7 @@ jest.mock("../artistCountsService", () => ({ ...jest.requireActual("../artistCou
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { loadScenario, startLidarrReplay, type LidarrReplay, type LidarrScenario } from "../../__tests__/helpers/lidarrReplay";
-import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
+import { useLidarr, useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { sortDiscoverAlbums } from "../discovery/sortDiscoverAlbums";
 import { clearOrphanedDiscoverAlbums } from "../discovery/discoverClearing";
 import { artistIdentityKey } from "../artistIdentity";
@@ -80,7 +80,8 @@ afterEach(async () => {
 });
 afterAll(async () => {
     await cleanup();
-    await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null, lidarrEnabled: false } });
+    await prisma.systemSettings.update({ where: { id: "default" }, data: { discoverAlbumsSortedAt: null } });
+    await useNoLidarr();
     await prisma.$disconnect();
 });
 
