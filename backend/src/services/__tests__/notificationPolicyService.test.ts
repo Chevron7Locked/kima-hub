@@ -150,15 +150,13 @@ describe("failed downloads", () => {
     });
 
     it.each(["complete", "failed"] as const)("stays silent for a pending song's retry, which the user asked for (%s)", async (event) => {
-        (prisma.downloadJob.findUnique as jest.Mock).mockResolvedValue(
-            makeJob({
-                status: event === "complete" ? "completed" : "failed",
-                error: event === "complete" ? null : "x",
-                metadata: { downloadType: "pending-track-retry" },
-            })
-        );
+        await seedJob({
+            status: event === "complete" ? "completed" : "failed",
+            error: event === "complete" ? null : "x",
+            metadata: { downloadType: "pending-track-retry" },
+        });
 
-        expect((await notificationPolicyService.evaluateNotification("job-1", event)).shouldNotify).toBe(false);
+        expect((await evaluate(event)).shouldNotify).toBe(false);
     });
 
     it("stays silent for a cancel, the user having asked for it", async () => {
