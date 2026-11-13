@@ -26,6 +26,7 @@ import { prisma } from "../../utils/db";
 import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
+import * as downloadJobs from "../../services/downloads/jobs";
 
 const MARK = "zz-cancel";
 let listener: string;
@@ -93,7 +94,7 @@ describe("DELETE /discover/batch -- cancel marks the batch failed, not completed
                 data: { userId: listener, subject: `${MARK} ${mbid}`, type: "album", status, targetMbid: `${MARK}-${mbid}`, discoveryBatchId: stuck.id },
             });
         await job("pending", "pending");
-        await job("active", "active");
+        await job("processing", "processing");
         await job("completed", "done");
 
         const res = await request(app).delete("/discover/batch").expect(200);
@@ -102,8 +103,31 @@ describe("DELETE /discover/batch -- cancel marks the batch failed, not completed
         const jobs = await prisma.downloadJob.findMany({ where: { discoveryBatchId: stuck.id } });
         const byMbid = Object.fromEntries(jobs.map((j) => [j.targetMbid, j]));
         expect(byMbid[`${MARK}-pending`]).toMatchObject({ status: "failed", error: "Cancelled by user" });
-        expect(byMbid[`${MARK}-active`]).toMatchObject({ status: "failed", error: "Cancelled by user" });
+        expect(byMbid[`${MARK}-processing`]).toMatchObject({ status: "failed", error: "Cancelled by user", metadata: { cancelled: true } });
         expect(byMbid[`${MARK}-done`]).toMatchObject({ status: "completed", error: null });
+    });
+
+    it("cancels the jobs through the download-job module without finishing the batch it is cancelling", async () => {
+        const stuck = await prisma.discoveryBatch.create({
+            data: { userId: listener, weekStart: THIS_WEEK, targetSongCount: 5, status: "downloading" },
+        });
+        await prisma.downloadJob.create({
+            data: { userId: listener, subject: `${MARK} one`, type: "album", status: "processing", targetMbid: `${MARK}-one`, discoveryBatchId: stuck.id },
+        });
+        const cancel = jest.spyOn(downloadJobs, "cancel");
+        const { discoverWeeklyService } = await import("../../services/discoverWeekly");
+        const check = jest.spyOn(discoverWeeklyService, "checkBatchCompletion");
+
+        await request(app).delete("/discover/batch").expect(200);
+
+        expect(cancel).toHaveBeenCalledTimes(1);
+        // The batch is already failed when the module tells it, so its completion flow stands down.
+        expect(check).toHaveBeenCalledWith(stuck.id);
+        const batch = await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: stuck.id } });
+        expect(batch).toMatchObject({ status: "failed", errorMessage: "Cancelled by user" });
+        expect(await prisma.playlist.count({ where: { userId: listener } })).toBe(0);
+        cancel.mockRestore();
+        check.mockRestore();
     });
 
     it("keeps a cancelled batch out of the completed-only lookup behind /current", async () => {

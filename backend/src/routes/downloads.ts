@@ -7,6 +7,7 @@ import { config } from "../config";
 import { lidarrService } from "../services/lidarr";
 import { musicBrainzService } from "../services/musicbrainz";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
+import * as downloadJobs from "../services/downloads/jobs";
 import { sweepFailedDownloads } from "../services/lidarrFailures";
 import crypto from "crypto";
 import { safeError, UserFacingError } from "../utils/errors";
@@ -364,6 +365,12 @@ async function processDownload(
     }
 }
 
+/** The jobs about to be removed stop first: Lidarr lets go of them, then they end as cancelled and their batch is told. */
+async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findMany>>): Promise<void> {
+    await simpleDownloadManager.cancelJobs(jobs);
+    await downloadJobs.cancel(jobs);
+}
+
 // Registered before /:id so "clear-all" is not read as an id.
 router.delete("/clear-all", async (req, res) => {
     try {
@@ -375,7 +382,7 @@ router.delete("/clear-all", async (req, res) => {
             where.status = status as string;
         }
 
-        await simpleDownloadManager.cancelJobs(await prisma.downloadJob.findMany({ where }));
+        await stopJobs(await prisma.downloadJob.findMany({ where }));
         const result = await prisma.downloadJob.deleteMany({ where });
 
         logger.debug(
@@ -445,7 +452,7 @@ router.delete("/:id", async (req, res) => {
         const userId = req.user!.id;
 
         const jobs = await prisma.downloadJob.findMany({ where: { id, userId } });
-        await simpleDownloadManager.cancelJobs(jobs);
+        await stopJobs(jobs);
         const result = await prisma.downloadJob.deleteMany({
             where: {
                 id,

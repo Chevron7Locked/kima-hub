@@ -7,6 +7,7 @@ import { requireAuth, requireAdmin, requireAcquirePermission } from "../middlewa
 import { soulseekService } from "../services/soulseek";
 import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
+import * as downloadJobs from "../services/downloads/jobs";
 import { prisma } from "../utils/db";
 import fs from "fs";
 import { pathInMusicFolder } from "../utils/musicFolderPath";
@@ -364,26 +365,11 @@ router.post(
                     await fs.promises.access(destPath);
                 } catch {
                     logger.error(`[Soulseek] Download reported success but file missing: ${destPath}`);
-                    await prisma.downloadJob.update({
-                        where: { id: job.id },
-                        data: { status: "failed", error: "File not written to disk", completedAt: new Date() },
-                    });
+                    await downloadJobs.fail([job], "File not written to disk");
                     return res.status(500).json({ success: false, error: "Download failed: file not written to disk" });
                 }
 
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: { status: "completed", completedAt: new Date() },
-                });
-
-                eventBus.emit({
-                    type: "download:complete",
-                    userId,
-                    payload: {
-                        jobId: job.id,
-                        subject,
-                    },
-                });
+                await downloadJobs.complete([job]);
 
                 // Trigger library scan to import the new file (keyed on
                 // this download job; a repeat click finds it queued/running)
@@ -405,10 +391,7 @@ router.post(
                     message: "Download complete, scanning library...",
                 });
             } else {
-                await prisma.downloadJob.update({
-                    where: { id: job.id },
-                    data: { status: "failed", error: result.error || "Download failed", completedAt: new Date() },
-                });
+                await downloadJobs.fail([job], result.error || "Download failed");
                 res.status(500).json({
                     success: false,
                     error: result.error || "Download failed",
@@ -416,10 +399,7 @@ router.post(
             }
         } catch (error) {
             if (jobId) {
-                await prisma.downloadJob.update({
-                    where: { id: jobId },
-                    data: { status: "failed", error: error instanceof Error ? error.message : "Download failed", completedAt: new Date() },
-                }).catch(() => {});
+                await downloadJobs.fail([{ id: jobId }], error instanceof Error ? error.message : "Download failed").catch(() => {});
             }
             safeError(res, "Soulseek download", error);
         }

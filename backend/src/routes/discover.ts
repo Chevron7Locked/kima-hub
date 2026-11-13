@@ -20,6 +20,8 @@ import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
 import { config } from "../config";
+import { simpleDownloadManager } from "../services/simpleDownloadManager";
+import * as downloadJobs from "../services/downloads/jobs";
 
 const router = Router();
 
@@ -124,19 +126,8 @@ router.delete("/batch", async (req, res) => {
         for (const batch of activeBatches) {
             logger.debug(`[Discover Cancel] Processing batch ${batch.id}, status: ${batch.status}`);
 
-            const downloadJobsUpdated = await prisma.downloadJob.updateMany({
-                where: {
-                    discoveryBatchId: batch.id,
-                    status: { in: ["pending", "active", "waiting"] },
-                },
-                data: {
-                    status: "failed",
-                    error: "Cancelled by user",
-                },
-            });
-            downloadJobsCancelled += downloadJobsUpdated.count;
-            logger.debug(`[Discover Cancel] Cancelled ${downloadJobsUpdated.count} download jobs for batch ${batch.id}`);
-
+            // The batch is marked failed first: cancelling its jobs tells it, and a batch
+            // that is already over takes no further completion work.
             // A cancelled batch produced no playlist -- it must not read as a
             // successful empty week to the /current fallback.
             await prisma.discoveryBatch.update({
@@ -147,6 +138,17 @@ router.delete("/batch", async (req, res) => {
                     errorMessage: "Cancelled by user",
                 },
             });
+
+            const unfinished = batch.jobs.filter((j) => j.status === "pending" || j.status === "processing");
+            try {
+                await simpleDownloadManager.cancelJobs(unfinished);
+            } catch (lidarrError) {
+                logger.warn(`[Discover Cancel] Could not stop the Lidarr side for batch ${batch.id}:`, lidarrError);
+            }
+            const cancelled = await downloadJobs.cancel(unfinished);
+            downloadJobsCancelled += cancelled.length;
+            logger.debug(`[Discover Cancel] Cancelled ${cancelled.length} download jobs for batch ${batch.id}`);
+
             batchesCancelled++;
             logger.debug(`[Discover Cancel] Marked batch ${batch.id} as failed`);
         }
@@ -765,14 +767,7 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
                 } catch (error) {
                     logger.error(`[Discover Retry] Error acquiring ${metadata.albumTitle}:`, error);
                     failed++;
-                    await prisma.downloadJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: "failed",
-                            error: (error as any)?.message || "Acquisition failed",
-                            completedAt: new Date(),
-                        },
-                    }).catch(() => {});
+                    await downloadJobs.fail([job], (error as any)?.message || "Acquisition failed").catch(() => {});
                 }
 
                 await prisma.discoveryBatch.update({

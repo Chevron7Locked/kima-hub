@@ -5,6 +5,7 @@ import { requireAuth, requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import { config } from "../config";
+import * as downloadJobs from "../services/downloads/jobs";
 import {
     createRetryJob,
     downloadSources,
@@ -16,6 +17,12 @@ import {
 } from "../services/pendingTrackRetry";
 
 const router = Router();
+
+/** A retried job's copy of the old metadata, less the marks of the old job's failure, so its own outcome tells the user afresh. */
+function withoutFailureMarks(metadata: Record<string, unknown> | null): Record<string, unknown> {
+    const { notificationSent, failedAt, cancelled, parked, ...carried } = metadata ?? {};
+    return carried;
+}
 
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
@@ -428,9 +435,9 @@ router.post(
                         attempts: 1,
                         startedAt: new Date(),
                         metadata: {
-                            ...metadata,
+                            ...withoutFailureMarks(metadata),
                             retryAttempt: true,
-                        },
+                        } as any,
                     },
                 });
 
@@ -463,19 +470,10 @@ router.post(
                     .searchAndDownloadBatch(tracks, musicPath, settings?.soulseekConcurrentDownloads ?? 4)
                     .then(async (result) => {
                         if (result.successful > 0) {
-                            await prisma.downloadJob.update({
-                                where: { id: newJobRecord.id },
-                                data: {
-                                    status: "completed",
-                                    completedAt: new Date(),
-                                    error: null,
-                                    metadata: {
-                                        ...metadata,
-                                        source: "soulseek",
-                                        tracksDownloaded: result.successful,
-                                        files: result.files,
-                                    },
-                                },
+                            await downloadJobs.complete([newJobRecord], {
+                                source: "soulseek",
+                                tracksDownloaded: result.successful,
+                                files: result.files,
                             });
                             logger.debug(
                                 `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`
@@ -514,39 +512,25 @@ router.post(
                                     );
 
                                 if (!lidarrResult.success) {
-                                    await prisma.downloadJob.update({
-                                        where: { id: newJobRecord.id },
-                                        data: {
-                                            status: "failed",
-                                            error:
-                                                lidarrResult.error ||
-                                                "Both Soulseek and Lidarr failed",
-                                            completedAt: new Date(),
-                                        },
-                                    });
+                                    await downloadJobs.fail(
+                                        [newJobRecord],
+                                        lidarrResult.error || "Both Soulseek and Lidarr failed"
+                                    );
                                 }
                             } else {
-                                await prisma.downloadJob.update({
-                                    where: { id: newJobRecord.id },
-                                    data: {
-                                        status: "failed",
-                                        error: "No tracks found on Soulseek, no MBID for Lidarr fallback",
-                                        completedAt: new Date(),
-                                    },
-                                });
+                                await downloadJobs.fail(
+                                    [newJobRecord],
+                                    "No tracks found on Soulseek, no MBID for Lidarr fallback"
+                                );
                             }
                         }
                     })
                     .catch(async (error) => {
                         logger.error(`[Retry] Soulseek error:`, error);
-                        await prisma.downloadJob.update({
-                            where: { id: newJobRecord.id },
-                            data: {
-                                status: "failed",
-                                error: error?.message || "Soulseek error",
-                                completedAt: new Date(),
-                            },
-                        });
+                        await downloadJobs.fail(
+                            [newJobRecord],
+                            error?.message || "Soulseek error"
+                        ).catch((failError) => logger.error(`[Retry] Could not fail job ${newJobRecord.id}:`, failError));
                     });
 
                 return res.json({ success: true, newJobId: newJobRecord.id });
@@ -597,7 +581,7 @@ router.post(
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     status: "pending",
-                    metadata: (metadata || {}) as any,
+                    metadata: withoutFailureMarks(metadata) as any,
                 },
             });
 
