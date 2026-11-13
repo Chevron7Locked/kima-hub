@@ -6,17 +6,6 @@ import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
 import { subsonicGuesses } from "../services/users/guessLimits";
 
-declare global {
-    // eslint-disable-next-line @typescript-eslint/no-namespace
-    namespace Express {
-        interface Request {
-            /** Which credential authenticated this Subsonic request: an app key must not be able to do what
-             * only the account password may (no route reads this since Subsonic stopped managing accounts). */
-            subsonicAuthMethod?: "password" | "apiKey";
-        }
-    }
-}
-
 export async function subsonicAuth(
     req: Request,
     res: Response,
@@ -56,11 +45,6 @@ export async function subsonicAuth(
             }
 
             req.user = keyUser;
-            // A provisioned app credential, not the account password -- see
-            // the 2FA note on the password branch below for why this
-            // distinction has to survive past this middleware, not just gate
-            // entry here.
-            req.subsonicAuthMethod = "apiKey";
             next();
             return;
         }
@@ -79,7 +63,6 @@ export async function subsonicAuth(
             const keyUser = await findApiKeyUser(plainPassword);
             if (keyUser && keyUser.username === username) {
                 req.user = keyUser;
-                req.subsonicAuthMethod = "apiKey";
                 next();
                 return;
             }
@@ -124,7 +107,6 @@ export async function subsonicAuth(
             }
 
             req.user = { id: user.id, username: user.username, role: user.role };
-            req.subsonicAuthMethod = "password";
             next();
             return;
         }

@@ -40,7 +40,7 @@ type PasswordTooShort = { ok: false; reason: "password-too-short"; minimum: numb
 type UsernameTaken = { ok: false; reason: "username-taken" };
 type Created = { ok: true; user: Account };
 
-const tooShort = (password: unknown) => typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH;
+const isTooShort = (password: unknown) => typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH;
 const passwordTooShort = (): PasswordTooShort => ({ ok: false, reason: "password-too-short", minimum: MIN_PASSWORD_LENGTH });
 const hashPassword = (password: string) => bcrypt.hash(password, HASH_COST);
 
@@ -65,7 +65,7 @@ export async function createAccount(input: {
     role: AccountRole;
     onboardingComplete: boolean;
 }): Promise<Created | UsernameTaken | PasswordTooShort> {
-    if (tooShort(input.password)) return passwordTooShort();
+    if (isTooShort(input.password)) return passwordTooShort();
     const passwordHash = await hashPassword(input.password);
     try {
         const user = await prisma.$transaction((tx) =>
@@ -93,7 +93,10 @@ export async function signUp(input: {
     password: string;
     registrationOpen: boolean;
 }): Promise<Created | UsernameTaken | PasswordTooShort | { ok: false; reason: "registration-closed" }> {
-    if (tooShort(input.password)) return passwordTooShort();
+    if (isTooShort(input.password)) return passwordTooShort();
+    // Refuse a closed sign-up before the costly hash, so a stranger cannot make the server hash for nothing. The check
+    // inside the transaction below is the one that counts.
+    if (!input.registrationOpen && (await prisma.user.count()) > 0) return { ok: false, reason: "registration-closed" };
     const passwordHash = await hashPassword(input.password);
     try {
         return await prisma.$transaction(async (tx) => {
@@ -114,18 +117,25 @@ export async function signUp(input: {
     }
 }
 
-/** Sets the password and signs out every session issued before: a new tokenVersion revokes every token. */
-async function setPassword(userId: string, password: string) {
+/**
+ * Sets the password and signs out every session issued before: a new tokenVersion revokes every token. With
+ * `ifHashIs` the write happens only while the stored hash is still that one, so two changes made together cannot both
+ * succeed from the same current password; `null` answers that it did not.
+ */
+async function setPassword(userId: string, password: string, ifHashIs?: string) {
     const passwordHash = await hashPassword(password);
-    const updated = await prisma.user.update({
-        where: { id: userId },
+    const { count } = await prisma.user.updateMany({
+        where: ifHashIs === undefined ? { id: userId } : { id: userId, passwordHash: ifHashIs },
         data: { passwordHash, tokenVersion: { increment: 1 } },
-        select: { id: true, username: true, role: true, tokenVersion: true },
     });
+    if (count === 0) return null;
     // The auth layer caches the user row, and tokenVersion is what revokes issued tokens: without this the old
     // tokens keep working until the cache expires.
     invalidateUserCache(userId);
-    return updated;
+    return prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, role: true, tokenVersion: true },
+    });
 }
 
 /**
@@ -137,11 +147,13 @@ export async function changePassword(input: { userId: string; currentPassword: s
     | PasswordTooShort
     | { ok: false; reason: "not-found" | "wrong-password" }
 > {
-    if (tooShort(input.newPassword)) return passwordTooShort();
+    if (isTooShort(input.newPassword)) return passwordTooShort();
     const stored = await prisma.user.findUnique({ where: { id: input.userId }, select: { passwordHash: true } });
     if (!stored) return { ok: false, reason: "not-found" };
     if (!(await bcrypt.compare(input.currentPassword, stored.passwordHash))) return { ok: false, reason: "wrong-password" };
-    return { ok: true, user: await setPassword(input.userId, input.newPassword) };
+    const user = await setPassword(input.userId, input.newPassword, stored.passwordHash);
+    // Nothing matched: the password changed, or the account went, since it was read.
+    return user ? { ok: true, user } : { ok: false, reason: "wrong-password" };
 }
 
 /**
@@ -149,13 +161,13 @@ export async function changePassword(input: { userId: string; currentPassword: s
  * under the rule is refused with a log line and the admin keeps the one it has.
  */
 export async function resetAdminPassword(password: string): Promise<"reset" | "password-too-short" | "no-admin"> {
-    if (tooShort(password)) {
+    if (isTooShort(password)) {
         logger.warn(
             `[Password Reset] ADMIN_RESET_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters; the admin password was not changed.`,
         );
         return "password-too-short";
     }
-    const admin = await prisma.user.findFirst({ where: { role: "admin" }, select: { id: true } });
+    const admin = await prisma.user.findFirst({ where: { role: "admin" }, orderBy: { createdAt: "asc" }, select: { id: true } });
     if (!admin) {
         logger.warn("[Password Reset] No admin user found");
         return "no-admin";

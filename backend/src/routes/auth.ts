@@ -209,7 +209,7 @@ router.post("/change-password", requireAuth, authLimiter, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
-        if (!currentPassword || !newPassword) {
+        if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword || !newPassword) {
             return res
                 .status(400)
                 .json({ error: "Current and new password are required" });
@@ -269,7 +269,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
     try {
         const { username, password, role } = req.body;
 
-        if (!username || !password) {
+        if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
             return res
                 .status(400)
                 .json({ error: "Username and password are required" });

@@ -160,6 +160,20 @@ describe("signUp", () => {
         expect(await prisma.user.count({ where: { username: "samename" } })).toBe(1);
     });
 
+    it("refuses a closed sign-up without hashing the password", async () => {
+        await seedUser("existing", { role: "admin" });
+        const hashing = jest.spyOn(bcrypt, "hash");
+        try {
+            expect(await signUp({ username: "late", password: "secret1", registrationOpen: false })).toEqual({
+                ok: false,
+                reason: "registration-closed",
+            });
+            expect(hashing).not.toHaveBeenCalled();
+        } finally {
+            hashing.mockRestore();
+        }
+    });
+
     it("refuses a short password before anything else, creating nothing", async () => {
         expect(await signUp({ username: "first", password: "12345", registrationOpen: false })).toMatchObject({
             ok: false,
@@ -215,6 +229,20 @@ describe("changePassword", () => {
         expect(await matches(user.id, "original-pass")).toBe(true);
     });
 
+    it("lets only one of two changes made together win, the other is told the password is wrong", async () => {
+        const user = await seedUser("alice");
+
+        const changes = await Promise.all(
+            ["first-new-1", "second-new-2"].map((newPassword) =>
+                changePassword({ userId: user.id, currentPassword: "original-pass", newPassword }),
+            ),
+        );
+
+        expect(changes.filter((c) => c.ok)).toHaveLength(1);
+        expect(changes.find((c) => !c.ok)).toEqual({ ok: false, reason: "wrong-password" });
+        expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).tokenVersion).toBe(1);
+    });
+
     it("answers not found for an account that is gone", async () => {
         expect(await changePassword({ userId: "nobody", currentPassword: "x", newPassword: "brand-new-1" })).toEqual({
             ok: false,
@@ -233,6 +261,16 @@ describe("resetAdminPassword (the startup reset)", () => {
         expect(await matches(admin.id, "rescue-pass")).toBe(true);
         expect((await prisma.user.findUniqueOrThrow({ where: { id: admin.id } })).tokenVersion).toBe(3);
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("ADMIN_RESET_PASSWORD"));
+    });
+
+    it("resets the oldest admin when there are several", async () => {
+        const oldest = await seedUser("root", { role: "admin", createdAt: new Date("2020-01-01") });
+        const newer = await seedUser("second", { role: "admin", createdAt: new Date("2024-01-01") });
+
+        await resetAdminPassword("rescue-pass");
+
+        expect(await matches(oldest.id, "rescue-pass")).toBe(true);
+        expect(await matches(newer.id, "original-pass")).toBe(true);
     });
 
     it("refuses a password under 6 characters with a log line, leaving the admin password as it was", async () => {
