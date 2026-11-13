@@ -1,5 +1,6 @@
 /**
- * A download job's status, through six moves: start, complete, fail, cancel, retry, park.
+ * A download job's status, through ten moves: create, start, grab, hold, resume, complete, fail, cancel, retry, park.
+ * No other code writes a job's status.
  *
  * Each move runs in one statement and only from a state it can leave, so a job two
  * paths reach is settled once and told once: start and complete leave pending or
@@ -9,7 +10,10 @@
  * the user through the notification policy, and the Discover batch and the Spotify
  * import the job belongs to; retry tells nobody, because nothing has finished. Park keeps a job
  * running while Lidarr holds its download for a person, and tells the user once. A job's attempt
- * count is kept through a retry: start sets it to 1 only for a job that has none.
+ * count is kept through a retry: start sets it to 1 only for a job that has none. Create opens a job
+ * (pending, or processing for a download already under way), in the caller's transaction when it has
+ * one. Grab gives the jobs waiting for an album the Lidarr download that took it, hold puts a job back
+ * to pending while Lidarr is away, and resume claims a held job for its next start.
  *
  * A move answers once the rows and the user's notice are written. The Discover batch's
  * and the import's completion checks run after it, detached (a batch check can wait
@@ -53,8 +57,37 @@ export type StartInput = {
     metadata?: Record<string, unknown>;
 };
 
+/** Every status a download job can have. */
+export const JOB_STATUSES: readonly string[] = ["pending", "processing", "completed", "failed", "exhausted"];
+
 const ACTIVE = ["pending", "processing"];
 const FAILED = ["failed", "exhausted"];
+
+/** Whether a settled job ended because the user stopped it, not because the download failed. */
+export function isCancelled(job: { metadata: Prisma.JsonValue }): boolean {
+    const metadata = job.metadata;
+    return !!metadata && typeof metadata === "object" && !Array.isArray(metadata) && metadata.cancelled === true;
+}
+
+export type CreateInput = {
+    userId: string;
+    subject: string;
+    type: string;
+    targetMbid?: string | null;
+    artistMbid?: string | null;
+    discoveryBatchId?: string | null;
+    /** Pending waits to be started. Processing is for a download already under way: attempt 1, started now. */
+    status?: "pending" | "processing";
+    metadata?: Prisma.InputJsonObject;
+};
+
+/** Opens a job. Pass the transaction's client to open it inside one. */
+export function create(input: CreateInput, db: Pick<Prisma.TransactionClient, "downloadJob"> = prisma) {
+    const { status = "pending", ...fields } = input;
+    return db.downloadJob.create({
+        data: { ...fields, status, ...(status === "processing" ? { attempts: 1, startedAt: new Date() } : {}) },
+    });
+}
 
 /** The metadata column with `patch` merged in: a null value clears its field, an undefined one is ignored. */
 function mergedMetadata(patch: Record<string, unknown>, extra: Prisma.Sql = Prisma.empty): Prisma.Sql {
@@ -73,14 +106,15 @@ async function settle(
     jobs: JobRef[],
     from: string[],
     columns: Prisma.Sql,
-    patch: Record<string, unknown>
+    patch: Record<string, unknown>,
+    also: Prisma.Sql = Prisma.empty
 ): Promise<SettledJob[]> {
     const ids = [...new Set(jobs.map((j) => j.id))];
     if (ids.length === 0) return [];
     return prisma.$queryRaw<SettledJob[]>`
         UPDATE "DownloadJob"
         SET ${columns}, metadata = ${mergedMetadata(patch)}
-        WHERE id = ANY(${ids}::text[]) AND status = ANY(${from}::text[])
+        WHERE id = ANY(${ids}::text[]) AND status = ANY(${from}::text[]) ${also}
         RETURNING id, "userId", subject, "discoveryBatchId", status, error, metadata
     `;
 }
@@ -117,16 +151,73 @@ export async function start(id: string, started: StartInput):Promise<boolean> {
  * policy, when it first waits. Returns the jobs it parked.
  */
 export async function park(jobs: JobRef[], reason: string): Promise<SettledJob[]> {
-    const ids = [...new Set(jobs.map((j) => j.id))];
-    if (ids.length === 0) return [];
-    const parked = await prisma.$queryRaw<SettledJob[]>`
-        UPDATE "DownloadJob"
-        SET metadata = ${mergedMetadata({ parked: reason, statusText: `Waiting in Lidarr: ${reason}` })}
-        WHERE id = ANY(${ids}::text[]) AND status = 'processing' AND nullif(metadata->>'parked', '') IS NULL
-        RETURNING id, "userId", subject, "discoveryBatchId", status, error, metadata
-    `;
-    for (const job of parked) await tellUser(job, "parked", reason);
+    const why = reason.trim() || "Lidarr is holding it";
+    // A job is parked when it has the field, whatever its text says.
+    const parked = await settle(
+        jobs,
+        ["processing"],
+        Prisma.sql`status = status`,
+        { parked: why, statusText: `Waiting in Lidarr: ${why}` },
+        Prisma.sql`AND NOT (coalesce(metadata, '{}'::jsonb) ? 'parked')`
+    );
+    for (const job of parked) await tellUser(job, "parked", why);
     return parked;
+}
+
+/**
+ * Lidarr is down or unhealthy: the jobs wait as pending until the health monitor resumes them. `patch` joins their
+ * metadata. A job already settled is left alone. Nobody is told: nothing has happened to the download.
+ */
+export async function hold(jobs: JobRef[], patch: Record<string, unknown> = {}): Promise<SettledJob[]> {
+    return settle(jobs, ACTIVE, Prisma.sql`status = 'pending'`, {
+        statusText: "Waiting for Lidarr",
+        ...patch,
+        waitingForLidarr: true,
+    });
+}
+
+/**
+ * A held job is claimed for its next start: it stops being held and records when it began waiting to run. A job
+ * two paths resume is claimed by one, and one that is not held is left alone.
+ */
+export async function resume(jobs: JobRef[]): Promise<SettledJob[]> {
+    return settle(
+        jobs,
+        ["pending"],
+        Prisma.sql`status = status`,
+        { waitingForLidarr: null, pendingSince: new Date().toISOString() },
+        Prisma.sql`AND metadata->>'waitingForLidarr' = 'true'`
+    );
+}
+
+/**
+ * Lidarr grabbed a release: the jobs still waiting for its album take the download. A job that is settled, or that
+ * already has a download, is left alone, so two grabs of one album do not both claim it. A job waiting for missing
+ * tracks follows the new download instead (its park and status text go), and a bundle, once seen, stays on record.
+ */
+export async function grab(
+    jobs: JobRef[],
+    grabbed: { downloadId: string; lidarrAlbumId: number; albumMbid: string; bundle: boolean }
+): Promise<SettledJob[]> {
+    const { downloadId, lidarrAlbumId, albumMbid, bundle } = grabbed;
+    return settle(
+        jobs,
+        ACTIVE,
+        Prisma.sql`status = 'processing',
+            "lidarrRef" = ${downloadId}::text,
+            "lidarrAlbumId" = coalesce(${lidarrAlbumId || null}::int, "lidarrAlbumId"),
+            "targetMbid" = coalesce(nullif("targetMbid", ''), nullif(${albumMbid}::text, ''), "targetMbid")`,
+        {
+            parked: null,
+            statusText: null,
+            downloadId,
+            lidarrMbid: albumMbid,
+            grabbedAt: new Date().toISOString(),
+            grabbedAsBundle: bundle,
+            ...(bundle ? { hadBundle: true } : {}),
+        },
+        Prisma.sql`AND "lidarrRef" IS NULL`
+    );
 }
 
 /**
@@ -233,8 +324,9 @@ const checking = new Set<Promise<void>>();
 
 /**
  * Resolves when every batch and import check a move started has ended, or after `timeoutMs` when one is given. For
- * tests, and for a route that removes the rows a check reads: a check reads its jobs as it starts, so a short wait
- * lets it see them while one that goes on to wait for Lidarr does not hold the route.
+ * tests, for shutdown (before the database closes), and for a route that removes the rows a check reads: a check
+ * reads its jobs as it starts, so a short wait lets it see them while one that goes on to wait for Lidarr does not
+ * hold the route.
  */
 export async function whenIdle(timeoutMs?: number): Promise<void> {
     const idle = (async () => {

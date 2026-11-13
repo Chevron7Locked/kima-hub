@@ -1574,10 +1574,17 @@ class SpotifyImportService {
       );
     }
 
-    // All downloads finished (completed or failed)
+    // All downloads finished (completed or failed). Counted again: the timeout settle moved some,
+    // and a job another path settled in the meantime counts as what it became.
+    const finalStatuses = await prisma.downloadJob.findMany({
+      where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId } },
+      select: { status: true },
+    });
+    const finalCompleted = finalStatuses.filter((j) => j.status === "completed").length;
+    const finalFailed = finalStatuses.filter((j) => j.status === "failed" || j.status === "exhausted").length;
     logger.debug(`   All downloads finished! Triggering library scan...`);
     jobLogger?.info(
-      `All ${total} download jobs finished (${completed} completed, ${failed} failed)`,
+      `All ${finalStatuses.length} download jobs finished (${finalCompleted} completed, ${finalFailed} failed)`,
     );
 
     const { requestScan } = await import("../workers/scanRequest");

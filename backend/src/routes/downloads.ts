@@ -109,13 +109,12 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                 return { duplicate: true, job: existingJob };
             }
 
-            const newJob = await tx.downloadJob.create({
-                data: {
+            const newJob = await downloadJobs.create(
+                {
                     userId,
                     subject,
                     type,
                     targetMbid: mbid,
-                    status: "pending",
                     metadata: {
                         downloadType: "library",
                         rootFolderPath,
@@ -123,7 +122,8 @@ router.post("/", requireAcquirePermission, async (req, res) => {
                         albumTitle,
                     },
                 },
-            });
+                tx
+            );
 
             return { duplicate: false, job: newJob };
         });
@@ -291,14 +291,13 @@ async function processArtistDownload(
                 return { skipped: true as const, reason: "recently_failed" };
             }
 
-            const job = await tx.downloadJob.create({
-                data: {
+            const job = await downloadJobs.create(
+                {
                     userId,
                     subject: albumSubject,
                     type: "album",
                     targetMbid: albumMbid,
                     artistMbid,
-                    status: "pending",
                     metadata: {
                         downloadType: "library",
                         rootFolderPath,
@@ -308,7 +307,8 @@ async function processArtistDownload(
                         batchId,
                     },
                 },
-            });
+                tx
+            );
 
             return { skipped: false as const, job };
         });
@@ -378,7 +378,7 @@ async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findM
 }
 
 const CHECK_READS_JOBS_MS = 2000;
-const JOB_STATUSES = ["pending", "processing", "completed", "failed", "exhausted"];
+const JOB_STATUSES = downloadJobs.JOB_STATUSES;
 
 // Registered before /:id so "clear-all" is not read as an id.
 router.delete("/clear-all", async (req, res) => {

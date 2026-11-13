@@ -723,7 +723,6 @@ class AcquisitionService {
             subject: `${request.artistName} - ${request.albumTitle}`,
             type: "album",
             targetMbid: request.mbid || null,
-            status: "pending",
             metadata: {
                 artistName: request.artistName,
                 albumTitle: request.albumTitle,
@@ -739,7 +738,7 @@ class AcquisitionService {
             jobData.metadata.downloadType = "spotify_import";
         }
         const create = async () => {
-            const job = await prisma.downloadJob.create({ data: jobData });
+            const job = await downloadJobs.create(jobData);
             logger.debug(
                 `[Acquisition] Created download job: ${job.id} (type: ${jobData.metadata.downloadType || "library"})`
             );

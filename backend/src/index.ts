@@ -490,6 +490,11 @@ async function gracefulShutdown(signal: string) {
         webhookReconciliation.stop();
         lidarrHealthMonitor.stop();
 
+        // Let the batch and import checks a settled download job started finish before the database closes.
+        // One waiting on Lidarr for a minute is not held for: wait only a moment.
+        const { whenIdle } = await import("./services/downloads/jobs");
+        await whenIdle(3000);
+
         // Disconnect Soulseek
         logger.debug("Disconnecting Soulseek...");
         const { soulseekService } = await import("./services/soulseek");

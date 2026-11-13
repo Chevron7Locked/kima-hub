@@ -309,6 +309,7 @@ class DiscoverWeeklyService {
 
                     const existingJob = await tx.downloadJob.findFirst({
                         where: {
+                            userId,
                             targetMbid: album.albumMbid,
                             status: { in: ["pending", "processing"] },
                         },
@@ -384,14 +385,9 @@ class DiscoverWeeklyService {
                         );
 
                         // A Soulseek album arrives complete. A Lidarr album is already running, started by
-                        // acquisition: only its reference is recorded, and only while it still runs.
+                        // acquisition; its download id comes from Lidarr's grab, not from here.
                         if (result.source === "soulseek") {
                             await downloadJobs.complete([job]);
-                        } else if (result.correlationId) {
-                            await prisma.downloadJob.updateMany({
-                                where: { id: job.id, status: "processing" },
-                                data: { lidarrRef: result.correlationId },
-                            });
                         }
                     } else {
                         downloadsFailed++;
@@ -647,8 +643,8 @@ class DiscoverWeeklyService {
         );
         // A job the user cancelled is not a failed album: it is never recorded as unavailable
         // and does not count toward "All downloads failed".
-        const cancelledJobs = settledAsFailed.filter((j) => (j.metadata as any)?.cancelled === true);
-        const failedJobs = settledAsFailed.filter((j) => (j.metadata as any)?.cancelled !== true);
+        const cancelledJobs = settledAsFailed.filter(downloadJobs.isCancelled);
+        const failedJobs = settledAsFailed.filter((j) => !downloadJobs.isCancelled(j));
         const pendingJobs = batch.jobs.filter(
             (j) => j.status === "pending" || j.status === "processing"
         );

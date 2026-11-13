@@ -8,7 +8,6 @@ import { soulseekService } from "../services/soulseek";
 import { randomUUID } from "crypto";
 import { eventBus } from "../services/eventBus";
 import * as downloadJobs from "../services/downloads/jobs";
-import { prisma } from "../utils/db";
 import fs from "fs";
 import { pathInMusicFolder } from "../utils/musicFolderPath";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
@@ -346,16 +345,7 @@ router.post(
             const subject = `${resolvedArtist} - ${resolvedTitle}`;
 
             // Create a DownloadJob so the activity tracker shows this download in progress
-            const job = await prisma.downloadJob.create({
-                data: {
-                    userId,
-                    subject,
-                    type: "soulseek-search",
-                    targetMbid: null,
-                    status: "processing",
-                    startedAt: new Date(),
-                },
-            });
+            const job = await downloadJobs.create({ userId, subject, type: "soulseek-search", status: "processing" });
             jobId = job.id;
 
             const result = await soulseekService.downloadTrack(match, destPath);

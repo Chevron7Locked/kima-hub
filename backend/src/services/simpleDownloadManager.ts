@@ -290,12 +290,7 @@ class SimpleDownloadManager {
         reason: string
     ): Promise<void> {
         logger.warn(`   ${reason}; waiting for Lidarr`);
-        const held = await prisma.downloadJob.updateMany({
-            where: { id: job.id, status: { in: ["pending", "processing"] } },
-            data: { status: "pending" },
-        });
-        if (held.count === 0) return;
-        await downloadJobs.mergeMetadata(job.id, { artistName, albumTitle, waitingForLidarr: true, statusText: "Waiting for Lidarr" });
+        await downloadJobs.hold([job], { artistName, albumTitle });
     }
 
     /** Start every download that was held while Lidarr was unavailable. */
@@ -307,13 +302,9 @@ class SimpleDownloadManager {
         let resumed = 0;
         for (const job of held) {
             if (await sourcePauseController.isPaused("lidarr")) break;
-            const { waitingForLidarr: _, ...held } = job.metadata as any;
-            const metadata = { ...held, pendingSince: new Date().toISOString() };
-            const claimed = await prisma.downloadJob.updateMany({
-                where: { id: job.id, status: "pending", metadata: { path: ["waitingForLidarr"], equals: true } },
-                data: { metadata },
-            });
-            if (claimed.count === 0) continue;
+            const [claimed] = await downloadJobs.resume([job]);
+            if (!claimed) continue;
+            const metadata = claimed.metadata as any;
             await this.startDownload(
                 job.id,
                 metadata.artistName,
@@ -402,52 +393,30 @@ class SimpleDownloadManager {
     ): Promise<{ matched: boolean; jobId?: string }> {
         logger.debug(`[DOWNLOAD] Grabbed: ${artistName} - ${albumTitle} (${downloadId})`);
 
-        return await this.withTransaction(
-            async (tx) => {
-                const waiting = await tx.downloadJob.findMany({
-                    where: { status: { in: ["pending", "processing"] }, lidarrRef: null },
-                    orderBy: { createdAt: "asc" },
-                });
-                const jobs = this.jobsForAlbum(waiting, { albumMbid, lidarrAlbumId });
-                if (jobs.length === 0) {
-                    // A bundle's other albums, or this grab replayed: already linked.
-                    const tracked = await tx.downloadJob.findFirst({
-                        where: { metadata: { path: ["downloadId"], equals: downloadId } },
-                        select: { id: true },
-                    });
-                    if (tracked) return { matched: true, jobId: tracked.id };
-                    logger.debug(`   No job asked for this album; Lidarr grabbed it on its own`);
-                    return { matched: false };
-                }
-
-                const grabbedAt = new Date().toISOString();
-                for (const job of jobs) {
-                    // A job waiting for missing tracks follows the new download instead.
-                    const { parked: _parked, statusText: _statusText, ...metadata } = (job.metadata as any) || {};
-                    await tx.downloadJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: "processing",
-                            lidarrRef: downloadId,
-                            lidarrAlbumId: lidarrAlbumId || job.lidarrAlbumId,
-                            targetMbid: job.targetMbid || albumMbid,
-                            metadata: {
-                                ...metadata,
-                                downloadId,
-                                lidarrMbid: albumMbid,
-                                grabbedAt,
-                                // Whether this download is a bundle, and whether the job ever had one.
-                                grabbedAsBundle: !!opts?.bundle,
-                                ...(opts?.bundle ? { hadBundle: true } : {}),
-                            },
-                        },
-                    });
-                }
-                logger.debug(`   ${jobs.length} job(s) took the download`);
-                return { matched: true, jobId: jobs[0].id };
-            },
-            { logPrefix: "[GRAB-TX]" }
-        );
+        const waiting = await prisma.downloadJob.findMany({
+            where: { status: { in: ["pending", "processing"] }, lidarrRef: null },
+            orderBy: { createdAt: "asc" },
+        });
+        const jobs = this.jobsForAlbum(waiting, { albumMbid, lidarrAlbumId });
+        const taken = await downloadJobs.grab(jobs, {
+            downloadId,
+            lidarrAlbumId,
+            albumMbid,
+            bundle: !!opts?.bundle,
+        });
+        if (taken.length === 0) {
+            // A bundle's other albums, this grab replayed, or a grab that raced another: already linked.
+            const tracked = await prisma.downloadJob.findFirst({
+                where: { metadata: { path: ["downloadId"], equals: downloadId } },
+                select: { id: true },
+            });
+            if (tracked) return { matched: true, jobId: tracked.id };
+            logger.debug(`   No job asked for this album; Lidarr grabbed it on its own`);
+            return { matched: false };
+        }
+        logger.debug(`   ${taken.length} job(s) took the download`);
+        const first = jobs.find((j) => taken.some((t) => t.id === j.id)) ?? jobs[0];
+        return { matched: true, jobId: first.id };
     }
 
     /**

@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import * as downloadJobs from '../downloads/jobs';
 
 interface DiscoveryJobAlbum {
     artistName: string;
@@ -21,13 +22,12 @@ export function createDiscoveryDownloadJob(
     tx: Prisma.TransactionClient,
     { userId, batchId, musicPath, album, similarity, extraMetadata }: DiscoveryDownloadJobInput
 ) {
-    return tx.downloadJob.create({
-        data: {
+    return downloadJobs.create(
+        {
             userId,
             subject: `${album.artistName} - ${album.albumTitle}`,
             type: 'album',
             targetMbid: album.albumMbid,
-            status: 'pending',
             discoveryBatchId: batchId,
             artistMbid: album.artistMbid,
             metadata: {
@@ -42,5 +42,6 @@ export function createDiscoveryDownloadJob(
                 ...extraMetadata,
             },
         },
-    });
+        tx
+    );
 }

@@ -392,6 +392,156 @@ describe("park", () => {
     });
 });
 
+describe("park with no reason", () => {
+    it("parks once and tells once, because the guard is whether the job is parked, not what the reason says", async () => {
+        const j = await job("dl_park_blank", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
+
+        expect(await downloadJobs.park([j], "")).toHaveLength(1);
+        expect(await downloadJobs.park([j], "")).toHaveLength(0);
+        expect(await downloadJobs.park([j], "Tracks missing")).toHaveLength(0);
+
+        expect(await notices("download_waiting")).toBe(1);
+        expect(Boolean((await meta(j.id)).parked)).toBe(true);
+    });
+});
+
+describe("create", () => {
+    const input = { userId: USER, subject: "Brad Sucks - Guess Who’s a Mess", type: "album", targetMbid: "rg-create", metadata: { artistName: "Brad Sucks" } };
+
+    it("opens a job pending, with the metadata it was given", async () => {
+        const made = await downloadJobs.create(input);
+        expect(await row(made.id)).toMatchObject({ status: "pending", attempts: 0, userId: USER, type: "album", targetMbid: "rg-create", startedAt: null });
+        expect(await meta(made.id)).toEqual({ artistName: "Brad Sucks" });
+    });
+
+    it("opens a job processing when its download is already under way: attempt 1, started now", async () => {
+        const made = await downloadJobs.create({ ...input, status: "processing", targetMbid: null });
+        const r = await row(made.id);
+        expect(r).toMatchObject({ status: "processing", attempts: 1 });
+        expect(r.startedAt).toBeInstanceOf(Date);
+    });
+
+    it("opens a job inside the caller's transaction, so it is gone when the transaction rolls back", async () => {
+        let id = "";
+        await expect(
+            prisma.$transaction(async (tx) => {
+                id = (await downloadJobs.create(input, tx)).id;
+                throw new Error("rollback");
+            })
+        ).rejects.toThrow("rollback");
+        expect(await prisma.downloadJob.findUnique({ where: { id } })).toBeNull();
+    });
+});
+
+describe("hold and resume", () => {
+    it("holds a running job as pending in one write, with the metadata merged, and leaves a settled job alone", async () => {
+        const running = await job("dl_hold_running", { metadata: { keep: "me", notificationSent: true } });
+        const done = await job("dl_hold_done", { status: "completed" });
+
+        const held = await downloadJobs.hold([running, done], { artistName: "Brad Sucks", albumTitle: "A Record" });
+
+        expect(held.map((h) => h.id)).toEqual([running.id]);
+        expect((await row(running.id)).status).toBe("pending");
+        expect(await meta(running.id)).toMatchObject({
+            keep: "me", notificationSent: true, artistName: "Brad Sucks", albumTitle: "A Record", waitingForLidarr: true, statusText: "Waiting for Lidarr",
+        });
+        expect((await row(done.id)).status).toBe("completed");
+        expect(await meta(done.id)).not.toHaveProperty("waitingForLidarr");
+    });
+
+    it("resumes a held job once however many paths reach it, and a job that is not held not at all", async () => {
+        const held = await job("dl_resume", { status: "pending", metadata: { waitingForLidarr: true, artistName: "Brad Sucks", keep: "me" } });
+        const plain = await job("dl_resume_plain", { status: "pending" });
+
+        const results = await Promise.all([downloadJobs.resume([held, plain]), downloadJobs.resume([held])]);
+
+        const resumed = results.flat();
+        expect(resumed.map((r) => r.id)).toEqual([held.id]);
+        expect((resumed[0].metadata as any).artistName).toBe("Brad Sucks");
+        const m = await meta(held.id);
+        expect(m).toMatchObject({ keep: "me", artistName: "Brad Sucks" });
+        expect(m).not.toHaveProperty("waitingForLidarr");
+        expect(typeof m.pendingSince).toBe("string");
+        expect((await row(held.id)).status).toBe("pending");
+    });
+
+    it("keeps what another path wrote between the read and the resume", async () => {
+        const held = await job("dl_resume_keeps", { status: "pending", metadata: { waitingForLidarr: true } });
+        await downloadJobs.mergeMetadata(held.id, { notificationSent: true });
+        await downloadJobs.resume([held]);
+        expect(await meta(held.id)).toMatchObject({ notificationSent: true });
+    });
+});
+
+describe("grab", () => {
+    const grab = { downloadId: "DL-1", lidarrAlbumId: 42, albumMbid: "rg-grab", bundle: false };
+
+    it("takes Lidarr's download for the jobs waiting for it, dropping a park and keeping what else the metadata holds", async () => {
+        const waiting = await job("dl_grab_waiting", { status: "pending", targetMbid: null, metadata: { keep: "me", parked: "Tracks missing", statusText: "Waiting in Lidarr: Tracks missing" } });
+        const running = await job("dl_grab_running", { lidarrAlbumId: 7, metadata: { notificationSent: true } });
+
+        const grabbed = await downloadJobs.grab([waiting, running], grab);
+
+        expect(grabbed.map((g) => g.id).sort()).toEqual([running.id, waiting.id]);
+        expect(await row(waiting.id)).toMatchObject({ status: "processing", lidarrRef: "DL-1", lidarrAlbumId: 42, targetMbid: "rg-grab" });
+        const m = await meta(waiting.id);
+        expect(m).toMatchObject({ keep: "me", downloadId: "DL-1", lidarrMbid: "rg-grab", grabbedAsBundle: false });
+        expect(typeof m.grabbedAt).toBe("string");
+        expect(m).not.toHaveProperty("parked");
+        expect(m).not.toHaveProperty("statusText");
+        expect(m).not.toHaveProperty("hadBundle");
+        expect(await row(running.id)).toMatchObject({ lidarrRef: "DL-1", targetMbid: `rg-dl_grab_running`, lidarrAlbumId: 42 });
+        expect(await meta(running.id)).toMatchObject({ notificationSent: true });
+    });
+
+    it("keeps the Lidarr album id a job has when the grab names none, and records a bundle for good", async () => {
+        const j = await job("dl_grab_bundle", { lidarrAlbumId: 7 });
+        await downloadJobs.grab([j], { ...grab, lidarrAlbumId: 0, bundle: true });
+        expect((await row(j.id)).lidarrAlbumId).toBe(7);
+        expect(await meta(j.id)).toMatchObject({ grabbedAsBundle: true, hadBundle: true });
+
+        await prisma.downloadJob.update({ where: { id: j.id }, data: { lidarrRef: null } });
+        await downloadJobs.grab([j], { ...grab, downloadId: "DL-2", bundle: false });
+        expect(await meta(j.id)).toMatchObject({ downloadId: "DL-2", grabbedAsBundle: false, hadBundle: true });
+    });
+
+    it("leaves a settled job and a job that already has a download alone, and a job two paths grab is grabbed once", async () => {
+        const done = await job("dl_grab_done", { status: "completed" });
+        const taken = await job("dl_grab_taken", { lidarrRef: "DL-OLD" });
+        expect(await downloadJobs.grab([done, taken], grab)).toHaveLength(0);
+        expect((await row(done.id)).status).toBe("completed");
+        expect((await row(taken.id)).lidarrRef).toBe("DL-OLD");
+
+        const one = await job("dl_grab_once", { status: "pending" });
+        const results = await Promise.all([downloadJobs.grab([one], grab), downloadJobs.grab([one], { ...grab, downloadId: "DL-2" })]);
+        expect(results.flat()).toHaveLength(1);
+    });
+
+    it("does not bring back a job that was cancelled while the grab read it", async () => {
+        const j = await job("dl_grab_cancelled", { status: "pending" });
+        await downloadJobs.cancel([j]);
+        expect(await downloadJobs.grab([j], grab)).toHaveLength(0);
+        expect(await meta(j.id)).toMatchObject({ cancelled: true });
+        expect((await row(j.id)).status).toBe("failed");
+    });
+});
+
+describe("what the module says about a job", () => {
+    it("tells a cancelled job from a failed one", async () => {
+        const a = await job("dl_is_cancelled", { metadata: {} });
+        const b = await job("dl_is_failed", { metadata: {} });
+        const [cancelled] = await downloadJobs.cancel([a]);
+        const [failed] = await downloadJobs.fail([b], "boom");
+        expect(downloadJobs.isCancelled(cancelled)).toBe(true);
+        expect(downloadJobs.isCancelled(failed)).toBe(false);
+        expect(downloadJobs.isCancelled({ metadata: null })).toBe(false);
+    });
+
+    it("lists the statuses a job can have", () => {
+        expect([...downloadJobs.JOB_STATUSES]).toEqual(["pending", "processing", "completed", "failed", "exhausted"]);
+    });
+});
+
 describe("telling the user", () => {
     it("tells once when two settlers of the same job both pass the policy before either has told", async () => {
         const j = await job("dl_claim", { metadata: { artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });

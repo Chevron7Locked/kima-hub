@@ -417,22 +417,17 @@ router.post(
                     data: { cleared: true },
                 });
 
-                const newJobRecord = await prisma.downloadJob.create({
-                    data: {
-                        userId: req.user!.id,
-                        type: "album",
-                        targetMbid:
-                            failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
-                        artistMbid: failedJob.artistMbid,
-                        subject: `${artistName} - ${albumTitle}`,
-                        status: "processing",
-                        attempts: 1,
-                        startedAt: new Date(),
-                        metadata: {
-                            ...downloadJobs.withoutFailureMarks(metadata),
-                            retryAttempt: true,
-                        } as any,
-                    },
+                const newJobRecord = await downloadJobs.create({
+                    userId: req.user!.id,
+                    type: "album",
+                    targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
+                    artistMbid: failedJob.artistMbid,
+                    subject: `${artistName} - ${albumTitle}`,
+                    status: "processing",
+                    metadata: {
+                        ...downloadJobs.withoutFailureMarks(metadata),
+                        retryAttempt: true,
+                    } as any,
                 });
 
                 // Try Soulseek first (async)
@@ -567,16 +562,13 @@ router.post(
                 subjectParts[1] ||
                 failedJob.subject;
 
-            const newJobRecord = await prisma.downloadJob.create({
-                data: {
-                    userId: req.user!.id,
-                    type: failedJob.type as "artist" | "album",
-                    targetMbid: failedJob.targetMbid,
-                    artistMbid: failedJob.artistMbid,
-                    subject: failedJob.subject,
-                    status: "pending",
-                    metadata: downloadJobs.withoutFailureMarks(metadata) as any,
-                },
+            const newJobRecord = await downloadJobs.create({
+                userId: req.user!.id,
+                type: failedJob.type,
+                targetMbid: failedJob.targetMbid,
+                artistMbid: failedJob.artistMbid,
+                subject: failedJob.subject,
+                metadata: downloadJobs.withoutFailureMarks(metadata) as any,
             });
 
             const { simpleDownloadManager } = await import(

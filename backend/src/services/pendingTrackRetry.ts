@@ -5,7 +5,6 @@
  */
 
 import type { DownloadJob, PlaylistPendingTrack } from "@prisma/client";
-import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { soulseekService } from "./soulseek";
@@ -32,27 +31,23 @@ export function retryJobTarget(pendingTrack: PlaylistPendingTrack): string {
 }
 
 export function createRetryJob(userId: string, pendingTrack: PlaylistPendingTrack, extra: Record<string, unknown> = {}) {
-    return prisma.downloadJob.create({
-        data: {
-            userId,
-            subject: `${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`,
-            type: "track",
-            targetMbid: retryJobTarget(pendingTrack),
-            artistMbid: pendingTrack.artistMbid,
-            status: "processing",
-            attempts: 1,
-            startedAt: new Date(),
-            metadata: {
-                downloadType: "pending-track-retry",
-                source: "soulseek",
-                playlistId: pendingTrack.playlistId,
-                pendingTrackId: pendingTrack.id,
-                spotifyArtist: pendingTrack.spotifyArtist,
-                spotifyTitle: pendingTrack.spotifyTitle,
-                spotifyAlbum: pendingTrack.spotifyAlbum,
-                albumMbid: pendingTrack.albumMbid,
-                ...extra,
-            },
+    return downloadJobs.create({
+        userId,
+        subject: `${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`,
+        type: "track",
+        targetMbid: retryJobTarget(pendingTrack),
+        artistMbid: pendingTrack.artistMbid,
+        status: "processing",
+        metadata: {
+            downloadType: "pending-track-retry",
+            source: "soulseek",
+            playlistId: pendingTrack.playlistId,
+            pendingTrackId: pendingTrack.id,
+            spotifyArtist: pendingTrack.spotifyArtist,
+            spotifyTitle: pendingTrack.spotifyTitle,
+            spotifyAlbum: pendingTrack.spotifyAlbum,
+            albumMbid: pendingTrack.albumMbid,
+            ...(extra as Record<string, never>),
         },
     });
 }
