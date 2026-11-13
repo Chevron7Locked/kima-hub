@@ -24,7 +24,7 @@ jest.mock("../../lidarr", () => ({
 
 import { prisma } from "../../../utils/db";
 import { lidarrService } from "../../lidarr";
-import { removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
+import { discoveryArtistVerdict, removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { artistIdentityKey } from "../../artistIdentity";
 
@@ -436,6 +436,36 @@ describe("removeDiscoveryArtist", () => {
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+
+    it("does not hold an artist in use for a same-name suggestion that carries another artist's MusicBrainz id", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: "rg-namesake", artistName: "Interpol", artistMbid: "other-artist-mbid", albumTitle: "Namesake", weekStartDate: new Date("2026-10-26"), status: "ACTIVE" },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("delete");
+    });
+
+    it("still holds an artist in use for a same-name suggestion whose artist id is a temp- placeholder", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: "rg-arriving", artistName: "Interpol", artistMbid: "temp-123", albumTitle: "Arriving", weekStartDate: new Date("2026-10-26"), status: "ACTIVE" },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("in use");
+    });
+
+    it("holds an artist in use for a suggestion carrying its MusicBrainz id, whatever name the suggestion spells", async () => {
+        await discovered("rg-1", "DELETED");
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: "rg-arriving", artistName: "Interpol (alt spelling)", artistMbid: "artist-mbid", albumTitle: "Arriving", weekStartDate: new Date("2026-10-26"), status: "ACTIVE" },
+        });
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await discoveryArtistVerdict(lidarrArtist([TAG]))).toBe("in use");
     });
 
     it("deletes once the batch that was downloading its album has finished", async () => {

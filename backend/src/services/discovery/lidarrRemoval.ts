@@ -250,8 +250,9 @@ export async function discoveryArtistVerdict(
     const { owner, albums } = await artistOwner(artist);
     if (owner === "theirs") return "theirs";
     const withFiles = albums.filter((a) => (a.statistics?.trackFileCount ?? 0) > 0).map((a) => a.foreignAlbumId);
-    // By artist id, by album, or by name: a suggestion's artist id can be missing or a placeholder, and an album still
-    // downloading has no files in Lidarr yet.
+    // By artist id, by album, or by name: an album still downloading has no files in Lidarr yet, and a suggestion's artist
+    // id can be missing or a `temp-` placeholder, the only case where its name stands in for it. A suggestion with a real
+    // artist id for another artist is a namesake and holds nothing.
     const [current, running] = await Promise.all([
         prisma.discoveryAlbum.findMany({
             where: { status: "ACTIVE" },
@@ -262,11 +263,11 @@ export async function discoveryArtistVerdict(
             select: { artistMbid: true, targetMbid: true, metadata: true },
         }),
     ]);
-    const names = (artistMbid: string | null, album: string | null, name: unknown) =>
-        artistMbid === mbid || (album !== null && withFiles.includes(album)) || (typeof name === "string" && sameName(name, artist.artistName));
+    const names = (artistMbid: string | null, album: string | null, name: unknown, nameCounts: boolean) =>
+        artistMbid === mbid || (album !== null && withFiles.includes(album)) || (nameCounts && typeof name === "string" && sameName(name, artist.artistName));
     if (
-        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName)) ||
-        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName))
+        current.some((r) => names(r.artistMbid, r.rgMbid, r.artistName, !r.artistMbid || r.artistMbid.startsWith("temp-"))) ||
+        running.some((j) => names(j.artistMbid, j.targetMbid, (j.metadata as { artistName?: unknown } | null)?.artistName, true))
     ) {
         return "in use";
     }
