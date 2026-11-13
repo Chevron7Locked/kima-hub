@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Clearing Discover deletes its albums again.** When Lidarr saved a Discover download without MusicBrainz tags in the files, the clear kept the album and only stopped monitoring it, so it stayed in Discover and its files stayed on disk. Kima now recognises Discover's albums by the Lidarr record it made for them, so it also stops taking Discover's tag off those artists in Lidarr, and an album the clear keeps says why: Kima couldn't read Discover's tag from Lidarr, the artist isn't Discover's, there's no record of Discover fetching it, a listener has made it theirs, or the library holds it.
 - **A newly created account stays signed in.** Creating an account now hands the app the same long-lived sign-in that logging in does, so the web and the iOS app renew the session on their own instead of asking for the password again once it runs out.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".

@@ -1,8 +1,8 @@
 /**
  * Discover's deletes from Lidarr. Files go only when Lidarr's record is provably
- * Discover's own: the album it asked for, under an artist carrying its tag, that
- * Kima's own records show Discover fetched, and nothing the user's library holds
- * or the user liked.
+ * Discover's own: under an artist carrying its tag, named by Discover's own records
+ * (the Lidarr album id Discover got back, or the MusicBrainz id it asked for), and
+ * nothing the user's library holds, the user liked or the user requested.
  */
 
 import { prisma } from "../../utils/db";
@@ -34,32 +34,83 @@ async function libraryHolds(rgMbids: string[], names: RemovalNames): Promise<boo
     return ofArtist.some((a) => sameName(a.title, names.albumTitle));
 }
 
-async function fetchedByDiscover(rgMbids: string[]): Promise<Set<string>> {
+/** What Kima's records can name a Lidarr album by: the Lidarr id Discover got back when it added it, and MusicBrainz ids. */
+interface AlbumKeys {
+    lidarrAlbumIds: number[];
+    rgMbids: string[];
+}
+
+/** A Lidarr album's own keys: its id and, when Lidarr has one, its MusicBrainz id. */
+const keysOf = (album: { id: number; foreignAlbumId?: string }): AlbumKeys => ({
+    lidarrAlbumIds: [album.id],
+    rgMbids: album.foreignAlbumId ? [album.foreignAlbumId] : [],
+});
+
+/**
+ * Which Lidarr albums Discover's own records name, by Lidarr id or by the MusicBrainz id Discover asked for: a
+ * suggestion, or a Discover download job. A placeholder id from untagged files never matches Lidarr's.
+ */
+async function discoverNamed(keys: AlbumKeys): Promise<(album: { id: number; foreignAlbumId?: string }) => boolean> {
     const [albums, jobs] = await Promise.all([
-        prisma.discoveryAlbum.findMany({ where: { rgMbid: { in: rgMbids } }, select: { rgMbid: true } }),
+        prisma.discoveryAlbum.findMany({
+            where: { OR: [{ lidarrAlbumId: { in: keys.lidarrAlbumIds } }, { rgMbid: { in: keys.rgMbids } }] },
+            select: { lidarrAlbumId: true, rgMbid: true },
+        }),
         prisma.downloadJob.findMany({
-            where: { targetMbid: { in: rgMbids }, discoveryBatchId: { not: null } },
-            select: { targetMbid: true },
+            where: {
+                OR: [{ lidarrAlbumId: { in: keys.lidarrAlbumIds } }, { targetMbid: { in: keys.rgMbids } }],
+                discoveryBatchId: { not: null },
+            },
+            select: { lidarrAlbumId: true, targetMbid: true },
         }),
     ]);
-    return new Set([...albums.map((a) => a.rgMbid), ...jobs.map((j) => j.targetMbid as string)]);
+    const ids = new Set([...albums.map((a) => a.lidarrAlbumId), ...jobs.map((j) => j.lidarrAlbumId)]);
+    const mbids = new Set([...albums.map((a) => a.rgMbid), ...jobs.map((j) => j.targetMbid)]);
+    return (album) => ids.has(album.id) || (!!album.foreignAlbumId && mbids.has(album.foreignAlbumId));
 }
 
 /**
- * Whether a listener has made any of these albums theirs: marked as theirs (a scan, a like, a repair), a liked or
- * moved suggestion, or their own download request. Any one keeps Discover's hands off the files.
+ * Whether a listener has made any of these albums theirs, by Lidarr id or MusicBrainz id: marked as theirs (a scan, a
+ * like, a repair), a liked or moved suggestion, or their own download request. Any one keeps Discover's hands off the
+ * files.
  */
-async function listenerClaims(rgMbids: string[]): Promise<boolean> {
+async function listenerClaims(keys: AlbumKeys): Promise<boolean> {
     const [owned, liked, requests] = await Promise.all([
-        prisma.ownedAlbum.findFirst({ where: { rgMbid: { in: rgMbids } }, select: { rgMbid: true } }),
-        prisma.discoveryAlbum.findFirst({ where: { rgMbid: { in: rgMbids }, status: { in: ["LIKED", "MOVED"] } }, select: { id: true } }),
+        prisma.ownedAlbum.findFirst({ where: { rgMbid: { in: keys.rgMbids } }, select: { rgMbid: true } }),
+        prisma.discoveryAlbum.findFirst({
+            where: {
+                OR: [{ lidarrAlbumId: { in: keys.lidarrAlbumIds } }, { rgMbid: { in: keys.rgMbids } }],
+                status: { in: ["LIKED", "MOVED"] },
+            },
+            select: { id: true },
+        }),
         prisma.downloadJob.findMany({
-            where: { targetMbid: { in: rgMbids }, discoveryBatchId: null },
+            where: {
+                OR: [{ lidarrAlbumId: { in: keys.lidarrAlbumIds } }, { targetMbid: { in: keys.rgMbids } }],
+                discoveryBatchId: null,
+            },
             select: { metadata: true },
         }),
     ]);
     const ownRequest = requests.some((j) => (j.metadata as { downloadType?: string } | null)?.downloadType !== "discovery");
     return !!owned || !!liked || ownRequest;
+}
+
+/** Why Discover must keep this Lidarr album, or null when it is Discover's to delete. */
+async function keepReason(
+    album: { id: number; foreignAlbumId?: string },
+    claimKeys: AlbumKeys,
+    names: RemovalNames,
+    tagId: number | null,
+    artist: LidarrArtist | null,
+): Promise<string | null> {
+    if (tagId === null) return "Kima could not read Discover's tag from Lidarr";
+    // The tag is the artist's, not the album's: a listener can add their own album to a tagged artist in Lidarr.
+    if (!artist?.tags?.includes(tagId)) return "Lidarr's artist does not carry Discover's tag";
+    if (!(await discoverNamed(keysOf(album)))(album)) return "Kima has no record of Discover fetching this album";
+    if (await listenerClaims(claimKeys)) return "A listener has made this album theirs";
+    if (await libraryHolds(claimKeys.rgMbids, names)) return "The library holds this album";
+    return null;
 }
 
 /**
@@ -99,25 +150,15 @@ export async function removeDiscoveryAlbum(
             lidarrService.getArtistById(album.artistId),
             lidarrService.getOrCreateDiscoveryTag(),
         ]);
-        const rgMbids = [...new Set([rgMbid, ...(names.rgMbids ?? [])])];
-        const ours =
-            album.foreignAlbumId === rgMbid &&
-            tagId !== null &&
-            !!artist?.tags?.includes(tagId) &&
-            // The tag is the artist's, not the album's: a listener can add their own album to a tagged artist in Lidarr.
-            (await fetchedByDiscover(rgMbids)).size > 0 &&
-            !(await listenerClaims(rgMbids)) &&
-            !(await libraryHolds(rgMbids, names));
+        // Lidarr's own id joins the caller's: untagged files leave Kima a placeholder where Lidarr has the real one.
+        const own = keysOf(album);
+        const claimKeys = { lidarrAlbumIds: own.lidarrAlbumIds, rgMbids: [...new Set([rgMbid, ...(names.rgMbids ?? []), ...own.rgMbids])] };
+        const kept = await keepReason(album, claimKeys, names, tagId, artist);
 
-        if (!ours) {
-            logger.warn(
-                `[Discover] Keeping Lidarr files for "${album.title}" (${lidarrAlbumId}): not the album Discover fetched`
-            );
+        if (kept) {
+            logger.warn(`[Discover] Keeping Lidarr files for "${album.title}" (${lidarrAlbumId}): ${kept}`);
             await lidarrService.unmonitorAlbum(lidarrAlbumId);
-            return {
-                removed: false,
-                reason: "Lidarr's record is not the album Discover fetched",
-            };
+            return { removed: false, reason: kept };
         }
 
         await lidarrService.deleteAlbumById(lidarrAlbumId, true);
@@ -158,7 +199,8 @@ export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"del
     const albums = await lidarrService.getAlbumsByArtistId(artist.id);
     // An album Lidarr gives no file count for may hold files: nothing is decided on a guess.
     if (albums.some((a) => typeof a.statistics?.trackFileCount !== "number")) return "keep";
-    const withFiles = albums.filter((a) => (a.statistics?.trackFileCount ?? 0) > 0).map((a) => a.foreignAlbumId);
+    const filed = albums.filter((a) => (a.statistics?.trackFileCount ?? 0) > 0);
+    const withFiles = filed.map((a) => a.foreignAlbumId);
     // By artist id, by album, or by name: a suggestion's artist id can be missing or a placeholder, and an album still
     // downloading has no files in Lidarr yet.
     const [current, running] = await Promise.all([
@@ -189,9 +231,10 @@ export async function discoveryArtistVerdict(artist: LidarrArtist): Promise<"del
         });
         return openRequest ? "keep" : "forget";
     }
-    const fetched = await fetchedByDiscover(withFiles);
-    if (!withFiles.every((m) => fetched.has(m))) return "keep";
-    return (await listenerClaims(withFiles)) ? "keep" : "delete";
+    const keys = { lidarrAlbumIds: filed.map((a) => a.id), rgMbids: withFiles };
+    const named = await discoverNamed(keys);
+    if (!filed.every(named)) return "keep";
+    return (await listenerClaims(keys)) ? "keep" : "delete";
 }
 
 /**
