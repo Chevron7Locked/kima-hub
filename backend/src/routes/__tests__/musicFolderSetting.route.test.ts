@@ -18,7 +18,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import systemSettingsRoutes from "../systemSettings";
 import { setEnv } from "../../__tests__/helpers/env";
 
-jest.mock("../../services/soulseek", () => ({ soulseekService: { isAvailable: jest.fn().mockResolvedValue(true), resetAndReconnect: jest.fn() } }));
+jest.mock("../../services/soulseek", () => ({ soulseekService: { isAvailable: jest.fn().mockResolvedValue(true) } }));
 
 const ADMIN = "zz-musicfolder-admin";
 const app = express().use(express.json()).use("/system-settings", systemSettingsRoutes);

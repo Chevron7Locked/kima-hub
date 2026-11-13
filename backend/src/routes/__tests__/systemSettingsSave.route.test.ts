@@ -9,7 +9,7 @@ import os from "os";
 import path from "path";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 import { validateMusicConfig } from "../../utils/configValidator";
 import systemSettingsRoutes from "../systemSettings";
 import { queues } from "../../workers/queues";
@@ -87,6 +87,25 @@ it("a server with no settings yet starts from the schema's defaults", async () =
         soulseekConcurrentDownloads: 4,
     });
     expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).musicPath).toBe("/music");
+});
+
+it("the settings page sending every field back tells a subscriber only about what changed", async () => {
+    const heard = jest.fn();
+    const off = onSystemSettingsChange(["soulseekUsername", "soulseekMode", "slskdUrl"], heard);
+    try {
+        const page = { soulseekUsername: "listener", soulseekMode: "p2p", slskdUrl: "", transcodeCacheMaxGb: 9 };
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send(page).expect(200);
+        heard.mockClear();
+
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ ...page, transcodeCacheMaxGb: 10 }).expect(200);
+        expect(heard).not.toHaveBeenCalled();
+
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ ...page, soulseekUsername: "someone" }).expect(200);
+        expect(heard).toHaveBeenCalledTimes(1);
+        expect(heard).toHaveBeenCalledWith(["soulseekUsername"]);
+    } finally {
+        off();
+    }
 });
 
 it("has no download folder setting: downloads go to the music folder", async () => {

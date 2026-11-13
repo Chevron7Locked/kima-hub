@@ -2,6 +2,7 @@ import { AxiosInstance } from "axios";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
+import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
 import { createLidarrClient } from "./lidarrClient";
 import { sourcePauseController } from "./sourcePauseController";
 import { lidarrHealthMonitor } from "./lidarrHealth";
@@ -1488,6 +1489,12 @@ export interface CalendarRelease {
 }
 
 export const lidarrService = new LidarrService();
+
+// A saved change to what Lidarr is reached with makes it read the settings again.
+onSystemSettingsChange(
+    ["lidarrEnabled", "lidarrUrl", "lidarrApiKey", "lidarrQualityProfileId", "lidarrMetadataProfileId"],
+    () => lidarrService.reinitialize(),
+);
 
 /** The track files Lidarr imported from one download, each with its album. */
 export async function getImportedFiles(lidarrUrl: string, apiKey: string, downloadId: string): Promise<LidarrHistoryRecord[]> {

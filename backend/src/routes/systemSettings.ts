@@ -8,12 +8,8 @@ import { mayAcquire } from "../utils/acquirePermission";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
-import { invalidateSystemSettingsCache, QUEUE_LENGTH } from "../utils/systemSettings";
-import {
-    decryptOrNull,
-    encryptSettings,
-    resolveEncryptedSettings,
-} from "../utils/encryptedFields";
+import { QUEUE_LENGTH, saveSystemSettings } from "../utils/systemSettings";
+import { resolveEncryptedSettings } from "../utils/encryptedFields";
 import {
     getGpuStatus,
     setGpuToggles,
@@ -177,97 +173,9 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // Fetch existing settings before save to detect credential changes
-    const existingSettings = await prisma.systemSettings.findUnique({ where: { id: "default" } });
-
-    // Encrypt every supplied field from ENCRYPTED_FIELDS; fields the
-    // payload omits stay untouched by the upsert.
-    const encryptedData = encryptSettings(data as Record<string, unknown>, existingSettings) as any;
-
-    await prisma.systemSettings.upsert({
-      where: { id: "default" },
-      create: {
-        id: "default",
-        ...encryptedData,
-      },
-      update: encryptedData,
-    });
-
-    invalidateSystemSettingsCache();
+    // Services that hold settings (Lidarr, Audiobookshelf, fanart, Soulseek, the feature list) reload what changed.
+    await saveSystemSettings(data);
     if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
-
-    // Reconnect Soulseek only when a connection setting actually changed: the P2P
-    // credentials or the slskd backend (mode, URL, API key, download folder).
-    if (
-      data.soulseekUsername !== undefined ||
-      data.soulseekPassword !== undefined ||
-      data.soulseekMode !== undefined ||
-      data.slskdUrl !== undefined ||
-      data.slskdApiKey !== undefined ||
-      data.soulseekDownloadPath !== undefined
-    ) {
-      try {
-        const oldUsername = existingSettings?.soulseekUsername || "";
-        const oldPassword = decryptOrNull("soulseekPassword", existingSettings?.soulseekPassword) ?? "";
-        const newUsername = data.soulseekUsername !== undefined ? data.soulseekUsername : oldUsername;
-        const newPassword = data.soulseekPassword !== undefined ? data.soulseekPassword : oldPassword;
-
-        const oldMode = existingSettings?.soulseekMode || "";
-        const newMode = (data.soulseekMode !== undefined ? data.soulseekMode : oldMode) || "";
-        const oldSlskdUrl = existingSettings?.slskdUrl || "";
-        const newSlskdUrl = (data.slskdUrl !== undefined ? data.slskdUrl : oldSlskdUrl) || "";
-        const oldSlskdApiKey = decryptOrNull("slskdApiKey", existingSettings?.slskdApiKey) ?? "";
-        const oldDownloads = existingSettings?.soulseekDownloadPath || "";
-        const newDownloads = (data.soulseekDownloadPath !== undefined ? data.soulseekDownloadPath : oldDownloads) || "";
-        const newSlskdApiKey = (data.slskdApiKey !== undefined ? data.slskdApiKey : oldSlskdApiKey) || "";
-
-        const changed =
-          newUsername !== oldUsername ||
-          newPassword !== oldPassword ||
-          newMode !== oldMode ||
-          newSlskdUrl !== oldSlskdUrl ||
-          newSlskdApiKey !== oldSlskdApiKey ||
-          newDownloads !== oldDownloads;
-
-        if (changed) {
-          const { soulseekService } = await import("../services/soulseek");
-          try {
-            await soulseekService.resetAndReconnect();
-            logger.debug(
-              "[SYSTEM SETTINGS] Reset Soulseek connection and reconnected after settings change",
-            );
-          } catch (err: any) {
-            logger.warn(
-              `[SYSTEM SETTINGS] Failed to reconnect Soulseek (will retry on first search): ${err.message}`,
-            );
-          }
-        }
-      } catch (err) {
-        logger.warn("Failed to check/disconnect Soulseek service:", err);
-      }
-    }
-
-    // Reinitialize services that cache credentials from DB
-    try {
-      const { lidarrService } = await import("../services/lidarr");
-      lidarrService.reinitialize();
-    } catch (err) {
-      logger.warn("[SYSTEM SETTINGS] Could not reinitialize Lidarr service:", err);
-    }
-
-    try {
-      const { audiobookshelfService } = await import("../services/audiobookshelf");
-      audiobookshelfService.reinitialize();
-    } catch (err) {
-      logger.warn("[SYSTEM SETTINGS] Could not reinitialize Audiobookshelf service:", err);
-    }
-
-    try {
-      const { fanartService } = await import("../services/fanart");
-      fanartService.reinitialize();
-    } catch (err) {
-      logger.warn("[SYSTEM SETTINGS] Could not reinitialize Fanart service:", err);
-    }
 
     // Audiobookshelf turned off: its listening progress goes with it. A failure here does not fail the save.
     if (data.audiobookshelfEnabled === false) {

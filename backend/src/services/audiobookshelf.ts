@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
+import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
 import { UserFacingError } from "../utils/errors";
 
 const TRACK_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -253,3 +254,7 @@ class AudiobookshelfService {
 }
 
 export const audiobookshelfService = new AudiobookshelfService();
+
+onSystemSettingsChange(["audiobookshelfEnabled", "audiobookshelfUrl", "audiobookshelfApiKey"], () =>
+    audiobookshelfService.reinitialize(),
+);

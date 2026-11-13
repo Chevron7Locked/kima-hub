@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
 import { fpcalcService } from "./fpcalc";
 
 // Analyzer script paths in the Docker image
@@ -23,6 +24,12 @@ const CACHE_TTL = 60000;
 class FeatureDetectionService {
     private cache: AvailableFeatures | null = null;
     private lastCheck: number = 0;
+
+    /** Forget the last answer, so the next one is worked out afresh. */
+    refresh(): void {
+        this.cache = null;
+        this.lastCheck = 0;
+    }
 
     async getFeatures(): Promise<AvailableFeatures> {
         const now = Date.now();
@@ -126,3 +133,6 @@ class FeatureDetectionService {
 }
 
 export const featureDetection = new FeatureDetectionService();
+
+// Whether Audiobookshelf is on is the one setting the list holds.
+onSystemSettingsChange(["audiobookshelfEnabled"], () => featureDetection.refresh());

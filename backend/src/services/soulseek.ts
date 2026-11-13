@@ -13,6 +13,7 @@ import { configureSlskd } from "../lib/soulseek/slskd-client";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
 import { getSystemSettings } from "../utils/systemSettings";
+import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
 import { sessionLog } from "../utils/playlistLogger";
 import { distributedLock } from "../utils/distributedLock";
 import { redisClient } from "../utils/redis";
@@ -2012,3 +2013,16 @@ class SoulseekService {
 }
 
 export const soulseekService = new SoulseekService();
+
+// It reconnects only when what it connects with changed: the account, or the slskd backend and its folder.
+onSystemSettingsChange(
+    ["soulseekUsername", "soulseekPassword", "soulseekMode", "slskdUrl", "slskdApiKey", "soulseekDownloadPath"],
+    async () => {
+        try {
+            await soulseekService.resetAndReconnect();
+            sessionLog("SOULSEEK", "Reset and reconnected after a settings change", "DEBUG");
+        } catch (err: any) {
+            sessionLog("SOULSEEK", `Could not reconnect after a settings change (will retry on first search): ${err.message}`, "WARN");
+        }
+    },
+);
