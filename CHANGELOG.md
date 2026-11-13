@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A repeated notification shows the latest event.** Its details and link now come from the newest event, not the one before.
 - **The metrics page has the same runaway limit as the other admin reads,** so a client stuck in a loop can no longer hammer it.
 - **Random mixes and stations stay fast as the library grows.** Their songs are now drawn in the database instead of from every matching song.
+- **The web player skips songs whose file can't be read.** It answers "not available" instead of stalling. Discover songs still play.
+- **A song path needs two songs that play.** A start or end song that is missing, unreadable or in Discover is refused as not found, instead of building a queue that breaks at its ends.
+- **Artist counts catch up after a busy recount.** An artist whose songs change while the library recounts is counted again right after, so counts no longer stay stale until the next scan.
+- **Library scans finish their artist counts faster.** Only the artists whose songs were added, changed, lost or brought back are recounted.
 - **Discover tells same-name artists apart in Lidarr.** Keeping a Discover album takes Discover's tag off only the Lidarr artist that owns that album, not off other artists with the same name. And an unrelated artist with the same name as one of this week's suggestions no longer stops Discover clearing an artist it added.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
