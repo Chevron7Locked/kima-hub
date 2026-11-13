@@ -32,7 +32,6 @@ import request from "supertest";
 import artistRoutes from "../artists";
 import { prisma } from "../../../utils/db";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
-import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 const ARTIST = "disco_interpol";
 const MBID = "b23e8a63-8f47-4882-b55b-df2c92ef400e";
@@ -105,8 +104,7 @@ it("offers only albums the library has in no edition", async () => {
 });
 
 it("joins a popular song to the owned one whatever its apostrophes and accents", async () => {
-    expectLog("error");
-    mockGetReleaseGroups.mockResolvedValue([]);
+    mockGetReleaseGroups.mockResolvedValue({ kind: "answered", value: [] });
     await prisma.track.create({
         data: {
             id: "disco_t_evil", albumId: "disco_antics", title: "Evil\u2019s Twin", trackNo: 1, duration: 200,

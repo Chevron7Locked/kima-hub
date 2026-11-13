@@ -160,13 +160,12 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
     });
 
     it("fails the album's download job through the download-job module when acquiring it throws", async () => {
-        expectLog("error");
+        const errorLog = expectLog("error");
         await seed(ONE);
         mockAcquireAlbum.mockRejectedValue(new Error("lidarr exploded"));
         mockCheckBatchCompletion.mockResolvedValue(undefined);
 
-        const res = await request(app).post("/discover/retry-unavailable");
-        expect(res.status).toBe(200);
+        const res = await retry();
         await waitFor(handedOff, "checkBatchCompletion invoked");
 
         const [job] = await prisma.downloadJob.findMany({ where: { discoveryBatchId: res.body.batchId } });
@@ -175,6 +174,7 @@ describe("POST /discover/retry-unavailable -- routes through checkBatchCompletio
         expect(job.completedAt).toBeInstanceOf(Date);
         // The module told the batch, and so did the route's own handoff.
         expect(mockCheckBatchCompletion).toHaveBeenCalledWith(res.body.batchId);
+        expect(errorLog).toHaveBeenCalled();
     });
 
     it("never sets the batch completed itself, since checkBatchCompletion owns that", async () => {

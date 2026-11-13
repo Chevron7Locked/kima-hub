@@ -100,9 +100,9 @@ describe("the cover-art route asks every source", () => {
         });
 
         it("asks with the release-group id as well as the name, not Deezer alone", async () => {
-            expectLog("error");
             expectLog("warn");
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+            mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
 
             await request(makeApp()).get(
                 "/library/cover-art/" + encodeURIComponent(NATIVE),
