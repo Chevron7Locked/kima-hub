@@ -1,8 +1,7 @@
 /**
- * A mix draws from every track that matches its filter, uniformly at random,
- * not from the first rows the database returns. Only ids are read for the
- * whole match; full rows are read for the draw. A seed repeats a draw; the
- * database's seeded draw is checked in mixes/__tests__/seededDraw.integration.test.ts.
+ * The draws a mix makes, in memory: uniform, weighted and seeded. Full rows are read only for the ids drawn. A seed
+ * repeats a draw; the database's seeded draw is checked in mixes/__tests__/seededDraw.integration.test.ts, and sampleTrackIds's draw in
+ * mixes/__tests__/sampleTrackIds.integration.test.ts.
  */
 const mockFindMany = jest.fn();
 jest.mock("../../utils/db", () => ({
@@ -11,13 +10,9 @@ jest.mock("../../utils/db", () => ({
 
 import { drawIds, drawWeighted, sampleTrackIds, seededKey, seededOrder, seededTake, tracksByIds } from "../mixes/helpers";
 
-const TOTAL = 1000;
-const ALL_IDS = Array.from({ length: TOTAL }, (_, i) => `t${String(i).padStart(4, "0")}`);
-
-/** An in-memory track table: an id-only read returns every id, an id-list read returns those rows. */
+/** An in-memory track table: an id-list read returns those rows. */
 function fakeTable() {
     mockFindMany.mockImplementation(async (args: any) => {
-        if (args.select) return ALL_IDS.map((id) => ({ id }));
         const wanted: string[] = args.where.id.in;
         return [...wanted].reverse().map((id) => ({ id, album: { coverUrl: null } }));
     });
@@ -26,31 +21,6 @@ function fakeTable() {
 beforeEach(() => {
     mockFindMany.mockReset();
     fakeTable();
-});
-
-describe("sampleTrackIds", () => {
-    it("reads ids only, draws take from the whole match, and differs between unseeded calls", async () => {
-        const a = await sampleTrackIds({ where: {}, take: 100 });
-        const b = await sampleTrackIds({ where: {}, take: 100 });
-        expect(mockFindMany).toHaveBeenCalledTimes(2);
-        expect(mockFindMany.mock.calls[0][0].select).toEqual({ id: true });
-        expect(mockFindMany.mock.calls[0][0].take).toBeUndefined();
-        expect(a).toHaveLength(100);
-        expect(new Set(a).size).toBe(100);
-        expect(a).not.toEqual(b);
-        expect(a.filter((id) => ALL_IDS.indexOf(id) >= 300).length).toBeGreaterThan(40);
-    });
-
-    it("a station refilling 10 times reaches far more than one pool", async () => {
-        const seen = new Set<string>();
-        for (let i = 0; i < 10; i++) for (const id of await sampleTrackIds({ where: {}, take: 100 })) seen.add(id);
-        expect(seen.size).toBeGreaterThan(500);
-    });
-
-    it("returns every match when fewer than take match", async () => {
-        mockFindMany.mockResolvedValue([{ id: "a" }, { id: "b" }]);
-        expect((await sampleTrackIds({ where: {}, take: 50 })).sort()).toEqual(["a", "b"]);
-    });
 });
 
 describe("drawIds", () => {
