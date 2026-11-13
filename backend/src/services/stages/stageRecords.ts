@@ -437,20 +437,20 @@ export async function absent(
  * Gone means "no such file" here, as the scanner counts it; any other error reading it (permissions, I/O) is another
  * kind of failure, and so is an empty or unreadable music folder (a drive that is not mounted). A report that no
  * longer answers the record's open claim, checked again inside the flagging transaction, flags nothing and is dropped.
- * Returns "flagged", "stale" (dropped) or "there" (the file is not gone: an ordinary failure).
+ * Returns "flagged", "stale" (dropped) or "file-present" (the file is not gone: an ordinary failure).
  */
 async function flagVanishedTrack(
     trackId: string,
     stage: StageName,
     jobId: string | undefined,
-): Promise<"flagged" | "there" | "stale"> {
+): Promise<"flagged" | "file-present" | "stale"> {
     const track = await prisma.track.findUnique({ where: { id: trackId }, select: { filePath: true } });
-    if (!track?.filePath) return "there";
+    if (!track?.filePath) return "file-present";
     const root = config.music.musicPath;
-    if ((await fs.readdir(root).catch(() => [])).length === 0) return "there";
+    if ((await fs.readdir(root).catch(() => [])).length === 0) return "file-present";
     const file = path.isAbsolute(track.filePath) ? track.filePath : path.join(root, track.filePath);
     const gone = await fs.access(file).then(() => false, (err: NodeJS.ErrnoException) => err.code === "ENOENT");
-    if (!gone) return "there";
+    if (!gone) return "file-present";
 
     const flagged = await prisma.$transaction(async (tx) => {
         // The claim is checked again here, under the record's lock: the reads above took time, and a report whose
@@ -607,7 +607,7 @@ export async function fail(
     if (!open) return;
     // A file an analyzer could not find: the song is flagged missing and a scan asked for, which removes it once it
     // confirms the file is gone (flagVanishedTrack); a file that is there after all is an ordinary failure.
-    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage, jobId)) !== "there") return;
+    if (stage !== "recording" && FILE_GONE.test(message) && (await flagVanishedTrack(trackId, stage, jobId)) !== "file-present") return;
     const { current, writeGuard } = open;
 
     if (await sourcePauseController.handleRateLimit(source, err, evidence)) {
