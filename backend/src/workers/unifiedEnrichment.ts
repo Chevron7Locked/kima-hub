@@ -30,6 +30,7 @@ import {
     haltVibeQueuing,
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
+import { createRunState } from "./enrichment/runState";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
 // The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 import * as stageRecords from "../services/stages/stageRecords";
@@ -348,20 +349,17 @@ const CYCLE_LOCK_KEY = "enrichment:cycle-lease";
 // Renewed while a cycle runs, so a process that dies or restarts frees it within this time.
 const CYCLE_LOCK_TTL_MS = 90 * 1000;
 
-let isRunning = false;
+/**
+ * What the scheduler is doing: running, paused, stopping or stopped, whether a cycle is in flight, whether a
+ * trigger is waiting, and whether the worker is closed. It changes only through the named moves in
+ * workers/enrichment/runState.ts. The closed latch is distinct from "no timer pending": while a cycle is
+ * executing there is no pending timer either, and treating a running cycle as a closed worker is what allowed a
+ * second timer chain to be armed alongside the one the cycle was about to arm itself.
+ */
+const run = createRunState();
 let enrichmentInterval: NodeJS.Timeout | null = null;
-// Whether the worker has been explicitly stopped. Distinct from "no timer pending": while a
-// cycle is executing there is no pending timer either, and the two must not be confused --
-// treating a running cycle as a stopped worker is what allowed a second timer chain to be
-// armed alongside the one the cycle was about to arm itself.
-let enrichmentStopped = false;
 let redis: Redis | null = null;
 let controlSubscriber: Redis | null = null;
-let isPaused = false;
-let isStopping = false;
-let userStopped = false; // True after explicit stop; prevents auto-restart via timer
-let userStoppedWarned = false; // Throttle warning log to once per stop
-let immediateEnrichmentRequested = false;
 let activeEnrichmentWorkers: BullWorker[] = [];
 let lastRunTime = 0;
 const MIN_INTERVAL_MS = 10000; // Minimum 10s between cycles
@@ -500,18 +498,17 @@ async function setupControlChannel() {
                 );
 
                 if (message === "pause") {
-                    isPaused = true;
+                    run.pause();
                     logger.debug("[Enrichment] Paused");
                     Promise.all(activeEnrichmentWorkers.map((w) => w.pause())).catch(() => {});
                     haltVibeQueuing();
                 } else if (message === "resume") {
-                    isPaused = false;
+                    run.resume();
                     logger.debug("[Enrichment] Resumed");
                     Promise.all(activeEnrichmentWorkers.map((w) => w.resume())).catch(() => {});
                     resumeVibeQueuing();
                 } else if (message === "stop") {
-                    isStopping = true;
-                    isPaused = true;
+                    run.stop();
                     logger.debug(
                         "[Enrichment] Stopping gracefully - completing current item...",
                     );
@@ -530,9 +527,6 @@ async function setupControlChannel() {
 
 /** Starts the enrichment cycle: control channel, one cycle now, then each cycle schedules the next. */
 export async function startUnifiedEnrichmentWorker() {
-    // Clear the stop latch, or a restart within the same process arms one cycle and then
-    // never reschedules.
-    enrichmentStopped = false;
     logger.debug(
         `[Enrichment] Starting worker: artist batch ${ARTIST_BATCH_SIZE}, track batch ${TRACK_BATCH_SIZE}, interval ${ENRICHMENT_INTERVAL_MS / 1000}s`
     );
@@ -545,18 +539,15 @@ export async function startUnifiedEnrichmentWorker() {
     const existingState = await enrichmentStateService.getState();
     const honoringPause = existingState?.status === "paused";
 
+    // Opening clears the closed latch, or a restart within the same process arms one cycle and then
+    // never reschedules.
+    run.open({ paused: honoringPause });
     if (honoringPause) {
-        isPaused = true;
-        userStopped = false;
-        isStopping = false;
         logger.warn(
             "[Enrichment] Honouring the persisted pause — " +
                 "use Resume on the Enrichment page to lift it",
         );
     } else {
-        isPaused = false;
-        isStopping = false;
-        userStopped = false;
         if (existingState && existingState.status !== "idle") {
             await enrichmentStateService.clear();
         }
@@ -637,8 +628,8 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
         } finally {
             // The only scheduling call, in a finally so an early return or a rejected cycle
             // still re-arms the chain; scheduling from two places would start a second
-            // chain. `enrichmentStopped` is how stopUnifiedEnrichmentWorker ends it.
-            if (!enrichmentStopped) {
+            // chain. The closed latch is how stopUnifiedEnrichmentWorker ends it.
+            if (!run.isClosed()) {
                 scheduleNextEnrichmentCycle(
                     nextDelayMs ??
                         (didWork
@@ -665,7 +656,7 @@ function bumpScheduleToFastInterval(): void {
 }
 
 export async function stopUnifiedEnrichmentWorker() {
-    enrichmentStopped = true;
+    run.close();
     if (enrichmentInterval) {
         clearTimeout(enrichmentInterval);
         enrichmentInterval = null;
@@ -1046,64 +1037,61 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
-    // Handle stopping state: transition to idle before checking isPaused.
-    // This must run first because stop sets both isStopping AND isPaused.
-    // If we checked isPaused first, we'd return early and never clear isStopping.
-    if (isStopping) {
+    // A stop asked over the control channel is seen first: it settles to stopped before anything else is checked.
+    if (run.mode() === "stopping") {
         // No stop-cleanup reset: stopping does not edit answers. The record
         // owns the attempt, and flipping `processing` rows back to `pending`
         // here would re-ask questions the stage records have already answered.
         await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
-        isStopping = false;
-        isPaused = false;
-        userStopped = true;
+        run.settleStop();
         return emptyResult;
     }
 
-    // User explicitly stopped -- don't auto-restart via timer. startEnrichmentNow clears this.
-    if (userStopped && !fullMode && !immediateEnrichmentRequested) {
-        if (!userStoppedWarned) {
+    // User explicitly stopped -- don't auto-restart via timer. startEnrichmentNow lifts it.
+    if (!run.admitsCycle({ fullMode })) {
+        if (!run.stopWarned()) {
             const pendingCount = await prisma.track.count({ where: { analysisStatus: "pending" } });
             if (pendingCount > 0) {
-                logger.warn(`[Enrichment] userStopped=true but ${pendingCount} tracks are pending. Use "Run Enrichment" or "Full Enrichment" to resume.`);
-                userStoppedWarned = true;
+                logger.warn(`[Enrichment] Stopped, but ${pendingCount} tracks are pending. Use "Run Enrichment" or "Full Enrichment" to resume.`);
+                run.markStopWarned();
             }
         }
         return emptyResult;
     }
 
-    // Sync local flags with state service (fallback for missed control messages)
-    if (isPaused) {
+    // Sync the run state with the state service (fallback for missed control messages)
+    if (run.mode() === "paused") {
         // State says running but this process is paused: resume the real infrastructure,
-        // not just the flag. A missed resume message would otherwise leave workers
+        // not just the mode. A missed resume message would otherwise leave workers
         // paused and the analyzer gated while state reports running.
         const state = await enrichmentStateService.getState();
         if (state?.status === "running") {
             logger.warn("[Enrichment] Reverse sync: state is running but local pause was set -- resuming workers + analyzer gate");
             await resumeInfrastructure();
-            isPaused = false;
+            run.resume();
         }
     } else {
         const state = await enrichmentStateService.getState();
         if (state?.status === "paused") {
-            isPaused = true;
+            run.adoptPause();
+            return emptyResult;
         } else if (state?.status === "stopping") {
             // State says stopping but we missed the control message. Same
-            // reasoning as the isStopping branch above: no reset of
+            // reasoning as the stopping branch above: no reset of
             // `processing` rows, because the stage record owns the attempt and
             // rewriting the column would contradict it.
             await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
-            userStopped = true;
+            run.settleStop();
             return emptyResult;
         }
     }
 
-    if (isPaused) {
+    if (run.mode() === "paused") {
         return emptyResult;
     }
 
     // Never allow concurrent runs
-    if (isRunning) {
+    if (run.cycleInFlight()) {
         return { ...emptyResult, declined: "already-running" };
     }
 
@@ -1114,13 +1102,13 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     }
 
     // Enforce minimum interval (unless full mode or immediate request)
-    const bypassIntervalCheck = fullMode || immediateEnrichmentRequested;
+    const bypassIntervalCheck = fullMode || run.wakeRequested();
     const now = Date.now();
     if (!bypassIntervalCheck && now - lastRunTime < MIN_INTERVAL_MS) {
         return { ...emptyResult, declined: "too-soon" };
     }
 
-    immediateEnrichmentRequested = false;
+    run.takeWake();
     lastRunTime = now;
 
     // Detect hangs: warn if enrichment has been "running" > 15 min with no state update
@@ -1136,7 +1124,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     }
     const stopLockRenewal = distributedLock.keepAlive(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
 
-    isRunning = true;
+    run.beginCycle();
 
     let artistsProcessed = 0;
     let tracksProcessed = 0;
@@ -1191,14 +1179,14 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
 
         // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
         const ONE_HOUR_MS = 60 * 60 * 1000;
-        if (!isStopping && !isPaused && (!lastOrphanedFailuresCleanup || Date.now() - lastOrphanedFailuresCleanup.getTime() > ONE_HOUR_MS)) {
+        if (run.mayDoHousekeeping() && (!lastOrphanedFailuresCleanup || Date.now() - lastOrphanedFailuresCleanup.getTime() > ONE_HOUR_MS)) {
             await enrichmentFailureService.cleanupOrphanedFailures();
             lastOrphanedFailuresCleanup = new Date();
         }
 
         // Daily: clean up old resolved failures (>30 days)
         const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-        if (!isStopping && !isPaused && (!lastResolvedCleanup || Date.now() - lastResolvedCleanup.getTime() > ONE_DAY_MS)) {
+        if (run.mayDoHousekeeping() && (!lastResolvedCleanup || Date.now() - lastResolvedCleanup.getTime() > ONE_DAY_MS)) {
             lastResolvedCleanup = new Date();
             await enrichmentFailureService.cleanupOldResolved();
         }
@@ -1312,7 +1300,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
                 logger.error("[Enrichment] Failed to record failure:", err),
             );
     } finally {
-        isRunning = false;
+        run.endCycle();
         stopLockRenewal();
         await distributedLock.release(CYCLE_LOCK_KEY);
     }
@@ -1757,19 +1745,20 @@ async function replaceRecordingIsrc(trackId: string, isrc: string | null): Promi
 
 /**
  * Check if enrichment should stop and handle state cleanup if stopping.
- * Returns true if cycle should halt (either stopping or paused).
+ * Returns true if cycle should halt (stopping, stopped or paused). A stop seen here settles to
+ * stopped, so the next timer tick does not start work again.
  */
 async function shouldHaltCycle(): Promise<boolean> {
-    if (isStopping || userStopped) {
+    const mode = run.mode();
+    if (mode === "stopping" || mode === "stopped") {
         await enrichmentStateService.updateState({
             status: "idle",
             currentPhase: null,
         });
-        isStopping = false;
-        isPaused = false;
+        run.settleStop();
         return true;
     }
-    return isPaused;
+    return run.haltRequested();
 }
 
 /**
@@ -2491,10 +2480,7 @@ export async function startEnrichmentNow(): Promise<{
     if (state?.status === "paused" || state?.status === "stopping") {
         await enrichmentStateService.updateState({ status: "idle", currentPhase: null, pausedAt: undefined });
     }
-    isPaused = false;
-    isStopping = false;
-    userStopped = false;
-    userStoppedWarned = false;
+    run.start();
     await resumeInfrastructure();
     return triggerEnrichmentNow();
 }
@@ -2510,9 +2496,9 @@ export async function triggerEnrichmentNow(): Promise<{
     // A trigger runs one cycle and never lifts an operator's stop or pause;
     // startEnrichmentNow does.
 
-    // Set flag to bypass the minimum interval check (does NOT bypass isRunning —
+    // Ask for a cycle past the minimum interval (does NOT bypass a cycle in flight —
     // a concurrent cycle will still cause this call to return an empty result)
-    immediateEnrichmentRequested = true;
+    run.requestWake();
     invalidateEnrichmentProgress();
     bumpScheduleToFastInterval();
 
