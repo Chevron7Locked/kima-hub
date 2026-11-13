@@ -288,6 +288,16 @@ describe('POST /discover/like -- whose Lidarr artist loses the tag', () => {
         expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
     });
 
+    it("keeps the tag while the same listener's other current suggestion carries the same artist id", async () => {
+        await suggest();
+        await otherSuggestion({ userId: USER });
+        lidarrKnowsAlbum();
+
+        await request(app).post('/discover/like').send({ albumId: ALBUM_ID });
+
+        expect(mockRemoveTagsFromArtist).not.toHaveBeenCalled();
+    });
+
     it.each([[null], ['temp-77']])("keeps the tag while another listener's current suggestion of the artist's name has artist id %s", async (artistMbid) => {
         await suggest();
         await otherSuggestion({ artistName: 'DLK artist', artistMbid });

@@ -11,11 +11,11 @@ import { discoverQueue } from "../workers/queues";
 import { requestScan } from "../workers/scanRequest";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
-import { discoveryArtistVerdict, hasNoRealArtistId, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
+import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { lookupKey, relocateDiscoverAlbums, sameName } from "../services/discovery/discoverEvidence";
+import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -484,20 +484,6 @@ async function relabelSuggestionPlays(
     const trackIds = songs.map((t) => t.trackId).filter((id): id is string => id !== null);
     if (trackIds.length === 0) return;
     await prisma.play.updateMany({ where: { userId, trackId: { in: trackIds }, source: from }, data: { source: to } });
-}
-
-/**
- * Whether another current suggestion still needs Discover's tag on this Lidarr artist: one with its MusicBrainz id, or,
- * when that suggestion's artist id is missing or a `temp-` placeholder, its name. `liked` is the suggestion being kept.
- */
-async function otherSuggestionNeedsTag(liked: { id: string; artistMbid: string | null; artistName: string }, artist: { foreignArtistId?: string; artistName?: string } | null): Promise<boolean> {
-    const mbids = [artist?.foreignArtistId, liked.artistMbid].filter((m): m is string => !!m && !hasNoRealArtistId(m));
-    const names = [artist?.artistName ?? liked.artistName];
-    const others = await prisma.discoveryAlbum.findMany({
-        where: { status: "ACTIVE", id: { not: liked.id } },
-        select: { artistMbid: true, artistName: true },
-    });
-    return others.some((o) => (o.artistMbid ? mbids.includes(o.artistMbid) : false) || (hasNoRealArtistId(o.artistMbid) && names.some((n) => sameName(o.artistName, n))));
 }
 
 /**

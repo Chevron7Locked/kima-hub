@@ -177,7 +177,7 @@ export async function removeDiscoveryAlbum(
 }
 
 /** Whether a suggestion's or job's artist id is missing or a `temp-` placeholder: the only case where its artist name stands in for the id. */
-export const hasNoRealArtistId = (artistMbid: string | null | undefined): boolean => !artistMbid || artistMbid.startsWith("temp-");
+const hasNoRealArtistId =(artistMbid: string | null | undefined): boolean => !artistMbid || artistMbid.startsWith("temp-");
 
 /**
  * Whether a listener kept a suggestion of this Lidarr artist (LIKED or MOVED): by its MusicBrainz id, or by name only
@@ -194,6 +194,26 @@ async function keptSuggestion(mbid: string, artistName: string): Promise<boolean
     });
     return kept.some(
         (r) => r.artistMbid === mbid || (hasNoRealArtistId(r.artistMbid) && sameName(r.artistName, artistName)),
+    );
+}
+
+/**
+ * Whether another current suggestion still needs Discover's tag on this Lidarr artist: one with its MusicBrainz id, or,
+ * when that suggestion's artist id is missing or a `temp-` placeholder, its name. `kept` is the suggestion a listener
+ * is keeping, which does not count; `artist` is Lidarr's, when it could be read.
+ */
+export async function otherSuggestionNeedsTag(
+    kept: { id: string; artistMbid: string | null; artistName: string },
+    artist: { foreignArtistId?: string; artistName?: string } | null,
+): Promise<boolean> {
+    const mbids = [artist?.foreignArtistId, kept.artistMbid].filter((m): m is string => !!m && !hasNoRealArtistId(m));
+    const name = artist?.artistName ?? kept.artistName;
+    const others = await prisma.discoveryAlbum.findMany({
+        where: { status: "ACTIVE", id: { not: kept.id } },
+        select: { artistMbid: true, artistName: true },
+    });
+    return others.some(
+        (o) => (o.artistMbid !== null && mbids.includes(o.artistMbid)) || (hasNoRealArtistId(o.artistMbid) && sameName(o.artistName, name)),
     );
 }
 
