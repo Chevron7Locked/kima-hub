@@ -26,8 +26,8 @@ import {
     executeFingerprintPhase,
     executeVibePhase,
     redecideEverything,
-    waitForFingerprintWork,
 } from "../unifiedEnrichment";
+import { waitForFingerprintWork } from "../enrichment/fingerprint";
 import * as stageRecords from "../../services/stages/stageRecords";
 
 const PREFIX = "smv";

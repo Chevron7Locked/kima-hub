@@ -88,6 +88,8 @@ jest.mock("../../services/featureDetection", () => ({
 const FINGERPRINT = "AQAA0pMiRZkQJBVZCSA98NOhHT-Q44eFB0sPPsgM_3hwnDgK7Yh6FCeOxyh-HMd5pDh6NEyQaDmuSjgSH8cXHdlyBSdiETAwHd-F88h3-Dt6KxlU5Dp27IPv4vk66Dz-JElw_Rm6HAWPJMmP_VCF8ki7CZ2h5sNfhD-0LT9-7I0jPMePsRT4HOeP50e0Fz_6Gs-P_7hChD-ePx06dDqaHT-Oy7hT_Dj2HHqND6WR5wieHN-w48iX4jvQ8Mh1PFKQJ9GeITl64QqP93hTfD0OHsd58IdU_Ax66DmOHxd0NEyQaDmuSjgSH8cXHdlyBSdiETAwHd-F88h3";
 const mockFingerprintFile = jest.fn();
 jest.mock("../../services/fpcalc", () => ({
+    // The module's constants (the budget a fingerprint run gets is read from them) stay real.
+    ...jest.requireActual("../../services/fpcalc"),
     fpcalcService: {
         isAvailable: jest.fn().mockResolvedValue(true),
         fingerprintFile: (...args: unknown[]) => mockFingerprintFile(...args),
@@ -110,6 +112,8 @@ jest.mock("../../workers/audioCompletionSubscriber", () => ({
 
 jest.mock("../../workers/enrichment/artists", () => ({
     queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+    // The progress readout counts the real artist rows; only the queue and worker are stood in.
+    artistProgress: () => jest.requireActual("../../workers/enrichment/artists").artistProgress(),
 }));
 jest.mock("../../workers/trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
@@ -128,8 +132,8 @@ import {
     executeFingerprintPhase,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
-    waitForFingerprintWork,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 
 const PREFIX = "fp";
 const id = (n: string) => `${PREFIX}_${n}`;

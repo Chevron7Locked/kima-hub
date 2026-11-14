@@ -53,8 +53,8 @@ import { generateToken } from "../../middleware/auth";
 import {
     getNextWork,
     redecideEverything,
-    waitForFingerprintWork,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 import enrichmentRouter from "../../routes/enrichment";
 import { mountAsServer } from "../../routes/__tests__/helpers/serverMount";
 

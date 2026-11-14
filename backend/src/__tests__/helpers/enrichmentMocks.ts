@@ -169,6 +169,11 @@ function startedWorker() {
     });
 }
 
-export const artistJobMock = { queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: startedWorker() };
+export const artistJobMock = {
+    queueOwedArtists: jest.fn().mockResolvedValue(0),
+    startArtistWorker: startedWorker(),
+    // The progress readout counts the real artist rows; only the queue and worker are stood in.
+    artistProgress: () => jest.requireActual("../../workers/enrichment/artists").artistProgress(),
+};
 export const trackEnrichmentWorkerMock = { startTrackEnrichmentWorker: startedWorker() };
 export const podcastJobMock = { queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: startedWorker() };

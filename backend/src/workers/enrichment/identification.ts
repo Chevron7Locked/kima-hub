@@ -5,6 +5,8 @@
  * Interface:
  *  - `identifyTrack(trackId, jobId?)`: one claimed question, settled on its stage record (done, absent, or failed
  *    with its cause) and returned as "identified", "no_match" or "deferred".
+ *  - `runIdentification(offer)`: the scheduler's turn for the stage: look ahead, prepare, and queue the window.
+ *  - `queueIdentification(item)`: queue one claimed song's job (also how a retry re-queues it).
  *  - `prepareIdentification(upcoming)`: before dispatch, ask AcoustID about the coming songs in batches and name
  *    their untagged albums.
  *  - `IDENTIFICATION_LOOKAHEAD`: how many songs ahead of the dispatch the scheduler offers for that.
@@ -15,7 +17,7 @@
  */
 
 import { logger } from "../../utils/logger";
-import { withTimeout } from "../../utils/timeout";
+import { TimeoutError, withTimeout } from "../../utils/timeout";
 import { prisma } from "../../utils/db";
 import { entityGoneError } from "../entityGone";
 import * as stageRecords from "../../services/stages/stageRecords";
@@ -37,6 +39,9 @@ import type { Outcome } from "../../utils/outcome";
 import { sourcePauseController } from "../../services/sourcePauseController";
 import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording } from "../../services/recordingMatch";
 import { ACOUSTID_NOT_ASKED } from "./fingerprint";
+import { trackQueue } from "../enrichmentQueues";
+import type { StageWork } from "../unifiedEnrichment";
+import type { StageOffer } from "./stageOffer";
 
 /** The time one source gets to answer one question about a song: a few HTTP calls. */
 const RECORDING_BUDGET_MS = 30_000;
@@ -45,12 +50,12 @@ const RECORDING_BUDGET_MS = 30_000;
 export const IDENTIFICATION_LOOKAHEAD = 100;
 
 /** An ask that timed out or threw: a transient failure, so the record retries on its ladder. */
-function unansweredAsk(err: unknown, label: string): Outcome<never> {
+function unansweredAsk(err: unknown): Outcome<never> {
     const message = err instanceof Error ? err.message : String(err);
     return {
         kind: "transient",
         error: {
-            code: message === label ? "TIMEOUT" : "REQUEST_FAILED",
+            code: err instanceof TimeoutError ? "TIMEOUT" : "REQUEST_FAILED",
             message,
         },
     };
@@ -66,7 +71,7 @@ async function askWithinBudget<T>(
     try {
         return await withTimeout(ask(), timeoutMs, label);
     } catch (err: any) {
-        return unansweredAsk(err, label);
+        return unansweredAsk(err);
     }
 }
 
@@ -440,7 +445,7 @@ export async function identifyTrack(
         const detailsLabel = `Timeout fetching MB ISRC and genres: ${track.title}`;
         const details = storeRecordingIsrc
             ? await withTimeout(musicBrainzService.getRecordingIsrcAndGenres(mbid), timeoutMs, detailsLabel).catch(
-                  (err) => ({ isrc: unansweredAsk(err, detailsLabel), genres: unansweredAsk(err, detailsLabel) }),
+                  (err) => ({ isrc: unansweredAsk(err), genres: unansweredAsk(err) }),
               )
             : null;
         if (details?.isrc.kind === "answered") {
@@ -548,4 +553,19 @@ async function prefetchAcoustidForWork(work: Array<{ trackId: string }>): Promis
 export async function prepareIdentification(upcoming: Array<{ trackId: string }>): Promise<void> {
     await prefetchAcoustidForWork(upcoming);
     await identifyAlbumsForWork(upcoming);
+}
+
+/** Queue one identification job. `jobId` is per attempt, so a retry never reuses the key a failed job still holds. */
+export async function queueIdentification(item: StageWork): Promise<void> {
+    await trackQueue.add("enrich", { trackId: item.trackId, trackTitle: item.title }, { jobId: item.jobId });
+}
+
+/**
+ * The identification stage's turn: look `IDENTIFICATION_LOOKAHEAD` songs ahead so AcoustID's batches fill and
+ * untagged albums are named, then claim and queue only the first window's worth.
+ */
+export async function runIdentification(offer: StageOffer): Promise<number> {
+    const upcoming = await offer.nextWork(IDENTIFICATION_LOOKAHEAD);
+    await prepareIdentification(upcoming);
+    return offer.dispatch(upcoming.slice(0, await offer.window()), queueIdentification);
 }

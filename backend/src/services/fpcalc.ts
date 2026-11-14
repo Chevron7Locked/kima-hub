@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 const execFileAsync = promisify(execFile);
 
 /** fpcalc on a full-length track is fast (<1s typical) but be generous. */
-const FPCALC_TIMEOUT_MS = 30000;
+export const FPCALC_TIMEOUT_MS = 30000;
 
 const PROBE_TIMEOUT_MS = 5000;
 

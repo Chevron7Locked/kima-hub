@@ -124,6 +124,8 @@ jest.mock("../enrichmentQueues", () => ({
 
 jest.mock("../enrichment/artists", () => ({
     queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+    // The progress readout counts the real artist rows; only the queue and worker are stood in.
+    artistProgress: () => jest.requireActual("../enrichment/artists").artistProgress(),
 }));
 jest.mock("../trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
@@ -170,13 +172,13 @@ import {
     startEnrichmentNow,
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
-    waitForFingerprintWork,
     executeAudioPhase,
     executeVibePhase,
     executeIdentificationPhase,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
 } from "../unifiedEnrichment";
+import { waitForFingerprintWork } from "../enrichment/fingerprint";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
 import { setTimeout as realSleep } from "timers/promises";

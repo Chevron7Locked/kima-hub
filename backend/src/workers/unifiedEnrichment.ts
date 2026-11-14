@@ -10,12 +10,8 @@ import { prisma } from "../utils/db";
 import Redis from "ioredis";
 import { config } from "../config";
 import type { Worker as BullWorker } from "bullmq";
-import {
-    trackQueue,
-    closeEnrichmentQueues,
-    QUEUE_NAMES,
-} from "./enrichmentQueues";
-import { ARTIST_BATCH_SIZE, queueOwedArtists, startArtistWorker } from "./enrichment/artists";
+import { closeEnrichmentQueues, QUEUE_NAMES } from "./enrichmentQueues";
+import { ARTIST_BATCH_SIZE, artistProgress, queueOwedArtists, startArtistWorker } from "./enrichment/artists";
 import { startTrackEnrichmentWorker } from "./trackEnrichmentWorker";
 import { queueStalePodcasts, startPodcastWorker } from "./enrichment/podcasts";
 import {
@@ -30,8 +26,8 @@ import { runSimilarityStep } from "./enrichment/similarity";
 import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "./enrichment/audioAnalysisJob";
 import { queueSoundVector, runSoundVectors } from "./enrichment/soundVectorJob";
 import type { StageOffer } from "./enrichment/stageOffer";
-import { startFingerprint } from "./enrichment/fingerprint";
-import { IDENTIFICATION_LOOKAHEAD, prepareIdentification } from "./enrichment/identification";
+import { runFingerprints, startFingerprint } from "./enrichment/fingerprint";
+import { queueIdentification, runIdentification } from "./enrichment/identification";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
 // The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 import * as stageRecords from "../services/stages/stageRecords";
@@ -601,9 +597,13 @@ function bumpScheduleToFastInterval(): void {
     scheduleNextEnrichmentCycle(ENRICHMENT_INTERVAL_MS);
 }
 
+/** How long a stop waits for the cycle in flight before it gives up and goes on closing. */
+const STOP_WAIT_MS = 30_000;
+
 /**
  * Closes the worker and returns once no cycle of this process is running. A cycle in flight is asked to stop at
- * its next phase and awaited, so nothing it does lands after this returns.
+ * its next phase and awaited, so nothing it does lands after this returns; a cycle stuck in a phase is waited for
+ * STOP_WAIT_MS, then left (with a warning naming the phase) so a shutdown is not held up by it.
  */
 export async function stopUnifiedEnrichmentWorker() {
     run.close();
@@ -612,7 +612,21 @@ export async function stopUnifiedEnrichmentWorker() {
         enrichmentInterval = null;
     }
     if (run.cycleInFlight()) run.stop();
-    await run.cycleSettled();
+    let giveUp: NodeJS.Timeout | undefined;
+    const settled = await Promise.race([
+        run.cycleSettled().then(() => true),
+        new Promise<false>((resolve) => {
+            giveUp = setTimeout(() => resolve(false), STOP_WAIT_MS);
+        }),
+    ]);
+    clearTimeout(giveUp);
+    if (!settled) {
+        logger.warn(
+            `[Enrichment] The cycle did not settle within ${STOP_WAIT_MS / 1000}s of the stop; closing anyway. It is ${
+                phaseRunning ? `still in its "${phaseRunning}" phase` : "between phases"
+            }.`,
+        );
+    }
     logger.debug("[Enrichment] Worker stopped");
     if (redis) {
         redis.disconnect();
@@ -663,15 +677,7 @@ const analysisList = { rpush: (key: string, value: string) => getRedis().rpush(k
 /** Where a claimed attempt is handed to its queue, shared by the phases and
  * "Retry failed and blocked" so each queue keeps one producer. */
 const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
-    recording: async (item) => {
-        await trackQueue.add(
-            "enrich",
-            { trackId: item.trackId, trackTitle: item.title },
-            // Per-attempt jobId: a retry never reuses the key a failed job
-            // still holds.
-            { jobId: item.jobId },
-        );
-    },
+    recording: queueIdentification,
     analysis: (item) => pushToAnalyzer(analysisList, item),
     embedding: queueSoundVector,
     fingerprint: async (item) => {
@@ -682,19 +688,9 @@ const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
     },
 };
 
-// The scheduler tests still wait for the pool through here; ticket 38 points them at the module and deletes this.
-export { waitForFingerprintWork } from "./enrichment/fingerprint";
-
-/** Offer the fingerprint stage its own batch, so busier stages cannot starve it. */
+/** The `fingerprint` question, in its own batch so busier stages cannot starve it: its own work is in enrichment/fingerprint.ts. */
 export async function executeFingerprintPhase(): Promise<number> {
-    const features = await featureDetection.getFeatures();
-    // No fpcalc binary: the questions stay pending — owed, not failed.
-    // Installing chromaprint is what answers them; nothing is made up and
-    // nothing is marked done that was not measured.
-    if (!features.fpcalc) return 0;
-
-    const work = await getNextWork(TRACK_BATCH_SIZE, "fingerprint");
-    return dispatchStageWork("fingerprint", work, STAGE_PRODUCERS.fingerprint);
+    return runFingerprints(offerFor("fingerprint"));
 }
 
 /**
@@ -810,6 +806,10 @@ async function runEnrichmentCycle(): Promise<{
     declined?: "already-running" | "too-soon" | "scan-running" | "stopped";
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
+
+    // A closed worker's queues and connections are gone, and its timer chain has ended: nothing past a stop runs,
+    // however it was asked (a trigger, a late timer). Declined, not empty, so a caller does not back off on it.
+    if (run.isClosed()) return { ...emptyResult, declined: "stopped" };
 
     // A stop asked over the control channel is seen first: it settles to stopped before anything else is checked.
     if (run.mode() === "stopping") {
@@ -1120,6 +1120,9 @@ async function shouldHaltCycle(): Promise<boolean> {
     return run.haltRequested();
 }
 
+/** The phase the cycle is inside now, for a stop that gives up waiting to say where the cycle is stuck. */
+let phaseRunning: string | null = null;
+
 /**
  * Run a phase and return result. Returns null if cycle should halt.
  */
@@ -1127,12 +1130,17 @@ async function runPhase(
     phaseName: NonNullable<EnrichmentPhase>,
     executor: () => Promise<number>,
 ): Promise<number | null> {
-    await enrichmentStateService.updateState({
-        status: "running",
-        currentPhase: phaseName,
-    });
-
-    const result = await executor();
+    phaseRunning = phaseName;
+    let result: number;
+    try {
+        await enrichmentStateService.updateState({
+            status: "running",
+            currentPhase: phaseName,
+        });
+        result = await executor();
+    } finally {
+        phaseRunning = null;
+    }
 
     if (await shouldHaltCycle()) {
         return null;
@@ -1238,11 +1246,9 @@ async function dispatchStageWork(
     return queued;
 }
 
-/** The `recording` question (identity and genres), offered from the records in its own window. */
+/** The `recording` question (identity and genres): its own work is in enrichment/identification.ts. */
 export async function executeIdentificationPhase(): Promise<number> {
-    const upcoming = await getNextWork(IDENTIFICATION_LOOKAHEAD, "recording");
-    await prepareIdentification(upcoming);
-    return dispatchStageWork("recording", upcoming.slice(0, TRACK_BATCH_SIZE), STAGE_PRODUCERS.recording);
+    return runIdentification(offerFor("recording"));
 }
 
 /**
@@ -1256,10 +1262,13 @@ export async function executeVibePhase(): Promise<number> {
     return runSoundVectors(offerFor("embedding"));
 }
 
-/** What a stage job asks of the scheduler: its window, the work owed to it, and the claim-and-queue dispatch. */
-function offerFor(stage: "analysis" | "embedding"): StageOffer {
+/**
+ * What a stage job asks of the scheduler: its window, the work owed to it, and the claim-and-queue dispatch. The
+ * heavy stages (analysis, embedding) move at the rate their answers drain; recording and fingerprint take a fixed batch.
+ */
+function offerFor(stage: StageName): StageOffer {
     return {
-        window: () => drainCap(stage),
+        window: async () => (stage === "analysis" || stage === "embedding" ? drainCap(stage) : TRACK_BATCH_SIZE),
         nextWork: (limit) => getNextWork(limit, stage),
         dispatch: (work, produce) => dispatchStageWork(stage, work, produce),
     };
@@ -1297,24 +1306,8 @@ export function invalidateEnrichmentProgress(): void {
 
 /** Enrichment progress per stage, read from the records and the analysis queue. */
 async function computeEnrichmentProgress() {
-    // Artist progress
-    // The artists enrichment works on: those with a library album (queueOwedArtists).
-    const artistCounts = await prisma.artist.groupBy({
-        by: ["enrichmentStatus"],
-        where: { albums: { some: { location: "LIBRARY" } } },
-        _count: true,
-    });
-
-    const artistTotal = artistCounts.reduce((sum, s) => sum + s._count, 0);
-    const artistCompleted =
-        (artistCounts.find((s) => s.enrichmentStatus === "completed")?._count || 0) +
-        (artistCounts.find((s) => s.enrichmentStatus === "unresolvable")?._count || 0);
-    const artistPending =
-        artistCounts.find((s) => s.enrichmentStatus === "pending")?._count || 0;
-    // Still to answer: waiting, in flight, or failed and due a retry; only artists with albums are enriched.
-    const artistsOwed = await prisma.artist.count({
-        where: { enrichmentStatus: { in: ["pending", "enriching", "failed"] }, albums: { some: { location: "LIBRARY" } } },
-    });
+    // Which artists count, and which are owed, is the artist job's rule.
+    const artists = await artistProgress();
 
     // Per-stage counts come from TrackStage, one LEFT JOIN from Track per stage, so
     // a track with no record counts as owed rather than vanishing from the totals.
@@ -1428,7 +1421,7 @@ async function computeEnrichmentProgress() {
         fingerprint.working -
         fingerprint.fileMissing;
     const coreComplete =
-        artistsOwed === 0 &&
+        artists.owed === 0 &&
         recordingPending === 0 &&
         recording.working === 0 &&
         recording.retryableFailed === 0 &&
@@ -1442,19 +1435,7 @@ async function computeEnrichmentProgress() {
         source: "TrackStage",
 
         // Core enrichment (blocking)
-        artists: {
-            total: artistTotal,
-            completed: artistCompleted,
-            pending: artistPending,
-            owed: artistsOwed,
-            failed:
-                artistCounts.find((s) => s.enrichmentStatus === "failed")
-                    ?._count || 0,
-            progress:
-                artistTotal > 0 ?
-                    Math.round((artistCompleted / artistTotal) * 100)
-                :   0,
-        },
+        artists,
         trackTags: {
             total: recording.total,
             enriched: recording.completed,

@@ -33,10 +33,10 @@ import { prisma } from "../../utils/db";
 import { featureDetection } from "../../services/featureDetection";
 import { libraryScanRunning } from "../scanActivity";
 import {
-    waitForFingerprintWork,
     getNextWork,
     retryFailedAndBlocked,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 
 const PREFIX = "rfb";
 const id = (n: string) => `${PREFIX}_${n}`;

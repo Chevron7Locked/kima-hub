@@ -42,7 +42,7 @@ jest.mock("../../utils/systemSettings", () => ({
 }));
 
 import { setTimeout as realSleep } from "timers/promises";
-import { mockRedis, enrichmentStateMock, artistJobMock } from "../../__tests__/helpers/enrichmentMocks";
+import { mockRedis, enrichmentStateMock, artistJobMock, loggerMock } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
 import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import {
@@ -237,6 +237,73 @@ describe("stopping the worker", () => {
 
     it("returns at once when no cycle is running", async () => {
         await expect(stopUnifiedEnrichmentWorker()).resolves.toBeUndefined();
+    });
+
+    it("gives up after 30 seconds on a cycle that will not settle, and names the phase it is stuck in", async () => {
+        let release!: (queued: number) => void;
+        queueOwedArtists.mockImplementationOnce(() => new Promise<number>((resolve) => { release = resolve; }));
+        const cycle = triggerEnrichmentNow();
+        try {
+            await until(() => queueOwedArtists.mock.calls.length === 1);
+            loggerMock.logger.warn.mockClear();
+
+            let returned = false;
+            const stopped = stopUnifiedEnrichmentWorker().then(() => { returned = true; });
+            await jest.advanceTimersByTimeAsync(29_000);
+            expect(returned).toBe(false);
+            expect(loggerMock.logger.warn).not.toHaveBeenCalled();
+
+            await jest.advanceTimersByTimeAsync(2_000);
+            await stopped;
+            expect(returned).toBe(true);
+            expect(loggerMock.logger.warn).toHaveBeenCalledWith(expect.stringContaining("artists"));
+        } finally {
+            release?.(0);
+            await cycle;
+        }
+    });
+
+    it("does not warn when the cycle settles in time", async () => {
+        let release!: (queued: number) => void;
+        queueOwedArtists.mockImplementationOnce(() => new Promise<number>((resolve) => { release = resolve; }));
+        const cycle = triggerEnrichmentNow();
+        try {
+            await until(() => queueOwedArtists.mock.calls.length === 1);
+            loggerMock.logger.warn.mockClear();
+
+            const stopped = stopUnifiedEnrichmentWorker();
+            await jest.advanceTimersByTimeAsync(5_000);
+            release(0);
+            await Promise.all([cycle, stopped]);
+            expect(loggerMock.logger.warn).not.toHaveBeenCalled();
+        } finally {
+            release?.(0);
+        }
+    });
+});
+
+describe("a trigger after the worker was stopped", () => {
+    it("declines as stopped before it looks at the state, the scan or the lock", async () => {
+        await stopUnifiedEnrichmentWorker();
+        jest.clearAllMocks();
+
+        const result = await triggerEnrichmentNow();
+
+        expect(result).toEqual(expect.objectContaining({ declined: "stopped" }));
+        expect(state.getState).not.toHaveBeenCalled();
+        expect(state.detectHang).not.toHaveBeenCalled();
+        expect(mockRedis.set).not.toHaveBeenCalled();
+        expect(queueOwedArtists).not.toHaveBeenCalled();
+    });
+
+    it("leaves the timer chain ended", async () => {
+        await stopUnifiedEnrichmentWorker();
+        jest.clearAllMocks();
+
+        await triggerEnrichmentNow();
+        await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+
+        expect(cyclesRun()).toBe(0);
     });
 });
 

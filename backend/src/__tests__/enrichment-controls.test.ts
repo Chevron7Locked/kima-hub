@@ -141,6 +141,8 @@ jest.mock("../workers/audioCompletionSubscriber", () => ({
 
 jest.mock("../workers/enrichment/artists", () => ({
     queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+    // The progress readout counts the real artist rows; only the queue and worker are stood in.
+    artistProgress: () => jest.requireActual("../workers/enrichment/artists").artistProgress(),
 }));
 jest.mock("../workers/trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
@@ -186,8 +188,8 @@ import {
     invalidateEnrichmentProgress,
     retryFailedAndBlocked,
     redecideEverything,
-    waitForFingerprintWork,
 } from "../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../workers/enrichment/fingerprint";
 import enrichmentRouter from "../routes/enrichment";
 import scanRouter from "../routes/library/scan";
 import { mountAsServer } from "../routes/__tests__/helpers/serverMount";

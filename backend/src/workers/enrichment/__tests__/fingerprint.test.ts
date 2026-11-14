@@ -9,7 +9,13 @@ jest.mock("../../../utils/logger", () => ({
 }));
 
 const mockFingerprintFile = jest.fn();
+const mockFeatures = jest.fn();
+jest.mock("../../../services/featureDetection", () => ({
+    featureDetection: { getFeatures: () => mockFeatures() },
+}));
+
 jest.mock("../../../services/fpcalc", () => ({
+    ...jest.requireActual("../../../services/fpcalc"),
     fpcalcService: {
         isAvailable: jest.fn().mockResolvedValue(true),
         fingerprintFile: (...args: unknown[]) => mockFingerprintFile(...args),
@@ -28,8 +34,13 @@ import {
     ACOUSTID_NOT_ASKED,
     answerFingerprint,
     createFingerprintPool,
+    FINGERPRINT_BUDGET_MS,
+    runFingerprints,
+    waitForFingerprintWork,
     type FingerprintItem,
 } from "../fingerprint";
+import { FPCALC_TIMEOUT_MS } from "../../../services/fpcalc";
+import type { StageOffer } from "../stageOffer";
 
 const PREFIX = "fpmod";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -153,6 +164,15 @@ describe("answerFingerprint", () => {
         expect((await stageRow(id("a4")))?.status).toBe("failed");
     });
 
+    it("drops a song deleted since it was claimed, quietly: nothing is thrown and no failure is recorded", async () => {
+        const gone: FingerprintItem = { trackId: id("gone"), filePath: "artist/album/gone.flac", jobId: "job-gone" };
+
+        await expect(answerFingerprint(gone)).resolves.toBeUndefined();
+
+        expect(mockFingerprintFile).not.toHaveBeenCalled();
+        expect(await stageRow(id("gone"))).toBeNull();
+    });
+
     it("reopens a recording no-match that never asked AcoustID, once the fingerprint lands", async () => {
         mockFingerprintFile.mockResolvedValue({ fingerprint: FINGERPRINT, duration: 218 });
         const item = await claimed(id("a5"));
@@ -240,9 +260,53 @@ describe("the fingerprint pool", () => {
             expect(row?.status).toBe("failed");
             expect(row?.attempt).toBe(1);
             expect(row?.retryable).toBe(true);
+            expect(row?.evidence).toMatchObject({ timedOut: true });
             expect(await storedFingerprint(item.trackId)).toBeNull();
         }
         expect((await stageRow(quick.trackId))?.status).toBe("done");
         expect(await storedFingerprint(quick.trackId)).toBe(FINGERPRINT);
+    });
+});
+
+describe("the fingerprint budget", () => {
+    it("stays above fpcalc's own timeout, so a slot never frees while fpcalc still runs", () => {
+        expect(FINGERPRINT_BUDGET_MS).toBeGreaterThan(FPCALC_TIMEOUT_MS);
+    });
+});
+
+describe("runFingerprints", () => {
+    /** An offer that hands out the given claimed items and starts each, as the scheduler's dispatch does. */
+    function offerOf(items: FingerprintItem[]) {
+        const nextWork = jest.fn(async (_limit: number) => items as never);
+        const offer: StageOffer = {
+            window: async () => 7,
+            nextWork,
+            dispatch: async (work, produce) => {
+                for (const item of work) await produce(item);
+                return work.length;
+            },
+        };
+        return { offer, nextWork };
+    }
+
+    it("offers and queues nothing when this install has no fpcalc", async () => {
+        mockFeatures.mockResolvedValue({ fpcalc: false });
+        const { offer, nextWork } = offerOf([]);
+
+        expect(await runFingerprints(offer)).toBe(0);
+        expect(nextWork).not.toHaveBeenCalled();
+    });
+
+    it("asks for its own window of songs and starts each in the pool", async () => {
+        mockFeatures.mockResolvedValue({ fpcalc: true });
+        mockFingerprintFile.mockResolvedValue({ fingerprint: FINGERPRINT, duration: 218 });
+        const item = await claimed(id("r1"));
+        const { offer, nextWork } = offerOf([item]);
+
+        expect(await runFingerprints(offer)).toBe(1);
+        await waitForFingerprintWork();
+
+        expect(nextWork).toHaveBeenCalledWith(7);
+        expect((await stageRow(id("r1")))?.status).toBe("done");
     });
 });

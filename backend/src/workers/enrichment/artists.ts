@@ -4,6 +4,8 @@
  *   queueOwedArtists()          the scheduler's turn each cycle: asks again an artist whose job was lost, then
  *                               queues a batch of the artists still owed (a library album; pending, failed, or
  *                               unresolvable for a week) and returns how many it queued
+ *   artistProgress()            how far along the artists are: counts by status, the share done, and how many are
+ *                               still owed (the progress readout and "core enrichment complete" read this)
  *   startArtistWorker()         the queue's worker: one artist per job
  *   enrichSimilarArtist(artist) one artist's whole enrichment (the worker's work, callable on its own)
  *   failedArtistStatus(n)       the status an artist takes after its nth failure in a row
@@ -507,6 +509,32 @@ export const ARTIST_BATCH_SIZE = 10;
 // off until this grace cleans the job. Completed jobs are cleaned immediately so a reset artist can be queued again.
 const FAILED_JOB_RETRY_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
+/** An artist known only from Discover is not enriched (Discover shows its name, nothing more): only artists with a library album are. */
+const ENRICHED_ARTISTS = { albums: { some: { location: "LIBRARY" as const } } };
+
+/**
+ * How far along the artists are, over the artists enrichment works on. `completed` counts unresolvable ones (closed
+ * for now); `owed` is what is still to answer: waiting, in flight, or failed and due a retry.
+ */
+export async function artistProgress() {
+    const counts = await prisma.artist.groupBy({
+        by: ["enrichmentStatus"],
+        where: ENRICHED_ARTISTS,
+        _count: true,
+    });
+    const of = (status: string) => counts.find((c) => c.enrichmentStatus === status)?._count ?? 0;
+    const total = counts.reduce((sum, c) => sum + c._count, 0);
+    const completed = of("completed") + of("unresolvable");
+    return {
+        total,
+        completed,
+        pending: of("pending"),
+        failed: of("failed"),
+        owed: of("pending") + of("enriching") + of("failed"),
+        progress: total > 0 ? Math.round((completed / total) * 100) : 0,
+    };
+}
+
 export async function queueOwedArtists(): Promise<number> {
     // Reset temp-MBID artists that have been unresolvable for >24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -537,8 +565,7 @@ export async function queueOwedArtists(): Promise<number> {
                 { enrichmentStatus: "failed" },
                 { enrichmentStatus: "unresolvable", lastEnriched: { lt: sevenDaysAgo } },
             ],
-            // An artist known only from Discover is not enriched: Discover shows its name, nothing more.
-            albums: { some: { location: "LIBRARY" } },
+            ...ENRICHED_ARTISTS,
         },
         select: { id: true, name: true },
         take: ARTIST_BATCH_SIZE,

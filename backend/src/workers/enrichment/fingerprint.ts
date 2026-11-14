@@ -6,6 +6,7 @@
  *  - `answerFingerprint(item)`: one claimed question, answered or failed on its stage record.
  *  - `startFingerprint(item)` / `waitForFingerprintWork()`: the same through the pool, which runs up to
  *    availableParallelism() fpcalc runs at once, each bounded by the stage budget, and returns at once.
+ *  - `runFingerprints(offer)`: the scheduler's turn for the stage: offer the songs owed a fingerprint and start each.
  *  - `createFingerprintPool(...)`: a pool of another size or budget (tests).
  *
  * The scheduler claims the record and offers the item; nothing here claims, queues or picks work. A stored
@@ -14,11 +15,14 @@
 
 import os from "os";
 import { logger } from "../../utils/logger";
-import { withTimeout } from "../../utils/timeout";
+import { TimeoutError, withTimeout } from "../../utils/timeout";
 import { prisma } from "../../utils/db";
 import * as stageRecords from "../../services/stages/stageRecords";
 import { persistAcoustidFingerprint } from "../../services/acoustidIdentification";
-import { fpcalcService } from "../../services/fpcalc";
+import { FPCALC_TIMEOUT_MS, fpcalcService } from "../../services/fpcalc";
+import { featureDetection } from "../../services/featureDetection";
+import { entityGoneError, isEntityGone } from "../entityGone";
+import type { StageOffer } from "./stageOffer";
 import { resolveWithinMusicRoot } from "../../routes/library/trackPath";
 
 /** One claimed fingerprint question: the song, its file, and the claim's job id. */
@@ -28,8 +32,12 @@ export interface FingerprintItem {
     jobId: string;
 }
 
-/** The time one fpcalc run gets before it is recorded as a timed-out failure. */
-const FINGERPRINT_BUDGET_MS = 30_000;
+/**
+ * The time one fingerprint question gets before it is recorded as a timed-out failure. It stays above fpcalc's own
+ * timeout (which kills the run), so a pool slot never frees while fpcalc is still running; the margin covers the
+ * reads and writes around the run.
+ */
+export const FINGERPRINT_BUDGET_MS = FPCALC_TIMEOUT_MS + 15_000;
 
 /** Evidence on a recording no-match that could not ask AcoustID: the file had no fingerprint. */
 export const ACOUSTID_NOT_ASKED = "not asked: the file's fingerprint question closed";
@@ -68,7 +76,7 @@ export async function answerFingerprint(item: FingerprintItem): Promise<void> {
             select: { acoustidFingerprint: true },
         });
         if (!track) {
-            throw new Error(`ENTITY_NOT_FOUND: Track ${item.trackId} deleted`);
+            throw entityGoneError("Track", item.trackId);
         }
 
         if (track.acoustidFingerprint) {
@@ -103,6 +111,11 @@ export async function answerFingerprint(item: FingerprintItem): Promise<void> {
         }, item.jobId);
         await reopenRecordingThatNeverAskedAcoustid(item.trackId);
     } catch (err) {
+        // A song deleted since it was claimed has nothing left to fingerprint or fail.
+        if (isEntityGone(err)) {
+            logger.debug(`[Enrichment] Fingerprint for ${item.trackId} dropped: the track no longer exists`);
+            return;
+        }
         logger.debug(
             `[Enrichment] Fingerprint failed for ${item.trackId}: ${(err as Error).message}`,
         );
@@ -152,8 +165,8 @@ export function createFingerprintPool(options: { concurrency: number; budgetMs: 
             )
                 .catch((err: unknown) => {
                     // The per-call budget expired (or the pool itself broke):
-                    // record it as the classified failure it is — never a silent
-                    // drop, never an unhandled rejection.
+                    // record it as the failure it is, never a silent drop or an
+                    // unhandled rejection.
                     logger.warn(
                         `[Enrichment] Fingerprint work for ${item.trackId} did not finish: ${(err as Error).message}`,
                     );
@@ -162,7 +175,7 @@ export function createFingerprintPool(options: { concurrency: number; budgetMs: 
                         "fingerprint",
                         "fpcalc",
                         err,
-                        { paths: ["fpcalc"], timedOut: true },
+                        { paths: ["fpcalc"], timedOut: err instanceof TimeoutError },
                         item.jobId,
                     );
                 })
@@ -194,4 +207,15 @@ export function startFingerprint(item: FingerprintItem): void {
  * it (the pool answers on its own schedule); tests do. */
 export async function waitForFingerprintWork(): Promise<void> {
     await pool.settled();
+}
+
+/**
+ * The fingerprint stage's turn: offer the songs owed a fingerprint, in their own window so busier stages cannot
+ * starve it, and start each in the pool. With no fpcalc binary the questions stay pending (owed, not failed):
+ * installing chromaprint is what answers them, and nothing is marked done that was not measured.
+ */
+export async function runFingerprints(offer: StageOffer): Promise<number> {
+    if (!(await featureDetection.getFeatures()).fpcalc) return 0;
+    const work = await offer.nextWork(await offer.window());
+    return offer.dispatch(work, async (item) => startFingerprint(item));
 }

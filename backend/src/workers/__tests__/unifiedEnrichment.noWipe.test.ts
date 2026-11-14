@@ -24,10 +24,10 @@ import { putStage, deleteSeededRows, seedArtistAndAlbum, seedPatternEmbedding } 
 import { mockQueueAdd } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
 import {
-    waitForFingerprintWork,
     retryFailedAndBlocked,
     redecideEverything,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 
 const PREFIX = "wipe";
 const id = (n: string) => `${PREFIX}_${n}`;

@@ -25,11 +25,11 @@ import { prisma } from "../../utils/db";
 import { featureDetection } from "../../services/featureDetection";
 import {
     analysisStillRunning,
-    waitForFingerprintWork,
     getNextWork,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 
 const PREFIX = "discskip";
 const id = (n: string) => `${PREFIX}_${n}`;

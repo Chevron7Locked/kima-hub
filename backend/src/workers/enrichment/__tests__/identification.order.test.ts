@@ -69,6 +69,8 @@ jest.mock("../../../utils/logger", () => ({
 // ── Imports (after mocks) ───────────────────────────────────────────
 
 import { identifyTrack } from "../identification";
+import * as stageRecords from "../../../services/stages/stageRecords";
+import { TimeoutError } from "../../../utils/timeout";
 import { acoustidService } from "../../../services/acoustidService";
 import { sourcePauseController } from "../../../services/sourcePauseController";
 import { prisma } from "../../../utils/db";
@@ -336,6 +338,23 @@ describe("identifyTrack: the identification order", () => {
         expect(result).toBe("deferred");
         expect(mockIdentifyRecording).not.toHaveBeenCalled();
         expect((await trackRow()).recordingMbid).toBeNull();
+    });
+
+    it("records a source that ran out of time as a timeout, and any other throw as a failed request", async () => {
+        await seedTrack({ rgMbid: RG_MBID });
+        const failOutcome = jest.spyOn(stageRecords, "failOutcome");
+        try {
+            mockGetAlbumCatalogue.mockRejectedValueOnce(new TimeoutError("musicbrainz did not answer in time"));
+            expect(await identifyTrack(TRACK_ID)).toBe("deferred");
+            expect(failOutcome.mock.calls[0][3]).toMatchObject({ kind: "transient", error: { code: "TIMEOUT" } });
+
+            failOutcome.mockClear();
+            mockGetAlbumCatalogue.mockRejectedValueOnce(new Error("socket hang up"));
+            expect(await identifyTrack(TRACK_ID)).toBe("deferred");
+            expect(failOutcome.mock.calls[0][3]).toMatchObject({ kind: "transient", error: { code: "REQUEST_FAILED" } });
+        } finally {
+            failOutcome.mockRestore();
+        }
     });
 
     it("asks AcoustID even with the fpcalc flag off — the step needs a fingerprint, not the binary", async () => {

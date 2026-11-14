@@ -57,6 +57,8 @@ jest.mock("../../services/acoustidIdentification", () => ({
 // fpcalc must never be reached from the recording stage: the recording
 // stage's AcoustID step consumes the fingerprint stage's STORED answer.
 jest.mock("../../services/fpcalc", () => ({
+    // The module's constants (the budget a fingerprint run gets is read from them) stay real.
+    ...jest.requireActual("../../services/fpcalc"),
     fpcalcService: {
         fingerprintFile: jest.fn()
             .mockResolvedValue({ fingerprint: "AQSEEFPFPCALC", duration: 180 }),
@@ -76,11 +78,11 @@ import {
     getNextWork,
     retryFailedAndBlocked,
     redecideEverything,
-    waitForFingerprintWork,
     executeFingerprintPhase,
     invalidateEnrichmentProgress,
     getEnrichmentProgress,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 import { fpcalcService } from "../../services/fpcalc";
 import {
     identifyTrackByAcoustid,

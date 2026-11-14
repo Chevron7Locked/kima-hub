@@ -26,12 +26,12 @@ jest.mock("../../workers/enrichment/podcasts", () => require("../../__tests__/he
 import { mockQueueAdd, mockRecordFailure } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
 import {
-    waitForFingerprintWork,
     getNextWork,
     retryFailedAndBlocked,
     getEnrichmentProgress,
     invalidateEnrichmentProgress,
 } from "../../workers/unifiedEnrichment";
+import { waitForFingerprintWork } from "../../workers/enrichment/fingerprint";
 
 const PREFIX = "scanmiss";
 const id = (n: string) => `${PREFIX}_${n}`;

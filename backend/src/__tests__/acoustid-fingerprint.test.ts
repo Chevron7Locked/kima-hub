@@ -22,6 +22,8 @@ jest.mock("music-metadata", () => ({
 const mockIsAvailable = jest.fn().mockResolvedValue(true);
 const mockFingerprintFile = jest.fn();
 jest.mock("../services/fpcalc", () => ({
+    // The module's constants (the budget a fingerprint run gets is read from them) stay real.
+    ...jest.requireActual("../services/fpcalc"),
     fpcalcService: {
         isAvailable: (...args: unknown[]) => mockIsAvailable(...args),
         fingerprintFile: (...args: unknown[]) => mockFingerprintFile(...args),
@@ -126,6 +128,8 @@ jest.mock("../workers/enrichmentQueues", () => ({
 
 jest.mock("../workers/enrichment/artists", () => ({
     queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({}),
+    // The progress readout counts the real artist rows; only the queue and worker are stood in.
+    artistProgress: () => jest.requireActual("../workers/enrichment/artists").artistProgress(),
 }));
 jest.mock("../workers/trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({}),
