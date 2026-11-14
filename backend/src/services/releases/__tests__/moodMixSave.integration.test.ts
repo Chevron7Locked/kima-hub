@@ -4,6 +4,7 @@
  * only the songs that are still playable, and when none are, no playlist is made. Real database.
  */
 import { prisma } from "../../../utils/db";
+import { VALID_MOODS, type MoodType } from "../../moodBucketService";
 import { MoodMixNotFoundError, saveMoodMixAsPlaylist } from "../moodMixes";
 
 jest.setTimeout(60_000);
@@ -74,6 +75,11 @@ afterEach(async () => {
 afterAll(clean);
 
 describe("saveMoodMixAsPlaylist", () => {
+    it("is tested with a retired mood and a current one", () => {
+        expect(VALID_MOODS).not.toContain("focus" as MoodType);
+        expect(VALID_MOODS).toContain("happy");
+    });
+
     it("makes no playlist when none of the mix's songs is playable", async () => {
         await saveMix([SONG.missing, SONG.corrupt, SONG.discover, `${P}-gone`]);
         await expect(saveMoodMixAsPlaylist(USER, MIX_ID)).rejects.toBeInstanceOf(MoodMixNotFoundError);
@@ -110,8 +116,7 @@ describe("saveMoodMixAsPlaylist", () => {
             expect(await playlists()).toHaveLength(1);
             expect(await itemsOf(first.id)).toEqual([SONG.a, SONG.b]);
         } finally {
-            await prisma.track.update({ where: { id: SONG.a }, data: { missingSince: null } });
-            await prisma.track.update({ where: { id: SONG.b }, data: { corrupt: false } });
+            await prisma.track.updateMany({ where: { id: { in: [SONG.a, SONG.b] } }, data: { missingSince: null, corrupt: false } });
         }
     });
 });

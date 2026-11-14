@@ -157,13 +157,13 @@ export async function saveMoodMixAsPlaylist(
     const mix = await savedMoodMix(userId);
     if (!mix || mix.id !== mixId) throw new MoodMixNotFoundError(mixId);
 
-    const playable = await prisma.track.findMany({
+    const playableRows = await prisma.track.findMany({
         where: { id: { in: mix.trackIds }, ...PLAYABLE_SONG },
         select: { id: true },
     });
-    const playableIds = new Set(playable.map((t) => t.id));
-    const trackIds = mix.trackIds.filter((id) => playableIds.has(id));
-    if (trackIds.length === 0) throw new MoodMixNotFoundError(mixId);
+    const playableSet = new Set(playableRows.map((t) => t.id));
+    const playableTrackIds = mix.trackIds.filter((id) => playableSet.has(id));
+    if (playableTrackIds.length === 0) throw new MoodMixNotFoundError(mixId);
 
     let created = false;
     let playlist = await prisma.playlist.findFirst({
@@ -188,7 +188,14 @@ export async function saveMoodMixAsPlaylist(
         }
     }
 
-    const { added } = await addTracks(playlist.id, trackIds);
+    let added: number;
+    try {
+        ({ added } = await addTracks(playlist.id, playableTrackIds));
+    } catch (error) {
+        // All or nothing: a playlist this save made is not left empty behind a failed add.
+        if (created) await prisma.playlist.deleteMany({ where: { id: playlist.id } });
+        throw error;
+    }
     if (created || added > 0) announcePlaylistChange(userId, playlist.id);
     const trackCount = await prisma.playlistItem.count({ where: { playlistId: playlist.id } });
     return { ...playlist, trackCount, created };
