@@ -208,6 +208,47 @@ describe("repairCoverFormatsOnce", () => {
         expect(await formatOf(path.join(covers, "albums", "p.jpg"))).toBe("png");
     });
 
+    it("drops a conversion when the file was written anew after it was read, so the newer write wins", async () => {
+        const file = path.join(covers, "albums", "p.jpg");
+        put(file, await picture("png"));
+        const newer = await picture("jpeg");
+        const realRead = fs.promises.readFile;
+        jest.spyOn(fs.promises, "readFile").mockImplementationOnce(async (...args: Parameters<typeof realRead>) => {
+            const old = await realRead(...args);
+            // A download of the same cover lands while the pass holds the old bytes.
+            fs.writeFileSync(file, newer);
+            const later = new Date(Date.now() + 5000);
+            fs.utimesSync(file, later, later);
+            return old;
+        });
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 0, superseded: 1, failed: 0 });
+        expect(fs.readFileSync(file).equals(newer)).toBe(true);
+        expect(fs.readdirSync(path.join(covers, "albums"))).toEqual(["p.jpg"]);
+        expect(await marker()).not.toBeNull();
+    });
+
+    it("drops a conversion when the newer write is the same size, going by its time", async () => {
+        const file = path.join(covers, "albums", "p.jpg");
+        const old = await picture("png");
+        put(file, old);
+        const sameSize = Buffer.from(old);
+        sameSize[sameSize.length - 20] ^= 0xff;
+        const realRead = fs.promises.readFile;
+        jest.spyOn(fs.promises, "readFile").mockImplementationOnce(async (...args: Parameters<typeof realRead>) => {
+            const read = await realRead(...args);
+            fs.writeFileSync(file, sameSize);
+            const later = new Date(Date.now() + 5000);
+            fs.utimesSync(file, later, later);
+            return read;
+        });
+
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, superseded: 1 });
+        expect(fs.readFileSync(file).equals(sameSize)).toBe(true);
+    });
+
     it("copes with folders that do not exist", async () => {
         expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, stopped: false });
         expect(await marker()).not.toBeNull();

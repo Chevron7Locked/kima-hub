@@ -1,7 +1,8 @@
 /**
  * The one-time repair of stored covers saved before every stored picture was written as a JPEG (ticket 104): a `.jpg`
  * could hold PNG or WebP bytes, and was served as `image/jpeg`. The pass walks every covers folder once, converts those
- * files in place through `storeAsJpeg` (atomic, so a reader never meets half a file), and records the done marker.
+ * files in place through `replaceWithJpeg` (atomic, so a reader never meets half a file; and dropped when the file was
+ * written anew since it was read, so the older bytes never overwrite a newer write), and records the done marker.
  *
  * A file that is no picture is left alone and logged: it is not this pass's to delete. A file that could not be written
  * keeps the marker unset, so the next start tries again. A stop (shutdown) ends the pass between files and also keeps
@@ -12,12 +13,14 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
-import { audiobookCoversPath, coversBasePath, storeAsJpeg } from "./imageStorage";
+import { audiobookCoversPath, coversBasePath, replaceWithJpeg } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
 
 export interface CoverRepairResult {
     /** Files that held another format and are JPEGs now. */
     converted: number;
+    /** Files written anew after the pass read them: the newer write stands (it is a JPEG already). */
+    superseded: number;
     /** Files named `.jpg` that are no picture, left as they were. */
     notPictures: number;
     /** Files that could not be read or written. */
@@ -53,7 +56,7 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
     // No settings row yet is a new install: it has stored no covers in the old way.
     if (!settings || settings.coverFormatsRepairedAt) return null;
 
-    const result: CoverRepairResult = { converted: 0, notPictures: 0, failed: 0, stopped: false };
+    const result: CoverRepairResult = { converted: 0, superseded: 0, notPictures: 0, failed: 0, stopped: false };
 
     for (const dir of coverFolders()) {
         let names: string[];
@@ -71,10 +74,16 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
             const file = path.join(dir, name);
             try {
                 // lstat, not stat: a symbolic link is not ours to replace with a real file.
-                if (!(await fs.promises.lstat(file)).isFile() || (await isJpeg(file))) continue;
-                if (await storeAsJpeg(file, await fs.promises.readFile(file))) {
+                const read = await fs.promises.lstat(file);
+                if (!read.isFile() || (await isJpeg(file))) continue;
+                const bytes = await fs.promises.readFile(file);
+                const outcome = await replaceWithJpeg(file, bytes, { mtimeMs: read.mtimeMs, size: read.size });
+                if (outcome === "replaced") {
                     result.converted++;
                     logger.debug(`[COVER-REPAIR] Converted ${file} to a JPEG`);
+                } else if (outcome === "changed") {
+                    result.superseded++;
+                    logger.debug(`[COVER-REPAIR] ${file} was written anew meanwhile; the newer write stands`);
                 } else {
                     result.notPictures++;
                     logger.warn(`[COVER-REPAIR] ${file} is no picture; left as it is`);

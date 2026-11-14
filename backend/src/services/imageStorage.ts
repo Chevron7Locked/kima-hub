@@ -44,15 +44,18 @@ export function resolveInCoversDir(relativePath: string): string | null {
 }
 
 /**
- * The picture as JPEG bytes: a JPEG as it came, anything else converted, null when the bytes are no picture. Every
- * stored image is a `.jpg` (readers look the file up by that name), so the bytes must be a JPEG, whatever the server's
- * content type claimed.
+ * The picture as JPEG bytes: a JPEG that needs no turning as it came, anything else converted (turned upright by its
+ * orientation tag, any transparency laid on white), null when the bytes are no picture. Every stored image is a `.jpg`
+ * (readers look the file up by that name), so the bytes must be a JPEG, whatever the server's content type claimed.
  */
 async function asJpeg(bytes: Buffer): Promise<Buffer | null> {
-    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return bytes;
     try {
         const sharp = (await import("sharp")).default;
-        return await sharp(bytes).jpeg({ quality: 90 }).toBuffer();
+        if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+            const { orientation } = await sharp(bytes).metadata();
+            if (!orientation || orientation === 1) return bytes;
+        }
+        return await sharp(bytes).rotate().flatten({ background: "#ffffff" }).jpeg({ quality: 90 }).toBuffer();
     } catch {
         return null;
     }
@@ -92,16 +95,32 @@ function sweepOrphanParts(dir: string): Promise<void> {
     return swept;
 }
 
+/** What a file looked like when it was read: a later write to it changes one of these. */
+export interface FileVersion {
+    mtimeMs: number;
+    size: number;
+}
+
 /**
  * Written under a temporary name and renamed into place, so a crash or a failed write never leaves half a file under
  * the final name, and a reader never finds one. The folder's orphan temporary files are swept before its first write.
+ * With `unchangedFrom`, the file is replaced only if it still looks as it did then, else nothing changes and the answer
+ * is false: a pass holding old bytes must not overwrite a newer write.
  */
-async function writeAtomically(filePath: string, bytes: Buffer): Promise<void> {
+async function writeAtomically(filePath: string, bytes: Buffer, unchangedFrom?: FileVersion): Promise<boolean> {
     await sweepOrphanParts(path.dirname(filePath));
     const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
     try {
         await fs.promises.writeFile(partial, bytes);
+        if (unchangedFrom) {
+            const now = await fs.promises.stat(filePath);
+            if (now.mtimeMs !== unchangedFrom.mtimeMs || now.size !== unchangedFrom.size) {
+                await fs.promises.rm(partial, { force: true });
+                return false;
+            }
+        }
         await fs.promises.rename(partial, filePath);
+        return true;
     } catch (err) {
         await fs.promises.rm(partial, { force: true });
         throw err;
@@ -117,6 +136,20 @@ export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<bool
     if (!picture) return false;
     await writeAtomically(filePath, picture);
     return true;
+}
+
+/**
+ * Replaces a stored file with its bytes as a JPEG, unless the file was written to since `readAs` (its time and size
+ * when `bytes` were read): then the newer write stands and nothing changes. Otherwise as `storeAsJpeg`.
+ */
+export async function replaceWithJpeg(
+    filePath: string,
+    bytes: Buffer,
+    readAs: FileVersion,
+): Promise<"replaced" | "notPicture" | "changed"> {
+    const picture = await asJpeg(bytes);
+    if (!picture) return "notPicture";
+    return (await writeAtomically(filePath, picture, readAs)) ? "replaced" : "changed";
 }
 
 /**
@@ -196,7 +229,7 @@ export function nativeFileExists(nativePath: string | null | undefined): boolean
 
 /**
  * Check for a local artist image file in the artist's music directory.
- * Copies to the image cache if found and returns a native path.
+ * Stores it in the image cache as a JPEG if found and returns a native path.
  */
 async function checkLocalArtistImage(
     musicPath: string,
@@ -224,14 +257,16 @@ async function checkLocalArtistImage(
             if (lstat.isSymbolicLink()) continue;
             if (lstat.isFile() && lstat.size > 1000) {
                 const dirPath = ensureCoversDir(ARTIST_IMAGES_DIR);
-                const ext = path.extname(filename);
-                const cachePath = path.join(dirPath, `${artistId}${ext}`);
-                await fs.promises.copyFile(filePath, cachePath);
+                const stored = `${artistId}.jpg`;
+                if (!(await storeAsJpeg(path.join(dirPath, stored), await fs.promises.readFile(filePath)))) {
+                    logger.debug(`[ImageStorage] Not a readable picture: ${filePath}`);
+                    continue;
+                }
                 logger.debug(`[ImageStorage] Local artist image found: ${filePath}`);
-                return `native:${ARTIST_IMAGES_DIR}/${artistId}${ext}`;
+                return `native:${ARTIST_IMAGES_DIR}/${stored}`;
             }
         } catch {
-            // Most candidate names do not exist; try the next.
+            // Most candidate names do not exist, and a file that cannot be read or stored is passed over; try the next.
         }
     }
     return null;
@@ -310,7 +345,7 @@ export async function coverFileForWidth(coverPath: string, relativePath: string,
     const resizedPath = getResizedImagePath(`native:${relativePath}`, width);
     if (!resizedPath) return coverPath;
     if (fs.existsSync(resizedPath)) return resizedPath;
-    const original = fs.readFileSync(coverPath);
+    const original = await fs.promises.readFile(coverPath);
     const resized = await resizeImageBuffer(original, width);
     if (resized === original) return coverPath;
     // Written atomically, so a request arriving mid-write (or after a crash) never finds, and caches for a year, a
