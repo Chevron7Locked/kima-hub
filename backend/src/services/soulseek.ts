@@ -198,6 +198,8 @@ class SoulseekService {
     private client: InstanceType<typeof SlskClient> | null = null;
     private connecting = false;
     private connectPromise: Promise<void> | null = null;
+    /** The latest reset-and-reconnect, so the next waits for it and a caller can wait for it to settle. */
+    private reconnectRun: Promise<void> = Promise.resolve();
     private lastConnectAttempt = 0;
     private failedConnectionAttempts = 0;
     private readonly MAX_BACKOFF_MS = 300000; // 5 minutes (slskd practice)
@@ -1956,7 +1958,23 @@ class SoulseekService {
      * Reset all backoff/error counters and force immediate reconnection.
      * Use this when credentials change or when manually resetting connection state.
      */
-    async resetAndReconnect(): Promise<void> {
+    resetAndReconnect(): Promise<void> {
+        // One at a time: a second reset waits for the one in flight rather than tearing its connection down mid-login.
+        const run = this.reconnectRun.catch(() => {}).then(() => this.resetAndReconnectNow());
+        this.reconnectRun = run;
+        return run;
+    }
+
+    /** Wait for the reset-and-reconnect in flight, if any, and for the ones queued behind it. Never throws. */
+    async reconnectSettled(): Promise<void> {
+        let last: Promise<void>;
+        do {
+            last = this.reconnectRun;
+            await last.catch(() => {});
+        } while (last !== this.reconnectRun);
+    }
+
+    private async resetAndReconnectNow(): Promise<void> {
         sessionLog("SOULSEEK", "Resetting connection state and forcing reconnect...", "DEBUG");
 
         this.failedConnectionAttempts = 0;

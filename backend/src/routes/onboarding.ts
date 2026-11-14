@@ -178,12 +178,13 @@ router.post("/soulseek", async (req, res) => {
 
         const changed = await saveSystemSettings({ soulseekEnabled: true, soulseekUsername: config.username, soulseekPassword: config.password });
 
-        // Being connected with the saved account is the connection test. A changed account was already reconnected by
-        // the save; an unchanged one is tried again here.
+        // Being connected with the saved account is the connection test. A changed account is already being reconnected
+        // by the save (which does not wait for it), so this waits for that one; an unchanged one is tried again here.
         let connectionTested = false;
         try {
             const { soulseekService } = await import("../services/soulseek");
             if (changed.length === 0) await soulseekService.resetAndReconnect();
+            else await soulseekService.reconnectSettled();
             if (!soulseekService.isConnected()) throw new Error("not connected");
             connectionTested = true;
             logger.debug("[ONBOARDING] Soulseek connection test successful");
