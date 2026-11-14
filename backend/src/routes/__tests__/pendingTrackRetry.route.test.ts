@@ -279,8 +279,9 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
 
         const [a, b] = await Promise.all([retryFromActivity(failed.id), retryFromActivity(failed.id)]);
 
-        expect([a.status, b.status]).toEqual([200, 200]);
-        expect([a.body, b.body].filter((body) => body.deduplicated)).toHaveLength(1);
+        // The second click meets the replacement still running (deduplicated) or already ended (409, nothing to retry).
+        expect([a, b].filter((answer) => answer.status === 200 && !answer.body.deduplicated)).toHaveLength(1);
+        expect([a, b].filter((answer) => answer.status === 409 || answer.body.deduplicated)).toHaveLength(1);
         const replacements = (await jobsFor(pt.id)).filter((j) => j.id !== failed.id);
         expect(replacements).toHaveLength(1);
         await settled(replacements[0].id);
@@ -292,10 +293,27 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         mockSearch.mockResolvedValue({ found: false, allMatches: [] });
         await retryFromActivity(failed.id).expect(200);
 
-        const second = await retryFromActivity(failed.id).expect(200);
+        await retryFromActivity(failed.id).expect(409);
 
-        expect(second.body).toMatchObject({ success: true, deduplicated: true });
         expect((await jobsFor(pt.id)).filter((j) => j.id !== failed.id)).toHaveLength(1);
+    });
+
+    it("keeps the failed job's Discover batch on the new job", async () => {
+        const pt = await pending("Wires");
+        const batch = await prisma.discoveryBatch.create({
+            data: { userId: OWNER, weekStart: new Date("2026-10-12T00:00:00.000Z"), targetSongCount: 1, totalAlbums: 1, status: "downloading" },
+        });
+        try {
+            const failed = await prisma.downloadJob.update({ where: { id: (await failedRetryOf(pt.id)).id }, data: { discoveryBatchId: batch.id } });
+
+            const res = await retryFromActivity(failed.id).expect(200);
+
+            expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: res.body.newJobId } })).discoveryBatchId).toBe(batch.id);
+            await settled(res.body.newJobId);
+        } finally {
+            await prisma.downloadJob.deleteMany({ where: { discoveryBatchId: batch.id } });
+            await prisma.discoveryBatch.deleteMany({ where: { id: batch.id } });
+        }
     });
 
     it("fails the new job, which stays on the list, when its Soulseek search throws", async () => {

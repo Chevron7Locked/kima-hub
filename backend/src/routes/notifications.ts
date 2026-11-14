@@ -22,7 +22,8 @@ const router = Router();
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
 
-const deduplicated = (running: DownloadJob | null) => ({ success: true, newJobId: running?.id, deduplicated: true });
+const deduplicated = (running: DownloadJob) => ({ success: true, newJobId: running.id, deduplicated: true });
+const ALREADY_RETRIED = "This download was already retried or removed";
 
 /**
  * GET /notifications
@@ -243,16 +244,16 @@ router.get(
 
 /**
  * POST /notifications/downloads/:id/clear
- * Clear a download from history. A download still running answers 409.
+ * Clear a download from history. A download still running answers 409; one that is not there, or is another person's, 404.
  */
 router.post(
     "/downloads/:id/clear",
     async (req: Request, res: Response) => {
         try {
             // A job still pending or processing is someone's running download: only a settled one is dismissed.
-            if ((await downloadJobs.dismiss(req.user!.id, req.params.id)) === "running") {
-                return res.status(409).json({ error: "Download is still running" });
-            }
+            const result = await downloadJobs.dismiss(req.user!.id, req.params.id);
+            if (result === "running") return res.status(409).json({ error: "Download is still running" });
+            if (result === "missing") return res.status(404).json({ error: "Download not found" });
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing download:", error);
@@ -328,9 +329,10 @@ router.post(
 
                 const target = await soulseekTarget();
                 const outcome = await downloadJobs.retryOnce(failedJob, { type: "track", targetMbid: retryJobTarget(pendingTrack) }, (tx) =>
-                    createRetryJob(req.user!.id, pendingTrack, {}, tx)
+                    createRetryJob(req.user!.id, pendingTrack, { db: tx, discoveryBatchId: failedJob.discoveryBatchId })
                 );
                 if ("running" in outcome) return res.json(deduplicated(outcome.running));
+                if ("alreadyRetried" in outcome) return res.status(409).json({ error: ALREADY_RETRIED });
                 const job = outcome.replacement;
                 if ("problem" in target) {
                     await failRetryJob(job.id, target.problem);
@@ -382,6 +384,7 @@ router.post(
                     }, tx)
                 );
                 if ("running" in outcome) return res.json(deduplicated(outcome.running));
+                if ("alreadyRetried" in outcome) return res.status(409).json({ error: ALREADY_RETRIED });
                 const newJobRecord = outcome.replacement;
 
                 try {
@@ -515,6 +518,7 @@ router.post(
                 }, tx)
             );
             if ("running" in outcome) return res.json(deduplicated(outcome.running));
+            if ("alreadyRetried" in outcome) return res.status(409).json({ error: ALREADY_RETRIED });
             const newJobRecord = outcome.replacement;
 
             let result: { success: boolean; error?: string };

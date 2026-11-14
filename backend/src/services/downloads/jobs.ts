@@ -24,7 +24,7 @@
  *
  * Around the moves: `findActive` is the one dedupe lookup, asking what the active-album unique index enforces (person,
  * kind, album id and Discover batch, a dismissed job included); `retryOnce` clears a failed job and makes its replacement
- * in one transaction, or answers the job already running; `dismiss` and `dismissAllSettled` take settled jobs off the
+ * in one transaction, or answers the job already running, or that another retry was here first; `dismiss` and `dismissAllSettled` take settled jobs off the
  * list and leave running ones.
  *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
@@ -153,39 +153,52 @@ export async function dismissAllSettled(userId: string): Promise<number> {
     return count;
 }
 
-/** What a retry made: the job already downloading the album (null when another retry cleared the failed job first and its replacement has since ended), or the replacement. */
-export type RetryOutcome<T> = { running: Awaited<ReturnType<typeof findActive>> } | { replacement: T };
+/**
+ * What a retry made: the job already downloading the album, `alreadyRetried` when another retry cleared the failed job
+ * first and nothing is running now (the caller has nothing to start and nothing to report as started), or the replacement.
+ */
+export type RetryOutcome<T> =
+    | { running: NonNullable<Awaited<ReturnType<typeof findActive>>> }
+    | { alreadyRetried: true }
+    | { replacement: T };
 
 /**
  * Retries a failed download once. In one transaction the failed job leaves the list (the first retry to clear it wins),
  * and then either the replacement is made or nothing is. `sameAlbum` names what the replacement would be (its kind of
  * job and album id), or null when it has no album id to collide on; the failed job's person and Discover batch complete
- * the key, so the lookup is the index's own. A failed job is cleared whenever its retry exists, so an answer of "already
- * running" leaves no stale entry behind. `createReplacement` makes the replacement in the same transaction, and
- * should copy the failed job's `discoveryBatchId`, so the user sees the failed job or its replacement, never neither.
+ * the key, so the lookup is the index's own. A failed job is cleared whenever a job for its album is running, so an answer
+ * of "already running" leaves no stale entry behind. A retry that loses the claim and finds nothing running answers
+ * `alreadyRetried`: the job was dismissed or already retried, and its replacement has ended. `createReplacement` makes the
+ * replacement in the same transaction, and should copy the failed job's `discoveryBatchId`, so the user sees the failed
+ * job or its replacement, never neither. When the insert meets the album's one active job (another retry, of another
+ * failed job, committed first), the transaction rolls back whole, the running job is read again and answered, and nothing
+ * is created a second time.
  */
 export async function retryOnce<T>(
     failedJob: { id: string; userId: string; discoveryBatchId: string | null },
     sameAlbum: { type: string; targetMbid: string } | null,
     createReplacement: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<RetryOutcome<T>> {
-    const attempt = () =>
-        prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
+    const key = sameAlbum && { userId: failedJob.userId, discoveryBatchId: failedJob.discoveryBatchId, ...sameAlbum };
+    try {
+        return await prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
             // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
             const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
-            const running = sameAlbum
-                ? await findActive({ userId: failedJob.userId, discoveryBatchId: failedJob.discoveryBatchId, ...sameAlbum }, tx)
-                : null;
-            if (claimed.count === 0 || running) return { running };
+            const running = key ? await findActive(key, tx) : null;
+            if (running) return { running };
+            if (claimed.count === 0) return { alreadyRetried: true };
             return { replacement: await createReplacement(tx) };
         });
-    try {
-        return await attempt();
     } catch (error: any) {
-        // Two different failed jobs of one album, retried together: the loser's insert meets the one active job an album
-        // may have. Its transaction rolled back whole, so it runs again and now finds the winner's job running.
-        if (error?.code !== "P2002") throw error;
-        return attempt();
+        // The insert met the one active job an album may have. Its transaction rolled back whole, so the failed job is
+        // not yet cleared: clear it only when the job that won is still running.
+        if (error?.code !== "P2002" || !key) throw error;
+        return prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
+            const running = await findActive(key, tx);
+            if (!running) return { alreadyRetried: true };
+            await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
+            return { running };
+        });
     }
 }
 

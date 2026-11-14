@@ -1,6 +1,7 @@
 /**
  * Dismissing downloads from the activity list: only a settled job (completed or failed) can be dismissed, singly or in
- * bulk. A pending or processing job answers 409 and is left untouched; a bulk clear leaves running jobs alone.
+ * bulk. A pending or processing job answers 409 and is left untouched; a bulk clear leaves running jobs alone. A download
+ * that is not there, or is another person's, answers 404.
  * Real database and router.
  */
 
@@ -59,8 +60,31 @@ describe("POST /notifications/downloads/:id/clear", () => {
         expect(await cleared(j.id)).toBe(false);
     });
 
-    it("answers success for a download that is not there, as before", async () => {
-        await request(app).post("/notifications/downloads/ndc_nothing/clear").expect(200, { success: true });
+    it("answers 404 for a download that is not there", async () => {
+        await request(app).post("/notifications/downloads/ndc_nothing/clear").expect(404);
+    });
+
+    it("answers 404 for another person's download and leaves it on their list", async () => {
+        await prisma.user.deleteMany({ where: { id: "ndc_other" } });
+        await prisma.user.create({ data: { id: "ndc_other", username: "ndc_other", passwordHash: "x", role: "user", tokenVersion: 0 } });
+        try {
+            const theirs = await prisma.downloadJob.create({
+                data: { userId: "ndc_other", subject: "Low - Things We Lost in the Fire", type: "album", status: "failed", targetMbid: "rg-1", metadata: {} },
+            });
+
+            await request(app).post(`/notifications/downloads/${theirs.id}/clear`).expect(404);
+
+            expect(await cleared(theirs.id)).toBe(false);
+        } finally {
+            await prisma.user.deleteMany({ where: { id: "ndc_other" } });
+        }
+    });
+
+    it("answers 200 again for a download already cleared, so a double click still works", async () => {
+        const j = await job("failed", "rg-1");
+
+        await request(app).post(`/notifications/downloads/${j.id}/clear`).expect(200);
+        await request(app).post(`/notifications/downloads/${j.id}/clear`).expect(200, { success: true });
     });
 });
 

@@ -30,12 +30,18 @@ export function retryJobTarget(pendingTrack: PlaylistPendingTrack): string {
     return pendingTrack.albumMbid || pendingTrack.artistMbid || `pendingTrack:${pendingTrack.id}`;
 }
 
-/** Opens the retry's job. Pass the transaction's client to open it together with the clearing of the failed one. */
+/**
+ * Opens the retry's job. Pass the transaction's client to open it together with the clearing of the failed one, and the
+ * failed job's Discover batch so the replacement stays in it.
+ */
 export function createRetryJob(
     userId: string,
     pendingTrack: PlaylistPendingTrack,
-    extra: Record<string, unknown> = {},
-    db?: Parameters<typeof downloadJobs.create>[1]
+    { extra = {}, db, discoveryBatchId = null }: {
+        extra?: Record<string, unknown>;
+        db?: Parameters<typeof downloadJobs.create>[1];
+        discoveryBatchId?: string | null;
+    } = {}
 ) {
     return downloadJobs.create({
         userId,
@@ -43,6 +49,7 @@ export function createRetryJob(
         type: "track",
         targetMbid: retryJobTarget(pendingTrack),
         artistMbid: pendingTrack.artistMbid,
+        discoveryBatchId,
         status: "processing",
         metadata: {
             downloadType: "pending-track-retry",

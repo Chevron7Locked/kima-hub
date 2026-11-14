@@ -844,11 +844,44 @@ describe("retryOnce", () => {
         expect(made.discoveryBatchId).toBe(week.id);
     });
 
-    it("makes nothing when no album is named and the failed job was already cleared", async () => {
+    it("answers already retried, and makes nothing, when another retry cleared the failed job and nothing is running", async () => {
         const failed = await job("dl_ro_cleared", { status: "failed", cleared: true });
         const make = jest.fn();
 
-        expect(await downloadJobs.retryOnce(failed, null, make)).toEqual({ running: null });
+        expect(await downloadJobs.retryOnce(failed, null, make)).toEqual({ alreadyRetried: true });
+        expect(await downloadJobs.retryOnce(failed, album, make)).toEqual({ alreadyRetried: true });
         expect(make).not.toHaveBeenCalled();
+    });
+
+    it("answers the running job when the insert meets another retry's, without a second try to create", async () => {
+        const failed = await job("dl_ro_race_failed", { status: "failed", targetMbid: "rg-retry" });
+        let winner: { id: string } | undefined;
+        // The other retry commits its job between our lookup and our insert, so the insert meets the unique index.
+        const make = jest.fn(async (tx: Parameters<typeof downloadJobs.create>[1]) => {
+            winner = await job("dl_ro_race_winner", { status: "processing", targetMbid: "rg-retry" });
+            return replacement(tx);
+        });
+
+        const outcome = await downloadJobs.retryOnce(failed, album, make);
+
+        expect(outcome).toEqual({ running: expect.objectContaining({ id: winner!.id }) });
+        expect(make).toHaveBeenCalledTimes(1);
+        expect((await row(failed.id)).cleared).toBe(true);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, status: { in: ["pending", "processing"] } } })).toBe(1);
+    });
+
+    it("leaves the failed job on the list when the insert meets a job that has ended since", async () => {
+        const failed = await job("dl_ro_race_ended", { status: "failed", targetMbid: "rg-retry" });
+        const make = jest.fn(async (tx: Parameters<typeof downloadJobs.create>[1]) => {
+            const winner = await job("dl_ro_race_ended_winner", { status: "processing", targetMbid: "rg-retry" });
+            try {
+                return await replacement(tx);
+            } finally {
+                await prisma.downloadJob.update({ where: { id: winner.id }, data: { status: "completed" } });
+            }
+        });
+
+        expect(await downloadJobs.retryOnce(failed, album, make)).toEqual({ alreadyRetried: true });
+        expect((await row(failed.id)).cleared).toBe(false);
     });
 });

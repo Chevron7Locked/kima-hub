@@ -2042,8 +2042,17 @@ class ApiClient {
         return this.get("/notifications/downloads/history");
     }
 
+    /** A download the server no longer has (a double click, another tab) is already gone: that is the answer wanted. */
     async clearDownloadFromHistory(id: string): Promise<{ success: boolean }> {
-        return this.post(`/notifications/downloads/${id}/clear`);
+        try {
+            return await this.request<{ success: boolean }>(`/notifications/downloads/${id}/clear`, {
+                method: "POST",
+                silent404: true,
+            });
+        } catch (error) {
+            if ((error as ApiError).status === 404) return { success: true };
+            throw error;
+        }
     }
 
     async clearAllDownloadHistory(): Promise<{ success: boolean }> {

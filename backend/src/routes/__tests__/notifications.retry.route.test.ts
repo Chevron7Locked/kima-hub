@@ -413,11 +413,43 @@ describe("retrying the same failed download twice", () => {
         const first = await retry(old.id).expect(200);
         await waitFor(settled(first.body.newJobId), "first replacement settled");
 
-        const second = await retry(old.id).expect(200);
+        const second = await retry(old.id).expect(409);
 
-        expect(second.body).toMatchObject({ success: true, deduplicated: true });
+        expect(second.body.success).toBeUndefined();
+        expect(second.body.error).toEqual(expect.any(String));
         expect(await replacementsOf(old.id)).toHaveLength(1);
         await whenIdle();
+    });
+
+    it.each(kinds)("answers 409, and creates nothing, for a %s job that was dismissed with nothing running", async (_name, make) => {
+        const old = await make();
+        await prisma.downloadJob.update({ where: { id: old.id }, data: { cleared: true } });
+
+        const res = await retry(old.id).expect(409);
+
+        expect(res.body.success).toBeUndefined();
+        expect(await replacementsOf(old.id)).toHaveLength(0);
+        expect(mockSearchAndDownloadBatch).not.toHaveBeenCalled();
+        expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 for a download that is not there", async () => {
+        await retry("nrt_nothing").expect(404);
+    });
+
+    it("answers success, never 500, when three failed jobs of one album are retried at once", async () => {
+        mockStartDownload.mockResolvedValue({ success: true });
+        const libraryMeta = { downloadType: "library", albumTitle: "Things We Lost in the Fire" };
+        const failed = await Promise.all([failedJob({ metadata: libraryMeta }), failedJob({ metadata: libraryMeta }), failedJob({ metadata: libraryMeta })]);
+
+        const answers = await Promise.all(failed.map((f) => retry(f.id)));
+
+        expect(answers.map((a) => a.status)).toEqual([200, 200, 200]);
+        expect(answers.filter((a) => a.body.deduplicated)).toHaveLength(2);
+        const active = await prisma.downloadJob.findMany({ where: { userId: USER, status: { in: ["pending", "processing"] } } });
+        expect(active).toHaveLength(1);
+        expect(answers.filter((a) => !a.body.deduplicated)[0].body.newJobId).toBe(active[0].id);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, cleared: true } })).toBe(3);
     });
 
     it("makes one replacement when two failed jobs of one album are retried at once", async () => {
