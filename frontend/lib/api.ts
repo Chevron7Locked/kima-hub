@@ -1004,7 +1004,7 @@ class ApiClient {
 
     /**
      * Retries one pending song. A song Soulseek has no files for throws an error with status 404 (its `data` has the
-     * server's message); a song already being retried answers success with `deduplicated`.
+     * server's message and `error: "No matching files found"`); an upstream failure throws with 502; a song already being retried answers success with `deduplicated`.
      */
     async retryPendingTrack(playlistId: string, pendingTrackId: string) {
         return this.request<{

@@ -61,9 +61,9 @@ const MATCH = [{ filename: "a.flac" }];
 
 let playlistId: string;
 
-async function pending(title: string) {
+async function pending(title: string, albumMbid = `${P}-rg-${title}`) {
     return prisma.playlistPendingTrack.create({
-        data: { playlistId, spotifyArtist: "Low", spotifyTitle: title, spotifyAlbum: "Things We Lost", albumMbid: `${P}-rg-${title}`, sort: 0, rank: `a${title}` },
+        data: { playlistId, spotifyArtist: "Low", spotifyTitle: title, spotifyAlbum: "Things We Lost", albumMbid, sort: 0, rank: `a${title}` },
     });
 }
 
@@ -123,7 +123,7 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
 
         expect(res.body).toMatchObject({ success: true, downloadJobId: expect.any(String) });
         const job = await settled(res.body.downloadJobId);
-        expect(job).toMatchObject({ status: "completed", type: "track", targetMbid: pt.albumMbid });
+        expect(job).toMatchObject({ status: "completed", type: "track", targetMbid: `pendingTrack:${pt.id}` });
         expect(job.metadata).toMatchObject({ downloadType: "pending-track-retry", playlistId, pendingTrackId: pt.id, filePath: "/music/Low/a.flac" });
         expect(mockDownload).toHaveBeenCalledWith("Low", "Sunflower", "Things We Lost", MATCH, "/music");
         expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ userId: OWNER, source: "retry-pending-track", albumMbid: pt.albumMbid }));
@@ -173,19 +173,20 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
         const pt = await pending("Monkey");
         mockSearch.mockRejectedValue(new Error("slskd is down"));
 
-        await retry(pt.id).expect(500);
+        const res = await retry(pt.id).expect(502);
 
         const [job] = await jobsFor(pt.id);
         expect(job).toMatchObject({ status: "failed", error: "slskd is down" });
+        expect(res.body).toEqual({ success: false, error: "slskd is down", downloadJobId: job.id });
     });
 
     it("refuses when Soulseek is not set up, and the failed job says why", async () => {
         const pt = await pending("Dinosaur Act");
         mockAvailable.mockResolvedValue(false);
 
-        const res = await retry(pt.id).expect(400);
+        const res = await retry(pt.id).expect(502);
 
-        expect(res.body.error).toBe("Soulseek is turned off or not set up");
+        expect(res.body).toMatchObject({ success: false, error: "Soulseek is turned off or not set up", downloadJobId: expect.any(String) });
         const [job] = await jobsFor(pt.id);
         expect(job).toMatchObject({ status: "failed", error: "Soulseek is turned off or not set up" });
         expect(mockSearch).not.toHaveBeenCalled();
@@ -208,11 +209,27 @@ describe("POST /playlists/:id/pending/retry-all", () => {
         expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ source: "retry-pending-track-batch", albumMbid: found.albumMbid }));
     });
 
+    it("retries every song of one album, each on its own job", async () => {
+        const album = `${P}-rg-shared`;
+        const one = await pending("Sunflower", album);
+        const two = await pending("Sleepwalking", album);
+        mockSearch.mockResolvedValue({ found: true, allMatches: MATCH });
+
+        const res = await request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(200);
+
+        expect(res.body).toMatchObject({ success: true, queued: 2 });
+        const [a] = await jobsFor(one.id);
+        const [b] = await jobsFor(two.id);
+        expect(a.id).not.toBe(b.id);
+        await settled(a.id);
+        await settled(b.id);
+    });
+
     it("leaves a song that is already being retried to its running job and queues the rest", async () => {
         const running = await pending("Hold");
         const fresh = await pending("Stay");
         const job = await prisma.downloadJob.create({
-            data: { userId: OWNER, subject: "Low - Hold", type: "track", targetMbid: running.albumMbid, status: "processing", metadata: { downloadType: "pending-track-retry", pendingTrackId: running.id } },
+            data: { userId: OWNER, subject: "Low - Hold", type: "track", targetMbid: `pendingTrack:${running.id}`, status: "processing", metadata: { downloadType: "pending-track-retry", pendingTrackId: running.id } },
         });
 
         const res = await request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(200);
@@ -227,7 +244,7 @@ describe("POST /playlists/:id/pending/retry-all", () => {
         const pt = await pending("Murderer");
         mockAvailable.mockResolvedValue(false);
 
-        const res = await request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(400);
+        const res = await request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(502);
 
         expect(res.body.error).toBe("Soulseek is turned off or not set up");
         expect(await jobsFor(pt.id)).toEqual([]);
@@ -293,7 +310,7 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         const pt = await pending("Pretend");
         const failed = await failedRetryOf(pt.id);
         const running = await prisma.downloadJob.create({
-            data: { userId: OWNER, subject: "Low - Pretend", type: "track", targetMbid: pt.albumMbid, status: "processing", metadata: { downloadType: "pending-track-retry" } },
+            data: { userId: OWNER, subject: "Low - Pretend", type: "track", targetMbid: `pendingTrack:${pt.id}`, status: "processing", metadata: { downloadType: "pending-track-retry", pendingTrackId: pt.id } },
         });
 
         const res = await retryFromActivity(failed.id).expect(200);
@@ -302,6 +319,24 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: failed.id } })).cleared).toBe(true);
         expect(await prisma.downloadJob.count({ where: { userId: OWNER } })).toBe(2);
         expect(mockSearch).not.toHaveBeenCalled();
+    });
+
+    it("starts a new job for a song whose album-mate is being retried", async () => {
+        const album = `${P}-rg-mates`;
+        const running = await pending("Cue", album);
+        const pt = await pending("Dinosaur Act", album);
+        const failed = await failedRetryOf(pt.id);
+        await prisma.downloadJob.create({
+            data: { userId: OWNER, subject: "Low - Cue", type: "track", targetMbid: `pendingTrack:${running.id}`, status: "processing", metadata: { downloadType: "pending-track-retry", pendingTrackId: running.id } },
+        });
+        mockSearch.mockResolvedValue({ found: true, allMatches: MATCH });
+
+        const res = await retryFromActivity(failed.id).expect(200);
+
+        expect(res.body.deduplicated).toBeUndefined();
+        expect(res.body.newJobId).not.toBe(failed.id);
+        expect((await jobsFor(pt.id)).filter((j) => j.id !== failed.id)).toHaveLength(1);
+        await settled(res.body.newJobId);
     });
 
     it("makes one replacement for a double-click", async () => {
@@ -384,12 +419,13 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
 
         expect([a.status, b.status]).toEqual([200, 200]);
         const jobs = await jobsFor(pt.id);
-        const active = jobs.filter((j) => ["pending", "processing"].includes(j.status));
-        expect(active).toHaveLength(1);
+        // The one new job may already have ended by now, so it is found by what it is not, not by its status.
+        const made = jobs.filter((j) => ![first.id, second.id].includes(j.id));
+        expect(made).toHaveLength(1);
         expect([a.body, b.body].filter((answer) => answer.deduplicated)).toHaveLength(1);
-        expect([a.body, b.body].every((answer) => answer.newJobId === active[0].id)).toBe(true);
+        expect([a.body, b.body].every((answer) => answer.newJobId === made[0].id)).toBe(true);
         expect(jobs.filter((j) => [first.id, second.id].includes(j.id)).every((j) => j.cleared)).toBe(true);
-        await settled(active[0].id);
+        await settled(made[0].id);
     });
 
     it("fails the new job, which stays on the list, when Soulseek is not set up", async () => {

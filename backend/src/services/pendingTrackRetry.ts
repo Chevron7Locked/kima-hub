@@ -25,9 +25,12 @@ export async function soulseekTarget(): Promise<{ musicPath: string } | { proble
     return { musicPath: config.music.musicPath };
 }
 
-/** The job a retry of this pending song is recorded on. */
+/**
+ * The key a retry of this pending song is recorded under: one per song, so a song's running retry never stands in for
+ * its album-mates' (a Spotify import puts many songs of one album on a playlist).
+ */
 export function retryJobTarget(pendingTrack: PlaylistPendingTrack): string {
-    return pendingTrack.albumMbid || pendingTrack.artistMbid || `pendingTrack:${pendingTrack.id}`;
+    return `pendingTrack:${pendingTrack.id}`;
 }
 
 function retryJobInput(

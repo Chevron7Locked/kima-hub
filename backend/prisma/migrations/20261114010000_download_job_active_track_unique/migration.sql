@@ -1,5 +1,14 @@
--- A pending song's retry is a track job. Like an album, a song has one active job per person and Discover batch,
--- so two retries of one song at once make one job. The oldest active job of a song is kept; the extras end failed.
+-- A pending song's retry is a track job keyed by the song (`pendingTrack:<id>`). Retries made before this keyed them by
+-- the song's album, so active ones are rekeyed first: two songs of one album are two jobs, not duplicates.
+UPDATE "DownloadJob"
+SET "targetMbid" = 'pendingTrack:' || (metadata ->> 'pendingTrackId')
+WHERE status IN ('pending', 'processing')
+  AND type = 'track'
+  AND metadata ->> 'downloadType' = 'pending-track-retry'
+  AND metadata ->> 'pendingTrackId' IS NOT NULL;
+
+-- Like an album, a song has one active job per person and Discover batch, so two retries of one song at once make one
+-- job. The oldest active job of a song is kept; the extras end failed.
 UPDATE "DownloadJob" d
 SET status = 'failed', error = 'Duplicate of another active download', "completedAt" = now()
 FROM (

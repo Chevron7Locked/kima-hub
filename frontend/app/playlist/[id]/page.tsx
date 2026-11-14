@@ -213,17 +213,13 @@ export default function PlaylistDetailPage() {
     const handleRetryPendingTrack = async (pendingId: string) => {
         setRetryingTrackId(pendingId);
         try {
-            const result = await api.retryPendingTrack(playlistId, pendingId);
-            if (result.success) {
-                showRetryProgress(10000);
-            } else {
-                notify.error("Track not found on Soulseek", { message: result.message });
-            }
+            await api.retryPendingTrack(playlistId, pendingId);
+            showRetryProgress(10000);
         } catch (error) {
-            // Soulseek has no files for the song: the server answers 404 with its message.
-            if ((error as { status?: number })?.status === 404) {
-                const data = (error as { data?: { message?: unknown } }).data;
-                notify.error("Track not found on Soulseek", { message: typeof data?.message === "string" ? data.message : undefined });
+            // Soulseek has no files for the song: the server answers 404 with its message and NO_SOURCES as the error.
+            const { status, data } = error as { status?: number; data?: { message?: unknown; error?: unknown } };
+            if (status === 404 && data?.error === "No matching files found") {
+                notify.error("Track not found on Soulseek", { message: typeof data.message === "string" ? data.message : undefined });
             } else {
                 console.error("Failed to retry download:", error);
                 notify.error("Failed to retry download");

@@ -564,7 +564,7 @@ router.post("/:id/pending/retry-all", requireAcquirePermission, requirePlaylistO
 
         const target = await soulseekTarget();
         if ("problem" in target) {
-            return res.status(400).json({ error: target.problem });
+            return res.status(502).json({ error: target.problem });
         }
 
         // A song already being retried keeps its running job: it is neither started again nor counted as queued.
@@ -622,10 +622,17 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
         const job = opened.created;
         if ("problem" in target) {
             await failRetryJob(job.id, target.problem);
-            return res.status(400).json({ error: target.problem });
+            return res.status(502).json({ success: false, error: target.problem, downloadJobId: job.id });
         }
 
-        const matches = await findSources(job, pendingTrack);
+        let matches: Awaited<ReturnType<typeof findSources>>;
+        try {
+            matches = await findSources(job, pendingTrack);
+        } catch (error: any) {
+            // findSources has already failed the job; Soulseek, the source, did not answer.
+            logger.error(`[Retry] Soulseek search for job ${job.id} failed:`, error);
+            return res.status(502).json({ success: false, error: error?.message || "Soulseek search failed", downloadJobId: job.id });
+        }
         if (matches.length === 0) {
             return res.status(404).json({
                 success: false,
