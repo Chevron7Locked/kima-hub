@@ -39,7 +39,7 @@ jest.mock("../../services/musicbrainz", () => ({
     },
 }));
 
-// enrichSingleTrack IS called here, so the mock must cover every identity
+// identifyTrack IS called here, so the mock must cover every identity
 // entry point it reaches — including the tag reader. The jest.fn lives IN
 // the factory (jest hoists it above any const), so call tracking works.
 jest.mock("../../services/acoustidIdentification", () => ({
@@ -71,8 +71,8 @@ jest.mock("../../routes/library/trackPath", () => ({
 import { putStage as seedStage, type PutStageOptions, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import { mockQueueAdd } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
+import { identifyTrack } from "../../workers/enrichment/identification";
 import {
-    enrichSingleTrack,
     getNextWork,
     retryFailedAndBlocked,
     redecideEverything,
@@ -196,7 +196,7 @@ describe("the fingerprint → recording edge is a gate, not a poll", () => {
             evidence: { score: 0.9 },
         });
 
-        const outcome = await enrichSingleTrack(id("ready"));
+        const outcome = await identifyTrack(id("ready"));
         expect(outcome).toBe("identified");
 
         // The AcoustID step consumed the fingerprint the fingerprint stage
@@ -241,7 +241,7 @@ describe("the fingerprint → recording edge is a gate, not a poll", () => {
             evidence: { reason: "mocked: nothing to match" },
         });
 
-        const outcome = await enrichSingleTrack(id("stuck"));
+        const outcome = await identifyTrack(id("stuck"));
         expect(outcome).toBe("no_match");
         expect(identifyTrackByAcoustid).not.toHaveBeenCalled();
         expect(fpcalcService.fingerprintFile).not.toHaveBeenCalled();
@@ -286,7 +286,7 @@ describe("a fingerprint that lands reopens the recording that could not ask Acou
         await seedTrack(trackId, { recording: "pending" });
         await putStage(trackId, "fingerprint", "failed", { retryable: false, nextRetryAt: null });
         jest.mocked(identifyTrackByAcoustid).mockResolvedValue({ kind: "absent", evidence: {} });
-        expect(await enrichSingleTrack(trackId)).toBe("no_match");
+        expect(await identifyTrack(trackId)).toBe("no_match");
         const recording = await stageRow(trackId, "recording");
         expect(recording?.status).toBe("done");
         expect(recording?.evidence?.["acoustid"]).toBe("not asked: the file's fingerprint question closed");
@@ -313,7 +313,7 @@ describe("a fingerprint that lands reopens the recording that could not ask Acou
 
         // Asked this time, with the new fingerprint.
         jest.mocked(identifyTrackByAcoustid).mockClear();
-        await enrichSingleTrack(id("rfs"));
+        await identifyTrack(id("rfs"));
         expect(identifyTrackByAcoustid).toHaveBeenCalledTimes(1);
         const [, , stored] = jest.mocked(identifyTrackByAcoustid).mock.calls[0];
         expect(stored).toEqual({ fingerprint: "AQSEEFPFPCALC" });

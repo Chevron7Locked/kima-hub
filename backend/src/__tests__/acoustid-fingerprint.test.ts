@@ -152,7 +152,7 @@ jest.mock("../utils/logger", () => ({
 // ── Imports (after mocks) ──────────────────────────────────────────────
 
 import { prisma } from "../utils/db";
-import { enrichSingleTrack } from "../workers/unifiedEnrichment";
+import { identifyTrack } from "../workers/enrichment/identification";
 
 const PREFIX = "afp";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -249,7 +249,7 @@ describe("AcoustID: the fingerprint is the fingerprint stage's stored answer", (
     });
 
     it("asks with the stored fingerprint; a real miss is the answer", async () => {
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         // Never a second fpcalc run — the recording stage reads what the
         // fingerprint stage stored.
@@ -267,7 +267,7 @@ describe("AcoustID: the fingerprint is the fingerprint stage's stored answer", (
     });
 
     it("closes the question as answered when the lookup does not match", async () => {
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         const record = await getStage();
         // A correct "no" is an answer: the record closes `done`, the
@@ -291,7 +291,7 @@ describe("AcoustID: the fingerprint is the fingerprint stage's stored answer", (
         mockLookup.mockClear();
         await putTrack({ isrc: null, acoustidFingerprint: null });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         expect(mockFingerprintFile).not.toHaveBeenCalled();
         expect(mockLookup).not.toHaveBeenCalled();
@@ -337,7 +337,7 @@ describe("AcoustID: a matched recording is stored in Track.recordingMbid", () =>
     });
 
     it("writes the matched recording MBID to Track.recordingMbid", async () => {
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         const track = await prisma.track.findUnique({
             where: { id: id("t1") },
@@ -348,7 +348,7 @@ describe("AcoustID: a matched recording is stored in Track.recordingMbid", () =>
     });
 
     it("answers the recording question from the stored fingerprint, with the source recorded", async () => {
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         const record = await getStage();
         expect(record.status).toBe("done");
@@ -375,7 +375,7 @@ describe("AcoustID: the identification order", () => {
         });
         await putTrack({ isrc: null });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         expect(mockSearchRecording).not.toHaveBeenCalled();
         expect(mockLookup).not.toHaveBeenCalled();
@@ -400,7 +400,7 @@ describe("AcoustID: the identification order", () => {
         );
         await putTrack({ isrc: null });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         // The search answered, so AcoustID is never asked and fpcalc never runs.
         expect(mockSearchRecording).toHaveBeenCalledWith(
@@ -437,7 +437,7 @@ describe("AcoustID: the identification order", () => {
         );
         await putTrack({ isrc: null });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         // Tags had no recording id → AcoustID is asked first, with the tag's
         // fingerprint instead of running fpcalc again, and its answer ends the
@@ -467,7 +467,7 @@ describe("AcoustID: the identification order", () => {
         );
         await putTrack({ isrc: "USX112345678" });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         expect(mockSearchRecording).not.toHaveBeenCalled();
         expect(mockLookup).not.toHaveBeenCalled();
@@ -493,7 +493,7 @@ describe("AcoustID: the identification order", () => {
         });
         await putTrack({ isrc: null, acoustidFingerprint: null });
 
-        await enrichSingleTrack(id("t1"));
+        await identifyTrack(id("t1"));
 
         expect(mockFingerprintFile).not.toHaveBeenCalled();
         expect(mockLookup).not.toHaveBeenCalled();

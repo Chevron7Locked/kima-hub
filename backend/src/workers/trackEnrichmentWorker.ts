@@ -1,7 +1,7 @@
 import { Worker, Job } from "bullmq";
 import { createWorkerConnection, QUEUE_NAMES } from "./enrichmentQueues";
 import { isEntityGone } from "./entityGone";
-import { enrichSingleTrack } from "./unifiedEnrichment";
+import { identifyTrack } from "./enrichment/identification";
 import * as stageRecords from "../services/stages/stageRecords";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
@@ -24,9 +24,9 @@ export async function startTrackEnrichmentWorker(): Promise<Worker> {
                 return;
             }
             logger.debug(`[TrackWorker] Processing ${trackId} (${trackTitle})`);
-            // enrichSingleTrack settles the stage record itself (done, absent, failed
+            // identifyTrack settles the stage record itself (done, absent, failed
             // with its cause, or left pending for a paused source); don't settle it again.
-            const outcome = await enrichSingleTrack(trackId, job.id);
+            const outcome = await identifyTrack(trackId, job.id);
             logger.debug(`[TrackWorker] ${trackId}: recording question settled (${outcome})`);
         },
         {

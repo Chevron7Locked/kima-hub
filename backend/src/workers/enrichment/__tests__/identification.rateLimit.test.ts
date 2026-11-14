@@ -4,21 +4,21 @@
  * record `done` with the asked sources as evidence.
  */
 
-jest.mock("../../workers/enrichmentQueues", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
-jest.mock("ioredis", () => require("../../__tests__/helpers/enrichmentMocks").ioredisMock);
-jest.mock("../../config", () => require("../../__tests__/helpers/enrichmentMocks").configMock);
-jest.mock("../../utils/logger", () => require("../../__tests__/helpers/enrichmentMocks").loggerMock);
-jest.mock("../../services/enrichmentState", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
-jest.mock("../../services/enrichmentFailureService", () => require("../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
-jest.mock("../../services/featureDetection", () => require("../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
-jest.mock("../../services/trackIdentity", () => require("../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
-jest.mock("../../services/musicbrainz", () => require("../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
-jest.mock("../../services/acoustidIdentification", () => require("../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
-jest.mock("../../services/sourcePauseController", () => require("../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
-jest.mock("../../workers/audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
-jest.mock("../../workers/enrichment/artists", () => require("../../__tests__/helpers/enrichmentMocks").artistJobMock);
-jest.mock("../../workers/trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
-jest.mock("../../workers/enrichment/podcasts", () => require("../../__tests__/helpers/enrichmentMocks").podcastJobMock);
+jest.mock("../../../workers/enrichmentQueues", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
+jest.mock("ioredis", () => require("../../../__tests__/helpers/enrichmentMocks").ioredisMock);
+jest.mock("../../../config", () => require("../../../__tests__/helpers/enrichmentMocks").configMock);
+jest.mock("../../../utils/logger", () => require("../../../__tests__/helpers/enrichmentMocks").loggerMock);
+jest.mock("../../../services/enrichmentState", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
+jest.mock("../../../services/enrichmentFailureService", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
+jest.mock("../../../services/featureDetection", () => require("../../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
+jest.mock("../../../services/trackIdentity", () => require("../../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
+jest.mock("../../../services/musicbrainz", () => require("../../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
+jest.mock("../../../services/acoustidIdentification", () => require("../../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
+jest.mock("../../../services/sourcePauseController", () => require("../../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
+jest.mock("../../../workers/audioCompletionSubscriber", () => require("../../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
+jest.mock("../../../workers/enrichment/artists", () => require("../../../__tests__/helpers/enrichmentMocks").artistJobMock);
+jest.mock("../../../workers/trackEnrichmentWorker", () => require("../../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
+jest.mock("../../../workers/enrichment/podcasts", () => require("../../../__tests__/helpers/enrichmentMocks").podcastJobMock);
 
 import {
     mockRecordFailure,
@@ -28,9 +28,9 @@ import {
     mockReadIdentityTags,
     mockHandleRateLimit,
     mockGetPause,
-} from "../../__tests__/helpers/enrichmentMocks";
-import { prisma } from "../../utils/db";
-import { enrichSingleTrack } from "../../workers/unifiedEnrichment";
+} from "../../../__tests__/helpers/enrichmentMocks";
+import { prisma } from "../../../utils/db";
+import { identifyTrack } from "../identification";
 
 const PREFIX = "mb429";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -126,7 +126,7 @@ describe("a rate-limited answer parks the question at its own deadline", () => {
         });
 
         // The queue job names the claim it answers: attempt 2, never redelivered.
-        const outcome = await enrichSingleTrack(trackId, `${trackId}-2-r0`);
+        const outcome = await identifyTrack(trackId, `${trackId}-2-r0`);
 
         const stage = await stageRow(trackId);
         // Parked, not failed: the same attempt it was dispatched with, due
@@ -160,7 +160,7 @@ describe("an honest no-match", () => {
             evidence: { fingerprint: "TAGFP", reason: "nothing matched" },
         });
 
-        const outcome = await enrichSingleTrack(trackId, `${trackId}-1-r0`);
+        const outcome = await identifyTrack(trackId, `${trackId}-1-r0`);
 
         expect(outcome).toBe("no_match");
 
