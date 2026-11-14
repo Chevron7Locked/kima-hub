@@ -31,8 +31,15 @@ export async function runSimilarityStep(readProgress: () => Promise<SimilarityIn
         logger.debug("[Enrichment] Similarity waits: analysis or sound vectors are still being made");
         return 0;
     }
-    const { feelUpdated } = await buildMatching();
-    const { laidOut, placed } = await updateMap(progress.artists.owed === 0);
-    if (laidOut > 0) logger.info(`[Enrichment] Vibe map laid out: ${laidOut} tracks`);
-    return feelUpdated + laidOut + placed;
+    // The housekeeping after this step does not depend on it, so a failure is logged and the cycle
+    // goes on; the next cycle tries again.
+    try {
+        const { feelUpdated } = await buildMatching();
+        const { laidOut, placed } = await updateMap(progress.artists.owed === 0);
+        if (laidOut > 0) logger.info(`[Enrichment] Vibe map laid out: ${laidOut} tracks`);
+        return feelUpdated + laidOut + placed;
+    } catch (error) {
+        logger.error("[Enrichment] Similarity step failed; the cycle goes on without it:", error);
+        return 0;
+    }
 }

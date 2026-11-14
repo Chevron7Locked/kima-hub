@@ -179,7 +179,6 @@ import {
 } from "../unifiedEnrichment";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
-import { distributedLock } from "../../utils/distributedLock";
 import { setTimeout as realSleep } from "timers/promises";
 import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 
@@ -228,11 +227,6 @@ async function until(done: () => boolean) {
     expect(done()).toBe(true);
 }
 
-/** Cycle leases taken and given back: a cycle holds its lease until it ends, so equal counts mean none is still running. */
-const leases = { taken: 0, returned: 0 };
-const realAcquire = distributedLock.acquire.bind(distributedLock);
-const realRelease = distributedLock.release.bind(distributedLock);
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("Enrichment State Machine", () => {
@@ -242,18 +236,6 @@ describe("Enrichment State Machine", () => {
         await wipe();
         await seedArtistAndAlbum(P, "Esm");
         jest.clearAllMocks();
-        leases.taken = 0;
-        leases.returned = 0;
-        jest.spyOn(distributedLock, "acquire").mockImplementation(async (key, ttl) => {
-            const got = await realAcquire(key, ttl);
-            if (got) leases.taken++;
-            return got;
-        });
-        jest.spyOn(distributedLock, "release").mockImplementation(async (key) => {
-            const done = await realRelease(key);
-            leases.returned++;
-            return done;
-        });
         // Only the clock timers are faked: the database's own I/O needs the real next-tick and immediate queues.
         jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "clearImmediate", "queueMicrotask"] });
         // Default: state service returns idle
@@ -268,9 +250,8 @@ describe("Enrichment State Machine", () => {
         // Inline fingerprint runs finish before the next test's wipe deletes their song.
         await waitForFingerprintWork();
         // The cycle's timer chain ends with the test; its fake clock goes with it. A cycle already under way
-        // finishes first, so it never reads the next test's songs or writes against a deleted one.
+        // finishes first (stop waits for it), so it never reads the next test's songs or writes against a deleted one.
         await stopUnifiedEnrichmentWorker();
-        await until(() => leases.returned >= leases.taken);
         jest.useRealTimers();
     });
 

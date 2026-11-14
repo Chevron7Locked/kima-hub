@@ -1,6 +1,7 @@
 /**
- * The scheduler's run state, seen from outside: a stop that lands while a cycle runs stays a stop, and a restart
- * after it runs again. Redis, queues and prisma are stood in; the scheduler and its run state are real.
+ * The scheduler's run state, seen from outside: a stop that lands while a cycle runs stays a stop, a restart
+ * after it runs again, and stopping the worker waits for the cycle in flight. Real test database. Redis, queues
+ * and the network-facing services are stood in; the scheduler and its run state are real.
  */
 
 jest.mock("../scanActivity", () => ({ libraryScanRunning: jest.fn().mockResolvedValue(false) }));
@@ -40,39 +41,10 @@ jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({ audioAnalyzerWorkers: 2, clapWorkers: 2 }),
 }));
 
-const mockQueryRaw = jest.fn().mockResolvedValue([]);
-const mockExecuteRaw = jest.fn().mockResolvedValue(1);
-const mockTransaction = jest.fn(async (run: (tx: unknown) => Promise<unknown>) =>
-    run({ $queryRawUnsafe: mockQueryRaw, $executeRawUnsafe: mockExecuteRaw }));
-
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        artist: {
-            findMany: jest.fn().mockResolvedValue([]),
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-            count: jest.fn().mockResolvedValue(0),
-            groupBy: jest.fn().mockResolvedValue([]),
-        },
-        track: {
-            findMany: jest.fn().mockResolvedValue([]),
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-            count: jest.fn().mockResolvedValue(0),
-            groupBy: jest.fn().mockResolvedValue([]),
-        },
-        trackStage: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), count: jest.fn().mockResolvedValue(0) },
-        sourceAttempt: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-        podcast: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
-        enrichmentFailure: { findMany: jest.fn().mockResolvedValue([]) },
-        notification: { findMany: jest.fn().mockResolvedValue([]) },
-        $queryRaw: (...a: unknown[]) => mockQueryRaw(...a),
-        $queryRawUnsafe: (...a: unknown[]) => mockQueryRaw(...a),
-        $executeRaw: (...a: unknown[]) => mockExecuteRaw(...a),
-        $executeRawUnsafe: (...a: unknown[]) => mockExecuteRaw(...a),
-        $transaction: (run: (tx: unknown) => Promise<unknown>) => mockTransaction(run),
-    },
-}));
-
-import { mockRedis, enrichmentStateMock } from "../../__tests__/helpers/enrichmentMocks";
+import { setTimeout as realSleep } from "timers/promises";
+import { mockRedis, enrichmentStateMock, artistJobMock } from "../../__tests__/helpers/enrichmentMocks";
+import { prisma } from "../../utils/db";
+import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import {
     triggerEnrichmentNow,
     startEnrichmentNow,
@@ -81,6 +53,10 @@ import {
 } from "../unifiedEnrichment";
 
 const state = enrichmentStateMock.enrichmentStateService;
+const queueOwedArtists = artistJobMock.queueOwedArtists;
+
+const P = "zz-run";
+const wipe = () => deleteSeededRows(P);
 
 /** What another process publishes on the enrichment control channel. */
 function control(message: "pause" | "resume" | "stop") {
@@ -95,16 +71,28 @@ function cyclesRun(): number {
     return state.detectHang.mock.calls.length;
 }
 
+/** Wait, in real time, for something a cycle does in the background: its database reads are not on the fake clock. */
+async function until(done: () => boolean) {
+    for (let i = 0; i < 300 && !done(); i++) await realSleep(10);
+    expect(done()).toBe(true);
+}
+
+beforeAll(wipe);
+afterAll(wipe);
+
 beforeEach(async () => {
+    await wipe();
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    // Only the clock timers are faked: the database's own I/O needs the real next-tick and immediate queues.
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "clearImmediate", "queueMicrotask"] });
     state.getState.mockResolvedValue({ status: "idle" });
-    mockQueryRaw.mockResolvedValue([]);
+    mockRedis.set.mockResolvedValue("OK");
     await startUnifiedEnrichmentWorker();
     state.detectHang.mockClear();
 });
 
 afterEach(async () => {
+    // Stopping waits for any cycle still in flight, so the next test's wipe never races one.
     await stopUnifiedEnrichmentWorker();
     jest.useRealTimers();
 });
@@ -157,21 +145,29 @@ describe("a stop during a run", () => {
 
 describe("a stop between cycles", () => {
     it("is settled by the next look and moves no stage record", async () => {
-        mockQueryRaw.mockClear();
-        mockExecuteRaw.mockClear();
-        mockTransaction.mockClear();
+        // A song that owes its recording: a cycle that ran would claim it.
+        await seedArtistAndAlbum(P, "Run");
+        await prisma.track.create({
+            data: {
+                id: `${P}_t1`, albumId: `${P}_alb`, title: "t1", trackNo: 1, duration: 200,
+                filePath: `/music/${P}/t1.flac`, fileModified: new Date(), fileSize: 1000,
+            },
+        });
+        await putStage(`${P}_t1`, "recording", "pending");
+        const stages = () => prisma.trackStage.findMany({ where: { trackId: `${P}_t1` }, orderBy: { stage: "asc" } });
+        const before = await stages();
+        expect(before).toHaveLength(1);
 
         control("stop");
         await triggerEnrichmentNow();
 
         expect(state.updateState).toHaveBeenCalledWith({ status: "idle", currentPhase: null });
-        expect(mockQueryRaw).not.toHaveBeenCalled();
-        expect(mockExecuteRaw).not.toHaveBeenCalled();
-        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(await stages()).toEqual(before);
 
         // And it holds against the timer.
         await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
         expect(cyclesRun()).toBe(0);
+        expect(await stages()).toEqual(before);
     });
 });
 
@@ -209,5 +205,52 @@ describe("a pause", () => {
         control("resume");
         await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
         expect(cyclesRun()).toBeGreaterThan(0);
+    });
+});
+
+describe("stopping the worker", () => {
+    it("waits for the cycle in flight, and the cycle ends at its next phase", async () => {
+        let release!: (queued: number) => void;
+        queueOwedArtists.mockImplementationOnce(() => new Promise<number>((resolve) => { release = resolve; }));
+        const order: string[] = [];
+        const cycle = triggerEnrichmentNow().then(() => { order.push("cycle ended"); });
+        try {
+            await until(() => queueOwedArtists.mock.calls.length === 1);
+            state.updateState.mockClear();
+
+            const stopped = stopUnifiedEnrichmentWorker().then(() => { order.push("stop returned"); });
+            await realSleep(100);
+            expect(order).toEqual([]);
+
+            release(0);
+            await Promise.all([cycle, stopped]);
+
+            expect(order).toEqual(["cycle ended", "stop returned"]);
+            // The stop was seen at the phase boundary: no later phase started.
+            expect(state.updateState).not.toHaveBeenCalledWith(expect.objectContaining({ currentPhase: "tracks" }));
+        } finally {
+            release?.(0);
+        }
+    });
+
+    it("returns at once when no cycle is running", async () => {
+        await expect(stopUnifiedEnrichmentWorker()).resolves.toBeUndefined();
+    });
+});
+
+describe("a cycle that loses the lock", () => {
+    it("leaves the wake request for the cycle that holds it", async () => {
+        // The lock is held by another process.
+        mockRedis.set.mockImplementation(async (key: string) => (key.startsWith("lock:") ? null : "OK"));
+
+        const lost = await triggerEnrichmentNow();
+        expect(lost).toEqual(expect.objectContaining({ declined: "already-running" }));
+        expect(queueOwedArtists).not.toHaveBeenCalled();
+
+        // The other process lets go. The trigger's request is still owed: the next tick runs past the minimum
+        // interval instead of declining as too soon.
+        mockRedis.set.mockResolvedValue("OK");
+        await jest.advanceTimersByTimeAsync(5000);
+        await until(() => queueOwedArtists.mock.calls.length === 1);
     });
 });

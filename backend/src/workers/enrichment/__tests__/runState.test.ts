@@ -78,7 +78,7 @@ describe("run state", () => {
             expect(run.mode()).toBe("stopped");
             expect(run.cycleInFlight()).toBe(false);
             // A timer tick must not start work again.
-            expect(run.admitsCycle({ fullMode: false })).toBe(false);
+            expect(run.admitsCycle()).toBe(false);
         });
 
         it("a pause mid-cycle halts the cycle without stopping the worker", () => {
@@ -106,7 +106,7 @@ describe("run state", () => {
             run.start();
             expect(run.mode()).toBe("running");
             expect(run.stopWarned()).toBe(false);
-            expect(run.admitsCycle({ fullMode: false })).toBe(true);
+            expect(run.admitsCycle()).toBe(true);
         });
 
         it("a new stop re-arms the stop warning", () => {
@@ -131,7 +131,7 @@ describe("run state", () => {
             const run = createRunState();
             run.open({ paused: true });
             expect(run.mode()).toBe("paused");
-            expect(run.admitsCycle({ fullMode: false })).toBe(true);
+            expect(run.admitsCycle()).toBe(true);
             expect(run.haltRequested()).toBe(true);
         });
     });
@@ -139,14 +139,14 @@ describe("run state", () => {
     describe("a wake request", () => {
         it("lets one cycle through a stopped worker, and is spent when taken", () => {
             const run = inMode("stopped");
-            expect(run.admitsCycle({ fullMode: false })).toBe(false);
+            expect(run.admitsCycle()).toBe(false);
 
             run.requestWake();
             expect(run.wakeRequested()).toBe(true);
-            expect(run.admitsCycle({ fullMode: false })).toBe(true);
+            expect(run.admitsCycle()).toBe(true);
             run.takeWake();
             expect(run.wakeRequested()).toBe(false);
-            expect(run.admitsCycle({ fullMode: false })).toBe(false);
+            expect(run.admitsCycle()).toBe(false);
         });
 
         it("a stop seen by a cycle drops a waiting request: the stop wins over it", () => {
@@ -155,11 +155,7 @@ describe("run state", () => {
             run.stop();
             run.settleStop();
             expect(run.wakeRequested()).toBe(false);
-            expect(run.admitsCycle({ fullMode: false })).toBe(false);
-        });
-
-        it("a full run is let through a stopped worker too", () => {
-            expect(inMode("stopped").admitsCycle({ fullMode: true })).toBe(true);
+            expect(run.admitsCycle()).toBe(false);
         });
     });
 
@@ -171,6 +167,32 @@ describe("run state", () => {
             expect(run.cycleInFlight()).toBe(true);
             run.endCycle();
             expect(run.cycleInFlight()).toBe(false);
+        });
+
+        it("a cycle's settle promise resolves when it ends, and is resolved when none runs", async () => {
+            const run = inMode("running");
+            await run.cycleSettled();
+
+            run.beginCycle();
+            let settled = false;
+            const waiting = run.cycleSettled().then(() => { settled = true; });
+            await Promise.resolve();
+            expect(settled).toBe(false);
+
+            run.endCycle();
+            await waiting;
+            expect(settled).toBe(true);
+            await run.cycleSettled();
+        });
+
+        it("a settle promise taken mid-cycle belongs to that cycle, not the next one", async () => {
+            const run = inMode("running");
+            run.beginCycle();
+            const first = run.cycleSettled();
+            run.endCycle();
+            run.beginCycle();
+            await first;
+            expect(run.cycleInFlight()).toBe(true);
         });
     });
 

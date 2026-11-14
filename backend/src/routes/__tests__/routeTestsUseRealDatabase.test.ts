@@ -14,12 +14,7 @@ const SRC = path.resolve(__dirname, "../..");
  * Files still allowed to fake the database module, each owned by an open ticket that converts it. Delete the
  * line when the file is converted; the check below fails if a listed file no longer fakes the module.
  */
-const EXEMPT = new Set([
-    // Another open ticket (the enrichment queue's stage records) is rewriting this file.
-    "workers/__tests__/enrichmentQueueBackoff.test.ts",
-    // Ticket 84 converts this one with the scheduler's stop, after the job modules move out.
-    "workers/__tests__/unifiedEnrichment.runState.test.ts",
-]);
+const EXEMPT = new Set<string>([]);
 
 const CODE_FILE = /\.[cm]?[jt]sx?$/;
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;

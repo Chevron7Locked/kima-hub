@@ -17,6 +17,9 @@ jest.mock("../../utils/logger", () => ({
   logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
 
+// Sound vectors are on: an embedding is offered only then (the gate has its own test in retryFailedAndBlocked).
+jest.mock("../../services/featureDetection", () => require("../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
+
 const PREFIX = "gnw";
 const id = (n: string) => `${PREFIX}_${n}`;
 const ALL_TRACKS = [

@@ -210,6 +210,12 @@ export async function getNextWork(
             continue;
         }
 
+        // An install without sound vectors is never offered an embedding, whichever caller asks.
+        if (stage === "embedding" && !(await featureDetection.getFeatures()).vibeEmbeddings) {
+            logger.debug("[Enrichment] 'embedding' skipped: sound vectors are switched off");
+            continue;
+        }
+
         // A just-enabled GPU runtime gets a head start on the embedding stage
         // only: a "yes" in the release window must reach the pipeline before
         // the library is embedded on CPU. Bounded by a hard timeout inside
@@ -230,7 +236,7 @@ export async function getNextWork(
             continue;
         }
 
-    const prerequisite = PREREQUISITE_STAGE[stage];
+        const prerequisite = PREREQUISITE_STAGE[stage];
         // A track with no record for this stage has never been asked — that is
         // "answer missing", so it is due. When there is a record, only a
         // pending or retryable-failed one is.
@@ -521,7 +527,7 @@ export async function startUnifiedEnrichmentWorker() {
     startAudioCompletionSubscriber();
 
     await setupControlChannel();
-    await runEnrichmentCycle(false);
+    await runEnrichmentCycle();
     scheduleNextEnrichmentCycle();
 }
 
@@ -538,7 +544,7 @@ function scheduleNextEnrichmentCycle(delayMs: number = ENRICHMENT_INTERVAL_MS) {
         // place spawns parallel timer chains -- see the note there.
         let nextDelayMs: number | null = null;
         try {
-            const result = await runEnrichmentCycle(false);
+            const result = await runEnrichmentCycle();
 
             // A cycle that declined to run has learned nothing about whether
             // there is work, so backing off for a minute on the strength of it
@@ -595,12 +601,18 @@ function bumpScheduleToFastInterval(): void {
     scheduleNextEnrichmentCycle(ENRICHMENT_INTERVAL_MS);
 }
 
+/**
+ * Closes the worker and returns once no cycle of this process is running. A cycle in flight is asked to stop at
+ * its next phase and awaited, so nothing it does lands after this returns.
+ */
 export async function stopUnifiedEnrichmentWorker() {
     run.close();
     if (enrichmentInterval) {
         clearTimeout(enrichmentInterval);
         enrichmentInterval = null;
     }
+    if (run.cycleInFlight()) run.stop();
+    await run.cycleSettled();
     logger.debug("[Enrichment] Worker stopped");
     if (redis) {
         redis.disconnect();
@@ -783,7 +795,7 @@ export async function syncEnrichmentFailureAlert(): Promise<void> {
     });
 }
 
-async function runEnrichmentCycle(fullMode: boolean): Promise<{
+async function runEnrichmentCycle(): Promise<{
     artists: number;
     tracks: number;
     audioQueued: number;
@@ -811,7 +823,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     }
 
     // User explicitly stopped -- don't auto-restart via timer. startEnrichmentNow lifts it.
-    if (!run.admitsCycle({ fullMode })) {
+    if (!run.admitsCycle()) {
         if (!run.stopWarned()) {
             const pendingCount = await prisma.track.count({ where: { analysisStatus: "pending" } });
             if (pendingCount > 0) {
@@ -864,15 +876,12 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         return { ...emptyResult, declined: "scan-running" };
     }
 
-    // Enforce minimum interval (unless full mode or immediate request)
-    const bypassIntervalCheck = fullMode || run.wakeRequested();
+    // Enforce minimum interval (unless an immediate request)
+    const bypassIntervalCheck = run.wakeRequested();
     const now = Date.now();
     if (!bypassIntervalCheck && now - lastRunTime < MIN_INTERVAL_MS) {
         return { ...emptyResult, declined: "too-soon" };
     }
-
-    run.takeWake();
-    lastRunTime = now;
 
     // Detect hangs: warn if enrichment has been "running" > 15 min with no state update
     const isHung = await enrichmentStateService.detectHang();
@@ -886,6 +895,10 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         return { ...emptyResult, declined: "already-running" };
     }
     const stopLockRenewal = distributedLock.keepAlive(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
+    // Spent only now that this cycle holds the lock: one that lost it leaves the request and the interval
+    // for the cycle that holds it.
+    run.takeWake();
+    lastRunTime = now;
 
     run.beginCycle();
 
@@ -1560,6 +1573,6 @@ export async function triggerEnrichmentNow(): Promise<{
     invalidateEnrichmentProgress();
     bumpScheduleToFastInterval();
 
-    return runEnrichmentCycle(false);
+    return runEnrichmentCycle();
 }
 

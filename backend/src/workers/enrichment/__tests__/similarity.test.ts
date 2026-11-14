@@ -20,6 +20,7 @@ jest.mock("../../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+import { logger } from "../../../utils/logger";
 import { runSimilarityStep, type SimilarityInputs } from "../similarity";
 
 const settled: SimilarityInputs = {
@@ -77,5 +78,19 @@ describe("the step", () => {
     it("builds feel before the map", async () => {
         await runSimilarityStep(async () => settled);
         expect(mockBuildMatching.mock.invocationCallOrder[0]).toBeLessThan(mockUpdateMap.mock.invocationCallOrder[0]);
+    });
+});
+
+describe("a failure in the step", () => {
+    it.each([
+        ["feel", () => mockBuildMatching.mockRejectedValue(new Error("boom"))],
+        ["the map", () => mockUpdateMap.mockRejectedValue(new Error("boom"))],
+    ])("in %s is logged and ends the step, not the cycle", async (_where, fail) => {
+        fail();
+        await expect(runSimilarityStep(async () => settled)).resolves.toBe(0);
+        expect(logger.error).toHaveBeenCalledWith(
+            "[Enrichment] Similarity step failed; the cycle goes on without it:",
+            expect.objectContaining({ message: "boom" }),
+        );
     });
 });

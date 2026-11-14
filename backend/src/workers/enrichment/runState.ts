@@ -61,10 +61,12 @@ export interface RunState {
     /** The cycle took the lock and starts: the in-flight slot is held until `endCycle`. */
     beginCycle(): void;
     endCycle(): void;
+    /** Resolves when the cycle now in flight ends, or at once when none is. A later cycle is not waited for. */
+    cycleSettled(): Promise<void>;
 
     // Questions the cycle asks.
-    /** Whether a cycle may go past the stop check: not while stopped, unless it is a full run or was woken. */
-    admitsCycle(options: { fullMode: boolean }): boolean;
+    /** Whether a cycle may go past the stop check: not while stopped, unless it was woken. */
+    admitsCycle(): boolean;
     /** Whether a cycle that is running should stop its work now: any mode but running. */
     haltRequested(): boolean;
     /** Periodic cleanup runs only while the worker runs, never during a pause or stop. */
@@ -79,6 +81,9 @@ export function createRunState(): RunState {
     let wake = false;
     let warned = false;
     let closed = false;
+    // Resolves the settle promise of the cycle in flight; null while none runs.
+    let settle: (() => void) | null = null;
+    let settled: Promise<void> = Promise.resolve();
 
     return {
         mode: () => mode,
@@ -130,13 +135,19 @@ export function createRunState(): RunState {
 
         beginCycle() {
             inFlight = true;
+            settled = new Promise<void>((resolve) => {
+                settle = resolve;
+            });
         },
         endCycle() {
             inFlight = false;
+            settle?.();
+            settle = null;
         },
+        cycleSettled: () => settled,
 
-        admitsCycle({ fullMode }) {
-            return mode !== "stopped" || fullMode || wake;
+        admitsCycle() {
+            return mode !== "stopped" || wake;
         },
         haltRequested: () => mode !== "running",
         mayDoHousekeeping: () => mode === "running",

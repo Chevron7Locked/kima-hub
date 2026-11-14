@@ -30,6 +30,7 @@ jest.mock("../../workers/enrichment/podcasts", () => require("../../__tests__/he
 import { putStage, deleteSeededRows, seedArtistAndAlbum } from "../../__tests__/helpers/trackStage";
 import { mockQueueAdd, mockQueueGetJob, mockRedis } from "../../__tests__/helpers/enrichmentMocks";
 import { prisma } from "../../utils/db";
+import { featureDetection } from "../../services/featureDetection";
 import { libraryScanRunning } from "../scanActivity";
 import {
     waitForFingerprintWork,
@@ -198,5 +199,23 @@ describe("retryFailedAndBlocked — the queue-based path", () => {
         expect(keys.filter((k) => k.endsWith("/analysis"))).toHaveLength(4);
         expect(keys.filter((k) => k.endsWith("/embedding"))).toHaveLength(0);
         expect(keys.filter((k) => k.endsWith("/fingerprint"))).toHaveLength(4);
+    });
+
+    it("queues no vector work while sound vectors are switched off", async () => {
+        // The song's analysis has answered, so its embedding is owed -- but the feature is off.
+        await seedTrack(id("vec"), { recording: "done", analysis: "done", embedding: "pending" });
+        jest.mocked(featureDetection.getFeatures).mockResolvedValue({
+            vibeEmbeddings: false, podcastSupport: false, fpcalc: true,
+        } as never);
+        try {
+            const work = await retryFailedAndBlocked(50);
+
+            expect(work.filter((w) => w.stage === "embedding")).toEqual([]);
+            expect((await stageRow(id("vec"), "embedding"))?.status).toBe("pending");
+        } finally {
+            jest.mocked(featureDetection.getFeatures).mockResolvedValue({
+                vibeEmbeddings: true, podcastSupport: false, fpcalc: true,
+            } as never);
+        }
     });
 });
