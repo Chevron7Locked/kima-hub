@@ -343,15 +343,16 @@ export const SONG_CHUNK_MAX = 10_000;
 
 /**
  * Every playable song, in id order, of the artists whose `normalizedName` holds `word` as a whole word, anywhere in the
- * name, and of the artists `shownIds` names (those whose shown name holds it; ShownArtists.holding): the pool for a source credit stored under a compound name ("artist a feat. b", "artist/other", "artist, other",
- * "(artist)", "x/artist"). A word ends at any character that is not a letter or a digit, and at the ends of the name. A
- * whole word, not a substring, so a common word ("the") finds the artists that have it and not every name with those
- * letters inside. `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word.
+ * name, and of the artists `shownIds` names (those whose shown name holds it; ShownArtists.holding). This is the pool for
+ * a source credit stored under a compound name ("artist a feat. b", "artist/other", "artist, other", "(artist)",
+ * "x/artist"). A word ends at any character that is not a letter or a digit, and at the ends of the name. A whole word,
+ * not a substring, so a common word ("the") finds the artists that have it and not every name with those letters
+ * inside. `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word.
  * One query joins the match to the playable songs and returns their ids, so the number of artists never reaches a
- * query's bind-parameter limit (the shown ids travel as one array); the songs are then loaded in chunks of `chunkSize` ids (SONG_CHUNK_MAX; a test passes a
- * small one), in id order. "Letter" follows
- * the database's character classes: where they know only ASCII (a C locale, SQL_ASCII), every accented or non-Latin
- * letter counts as a boundary, so such names are offered more often, never less; the matcher narrows the pool afterwards.
+ * query's bind-parameter limit (the shown ids travel as one array). The songs are then loaded in chunks of `chunkSize`
+ * ids (SONG_CHUNK_MAX; a test passes a small one), in id order. "Letter" follows the database's character classes:
+ * where they know only ASCII (a C locale, SQL_ASCII), every accented or non-Latin letter counts as a boundary, so such
+ * names are offered more often, never less; the matcher narrows the pool afterwards.
  */
 export async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
   word: string,
@@ -409,7 +410,11 @@ class ShownArtists {
     return this.shown.filter((a) => words.some((w) => a.name === w || a.name.startsWith(`${w} `))).map((a) => a.id);
   }
 
-  /** Ids of the artists whose shown name holds `word` (normalized) as a whole word, the way the stored-name match reads it. */
+  /**
+   * Ids of the artists whose shown name holds `word` (normalized) as a whole word, read like the stored-name match. The
+   * database's "letter" is its locale's; here it is any Unicode letter or digit, so under a C locale this offers fewer
+   * non-ASCII names than the stored-name match does.
+   */
   holding(word: string): string[] {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const whole = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "u");

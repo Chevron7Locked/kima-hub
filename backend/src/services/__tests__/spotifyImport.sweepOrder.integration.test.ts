@@ -1,7 +1,7 @@
 /**
- * An import's first-word artist sweeps offer the matcher every song of the artists they find, in a stable order. Two
+ * An import's first-word artist sweeps offer the matcher every song of the artists they find, in a stable order. Five
  * properties, each checked through the preview (all three sweeps of the per-song lookup) and the M3U import (its fuzzy
- * tier). Real database. Four properties:
+ * tier). Real database.
  *
  * - Nothing is cut by id: the right song is found when it has the highest id of an artist with more than 50 songs, and
  *   when the first word is a common one ("the") shared by dozens of artists with lower ids.
@@ -10,6 +10,7 @@
  * - A word held by more artists than one query can carry ids for still finds its songs, and the songs load in chunks
  *   of at most the chunk size (a small one is passed in), in id order across chunks.
  * - A credit whose first word is short ("DJ Qzsw feat. Someone") still reaches the matcher through the credit sweep.
+ * - An artist whose shown name holds the word, and whose stored name does not, reaches the matcher through each sweep.
  */
 import { prisma } from "../../utils/db";
 import { spotifyImportService, songsOfArtistsHoldingWord } from "../spotifyImport";
@@ -285,7 +286,7 @@ describe("an artist whose shown name holds the word, and whose stored name does 
     // found only by the sweep under test.
     it("through the first-word sweep", async () => {
         const title = `${P} shown first`;
-        const id = await seedOne("sh-1", "zzstored one", title, undefined, "Qzone Band");
+        const id = await seedOne("sh-1", "zzstored one", title, undefined, "The Qzone Band");
         expect(await previewMatch("Qzone", title)).toBe(id);
     });
 
