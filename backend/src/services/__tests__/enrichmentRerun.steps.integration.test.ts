@@ -5,7 +5,8 @@
  */
 import { prisma } from "../../utils/db";
 import { rerunEnrichment } from "../enrichmentRestart";
-import { executeMoodPhase } from "../../workers/unifiedEnrichment";
+import { getEnrichmentProgress } from "../../workers/unifiedEnrichment";
+import { createMoodStep } from "../../workers/enrichment/moods";
 import { redisClient } from "../../utils/redis";
 import { MOODS } from "../moods/heads";
 import { READINGS } from "../moods/state";
@@ -13,6 +14,8 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFixtures";
 
 const P = "crerun";
+
+const executeMoodPhase = createMoodStep({ readProgress: getEnrichmentProgress, redis: () => redisClient });
 
 async function seedEnrichedTrack(id: string, withVector: boolean) {
     await prisma.track.create({

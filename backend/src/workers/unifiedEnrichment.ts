@@ -31,6 +31,8 @@ import {
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { createRunState } from "./enrichment/runState";
+import { createMoodStep } from "./enrichment/moods";
+import { runSimilarityStep } from "./enrichment/similarity";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
 // The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 import * as stageRecords from "../services/stages/stageRecords";
@@ -60,11 +62,9 @@ import { acoustidService } from "../services/acoustidService";
 import { fingerprintToAsk, fingerprintsToAsk, type FingerprintQuestion } from "../services/fingerprintChoice";
 import { fpcalcService } from "../services/fpcalc";
 import { resolveWithinMusicRoot } from "../routes/library/trackPath";
-import { buildMatching, matchingProgress } from "../services/matching/state";
-import { buildMoods, moodProgress } from "../services/moods/state";
-import { writeMoodTags } from "../services/moods/tags";
-import { updateMap } from "../services/matching/map";
-import { dependsOnMoods } from "../services/mixes/cacheKeys";
+import { matchingProgress } from "../services/matching/state";
+import { moodProgress } from "../services/moods/state";
+import { dropCachedMixes } from "../services/mixes/dropCache";
 import { isMbid } from "../services/artistIdentity";
 import type { Outcome } from "../utils/outcome";
 
@@ -688,24 +688,6 @@ export async function stopUnifiedEnrichmentWorker() {
         );
 }
 
-/**
- * Drop the cached mixes so the next read rebuilds them; returns how many were dropped. With `moodsOnly`, only the keys
- * a change to the moods makes stale (services/mixes/cacheKeys.ts): the familiarity results, their locks and the energy
- * band stay.
- */
-async function dropCachedMixes(moodsOnly = false): Promise<number> {
-    const redis = getRedis();
-    const keys: string[] = [];
-    let cursor = "0";
-    do {
-        const [next, batch] = await redis.scan(cursor, "MATCH", "mixes:*", "COUNT", 100);
-        cursor = next;
-        keys.push(...(moodsOnly ? batch.filter(dependsOnMoods) : batch));
-    } while (cursor !== "0");
-    if (keys.length > 0) await redis.del(...keys);
-    return keys.length;
-}
-
 /** Drop every cached mix so the next read rebuilds it from what enrichment has now answered, and record
  * that this point's clear is done. */
 async function clearMixCache(
@@ -713,7 +695,7 @@ async function clearMixCache(
     done: { coreCacheCleared: true } | { fullCacheCleared: true },
 ): Promise<void> {
     try {
-        const dropped = await dropCachedMixes();
+        const dropped = await dropCachedMixes(getRedis());
         if (dropped > 0) {
             logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after ${point} enrichment complete`);
         }
@@ -1174,9 +1156,9 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         const vibeResult = await runPhase("vibe", executeVibePhase);
         vibeQueued = vibeResult ?? 0;
 
-        await runPhase("mood", executeMoodPhase);
+        await runPhase("mood", moodStep);
 
-        await runPhase("similarity", executeSimilarityPhase);
+        await runPhase("similarity", () => runSimilarityStep(getEnrichmentProgress));
 
         // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
         const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -2039,102 +2021,8 @@ export async function executeVibePhase(): Promise<number> {
     return dispatchStageWork("embedding", work, STAGE_PRODUCERS.embedding);
 }
 
-/**
- * The note in Redis that the moods changed and the cached mixes that depend on them are not dropped yet
- * (executeMoodPhase). It is kept outside the process so a restart before the inputs settle still makes the drop, and it
- * is not under `mixes:` so the drop never deletes it.
- */
-const MOOD_MIXES_OWED_KEY = "enrichment:mood-mixes-owed";
-
-/**
- * True when nothing that feeds the moods is still being answered: no analysis waiting, running or failed and due a
- * retry, and no sound vector waiting, running or retrying. The moods are scored from both.
- */
-function moodInputsSettled(progress: EnrichmentProgress): boolean {
-    return (
-        progress.audioAnalysis.pending === 0 &&
-        progress.audioAnalysis.processing === 0 &&
-        progress.audioAnalysis.failed === 0 &&
-        progress.clapEmbeddings.pending === 0 &&
-        progress.clapEmbeddings.processing === 0 &&
-        progress.clapEmbeddings.retrying === 0
-    );
-}
-
-// A change whose note could not be written to Redis, held here until it is: the moods are already committed, so
-// the next cycle will not see the change again.
-let moodMixesOwedUnwritten = false;
-
-/**
- * Writes down that the moods changed (when they did) and, once the moods' inputs have settled, drops the cached mixes that
- * depend on them. A Redis or database error is logged and goes no further: the mood tags are still written, and a note
- * already written down stays for the next cycle.
- */
-async function dropMoodMixesIfOwed(changed: boolean): Promise<void> {
-    if (changed) moodMixesOwedUnwritten = true;
-    try {
-        const redis = getRedis();
-        if (moodMixesOwedUnwritten) {
-            await redis.set(MOOD_MIXES_OWED_KEY, "1");
-            moodMixesOwedUnwritten = false;
-        }
-        if ((await redis.get(MOOD_MIXES_OWED_KEY)) && moodInputsSettled(await getEnrichmentProgress())) {
-            const dropped = await dropCachedMixes(true);
-            await redis.del(MOOD_MIXES_OWED_KEY);
-            if (dropped > 0) logger.info(`[Enrichment] Cleared ${dropped} mix cache entries after the moods changed`);
-        }
-    } catch (error) {
-        logger.error("[Enrichment] Could not drop the cached mood mixes; the moods changed and the drop is still owed:", error);
-    }
-}
-
-/**
- * The mood step, once analysis and sound vectors have finished for the whole library (the moods read the vectors, and
- * their statistics the whole library): mood scores for new or changed vectors, the mood statistics when their inputs
- * changed, then every track's tags. A change drops the cached mood mixes (dropMoodMixesIfOwed, which keeps the drop owed
- * across a Redis failure or a restart). A failure is logged and stops the step (scores already committed stay); the
- * cycle goes on to similarity. Returns how many tracks were scored.
- */
-export async function executeMoodPhase(): Promise<number> {
-    if (!moodInputsSettled(await getEnrichmentProgress())) {
-        logger.debug("[Enrichment] Moods wait: analysis or sound vectors are still being made");
-        return 0;
-    }
-    try {
-        const { scored, stateChanged } = await buildMoods();
-        await dropMoodMixesIfOwed(scored > 0 || stateChanged);
-        const tagged = await writeMoodTags();
-        if (tagged > 0) logger.info(`[Enrichment] Mood tags changed on ${tagged} tracks`);
-        return scored;
-    } catch (error) {
-        logger.error("[Enrichment] Mood step failed; the cycle goes on without it:", error);
-        return 0;
-    }
-}
-
-/**
- * The similarity step, after the moods: feel for new sound vectors and the
- * library's matching state when its inputs changed (services/matching/state.ts),
- * then the vibe map: laid out or extended with new tracks (services/matching/map.ts).
- * Returns how many tracks got feel or a map position.
- */
-export async function executeSimilarityPhase(): Promise<number> {
-    const features = await featureDetection.getFeatures();
-    if (!features.vibeEmbeddings) {
-        return 0;
-    }
-    // Similarity comes after the moods: it waits for the same settled analysis and sound vectors.
-    const progress = await getEnrichmentProgress();
-    if (!moodInputsSettled(progress)) {
-        logger.debug("[Enrichment] Similarity waits: analysis or sound vectors are still being made");
-        return 0;
-    }
-    const { feelUpdated } = await buildMatching();
-    // The one-time layout also waits for the artist genres the formula reads.
-    const { laidOut, placed } = await updateMap(progress.artists.owed === 0);
-    if (laidOut > 0) logger.info(`[Enrichment] Vibe map laid out: ${laidOut} tracks`);
-    return feelUpdated + laidOut + placed;
-}
+/** The mood step (workers/enrichment/moods.ts): it reads this scheduler's progress counts and Redis. */
+const moodStep = createMoodStep({ readProgress: () => getEnrichmentProgress(), redis: () => getRedis() });
 
 export async function executePodcastRefreshPhase(): Promise<number> {
     const podcastCount = await prisma.podcast.count();
