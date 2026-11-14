@@ -331,6 +331,30 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
 }
 
 /**
+ * The artists whose `normalizedName` holds `word` as a whole word, anywhere in the name ("artist a feat. b" holds
+ * "artist", "b and a" holds "a"): the pool for a source credit stored under a compound name. A whole word, not a
+ * substring, so a common word ("the") finds the artists that have it and not every name with those letters inside.
+ */
+function artistNameHolds(word: string): Prisma.ArtistWhereInput {
+  return {
+    OR: [
+      { normalizedName: word },
+      { normalizedName: { startsWith: `${word} ` } },
+      { normalizedName: { contains: ` ${word} ` } },
+      { normalizedName: { endsWith: ` ${word}` } },
+    ],
+  };
+}
+
+/**
+ * Every playable song of the artists `artist` selects, in id order, so the matcher reads the whole pool and the same
+ * song wins whatever order the rows were stored in. The title check, not a row cap, decides the match: a cap would
+ * drop the right song of an artist with many songs, or of a word many artists share.
+ */
+const SONGS_OF_ARTISTS = (artist: Prisma.ArtistWhereInput) =>
+  ({ where: { AND: [PLAYABLE_SONG, { album: { artist } }] }, orderBy: { id: "asc" } }) satisfies Prisma.TrackFindManyArgs;
+
+/**
  * The artists a person renamed (their `displayName`), each with its shown name normalized, read in one query. There is no
  * stored normalized form of a shown name, and the edited are few, so an import loads them once and every track it matches
  * asks this list. A song of an artist so named is offered to the matcher under the shown name too (trackMatching
@@ -454,7 +478,7 @@ class SpotifyImportService {
     });
     add(artistRows.flatMap(toMatchCandidates));
 
-    // Fuzzy sweeps: artists whose normalizedName contains the first word (covers
+    // Fuzzy sweeps: artists whose normalizedName holds the first word as a whole word (covers
     // "Artist A feat. B" stored under a compound name); the matcher narrows them
     // to exact-artist candidates.
     if (candidates.size === 0) {
@@ -463,12 +487,8 @@ class SpotifyImportService {
         add(
           (
             await prisma.track.findMany({
-              where: {
-                AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { contains: firstWord } } } }],
-              },
+              ...SONGS_OF_ARTISTS(artistNameHolds(firstWord)),
               ...withAlbum,
-              orderBy: { id: "asc" },
-              take: 50,
             })
           ).flatMap(toMatchCandidates),
         );
@@ -477,26 +497,12 @@ class SpotifyImportService {
         add(
           (
             await prisma.track.findMany({
-              where: {
-                AND: [
-                  PLAYABLE_SONG,
-                  {
-                    album: {
-                      artist: {
-                        normalizedName: {
-                          startsWith: normalizedPrimaryArtist.substring(
-                            0,
-                            Math.min(5, normalizedPrimaryArtist.length),
-                          ),
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
+              ...SONGS_OF_ARTISTS({
+                normalizedName: {
+                  startsWith: normalizedPrimaryArtist.substring(0, Math.min(5, normalizedPrimaryArtist.length)),
+                },
+              }),
               ...withAlbum,
-              orderBy: { id: "asc" },
-              take: 50,
             })
           ).flatMap(toMatchCandidates),
         );
@@ -505,15 +511,8 @@ class SpotifyImportService {
         add(
           (
             await prisma.track.findMany({
-              where: {
-                AND: [
-                  PLAYABLE_SONG,
-                  { album: { artist: { normalizedName: { contains: dbNormalizedArtist.split(" ")[0] } } } },
-                ],
-              },
+              ...SONGS_OF_ARTISTS(artistNameHolds(dbNormalizedArtist.split(" ")[0])),
               ...withAlbum,
-              orderBy: { id: "asc" },
-              take: 50,
             })
           ).flatMap(toMatchCandidates),
         );
@@ -2682,12 +2681,10 @@ class SpotifyImportService {
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= 3) {
           const candidates = await prisma.track.findMany({
-            where: { AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { contains: firstWord } } } }] },
+            ...SONGS_OF_ARTISTS(artistNameHolds(firstWord)),
             include: {
               album: { include: { artist: { select: { name: true } } } },
             },
-            orderBy: { id: "asc" },
-            take: 50,
           });
 
           let bestMatch: { id: string } | null = null;
