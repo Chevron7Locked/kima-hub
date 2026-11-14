@@ -8,6 +8,7 @@
  * 3. Close the resources, in order. A step that throws ends the shutdown with exit code 1.
  *
  * A timer, started with the shutdown and not holding the process open, ends it with exit code 1 when any step hangs.
+ * A shutdown started by a crash (`failed`) exits 1 even when it completes, so a restart policy sees the crash.
  * A second signal while shutting down is ignored: the deadline is what ends a shutdown that stalls.
  */
 
@@ -22,7 +23,7 @@ export interface ShutdownPlan {
     exit: (code: number) => void;
 }
 
-export function createShutdown(plan: ShutdownPlan): (signal: string) => Promise<void> {
+export function createShutdown(plan: ShutdownPlan): (signal: string, opts?: { failed?: boolean }) => Promise<void> {
     let started = false;
     let exited = false;
 
@@ -32,7 +33,7 @@ export function createShutdown(plan: ShutdownPlan): (signal: string) => Promise<
         plan.exit(code);
     };
 
-    return async (signal) => {
+    return async (signal, opts = {}) => {
         if (started) {
             logger.debug("Shutdown already in progress...");
             return;
@@ -58,7 +59,7 @@ export function createShutdown(plan: ShutdownPlan): (signal: string) => Promise<
             for (const close of plan.close) await close();
             logger.debug("Graceful shutdown complete");
             clearTimeout(deadline);
-            exit(0);
+            exit(opts.failed ? 1 : 0);
         } catch (error) {
             logger.error("Error during shutdown:", error);
             clearTimeout(deadline);

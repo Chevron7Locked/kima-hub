@@ -461,7 +461,7 @@ let webhookCleanupInterval: NodeJS.Timeout | null = null;
 /**
  * Longest a shutdown may take before the process exits anyway (code 1). It covers the 3 s drain below, with room for
  * the workers, Redis and the database to close, and ends before Docker's default 10 s stop timeout sends SIGKILL, so
- * the log says what stalled. `tsx watch` waits for the old process to exit before it starts the next, so a shutdown
+ * the log says the shutdown stalled instead of the process vanishing without a word. `tsx watch` waits for the old process to exit before it starts the next, so a shutdown
  * that stalled would otherwise hang a restart for good.
  */
 const SHUTDOWN_DEADLINE_MS = 8_000;
@@ -546,7 +546,7 @@ process.on("uncaughtException", (error) => {
         stack: error.stack,
     });
     // Attempt graceful shutdown for uncaught exceptions
-    gracefulShutdown("uncaughtException").catch(() => {
+    gracefulShutdown("uncaughtException", { failed: true }).catch(() => {
         process.exit(1);
     });
 });

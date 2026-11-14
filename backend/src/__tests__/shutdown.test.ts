@@ -37,6 +37,16 @@ describe("createShutdown", () => {
         expect(exits).toEqual([0]);
     });
 
+    it("exits 1 after a clean run when a crash started the shutdown, so a restart policy sees it", async () => {
+        const order: string[] = [];
+        const { steps, exits } = plan(order);
+
+        await createShutdown(steps)("uncaughtException", { failed: true });
+
+        expect(order).toEqual(["close the server", "stop reconciliation", "drain", "workers", "redis", "database"]);
+        expect(exits).toEqual([1]);
+    });
+
     it("has stopped accepting work before the drain starts", async () => {
         const order: string[] = [];
         const { steps } = plan(order, {

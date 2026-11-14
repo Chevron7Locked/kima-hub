@@ -118,7 +118,7 @@ async function processEvent(
             }
             return;
         }
-        await markProcessed(id, eventType, correlationId);
+        await markProcessedOrLeaveForReplay(id, eventType, correlationId);
     } finally {
         // The outcome is recorded; a metrics call that throws must not turn this into a rejection.
         try {
@@ -135,7 +135,7 @@ async function processEvent(
  * it is tried once more, and then left unmarked. The reconciliation job replays an unmarked event like any not yet
  * processed (the handlers are safe to run again), instead of an error and a retry count being recorded against it.
  */
-async function markProcessed(id: string, eventType: string, correlationId: string | undefined): Promise<void> {
+async function markProcessedOrLeaveForReplay(id: string, eventType: string, correlationId: string | undefined): Promise<void> {
     for (let attempt = 1; ; attempt++) {
         try {
             await webhookEventStore.markProcessed(id, correlationId);
