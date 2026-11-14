@@ -22,6 +22,7 @@ import { parseLimit } from "./library/paging";
 import { config } from "../config";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
+import type { Prisma } from "@prisma/client";
 import { PLAYABLE_DISCOVER_SONG, PLAYABLE_SONG } from "../utils/playableSong";
 
 const router = Router();
@@ -332,6 +333,81 @@ function suggestionSong(
     };
 }
 
+type SuggestionWithSongs = Prisma.DiscoveryAlbumGetPayload<{ include: { tracks: true } }>;
+
+/**
+ * The songs GET /current lists for a week's suggestions, in suggestion order, in a fixed number of queries. A
+ * suggestion lists its recorded songs that are playable; with none, one stand-in: the first playable song in track
+ * order of its album, found by release id (title and artist only when it has no release id); with no album or no
+ * playable song yet, a pending placeholder.
+ */
+async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
+    const recorded = new Map<string, Awaited<ReturnType<typeof recordedSongs>>[number]>();
+    const standIns = new Map<string, { song: { id: string; title: string; duration: number }; coverUrl: string | null }>();
+
+    // A liked suggestion's album is in the library now; any other's is a Discover album, never a library album of the same name.
+    for (const liked of [true, false]) {
+        const group = suggestions.filter((s) => (s.status === "LIKED") === liked);
+        if (group.length === 0) continue;
+        const rule = suggestionSongRule(group[0].status);
+
+        const ids = group.flatMap((s) => s.tracks.map((dt) => dt.trackId).filter((id): id is string => id !== null));
+        for (const song of await recordedSongs(rule, ids)) recorded.set(song.id, song);
+
+        const needy = group.filter((s) => !s.tracks.some((dt) => dt.trackId !== null && recorded.has(dt.trackId)));
+        if (needy.length === 0) continue;
+        const matches = [
+            { rgMbid: { in: needy.filter((s) => s.rgMbid).map((s) => s.rgMbid) } },
+            ...needy.filter((s) => !s.rgMbid).map((s) => ({ title: s.albumTitle, artist: { name: s.artistName } })),
+        ];
+        const albums = await prisma.album.findMany({
+            where: { AND: [liked ? {} : { location: "DISCOVER" as const }, { OR: matches }] },
+            include: {
+                artist: { select: { name: true } },
+                tracks: { where: rule, take: 1, orderBy: { trackNo: "asc" } },
+            },
+        });
+        for (const s of needy) {
+            const album = s.rgMbid
+                ? albums.find((a) => a.rgMbid === s.rgMbid)
+                : albums.find((a) => a.title === s.albumTitle && a.artist.name === s.artistName);
+            if (album && album.tracks.length > 0) standIns.set(s.id, { song: album.tracks[0], coverUrl: album.coverUrl });
+        }
+    }
+
+    return suggestions.flatMap((s) => {
+        const listed = s.tracks.flatMap((dt) => {
+            const song = dt.trackId ? recorded.get(dt.trackId) : undefined;
+            return song ? [suggestionSong(s, { ...song, coverUrl: song.album?.coverUrl ?? null })] : [];
+        });
+        if (listed.length > 0) return listed;
+        const standIn = standIns.get(s.id);
+        if (standIn) return [suggestionSong(s, { ...standIn.song, coverUrl: standIn.coverUrl })];
+        // The album is not in the library yet (downloading or pending), or none of its songs can play.
+        return [
+            {
+                ...suggestionSong(s, {
+                    id: `pending-${s.id}`,
+                    title: `${s.albumTitle} (pending import)`,
+                    duration: 0,
+                    coverUrl: null,
+                }),
+                available: false,
+                isPending: true,
+            },
+        ];
+    });
+}
+
+/** The recorded songs among `ids` that satisfy the playable-song rule, each with its album. */
+function recordedSongs(rule: ReturnType<typeof suggestionSongRule>, ids: string[]) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return prisma.track.findMany({
+        where: { AND: [rule, { id: { in: ids } }] },
+        include: { album: { include: { artist: true } } },
+    });
+}
+
 /** The week the listener's Discover page shows, from the calendar week and their latest completed batch. */
 async function viewWeekFor(userId: string) {
     const latestBatch = await prisma.discoveryBatch.findFirst({
@@ -373,70 +449,7 @@ router.get("/current", async (req, res) => {
             ],
         });
 
-        const tracks = [];
-
-        for (const discoveryAlbum of discoveryAlbums) {
-            const listedBefore = tracks.length;
-            if (discoveryAlbum.tracks && discoveryAlbum.tracks.length > 0) {
-                const trackIds = discoveryAlbum.tracks
-                    .map((dt) => dt.trackId)
-                    .filter((id): id is string => id !== null);
-
-                if (trackIds.length > 0) {
-                    const libraryTracks = await prisma.track.findMany({
-                        where: { AND: [suggestionSongRule(discoveryAlbum.status), { id: { in: trackIds } }] },
-                        include: { album: { include: { artist: true } } },
-                    });
-
-                    const trackMap = new Map(
-                        libraryTracks.map((t) => [t.id, t])
-                    );
-
-                    for (const dt of discoveryAlbum.tracks) {
-                        const track = dt.trackId
-                            ? trackMap.get(dt.trackId)
-                            : null;
-                        if (track) {
-                            tracks.push(suggestionSong(discoveryAlbum, { ...track, coverUrl: track.album?.coverUrl ?? null }));
-                        }
-                    }
-                }
-            }
-
-            // Fallback: No DiscoveryTrack records or no valid trackIds, find ONE track from library
-            if (tracks.length === listedBefore) {
-                const album = await prisma.album.findFirst({
-                    where: {
-                        title: discoveryAlbum.albumTitle,
-                        artist: { name: discoveryAlbum.artistName },
-                        // A liked suggestion's album is in the library now; any other's is a Discover album, never
-                        // a library album of the same name.
-                        ...(discoveryAlbum.status === "LIKED" ? {} : { location: "DISCOVER" as const }),
-                    },
-                    include: {
-                        artist: true,
-                        // The first song in track order that is playable.
-                        tracks: { where: suggestionSongRule(discoveryAlbum.status), take: 1, orderBy: { trackNo: "asc" } },
-                    },
-                });
-
-                if (album && album.tracks.length > 0) {
-                    tracks.push(suggestionSong(discoveryAlbum, { ...album.tracks[0], coverUrl: album.coverUrl }));
-                } else {
-                    // Album not in library yet (downloading/pending)
-                    tracks.push({
-                        ...suggestionSong(discoveryAlbum, {
-                            id: `pending-${discoveryAlbum.id}`,
-                            title: `${discoveryAlbum.albumTitle} (pending import)`,
-                            duration: 0,
-                            coverUrl: null,
-                        }),
-                        available: false,
-                        isPending: true,
-                    });
-                }
-            }
-        }
+        const tracks = await suggestionSongs(discoveryAlbums);
 
         const { missing: filteredUnavailable } = await unavailableStillMissing(userId, weekStart, unavailableAlbums);
 

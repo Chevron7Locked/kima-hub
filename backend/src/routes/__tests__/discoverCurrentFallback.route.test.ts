@@ -401,6 +401,59 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         expect(titles(res.body)).toEqual([first(1), second(1)]);
     });
 
+    it("finds a liked suggestion's album by its release id when two albums of the artist share the title", async () => {
+        const artist = await prisma.artist.create({ data: { name: `${MARK} twins`, identityKey: `${MARK}-twins` } });
+        const make = async (tag: string) => {
+            const album = await prisma.album.create({
+                data: { rgMbid: `${MARK}-rg-${tag}`, identityKey: `${MARK}-${tag}`, title: `${MARK} same title`, primaryType: "Album", artistId: artist.id, location: "LIBRARY" },
+            });
+            await prisma.track.create({
+                data: { albumId: album.id, title: `${MARK} song of ${tag}`, trackNo: 1, duration: 200, filePath: `/music/${MARK}/${tag}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            return album;
+        };
+        await make("deluxe");
+        const asked = await make("original");
+        await prisma.discoveryAlbum.create({
+            data: {
+                userId: listener, rgMbid: asked.rgMbid, artistName: artist.name, albumTitle: asked.title,
+                weekStartDate: THIS_WEEK, status: "LIKED", downloadedAt: THIS_WEEK, similarity: 0.9, tier: "core",
+            },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([`${MARK} song of original`]);
+    });
+
+    it("falls back to the title and artist when a suggestion carries no release id", async () => {
+        const song = await suggestWithSongs("noid", [{ trackNo: 1 }]);
+        await prisma.discoveryAlbum.updateMany({ where: { rgMbid: `${MARK}-rg-noid` }, data: { rgMbid: "" } });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song(1)]);
+    });
+
+    it("asks the database the same number of questions for one suggestion as for six", async () => {
+        const count = async () => {
+            const spies = [prisma.album, prisma.track, prisma.discoveryAlbum].flatMap((model) => [
+                jest.spyOn(model, "findMany"),
+                jest.spyOn(model, "findFirst"),
+            ]);
+            await request(app).get("/discover/current");
+            const calls = spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+            spies.forEach((spy) => spy.mockRestore());
+            return calls;
+        };
+        await suggestWithSongs("q0", [{ trackNo: 1 }]);
+        const one = await count();
+        expect(one).toBeGreaterThan(0);
+        for (const n of [1, 2, 3, 4, 5]) await suggestWithSongs(`q${n}`, [{ trackNo: 1, missing: true }, { trackNo: 2 }], n % 2 ? "LIKED" : "ACTIVE");
+
+        expect(await count()).toBeLessThanOrEqual(one + 2);
+    });
+
     it("applies the same pick to a liked suggestion, whose album is in the library now", async () => {
         const song = await suggestWithSongs("liked", [{ trackNo: 1, missing: true }, { trackNo: 2 }], "LIKED");
 
