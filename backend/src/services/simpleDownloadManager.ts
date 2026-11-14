@@ -29,6 +29,9 @@ type CompletableJob = {
     discoveryBatchId: string | null;
 };
 
+/** A transaction that conflicts with another is run again, up to this many runs in all. */
+const TRANSACTION_RUNS = 3;
+
 const LIDARR_RETRY_DELAYS_MS = [5_000, 20_000];
 
 type TransactionClient = Omit<
@@ -88,16 +91,17 @@ class SimpleDownloadManager {
         return config?.maxRetryAttempts ?? this.DEFAULT_MAX_ATTEMPTS;
     }
 
-    /** Runs a transaction, retrying on serialization conflicts. */
+    /**
+     * Runs a transaction at least once, and again after a conflict with another transaction, up to three runs in all.
+     * A conflict on the last run is thrown as it came.
+     */
     private async withTransaction<T>(
         operation: (tx: TransactionClient) => Promise<T>,
-        options?: { maxRetries?: number; logPrefix?: string }
+        options?: { logPrefix?: string }
     ): Promise<T> {
-        const maxRetries = options?.maxRetries ?? 3;
         const logPrefix = options?.logPrefix ?? "[TX]";
-        let lastError: Error | undefined;
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        for (let attempt = 1; ; attempt++) {
             try {
                 return await prisma.$transaction(operation, {
                     isolationLevel:
@@ -105,21 +109,15 @@ class SimpleDownloadManager {
                     maxWait: 5000,
                     timeout: 10000,
                 });
-            } catch (error: any) {
-                if (isTransactionConflict(error) && attempt < maxRetries) {
-                    lastError = error;
-                    const delay = Math.pow(2, attempt) * 100; // 200ms, 400ms, 800ms
-                    logger.debug(
-                        `${logPrefix} Transaction conflict, retry ${attempt}/${maxRetries} after ${delay}ms`
-                    );
-                    await new Promise((resolve) => setTimeout(resolve, delay));
-                    continue;
-                }
-                throw error;
+            } catch (error: unknown) {
+                if (!isTransactionConflict(error) || attempt >= TRANSACTION_RUNS) throw error;
+                const delay = Math.pow(2, attempt) * 100; // 200ms, 400ms
+                logger.debug(
+                    `${logPrefix} Transaction conflict, run ${attempt}/${TRANSACTION_RUNS} lost, again after ${delay}ms`
+                );
+                await new Promise((resolve) => setTimeout(resolve, delay));
             }
         }
-
-        throw lastError;
     }
 
     /**

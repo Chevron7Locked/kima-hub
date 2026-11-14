@@ -268,6 +268,20 @@ describe('POST /auth/change-password', () => {
 // ── DELETE /auth/account ──────────────────────────────────────────────────────
 
 describe('DELETE /auth/account', () => {
+    it('answers 409, and keeps the account, when the delete lost a transaction conflict (a deadlock as much as a write conflict)', async () => {
+        const conflict = Object.assign(new Error('deadlock detected'), { code: 'P2010', meta: { code: '40P01' } });
+        const transaction = jest.spyOn(prisma, '$transaction').mockRejectedValueOnce(conflict as never);
+        try {
+            const res = await request(app)
+                .delete('/auth/account')
+                .set('Authorization', `Bearer ${tokenFor(VICTIM)}`);
+            expect(res.status).toBe(409);
+            expect(await prisma.user.findUnique({ where: { id: VICTIM } })).not.toBeNull();
+        } finally {
+            transaction.mockRestore();
+        }
+    });
+
     it('stops the deleted account authenticating immediately, not 30 seconds later', async () => {
         // loadUser caches the user for 30s, so self-delete must clear the cache
         // or the deleted account's token keeps working.

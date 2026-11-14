@@ -134,6 +134,22 @@ describe('POST /share -- create share link', () => {
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ token: res.body.token, entityType: 'track', entityId: trackId });
     });
+
+    it('creates the link on a second try when the first lost a transaction conflict, a deadlock as much as a write conflict', async () => {
+        const conflict = Object.assign(new Error('deadlock detected'), { code: 'P2010', meta: { code: '40P01' } });
+        const transaction = jest.spyOn(prisma, '$transaction').mockRejectedValueOnce(conflict as never);
+        try {
+            const res = await request(app)
+                .post('/share')
+                .set('Authorization', `Bearer ${userToken(OWNER)}`)
+                .send({ entityType: 'track', entityId: trackId });
+            expect(res.status).toBe(200);
+            expect(transaction).toHaveBeenCalledTimes(2);
+            expect(await sharesBy(OWNER)).toHaveLength(1);
+        } finally {
+            transaction.mockRestore();
+        }
+    });
 });
 
 describe('DELETE /share/:token -- revoke share link', () => {

@@ -2,6 +2,7 @@
 
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
+import { isTransactionConflict } from "../utils/dbConflict";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
@@ -143,9 +144,8 @@ export async function createShareLink(
     try {
         return await attempt();
     } catch (error: any) {
-        // P2034 is a serialization failure; one retry is enough for the
-        // read-then-insert race this guards.
-        if (error?.code === "P2034") return attempt();
+        // One retry is enough for the read-then-insert race this guards.
+        if (isTransactionConflict(error)) return attempt();
         throw error;
     }
 }

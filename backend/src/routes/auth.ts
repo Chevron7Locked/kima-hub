@@ -20,6 +20,7 @@ import {
 import { authLimiter } from "../middleware/rateLimiter";
 import { webLoginGuesses } from "../services/users/guessLimits";
 import { encrypt, decrypt } from "../utils/encryption";
+import { isTransactionConflict } from "../utils/dbConflict";
 
 const router = Router();
 
@@ -535,7 +536,7 @@ router.delete("/account", async (req, res) => {
             });
         }
         // Serializable conflict from a concurrent admin change — safe to retry.
-        if (error?.code === "P2034") {
+        if (isTransactionConflict(error)) {
             return res.status(409).json({
                 error: "Concurrent account change, please retry",
             });

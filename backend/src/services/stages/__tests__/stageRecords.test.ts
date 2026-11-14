@@ -1130,6 +1130,30 @@ describe("a move that loses a deadlock", () => {
         await expectColumnsMatch(id);
     });
 
+    // The wait is 50 + 150 * Math.random() ms: the dice at both ends give the bounds.
+    const waits = moves.flatMap((move) => [
+        { ...move, roll: 0, least: 45, most: 140 },
+        { ...move, roll: 0.999, least: 190, most: 400 },
+    ]);
+
+    it.each(waits)("$name waits a short random moment before the retry (dice $roll), so the two transactions do not collide again", async ({ seed, run, roll, least, most }) => {
+        await seed();
+        jest.spyOn(Math, "random").mockReturnValue(roll);
+        const real = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+        const startedAt: number[] = [];
+        jest.spyOn(prisma, "$transaction").mockImplementation(((...args: unknown[]) => {
+            startedAt.push(Date.now());
+            return startedAt.length === 1 ? Promise.reject(deadlock()) : real(...args);
+        }) as never);
+
+        await run();
+
+        expect(startedAt).toHaveLength(2);
+        const waited = startedAt[1] - startedAt[0];
+        expect(waited).toBeGreaterThanOrEqual(least);
+        expect(waited).toBeLessThan(most);
+    });
+
     it.each(moves)("$name gives up after that one retry, and does not retry any other failure", async ({ seed, run }) => {
         await seed();
         const spy = jest.spyOn(prisma, "$transaction")
