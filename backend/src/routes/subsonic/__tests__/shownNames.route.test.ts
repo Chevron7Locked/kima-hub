@@ -140,6 +140,10 @@ describe("getLyrics matches the title and artist as shown", () => {
         expect(await lyricsOf({ artist: "zzshnshownuni", title: "shown lyric" })).toEqual({});
     });
 
+    it("treats an artist of only blanks as no artist given, not as an artist with no name", async () => {
+        expect(await lyricsOf({ artist: "   ", title: "shown lyric" })).toMatchObject({ value: "shown line" });
+    });
+
     it("matches a title with a non-ASCII letter by the title shown, in either letter case", async () => {
         expect(await lyricsOf({ title: "zzshnshown éclat" })).toMatchObject({ value: "uni line" });
         expect(await lyricsOf({ title: "ÉCLAT" })).toMatchObject({ value: "uni line" });

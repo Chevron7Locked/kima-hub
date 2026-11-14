@@ -32,7 +32,8 @@ function indexLetter(sortName: string): string {
 
 /**
  * When the library last changed, in milliseconds since the epoch, as clients compare it with the one they hold: the newest
- * song change (a file flagged missing counts) or artist sync. More changes than a client lists move it, never fewer.
+ * song change (a file flagged missing counts) or artist sync. It also moves for changes a client does not list (Discover
+ * songs, analysis writes), and a removal that is not of the newest row leaves it as it was. There is no scan time to read.
  */
 async function libraryLastModified(): Promise<number> {
     const [row] = await prisma.$queryRaw<{ ms: number | null }[]>`
@@ -128,7 +129,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     if (id === "1") {
         const artists = await prisma.artist.findMany({
             where: { albums: { some: PLAYABLE_ALBUM_WHERE } },
-            orderBy: { sortName: "asc" },
+            orderBy: [{ sortName: "asc" }, { id: "asc" }],
             select: { id: true, name: true, displayName: true },
         });
 
