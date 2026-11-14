@@ -73,8 +73,23 @@ export async function whenWebhooksIdle(timeoutMs?: number): Promise<void> {
     clearTimeout(timer);
 }
 
+let stopped = false;
+
+/**
+ * Shutdown's first step: from now on no event starts, wherever it comes from (the route, the reconciliation cycle, the
+ * history recovery). One that arrives stays unprocessed in the store and is replayed by the next start. Events already
+ * being processed run on, and `whenWebhooksIdle` waits for them.
+ */
+export function stopWebhookProcessing(): void {
+    stopped = true;
+}
+
 /** Dispatch a stored event and record the outcome on it; never throws. */
 export function processStoredEvent(id: string, eventType: string, payload: any): Promise<void> {
+    if (stopped) {
+        logger.debug(`[WEBHOOK] Shutting down; ${eventType} event ${id} is left for the next start`);
+        return Promise.resolve();
+    }
     const run = processEvent(id, eventType, payload);
     processing.add(run);
     const forget = () => void processing.delete(run);

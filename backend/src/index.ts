@@ -478,6 +478,10 @@ const gracefulShutdown = createShutdown({
             const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
             webhookReconciliation.stop();
         },
+        async () => {
+            const { stopWebhookProcessing } = await import("./services/webhookHandlers");
+            stopWebhookProcessing();
+        },
         () => lidarrHealthMonitor.stop(),
         () => {
             if (healthCheckInterval) clearInterval(healthCheckInterval);
