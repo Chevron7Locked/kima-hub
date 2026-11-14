@@ -391,11 +391,18 @@ describe("retrying the same failed download twice", () => {
     ];
 
     it.each(kinds)("makes one replacement for a double-click on a %s job", async (_name, make) => {
-        mockSearchAndDownloadBatch.mockResolvedValue({ successful: 1, failed: 0, files: ["a.flac"] });
+        // The background Soulseek download stays running until both clicks are answered: a replacement that had
+        // already ended by the second click would rightly answer "already retried".
+        let finish!: () => void;
+        const downloading = new Promise<void>((resolve) => (finish = resolve));
+        mockSearchAndDownloadBatch.mockImplementation(() =>
+            downloading.then(() => ({ successful: 1, failed: 0, files: ["a.flac"] }))
+        );
         mockStartDownload.mockResolvedValue({ success: true });
         const old = await make();
 
         const [a, b] = await Promise.all([retry(old.id), retry(old.id)]);
+        finish();
 
         expect(a.status).toBe(200);
         expect(b.status).toBe(200);
