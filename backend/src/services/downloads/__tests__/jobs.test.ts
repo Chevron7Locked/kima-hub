@@ -885,3 +885,62 @@ describe("retryOnce", () => {
         expect((await row(failed.id)).cleared).toBe(false);
     });
 });
+
+describe("a track job has one active job per song, as an album has", () => {
+    const input = (data: Record<string, unknown> = {}) => ({
+        userId: USER, subject: "Low - Sunflower", type: "track", targetMbid: "pendingTrack:one", status: "processing" as const, ...data,
+    });
+
+    it("refuses a second active job of the same song for the same person and Discover batch", async () => {
+        await downloadJobs.create(input());
+
+        await expect(downloadJobs.create(input())).rejects.toMatchObject({ code: "P2002" });
+    });
+
+    it("allows a new job once the first has settled, and a job of another song or batch", async () => {
+        const first = await downloadJobs.create(input());
+        const week = await batchOf(1);
+        await downloadJobs.create(input({ targetMbid: "pendingTrack:two" }));
+        await downloadJobs.create(input({ discoveryBatchId: week.id }));
+        await downloadJobs.fail([first], "gone");
+
+        await expect(downloadJobs.create(input())).resolves.toMatchObject({ status: "processing" });
+    });
+});
+
+describe("createOnce", () => {
+    const input = (data: Record<string, unknown> = {}) => ({
+        userId: USER, subject: "Low - Sunflower", type: "track", targetMbid: "pendingTrack:once", status: "processing" as const, ...data,
+    });
+
+    it("opens the job when none of the song is running", async () => {
+        const outcome = await downloadJobs.createOnce(input());
+
+        expect(outcome).toEqual({ created: expect.objectContaining({ status: "processing", targetMbid: "pendingTrack:once" }) });
+    });
+
+    it("answers the running job, dismissed or not, and creates nothing", async () => {
+        const running = await job("dl_once_running", { type: "track", targetMbid: "pendingTrack:once", cleared: true });
+
+        expect(await downloadJobs.createOnce(input())).toEqual({ running: expect.objectContaining({ id: running.id }) });
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("makes one job when called twice at once, and answers the other with it", async () => {
+        const [a, b] = await Promise.all([downloadJobs.createOnce(input()), downloadJobs.createOnce(input())]);
+
+        const made = [a, b].filter((outcome) => "created" in outcome);
+        const answered = [a, b].filter((outcome) => "running" in outcome);
+        expect(made).toHaveLength(1);
+        expect(answered).toHaveLength(1);
+        expect((answered[0] as { running: { id: string } }).running.id).toBe((made[0] as { created: { id: string } }).created.id);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("lets a conflict that is no running job's through", async () => {
+        const failing = jest.spyOn(prisma.downloadJob, "create").mockRejectedValueOnce(Object.assign(new Error("other"), { code: "P2002" }));
+
+        await expect(downloadJobs.createOnce(input())).rejects.toMatchObject({ code: "P2002" });
+        failing.mockRestore();
+    });
+});

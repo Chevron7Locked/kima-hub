@@ -336,7 +336,8 @@ router.post(
                 const job = outcome.replacement;
                 if ("problem" in target) {
                     await failRetryJob(job.id, target.problem);
-                    return res.json({ success: false, newJobId: job.id, error: target.problem });
+                    // The replacement exists and is failed; the retry did not start. Soulseek, the source, is unavailable.
+                    return res.status(502).json({ success: false, newJobId: job.id, error: target.problem });
                 }
 
                 let matches: Awaited<ReturnType<typeof findSources>>;
@@ -345,10 +346,10 @@ router.post(
                 } catch (error: any) {
                     // findSources has already failed the job: the user sees it and can retry again.
                     logger.error(`[Retry] Soulseek search for job ${job.id} failed:`, error);
-                    return res.json({ success: false, newJobId: job.id, error: error?.message || "Soulseek search failed" });
+                    return res.status(502).json({ success: false, newJobId: job.id, error: error?.message || "Soulseek search failed" });
                 }
                 if (matches.length === 0) {
-                    return res.json({ success: false, newJobId: job.id, error: NO_SOURCES });
+                    return res.status(404).json({ success: false, newJobId: job.id, error: NO_SOURCES });
                 }
 
                 void downloadSources(job, pendingTrack, matches, target.musicPath, "retry-pending-track");

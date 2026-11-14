@@ -1002,14 +1002,20 @@ class ApiClient {
         );
     }
 
+    /**
+     * Retries one pending song. A song Soulseek has no files for throws an error with status 404 (its `data` has the
+     * server's message); a song already being retried answers success with `deduplicated`.
+     */
     async retryPendingTrack(playlistId: string, pendingTrackId: string) {
         return this.request<{
             success: boolean;
             message: string;
             error?: string;
             filePath?: string;
+            deduplicated?: boolean;
         }>(`/playlists/${playlistId}/pending/${pendingTrackId}/retry`, {
             method: "POST",
+            silent404: true,
         });
     }
 
@@ -2106,9 +2112,13 @@ class ApiClient {
         });
     }
 
+    /**
+     * Retries a failed download. A retry that could not start throws (the server answers 404 when Soulseek has no
+     * files, 502 when it failed or is unavailable); the error's `data` carries the failed replacement's `newJobId`.
+     */
     async retryFailedDownload(
         id: string
-    ): Promise<{ success: boolean; newJobId?: string }> {
+    ): Promise<{ success: boolean; newJobId?: string; deduplicated?: boolean }> {
         return this.post(`/notifications/downloads/${id}/retry`);
     }
 

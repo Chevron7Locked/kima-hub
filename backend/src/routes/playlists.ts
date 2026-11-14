@@ -13,11 +13,11 @@ import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
-    createRetryJob,
     downloadSources,
     failRetryJob,
     findSources,
     NO_SOURCES,
+    openRetryJob,
     soulseekTarget,
 } from "../services/pendingTrackRetry";
 import { parseLimit } from "./library/paging";
@@ -567,15 +567,18 @@ router.post("/:id/pending/retry-all", requireAcquirePermission, requirePlaylistO
             return res.status(400).json({ error: target.problem });
         }
 
+        // A song already being retried keeps its running job: it is neither started again nor counted as queued.
         const retries = [];
         for (const pendingTrack of pendingTracks) {
-            retries.push({ job: await createRetryJob(userId, pendingTrack), pendingTrack });
+            const opened = await openRetryJob(userId, pendingTrack);
+            if ("created" in opened) retries.push({ job: opened.created, pendingTrack });
         }
 
         res.json({
             success: true,
             queued: retries.length,
-            message: `Retrying ${retries.length} tracks`,
+            message:
+                retries.length > 0 ? `Retrying ${retries.length} tracks` : "These tracks are already being retried",
         });
 
         void (async () => {
@@ -607,7 +610,16 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
         if (!pendingTrack) return;
 
         const target = await soulseekTarget();
-        const job = await createRetryJob(req.user!.id, pendingTrack);
+        const opened = await openRetryJob(req.user!.id, pendingTrack);
+        if ("running" in opened) {
+            return res.json({
+                success: true,
+                message: "Already retrying",
+                downloadJobId: opened.running.id,
+                deduplicated: true,
+            });
+        }
+        const job = opened.created;
         if ("problem" in target) {
             await failRetryJob(job.id, target.problem);
             return res.status(400).json({ error: target.problem });
@@ -615,10 +627,11 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
 
         const matches = await findSources(job, pendingTrack);
         if (matches.length === 0) {
-            return res.json({
+            return res.status(404).json({
                 success: false,
                 message: "Track not found on Soulseek",
                 error: NO_SOURCES,
+                downloadJobId: job.id,
             });
         }
 

@@ -30,20 +30,13 @@ export function retryJobTarget(pendingTrack: PlaylistPendingTrack): string {
     return pendingTrack.albumMbid || pendingTrack.artistMbid || `pendingTrack:${pendingTrack.id}`;
 }
 
-/**
- * Opens the retry's job. Pass the transaction's client to open it together with the clearing of the failed one, and the
- * failed job's Discover batch so the replacement stays in it.
- */
-export function createRetryJob(
+function retryJobInput(
     userId: string,
     pendingTrack: PlaylistPendingTrack,
-    { extra = {}, db, discoveryBatchId = null }: {
-        extra?: Record<string, unknown>;
-        db?: Parameters<typeof downloadJobs.create>[1];
-        discoveryBatchId?: string | null;
-    } = {}
-) {
-    return downloadJobs.create({
+    discoveryBatchId: string | null,
+    extra: Record<string, unknown> = {}
+): downloadJobs.CreateInput & { targetMbid: string } {
+    return {
         userId,
         subject: `${pendingTrack.spotifyArtist} - ${pendingTrack.spotifyTitle}`,
         type: "track",
@@ -62,7 +55,32 @@ export function createRetryJob(
             albumMbid: pendingTrack.albumMbid,
             ...(extra as Record<string, never>),
         },
-    }, db);
+    };
+}
+
+/**
+ * Opens the retry's job inside the transaction `retryOnce` runs, together with the clearing of the failed one. Pass the
+ * failed job's Discover batch so the replacement stays in it. A song with a job already running makes the insert meet
+ * the active-track index, which `retryOnce` answers.
+ */
+export function createRetryJob(
+    userId: string,
+    pendingTrack: PlaylistPendingTrack,
+    { extra = {}, db, discoveryBatchId = null }: {
+        extra?: Record<string, unknown>;
+        db?: Parameters<typeof downloadJobs.create>[1];
+        discoveryBatchId?: string | null;
+    } = {}
+) {
+    return downloadJobs.create(retryJobInput(userId, pendingTrack, discoveryBatchId, extra), db);
+}
+
+/**
+ * Opens the retry's job from the playlist, with no failed job to clear: the song's running job when it already has one
+ * (another retry, from the playlist or Activity), otherwise a new one. Two retries of one song at once make one job.
+ */
+export function openRetryJob(userId: string, pendingTrack: PlaylistPendingTrack) {
+    return downloadJobs.createOnce(retryJobInput(userId, pendingTrack, null));
 }
 
 export async function failRetryJob(jobId: string, error: string): Promise<void> {

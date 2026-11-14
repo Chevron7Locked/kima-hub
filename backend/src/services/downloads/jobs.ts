@@ -22,8 +22,9 @@
  * telling, for tests and shutdown. `withoutFailureMarks` is the metadata of a job with what a failure left
  * on it removed, for a retry or a re-queue.
  *
- * Around the moves: `findActive` is the one dedupe lookup, asking what the active-album unique index enforces (person,
- * kind, album id and Discover batch, a dismissed job included); `retryOnce` clears a failed job and makes its replacement
+ * Around the moves: `findActive` is the one dedupe lookup, asking what the active-job unique indexes enforce (person,
+ * kind, album or song id and Discover batch, a dismissed job included; albums and pending-song retries have one each);
+ * `createOnce` opens a job unless that lookup finds one running; `retryOnce` clears a failed job and makes its replacement
  * in one transaction, or answers the job already running, or that another retry was here first; `dismiss` and `dismissAllSettled` take settled jobs off the
  * list and leave running ones.
  *
@@ -108,9 +109,9 @@ export type ActiveKey = {
 type JobDb = Pick<Prisma.TransactionClient, "downloadJob">;
 
 /**
- * The pending or running job the active-album unique index would collide with, or null. It asks the index's own
- * question: a dismissed job still counts (the index ignores `cleared`), and a library job, a Discover batch's job
- * and a track job of one album id are different jobs. Every dedupe before a create asks this.
+ * The pending or running job an active-job unique index (album or track) would collide with, or null. It asks the
+ * index's own question: a dismissed job still counts (the index ignores `cleared`), and a library job, a Discover
+ * batch's job and a track job of one album id are different jobs. Every dedupe before a create asks this.
  */
 export function findActive(key: ActiveKey, db: JobDb = prisma) {
     return db.downloadJob.findFirst({
@@ -123,6 +124,31 @@ export function findActive(key: ActiveKey, db: JobDb = prisma) {
         },
         orderBy: { createdAt: "asc" },
     });
+}
+
+/** What `createOnce` did: opened the job, or found the one already running for its album or song. */
+export type CreateOnceOutcome =
+    | { created: Awaited<ReturnType<typeof create>> }
+    | { running: NonNullable<Awaited<ReturnType<typeof findActive>>> };
+
+/**
+ * Opens a job for an album or song unless one is already pending or running for it (the person, kind, id and Discover
+ * batch `findActive` asks about), and answers that one instead. Two calls at once make one job: the loser's insert meets
+ * the active-job unique index (albums and songs each have one) and it answers the winner. Needs a `targetMbid`.
+ */
+export async function createOnce(input: CreateInput & { targetMbid: string }): Promise<CreateOnceOutcome> {
+    const key = { userId: input.userId, type: input.type, targetMbid: input.targetMbid, discoveryBatchId: input.discoveryBatchId };
+    const running = await findActive(key);
+    if (running) return { running };
+    try {
+        return { created: await create(input) };
+    } catch (error: any) {
+        if (error?.code !== "P2002") throw error;
+        const winner = await findActive(key);
+        // A conflict on another unique key, or a winner that has ended already: not this module's to answer.
+        if (!winner) throw error;
+        return { running: winner };
+    }
 }
 
 /** Whether a dismiss took the job off the list, found it still running, or found no such job of the person's. */

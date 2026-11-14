@@ -220,8 +220,14 @@ export default function PlaylistDetailPage() {
                 notify.error("Track not found on Soulseek", { message: result.message });
             }
         } catch (error) {
-            console.error("Failed to retry download:", error);
-            notify.error("Failed to retry download");
+            // Soulseek has no files for the song: the server answers 404 with its message.
+            if ((error as { status?: number })?.status === 404) {
+                const data = (error as { data?: { message?: unknown } }).data;
+                notify.error("Track not found on Soulseek", { message: typeof data?.message === "string" ? data.message : undefined });
+            } else {
+                console.error("Failed to retry download:", error);
+                notify.error("Failed to retry download");
+            }
         } finally {
             setRetryingTrackId(null);
         }

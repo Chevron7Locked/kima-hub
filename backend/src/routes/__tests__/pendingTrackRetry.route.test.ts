@@ -134,12 +134,28 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
         const pt = await pending("Tonight");
         mockSearch.mockResolvedValue({ found: false, allMatches: [] });
 
-        const res = await retry(pt.id).expect(200);
+        const res = await retry(pt.id).expect(404);
 
         expect(res.body).toMatchObject({ success: false, error: "No matching files found" });
         const [job] = await jobsFor(pt.id);
         expect(job).toMatchObject({ status: "failed", error: "No matching files found" });
         expect(mockDownload).not.toHaveBeenCalled();
+    });
+
+    it("starts one job when the same song is retried twice at once, and says the second is already running", async () => {
+        const pt = await pending("Sunburn");
+        mockSearch.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ found: true, allMatches: MATCH }), 150)));
+
+        const [a, b] = await Promise.all([retry(pt.id), retry(pt.id)]);
+
+        expect([a.status, b.status]).toEqual([200, 200]);
+        const answers = [a.body, b.body];
+        expect(answers.filter((answer) => answer.deduplicated)).toHaveLength(1);
+        const [first] = await jobsFor(pt.id);
+        expect(await jobsFor(pt.id)).toHaveLength(1);
+        expect(answers.every((answer) => answer.downloadJobId === first.id)).toBe(true);
+        expect(mockSearch).toHaveBeenCalledTimes(1);
+        await settled(first.id);
     });
 
     it("fails the job with the download's reason", async () => {
@@ -190,6 +206,21 @@ describe("POST /playlists/:id/pending/retry-all", () => {
         expect(await settled(a.id)).toMatchObject({ status: "completed" });
         expect(await settled(b.id)).toMatchObject({ status: "failed", error: "No matching files found" });
         expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ source: "retry-pending-track-batch", albumMbid: found.albumMbid }));
+    });
+
+    it("leaves a song that is already being retried to its running job and queues the rest", async () => {
+        const running = await pending("Hold");
+        const fresh = await pending("Stay");
+        const job = await prisma.downloadJob.create({
+            data: { userId: OWNER, subject: "Low - Hold", type: "track", targetMbid: running.albumMbid, status: "processing", metadata: { downloadType: "pending-track-retry", pendingTrackId: running.id } },
+        });
+
+        const res = await request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(200);
+
+        expect(res.body).toMatchObject({ success: true, queued: 1 });
+        expect((await jobsFor(running.id)).map((j) => j.id)).toEqual([job.id]);
+        const [made] = await jobsFor(fresh.id);
+        expect(await settled(made.id)).toMatchObject({ status: "completed" });
     });
 
     it("queues nothing when Soulseek is not set up", async () => {
@@ -291,7 +322,7 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         const pt = await pending("Weight");
         const failed = await failedRetryOf(pt.id);
         mockSearch.mockResolvedValue({ found: false, allMatches: [] });
-        await retryFromActivity(failed.id).expect(200);
+        await retryFromActivity(failed.id).expect(404);
 
         await retryFromActivity(failed.id).expect(409);
 
@@ -322,7 +353,7 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         const failed = await failedRetryOf(pt.id);
         mockSearch.mockRejectedValue(new Error("slskd exploded"));
 
-        const res = await retryFromActivity(failed.id).expect(200);
+        const res = await retryFromActivity(failed.id).expect(502);
 
         expect(res.body).toMatchObject({ success: false, error: "slskd exploded" });
         const [old, replacement] = await jobsFor(pt.id);
@@ -330,12 +361,43 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         expect(old.cleared).toBe(true);
     });
 
+    it("fails the new job, which stays on the list, and answers not found when Soulseek has no files", async () => {
+        const pt = await pending("Sleepwalking");
+        const failed = await failedRetryOf(pt.id);
+        mockSearch.mockResolvedValue({ found: false, allMatches: [] });
+
+        const res = await retryFromActivity(failed.id).expect(404);
+
+        expect(res.body).toMatchObject({ success: false, error: "No matching files found", newJobId: expect.any(String) });
+        const [old, replacement] = await jobsFor(pt.id);
+        expect(replacement).toMatchObject({ id: res.body.newJobId, status: "failed", error: "No matching files found", cleared: false });
+        expect(old.cleared).toBe(true);
+    });
+
+    it("makes one job when two failed retries of one song are retried at once", async () => {
+        const pt = await pending("Rewind");
+        const first = await failedRetryOf(pt.id);
+        const second = await failedRetryOf(pt.id);
+        mockSearch.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ found: true, allMatches: MATCH }), 150)));
+
+        const [a, b] = await Promise.all([retryFromActivity(first.id), retryFromActivity(second.id)]);
+
+        expect([a.status, b.status]).toEqual([200, 200]);
+        const jobs = await jobsFor(pt.id);
+        const active = jobs.filter((j) => ["pending", "processing"].includes(j.status));
+        expect(active).toHaveLength(1);
+        expect([a.body, b.body].filter((answer) => answer.deduplicated)).toHaveLength(1);
+        expect([a.body, b.body].every((answer) => answer.newJobId === active[0].id)).toBe(true);
+        expect(jobs.filter((j) => [first.id, second.id].includes(j.id)).every((j) => j.cleared)).toBe(true);
+        await settled(active[0].id);
+    });
+
     it("fails the new job, which stays on the list, when Soulseek is not set up", async () => {
         const pt = await pending("Dinosaur Act");
         const failed = await failedRetryOf(pt.id);
         mockAvailable.mockResolvedValue(false);
 
-        const res = await retryFromActivity(failed.id).expect(200);
+        const res = await retryFromActivity(failed.id).expect(502);
 
         expect(res.body).toMatchObject({ success: false, error: "Soulseek is turned off or not set up" });
         const [old, replacement] = await jobsFor(pt.id);

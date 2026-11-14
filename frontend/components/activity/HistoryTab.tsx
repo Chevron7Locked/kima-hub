@@ -48,8 +48,13 @@ export function HistoryTab() {
             setHistory((prev) => prev.filter((h) => h.id !== id));
             queryClient.invalidateQueries({ queryKey: ["active-downloads"] });
         } catch (error) {
+            // A retry that could not start answers a non-2xx status. When its replacement was made and failed, that
+            // job takes the failed job's place on the list, so the notice goes on both.
             const reason = error instanceof Error ? error.message : "The retry did not start";
-            setRetryFailed((prev) => ({ ...prev, [id]: `Retry failed: ${reason}` }));
+            const replacement = (error as { data?: { newJobId?: unknown } })?.data?.newJobId;
+            const notice = `Retry failed: ${reason}`;
+            setRetryFailed((prev) => ({ ...prev, [id]: notice, ...(typeof replacement === "string" ? { [replacement]: notice } : {}) }));
+            if (typeof replacement === "string") queryClient.invalidateQueries({ queryKey: ["download-history"] });
         } finally {
             setRetrying((prev) => {
                 const next = new Set(prev);
