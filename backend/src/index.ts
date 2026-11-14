@@ -9,7 +9,6 @@ import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 
 import { mountApi, mountQueueBoardSlot, QUEUE_BOARD_PATH } from "./routes/mounts";
-import { dataCacheService } from "./services/dataCache";
 import {
     checkEmbeddingWritePath,
     reportEmbeddingWritePathAtStartup,
@@ -23,7 +22,8 @@ import { jsonBodyParser } from "./middleware/jsonBody";
 import { createShutdown } from "./shutdown";
 import { closeSteps } from "./closeSteps";
 import { runStartSteps, type StartStep } from "./startup";
-import { backgroundStartSteps } from "./backgroundStart";
+import { createBackgroundStart } from "./backgroundStart";
+import { useShutdownCheck } from "./utils/stopCheck";
 const app = express();
 
 // Middleware
@@ -253,6 +253,9 @@ async function main() {
     });
 }
 
+/** The catch-up work after start-up. The shutdown's drain waits for it (see ./backgroundStart). */
+const background = createBackgroundStart(() => gracefulShutdown.hasBegun());
+
 /** What the server starts once it is listening, in order (see ./startup). */
 const listeningStartSteps: StartStep[] = [
     {
@@ -368,12 +371,8 @@ const listeningStartSteps: StartStep[] = [
             // - On-demand fetching: Artist images, bios when browsing (cached in Redis 7 days)
             logger.debug("Background enrichment enabled for owned content (genres, MBIDs, etc.)");
 
-            // Warm up Redis cache from database on startup
-            // This populates Redis with existing artist images and album covers
-            // so first page loads are instant instead of waiting for cache population
-            dataCacheService.warmupCache({ shouldStop: () => gracefulShutdown.hasBegun() }).catch((err) => {
-                logger.error("Cache warmup failed:", err);
-            });
+            // Warm up Redis cache from database on startup, without holding up the steps after it.
+            background.startCacheWarmup();
         },
     },
     {
@@ -437,7 +436,7 @@ const listeningStartSteps: StartStep[] = [
             logger.debug("Podcast cache cleanup scheduled (daily, 30-day expiry)");
         },
     },
-    ...backgroundStartSteps(() => gracefulShutdown.hasBegun()),
+    ...background.steps,
 ];
 
 // Graceful shutdown handling
@@ -480,16 +479,20 @@ const gracefulShutdown = createShutdown({
     // Let the batch and import checks a settled download job started, and the webhook events being processed,
     // finish while the queues and the database are still open. One waiting on Lidarr for a minute is not held for:
     // both wait together for the same moment. A webhook event left unfinished is replayed by the reconciliation job
-    // on the next start.
+    // on the next start. The start-up catch-up work (cache warmup, audiobook sync, artist counts, image backfill) is
+    // waited for too: the batch under way finishes, the next never starts, and the wait ends at the deadline.
     drain: async () => {
         const { whenIdle } = await import("./services/downloads/jobs");
         const { whenWebhooksIdle } = await import("./services/webhookHandlers");
-        await Promise.all([whenIdle(3000), whenWebhooksIdle(3000)]);
+        await Promise.all([whenIdle(3000), whenWebhooksIdle(3000), background.whenEnded()]);
     },
     close: closeSteps,
     deadlineMs: SHUTDOWN_DEADLINE_MS,
     exit: (code) => process.exit(code),
 });
+
+// Work a request starts (an admin backfill, a re-file) stops between batches once this shutdown has begun.
+useShutdownCheck(gracefulShutdown.hasBegun);
 
 // Handle termination signals
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

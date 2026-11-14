@@ -10,6 +10,7 @@ import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
 import { artistSortName } from "../services/artistIdentity";
 import { upstreamHeader } from "../utils/upstreamHeaders";
+import { shutdownStop } from "../utils/stopCheck";
 import type { Audiobook, AudiobookProgress } from "@prisma/client";
 
 /**
@@ -157,7 +158,7 @@ router.post("/sync", async (_req, res) => {
         }
 
         logger.debug("[Audiobooks] Starting manual audiobook sync...");
-        const result = await audiobookCacheService.syncAll();
+        const result = await audiobookCacheService.syncAll(shutdownStop());
 
         res.json({
             success: true,

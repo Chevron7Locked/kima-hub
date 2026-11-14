@@ -9,33 +9,39 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { downloadAndStoreImage, isNativePath } from "./imageStorage";
 import { redisClient } from "../utils/redis";
+import type { StopCheck } from "../utils/stopCheck";
 
 const BATCH_SIZE = 10;
 const DELAY_BETWEEN_BATCHES = 1000; // 1 second
 
-interface BackfillProgress {
+interface BackfillCounts {
     total: number;
     processed: number;
     success: number;
     failed: number;
     skipped: number;
+}
+
+interface BackfillProgress extends BackfillCounts {
     inProgress: boolean;
 }
 
-let backfillProgress: BackfillProgress = {
+let backfillProgress: BackfillCounts = {
     total: 0,
     processed: 0,
     success: 0,
     failed: 0,
     skipped: 0,
-    inProgress: false,
 };
+
+// Claimed by `backfillAllImages` before its first await, so two callers in the same tick cannot both run.
+let running = false;
 
 /**
  * Get current backfill progress
  */
 export function getImageBackfillProgress(): BackfillProgress {
-    return { ...backfillProgress };
+    return { ...backfillProgress, inProgress: running };
 }
 
 /**
@@ -94,11 +100,6 @@ const BACKFILLS: Record<
 };
 
 async function backfillImages(kind: BackfillKind, shouldStop: () => boolean): Promise<void> {
-    if (backfillProgress.inProgress) {
-        logger.warn("[ImageBackfill] Backfill already in progress");
-        return;
-    }
-
     if (shouldStop()) return;
     const { noun, cacheKey, cacheTtlSeconds } = BACKFILLS[kind];
     logger.info(`[ImageBackfill] Starting ${kind} ${noun} backfill...`);
@@ -124,104 +125,107 @@ async function backfillImages(kind: BackfillKind, shouldStop: () => boolean): Pr
         success: 0,
         failed: 0,
         skipped: 0,
-        inProgress: true,
     };
 
-    try {
-        logger.info(
-            `[ImageBackfill] Found ${rows.length} ${kind}s with external URLs`
-        );
+    logger.info(
+        `[ImageBackfill] Found ${rows.length} ${kind}s with external URLs`
+    );
 
-        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-            if (shouldStop()) {
-                logger.info(`[ImageBackfill] ${kind} ${noun} backfill stopped for shutdown: ${backfillProgress.processed}/${rows.length} done`);
-                return;
-            }
-            const batch = rows.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        if (shouldStop()) {
+            logger.info(`[ImageBackfill] ${kind} ${noun} backfill stopped for shutdown: ${backfillProgress.processed}/${rows.length} done`);
+            return;
+        }
+        const batch = rows.slice(i, i + BATCH_SIZE);
 
-            await Promise.all(
-                batch.map(async (row) => {
-                    try {
-                        if (!row.url || isNativePath(row.url)) {
-                            backfillProgress.skipped++;
-                            backfillProgress.processed++;
-                            return;
-                        }
-
-                        const localPath = await downloadAndStoreImage(
-                            row.url,
-                            row.id,
-                            kind
-                        );
-
-                        if (localPath) {
-                            if (kind === "artist") {
-                                await prisma.artist.update({
-                                    where: { id: row.id },
-                                    data: { heroUrl: localPath },
-                                });
-                            } else {
-                                await prisma.album.update({
-                                    where: { id: row.id },
-                                    data: { coverUrl: localPath },
-                                });
-                            }
-
-                            // Update Redis cache
-                            try {
-                                await redisClient.setex(
-                                    cacheKey(row.id),
-                                    cacheTtlSeconds,
-                                    localPath
-                                );
-                            } catch {
-                                // Redis errors non-critical
-                            }
-
-                            backfillProgress.success++;
-                            logger.debug(
-                                `[ImageBackfill] Downloaded ${noun} for ${row.label}`
-                            );
-                        } else {
-                            backfillProgress.failed++;
-                            logger.debug(
-                                `[ImageBackfill] Failed to download ${noun} for ${row.label}`
-                            );
-                        }
-                    } catch (error: any) {
-                        backfillProgress.failed++;
-                        logger.debug(
-                            `[ImageBackfill] Error processing ${row.label}: ${error.message}`
-                        );
+        await Promise.all(
+            batch.map(async (row) => {
+                try {
+                    if (!row.url || isNativePath(row.url)) {
+                        backfillProgress.skipped++;
+                        backfillProgress.processed++;
+                        return;
                     }
 
-                    backfillProgress.processed++;
-                })
-            );
+                    const localPath = await downloadAndStoreImage(
+                        row.url,
+                        row.id,
+                        kind
+                    );
 
-            // Delay between batches to avoid rate limiting
-            if (i + BATCH_SIZE < rows.length) {
-                await new Promise((resolve) =>
-                    setTimeout(resolve, DELAY_BETWEEN_BATCHES)
-                );
-            }
-        }
+                    if (localPath) {
+                        if (kind === "artist") {
+                            await prisma.artist.update({
+                                where: { id: row.id },
+                                data: { heroUrl: localPath },
+                            });
+                        } else {
+                            await prisma.album.update({
+                                where: { id: row.id },
+                                data: { coverUrl: localPath },
+                            });
+                        }
 
-        logger.info(
-            `[ImageBackfill] ${kind} ${noun} backfill complete: ${backfillProgress.success} success, ${backfillProgress.failed} failed, ${backfillProgress.skipped} skipped`
+                        // Update Redis cache
+                        try {
+                            await redisClient.setex(
+                                cacheKey(row.id),
+                                cacheTtlSeconds,
+                                localPath
+                            );
+                        } catch {
+                            // Redis errors non-critical
+                        }
+
+                        backfillProgress.success++;
+                        logger.debug(
+                            `[ImageBackfill] Downloaded ${noun} for ${row.label}`
+                        );
+                    } else {
+                        backfillProgress.failed++;
+                        logger.debug(
+                            `[ImageBackfill] Failed to download ${noun} for ${row.label}`
+                        );
+                    }
+                } catch (error: any) {
+                    backfillProgress.failed++;
+                    logger.debug(
+                        `[ImageBackfill] Error processing ${row.label}: ${error.message}`
+                    );
+                }
+
+                backfillProgress.processed++;
+            })
         );
-    } finally {
-        backfillProgress.inProgress = false;
+
+        // Delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < rows.length) {
+            await new Promise((resolve) =>
+                setTimeout(resolve, DELAY_BETWEEN_BATCHES)
+            );
+        }
     }
+
+    logger.info(
+        `[ImageBackfill] ${kind} ${noun} backfill complete: ${backfillProgress.success} success, ${backfillProgress.failed} failed, ${backfillProgress.skipped} skipped`
+    );
 }
 
 /**
- * Backfill all images (artists and albums). `shouldStop` is asked before each batch of downloads and before each
- * kind: once it says yes the backfill ends quietly, leaving the rest for the next start.
+ * Backfill all images (artists and albums), one run at a time: a call made while one runs does nothing. `shouldStop`
+ * is asked before each batch of downloads and before each kind: once it says yes the backfill ends quietly, leaving
+ * the rest for the next start.
  */
-export async function backfillAllImages(
-    { shouldStop = () => false }: { shouldStop?: () => boolean } = {}
-): Promise<void> {
-    await backfillImages("artist", shouldStop);
-    await backfillImages("album", shouldStop);
+export async function backfillAllImages({ shouldStop = () => false }: StopCheck = {}): Promise<void> {
+    if (running) {
+        logger.warn("[ImageBackfill] Backfill already in progress");
+        return;
+    }
+    running = true;
+    try {
+        await backfillImages("artist", shouldStop);
+        await backfillImages("album", shouldStop);
+    } finally {
+        running = false;
+    }
 }

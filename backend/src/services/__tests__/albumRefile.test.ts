@@ -19,6 +19,8 @@ import path from "path";
 import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { refileLibrary } from "../albumRefile";
+import { backfillAllArtistCounts } from "../artistCountsService";
+import { useShutdownCheck } from "../../utils/stopCheck";
 
 jest.setTimeout(60_000);
 
@@ -104,6 +106,25 @@ async function filing(title: string) {
 }
 
 describe("re-filing albums by their tags", () => {
+    it("recounts the artists after it, and stops that recount when the server shuts down", async () => {
+        const recount = backfillAllArtistCounts as jest.Mock;
+        recount.mockClear();
+        let begun = false;
+        useShutdownCheck(() => begun);
+
+        try {
+            await refileLibrary(musicDir);
+
+            expect(recount).toHaveBeenCalledTimes(1);
+            const shouldStop = recount.mock.calls[0][1]?.shouldStop as () => boolean;
+            expect(shouldStop()).toBe(false);
+            begun = true;
+            expect(shouldStop()).toBe(true);
+        } finally {
+            useShutdownCheck(() => false);
+        }
+    });
+
     it("moves an album from a cut-off name to the artist its files name, ownership included", async () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { mbid: FULL_ID });

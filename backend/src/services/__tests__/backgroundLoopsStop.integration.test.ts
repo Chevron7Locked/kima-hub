@@ -12,12 +12,13 @@ jest.mock("../imageStorage", () => ({
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { backfillAllArtistCounts } from "../artistCountsService";
-import { backfillAllImages } from "../imageBackfill";
+import { backfillAllImages, getImageBackfillProgress } from "../imageBackfill";
 import { downloadAndStoreImage } from "../imageStorage";
 import { dataCacheService } from "../dataCache";
 import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 jest.setTimeout(60_000);
 
@@ -142,6 +143,33 @@ describe("backfillAllImages", () => {
 
         expect(download.mock.calls.filter(([, id]) => String(id).startsWith(P))).toHaveLength(12);
     });
+
+    it("lets one run at a time: a second call in the same tick does nothing", async () => {
+        await seedArtists(2, "http://example.invalid/a.jpg");
+
+        await Promise.all([backfillAllImages(), backfillAllImages()]);
+
+        // Both artists once, not twice: the second call found the first running and went away.
+        expect(download.mock.calls.filter(([, id]) => String(id).startsWith(P))).toHaveLength(2);
+    });
+
+    it("lets a later call run once the first has ended, and after one that failed", async () => {
+        await seedArtists(1, "http://example.invalid/a.jpg");
+        jest.spyOn(prisma.artist, "findMany").mockRejectedValueOnce(new Error("database down"));
+
+        await expect(backfillAllImages()).rejects.toThrow("database down");
+        await backfillAllImages();
+
+        expect(download.mock.calls.filter(([, id]) => String(id).startsWith(P))).toHaveLength(1);
+        expect(getImageBackfillProgress().inProgress).toBe(false);
+    });
+
+    it("reports itself in progress from the moment it is called", async () => {
+        const running = backfillAllImages();
+        expect(getImageBackfillProgress().inProgress).toBe(true);
+        await running;
+        expect(getImageBackfillProgress().inProgress).toBe(false);
+    });
 });
 
 describe("dataCacheService.warmupCache", () => {
@@ -169,13 +197,49 @@ describe("dataCacheService.warmupCache", () => {
         expect(albumFind).not.toHaveBeenCalled();
     });
 
+    it("reads the artists a page at a time, by id, and stops between pages", async () => {
+        // One more than a page, so the second page exists. The warmup writes to Redis once per page.
+        await prisma.artist.createMany({
+            data: Array.from({ length: 501 }, (_, i) => {
+                const id = `${P}-wu-${String(i).padStart(3, "0")}`;
+                return { id, name: id, normalizedName: id, identityKey: id, heroUrl: "http://example.invalid/a.jpg" };
+            }),
+        });
+        const artistFind = jest.spyOn(prisma.artist, "findMany");
+        const albumFind = jest.spyOn(prisma.album, "findMany");
+        const write = jest.spyOn(redisClient, "multi");
+
+        await dataCacheService.warmupCache({ shouldStop: () => write.mock.calls.length >= 1 });
+
+        expect(artistFind).toHaveBeenCalledTimes(1);
+        expect(artistFind.mock.calls[0][0]).toMatchObject({ take: 500, orderBy: { id: "asc" } });
+        expect(albumFind).not.toHaveBeenCalled();
+    });
+
+    it("walks every page when never told to stop, each after the last id of the one before", async () => {
+        await prisma.artist.createMany({
+            data: Array.from({ length: 501 }, (_, i) => {
+                const id = `${P}-wu-${String(i).padStart(3, "0")}`;
+                return { id, name: id, normalizedName: id, identityKey: id, heroUrl: "http://example.invalid/a.jpg" };
+            }),
+        });
+        const artistFind = jest.spyOn(prisma.artist, "findMany");
+
+        await dataCacheService.warmupCache();
+
+        const pages = artistFind.mock.calls.map(([args]) => args as { where?: { id?: { gt?: string } } });
+        expect(pages.length).toBeGreaterThanOrEqual(2);
+        expect(pages[0].where?.id).toBeUndefined();
+        expect(pages[1].where?.id?.gt).toEqual(expect.any(String));
+    });
+
     it("warms both when never told to stop", async () => {
         const albumFind = jest.spyOn(prisma.album, "findMany");
 
         await dataCacheService.warmupCache({ shouldStop: () => false });
         await dataCacheService.warmupCache();
 
-        expect(albumFind).toHaveBeenCalledTimes(2);
+        expect(albumFind).toHaveBeenCalled();
     });
 });
 
@@ -196,6 +260,21 @@ describe("audiobookCacheService.syncAll", () => {
 
         expect(syncOne).toHaveBeenCalledTimes(1);
         expect(result.synced).toBe(1);
+        expect(prune).not.toHaveBeenCalled();
+    });
+
+    it("does not prune when a book failed to sync: the list was not gone through", async () => {
+        expectLog("error");
+        expectLog("warn");
+        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+        const syncOne = jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
+        syncOne.mockRejectedValueOnce(new Error("cover download failed") as never);
+        const prune = jest.spyOn(prisma.audiobook, "deleteMany");
+
+        const result = await audiobookCacheService.syncAll();
+
+        expect(result).toMatchObject({ synced: 2, failed: 1 });
+        expect(result.pruned).toBe(0);
         expect(prune).not.toHaveBeenCalled();
     });
 

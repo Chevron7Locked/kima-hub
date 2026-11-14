@@ -16,6 +16,7 @@ import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandida
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { backfillAllArtistCounts } from "./artistCountsService";
+import { shutdownStop } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
 import { JointCreditFiler, type JointFiling } from "./jointCredit";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
@@ -192,7 +193,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     }
 
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
-    await backfillAllArtistCounts().catch((err) => logger.error("[Refile] Artist counts update failed:", err));
+    await backfillAllArtistCounts(undefined, shutdownStop()).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
     logger.info(
         `[Refile] Read ${result.songsRead} songs (${result.songsUnreadable} unreadable): ${result.artistsRenamed} artists renamed, ` +
             `${result.albumsMoved} albums moved, ${result.albumsMerged} merged, ${result.keptEdited} kept as edited, ${result.albumsFailed} failed, ` +

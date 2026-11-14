@@ -7,6 +7,7 @@ import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type
 import { generateRefreshToken, generateToken, signedInUser } from "../middleware/auth";
 import { signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
+import { shutdownStop } from "../utils/stopCheck";
 
 const router = Router();
 
@@ -225,7 +226,7 @@ router.post("/complete", async (req, res) => {
                 const settings = await getSystemSettings();
                 if (settings?.audiobookshelfEnabled) {
                     const { audiobookCacheService } = await import("../services/audiobookCache");
-                    const result = await audiobookCacheService.syncAll();
+                    const result = await audiobookCacheService.syncAll(shutdownStop());
                     logger.info(`[ONBOARDING] Audiobook sync complete: ${result.synced} synced`);
                 }
             } catch (err) {

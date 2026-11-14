@@ -6,6 +6,7 @@ import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
+import type { StopCheck } from "../utils/stopCheck";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -55,9 +56,9 @@ class AudiobookCacheService {
      * Sync all audiobooks from Audiobookshelf to our database.
      *
      * `shouldStop` is asked before each book: once it says yes the sync ends quietly with what it did, and prunes
-     * nothing, since the list was not gone through.
+     * nothing, since the list was not gone through. A run where a book failed prunes nothing either.
      */
-    async syncAll({ shouldStop = () => false }: { shouldStop?: () => boolean } = {}): Promise<SyncResult> {
+    async syncAll({ shouldStop = () => false }: StopCheck = {}): Promise<SyncResult> {
         const result: SyncResult = {
             synced: 0,
             failed: 0,
@@ -110,9 +111,15 @@ class AudiobookCacheService {
             );
             result.errors.forEach((err) => logger.debug(`[AUDIOBOOK] ${err}`));
 
-            // Prune books missing from the ABS list, but never on an empty list: that means
-            // the fetch failed, and pruning would wipe the library.
-            if (audiobooks.length === 0) {
+            // Prune books missing from the ABS list, but never on an empty list (that means the fetch failed, and
+            // pruning would wipe the library) and never after a run where a book failed to sync: a failed book may
+            // still be in Audiobookshelf, and the list was not gone through.
+            if (result.failed > 0) {
+                logger.warn(
+                    `[AUDIOBOOK] ${result.failed} audiobooks failed to sync; skipping prune ` +
+                    "(they may still be in Audiobookshelf)"
+                );
+            } else if (audiobooks.length === 0) {
                 logger.warn(
                     "[AUDIOBOOK] ABS returned an empty library; skipping prune " +
                     "(refusing to delete everything on a possibly-failed fetch)"

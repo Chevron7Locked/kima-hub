@@ -9,6 +9,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 import { PLAYABLE_SONG } from "../utils/playableSong";
+import type { StopCheck } from "../utils/stopCheck";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
@@ -75,19 +76,17 @@ export function isBackfillInProgress(): boolean {
   return isBackfillRunning;
 }
 
-/** `shouldStop` is asked before each batch: once it says yes the pass ends quietly with what it counted, and no extra pass starts. */
-interface BackfillOptions {
-  shouldStop?: () => boolean;
-}
-
 /**
+ * `shouldStop` is asked before each batch: once it says yes the pass ends quietly with what it counted, and no extra
+ * pass starts.
+ *
  * Recounts every artist in small batches with pauses, so it is safe on a running server. Asked for while a recount
  * runs, it returns at once and the running one goes over the artists once more when it finishes: any number of asks
  * cost one more pass, and the answer (processed, errors) of the running call covers every pass.
  */
 export async function backfillAllArtistCounts(
   onProgress?: (processed: number, total: number) => void,
-  { shouldStop = () => false }: BackfillOptions = {}
+  { shouldStop = () => false }: StopCheck = {}
 ): Promise<{ processed: number; errors: number }> {
   if (isBackfillRunning) {
     recountAsked = true;

@@ -6,11 +6,13 @@ import { redisClient } from "../utils/redis";
 import { findAlbumArtwork, findArtistArtwork } from "./artwork";
 import { isMbid } from "./artistIdentity";
 import { downloadAndStoreImage } from "./imageStorage";
+import type { StopCheck } from "../utils/stopCheck";
 
 // Cache TTLs
 const ARTIST_IMAGE_TTL = 7 * 24 * 60 * 60; // 7 days
 const ALBUM_COVER_TTL = 30 * 24 * 60 * 60; // 30 days
 const NEGATIVE_CACHE_TTL = 24 * 60 * 60; // 1 day for "not found" results
+const WARMUP_PAGE_SIZE = 500;
 
 class DataCacheService {
     /**
@@ -291,53 +293,66 @@ class DataCacheService {
 
     /**
      * Warm up Redis cache from database
-     * Called on server startup. `shouldStop` is asked before each read: once it says yes the warmup ends quietly (the
-     * cache fills as it is used).
+     * Called on server startup. Reads artists, then albums, a page of rows at a time by id, so a large library is never
+     * held in memory whole. `shouldStop` is asked before each page: once it says yes the warmup ends quietly (the cache
+     * fills as it is used).
      */
-    async warmupCache({ shouldStop = () => false }: { shouldStop?: () => boolean } = {}): Promise<void> {
-        if (shouldStop()) return;
+    async warmupCache({ shouldStop = () => false }: StopCheck = {}): Promise<void> {
         logger.debug("[DataCache] Warming up Redis cache from database...");
 
         try {
             // Warm up artist images
-            const artists = await prisma.artist.findMany({
-                where: { heroUrl: { not: null } },
-                select: { id: true, heroUrl: true },
-            });
-
-            const artistEntries = artists
-                .filter((a) => a.heroUrl)
-                .map((a) => ({
-                    key: `hero:${a.id}`,
-                    value: a.heroUrl!,
-                    ttl: ARTIST_IMAGE_TTL,
-                }));
-
-            await this.setRedisCacheBatch(artistEntries);
-            logger.debug(`[DataCache] Cached ${artistEntries.length} artist images`);
-
-            if (shouldStop()) return;
+            const artists = await this.warmPages(
+                shouldStop,
+                (after) =>
+                    prisma.artist.findMany({
+                        where: { heroUrl: { not: null }, ...(after && { id: { gt: after } }) },
+                        select: { id: true, heroUrl: true },
+                        orderBy: { id: "asc" },
+                        take: WARMUP_PAGE_SIZE,
+                    }),
+                (a) => ({ key: `hero:${a.id}`, value: a.heroUrl!, ttl: ARTIST_IMAGE_TTL })
+            );
+            if (artists.stopped) return;
+            logger.debug(`[DataCache] Cached ${artists.cached} artist images`);
 
             // Warm up album covers
-            const albums = await prisma.album.findMany({
-                where: { coverUrl: { not: null } },
-                select: { id: true, coverUrl: true },
-            });
-
-            const albumEntries = albums
-                .filter((a) => a.coverUrl)
-                .map((a) => ({
-                    key: `album-cover:${a.id}`,
-                    value: a.coverUrl!,
-                    ttl: ALBUM_COVER_TTL,
-                }));
-
-            await this.setRedisCacheBatch(albumEntries);
-            logger.debug(`[DataCache] Cached ${albumEntries.length} album covers`);
+            const albums = await this.warmPages(
+                shouldStop,
+                (after) =>
+                    prisma.album.findMany({
+                        where: { coverUrl: { not: null }, ...(after && { id: { gt: after } }) },
+                        select: { id: true, coverUrl: true },
+                        orderBy: { id: "asc" },
+                        take: WARMUP_PAGE_SIZE,
+                    }),
+                (a) => ({ key: `album-cover:${a.id}`, value: a.coverUrl!, ttl: ALBUM_COVER_TTL })
+            );
+            if (albums.stopped) return;
+            logger.debug(`[DataCache] Cached ${albums.cached} album covers`);
 
             logger.debug("[DataCache] Cache warmup complete");
         } catch (err) {
             logger.error("[DataCache] Cache warmup failed:", err);
+        }
+    }
+
+    /** Writes one kind of row to Redis, a page after the last id of the one before; stops between pages. */
+    private async warmPages<Row extends { id: string }>(
+        shouldStop: () => boolean,
+        readPage: (after: string | undefined) => Promise<Row[]>,
+        toEntry: (row: Row) => { key: string; value: string; ttl: number }
+    ): Promise<{ cached: number; stopped: boolean }> {
+        let cached = 0;
+        let after: string | undefined;
+        while (true) {
+            if (shouldStop()) return { cached, stopped: true };
+            const rows = await readPage(after);
+            const entries = rows.map(toEntry);
+            await this.setRedisCacheBatch(entries);
+            cached += entries.length;
+            if (rows.length < WARMUP_PAGE_SIZE) return { cached, stopped: false };
+            after = rows[rows.length - 1].id;
         }
     }
 }
