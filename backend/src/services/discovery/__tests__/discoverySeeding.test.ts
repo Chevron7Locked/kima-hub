@@ -44,11 +44,11 @@ async function song(key: string, artistKey: string, plays: number) {
     await playsOf(`${P}t_${key}`, key, plays);
 }
 
-async function playsOf(trackId: string, key: string, plays: number) {
+async function playsOf(trackId: string, key: string, plays: number, userId = USER) {
     await prisma.play.createMany({
         data: Array.from({ length: plays }, (_, i) => ({
             id: `${P}p_${key}_${i}`,
-            userId: USER,
+            userId,
             trackId,
             playedAt: new Date(Date.now() - 86_400_000 - i * 3_600_000),
         })),
@@ -84,7 +84,7 @@ describe('DiscoverySeeding', () => {
             }
         }
 
-        it('returns the artists of the most played songs, with their MBIDs', async () => {
+        it('seeds from the artists of the songs played enough, with their MBIDs', async () => {
             await fiveArtists();
 
             const result = await new DiscoverySeeding().getSeedArtists(USER);
@@ -134,13 +134,16 @@ describe('DiscoverySeeding', () => {
 
         it("does not read another listener's plays", async () => {
             await fiveArtists();
-            await prisma.play.updateMany({ where: { userId: USER }, data: { userId: OTHER_USER } });
+            // Another listener plays five other artists more than this one plays its own.
+            for (let i = 1; i <= 5; i++) {
+                await artist(`o${i}`, `Other Artist ${i}`, `${P}mbid-o${i}`);
+                await song(`o${i}`, `o${i}`, 0);
+                await playsOf(`${P}t_o${i}`, `o${i}`, 30, OTHER_USER);
+            }
 
             const result = await new DiscoverySeeding().getSeedArtists(USER, 1000);
 
-            // No plays of its own: the library fallback answers, and still lists all five artists.
-            expect(mine(result)).toHaveLength(5);
-            expect(await prisma.play.count({ where: { userId: USER } })).toBe(0);
+            expect(mine(result).map((s) => s.mbid).sort()).toEqual([1, 2, 3, 4, 5].map((i) => `${P}mbid-${i}`));
         });
 
         it('stops at seedCount', async () => {
