@@ -467,6 +467,7 @@ class SpotifyImportService {
                 AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { contains: firstWord } } } }],
               },
               ...withAlbum,
+              orderBy: { id: "asc" },
               take: 50,
             })
           ).flatMap(toMatchCandidates),
@@ -494,6 +495,7 @@ class SpotifyImportService {
                 ],
               },
               ...withAlbum,
+              orderBy: { id: "asc" },
               take: 50,
             })
           ).flatMap(toMatchCandidates),
@@ -510,6 +512,7 @@ class SpotifyImportService {
                 ],
               },
               ...withAlbum,
+              orderBy: { id: "asc" },
               take: 50,
             })
           ).flatMap(toMatchCandidates),
@@ -2682,6 +2685,7 @@ class SpotifyImportService {
             include: {
               album: { include: { artist: { select: { name: true } } } },
             },
+            orderBy: { id: "asc" },
             take: 50,
           });
 
