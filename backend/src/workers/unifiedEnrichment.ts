@@ -807,7 +807,7 @@ async function runEnrichmentCycle(): Promise<{
      * Set when the cycle declined to run, as opposed to running and finding nothing.
      * An empty cycle backs off; a declined one should come back promptly.
      */
-    declined?: "already-running" | "too-soon" | "scan-running";
+    declined?: "already-running" | "too-soon" | "scan-running" | "stopped";
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
@@ -893,6 +893,12 @@ async function runEnrichmentCycle(): Promise<{
     // another, from offering the same records.
     if (!(await distributedLock.acquire(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS))) {
         return { ...emptyResult, declined: "already-running" };
+    }
+    // A stop that landed while this cycle waited for the lock closed the worker, and its queues and connections
+    // with it: this cycle was admitted before the stop and must not start after it.
+    if (run.isClosed()) {
+        await distributedLock.release(CYCLE_LOCK_KEY);
+        return { ...emptyResult, declined: "stopped" };
     }
     const stopLockRenewal = distributedLock.keepAlive(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
     // Spent only now that this cycle holds the lock: one that lost it leaves the request and the interval
@@ -1076,9 +1082,14 @@ async function runEnrichmentCycle(): Promise<{
                 logger.error("[Enrichment] Failed to record failure:", err),
             );
     } finally {
-        run.endCycle();
         stopLockRenewal();
-        await distributedLock.release(CYCLE_LOCK_KEY);
+        // The cycle settles only after the lease is let go, so a stop that returns leaves the next cycle a free
+        // lock; and a release that fails cannot leave the stop waiting forever.
+        try {
+            await distributedLock.release(CYCLE_LOCK_KEY);
+        } finally {
+            run.endCycle();
+        }
     }
 
     return {

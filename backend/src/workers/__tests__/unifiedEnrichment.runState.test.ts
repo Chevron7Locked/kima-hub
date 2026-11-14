@@ -88,7 +88,9 @@ beforeEach(async () => {
     state.getState.mockResolvedValue({ status: "idle" });
     mockRedis.set.mockResolvedValue("OK");
     await startUnifiedEnrichmentWorker();
+    // Starting runs a first cycle; what it did is not what the test is about.
     state.detectHang.mockClear();
+    queueOwedArtists.mockClear();
 });
 
 afterEach(async () => {
@@ -235,6 +237,25 @@ describe("stopping the worker", () => {
 
     it("returns at once when no cycle is running", async () => {
         await expect(stopUnifiedEnrichmentWorker()).resolves.toBeUndefined();
+    });
+});
+
+describe("a stop that lands while a cycle waits for the lock", () => {
+    it("is not followed by the cycle: it starts no phase", async () => {
+        let grant!: (reply: string) => void;
+        mockRedis.set.mockImplementation((key: string) =>
+            key.startsWith("lock:") ? new Promise<string>((resolve) => { grant = resolve; }) : Promise.resolve("OK"));
+        const cycle = triggerEnrichmentNow();
+        try {
+            await until(() => typeof grant === "function");
+            // Nothing is in flight yet, so the stop returns at once and closes the worker.
+            await stopUnifiedEnrichmentWorker();
+        } finally {
+            grant?.("OK");
+        }
+
+        expect(await cycle).toEqual(expect.objectContaining({ declined: "stopped" }));
+        expect(queueOwedArtists).not.toHaveBeenCalled();
     });
 });
 
