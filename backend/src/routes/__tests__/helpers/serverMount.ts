@@ -19,7 +19,6 @@ const STAND_IN = { id: "stand-in", username: "stand-in", role: "admin" } as cons
  * another, so a missing one is filled from the other of the pair that sign a person in. An unmocked module has both.
  */
 function fillSignInChecks(): void {
-     
     const auth = require("../../../middleware/auth") as Record<string, unknown>;
     auth.requireAuth ??= auth.requireAuthOrToken;
     auth.requireAuthOrToken ??= auth.requireAuth;
@@ -36,7 +35,6 @@ function standInFor(user: NonNullable<ServerMountOptions["standIn"]>): void {
         req.user ??= STAND_IN as Request["user"];
         next();
     };
-     
     const auth = require("../../../middleware/auth") as Record<string, unknown>;
     auth.requireAuth = signIn;
     auth.requireAuthOrToken = signIn;
@@ -47,7 +45,6 @@ function standInFor(user: NonNullable<ServerMountOptions["standIn"]>): void {
  * test is signed in, or refused, the way the server does it. The routers carry no access checks of their own. Pass the
  * router of a library router with the server path of the mount it sits under. No runaway limit.
  */
- 
 export function mountAsServer<T extends { use: (...args: any[]) => unknown }>(
     app: T,
     prefix: string,

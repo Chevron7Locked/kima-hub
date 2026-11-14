@@ -21,7 +21,6 @@ jest.mock("../listenBrainz", () => ({
     },
 }));
 
- 
 const { listenBrainzService } = require("../listenBrainz");
 
 const P = "zz-playRecording-";

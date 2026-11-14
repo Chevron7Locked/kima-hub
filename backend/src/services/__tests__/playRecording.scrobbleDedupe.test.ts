@@ -19,7 +19,6 @@ jest.mock("../listenBrainz", () => ({
     listenBrainzService: { submitListens: jest.fn() },
 }));
 
- 
 const { listenBrainzService } = require("../listenBrainz");
 
 /** Every row this file creates is keyed off this prefix so cleanup is exact. */

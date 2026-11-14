@@ -14,7 +14,6 @@ jest.mock("../releases/moodMixes", () => ({ MOOD_MIX_RELEASE: "1.11.0", moodMixS
 // suite sees it on arm/macOS runners too, as on the linux/x86_64 target.
 jest.mock("../gpuRuntime", () => ({ gpuSupported: () => true }));
 
- 
 const { moodMixState } = require("../releases/moodMixes");
 
 const P = "zz-releases-";

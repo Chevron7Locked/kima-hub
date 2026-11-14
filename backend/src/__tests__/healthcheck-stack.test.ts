@@ -1,7 +1,6 @@
 export {};
 
 // The all-in-one container's health verdict (backend/healthcheck-stack.js).
- 
 const { decide, clapRequired } = require("../../healthcheck-stack.js");
 
 const web = { status: 200 };
