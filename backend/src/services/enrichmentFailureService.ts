@@ -9,7 +9,8 @@ import { STAGE_RETRY_CAP } from "../workers/stageRetry";
 import * as stageRecords from "./stages/stageRecords";
 
 /** Each song stage's failure type, as the settings screen names it. */
-const ENTITY_TYPE_BY_STAGE: Record<string, "track" | "audio" | "vibe" | "scan"> = {
+type StageFailureType = "track" | "audio" | "vibe" | "scan";
+const ENTITY_TYPE_BY_STAGE: Record<string, StageFailureType> = {
     recording: "track",
     analysis: "audio",
     embedding: "vibe",
@@ -138,7 +139,8 @@ interface RecordFailureInput {
 }
 
 interface GetFailuresOptions {
-    entityType?: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
+    /** A read covers both kinds of failure: a song stage's type (from TrackStage) or a ledger type. */
+    entityType?: StageFailureType | LedgerType;
     includeSkipped?: boolean;
     includeResolved?: boolean;
     limit?: number;
