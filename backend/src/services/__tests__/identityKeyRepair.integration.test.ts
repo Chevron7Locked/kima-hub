@@ -150,7 +150,7 @@ describe("repairIdentityKeys", () => {
     it("marks itself done through the settings save, so whoever reads the marker is told", async () => {
         await notYetChecked();
         const heard = jest.fn();
-        const signOff = onSystemSettingsChange("test", ["identityKeysCheckedAt"], heard);
+        const signOff = onSystemSettingsChange("test listener", ["identityKeysCheckedAt"], heard);
         try {
             await repairIdentityKeys();
             expect(heard).toHaveBeenCalledWith(["identityKeysCheckedAt"]);

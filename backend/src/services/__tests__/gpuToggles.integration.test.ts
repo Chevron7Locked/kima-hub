@@ -126,7 +126,7 @@ describe("the two GPU switches", () => {
 it("saves the switches through the settings save, so whoever reads them is told what changed", async () => {
     await gpu.setGpuToggles({ soundVectors: false, analysis: false });
     const heard = jest.fn();
-    const signOff = onSystemSettingsChange("test", ["gpuOnnxEnabled", "gpuAnalysisEnabled"], heard);
+    const signOff = onSystemSettingsChange("test listener", ["gpuOnnxEnabled", "gpuAnalysisEnabled"], heard);
     try {
         await gpu.setGpuToggles({ analysis: true });
         expect(heard).toHaveBeenLastCalledWith(["gpuAnalysisEnabled"]);

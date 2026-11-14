@@ -21,9 +21,9 @@ const subscribers = new Set<Subscriber>();
 
 /**
  * Be told, in this process, when a save changes any of `fields`; the listener gets the ones that changed. `name` says
- * who is listening, for the log when the listener fails. A value
- * sent back as it was is no change. Returns the way to sign off. The save does not wait for a listener; one that
- * throws or rejects is logged and does not fail the save or the other listeners.
+ * who is listening, for the log when the listener fails. A value sent back as it was is no change. Returns the way
+ * to sign off. The save does not wait for a listener; one that throws or rejects is logged and does not fail the
+ * save or the other listeners.
  */
 export function onSystemSettingsChange<F extends SystemSettingsField>(
     name: string,

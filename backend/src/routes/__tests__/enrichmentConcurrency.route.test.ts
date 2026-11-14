@@ -56,7 +56,7 @@ it("saves the clamped value, answers it and sets the limiter", async () => {
 
 it("tells whoever reads the setting that it changed", async () => {
     const heard = jest.fn();
-    const signOff = onSystemSettingsChange("test", ["enrichmentConcurrency"], heard);
+    const signOff = onSystemSettingsChange("test listener", ["enrichmentConcurrency"], heard);
     try {
         await request(app).put("/enrichment/concurrency").send({ concurrency: 3 }).expect(200);
         expect(heard).toHaveBeenCalledWith(["enrichmentConcurrency"]);

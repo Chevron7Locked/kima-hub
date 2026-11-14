@@ -60,7 +60,8 @@ function meaning(field: string, stored: unknown): unknown {
  */
 export async function saveSystemSettings(changes: SystemSettingsChanges): Promise<SystemSettingsField[]> {
     const changed = await prisma.$transaction(async (tx) => {
-        // The row exists before it is locked; a save that creates it has nothing before it to compare with.
+        // A lock needs a row, and an upsert races another creator into a unique-key error, so the row is inserted
+        // first (a no-op when it exists) and then locked. A save that creates it has nothing before it to compare with.
         const created = (await tx.systemSettings.createMany({ data: [{ id: "default" }], skipDuplicates: true })).count > 0;
         await tx.$queryRaw`SELECT id FROM "SystemSettings" WHERE id = 'default' FOR UPDATE`;
         const before = created ? null : await tx.systemSettings.findUnique({ where: { id: "default" } });
@@ -70,7 +71,7 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
         return (Object.keys(changes) as SystemSettingsField[]).filter(
             (field) => changes[field] !== undefined && meaning(field, before?.[field]) !== meaning(field, after[field]),
         );
-    });
+    }, { timeout: 15_000 }); // time spent waiting for the lock counts against it
     invalidateSystemSettingsCache();
     tellSettingsSubscribers(changed);
     return changed;
