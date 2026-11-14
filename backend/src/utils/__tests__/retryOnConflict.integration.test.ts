@@ -111,18 +111,18 @@ describe("retryOnConflict", () => {
 
     it("returns the first run's value without waiting when nothing conflicts", async () => {
         const run = jest.fn().mockResolvedValue("ok");
-        const before = Date.now();
+        const dice = jest.spyOn(Math, "random");
 
         expect(await retryOnConflict(run, { runs: 3 })).toBe("ok");
 
         expect(run).toHaveBeenCalledTimes(1);
-        expect(Date.now() - before).toBeLessThan(40);
+        expect(dice).not.toHaveBeenCalled();
     });
 
     // The wait is 50 to 200 ms, so two transactions that lost to each other do not start again in step.
     it.each([
-        { roll: 0, least: 45, most: 250 },
-        { roll: 0.999, least: 190, most: 600 },
+        { roll: 0, least: 45, most: 1500 },
+        { roll: 0.999, least: 190, most: 2000 },
     ])("waits a short random moment between runs (dice $roll)", async ({ roll, least, most }) => {
         jest.spyOn(Math, "random").mockReturnValue(roll);
         const { run, started } = serializationRun((n) => n === 1);

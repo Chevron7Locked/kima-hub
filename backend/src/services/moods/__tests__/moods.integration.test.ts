@@ -17,7 +17,8 @@ import { READINGS, buildMoodState, buildMoods, loadMoodState, moodProgress, upda
 import { writeMoodTags } from "../tags";
 import * as inputsHash from "../inputsHash";
 import { insertEmbeddings, vectorLiteral } from "../../../__tests__/helpers/embeddingFixtures";
-import { removeMoodRows, untilWaiting } from "../../__tests__/helpers/moodRows";
+import { removeMoodRows } from "../../__tests__/helpers/moodRows";
+import { untilLockWait } from "../../../__tests__/helpers/lockWait";
 import reference from "./fixtures/shipped-reference.json";
 
 jest.mock("../../../utils/logger", () => ({
@@ -390,7 +391,7 @@ describe("a re-run that deletes a sound vector while the step scores it", () => 
             async (tx) => {
                 await tx.$executeRawUnsafe(`DELETE FROM track_embeddings WHERE track_id = $1`, gone);
                 building = buildMoods();
-                await untilWaiting("INSERT INTO track_moods");
+                await untilLockWait("INSERT INTO track_moods");
             },
             { timeout: 30_000, maxWait: 30_000 },
         );

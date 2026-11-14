@@ -121,15 +121,15 @@ const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 // ── Deadlocks ────────────────────────────────────────────────────────────
 
 /**
- * Runs a move's own transaction, and once more when Postgres picked it as a deadlock victim: the other transaction
+ * Runs a move's own transaction, and once more when Postgres ended it for a conflict with another transaction (a deadlock, in practice): the other transaction
  * has finished by then and the rolled-back move left nothing behind. The retry waits first (`retryOnConflict`). Any
- * other failure, and a second deadlock, throw.
+ * other failure, and a second conflict, throw.
  * A move that joins its caller's transaction does not use this: the caller owns the retry.
  */
 async function retryOnDeadlock<T>(what: string, run: () => Promise<T>): Promise<T> {
     return retryOnConflict(run, {
         runs: 2,
-        onLostRun: () => logger.warn(`[Enrichment] ${what} lost a transaction conflict (deadlock); trying once more`),
+        onLostRun: () => logger.warn(`[Enrichment] ${what} lost a transaction conflict; trying once more`),
     });
 }
 

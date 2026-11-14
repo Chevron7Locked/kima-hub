@@ -13,7 +13,8 @@ import { TAG_LINE_Z, writeMoodTags } from "../tags";
 import { rerunEnrichment } from "../../enrichmentRestart";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { insertEmbeddings } from "../../../__tests__/helpers/embeddingFixtures";
-import { removeMoodRows, untilWaiting } from "../../__tests__/helpers/moodRows";
+import { removeMoodRows } from "../../__tests__/helpers/moodRows";
+import { untilLockWait } from "../../../__tests__/helpers/lockWait";
 
 jest.mock("../../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -216,7 +217,7 @@ describe("a deadlock while the tags are written", () => {
             async (tx) => {
                 await holdTrack(tx, trackId(0));
                 writing = writeMoodTags();
-                await untilWaiting(`SET "moodTags" = n.tags`);
+                await untilLockWait(`SET "moodTags" = n.tags`);
                 await tx.$queryRawUnsafe(`SELECT id FROM mood_state WHERE id = 'default' FOR UPDATE`);
             },
             { timeout: 30_000, maxWait: 30_000 },
@@ -244,7 +245,7 @@ describe("a deadlock while the tags are written", () => {
                         { timeout: 30_000, maxWait: 30_000 },
                     )
                     .then(() => null, (error: unknown) => error);
-                await untilWaiting(`SET title = title || ''`);
+                await untilLockWait(`SET title = title || ''`);
                 await holdTrack(tx, trackId(2));
             },
             { timeout: 30_000, maxWait: 30_000 },

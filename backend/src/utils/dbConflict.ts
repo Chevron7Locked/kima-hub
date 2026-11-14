@@ -51,7 +51,6 @@ export interface LostRun {
     runs: number;
     /** How long the next run waits. */
     waitMs: number;
-    error: unknown;
 }
 
 /**
@@ -70,7 +69,7 @@ export async function retryOnConflict<T>(
         } catch (error) {
             if (run >= options.runs || !isTransactionConflict(error)) throw error;
             const waitMs = WAIT_MIN_MS + Math.random() * (WAIT_MAX_MS - WAIT_MIN_MS);
-            options.onLostRun?.({ run, runs: options.runs, waitMs, error });
+            options.onLostRun?.({ run, runs: options.runs, waitMs });
             await new Promise((resolve) => setTimeout(resolve, waitMs));
         }
     }
