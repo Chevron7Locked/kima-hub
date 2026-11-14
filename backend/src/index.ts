@@ -218,6 +218,8 @@ async function checkPasswordReset() {
     await resetAdminPassword(resetPassword);
 }
 
+const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
 // The catch-up work after startup. Each task logs its own failure, so one that fails does not stop the next.
 const backgroundStartSteps: StartStep[] = [
     { name: "audiobook auto-sync", run: syncAudiobooksIfEmpty },
@@ -300,6 +302,9 @@ async function main() {
 
     // Check for admin password reset
     await checkPasswordReset();
+
+    // A stop signal during the checks above has already run the shutdown, which had no server to close: do not listen.
+    if (gracefulShutdown.hasBegun()) return;
 
     const server = app.listen(config.port, "0.0.0.0", () => {
         httpServer = server;
@@ -449,6 +454,7 @@ const listeningStartSteps: StartStep[] = [
         name: "webhook reconciliation and Lidarr health",
         run: async () => {
             const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
+            if (gracefulShutdown.hasBegun()) return; // the import can outlast a stop signal
             webhookReconciliation.start();
             lidarrHealthMonitor.start();
         },
@@ -458,6 +464,7 @@ const listeningStartSteps: StartStep[] = [
         run: async () => {
             // Webhook event cleanup - runs daily to remove old processed events
             const { webhookEventStore } = await import("./services/webhookEventStore");
+            if (gracefulShutdown.hasBegun()) return; // the import can outlast a stop signal
 
             // Run cleanup on startup (async, don't block)
             webhookEventStore.cleanupOldEvents(30).catch((err) => {
@@ -478,6 +485,7 @@ const listeningStartSteps: StartStep[] = [
         run: async () => {
             // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
             const { cleanupExpiredCache, measureCachedEpisodeLengths } = await import("./services/podcastDownload");
+            if (gracefulShutdown.hasBegun()) return; // the import can outlast a stop signal
 
             // Run cleanup on startup (async, don't block), then measure what stays cached.
             cleanupExpiredCache()
@@ -505,13 +513,6 @@ const listeningStartSteps: StartStep[] = [
     },
     ...backgroundStartSteps,
 ];
-
-const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
-main().catch((err) => {
-    logger.error("Server failed to start:", err);
-    process.exit(1);
-});
 
 // Graceful shutdown handling
 let httpServer: ReturnType<typeof app.listen> | undefined;
@@ -643,3 +644,9 @@ healthCheckInterval = setInterval(async () => {
         }
     }
 }, HEALTH_CHECK_INTERVAL);
+
+// Last, so everything the start-up reads (the shutdown, the start steps, the intervals) is declared before it runs.
+main().catch((err) => {
+    logger.error("Server failed to start:", err);
+    process.exit(1);
+});

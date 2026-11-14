@@ -11,6 +11,7 @@ const mockStops = {
     syncCron: jest.fn(),
 };
 const mockClose = jest.fn(async () => {});
+const mockIntegrity = jest.fn();
 
 jest.mock("bullmq", () => ({
     Worker: class {
@@ -47,7 +48,7 @@ jest.mock("../moodSnapshotWorker", () => ({
 jest.mock("../discoverCron", () => ({ startDiscoverWeeklyCron: jest.fn(), stopDiscoverWeeklyCron: mockStops.discoverCron }));
 jest.mock("../dataCleanup", () => ({ startDataCleanupCron: jest.fn(), stopDataCleanupCron: mockStops.cleanupCron }));
 jest.mock("../librarySyncCron", () => ({ startLibrarySyncCron: jest.fn(), stopLibrarySyncCron: mockStops.syncCron }));
-jest.mock("../dataIntegrity", () => ({ runDataIntegrityCheck: jest.fn() }));
+jest.mock("../dataIntegrity", () => ({ runDataIntegrityCheck: mockIntegrity }));
 jest.mock("../../services/simpleDownloadManager", () => ({ simpleDownloadManager: {} }));
 jest.mock("../../services/lidarrFailures", () => ({ sweepFailedDownloads: jest.fn() }));
 jest.mock("../../jobs/queueCleaner", () => ({ queueCleaner: {} }));
@@ -71,5 +72,33 @@ describe("shutdownWorkers", () => {
         await shutdownWorkers();
 
         expect(mockDisconnect).not.toHaveBeenCalled();
+    });
+
+    it("schedules nothing afterwards, even for a cycle that was still running when it cleared the timers", async () => {
+        jest.useFakeTimers();
+        try {
+            let finishCycle!: () => void;
+            mockIntegrity.mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishCycle = resolve;
+                    }),
+            );
+            let workers!: typeof import("../index");
+            jest.isolateModules(() => {
+                workers = require("../index");
+            });
+
+            await jest.advanceTimersByTimeAsync(10_000); // the data integrity cycle starts and stays running
+            expect(mockIntegrity).toHaveBeenCalledTimes(1);
+
+            await workers.shutdownWorkers();
+            finishCycle(); // it ends after shutdown, where it used to schedule its next run
+            await jest.advanceTimersByTimeAsync(0);
+
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });

@@ -43,9 +43,12 @@ import { sweepFailedDownloads } from "../services/lidarrFailures";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { warmRadioCovers } from "../services/mixes/radioRow";
 
-// One pending timer per self-rescheduling cycle, so handles never pile up; shutdown clears them.
+// One pending timer per self-rescheduling cycle, so handles never pile up; shutdown clears them. A cycle still running
+// when shutdown clears the timers would schedule its next run afterwards, so once shut down nothing is scheduled.
 const timers = new Map<string, NodeJS.Timeout>();
+let shutDown = false;
 function schedule(name: string, run: () => void, ms: number) {
+    if (shutDown) return;
     timers.set(name, setTimeout(run, ms));
 }
 
@@ -281,6 +284,7 @@ export async function shutdownWorkers(): Promise<void> {
     stopLibrarySyncCron();
 
     // Clear all timeouts
+    shutDown = true;
     for (const timeout of timers.values()) {
         clearTimeout(timeout);
     }
