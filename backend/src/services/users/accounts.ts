@@ -74,8 +74,11 @@ function passwordRefusal(password: unknown): PasswordRefusal | null {
  */
 export const normalizeUsername = (username: string): string => username.trim();
 
-/** The stored name with its padding removed, as SQL: the same whitespace `normalizeUsername` trims. */
-const TRIMMED_STORED_USERNAME = Prisma.sql`regexp_replace(username, '^[[:space:]]+|[[:space:]]+$', '', 'g')`;
+/** Every character JavaScript's `trim()` strips, as a regular-expression class body, so SQL and `normalizeUsername` agree. */
+const TRIMMED_CHARACTERS = String.raw`\t\n\v\f\r    -     　﻿`;
+
+/** The stored name with its padding removed, as SQL: what `normalizeUsername` makes of it. */
+const TRIMMED_STORED_USERNAME = Prisma.sql`regexp_replace(username, ${`^[${TRIMMED_CHARACTERS}]+|[${TRIMMED_CHARACTERS}]+$`}, '', 'g')`;
 
 /**
  * The account a person means by a typed name. Names are compared trimmed on both sides, so an account stored with
@@ -93,10 +96,10 @@ export async function findUserByUsername<S extends Prisma.UserSelect>(
     const trimmed = normalizeUsername(given);
     const exact = await prisma.user.findUnique({ where: { username: trimmed }, select });
     if (exact) return exact;
-    const padded = await prisma.$queryRaw<{ id: string }[]>(
+    const trimsToIt = await prisma.$queryRaw<{ id: string }[]>(
         Prisma.sql`SELECT id FROM "User" WHERE ${TRIMMED_STORED_USERNAME} = ${trimmed} LIMIT 2`,
     );
-    if (padded.length === 1) return prisma.user.findUnique({ where: { id: padded[0].id }, select });
+    if (trimsToIt.length === 1) return prisma.user.findUnique({ where: { id: trimsToIt[0].id }, select });
     if (given === trimmed) return null;
     return prisma.user.findUnique({ where: { username: given }, select });
 }

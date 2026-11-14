@@ -463,6 +463,12 @@ describe("findUserByUsername (a name as a person typed it)", () => {
         expect((await findUserByUsername("bob", { id: true }))?.id).toBe(padded.id);
     });
 
+    it("treats every character JavaScript trims as padding, in the lookup and in the shadow check", async () => {
+        const padded = await seedUser(" ﻿bob　");
+        expect((await findUserByUsername("bob", { id: true }))?.id).toBe(padded.id);
+        expect(await plain("bob")).toEqual({ ok: false, reason: "username-taken" });
+    });
+
     it("finds neither of two legacy rows that trim to the same name by that name, and each by its exact form", async () => {
         const left = await seedUser(" bob");
         const right = await seedUser("bob ");

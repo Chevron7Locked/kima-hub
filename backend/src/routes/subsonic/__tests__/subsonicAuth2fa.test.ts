@@ -209,6 +209,21 @@ describe("subsonicAuth: the username is trimmed", () => {
         expect(wrong.body["subsonic-response"].error.code).toBe(40);
     });
 
+    it("does not guess between two legacy rows that trim to one name: a key owner needs the exact form", async () => {
+        seq += 1;
+        const name = `subauth_twin_${seq}`;
+        const passwordHash = await bcrypt.hash(PLAIN_PASSWORD, 10);
+        const left = await prisma.user.create({ data: { username: ` ${name}`, passwordHash } });
+        await prisma.user.create({ data: { username: `${name} `, passwordHash } });
+        const { key } = await createApiKey(left.id, "test device");
+        const ping = (extra: Record<string, string>) =>
+            request(app).get("/rest/ping.view").query({ f: "json", v: "1.16.1", c: "test", ...extra });
+
+        expect((await ping({ u: name, apiKey: key })).body["subsonic-response"].error.code).toBe(40);
+        expect((await ping({ u: name, p: PLAIN_PASSWORD })).body["subsonic-response"].error.code).toBe(40);
+        expect((await ping({ u: ` ${name}`, apiKey: key })).body["subsonic-response"].status).toBe("ok");
+    });
+
     it("signs in the trimmed account, not the padded one, when both exist", async () => {
         seq += 1;
         const name = `subauth_both_${seq}`;

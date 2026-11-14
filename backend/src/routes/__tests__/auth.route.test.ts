@@ -117,7 +117,6 @@ describe('POST /auth/login', () => {
         await prisma.user.create({ data: { username: PADDED, passwordHash, onboardingComplete: true } });
 
         const exact = await request(app).post('/auth/login').send({ username: PADDED, password: PASSWORD });
-
         const trimmed = await request(app).post('/auth/login').send({ username: PADDED.trim(), password: PASSWORD });
 
         expect(exact.status).toBe(200);
