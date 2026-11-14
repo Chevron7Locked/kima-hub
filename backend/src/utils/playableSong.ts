@@ -21,9 +21,10 @@
  *    Album identification reads the songs of the one album it is identifying in the same way (by album id, never to
  *    offer them): it fingerprints files that are there, corrupt ones included, so it asks only `missingSince: null`.
  *
- * Discover's own song lookup is not a fourth exception. The Discover Weekly playlist builder looks up the songs of a
+ * Discover's own song lookups are not a fourth exception. The Discover Weekly playlist builder looks up the songs of a
  * week's Discover albums, and there PLAYABLE_DISCOVER_SONG is the rule: the same file-there-and-read test, on a
- * DISCOVER album instead of a library one. No other interface uses it.
+ * DISCOVER album instead of a library one. GET /discover/current uses its file test alone (without the album
+ * location) to pick the stand-in song of a suggestion whose album it has already found. No other interface uses it.
  */
 import { Prisma } from "@prisma/client";
 

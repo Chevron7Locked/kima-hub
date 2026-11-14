@@ -309,3 +309,79 @@ describe("GET /discover/batch-status -- reports the latest finished batch when n
         expect(res.body).not.toHaveProperty("lastBatchId");
     });
 });
+
+describe("GET /discover/current -- the stand-in song for a suggestion with no recorded songs", () => {
+    /** A suggestion with an album and songs but no DiscoveryTrack rows, so /current picks one stand-in song. */
+    async function suggestWithSongs(
+        name: string,
+        songs: Array<{ trackNo: number; missing?: boolean; corrupt?: boolean }>,
+        status: "ACTIVE" | "LIKED" = "ACTIVE",
+    ) {
+        const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: `${MARK}-${name}` } });
+        const album = await prisma.album.create({
+            data: {
+                rgMbid: `${MARK}-rg-${name}`, identityKey: `${MARK}-${name}`, title: `${MARK} ${name} LP`,
+                primaryType: "Album", artistId: artist.id, location: status === "LIKED" ? "LIBRARY" : "DISCOVER",
+            },
+        });
+        for (const s of songs) {
+            await prisma.track.create({
+                data: {
+                    albumId: album.id, title: `${MARK} ${name} song ${s.trackNo}`, trackNo: s.trackNo, duration: 200,
+                    filePath: `/music/${MARK}/${name}-${s.trackNo}.flac`, fileModified: new Date(), fileSize: 1,
+                    missingSince: s.missing ? new Date() : null, corrupt: s.corrupt ?? false,
+                },
+            });
+        }
+        await prisma.discoveryAlbum.create({
+            data: {
+                userId: listener, rgMbid: album.rgMbid, artistName: artist.name, albumTitle: album.title,
+                weekStartDate: THIS_WEEK, status, downloadedAt: THIS_WEEK, similarity: 0.9, tier: "core",
+            },
+        });
+        return (n: number) => `${MARK} ${name} song ${n}`;
+    }
+
+    it("takes the second song when the first one's file is missing", async () => {
+        const song = await suggestWithSongs("gone", [{ trackNo: 1, missing: true }, { trackNo: 2 }]);
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.status).toBe(200);
+        expect(titles(res.body)).toEqual([song(2)]);
+        expect(res.body.tracks[0].available).toBe(true);
+    });
+
+    it("takes the second song when the first one is corrupt", async () => {
+        const song = await suggestWithSongs("bad", [{ trackNo: 1, corrupt: true }, { trackNo: 2 }]);
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song(2)]);
+    });
+
+    it("takes the first song in track order when it is playable", async () => {
+        const song = await suggestWithSongs("ok", [{ trackNo: 2 }, { trackNo: 1 }]);
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song(1)]);
+    });
+
+    it("shows the suggestion as pending when no song of the album is playable", async () => {
+        await suggestWithSongs("none", [{ trackNo: 1, missing: true }, { trackNo: 2, corrupt: true }]);
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.body.tracks).toHaveLength(1);
+        expect(res.body.tracks[0]).toMatchObject({ available: false, isPending: true });
+    });
+
+    it("applies the same pick to a liked suggestion, whose album is in the library now", async () => {
+        const song = await suggestWithSongs("liked", [{ trackNo: 1, missing: true }, { trackNo: 2 }], "LIKED");
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song(2)]);
+    });
+});

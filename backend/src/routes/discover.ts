@@ -22,6 +22,7 @@ import { parseLimit } from "./library/paging";
 import { config } from "../config";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
+import { PLAYABLE_DISCOVER_SONG } from "../utils/playableSong";
 
 const router = Router();
 
@@ -302,6 +303,9 @@ async function unavailableStillMissing(
     return { missing, turnedUp };
 }
 
+/** The playable-song rule's file test without its album-location part, for the stand-in song of a Discover album. */
+const { album: _albumLocation, ...standInSongFileTest } = PLAYABLE_DISCOVER_SONG;
+
 type SuggestionRow = Awaited<ReturnType<typeof prisma.discoveryAlbum.findMany>>[number];
 
 /** One song of a week's suggestion as GET /current lists it. */
@@ -410,7 +414,9 @@ router.get("/current", async (req, res) => {
                     },
                     include: {
                         artist: true,
-                        tracks: { take: 1, orderBy: { trackNo: "asc" } },
+                        // The first song in track order whose file is there and was read. The album is already
+                        // pinned above, so only the rule's file test applies, not its album-location part.
+                        tracks: { where: standInSongFileTest, take: 1, orderBy: { trackNo: "asc" } },
                     },
                 });
 
