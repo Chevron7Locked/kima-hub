@@ -66,7 +66,7 @@ async function trimCache(cacheName, maxEntries) {
  * another site's address never changes under its address and stays cache-first.
  */
 function isStoredCover(url) {
-  if (/^\/api\/audiobooks\/[^/]+\/cover/.test(url.pathname)) return true;
+  if (/^\/api\/audiobooks\/.*\/cover/.test(url.pathname)) return true;
   return /^\/api\/library\/cover-art/.test(url.pathname) && (url.searchParams.get('url') || '').startsWith('native:');
 }
 

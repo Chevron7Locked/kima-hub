@@ -42,6 +42,7 @@ export class CoverArtExtractor {
                 return null;
             }
 
+            // music-metadata has no read limit, so the picture is already in memory here; the cap stops it being decoded and stored.
             if (picture.data.byteLength > MAX_PICTURE_BYTES) {
                 logger.warn(`[COVER-ART] Embedded picture in ${path.basename(audioFilePath)} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; skipped`);
                 return null;

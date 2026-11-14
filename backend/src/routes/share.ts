@@ -8,7 +8,7 @@ import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
-import { coverFileForWidth, getLocalImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { coverFileForSize, getLocalImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
 import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
@@ -160,15 +160,7 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
         }
 
         // The same width limits and stored-copy rules as the library cover route: a copy older than its cover is made again.
-        let file = localPath;
-        const width = size ? parseInt(size, 10) : 0;
-        if (width >= 16 && width <= 2048) {
-            try {
-                file = await coverFileForWidth(localPath, coverArtId.slice("native:".length), width);
-            } catch (err: any) {
-                logger.warn(`[Share] Resize failed for ${coverArtId}, serving original: ${err.message}`);
-            }
-        }
+        const file = await coverFileForSize(localPath, coverArtId.slice("native:".length), size);
 
         return sendStoredFile(
             res,

@@ -14,7 +14,7 @@ import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
 import { resolveWithinMusicRoot } from "../library/trackPath";
-import { coverFileForWidth, resolveInCoversDir } from "../../services/imageStorage";
+import { coverFileForSize, resolveInCoversDir } from "../../services/imageStorage";
 import { sendStoredFile } from "../../utils/sendStoredFile";
 import { recordPlay } from "../../services/playRecording";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -301,15 +301,7 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 
         // `size` is the width to scale to (Subsonic spec), within the limits the web cover route holds to; without
         // one, or outside them, the stored file is sent whole. A scaled copy is always a JPEG.
-        const size = parseInt(one(req, "size") ?? "", 10);
-        let file = resolvedPath;
-        if (size >= 16 && size <= 2048) {
-            try {
-                file = await coverFileForWidth(resolvedPath, nativePath, size);
-            } catch (err) {
-                logger.warn(`[Subsonic] Could not scale ${nativePath}, sending it whole: ${err instanceof Error ? err.message : String(err)}`);
-            }
-        }
+        const file = await coverFileForSize(resolvedPath, nativePath, one(req, "size"));
 
         const ext = path.extname(file).toLowerCase();
         const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";

@@ -402,6 +402,22 @@ export function getResizedImagePath(nativePath: string, width: number): string |
 }
 
 /**
+ * The file to serve for a stored cover when a client sends `size` (the raw query value): the cover itself unless `size`
+ * is a whole width from 16 to 2048, else `coverFileForWidth`. The one place those limits live for every route that serves
+ * a stored cover. A copy that cannot be made leaves the cover itself, with a warning.
+ */
+export async function coverFileForSize(coverPath: string, relativePath: string, size: string | undefined): Promise<string> {
+    const width = size ? parseInt(size, 10) : 0;
+    if (!(width >= 16 && width <= 2048)) return coverPath;
+    try {
+        return await coverFileForWidth(coverPath, relativePath, width);
+    } catch (err) {
+        logger.warn(`[ImageStorage] Could not scale ${relativePath}, serving it whole: ${err instanceof Error ? err.message : String(err)}`);
+        return coverPath;
+    }
+}
+
+/**
  * The file to serve for a stored cover at a width: a smaller copy, written beside it once, when the cover is wider;
  * the cover itself when it is no wider (a copy would only duplicate it) or a copy's path would leave the covers folder.
  * A copy older than its cover was made from earlier bytes and is made again.

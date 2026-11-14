@@ -11,7 +11,7 @@ import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../ut
 import { upstreamFailure, upstreamStatusFailure } from "../../utils/upstream";
 import {
   resizeImageBuffer,
-  coverFileForWidth,
+  coverFileForSize,
   resolveInCoversDir,
   STORED_COVER_CACHE_CONTROL,
 } from "../../services/imageStorage";
@@ -48,21 +48,7 @@ async function serveNativeImage(
   const send = (file: string) =>
     sendStoredFile(res, file, { headers }, () => void res.status(404).json({ error: "Cover art not found" }));
 
-  const width = size ? parseInt(size, 10) : 0;
-
-  if (!width || width < 16 || width > 2048) {
-    return send(coverCachePath);
-  }
-
-  let file = coverCachePath;
-  try {
-    file = await coverFileForWidth(coverCachePath, nativePath, width);
-  } catch (err) {
-    logger.warn(
-      `[COVER-ART] Resize failed for ${nativePath}, serving original: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  return send(file);
+  return send(await coverFileForSize(coverCachePath, nativePath, size));
 }
 
 /** The only Audiobookshelf address this route asks for: a book's cover (what the audiobook sync stores). */
