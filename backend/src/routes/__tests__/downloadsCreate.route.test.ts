@@ -60,6 +60,7 @@ const jobsOf = (userId = USER) => prisma.downloadJob.findMany({ where: { userId,
 
 async function cleanup() {
     await prisma.downloadJob.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: { in: [USER, OTHER] } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: "dlc_" } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: "dlc_" } } });
     await prisma.user.deleteMany({ where: { id: { in: [USER, OTHER] } } });
@@ -252,6 +253,29 @@ describe("POST /downloads", () => {
                 ["albumTitle", "artistMbid", "artistName", "batchId", "downloadType", "rootFolderPath"],
             );
             expect(await startedWith()).toEqual([jobs[0].id, "Low", "Ones and Sixes", ALBUM]);
+        });
+
+        it("holds back an album whose library job just failed, but not one whose Discover job just failed", async () => {
+            mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Low" } });
+            mockAddArtist.mockResolvedValue({ id: 7 });
+            mockGetReleaseGroups.mockResolvedValue({
+                kind: "answered",
+                value: [
+                    { id: ALBUM, title: "Ones and Sixes" },
+                    { id: LIBRARY_ALBUM, title: "Double Negative" },
+                ],
+            });
+            const batch = await prisma.discoveryBatch.create({
+                data: { userId: USER, weekStart: new Date("2026-08-03T00:00:00.000Z"), targetSongCount: 1, totalAlbums: 1, status: "downloading" },
+            });
+            const failed = { userId: USER, status: "failed", completedAt: new Date(), subject: "low - x" };
+            await prisma.downloadJob.create({ data: { ...failed, type: "album", targetMbid: ALBUM } });
+            await prisma.downloadJob.create({ data: { ...failed, type: "album", targetMbid: LIBRARY_ALBUM, discoveryBatchId: batch.id } });
+
+            await postArtist().expect(200);
+
+            const queued = (await jobsOf()).filter((job) => job.status === "pending");
+            expect(queued.map((job) => job.targetMbid)).toEqual([LIBRARY_ALBUM]);
         });
     });
 });

@@ -1,5 +1,4 @@
 import { Router } from "express";
-import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
@@ -15,11 +14,6 @@ import { failureCause } from "../utils/outcome";
 import { isMbid } from "../services/artistIdentity";
 
 const router = Router();
-
-/** The caller's own pending or running library job for this album, if there is one. */
-function activeJobFor(tx: Pick<Prisma.TransactionClient, "downloadJob">, userId: string, mbid: string) {
-    return downloadJobs.findActive({ userId, type: "album", targetMbid: mbid }, tx);
-}
 
 router.post("/", requireAcquirePermission, async (req, res) => {
     try {
@@ -91,9 +85,9 @@ router.post("/", requireAcquirePermission, async (req, res) => {
             logger.warn(`[DOWNLOAD] Release group ${mbid}: ${failureCause(group)}`);
         }
 
-        // One active job per user per album: concurrent requests lock and re-check inside the transaction.
+        // One active job per user per album: the unique index stops two concurrent requests, and the loser takes the winner.
         const jobResult = await prisma.$transaction(async (tx) => {
-            const existingJob = await activeJobFor(tx, userId, mbid);
+            const existingJob = await downloadJobs.findActive({ userId, type: "album", targetMbid: mbid }, tx);
             if (existingJob) {
                 return { duplicate: true, job: existingJob };
             }
@@ -158,7 +152,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
         // Two inserts that both saw no row: the unique index rejects the loser.
         if (error.code === "P2002") {
             const { mbid } = req.body;
-            const existingJob = await activeJobFor(prisma, req.user!.id, mbid);
+            const existingJob = await downloadJobs.findActive({ userId: req.user!.id, type: "album", targetMbid: mbid });
             if (existingJob) {
                 return res.json({
                     id: existingJob.id,
@@ -254,7 +248,7 @@ async function processArtistDownload(
         }
 
         const jobResult = await prisma.$transaction(async (tx) => {
-            if (await activeJobFor(tx, userId, albumMbid)) {
+            if (await downloadJobs.findActive({ userId, type: "album", targetMbid: albumMbid }, tx)) {
                 return { skipped: true as const, reason: "already_queued" };
             }
 
@@ -264,6 +258,8 @@ async function processArtistDownload(
                 FROM "DownloadJob"
                 WHERE "targetMbid" = ${albumMbid}
                 AND "userId" = ${userId}
+                AND type = 'album'
+                AND "discoveryBatchId" IS NULL
                 AND status = 'failed'
                 AND "completedAt" >= ${new Date(Date.now() - 30000)}
                 FOR UPDATE SKIP LOCKED
@@ -293,6 +289,10 @@ async function processArtistDownload(
             );
 
             return { skipped: false as const, job };
+        }).catch((error: any) => {
+            // Another request queued this album between the check and the insert: the index refused the second job.
+            if (error?.code === "P2002") return { skipped: true as const, reason: "already_queued" };
+            throw error;
         });
 
         if (jobResult.skipped) {

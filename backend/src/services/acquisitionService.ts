@@ -711,6 +711,7 @@ class AcquisitionService {
                           status: { in: ["pending", "processing"] },
                           subject: `${request.artistName} - ${request.albumTitle}`,
                       },
+                      orderBy: { createdAt: "asc" },
                   });
 
         const existingJob = await findExisting();
