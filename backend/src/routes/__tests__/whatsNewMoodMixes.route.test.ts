@@ -293,7 +293,7 @@ describe("a mix under a mood 1.11 removed", () => {
             id: MIX_ID,
             name: "Your Deep Feels Mix",
             mood: "melancholy",
-            trackCount: 4,
+            trackCount: 3,
             retired: true,
         });
     });

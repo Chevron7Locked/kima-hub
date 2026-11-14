@@ -156,11 +156,13 @@ describe("re-filing albums by their tags", () => {
             });
         }
         // The server begins to shut down as the first album's move commits.
+        // Armed only once the re-file starts: the marker's own settings save before it is a transaction too.
         let stop = false;
+        let armed = false;
         const transaction = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
         const watched = jest.spyOn(prisma, "$transaction").mockImplementation((async (...args: unknown[]) => {
             const done = await transaction(...args);
-            stop = true;
+            if (armed) stop = true;
             return done;
         }) as never);
         const prune = jest.spyOn(prisma.artist, "deleteMany");
@@ -168,7 +170,7 @@ describe("re-filing albums by their tags", () => {
         try {
             let result!: Awaited<ReturnType<typeof refileLibrary>>;
             // The album that was moved before the stop is listed, so a client is told of it though the re-file did not finish.
-            expect(await markerMoves(async () => (result = await refileLibrary(musicDir, { shouldStop: () => stop })))).toBe(true);
+            expect(await markerMoves(async () => { armed = true; result = await refileLibrary(musicDir, { shouldStop: () => stop }); })).toBe(true);
 
             expect(result).toMatchObject({ stopped: true, albumsMoved: 1 });
             expect(await filing("Refile Alpha")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 1 }]);
