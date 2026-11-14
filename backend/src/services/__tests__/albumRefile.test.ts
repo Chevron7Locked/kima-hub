@@ -166,7 +166,9 @@ describe("re-filing albums by their tags", () => {
         const prune = jest.spyOn(prisma.artist, "deleteMany");
 
         try {
-            const result = await refileLibrary(musicDir, { shouldStop: () => stop });
+            let result!: Awaited<ReturnType<typeof refileLibrary>>;
+            // The album that was moved before the stop is listed, so a client is told of it though the re-file did not finish.
+            expect(await markerMoves(async () => (result = await refileLibrary(musicDir, { shouldStop: () => stop })))).toBe(true);
 
             expect(result).toMatchObject({ stopped: true, albumsMoved: 1 });
             expect(await filing("Refile Alpha")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 1 }]);

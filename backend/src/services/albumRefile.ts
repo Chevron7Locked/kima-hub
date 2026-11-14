@@ -85,8 +85,16 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
         stopped: false, songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, artistsRenamed: 0,
         albumsFailed: 0, artistsRemoved: 0,
     };
-    const halted = (): RefileResult => {
+    // Whether anything the re-file changed is something a client lists: an album that moved or merged with a playable
+    // song among the songs it moved, or an artist renamed that holds a playable song.
+    let listedChange = false;
+    const markIfListed = async () => {
+        if (listedChange) await markLibraryChangedQuietly("albums re-filed");
+    };
+    const halted = async (): Promise<RefileResult> => {
         result.stopped = true;
+        // What was moved before the stop is already done, so a client is told of it now.
+        await markIfListed();
         logger.info(`[Refile] Stopped for shutdown: ${result.albumsMoved} albums moved, ${result.albumsMerged} merged so far`);
         return result;
     };
@@ -185,10 +193,6 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
         filings.push(...byTarget.values());
     }
 
-    // Whether anything the re-file changed is something a client lists: an album that moved or merged with a playable
-    // song among the songs it moved, or an artist renamed that holds a playable song.
-    let listedChange = false;
-
     // 3. Names the old splitter cut, where the cut row holds the files' MusicBrainz id: their full names back.
     const named = new Map<string, string>();
     for (const { candidate } of filings) if (candidate.mbid && !named.has(candidate.mbid)) named.set(candidate.mbid, candidate.name);
@@ -222,7 +226,8 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
     }
 
     // Only a moved or merged album holding a playable song, or a renamed artist holding one, is listed differently.
-    if (listedChange) await markLibraryChangedQuietly("albums re-filed");
+    await markIfListed();
+    listedChange = false;
     if (shouldStop()) return halted();
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
     await backfillAllArtistCounts(undefined, { shouldStop }).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
@@ -401,7 +406,8 @@ async function refileAlbum(
                 });
             }
             // Listed: a song that moved is one a client lists, now under its new artist.
-            const listed = (await tx.track.count({ where: { AND: [PLAYABLE_SONG, { id: { in: misfiled.map((t) => t.id) } }] } })) > 0;
+            const listed =
+                (await tx.track.findFirst({ where: { AND: [PLAYABLE_SONG, { id: { in: misfiled.map((t) => t.id) } }] }, select: { id: true } })) !== null;
             return { outcome, listed };
         },
         { timeout: ALBUM_TRANSACTION_MS },

@@ -220,6 +220,21 @@ describe("a scan's libraryChanged for a song flagged missing", () => {
     });
 });
 
+describe("a scan's libraryChanged for a missing song whose file is back and reads", () => {
+    it("is true, since the song is listed again", async () => {
+        const lib = put(LIB);
+        await new MusicScannerService().scanLibrary(musicDir);
+        fs.unlinkSync(lib);
+        expect((await new MusicScannerService().scanLibrary(musicDir)).tracksMissing).toBe(1);
+
+        put(LIB);
+        const back = await new MusicScannerService().scanLibrary(musicDir);
+
+        expect((await prisma.track.findFirstOrThrow({ where: { filePath: LIB.rel } })).missingSince).toBeNull();
+        expect(back.libraryChanged).toBe(true);
+    });
+});
+
 describe("a scan that fails", () => {
     it("before filing anything has changed no library song", async () => {
         const lib = put(LIB);

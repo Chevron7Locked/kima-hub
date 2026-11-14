@@ -230,7 +230,8 @@ export class MusicScannerService {
             for (const row of rows) touchedArtists.add(row.album.artistId);
             if (listed && !this.libraryMoved) {
                 const rule = listed === "returning" ? { ...PLAYABLE_SONG, missingSince: undefined } : PLAYABLE_SONG;
-                this.libraryMoved = (await prisma.track.findFirst({ where: { AND: [rule, where] }, select: { id: true } })) !== null;
+                // Only ever raised: scan tasks run side by side, and one that finds nothing must not undo another's find.
+                if (await prisma.track.findFirst({ where: { AND: [rule, where] }, select: { id: true } })) this.libraryMoved = true;
             }
         };
         const touchArtistsOf = async (songIds: string[], listed: "now" | "returning" = "now") => {
