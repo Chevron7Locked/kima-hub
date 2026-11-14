@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { formatTime, formatDuration } from "@/lib/format";
 import { cascadeStyle } from "@/lib/motion";
-import { shareCoverPath } from "@/lib/sharePreviewImage";
+import { shareCoverPath, shareResolvePath, shareStreamPath } from "@/lib/shareAddresses";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 
@@ -124,7 +124,7 @@ export default function SharePageClient() {
     const progressBarRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
-        fetch(`/api/share/${token}`)
+        fetch(shareResolvePath(token))
             .then(async (res) => {
                 if (!res.ok) {
                     const body = await res.json().catch(() => ({}));
@@ -151,7 +151,7 @@ export default function SharePageClient() {
     const currentTrack = tracks[currentTrackIndex];
 
     const getStreamUrl = useCallback(
-        (trackId: string) => `/api/share/${token}/stream/${trackId}`,
+        (trackId: string) => shareStreamPath(token, trackId),
         [token]
     );
 

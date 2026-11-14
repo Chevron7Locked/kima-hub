@@ -2,6 +2,8 @@
  * the host the link was opened on, through the share's own cover route (the same one SharePageClient uses, and the only
  * one that serves a cover to a stranger). A cover that route would refuse, or no cover at all, gives no image. */
 
+import { shareCoverPath } from "@/lib/shareAddresses";
+
 interface ShareEntityCover {
     coverUrl?: string | null;
     album?: { coverUrl?: string | null } | null;
@@ -17,11 +19,6 @@ function origin(headers: Headers): string | null {
     if (!host) return null;
     const proto = first(headers.get("x-forwarded-proto")).toLowerCase();
     return `${proto === "https" ? "https" : "http"}://${host}`;
-}
-
-/** The share's cover route for one cover (a relative address; the page uses it as is). */
-export function shareCoverPath(token: string, coverId: string): string {
-    return `/api/share/${encodeURIComponent(token)}/cover-art/${encodeURIComponent(coverId)}?size=500`;
 }
 
 export function sharePreviewImage(token: string, entity: ShareEntityCover | undefined, headers: Headers): string | null {
