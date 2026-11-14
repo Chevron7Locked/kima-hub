@@ -54,6 +54,24 @@ describe("EnrichmentFailureService", () => {
             expect(rows[0]).toMatchObject({ retryCount: 2, errorMessage: "second try" });
         });
 
+        it("a repeat failure refreshes maxRetries, so a changed cap reaches an old row", async () => {
+            await enrichmentFailureService.recordFailure(baseInput);
+            await prisma.enrichmentFailure.update({
+                where: { entityType_entityId: { entityType: "artist", entityId: baseInput.entityId } },
+                data: { maxRetries: 1 },
+            });
+
+            await enrichmentFailureService.recordFailure(baseInput);
+
+            expect(await stored(baseInput.entityId)).toMatchObject({ maxRetries: STAGE_RETRY_CAP, retryCount: 2 });
+        });
+
+        it("takes only ledger types: a song's failure is its stage record", () => {
+            // @ts-expect-error a song stage's type is not a ledger type
+            const song: Parameters<typeof enrichmentFailureService.recordFailure>[0] = { ...baseInput, entityType: "audio" };
+            expect(song.entityType).toBe("audio");
+        });
+
         it("a repeat failure records the entity's current name", async () => {
             await enrichmentFailureService.recordFailure(baseInput);
             await enrichmentFailureService.recordFailure({ ...baseInput, entityName: "Renamed Artist" });
@@ -115,6 +133,57 @@ describe("EnrichmentFailureService", () => {
             await enrichmentFailureService.recordFailure({ ...input, metadata: { kept: true } });
             await enrichmentFailureService.recordFailure(input);
             expect((await stored(id))?.metadata).toEqual({ kept: true });
+        });
+    });
+
+    describe("cleanupOrphanedFailures", () => {
+        const failure = (entityType: string, entityId: string) =>
+            prisma.enrichmentFailure.create({ data: { entityType, entityId, errorMessage: "x", maxRetries: STAGE_RETRY_CAP } });
+        const open = (entityType: string, entityId: string) =>
+            prisma.enrichmentFailure.count({ where: { entityType, entityId, resolved: false } });
+
+        afterEach(async () => {
+            await prisma.track.deleteMany({ where: { id: `${P}track` } });
+            await prisma.album.deleteMany({ where: { id: `${P}album` } });
+            await prisma.artist.deleteMany({ where: { id: `${P}artist-real` } });
+        });
+
+        it("resolves a row whose artist or podcast is gone and keeps one whose subject exists", async () => {
+            await prisma.artist.create({
+                data: { id: `${P}artist-real`, name: "Real", normalizedName: "real", identityKey: `${P}ik-real`, mbid: null },
+            });
+            await failure("artist", `${P}artist-real`);
+            await failure("artist", `${P}artist-gone`);
+            await failure("podcast", `${P}podcast-gone`);
+
+            await enrichmentFailureService.cleanupOrphanedFailures();
+
+            expect(await open("artist", `${P}artist-real`)).toBe(1);
+            expect(await open("artist", `${P}artist-gone`)).toBe(0);
+            expect(await open("podcast", `${P}podcast-gone`)).toBe(0);
+        });
+
+        it("leaves a legacy audio or vibe row for a song that has since analysed", async () => {
+            await prisma.artist.create({
+                data: { id: `${P}artist-real`, name: "Real", normalizedName: "real", identityKey: `${P}ik-real`, mbid: null },
+            });
+            await prisma.album.create({
+                data: { id: `${P}album`, rgMbid: `${P}rg`, artistId: `${P}artist-real`, identityKey: `${P}ik-al`, title: "A", primaryType: "Album", location: "LIBRARY" },
+            });
+            await prisma.track.create({
+                data: {
+                    id: `${P}track`, albumId: `${P}album`, title: "T", trackNo: 1, duration: 1, filePath: `${P}t.flac`,
+                    fileModified: new Date(), fileSize: 1, analysisStatus: "completed", vibeAnalysisStatus: "completed",
+                },
+            });
+            await failure("audio", `${P}track`);
+            await failure("vibe", `${P}track`);
+
+            await enrichmentFailureService.cleanupOrphanedFailures();
+
+            // Nothing writes these types any more; the sweep no longer reads the song's status columns for them.
+            expect(await open("audio", `${P}track`)).toBe(1);
+            expect(await open("vibe", `${P}track`)).toBe(1);
         });
     });
 });

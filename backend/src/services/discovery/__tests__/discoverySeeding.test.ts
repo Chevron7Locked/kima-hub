@@ -93,6 +93,18 @@ describe('DiscoverySeeding', () => {
             expect(mine(result)).toContainEqual({ name: 'Artist 1', mbid: `${P}mbid-1` });
         });
 
+        it('takes the most played artists first, whatever order the songs were stored in', async () => {
+            // Stored least played first, so the database's own order is the reverse of the plays' rank.
+            for (let i = 1; i <= 8; i++) {
+                await artist(`r${i}`, `Rank ${i}`, `${P}mbid-r${i}`);
+                await song(`r${i}`, `r${i}`, 4 + i);
+            }
+
+            const result = await new DiscoverySeeding().getSeedArtists(USER, 3);
+
+            expect(result.map((s) => s.name)).toEqual(['Rank 8', 'Rank 7', 'Rank 6']);
+        });
+
         it('leaves out an artist with a temp- MBID', async () => {
             await fiveArtists({ 1: { mbid: 'temp-12345' } });
 
@@ -121,6 +133,45 @@ describe('DiscoverySeeding', () => {
             const result = await new DiscoverySeeding().getSeedArtists(USER, 1000);
 
             expect(mine(result).map((s) => s.name)).toEqual(['Library Artist One', 'Library Artist Two']);
+        });
+
+        it('falls back in name order when artists score the same', async () => {
+            // Stored in reverse name order, each with one album of one song.
+            for (const [key, name] of [['c', 'Gamma'], ['b', 'Beta'], ['a', 'Alpha']]) {
+                await artist(key, `Tie ${name}`, `${P}tie-${key}`);
+                await song(`tie${key}`, key, 0);
+            }
+
+            const result = await new DiscoverySeeding().getSeedArtists(USER, 1000);
+
+            expect(mine(result).map((s) => s.name)).toEqual(['Tie Alpha', 'Tie Beta', 'Tie Gamma']);
+        });
+
+        it('falls back to the library with artists that have no MBID or a temp- one left out', async () => {
+            await artist('real', 'Real Artist', `${P}lib-real`);
+            await song('real1', 'real', 0);
+            await artist('temp', 'Temp Artist', 'temp-123');
+            await song('temp1', 'temp', 0);
+            await artist('none', 'No Id Artist', null);
+            await song('none1', 'none', 0);
+
+            const result = await new DiscoverySeeding().getSeedArtists(USER, 1000);
+
+            expect(result.map((s) => s.name)).toContain('Real Artist');
+            expect(result.map((s) => s.name)).not.toContain('Temp Artist');
+            expect(result.map((s) => s.name)).not.toContain('No Id Artist');
+        });
+
+        it('falls back to the library, counting only library albums, when the listener has too few plays', async () => {
+            await artist('mix', 'Mixed Artist', `${P}lib-mix`);
+            await song('mix1', 'mix', 0);
+            await prisma.album.update({ where: { id: `${P}al_mix1` }, data: { location: 'DISCOVER' } });
+            await artist('only', 'Library Only', `${P}lib-only`);
+            await song('only1', 'only', 0);
+
+            const result = await new DiscoverySeeding().getSeedArtists(USER, 1000);
+
+            expect(mine(result).map((s) => s.name)).toEqual(['Library Only']);
         });
 
         it('falls back to the library when fewer than 5 songs were played enough', async () => {
@@ -235,6 +286,36 @@ describe('DiscoverySeeding', () => {
 
             await failed(2);
             expect(await owned()).toBe(true);
+        });
+
+        describe('by name', () => {
+            /** An album kept in OwnedAlbum whose Album row is gone; the suggestion that brought it in still names its title. */
+            async function keptWithoutAlbumRow(title: string) {
+                await artist('kept', 'Kept Artist', null);
+                await prisma.ownedAlbum.create({ data: { artistId: `${P}ar_kept`, rgMbid: `${P}rg_kept`, source: 'discovery_liked' } });
+                await prisma.discoveryAlbum.create({
+                    data: { userId: OTHER_USER, rgMbid: `${P}rg_kept`, artistName: 'Kept Artist', albumTitle: title, weekStartDate: OLD_WEEK, status: 'LIKED' },
+                });
+            }
+
+            it('counts an OwnedAlbum with no Album row, under another id, as owned', async () => {
+                await keptWithoutAlbumRow('Trust');
+
+                expect(await new DiscoverySeeding().isAlbumOwned(MBID, USER, 'Kept Artist', 'Trust (Deluxe Edition)')).toBe(true);
+            });
+
+            it('does not count an OwnedAlbum of the same artist with another title', async () => {
+                await keptWithoutAlbumRow('Trust');
+
+                expect(await new DiscoverySeeding().isAlbumOwned(MBID, USER, 'Kept Artist', 'Something Else Entirely')).toBe(false);
+            });
+
+            it('counts a library album of the same artist and title, as before', async () => {
+                await artist('lib', 'Library Artist', null);
+                await song('Trust', 'lib', 0);
+
+                expect(await new DiscoverySeeding().isAlbumOwned(MBID, USER, 'Library Artist', 'Trust')).toBe(true);
+            });
         });
 
         it('is false when the album is nowhere and Lidarr is not set up', async () => {

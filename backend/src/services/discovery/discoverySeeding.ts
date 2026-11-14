@@ -71,16 +71,18 @@ export class DiscoverySeeding {
             include: { album: { include: { artist: true } } },
         });
 
+        // Most played first: the rows come back in the database's order, so the plays' rank is walked, not the rows'.
+        const trackById = new Map(tracks.map((track) => [track.id, track]));
         const artistMap = new Map<string, SeedArtist>();
-        for (const track of tracks) {
+        for (const { trackId } of weightedPlays) {
+            const track = trackById.get(trackId);
+            if (!track) continue;
             const artist = track.album.artist;
-            if (!artistMap.has(track.album.artistId)) {
-                if (hasRealArtistId(artist.mbid)) {
-                    artistMap.set(track.album.artistId, {
-                        name: artist.name,
-                        mbid: artist.mbid,
-                    });
-                }
+            if (!artistMap.has(track.album.artistId) && hasRealArtistId(artist.mbid)) {
+                artistMap.set(track.album.artistId, {
+                    name: artist.name,
+                    mbid: artist.mbid,
+                });
             }
         }
 
@@ -89,52 +91,25 @@ export class DiscoverySeeding {
         return artists;
     }
 
-    /** The artists with the most albums and tracks, for users with too little play history. */
+    /** The artists with the most albums and tracks, for users with too little play history. Ties go by name, then id. */
     private async getFallbackSeedArtists(limit: number): Promise<SeedArtist[]> {
         logger.debug('[DiscoverySeeding] Insufficient play history, falling back to library');
 
-        const artistsWithCounts = await prisma.artist.findMany({
-            where: {
-                albums: {
-                    some: { location: LIBRARY_LOCATION },
-                },
-            },
-            include: {
-                albums: {
-                    where: { location: LIBRARY_LOCATION },
-                    include: {
-                        _count: {
-                            select: { tracks: true },
-                        },
-                    },
-                },
-            },
-        });
+        // Score: album count + track count / 10, over library albums; an artist with no real MBID cannot seed.
+        const rows = await prisma.$queryRaw<Array<{ name: string; mbid: string }>>`
+            SELECT ar.name, ar.mbid
+            FROM "Artist" ar
+            JOIN "Album" al ON al."artistId" = ar.id AND al.location = ${LIBRARY_LOCATION}::"AlbumLocation"
+            LEFT JOIN "Track" t ON t."albumId" = al.id
+            WHERE ar.mbid IS NOT NULL AND ar.mbid NOT LIKE 'temp-%'
+            GROUP BY ar.id, ar.name, ar.mbid
+            ORDER BY COUNT(DISTINCT al.id) + COUNT(t.id) / 10.0 DESC, ar.name ASC, ar.id ASC
+            LIMIT ${limit}
+        `;
 
-        // Score: album count + track count / 10
-        const scored = artistsWithCounts
-            .map(artist => {
-                const albumCount = artist.albums.length;
-                const trackCount = artist.albums.reduce((sum, album) => sum + (album._count?.tracks || 0), 0);
-                const score = albumCount + (trackCount / 10);
+        logger.debug(`[DiscoverySeeding] Selected ${rows.length} fallback artists by engagement score`);
 
-                return {
-                    artist,
-                    score,
-                    albumCount,
-                    trackCount,
-                };
-            })
-            .filter(a => hasRealArtistId(a.artist.mbid))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
-
-        logger.debug(`[DiscoverySeeding] Selected ${scored.length} fallback artists by engagement score`);
-
-        return scored.map(s => ({
-            name: s.artist.name,
-            mbid: s.artist.mbid,
-        }));
+        return rows.map((r) => ({ name: r.name, mbid: r.mbid }));
     }
 
     /** The owned-album snapshot, cached for OWNED_INDEX_TTL_MS. */
@@ -164,6 +139,20 @@ export class DiscoverySeeding {
             }),
         ]);
 
+        // An OwnedAlbum names no title of its own. Its album row has one; with that row gone, a suggestion's record of the
+        // same release group still does.
+        const albumTitles = new Map(albumRows.map((a) => [a.rgMbid, a.title]));
+        const untitled = ownedAlbumRows.map((o) => o.rgMbid).filter((rg) => !albumTitles.has(rg));
+        const suggested = untitled.length > 0
+            ? await prisma.discoveryAlbum.findMany({
+                where: { rgMbid: { in: untitled } },
+                select: { rgMbid: true, albumTitle: true },
+            })
+            : [];
+        for (const record of suggested) {
+            if (!albumTitles.has(record.rgMbid)) albumTitles.set(record.rgMbid, record.albumTitle);
+        }
+
         const albums = albumRows.map((a) => ({
             artistName: a.artist.name,
             title: a.title,
@@ -178,7 +167,7 @@ export class DiscoverySeeding {
                 artistName: o.artist.name,
                 rgMbid: o.rgMbid,
             })),
-            albumTitleByRgMbid: new Map(albums.map((a) => [a.rgMbid, a.title])),
+            albumTitleByRgMbid: albumTitles,
         };
         return this.ownedIndexCache;
     }
@@ -230,18 +219,22 @@ export class DiscoverySeeding {
             // Allow 2+ character names (handles U2, AC/DC, M83, etc.)
             if (artistFirstWord && artistFirstWord.length >= 2) {
                 // Scan the cached owned-album snapshot in-memory instead of a
-                // startsWith/contains query per candidate.
-                const { albums } = await this.getOwnedAlbumIndex();
+                // startsWith/contains query per candidate. Library albums and OwnedAlbum records both count:
+                // an owned album whose album row is gone is still owned.
+                const { albums, ownedAlbumArtists, albumTitleByRgMbid } = await this.getOwnedAlbumIndex();
                 // Both sides normalised the same way: no leading article, no edition suffix.
                 const normTitle = normalizeForMatching(albumTitle);
-                const candidates = albums.filter(
-                    (a) =>
-                        a.location === LIBRARY_LOCATION &&
-                        normalizeForMatching(a.artistName).startsWith(artistFirstWord)
+                const candidates: Array<{ artistName: string; title: string }> = albums.filter(
+                    (a) => a.location === LIBRARY_LOCATION
                 );
+                for (const owned of ownedAlbumArtists) {
+                    const title = albumTitleByRgMbid.get(owned.rgMbid);
+                    if (title) candidates.push({ artistName: owned.artistName, title });
+                }
 
                 for (const album of candidates) {
                     if (
+                        normalizeForMatching(album.artistName).startsWith(artistFirstWord) &&
                         stringSimilarity(normArtist, normalizeForMatching(album.artistName)) >= 75 &&
                         stringSimilarity(normTitle, normalizeForMatching(album.title)) >= 75
                     ) {

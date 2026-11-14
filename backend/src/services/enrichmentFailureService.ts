@@ -29,14 +29,17 @@ function isTrackStageEntityType(entityType: string | undefined): boolean {
     return entityType !== undefined && STAGE_ENTITY_TYPES.has(entityType);
 }
 
-const LEDGER_TYPES = ["artist", "podcast"];
+/** The types the ledger holds. A song's failures are its stage records, never ledger rows. */
+const LEDGER_TYPES = ["artist", "podcast"] as const;
+type LedgerType = (typeof LEDGER_TYPES)[number];
 
 /** The stages and ledger types a failure type covers; no type covers them all. */
-function failureScope(entityType: string | undefined): { stages: string[]; ledgerTypes: string[] } {
-    if (entityType === undefined) return { stages: Object.keys(ENTITY_TYPE_BY_STAGE), ledgerTypes: LEDGER_TYPES };
+function failureScope(entityType: string | undefined): { stages: string[]; ledgerTypes: LedgerType[] } {
+    if (entityType === undefined) return { stages: Object.keys(ENTITY_TYPE_BY_STAGE), ledgerTypes: [...LEDGER_TYPES] };
+    const ledgerType = LEDGER_TYPES.find((t) => t === entityType);
     return {
         stages: isTrackStageEntityType(entityType) ? STAGES_BY_ENTITY_TYPE[entityType] : [],
-        ledgerTypes: LEDGER_TYPES.includes(entityType) ? [entityType] : [],
+        ledgerTypes: ledgerType ? [ledgerType] : [],
     };
 }
 
@@ -126,7 +129,7 @@ interface EnrichmentFailure {
 }
 
 interface RecordFailureInput {
-    entityType: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
+    entityType: LedgerType;
     entityId: string;
     entityName?: string;
     errorMessage: string;
@@ -143,7 +146,7 @@ interface GetFailuresOptions {
 }
 
 class EnrichmentFailureService {
-    /** Records an artist's or podcast's failure, counting a repeat. */
+    /** Records an artist's or podcast's failure, counting a repeat and refreshing the retry cap. */
     async recordFailure(input: RecordFailureInput): Promise<EnrichmentFailure> {
         const {
             entityType,
@@ -177,6 +180,7 @@ class EnrichmentFailureService {
                 errorMessage,
                 errorCode,
                 retryCount: { increment: 1 },
+                maxRetries: STAGE_RETRY_CAP,
                 lastFailedAt: new Date(),
                 resolved: false,
                 resolvedAt: null,
@@ -451,20 +455,6 @@ class EnrichmentFailureService {
             }
         }
 
-        // Resolve failures for entities that subsequently succeeded on retry
-        const staleSucceeded = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT ef.id FROM "EnrichmentFailure" ef
-            JOIN "Track" t ON ef."entityId" = t.id
-            WHERE ef.resolved = false AND ef.skipped = false
-            AND (
-                (ef."entityType" = 'audio' AND t."analysisStatus" = 'completed')
-                OR (ef."entityType" = 'vibe' AND t."vibeAnalysisStatus" = 'completed')
-            )
-        `;
-        for (const row of staleSucceeded) {
-            toResolve.push(row.id);
-        }
-
         if (toResolve.length > 0) {
             await this.resolveFailures(toResolve);
             logger.debug(
@@ -476,7 +466,7 @@ class EnrichmentFailureService {
     }
 
     /** Resolves an entity's open failure rows once it has enriched. */
-    async resolveByEntity(entityType: "vibe" | "audio" | "artist" | "podcast", entityId: string): Promise<boolean> {
+    async resolveByEntity(entityType: LedgerType, entityId: string): Promise<boolean> {
         const result = await prisma.enrichmentFailure.updateMany({
             where: {
                 entityType,
