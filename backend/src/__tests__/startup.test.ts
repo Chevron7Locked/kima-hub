@@ -110,7 +110,6 @@ describe("backgroundStartSteps", () => {
     beforeEach(() => {
         jest.resetModules();
         jest.doMock("../utils/systemSettings", () => ({ getSystemSettings: mockSettings }));
-        jest.doMock("../utils/db", () => ({ prisma: { audiobook: { count: mockAudiobookCount } } }));
         jest.doMock("../services/audiobookCache", () => ({ audiobookCacheService: { syncAll: mockSyncAll } }));
         jest.doMock("../services/discovery/sortDiscoverAlbums", () => ({ sortDiscoverAlbums: mockSortDiscover }));
         jest.doMock("../services/artistCountsService", () => ({
@@ -125,6 +124,9 @@ describe("backgroundStartSteps", () => {
 
     async function steps(shutdownHasBegun: () => boolean) {
         const { backgroundStartSteps } = await import("../backgroundStart");
+        // The real client, with the one read that decides whether the sync runs answered as an empty cache.
+        const { prisma } = await import("../utils/db");
+        jest.spyOn(prisma.audiobook, "count").mockImplementation(mockAudiobookCount as never);
         return backgroundStartSteps(shutdownHasBegun);
     }
     const run = async (all: Awaited<ReturnType<typeof steps>>, name: string) =>

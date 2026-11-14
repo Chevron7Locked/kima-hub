@@ -1,6 +1,7 @@
 // shutdownWorkers stops the workers and crons and closes their queues. `enrichmentStateService` is shared with
 // code outside the workers, so its connections close once, in the server's own close steps (closeSteps.ts), not here too.
-// Everything the workers module starts is replaced, so the test only asks what shutdown does.
+// Everything the workers module starts is replaced, so the test only asks what shutdown does. The database is the
+// real one: the only thing asked of it is that its client is disconnected once, which a spy on the real client records.
 
 const mockDisconnect = jest.fn(async () => {});
 const mockStops = {
@@ -32,10 +33,8 @@ jest.mock("../processors/refileProcessor", () => ({ processRefile: jest.fn() }))
 jest.mock("../processors/discoverProcessor", () => ({ processDiscoverWeekly: jest.fn() }));
 jest.mock("../processors/importProcessor", () => ({ processImportJob: jest.fn() }));
 jest.mock("../scanRequest", () => ({ requestScan: jest.fn() }));
-const mockDbDisconnect = jest.fn(async () => {});
 const mockRedisQuit = jest.fn(async () => {});
 const mockSoulseekDisconnect = jest.fn();
-jest.mock("../../utils/db", () => ({ prisma: { $disconnect: mockDbDisconnect } }));
 jest.mock("../../services/soulseek", () => ({ soulseekService: { disconnect: mockSoulseekDisconnect } }));
 jest.mock("../../utils/redis", () => ({ redisClient: { quit: mockRedisQuit } }));
 jest.mock("../../services/stages/stageRecords", () => ({ SCAN_AGAIN_KEY: "scan-again" }));
@@ -61,6 +60,10 @@ jest.mock("../../services/enrichmentState", () => ({ enrichmentStateService: { d
 
 import { shutdownWorkers } from "../index";
 import { closeSteps } from "../../closeSteps";
+import { prisma } from "../../utils/db";
+
+// Spied without running: nothing here connected, and the suite's other files keep their own clients.
+const mockDbDisconnect = jest.spyOn(prisma, "$disconnect").mockResolvedValue();
 
 describe("shutdownWorkers", () => {
     it("stops every worker and cron and closes the queues", async () => {
