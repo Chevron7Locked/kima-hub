@@ -7,9 +7,15 @@ import { subsonicGuesses } from "../services/users/guessLimits";
 import { findUserByUsername, normalizeUsername } from "../services/users/accounts";
 import { one } from "../utils/subsonicParams";
 
-/** Whether the typed name means this account: the same lookup the password path uses. */
-async function isNamedAccount(given: string, userId: string): Promise<boolean> {
-    return (await findUserByUsername(given, { id: true }))?.id === userId;
+/**
+ * Whether the typed name means the account that owns a key: the same answer the password path's lookup gives. The
+ * trimmed name is the common case and costs no query; only a name stored with padding needs the lookup, to see that no
+ * trimmed account shadows it.
+ */
+async function namesKeyOwner(given: string, keyOwner: { id: string; username: string }): Promise<boolean> {
+    if (keyOwner.username === normalizeUsername(given)) return true;
+    if (keyOwner.username !== given) return false;
+    return (await findUserByUsername(given, { id: true }))?.id === keyOwner.id;
 }
 
 export async function subsonicAuth(
@@ -47,7 +53,7 @@ export async function subsonicAuth(
         // OpenSubsonic API key auth (preferred)
         if (apiKey) {
             const keyUser = await findApiKeyUser(apiKey);
-            if (!keyUser || !(await isNamedAccount(given, keyUser.id))) {
+            if (!keyUser || !(await namesKeyOwner(given, keyUser))) {
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
@@ -69,7 +75,7 @@ export async function subsonicAuth(
             // adds no enumeration timing gap. Scoped to the claimed user. A key skips the
             // 2FA check below: it was minted from a 2FA-verified session.
             const keyUser = await findApiKeyUser(plainPassword);
-            if (keyUser && (await isNamedAccount(given, keyUser.id))) {
+            if (keyUser && (await namesKeyOwner(given, keyUser))) {
                 req.user = keyUser;
                 next();
                 return;

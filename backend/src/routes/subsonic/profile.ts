@@ -10,15 +10,15 @@ export const profileRouter = Router();
 profileRouter.all("/getUser.view", wrap(async (req, res) => {
     const given = one(req, "username") ?? "";
     const requested = normalizeUsername(given);
-    // Asking about oneself needs no admin, including an account stored with padding, named as stored.
-    const isSelf = requested === req.user!.username || given === req.user!.username;
-    if (requested && !isSelf && !requireSubsonicAdmin(req, res)) {
-        return;
-    }
 
     const target = requested
-        ? await findUserByUsername(given, { username: true, role: true })
-        : { username: req.user!.username, role: req.user!.role };
+        ? await findUserByUsername(given, { id: true, username: true, role: true })
+        : { id: req.user!.id, username: req.user!.username, role: req.user!.role };
+
+    // Asking about oneself needs no admin, whatever name form was typed; anyone else is an admin's to look up.
+    if (target?.id !== req.user!.id && !requireSubsonicAdmin(req, res)) {
+        return;
+    }
 
     if (!target) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "User not found");

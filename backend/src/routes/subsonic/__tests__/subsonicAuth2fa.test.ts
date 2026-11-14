@@ -221,6 +221,40 @@ describe("subsonicAuth: the username is trimmed", () => {
         expect(res.body["subsonic-response"].user.username).toBe(name);
     });
 
+    it("refuses a padded account's key under its padded name once a trimmed account of that name exists", async () => {
+        seq += 1;
+        const name = `subauth_shadow_${seq}`;
+        const padded = await prisma.user.create({
+            data: { username: ` ${name}`, passwordHash: await bcrypt.hash(PLAIN_PASSWORD, 10) },
+        });
+        const { key } = await createApiKey(padded.id, "test device");
+        const ping = (extra: Record<string, string>) =>
+            request(app).get("/rest/ping.view").query({ f: "json", v: "1.16.1", c: "test", ...extra });
+
+        expect((await ping({ u: ` ${name}`, apiKey: key })).body["subsonic-response"].status).toBe("ok");
+
+        await prisma.user.create({ data: { username: name, passwordHash: await bcrypt.hash("other-password", 10) } });
+
+        // The trimmed account now wins the name, as it does on the password path.
+        expect((await ping({ u: ` ${name}`, apiKey: key })).body["subsonic-response"].error.code).toBe(40);
+        expect((await ping({ u: ` ${name}`, p: key })).body["subsonic-response"].error.code).toBe(40);
+    });
+
+    it("lets a user ask getUser about itself under any typed form, and keeps others for admins", async () => {
+        const me = await mkUser("me");
+        const other = await mkUser("other");
+
+        const self = await request(app)
+            .get("/rest/getUser.view")
+            .query({ u: me.username, p: PLAIN_PASSWORD, username: ` ${me.username} `, f: "json", v: "1.16.1", c: "test" });
+        const someoneElse = await request(app)
+            .get("/rest/getUser.view")
+            .query({ u: me.username, p: PLAIN_PASSWORD, username: other.username, f: "json", v: "1.16.1", c: "test" });
+
+        expect(self.body["subsonic-response"].status).toBe("ok");
+        expect(someoneElse.body["subsonic-response"].error.code).toBe(50);
+    });
+
     it("answers getUser and getAvatar for an account stored with padding, and lets it ask about itself", async () => {
         seq += 1;
         const stored = ` subauth_self_${seq}`;
