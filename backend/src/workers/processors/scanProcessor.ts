@@ -89,9 +89,10 @@ export async function processScan(
 
         await job.updateProgress(100);
 
-        // What a Subsonic client lists changed when the scan added, changed, flagged or retired songs. A marker that
-        // cannot be written is logged and does not fail a scan that found the songs.
-        if (result.tracksAdded + result.tracksUpdated + result.tracksMissing + result.tracksRemoved + result.tracksCorrupt > 0) {
+        // What a Subsonic client lists changed when the scan added, changed, flagged or retired a song on a library
+        // album; a scan that only touched Discover's songs leaves it. A marker that cannot be written is logged and does
+        // not fail a scan that found the songs.
+        if (result.libraryChanged) {
             await markLibraryChanged().catch((e) => logger.error(`[ScanJob ${job.id}] Failed to record the library change:`, e));
         }
 
@@ -234,8 +235,11 @@ export async function processScan(
     } catch (error) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);
         // A scan that fails part-way has filed songs the next scan will skip, and its counts are lost with the throw,
-        // so the marker moves: a client re-lists once, never misses a change.
-        await markLibraryChanged().catch((e) => logger.error(`[ScanJob ${job.id}] Failed to record the library change:`, e));
+        // so the scanner's own record decides: the marker moves when it changed a library song before failing (a client
+        // re-lists once, never misses a change), and stays when it failed before filing anything or only filed Discover's.
+        if (scanner.libraryChanged) {
+            await markLibraryChanged().catch((e) => logger.error(`[ScanJob ${job.id}] Failed to record the library change:`, e));
+        }
         if (userId) {
             eventBus.emit({
                 type: "scan:complete",

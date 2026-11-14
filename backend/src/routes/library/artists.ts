@@ -41,6 +41,7 @@ import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { popularSongs } from "../../services/popularSongs";
+import { markLibraryChangedQuietly } from "../../services/libraryChanged";
 
 /**
  * The artist list's order for `sortBy`; anything unknown sorts by name. Names sort on `sortName` (article-stripped,
@@ -805,6 +806,8 @@ router.delete("/artists/:id", async (req, res) => {
       where: { id: artist.id },
     });
     announcePlaylistsChanged(playlists);
+    // An artist with a library album gone is a change to what a client lists; one with only Discover albums was never listed.
+    if (artist.albums.some((a) => a.location === "LIBRARY")) await markLibraryChangedQuietly("artist deleted");
 
     res.json({
       message: "Artist deleted successfully",

@@ -21,6 +21,7 @@ import { prisma } from "../../utils/db";
 import { refileLibrary } from "../albumRefile";
 import { backfillAllArtistCounts } from "../artistCountsService";
 import { useShutdownCheck } from "../../utils/stopCheck";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.setTimeout(60_000);
 
@@ -254,6 +255,18 @@ describe("re-filing albums by their tags", () => {
 
         expect(result).toMatchObject({ albumsMoved: 0, albumsMerged: 0, artistsRemoved: 0 });
         expect(await filing("Refile Settled")).toEqual([{ artist: "Refile Band", rgMbid: a.rgMbid, songs: 1 }]);
+    });
+
+    it("moves the library-changed marker when an album moves to another artist, and leaves it when nothing moves", async () => {
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Marker Album", { rgMbid: REAL_RG });
+        await song(a.id, "Refile Cut and Band/Refile Marker Album/01.flac", {
+            album: "Refile Marker Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+
+        expect(await markerMoves(() => refileLibrary(musicDir))).toBe(true);
+        expect(await markerMoves(() => refileLibrary(musicDir))).toBe(false);
     });
 
     it("never deletes or adds to the right artist's own copy when it was edited", async () => {

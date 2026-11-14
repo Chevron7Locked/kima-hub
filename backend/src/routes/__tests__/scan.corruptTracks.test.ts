@@ -19,6 +19,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import scanRouter from "../../routes/library/scan";
 import { mountAsServer } from "./helpers/serverMount";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 const PREFIX = "corrupt";
 const id = (n: string) => `${PREFIX}_${n}`;
@@ -138,5 +139,26 @@ describe("DELETE /library/corrupt-tracks", () => {
         // The non-admin call changed nothing — the flag is still set.
         const track = await prisma.track.findUnique({ where: { id: id("t1") } });
         expect(track?.corrupt).toBe(true);
+    });
+});
+
+describe("the library-changed marker on DELETE /library/corrupt-tracks", () => {
+    const clear = (token: string) => request(app).delete("/library/corrupt-tracks").set("Authorization", `Bearer ${token}`);
+
+    it("moves when a song on a library album is cleared, because the library lists it again", async () => {
+        const token = await makeUser(id("boss3"), "admin");
+        expect(await markerMoves(() => clear(token))).toBe(true);
+    });
+
+    it("leaves it when the cleared song is on a Discover album", async () => {
+        const token = await makeUser(id("boss4"), "admin");
+        await prisma.album.update({ where: { id: id("alb") }, data: { location: "DISCOVER" } });
+        expect(await markerMoves(() => clear(token))).toBe(false);
+    });
+
+    it("leaves it when no song is flagged", async () => {
+        const token = await makeUser(id("boss5"), "admin");
+        await prisma.track.update({ where: { id: id("t1") }, data: { corrupt: false } });
+        expect(await markerMoves(() => clear(token))).toBe(false);
     });
 });

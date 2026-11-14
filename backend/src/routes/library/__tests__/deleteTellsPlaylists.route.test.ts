@@ -19,6 +19,7 @@ import { prisma } from "../../../utils/db";
 import { eventBus, type SSEEvent } from "../../../services/eventBus";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
+import { markerMoves } from "../../../__tests__/helpers/libraryMarker";
 
 const MARK = "zz-library-delete";
 const app = express();
@@ -110,5 +111,40 @@ describe("deleting from the library tells the playlists that held the songs", ()
         expect((await request(app).delete(`/artists/${artist}`)).status).toBe(200);
 
         expect(announced().map((p) => p.playlistId).sort()).toEqual([first, second].sort());
+    });
+});
+
+describe("deleting from the library moves the library-changed marker", () => {
+    it("for a song, an album and an artist on the library", async () => {
+        expectLog("warn");
+        const song = await seedArtist("mark-song");
+        expect(await markerMoves(() => request(app).delete(`/tracks/${song.songs[0]}`))).toBe(true);
+
+        const album = await seedArtist("mark-album");
+        expect(await markerMoves(() => request(app).delete(`/albums/${album.album}`))).toBe(true);
+
+        const artist = await seedArtist("mark-artist");
+        expect(await markerMoves(() => request(app).delete(`/artists/${artist.artist}`))).toBe(true);
+    });
+
+    it("not for a Discover song, album or artist, which no client lists", async () => {
+        expectLog("warn");
+        const hide = async (tag: string) => {
+            const seeded = await seedArtist(tag);
+            await prisma.album.update({ where: { id: seeded.album }, data: { location: "DISCOVER" } });
+            return seeded;
+        };
+        const song = await hide("hidden-song");
+        expect(await markerMoves(() => request(app).delete(`/tracks/${song.songs[0]}`))).toBe(false);
+
+        const album = await hide("hidden-album");
+        expect(await markerMoves(() => request(app).delete(`/albums/${album.album}`))).toBe(false);
+
+        const artist = await hide("hidden-artist");
+        expect(await markerMoves(() => request(app).delete(`/artists/${artist.artist}`))).toBe(false);
+    });
+
+    it("not when the delete finds nothing", async () => {
+        expect(await markerMoves(() => request(app).delete(`/tracks/${MARK}-nothing`))).toBe(false);
     });
 });

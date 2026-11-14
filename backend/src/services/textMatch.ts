@@ -4,6 +4,7 @@
  * case form of each letter, and Postgres matches that pattern and pages the ids.
  */
 import { Prisma } from "@prisma/client";
+import { pgLower, unaccent } from "./pgTextRules";
 
 /** Whether the text holds any character outside ASCII, which the database cannot fold case for. */
 export const hasNonAscii = (text: string): boolean => /[^\x00-\x7f]/.test(text);
@@ -69,4 +70,19 @@ export function containsSql(columns: Prisma.Sql[], text: string): Prisma.Sql {
     const pattern = hasNonAscii(text) ? foldedPattern(text) : null;
     const tests = columns.map((c) => (pattern === null ? Prisma.sql`strpos(lower(${c}), ${lowered}) > 0` : Prisma.sql`${c} ~ ${pattern}`));
     return Prisma.sql`(${Prisma.join(tests, " OR ")})`;
+}
+
+/** `text` as the database's `lower(unaccent())` folds it: "Café" and "cafe" fold alike (the fold the stored name keys use). */
+export const accentBlind = (text: string): string => pgLower(unaccent(text.normalize("NFC")));
+
+/**
+ * `containsSql`, and also true when the columns hold `text` apart from accents: "cafe" finds "Café". The text is folded
+ * here as `lower(unaccent())` folds a column there (pgTextRules keeps the two alike), so a query that is already
+ * accented finds what it did before and its unaccented spellings too.
+ */
+export function containsAccentBlindSql(columns: Prisma.Sql[], text: string): Prisma.Sql {
+    const folded = accentBlind(text);
+    if (folded === "") return containsSql(columns, text);
+    const tests = columns.map((c) => Prisma.sql`strpos(lower(unaccent(${c})), ${folded}) > 0`);
+    return Prisma.sql`(${containsSql(columns, text)} OR ${Prisma.join(tests, " OR ")})`;
 }

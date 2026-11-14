@@ -15,6 +15,7 @@ import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist }
 import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
+import { markLibraryChangedQuietly } from "./libraryChanged";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import { shutdownStop } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
@@ -192,6 +193,8 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
         }
     }
 
+    // Library albums moved, merged or under a renamed artist: a client lists them differently.
+    if (result.albumsMoved + result.albumsMerged + result.artistsRenamed > 0) await markLibraryChangedQuietly("albums re-filed");
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
     await backfillAllArtistCounts(undefined, shutdownStop()).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
     logger.info(

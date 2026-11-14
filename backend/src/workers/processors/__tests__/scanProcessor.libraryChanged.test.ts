@@ -1,11 +1,18 @@
 /**
- * The library-changed marker a Subsonic client's `lastModified` reads (services/libraryChanged.ts) moves when a scan added,
- * changed, flagged missing, retired or flagged corrupt any song, and not when the scan found nothing to change. The
- * scanner is faked; the marker is the real one on the suite database.
+ * The library-changed marker a Subsonic client's `lastModified` reads (services/libraryChanged.ts) moves when the scan says
+ * it changed what a client lists (the scan result's `libraryChanged`, or the scanner's own when the scan fails
+ * part-way), and not when it found nothing to change or only touched Discover songs. The scanner is faked; the
+ * marker is the real one on the suite database. What counts as a library change is musicScanner.libraryChanged.test.ts.
  */
 const mockScanLibrary = jest.fn();
+let mockScannerChangedLibrary = false;
 jest.mock("../../../services/musicScanner", () => ({
-    MusicScannerService: jest.fn().mockImplementation(() => ({ scanLibrary: (...a: unknown[]) => mockScanLibrary(...a) })),
+    MusicScannerService: jest.fn().mockImplementation(() => ({
+        scanLibrary: (...a: unknown[]) => mockScanLibrary(...a),
+        get libraryChanged() {
+            return mockScannerChangedLibrary;
+        },
+    })),
 }));
 jest.mock("../../../services/spotifyImport", () => ({
     spotifyImportService: { reconcilePendingTracks: jest.fn().mockResolvedValue({ tracksAdded: 0, playlistsUpdated: 0 }), buildPlaylistAfterScan: jest.fn() },
@@ -23,26 +30,32 @@ import { prisma } from "../../../utils/db";
 import { libraryChangedAt, markLibraryChanged } from "../../../services/libraryChanged";
 import { processScan, type ScanJobData } from "../scanProcessor";
 
-const counts = { tracksAdded: 0, tracksUpdated: 0, tracksMissing: 0, tracksRemoved: 0, tracksCorrupt: 0 };
+const counts = { tracksAdded: 0, tracksUpdated: 0, tracksMissing: 0, tracksRemoved: 0, tracksCorrupt: 0, libraryChanged: false };
 const job = (data: ScanJobData = {}) => ({ id: "j1", data, updateProgress: jest.fn().mockResolvedValue(undefined) }) as unknown as Job<ScanJobData>;
 const tick = () => new Promise((r) => setTimeout(r, 15));
+
+beforeEach(() => {
+    mockScannerChangedLibrary = false;
+});
 
 afterAll(async () => {
     await prisma.$disconnect();
 });
 
-it.each([
-    ["added", { tracksAdded: 1 }],
-    ["updated", { tracksUpdated: 1 }],
-    ["flagged missing", { tracksMissing: 1 }],
-    ["retired", { tracksRemoved: 1 }],
-    ["flagged corrupt", { tracksCorrupt: 1 }],
-])("moves the marker when a scan %s songs", async (_what, changed) => {
+it("moves the marker when the scan says it changed the library", async () => {
     const before = (await markLibraryChanged()).getTime();
     await tick();
-    mockScanLibrary.mockResolvedValue({ ...counts, ...changed });
+    mockScanLibrary.mockResolvedValue({ ...counts, tracksAdded: 1, libraryChanged: true });
     await processScan(job());
     expect(await libraryChangedAt()).toBeGreaterThan(before);
+});
+
+it("leaves the marker alone when a scan only changed Discover songs", async () => {
+    const before = (await markLibraryChanged()).getTime();
+    await tick();
+    mockScanLibrary.mockResolvedValue({ ...counts, tracksAdded: 2, tracksMissing: 1, libraryChanged: false });
+    await processScan(job());
+    expect(await libraryChangedAt()).toBe(before);
 });
 
 it("leaves the marker alone when a scan changed nothing, even one asked for by hand", async () => {
@@ -53,10 +66,19 @@ it("leaves the marker alone when a scan changed nothing, even one asked for by h
     expect(await libraryChangedAt()).toBe(before);
 });
 
-it("moves the marker when the scan fails part-way, since songs it filed are skipped by the next scan", async () => {
+it("moves the marker when the scan fails part-way after changing the library, since songs it filed are skipped by the next scan", async () => {
+    const before = (await markLibraryChanged()).getTime();
+    await tick();
+    mockScannerChangedLibrary = true;
+    mockScanLibrary.mockRejectedValue(new Error("disk gone"));
+    await expect(processScan(job())).rejects.toThrow("disk gone");
+    expect(await libraryChangedAt()).toBeGreaterThan(before);
+});
+
+it("leaves the marker alone when the scan fails before changing the library", async () => {
     const before = (await markLibraryChanged()).getTime();
     await tick();
     mockScanLibrary.mockRejectedValue(new Error("disk gone"));
     await expect(processScan(job())).rejects.toThrow("disk gone");
-    expect(await libraryChangedAt()).toBeGreaterThan(before);
+    expect(await libraryChangedAt()).toBe(before);
 });

@@ -16,6 +16,7 @@ import {
     loadDiscoverRecords,
 } from "./discoverEvidence";
 import { nameKey } from "../nameFold";
+import { markLibraryChangedQuietly } from "../libraryChanged";
 import { albumsPlayedAtLeast } from "../stats/listens";
 
 /** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
@@ -142,6 +143,9 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
     });
     // Marked done just after its albums are filed (Kevin, 2026-11-11): the save cannot join the transaction. If it fails,
     // the marker stays unset and the next start sorts again from the albums as now filed.
+    // Albums that crossed in either direction change what a client lists. Before the done marker: if the save fails,
+    // the next start sorts again and the marker has already moved.
+    if (toLibrary.length + toDiscover.length > 0) await markLibraryChangedQuietly("Discover sort moved albums");
     await saveSystemSettings({ discoverAlbumsSortedAt: new Date() });
     for (const artistId of new Set([...toLibrary, ...toDiscover].map((a) => a.artistId))) await updateArtistCounts(artistId);
 

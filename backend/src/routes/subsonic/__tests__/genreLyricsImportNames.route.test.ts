@@ -4,7 +4,9 @@
  *   the artist's cached counts.
  * - getLyrics answers with the best match: the exact title as shown first, then a song that has lyrics, then id.
  * - A playlist import finds an artist by the name shown too.
- * - A playlist import's title checks fold case, accents and punctuation like the rest of the import.
+ * - getLyrics finds a title apart from accents ("cafe" finds "Café"), as the rest of the import and the name keys fold.
+ * - A playlist import's title and album checks fold case, accents and punctuation like the rest of the import.
+ * - A playlist import reads the shown artist names once, however many songs it matches.
  * - getArtists' lastModified is when the library a client lists last changed: a person's edit of a shown name moves it;
  *   a Discover song or an analysis write does not; it never goes backwards. (A scan's part is in
  *   workers/processors/__tests__/scanProcessor.libraryChanged.test.ts.)
@@ -123,6 +125,7 @@ beforeAll(async () => {
             { id: `${P}-lyr-b0`, songs: [{ id: `${P}-lyr-b0s`, title: `${P} zeta shown extra`, lyrics: "the extra lyrics" }] },
             { id: `${P}-lyr-b1`, songs: [{ id: `${P}-lyr-b1s`, title: `${P} zeta file`, shown: `${P} zeta shown`, lyrics: "the shown lyrics" }] },
             { id: `${P}-lyr-c`, songs: [{ id: `${P}-lyr-cs`, title: `${P} mute` }] },
+            { id: `${P}-lyr-d`, songs: [{ id: `${P}-lyr-ds`, title: `${P} Café Tune`, lyrics: "the café lyrics" }, { id: `${P}-lyr-es`, title: `${P} plain song`, lyrics: "the plain lyrics" }] },
         ],
     });
     // The artist is matched whole: this one's name holds the other's.
@@ -182,6 +185,16 @@ describe("getLyrics picks the best match", () => {
     it("answers empty when the exact match has no lyrics, rather than another song's lyrics", async () => {
         expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} mute` })).toEqual({});
     });
+
+    it("finds a title with accents when the app asks without them, in any case", async () => {
+        expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} cafe tune` })).toMatchObject({ value: "the café lyrics" });
+        expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} CAFE` })).toMatchObject({ value: "the café lyrics" });
+    });
+
+    it("still finds an accented title when asked with its accents, and a plain title when asked with accents it lacks", async () => {
+        expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} café tune` })).toMatchObject({ value: "the café lyrics" });
+        expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} pláin song` })).toMatchObject({ value: "the plain lyrics" });
+    });
 });
 
 describe("a playlist import finds an artist by the name shown", () => {
@@ -240,12 +253,56 @@ describe("a playlist import's title checks fold like the rest of the import", ()
         expect(pending.albumMbid).toBeNull();
     });
 
+    it("finds the album a song is on when the album names differ by accents or case", () => {
+        const preview = {
+            matchedTracks: [{ spotifyTrack: { ...song("Other", "Beyonce", "other-id"), album: "Cafe Del Mar" }, localTrack: null }],
+            albumsToDownload: [{
+                spotifyAlbumId: "sp1", albumName: "Café Del Mar", artistName: "Beyoncé", artistMbid: "ar1", albumMbid: "rg1", coverUrl: null,
+                trackCount: 1, tracksNeeded: [song("Something Else", "Beyoncé", "needed-id")],
+            }],
+        };
+        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        expect(pending).toMatchObject({ albumMbid: "rg1", artistMbid: "ar1" });
+    });
+
+    it("does not take an album for a song whose album name has no letters or digits", () => {
+        const preview = {
+            matchedTracks: [{ spotifyTrack: { ...song("Other", "Beyonce", "other-id"), album: "???" }, localTrack: null }],
+            albumsToDownload: [{
+                spotifyAlbumId: "sp1", albumName: "Café Del Mar", artistName: "Beyoncé", artistMbid: "ar1", albumMbid: "rg1", coverUrl: null,
+                trackCount: 1, tracksNeeded: [song("Something Else", "Beyoncé", "needed-id")],
+            }],
+        };
+        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        expect(pending.albumMbid).toBeNull();
+    });
+
     it("merges the editions of one album without a song twice, whatever its case, accents or apostrophe", () => {
         const merged = mergeEditionTracks([
             song("Don't Stop", "A", "1"), song("Café", "A", "2"),
             song("DON’T STOP", "A", "3"), song("cafe", "A", "4"), song("Don't Stop (Live)", "A", "5"),
         ]);
         expect(merged.map((t) => t.spotifyId)).toEqual(["1", "2", "5"]);
+    });
+});
+
+describe("a playlist import reads the shown artist names once", () => {
+    it("reconciling several waiting songs makes one lookup of the shown names, not one per song", async () => {
+        const playlistId = `${P}-playlist-2`;
+        await prisma.playlist.create({ data: { id: playlistId, userId: USER, name: playlistId } });
+        for (const [n, title] of ["Hymn", `${P} import song`, "Nothing Matches This"].entries()) {
+            await prisma.playlistPendingTrack.create({
+                data: { playlistId, spotifyArtist: "Quillon Vesper Choir", spotifyTitle: title, spotifyAlbum: "x", sort: n, rank: `a${n}` },
+            });
+        }
+        const lookup = jest.spyOn(prisma.artist, "findMany");
+        try {
+            await spotifyImportService.reconcilePendingTracks(playlistId);
+            const ofShownNames = lookup.mock.calls.filter(([args]) => JSON.stringify(args?.where ?? {}).includes('"displayName"'));
+            expect(ofShownNames).toHaveLength(1);
+        } finally {
+            lookup.mockRestore();
+        }
     });
 });
 

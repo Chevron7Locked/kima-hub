@@ -11,6 +11,7 @@ import { config } from "../../config";
 import { lidarrService } from "../lidarr";
 import { artistNamed, isMbid } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
+import { markLibraryChangedQuietly } from "../libraryChanged";
 import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
@@ -553,7 +554,11 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
         if (result.cleared) cleared++;
         else failures.push({ artistName: ref.artistName, albumTitle: ref.albumTitle, reason: result.reason, userIds: await listenersNaming(ref) });
     }
-    if (returned > 0) logger.info(`[DiscoverClear] ${returned} album(s) filed as Discover with no Discover record went back to the library`);
+    if (returned > 0) {
+        logger.info(`[DiscoverClear] ${returned} album(s) filed as Discover with no Discover record went back to the library`);
+        // A client now lists them.
+        await markLibraryChangedQuietly("Discover albums with no record went back to the library");
+    }
     return { cleared, returned, failures };
 }
 

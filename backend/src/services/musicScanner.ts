@@ -95,6 +95,12 @@ export interface ScanResult {
     /** Tracks retired by the reconcile sweep; always 0 in `flag` mode. */
     tracksRemoved: number;
     tracksCorrupt: number;
+    /**
+     * Whether the scan changed the library a client lists: a song on a library album was added, changed, flagged
+     * missing, brought back, flagged corrupt or retired. Discover's songs are not listed, so a scan that only
+     * touched those leaves it false.
+     */
+    libraryChanged: boolean;
     errors: Array<{ file: string; error: string }>;
     duration: number;
 }
@@ -121,6 +127,15 @@ export class MusicScannerService {
     private progressCallback?: (progress: ScanProgress) => void;
     private coverArtExtractor?: CoverArtExtractor;
     private coverCachePath?: string;
+    private libraryMoved = false;
+
+    /**
+     * Whether the scan so far changed a song on a library album (the scan's `libraryChanged`). Readable after the scan
+     * throws too: the scan's counts are lost with the throw, but what it filed before is kept.
+     */
+    get libraryChanged(): boolean {
+        return this.libraryMoved;
+    }
 
     constructor(
         progressCallback?: (progress: ScanProgress) => void,
@@ -142,6 +157,7 @@ export class MusicScannerService {
         // for another artist, or retired): only their stored counts are recounted, in the background, even when the
         // scan fails part-way, since the next scan skips the files this one already filed.
         const touchedArtists = new Set<string>();
+        this.libraryMoved = false;
         try {
             return await this.scanFiles(musicPath, touchedArtists);
         } finally {
@@ -164,6 +180,7 @@ export class MusicScannerService {
             tracksMissing: 0,
             tracksRemoved: 0,
             tracksCorrupt: 0,
+            libraryChanged: false,
             errors: [],
             duration: 0,
         };
@@ -202,9 +219,15 @@ export class MusicScannerService {
             errors: [],
         };
 
-        const touchArtistsWhere = async (where: Prisma.TrackWhereInput) => {
-            const rows = await prisma.track.findMany({ where, select: { album: { select: { artistId: true } } } });
-            for (const row of rows) touchedArtists.add(row.album.artistId);
+        // `listed`: the songs are about to change (or have just), so a library song among them changes what a client lists.
+        // A song already flagged corrupt is not listed: a corrupt file is read again on every scan and fails the same
+        // way, which must not move the marker each time. If it reads this time, the filing below moves it.
+        const touchArtistsWhere = async (where: Prisma.TrackWhereInput, listed = true) => {
+            const rows = await prisma.track.findMany({ where, select: { corrupt: true, album: { select: { artistId: true, location: true } } } });
+            for (const row of rows) {
+                touchedArtists.add(row.album.artistId);
+                if (listed && !row.corrupt && row.album.location === "LIBRARY") this.libraryMoved = true;
+            }
         };
         const touchArtistsOf = async (songIds: string[]) => {
             if (songIds.length > 0) await touchArtistsWhere({ id: { in: songIds } });
@@ -307,7 +330,9 @@ export class MusicScannerService {
                         await reopenStagesForChangedFile(existingTrack.id);
                     }
 
-                    touchedArtists.add(await this.processAudioFile(audioFile, relativePath, musicPath, elected, parsed.get(audioFile)));
+                    const filed = await this.processAudioFile(audioFile, relativePath, musicPath, elected, parsed.get(audioFile));
+                    touchedArtists.add(filed.artistId);
+                    if (filed.location === "LIBRARY") this.libraryMoved = true;
                     if (existingTrack) result.tracksUpdated++;
                     else result.tracksAdded++;
                 } catch (err: any) {
@@ -414,14 +439,18 @@ export class MusicScannerService {
         // A retired song leaves its artist's counts (a Discover album counts while it holds a song, flagged or not,
         // and the pruning below removes the album once its songs go), so those artists are recounted too.
         if (config.music.reconcileMode === "delete") {
-            await touchArtistsWhere({ missingSince: { not: null, lt: new Date(startTime) } });
+            // For the counts only: whether the songs go is the reconcile's call (a mass disappearance retires none).
+            await touchArtistsWhere({ missingSince: { not: null, lt: new Date(startTime) } }, false);
         }
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
+        if (reconcile.libraryRemoved > 0) this.libraryMoved = true;
 
         // Albums with no songs, then artists with no albums, go.
-        await pruneEmptyAlbumsAndArtists();
+        const pruned = await pruneEmptyAlbumsAndArtists();
+        if (pruned.libraryAlbums > 0) this.libraryMoved = true;
 
+        result.libraryChanged = this.libraryMoved;
         result.duration = Date.now() - startTime;
         logger.debug(
             `Scan complete: +${result.tracksAdded} ~${result.tracksUpdated} missing:${result.tracksMissing} corrupt:${result.tracksCorrupt} removed:${result.tracksRemoved} (${result.duration}ms)`
@@ -647,14 +676,14 @@ export class MusicScannerService {
         return (await this.jointFiler.file(chosen)).candidate;
     }
 
-    /** Files one song. Answers the id of the artist whose album it is filed under, for the scan's recount. */
+    /** Files one song. Answers the id of the artist whose album it is filed under, for the scan's recount, and where that album is. */
     private async processAudioFile(
         absolutePath: string,
         relativePath: string,
         musicPath: string,
         elected: ReadonlyMap<string, ArtistCandidate> = new Map(),
         read?: SlimMetadata
-    ): Promise<string> {
+    ): Promise<{ artistId: string; location: "LIBRARY" | "DISCOVER" }> {
         // The tags the vote step already read; a file it could not read is read again, to report why. Nothing here
         // uses the embedded pictures (the cover is extracted from the file itself), so they are never read.
         const metadata = read ?? slimMetadata(await parseFile(absolutePath, { skipCovers: true }));
@@ -871,7 +900,7 @@ export class MusicScannerService {
             logger.debug(`[Scanner] Failed to extract lyrics for ${relativePath}:`, error);
         }
 
-        // The artist whose album the song is filed under, for the scan's recount.
-        return album.artistId;
+        // The artist whose album the song is filed under, for the scan's recount, and whether that album is the library's.
+        return { artistId: album.artistId, location: album.location };
     }
 }

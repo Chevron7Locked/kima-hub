@@ -7,6 +7,7 @@ import { prisma } from "../../utils/db";
 import { parseCredit } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
 import { nameKey } from "../nameFold";
+import { markLibraryChangedQuietly } from "../libraryChanged";
 
 /** What the records say about one album (by id, or by artist and title). */
 interface Mark {
@@ -237,6 +238,8 @@ export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Prom
     }
     // The artist's library and Discover counts, which listings filter on, follow the albums.
     for (const artistId of movedArtists) await updateArtistCounts(artistId);
+    // Library albums left the library: a client no longer lists them.
+    if (movedArtists.size > 0) await markLibraryChangedQuietly("library albums moved to Discover");
     return moved;
 }
 

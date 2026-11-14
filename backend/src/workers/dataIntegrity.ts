@@ -7,6 +7,7 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { markLibraryChangedQuietly } from "../services/libraryChanged";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -135,10 +136,12 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             realArtists.map((a) => [a.normalizedName, a])
         );
 
+        let libraryAlbumsMoved = 0;
         for (const tempArtist of tempArtists) {
             const realArtist = realArtistByNormalizedName.get(tempArtist.normalizedName);
 
             if (realArtist) {
+                libraryAlbumsMoved += await prisma.album.count({ where: { artistId: tempArtist.id, location: "LIBRARY" } });
                 await prisma.album.updateMany({
                     where: { artistId: tempArtist.id },
                     data: { artistId: realArtist.id },
@@ -155,6 +158,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
             }
         }
+        // Library albums under another artist change what a client lists; Discover's were never listed.
+        if (libraryAlbumsMoved > 0) await markLibraryChangedQuietly("temp artists merged into real ones");
     }
 
     // Artists with no albums go, with their similar-artist links.

@@ -311,8 +311,8 @@ function notifyImportFailed(job: ImportJob): void {
  * `normalizedName` is stored already folded to lower case, and `words` are normalized the same way, so a plain
  * comparison is exact for every script.
  */
-async function tracksOfArtistsStartingWith(words: string[]): Promise<Prisma.TrackWhereInput> {
-  const shown = await artistIdsShownStartingWith(words);
+async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownArtists): Promise<Prisma.TrackWhereInput> {
+  const shown = shownArtists.startingWith(words);
   return {
     AND: [
       PLAYABLE_SONG,
@@ -331,17 +331,31 @@ async function tracksOfArtistsStartingWith(words: string[]): Promise<Prisma.Trac
 }
 
 /**
- * Ids of the artists a person renamed (their `displayName`) whose shown name, normalized, passes `test`. Only the edited artists are read and compared here: there is no stored normalized form of a
- * shown name, and the edited are few. A song of an artist so named is offered to the matcher under the shown name too
- * (trackMatching `toMatchCandidates`), and this finds the songs to offer.
+ * The artists a person renamed (their `displayName`), each with its shown name normalized, read in one query. There is no
+ * stored normalized form of a shown name, and the edited are few, so an import loads them once and every track it matches
+ * asks this list. A song of an artist so named is offered to the matcher under the shown name too (trackMatching
+ * `toMatchCandidates`), and these ids find the songs to offer.
  */
-async function artistIdsShown(test: (normalizedShown: string) => boolean): Promise<string[]> {
-  const edited = await prisma.artist.findMany({ where: { displayName: { not: null } }, select: { id: true, displayName: true } });
-  return edited.filter((a) => a.displayName && test(normalizeArtistName(a.displayName))).map((a) => a.id);
+class ShownArtists {
+  private constructor(private readonly shown: { id: string; name: string }[]) {}
+
+  static async load(): Promise<ShownArtists> {
+    const edited = await prisma.artist.findMany({ where: { displayName: { not: null } }, select: { id: true, displayName: true } });
+    return new ShownArtists(
+      edited.flatMap((a) => (a.displayName ? [{ id: a.id, name: normalizeArtistName(a.displayName) }] : [])),
+    );
+  }
+
+  /** Ids of the artists shown as one of `names` (normalized). */
+  as(names: string[]): string[] {
+    return this.shown.filter((a) => names.includes(a.name)).map((a) => a.id);
+  }
+
+  /** Ids of the artists whose shown name is, or begins with the word, one of `words` (normalized). */
+  startingWith(words: string[]): string[] {
+    return this.shown.filter((a) => words.some((w) => a.name === w || a.name.startsWith(`${w} `))).map((a) => a.id);
+  }
 }
-const artistIdsShownAs = (names: string[]) => artistIdsShown((shown) => names.includes(shown));
-const artistIdsShownStartingWith = (words: string[]) =>
-  artistIdsShown((shown) => words.some((w) => shown === w || shown.startsWith(`${w} `)));
 
 /** The most title-only candidates one lookup reads. */
 const TITLE_CANDIDATES_MAX = 500;
@@ -395,7 +409,7 @@ class SpotifyImportService {
    * artist's tracks, then first-word prefix sweeps; the shared ladder in
    * services/trackMatching picks the verdict.
    */
-  private async matchTrack(spotifyTrack: SpotifyTrack): Promise<MatchedTrack> {
+  private async matchTrack(spotifyTrack: SpotifyTrack, shownArtists?: ShownArtists): Promise<MatchedTrack> {
     // A song edited to a shown title or artist name is in once under each pairing, so the key holds both.
     const candidates = new Map<string, MatchCandidate>();
     const add = (rows: MatchCandidate[]) => {
@@ -422,7 +436,7 @@ class SpotifyImportService {
     const dbNormalizedArtist = normalizeArtistName(spotifyTrack.artist);
 
     const exactArtistNames = [normalizedPrimaryArtist, dbNormalizedArtist];
-    const shownAsArtist = await artistIdsShownAs(exactArtistNames);
+    const shownAsArtist = (shownArtists ?? (await ShownArtists.load())).as(exactArtistNames);
     const artistRows = await prisma.track.findMany({
       where: {
         AND: [
@@ -724,8 +738,9 @@ class SpotifyImportService {
     // Parallel DB lookups, capped at 8 so a large playlist does not exhaust the Prisma pool.
     // Promise.all keeps insertion order, so matchedTracks[i] is tracks[i].
     const matchLimit = pLimit(8);
+    const shownArtists = await ShownArtists.load();
     const matchedTracks: MatchedTrack[] = await Promise.all(
-      tracks.map((track) => matchLimit(() => this.matchTrack(track))),
+      tracks.map((track) => matchLimit(() => this.matchTrack(track, shownArtists))),
     );
 
     // Second pass: build unmatchedByAlbum from ordered results
@@ -1145,13 +1160,14 @@ class SpotifyImportService {
         spotifyAlbum &&
         spotifyAlbum !== "Unknown Album"
       ) {
-        const normalizedAlbum = spotifyAlbum.toLowerCase();
+        // Folded like every other name in the import: case, accents and punctuation do not tell two albums apart.
+        const normalizedAlbum = normalizeTrackTitle(spotifyAlbum);
+        // An album name with no letters or digits folds to nothing, which would hold in every name: it matches none.
         albumToDownload = preview.albumsToDownload.find(
           (a) =>
+            normalizedAlbum !== "" &&
             sameName(a.artistName, spotifyArtist) &&
-            a.albumName
-              .toLowerCase()
-              .includes(normalizedAlbum.substring(0, 10)),
+            normalizeTrackTitle(a.albumName).includes(normalizedAlbum.substring(0, 10)),
         );
       }
 
@@ -1677,6 +1693,7 @@ class SpotifyImportService {
       : new Map<string, { id: string; title: string }>();
 
     // Library tracks of the relevant artists
+    const shownArtists = await ShownArtists.load();
     const allArtistFirstWords = [
       ...new Set(
         job.pendingTracks.map((t) => normalizeArtistName(t.artist).split(" ")[0]),
@@ -1694,7 +1711,7 @@ class SpotifyImportService {
     };
     const allLibraryTracks: TrackWithRelations[] = allArtistFirstWords.length > 0
       ? await prisma.track.findMany({
-          where: await tracksOfArtistsStartingWith(allArtistFirstWords),
+          where: await tracksOfArtistsStartingWith(allArtistFirstWords, shownArtists),
           include: { album: { include: { artist: { select: { name: true, displayName: true } } } } },
         }) as TrackWithRelations[]
       : [];
@@ -2344,6 +2361,7 @@ class SpotifyImportService {
     let totalTracksAdded = 0;
     const playlistsWithAdditions = new Set<string>();
     const matchedPendingTrackIds: string[] = [];
+    const shownArtists = await ShownArtists.load();
 
     // Group by playlist for efficient processing
     const tracksByPlaylist = new Map<string, typeof allPendingTracks>();
@@ -2380,7 +2398,7 @@ class SpotifyImportService {
 
         // Same pool and ladder as the import itself (services/trackMatching).
         const artistCandidateRows = await prisma.track.findMany({
-          where: await tracksOfArtistsStartingWith([artistFirstWord]),
+          where: await tracksOfArtistsStartingWith([artistFirstWord], shownArtists),
           include: { album: { include: { artist: true } } },
         });
         const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);

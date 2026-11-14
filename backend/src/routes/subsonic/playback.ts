@@ -11,7 +11,7 @@ import { config } from "../../config";
 import { firstArtistGenre, mapSong, serveFromTranscodeParams, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
-import { containsSql } from "../../services/textMatch";
+import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
@@ -470,14 +470,15 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
         if (artistIds.length === 0) return subsonicOk(req, res, { lyrics: {} });
     }
 
-    // The title is matched as part of the title shown or of the file's, in any letter case and any script.
+    // The title is matched as part of the title shown or of the file's, in any letter case and any script, with or
+    // without accents ("cafe" finds "Café").
     const hits = await prisma.$queryRaw<{ id: string; title: string; displayTitle: string | null; hasLyrics: boolean }[]>`
         SELECT t.id, t.title, t."displayTitle", (tl.track_id IS NOT NULL) AS "hasLyrics"
           FROM "Track" t JOIN "Album" al ON al.id = t."albumId" LEFT JOIN track_lyrics tl ON tl.track_id = t.id
          WHERE ${playableSongSql("t", "al")}
-           ${title ? Prisma.sql`AND ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
+           ${title ? Prisma.sql`AND ${containsAccentBlindSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
            ${artistIds ? Prisma.sql`AND al."artistId" = ANY(${artistIds}::text[])` : Prisma.empty}
-         ORDER BY ${title ? Prisma.sql`(lower(t.title) = lower(${title}) OR lower(t."displayTitle") = lower(${title})) DESC,` : Prisma.empty}
+         ORDER BY ${title ? Prisma.sql`(lower(unaccent(t.title)) = ${accentBlind(title)} OR lower(unaccent(t."displayTitle")) = ${accentBlind(title)}) DESC,` : Prisma.empty}
                   (tl.track_id IS NOT NULL) DESC, t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
 
     // The best match: a song whose title, as shown or in the file, is the one asked for (the same name as far as case,

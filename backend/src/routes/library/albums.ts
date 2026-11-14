@@ -7,6 +7,7 @@ import { lidarrService } from "../../services/lidarr";
 import { safeError } from "../../utils/errors";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
+import { markLibraryChangedQuietly } from "../../services/libraryChanged";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
@@ -235,6 +236,8 @@ router.delete("/albums/:id", async (req, res) => {
       where: { id: album.id },
     });
     announcePlaylistsChanged(playlists);
+    // A library album gone is a change to what a client lists; a Discover album was never listed.
+    if (album.location === "LIBRARY") await markLibraryChangedQuietly("album deleted");
 
     logger.debug(
       `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,

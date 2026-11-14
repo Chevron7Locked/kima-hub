@@ -23,6 +23,7 @@ import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
+import { markLibraryChangedQuietly } from "../../services/libraryChanged";
 import fs from "fs";
 
 const TRACK_SORT_MAP: Record<string, any> = {
@@ -488,7 +489,7 @@ router.delete("/tracks/:id", async (req, res) => {
   try {
     const track = await prisma.track.findUnique({
       where: { id: req.params.id },
-      select: { id: true, title: true, filePath: true },
+      select: { id: true, title: true, filePath: true, album: { select: { location: true } } },
     });
 
     if (!track) {
@@ -522,6 +523,8 @@ router.delete("/tracks/:id", async (req, res) => {
       where: { id: track.id },
     });
     announcePlaylistsChanged(playlists);
+    // A library song gone is a change to what a client lists; a Discover song was never listed.
+    if (track.album.location === "LIBRARY") await markLibraryChangedQuietly("song deleted");
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 

@@ -232,7 +232,7 @@ describe("reconcileDeletedTracks", () => {
         const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "flag" });
         const res = await runReconcile(scanStartedAt());
         spy.mockRestore();
-        expect(res).toEqual({ removed: 0, artifacts: [], playlists: [], skipped: true });
+        expect(res).toEqual({ removed: 0, libraryRemoved: 0, artifacts: [], playlists: [], skipped: true });
         expect(await prisma.track.findUnique({ where: { id: `${P}flag` } })).not.toBeNull();
         expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}flag.flac` } })).toBe(0);
     });
