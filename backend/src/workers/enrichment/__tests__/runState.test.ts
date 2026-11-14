@@ -196,6 +196,26 @@ describe("run state", () => {
         });
     });
 
+    describe("the phase a cycle is inside", () => {
+        it("is none until a phase is entered, and none again once it is left", () => {
+            const run = inMode("running");
+            expect(run.phase()).toBeNull();
+            run.beginCycle();
+            run.enterPhase("analysis");
+            expect(run.phase()).toBe("analysis");
+            run.leavePhase();
+            expect(run.phase()).toBeNull();
+        });
+
+        it("a cycle that ends inside a phase leaves none behind for the next one", () => {
+            const run = inMode("running");
+            run.beginCycle();
+            run.enterPhase("embedding");
+            run.endCycle();
+            expect(run.phase()).toBeNull();
+        });
+    });
+
     describe("housekeeping runs only while the worker runs", () => {
         it.each([
             ["running", true],

@@ -12,9 +12,9 @@
  * A stop is never lost: wherever it is seen (admission, a phase boundary, the stored state), it settles to
  * `stopped`, so a stop that lands mid-cycle holds against the next timer tick.
  *
- * Beside the mode are four facts that are not modes: whether a cycle is in flight, whether a wake request is
- * waiting, whether the stop warning was already given, and whether the worker is closed (the latch that ends the
- * timer chain). The module holds no Redis, timers or workers; the scheduler does the talking and asks here which
+ * Beside the mode are five facts that are not modes: whether a cycle is in flight, which phase it is inside,
+ * whether a wake request is waiting, whether the stop warning was already given, and whether the worker is closed
+ * (the latch that ends the timer chain). The module holds no Redis, timers or workers; the scheduler does the talking and asks here which
  * move to make.
  */
 
@@ -63,6 +63,10 @@ export interface RunState {
     endCycle(): void;
     /** Resolves when the cycle now in flight ends, or at once when none is. A later cycle is not waited for. */
     cycleSettled(): Promise<void>;
+    /** The phase the cycle is inside now, or null between phases and when no cycle runs. */
+    phase(): string | null;
+    enterPhase(name: string): void;
+    leavePhase(): void;
 
     // Questions the cycle asks.
     /** Whether a cycle may go past the stop check: not while stopped, unless it was woken. */
@@ -81,6 +85,7 @@ export function createRunState(): RunState {
     let wake = false;
     let warned = false;
     let closed = false;
+    let phase: string | null = null;
     // Resolves the settle promise of the cycle in flight; null while none runs.
     let settle: (() => void) | null = null;
     let settled: Promise<void> = Promise.resolve();
@@ -141,10 +146,18 @@ export function createRunState(): RunState {
         },
         endCycle() {
             inFlight = false;
+            phase = null;
             settle?.();
             settle = null;
         },
         cycleSettled: () => settled,
+        phase: () => phase,
+        enterPhase(name) {
+            phase = name;
+        },
+        leavePhase() {
+            phase = null;
+        },
 
         admitsCycle() {
             return mode !== "stopped" || wake;

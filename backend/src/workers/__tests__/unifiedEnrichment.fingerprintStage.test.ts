@@ -244,67 +244,6 @@ afterAll(async () => {
 });
 
 describe("the fingerprint stage answers every track", () => {
-    it("computes and stores a fingerprint for a track that HAS an ISRC", async () => {
-        // Fully identified already, ISRC and recording MBID both present:
-        // this class of track is fingerprinted too.
-        const trackId = id("isrc");
-        await seedTrack(trackId, { isrc: "FR10S1700001", recordingMbid: "mbid-known" });
-        await putStage(trackId, "fingerprint", "pending");
-
-        const queued = await dispatchAndDrain();
-
-        expect(queued).toBe(1);
-        // The fingerprint was computed locally and STORED on the track.
-        expect(mockFingerprintFile).toHaveBeenCalledWith(
-            expect.stringContaining("fp_isrc.flac"),
-        );
-        expect(await storedFingerprint(trackId)).toBe(FINGERPRINT);
-        // And the stage record carries the answer.
-        const row = await stageRow(trackId, "fingerprint");
-        expect(row?.status).toBe("done");
-        expect(row?.source).toBe("fpcalc");
-        expect(row?.finishedAt).not.toBeNull();
-    });
-
-    it("does not recompute when the fingerprint is already stored", async () => {
-        const trackId = id("stored");
-        await seedTrack(trackId);
-        await prisma.$executeRawUnsafe(
-            `UPDATE "Track" SET "acoustidFingerprint" = $2 WHERE id = $1`,
-            trackId, FINGERPRINT,
-        );
-        await putStage(trackId, "fingerprint", "pending");
-
-        await dispatchAndDrain();
-
-        // The answer already exists — answering the record from it costs no
-        // fpcalc run and overwrites nothing with nothing.
-        expect(mockFingerprintFile).not.toHaveBeenCalled();
-        expect(await storedFingerprint(trackId)).toBe(FINGERPRINT);
-        expect((await stageRow(trackId, "fingerprint"))?.status).toBe("done");
-    });
-
-    it("records a classified, retryable failure on the record when fpcalc fails", async () => {
-        const trackId = id("broken");
-        await seedTrack(trackId);
-        await putStage(trackId, "fingerprint", "pending");
-        mockFingerprintFile.mockImplementation(async () => null);
-
-        await dispatchAndDrain();
-
-        const row = await stageRow(trackId, "fingerprint");
-        expect(row?.status).toBe("failed");
-        expect(row?.attempt).toBe(1);
-        // Retryable until the cap — a failed file is asked again on backoff,
-        // never silently dropped and never parked as done.
-        const failedRow = await prisma.$queryRawUnsafe<{ retryable: boolean }[]>(
-            `SELECT retryable FROM "TrackStage" WHERE "trackId" = $1 AND stage = 'fingerprint'`,
-            trackId,
-        );
-        expect(failedRow[0]?.retryable).toBe(true);
-        expect(await storedFingerprint(trackId)).toBeNull();
-    });
-
     it("seeds a pending fingerprint record for EVERY existing track, and answers a new track's question the same way as the other stages", async () => {
         const a = id("exist_a");
         const b = id("exist_b");

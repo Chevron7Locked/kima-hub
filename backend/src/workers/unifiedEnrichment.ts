@@ -613,17 +613,21 @@ export async function stopUnifiedEnrichmentWorker() {
     }
     if (run.cycleInFlight()) run.stop();
     let giveUp: NodeJS.Timeout | undefined;
-    const settled = await Promise.race([
-        run.cycleSettled().then(() => true),
-        new Promise<false>((resolve) => {
-            giveUp = setTimeout(() => resolve(false), STOP_WAIT_MS);
-        }),
-    ]);
-    clearTimeout(giveUp);
+    let settled: boolean;
+    try {
+        settled = await Promise.race([
+            run.cycleSettled().then(() => true),
+            new Promise<false>((resolve) => {
+                giveUp = setTimeout(() => resolve(false), STOP_WAIT_MS);
+            }),
+        ]);
+    } finally {
+        clearTimeout(giveUp);
+    }
     if (!settled) {
         logger.warn(
             `[Enrichment] The cycle did not settle within ${STOP_WAIT_MS / 1000}s of the stop; closing anyway. It is ${
-                phaseRunning ? `still in its "${phaseRunning}" phase` : "between phases"
+                run.phase() ? `still in its "${run.phase()}" phase` : "outside any phase"
             }.`,
         );
     }
@@ -980,6 +984,7 @@ async function runEnrichmentCycle(): Promise<{
             artistsProcessed > 0 ||
             tracksProcessed > 0 ||
             audioQueued > 0 ||
+            vibeQueued > 0 ||
             fingerprintsQueued > 0;
 
          // Log progress (only if work was done)
@@ -1120,9 +1125,6 @@ async function shouldHaltCycle(): Promise<boolean> {
     return run.haltRequested();
 }
 
-/** The phase the cycle is inside now, for a stop that gives up waiting to say where the cycle is stuck. */
-let phaseRunning: string | null = null;
-
 /**
  * Run a phase and return result. Returns null if cycle should halt.
  */
@@ -1130,7 +1132,7 @@ async function runPhase(
     phaseName: NonNullable<EnrichmentPhase>,
     executor: () => Promise<number>,
 ): Promise<number | null> {
-    phaseRunning = phaseName;
+    run.enterPhase(phaseName);
     let result: number;
     try {
         await enrichmentStateService.updateState({
@@ -1139,7 +1141,7 @@ async function runPhase(
         });
         result = await executor();
     } finally {
-        phaseRunning = null;
+        run.leavePhase();
     }
 
     if (await shouldHaltCycle()) {
