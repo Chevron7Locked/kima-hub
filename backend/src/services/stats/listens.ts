@@ -11,7 +11,7 @@
  *   `neverPlayedSql`, `playedMoreThanSql`, `playCounts`, `mostPlayedTrackIds`,
  *   `recentPlayArtists`, `playHistory`, `countPlaysBefore`, `hasPlayBetween`);
  * - listened: the folded listens (`listenRows`, `listenedMoreThanSql`,
- *   `recentListenArtists`).
+ *   `withListens`, `recentListenArtists`).
  * Two readers keep to the rows the listen rule recorded (`heard`: the mixes' night
  * songs and familiar songs); `playRowsSql` takes that as a choice, and no other
  * reader looks at it.
@@ -109,31 +109,68 @@ export function listenRows(
         runs AS (
             SELECT g.*,
                    row_number() OVER (PARTITION BY g."trackId", g.run_id
-                                      ORDER BY g."playedAt", g.id) AS seq
+                                      ORDER BY g."playedAt", g.id) AS seq,
+                   count(*) OVER (PARTITION BY g."trackId", g.run_id) AS run_len
             FROM grouped g
+        ),
+        -- Only a run of two or more rows has anything to decide: a lone row is
+        -- its own listen. Walking just these, and only the few columns the walk
+        -- reads, keeps the recursion small. Postgres re-sorts the recursive
+        -- term's input at every level, so a wide table of every play made the
+        -- cost grow faster than the history did.
+        bursts AS MATERIALIZED (
+            SELECT r.id, r."trackId", r.run_id, r.seq, r."playedAt", r.listen_window
+            FROM runs r
+            WHERE r.run_len > 1
         ),
         -- Inside a run every row sits within one duration of the row before it,
         -- so which of them open listens depends on the running decision. Walk
         -- it, carrying the timestamp the current listen began at. Depth here is
         -- the longest single burst of rows, not the track's whole history.
         walk AS (
-            SELECT r.*, r."playedAt" AS listen_started, TRUE AS starts_listen
-            FROM runs r
-            WHERE r.seq = 1
+            SELECT b.id, b."trackId", b.run_id, b.seq, b."playedAt" AS listen_started, TRUE AS starts_listen
+            FROM bursts b
+            WHERE b.seq = 1
           UNION ALL
-            SELECT r.*,
+            SELECT b.id, b."trackId", b.run_id, b.seq,
                    -- Greater-or-equal: at exactly one duration the track has
                    -- finished, so that row opens a new listen. The recording
                    -- path and the audit draw the line in the same place.
-                   CASE WHEN EXTRACT(EPOCH FROM (r."playedAt" - w.listen_started)) >= r.listen_window
-                        THEN r."playedAt" ELSE w.listen_started END,
-                   EXTRACT(EPOCH FROM (r."playedAt" - w.listen_started)) >= r.listen_window
-            FROM runs r
-            JOIN walk w ON w."trackId" = r."trackId"
-                       AND w.run_id = r.run_id
-                       AND r.seq = w.seq + 1
+                   CASE WHEN EXTRACT(EPOCH FROM (b."playedAt" - w.listen_started)) >= b.listen_window
+                        THEN b."playedAt" ELSE w.listen_started END,
+                   EXTRACT(EPOCH FROM (b."playedAt" - w.listen_started)) >= b.listen_window
+            FROM bursts b
+            JOIN walk w ON w."trackId" = b."trackId"
+                       AND w.run_id = b.run_id
+                       AND b.seq = w.seq + 1
         ),
-        p AS (SELECT * FROM walk WHERE starts_listen ${window(period)})`;
+        p AS (SELECT r.* FROM runs r
+              WHERE (r.run_len = 1 OR r.id IN (SELECT w.id FROM walk w WHERE w.starts_listen))
+              ${window(period)})`;
+}
+
+/**
+ * Fold the plays once and read the listens as often as `work` likes. A page that shows several figures from the
+ * same listens would otherwise run the whole recursive fold once per figure, all at the same time, each holding a
+ * connection. The fold lands in a temporary table that lives until the transaction ends; `fold` is a
+ * `listenRows`-shaped prefix over it (ends in `p`, extra CTEs follow with a leading comma) and `db` is the
+ * connection the table is on, so every query of `work` must run through it.
+ */
+export async function withListens<T>(
+    userId: string,
+    period: Period,
+    work: (fold: Prisma.Sql, db: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+    return prisma.$transaction(
+        async (db) => {
+            await db.$executeRaw(
+                Prisma.sql`CREATE TEMP TABLE folded_listens ON COMMIT DROP AS ${listenRows(userId, period)} SELECT * FROM p`,
+            );
+            return work(Prisma.sql`WITH p AS (SELECT * FROM folded_listens)`, db);
+        },
+        // The fold of a long history takes seconds, and the default five would cut it off.
+        { timeout: 120_000, maxWait: 30_000 },
+    );
 }
 
 /**

@@ -139,7 +139,9 @@ async function main() {
     check("bySource sums to plays", Object.values(L.bySource).reduce((a, b) => a + b, 0), L.plays);
     const src: Record<string, number> = {};
     for (const r of listens) src[r.source] = (src[r.source] ?? 0) + 1;
-    check("bySource breakdown", L.bySource, src);
+    // A record has no meaningful key order (the query's GROUP BY returns sources in whatever order its plan likes).
+    const bySorted = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
+    check("bySource breakdown", bySorted(L.bySource), bySorted(src));
 
     const feat = listens.filter((r) => r.energy !== null && r.valence !== null);
     check("shape sums to analysed listens", L.shape.reduce((n, s) => n + s.plays, 0), feat.length);

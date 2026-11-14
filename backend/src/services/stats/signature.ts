@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
-import { listenRows, type Period } from "./listens";
+import { withListens, type Period } from "./listens";
 import { spellingsOf } from "./playable";
 import { safeZone } from "./listening";
 
@@ -44,9 +44,11 @@ export async function signature(
 ): Promise<Signature> {
     const tz = await safeZone(timezone);
 
-    const [conc, habit, era, keys, owned, played, hourly] = await Promise.all([
-        prisma.$queryRaw<Array<{ for_half: number; for_eighty: number; distinct: number }>>(Prisma.sql`
-            ${listenRows(userId, period)},
+    // The listens are folded once for the six figures that read them; the shelf figures read no plays.
+    const [[conc, habit, era, keys, played, hourly], owned] = await Promise.all([
+        withListens(userId, period, (fold, db) => Promise.all([
+        db.$queryRaw<Array<{ for_half: number; for_eighty: number; distinct: number }>>(Prisma.sql`
+            ${fold},
             c AS (SELECT "trackId", count(*)::int n FROM p GROUP BY 1),
             r AS (SELECT n, sum(n) OVER (ORDER BY n DESC, "trackId") running,
                          sum(n) OVER () total,
@@ -55,8 +57,8 @@ export async function signature(
                    (SELECT min(rank)::int FROM r WHERE running >= total * 0.8)      AS for_eighty,
                    (SELECT max(rank)::int FROM r)                                   AS distinct`),
 
-        prisma.$queryRaw<Array<{ moves: number; same_album: number; in_order: number }>>(Prisma.sql`
-            ${listenRows(userId, period)},
+        db.$queryRaw<Array<{ moves: number; same_album: number; in_order: number }>>(Prisma.sql`
+            ${fold},
             seq AS (
                 SELECT "albumId", "trackNo",
                        LAG("albumId") OVER (ORDER BY "playedAt", id) prev_album,
@@ -70,8 +72,8 @@ export async function signature(
                        / nullif(count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS}), 0), 1), 0)::float8 AS in_order
             FROM seq`),
 
-        prisma.$queryRaw<Array<{ label: string; plays: number; median: number }>>(Prisma.sql`
-            ${listenRows(userId, period)},
+        db.$queryRaw<Array<{ label: string; plays: number; median: number }>>(Prisma.sql`
+            ${fold},
             y AS (SELECT coalesce(a."displayYear", a.year) yr FROM p JOIN "Album" a ON a.id = p."albumId"
                   WHERE coalesce(a."displayYear", a.year) IS NOT NULL)
             SELECT CASE WHEN yr >= date_part('year', now()) - 1 THEN 'the last two years'
@@ -82,29 +84,29 @@ export async function signature(
                    (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY yr) FROM y)::int AS median
             FROM y GROUP BY 1 ORDER BY min(yr) DESC`),
 
-        prisma.$queryRaw<Array<{ musical_key: string; scale: string; plays: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+        db.$queryRaw<Array<{ musical_key: string; scale: string; plays: number }>>(Prisma.sql`
+            ${fold}
             SELECT key AS musical_key, "keyScale" AS scale, count(*)::int AS plays
             FROM p WHERE key IS NOT NULL AND "keyScale" IS NOT NULL
             GROUP BY 1, 2 ORDER BY plays DESC`),
 
+        db.$queryRaw<Array<{ energy: number; valence: number; bpm: number; inst: number }>>(Prisma.sql`
+            ${fold}
+            SELECT avg(energy)::float8 AS energy, avg(valence)::float8 AS valence,
+                   avg(bpm)::float8 AS bpm, avg(instrumentalness)::float8 AS inst
+            FROM p WHERE energy IS NOT NULL`),
+
+        db.$queryRaw<Array<{ hour: number; plays: number; energy: number }>>(Prisma.sql`
+            ${fold}
+            SELECT EXTRACT(HOUR FROM "playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS hour,
+                   count(*)::int AS plays, avg(energy)::float8 AS energy
+            FROM p WHERE energy IS NOT NULL GROUP BY 1 ORDER BY 1`),
+        ])),
         prisma.$queryRaw<Array<{ energy: number; valence: number; bpm: number; inst: number }>>`
             SELECT avg(t.energy)::float8 AS energy, avg(t.valence)::float8 AS valence,
                    avg(t.bpm)::float8 AS bpm, avg(t.instrumentalness)::float8 AS inst
             FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
             WHERE ${playableSongSql("t", "a")} AND t.energy IS NOT NULL`,
-
-        prisma.$queryRaw<Array<{ energy: number; valence: number; bpm: number; inst: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
-            SELECT avg(energy)::float8 AS energy, avg(valence)::float8 AS valence,
-                   avg(bpm)::float8 AS bpm, avg(instrumentalness)::float8 AS inst
-            FROM p WHERE energy IS NOT NULL`),
-
-        prisma.$queryRaw<Array<{ hour: number; plays: number; energy: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
-            SELECT EXTRACT(HOUR FROM "playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS hour,
-                   count(*)::int AS plays, avg(energy)::float8 AS energy
-            FROM p WHERE energy IS NOT NULL GROUP BY 1 ORDER BY 1`),
     ]);
 
     // Fold the two spellings of a pitch together before ranking. Ungrouped,

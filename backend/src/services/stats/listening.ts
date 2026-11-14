@@ -7,7 +7,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { listenRows, type Period } from "./listens";
+import { listenRows, withListens, type Period } from "./listens";
 
 /** No single play counts for more than ten minutes. See the note above. */
 export const PLAY_CREDIT_CAP_SECONDS = 600;
@@ -69,8 +69,8 @@ export async function listeningStats(
     const tz = await safeZone(timezone);
 
     const [totals, sources, clockRows, shapeRows, driftRows, artistRows, trackRows] =
-        await Promise.all([
-            prisma.$queryRaw<
+        await withListens(userId, period, (fold, db) => Promise.all([
+            db.$queryRaw<
                 Array<{
                     plays: number;
                     est: number;
@@ -80,7 +80,7 @@ export async function listeningStats(
                     first_play: Date | null;
                     last_play: Date | null;
                 }>
-            >(Prisma.sql`${listenRows(userId, period)}
+            >(Prisma.sql`${fold}
             SELECT count(*)::int                                    AS plays,
                    coalesce(sum(LEAST(p.duration, ${PLAY_CREDIT_CAP_SECONDS}::int)), 0)::int AS est,
                    count(DISTINCT p."trackId")::int                 AS tracks,
@@ -91,19 +91,19 @@ export async function listeningStats(
             FROM p
             JOIN "Album" al ON al.id = p."albumId"`),
 
-            prisma.$queryRaw<Array<{ source: string; n: number }>>(Prisma.sql`${listenRows(userId, period)}
+            db.$queryRaw<Array<{ source: string; n: number }>>(Prisma.sql`${fold}
             SELECT CASE WHEN al.location = 'DISCOVER' THEN 'DISCOVER' ELSE p.source::text END AS source, count(*)::int AS n
             FROM p
             JOIN "Album" al ON al.id = p."albumId"
             GROUP BY 1`),
 
-            prisma.$queryRaw<Array<{ dow: number; hour: number; n: number }>>(Prisma.sql`${listenRows(userId, period)}
+            db.$queryRaw<Array<{ dow: number; hour: number; n: number }>>(Prisma.sql`${fold}
             SELECT EXTRACT(DOW  FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS dow,
                    EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS hour,
                    count(*)::int AS n
             FROM p GROUP BY 1, 2`),
 
-            prisma.$queryRaw<Array<{ x: number; y: number; n: number }>>(Prisma.sql`${listenRows(userId, period)}
+            db.$queryRaw<Array<{ x: number; y: number; n: number }>>(Prisma.sql`${fold}
             -- Clamped, because width_bucket treats the top of the range as
             -- exclusive: a track scoring exactly 1.0 comes back as bucket 25,
             -- outside the grid, and gets drawn past the frame it belongs in.
@@ -118,9 +118,9 @@ export async function listeningStats(
             WHERE p.valence IS NOT NULL AND p.energy IS NOT NULL
             GROUP BY 1, 2`),
 
-            prisma.$queryRaw<
+            db.$queryRaw<
                 Array<{ month: Date; energy: number | null; valence: number | null; bpm: number | null; n: number }>
-            >(Prisma.sql`${listenRows(userId, period)}
+            >(Prisma.sql`${fold}
             SELECT date_trunc('month', p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz}) AS month,
                    avg(p.energy)::float8  AS energy,
                    avg(p.valence)::float8 AS valence,
@@ -128,7 +128,7 @@ export async function listeningStats(
                    count(*)::int          AS n
             FROM p GROUP BY 1 ORDER BY 1`),
 
-            prisma.$queryRaw<Array<{ id: string; name: string; n: number; est: number }>>(Prisma.sql`${listenRows(userId, period)}
+            db.$queryRaw<Array<{ id: string; name: string; n: number; est: number }>>(Prisma.sql`${fold}
             SELECT ar.id AS id, coalesce(ar."displayName", ar.name) AS name,
                    count(*)::int AS n,
                    coalesce(sum(LEAST(p.duration, ${PLAY_CREDIT_CAP_SECONDS}::int)), 0)::int AS est
@@ -137,7 +137,7 @@ export async function listeningStats(
             JOIN "Artist" ar ON ar.id = al."artistId"
             GROUP BY 1, 2 ORDER BY n DESC LIMIT 8`),
 
-            prisma.$queryRaw<Array<{ id: string; title: string; artist: string; n: number }>>(Prisma.sql`${listenRows(userId, period)}
+            db.$queryRaw<Array<{ id: string; title: string; artist: string; n: number }>>(Prisma.sql`${fold}
             SELECT t.id AS id, coalesce(t."displayTitle", t.title)   AS title,
                    coalesce(ar."displayName", ar.name)   AS artist,
                    count(*)::int AS n
@@ -146,7 +146,7 @@ export async function listeningStats(
             JOIN "Album"  al ON al.id = p."albumId"
             JOIN "Artist" ar ON ar.id = al."artistId"
             GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 8`),
-        ]);
+        ]));
 
     const t = totals[0];
 
