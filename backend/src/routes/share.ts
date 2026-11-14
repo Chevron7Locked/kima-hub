@@ -27,6 +27,13 @@ setInterval(() => {
 
 const shareResolveLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
+// A playlist page asks for one cover per song, so covers count apart from opening the share: the same runaway limit as the web and Subsonic cover routes.
+const shareCoverLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 3000,
+    message: "Too many image requests, please slow down.",
+});
+
 const shareStreamLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 300 });
 
 function getMimeType(filePath: string): string {
@@ -137,7 +144,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
 /**
  * GET /api/share/:token/cover-art/:coverArtId - Serve cover art via share token (public)
  */
-router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Request, res: Response) => {
+router.get("/:token/cover-art/:coverArtId", shareCoverLimiter, async (req: Request, res: Response) => {
     try {
         const shareLink = await loadUsableShareLink(req.params.token, res);
         if (!shareLink) return;

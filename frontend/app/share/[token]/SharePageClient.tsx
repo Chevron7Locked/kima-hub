@@ -124,7 +124,9 @@ export default function SharePageClient() {
     const progressBarRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
-        fetch(shareResolvePath(token))
+        // The request goes with the page (or with the token it was for); a cancelled one is not a failure to show.
+        const request = new AbortController();
+        fetch(shareResolvePath(token), { signal: request.signal })
             .then(async (res) => {
                 if (!res.ok) {
                     const body = await res.json().catch(() => ({}));
@@ -135,8 +137,13 @@ export default function SharePageClient() {
                 return res.json();
             })
             .then(setData)
-            .catch((err) => setError(err.message))
-            .finally(() => setLoading(false));
+            .catch((err) => {
+                if (!request.signal.aborted) setError(err.message);
+            })
+            .finally(() => {
+                if (!request.signal.aborted) setLoading(false);
+            });
+        return () => request.abort();
     }, [token]);
 
     useEffect(() => {

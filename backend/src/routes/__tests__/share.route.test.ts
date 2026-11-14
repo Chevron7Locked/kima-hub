@@ -386,6 +386,18 @@ describe('GET /share/:token/cover-art/:coverArtId', () => {
         expect(res.body).toEqual({ error: 'Cover art not found' });
     });
 
+    it("a page's covers do not use up the budget for opening the share", async () => {
+        // The resolve limit is 60 a minute per address; a playlist page asks for one cover per song.
+        for (let i = 0; i < 61; i++) {
+            const res = await request(app).get(coverUrl(`native:albums/${TAG}-none-${i}.jpg`));
+            expect([i, res.status]).toEqual([i, 404]);
+        }
+
+        const resolve = await request(app).get(`/share/${TOKEN}`);
+
+        expect(resolve.status).toBe(200);
+    });
+
     describe('only what the share holds', () => {
         const file = (name: string) => `native:albums/${TAG}-held-${name}.jpg`;
         const stored = (name: string) => putFile(path.join(coversBasePath(), 'albums', `${TAG}-held-${name}.jpg`));
