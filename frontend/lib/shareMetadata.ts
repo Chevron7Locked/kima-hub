@@ -4,9 +4,10 @@
 
 import type { Metadata } from "next";
 import { backendUrl } from "@/lib/backend-url";
+import { shareResolvePath } from "@/lib/shareAddresses";
 import { sharePreviewImage } from "@/lib/sharePreviewImage";
 
-const FALLBACK: Metadata = { title: "shared music - kima" };
+const plainTitle = (): Metadata => ({ title: "shared music - kima" });
 
 const OPEN_GRAPH_TYPE: Record<string, "music.album" | "music.playlist" | "music.song"> = {
     album: "music.album",
@@ -19,11 +20,11 @@ export async function shareMetadata(token: string, requestHeaders: Headers): Pro
         const forwarded: Record<string, string> = {};
         const forwardedFor = requestHeaders.get("x-forwarded-for");
         if (forwardedFor) forwarded["x-forwarded-for"] = forwardedFor;
-        const res = await fetch(`${backendUrl}/api/share/${encodeURIComponent(token)}`, {
+        const res = await fetch(`${backendUrl}${shareResolvePath(token)}`, {
             headers: forwarded,
             next: { revalidate: 0 },
         });
-        if (!res.ok) return FALLBACK;
+        if (!res.ok) return plainTitle();
         const data = await res.json();
         const title = data.entity?.name || data.entity?.title || "shared music";
         const artistName = data.entity?.artist?.name || data.entity?.album?.artist?.name || "kima";
@@ -39,6 +40,6 @@ export async function shareMetadata(token: string, requestHeaders: Headers): Pro
             },
         };
     } catch {
-        return FALLBACK;
+        return plainTitle();
     }
 }

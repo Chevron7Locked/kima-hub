@@ -2144,7 +2144,7 @@ class ApiClient {
     }
 
     async revokeShareLink(token: string): Promise<{ message: string }> {
-        return this.request<{ message: string }>(`/share/${token}`, {
+        return this.request<{ message: string }>(`/share/${encodeURIComponent(token)}`, {
             method: "DELETE",
         });
     }
