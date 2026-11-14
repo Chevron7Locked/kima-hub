@@ -66,7 +66,8 @@ export interface RunState {
     /** The phase the cycle is inside now, or null between phases and when no cycle runs. */
     phase(): string | null;
     enterPhase(name: string): void;
-    leavePhase(): void;
+    /** Clears the phase only when it is still `name`: a cycle abandoned after the stop wait cannot clear the phase of one that started since. */
+    leavePhase(name: string): void;
 
     // Questions the cycle asks.
     /** Whether a cycle may go past the stop check: not while stopped, unless it was woken. */
@@ -155,8 +156,8 @@ export function createRunState(): RunState {
         enterPhase(name) {
             phase = name;
         },
-        leavePhase() {
-            phase = null;
+        leavePhase(name) {
+            if (phase === name) phase = null;
         },
 
         admitsCycle() {

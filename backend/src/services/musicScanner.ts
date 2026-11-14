@@ -587,7 +587,7 @@ export class MusicScannerService {
                     data: { coverUrl: found.url },
                 });
             }
-        } catch (error) {
+        } catch {
             // Cover art is optional; a scan must not fail over a picture.
         }
     }

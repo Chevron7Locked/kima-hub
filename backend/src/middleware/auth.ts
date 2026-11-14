@@ -18,6 +18,8 @@ if (!JWT_SECRET) {
 export const JWT_SECRET_VALIDATED: string = JWT_SECRET;
 
 declare global {
+    // Express documents `namespace Express` as the way to add a field to `req`; a module cannot do it.
+    // eslint-disable-next-line @typescript-eslint/no-namespace
     namespace Express {
         interface Request {
             user?: {

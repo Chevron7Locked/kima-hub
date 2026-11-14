@@ -9,8 +9,7 @@
 
 import { vibeQueue } from "../enrichmentQueues";
 import { featureDetection } from "../../services/featureDetection";
-import type { StageWork } from "../unifiedEnrichment";
-import type { StageOffer } from "./stageOffer";
+import type { StageOffer, StageWork } from "./stageOffer";
 
 /** Queue one vector question. `jobId` is per attempt, so a retry never reuses the key a failed job still holds. */
 export async function queueSoundVector(item: StageWork): Promise<void> {

@@ -37,9 +37,9 @@ export async function processRefile(job: Job<RefileJobData>): Promise<RefileResu
     let result: RefileResult;
     try {
         result = await refileLibrary(config.music.musicPath);
-    } catch (error: any) {
+    } catch (error) {
         logger.error(`[RefileJob ${job.id}] Failed:`, error);
-        await tell("error", "Re-filing albums failed", error?.message ?? String(error));
+        await tell("error", "Re-filing albums failed", (error as Error | undefined)?.message ?? String(error));
         throw error;
     }
 

@@ -62,7 +62,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         // No Soulseek folder, mark as migrated
         try {
             await writeFile(migrationMarker, new Date().toISOString());
-        } catch (e) {
+        } catch {
             // Ignore write errors
         }
         return;
@@ -88,7 +88,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                     }
                 }
             }
-        } catch (e) {
+        } catch {
             // Ignore read errors
         }
         return files;
@@ -100,7 +100,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         sessionLog('ORGANIZE', 'No audio files found in Soulseek folder');
         try {
             await writeFile(migrationMarker, new Date().toISOString());
-        } catch (e) {
+        } catch {
             // Ignore
         }
         return;
@@ -147,8 +147,8 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             // Create destination directory (idempotent - won't fail if exists)
             try {
                 await mkdir(destDir, { recursive: true });
-            } catch (err: any) {
-                sessionLog('ORGANIZE', `Failed to create directory ${destDir}: ${err.message}`, 'WARN');
+            } catch (err) {
+                sessionLog('ORGANIZE', `Failed to create directory ${destDir}: ${(err as Error).message}`, 'WARN');
                 failed++; // marker stays unwritten so this file is retried
                 continue; // Skip this file, try next
             }
@@ -158,8 +158,8 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             migrated++;
 
             sessionLog('ORGANIZE', `Migrated: ${filename} -> Singles/${artist}/${album}/`);
-        } catch (err: any) {
-            sessionLog('ORGANIZE', `Failed to migrate ${filePath}: ${err.message}`, 'WARN');
+        } catch (err) {
+            sessionLog('ORGANIZE', `Failed to migrate ${filePath}: ${(err as Error).message}`, 'WARN');
             failed++; // marker stays unwritten so this file is retried
         }
     }
@@ -185,7 +185,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             await rmdir(soulseekDir);
             sessionLog('ORGANIZE', 'Removed empty Soulseek folder');
         }
-    } catch (e) {
+    } catch {
         // Ignore cleanup errors
     }
 
@@ -194,7 +194,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
     if (failed === 0) {
         try {
             await writeFile(migrationMarker, new Date().toISOString());
-        } catch (e) {
+        } catch {
             // Ignore
         }
         sessionLog('ORGANIZE', `Migration complete: ${migrated}/${audioFiles.length} files moved to Singles`);

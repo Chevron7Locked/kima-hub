@@ -60,7 +60,7 @@ export function startDiscoverWeeklyCron() {
                             userId: config.userId,
                         }, { jobId });
                     },
-                ).catch((e: any) =>
+                ).catch((e: Error) =>
                     logger.warn(
                         `[DiscoverCron] enqueue skipped for ${config.userId}: ${e.message}`,
                     ),
@@ -68,8 +68,8 @@ export function startDiscoverWeeklyCron() {
             }
 
             logger.debug(`   Queued ${configs.length} Discover Weekly jobs`);
-        } catch (error: any) {
-            logger.error(` Discover Weekly cron error:`, error.message);
+        } catch (error) {
+            logger.error(` Discover Weekly cron error:`, (error as Error).message);
         }
     });
 

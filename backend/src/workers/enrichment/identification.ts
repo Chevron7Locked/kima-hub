@@ -40,8 +40,7 @@ import { sourcePauseController } from "../../services/sourcePauseController";
 import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording } from "../../services/recordingMatch";
 import { ACOUSTID_NOT_ASKED } from "./fingerprint";
 import { trackQueue } from "../enrichmentQueues";
-import type { StageWork } from "../unifiedEnrichment";
-import type { StageOffer } from "./stageOffer";
+import type { StageOffer, StageWork } from "./stageOffer";
 
 /** The time one source gets to answer one question about a song: a few HTTP calls. */
 const RECORDING_BUDGET_MS = 30_000;
@@ -70,7 +69,7 @@ async function askWithinBudget<T>(
 ): Promise<Outcome<T>> {
     try {
         return await withTimeout(ask(), timeoutMs, label);
-    } catch (err: any) {
+    } catch (err) {
         return unansweredAsk(err);
     }
 }

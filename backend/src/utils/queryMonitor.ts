@@ -8,7 +8,7 @@ const SLOW_QUERY_THRESHOLD_MS = 100; // Log queries that take longer than 100ms
  * Logs queries that exceed the threshold to help identify performance issues
  */
 export function enableSlowQueryMonitoring() {
-    // @ts-ignore - Prisma's query event type is not fully typed
+    // @ts-expect-error - Prisma's query event type is not fully typed
     prisma.$on("query", async (e: any) => {
         if (e.duration > SLOW_QUERY_THRESHOLD_MS) {
             logger.warn(

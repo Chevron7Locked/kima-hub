@@ -19,7 +19,7 @@ jest.mock("../listenBrainz", () => ({
     listenBrainzService: { submitListens: jest.fn() },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const { listenBrainzService } = require("../listenBrainz");
 
 /** Every row this file creates is keyed off this prefix so cleanup is exact. */

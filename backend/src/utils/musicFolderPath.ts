@@ -6,7 +6,7 @@ import path from "path";
  * dots ("." and ".." walk the tree) becomes "_". Anything else, leading dots included, is kept.
  */
 export function safePathPart(name: string): string {
-    // eslint-disable-next-line no-control-regex
+     
     const cleaned = name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
     return /^\.*$/.test(cleaned) ? "_" : cleaned;
 }

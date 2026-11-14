@@ -41,7 +41,10 @@ function fakeRedis(mixKeys: string[] = []) {
             let n = 0;
             for (const k of ks) {
                 if (notes.delete(k)) n++;
-                else if (mixKeys.includes(k)) (dropped.push(k), n++);
+                else if (mixKeys.includes(k)) {
+                    dropped.push(k);
+                    n++;
+                }
             }
             return n;
         }),

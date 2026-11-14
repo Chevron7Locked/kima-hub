@@ -87,7 +87,7 @@ class ListenBrainzService {
         try {
             const token = decrypt(stored);
             return token.length > 0 ? token : null;
-        } catch (err) {
+        } catch {
             logger.warn(
                 `[ListenBrainz] Token for ${userId} cannot be decrypted — scrobbles skip`
             );

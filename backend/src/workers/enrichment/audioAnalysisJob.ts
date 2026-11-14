@@ -6,8 +6,7 @@
  * this module owns what an analysis question looks like on the list and how deep a window it is offered in.
  */
 
-import type { StageWork } from "../unifiedEnrichment";
-import type { StageOffer } from "./stageOffer";
+import type { StageOffer, StageWork } from "./stageOffer";
 
 /** The analyzer's input list. */
 export const ANALYSIS_QUEUE = "audio:analysis:queue";

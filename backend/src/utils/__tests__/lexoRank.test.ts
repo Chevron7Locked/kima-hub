@@ -54,7 +54,7 @@ describe("rankBetween — randomised insertion", () => {
 
     it("keeps 500 random insertions correctly ordered", () => {
         const rng = makeRng(42);
-        let list = rankSequence(3);
+        const list = rankSequence(3);
 
         for (let n = 0; n < 500; n += 1) {
             const at = Math.floor(rng() * (list.length + 1));
@@ -74,7 +74,7 @@ describe("rankBetween — randomised insertion", () => {
         // The adversarial case for fractional indexing: always split the same
         // gap, which is what a user dragging one row to position 2 repeatedly
         // would do.
-        let lo = "A";
+        const lo = "A";
         let hi = "B";
         for (let n = 0; n < 40; n += 1) {
             const mid = rankBetween(lo, hi);
@@ -86,7 +86,7 @@ describe("rankBetween — randomised insertion", () => {
     });
 
     it("throws rather than silently emitting a duplicate when depth runs out", () => {
-        let lo = "A";
+        const lo = "A";
         let hi = "B";
         for (let n = 0; n < 500; n += 1) {
             let mid: string;

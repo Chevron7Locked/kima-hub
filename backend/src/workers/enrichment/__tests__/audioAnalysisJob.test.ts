@@ -4,8 +4,7 @@
  */
 
 import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "../audioAnalysisJob";
-import type { StageOffer } from "../stageOffer";
-import type { StageWork } from "../../unifiedEnrichment";
+import type { StageOffer, StageWork } from "../stageOffer";
 
 function work(n: number): StageWork {
     return {

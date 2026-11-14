@@ -21,7 +21,7 @@ jest.mock("../listenBrainz", () => ({
     },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const { listenBrainzService } = require("../listenBrainz");
 
 const P = "zz-playRecording-";

@@ -203,7 +203,21 @@ describe("run state", () => {
             run.beginCycle();
             run.enterPhase("analysis");
             expect(run.phase()).toBe("analysis");
-            run.leavePhase();
+            run.leavePhase("analysis");
+            expect(run.phase()).toBeNull();
+        });
+
+        it("leaving a phase clears only that phase, so an abandoned cycle cannot clear the phase a reopened worker is in", () => {
+            const run = inMode("running");
+            run.beginCycle();
+            run.enterPhase("analysis");
+            // The 30 s stop gave up on this cycle; the worker reopened and a new cycle entered another phase.
+            run.endCycle();
+            run.beginCycle();
+            run.enterPhase("embedding");
+            run.leavePhase("analysis");
+            expect(run.phase()).toBe("embedding");
+            run.leavePhase("embedding");
             expect(run.phase()).toBeNull();
         });
 

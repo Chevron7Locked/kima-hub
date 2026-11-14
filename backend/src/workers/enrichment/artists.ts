@@ -39,6 +39,9 @@ import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQ
 import { entityGoneError, isEntityGone } from "../entityGone";
 import { getSystemSettings } from "../../utils/systemSettings";
 
+/** One MusicBrainz genre with its vote count. */
+type GenreVote = { name: string; count?: number };
+
 /**
  * An artist row's MusicBrainz id must name this artist (its name, sort name or an alias agrees with the row's): a track
  * artist's id tagged under an album artist's name puts another artist's id on the row. Such an id and everything
@@ -137,8 +140,8 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         data: { mbid: realMbid },
                     });
                     artist.mbid = realMbid;
-                } catch (mbidError: any) {
-                    if (mbidError.code === "P2002") {
+                } catch (mbidError) {
+                    if ((mbidError as { code?: string }).code === "P2002") {
                         logger.debug(
                             `${logPrefix} MBID ${realMbid} already used by another artist, keeping temp`
                         );
@@ -220,9 +223,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             if (mbArtist.kind === "answered") {
                 if (Array.isArray(mbArtist.value.genres)) {
                     genres = mbArtist.value.genres
-                        .sort((a: any, b: any) => (b.count || 0) - (a.count || 0))
+                        .sort((a: GenreVote, b: GenreVote) => (b.count || 0) - (a.count || 0))
                         .slice(0, 5)
-                        .map((g: any) => g.name)
+                        .map((g: GenreVote) => g.name)
                         .filter(Boolean);
                     if (genres.length > 0) {
                         logger.debug(`${logPrefix} MusicBrainz: ${genres.length} genres: ${genres.join(', ')}`);
@@ -250,11 +253,11 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             logger.debug(
                 `${logPrefix} Similar artists: Found ${similarArtists.length}${found.failed ? " (a source failed)" : ""}`
             );
-        } catch (error: any) {
+        } catch (error) {
             similarFetchFailed = true;
             logger.warn(
                 `${logPrefix} Similar artists: FAILED - ${
-                    error?.message || error
+                    (error as Error | undefined)?.message || error
                 }`
             );
         }
@@ -283,6 +286,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         }
 
         // Prepare similar artists JSON for storage (from the similarity source)
+        // `any`: the column is a nullable Json and this stores a plain null, which Prisma's types only accept as DbNull;
+        // the write's behaviour must not change under a lint fix.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const similarArtistsJson: any =
             similarArtists.length > 0
                 ? similarArtists.map((s) => ({
@@ -390,14 +396,14 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                     7 * 24 * 60 * 60,
                     localHeroUrl
                 );
-            } catch (err) {
+            } catch {
                 // Redis errors are non-critical
             }
         }
-    } catch (error: any) {
+    } catch (error) {
         logger.error(
             `${logPrefix} ENRICHMENT FAILED:`,
-            error?.message || error
+            (error as Error | undefined)?.message || error
         );
 
         await prisma.artist.update({
@@ -478,13 +484,13 @@ async function enrichAlbumCovers(
                                     30 * 24 * 60 * 60, // 30 days
                                     coverUrl
                                 );
-                            } catch (err) {
+                            } catch {
                                 // Redis errors are non-critical
                             }
 
                             fetchedCount++;
                         }
-                    } catch (err) {
+                    } catch {
                         // Cover art fetch failed, continue with next album
                         logger.debug(`      No cover found for: ${album.title}`);
                     }

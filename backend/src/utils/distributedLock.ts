@@ -13,7 +13,7 @@ class DistributedLock {
     try {
       const result = await this.redis.set(lockKey, this.lockValue, "PX", ttlMs, "NX");
       return result === 'OK';
-    } catch (error) {
+    } catch {
       // Return false on Redis errors (lock acquisition failed)
       return false;
     }
@@ -32,7 +32,7 @@ class DistributedLock {
       `;
       const result = await this.redis.eval(script, 1, lockKey, this.lockValue);
       return result === 1;
-    } catch (error) {
+    } catch {
       // Return false on Redis errors (lock release failed)
       return false;
     }

@@ -37,7 +37,7 @@ export async function processDiscoverWeekly(
         await job.updateProgress(100);
         logger.debug(`[DiscoverJob ${job.id}] ${result.downloadsQueued} album downloads queued (batch ${result.batchId})`);
         return { success: result.success, downloadsQueued: result.downloadsQueued, batchId: result.batchId };
-    } catch (error: any) {
+    } catch (error) {
         // Thrown on so BullMQ records the failure and retries.
         logger.error(`[DiscoverJob ${job.id}] Generation failed:`, error);
         throw error;

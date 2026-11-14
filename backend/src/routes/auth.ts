@@ -173,7 +173,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
             token: newAccessToken,
             refreshToken: newRefreshToken,
         });
-    } catch (error) {
+    } catch {
         return res.status(401).json({ error: "Invalid refresh token" });
     }
 });

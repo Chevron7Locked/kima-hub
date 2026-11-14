@@ -148,8 +148,8 @@ importWorker.on("failed", async (job, err) => {
     if (job?.data?.importJobId) {
         try {
             await spotifyImportService.markJobFailed(job.data.importJobId, err.message);
-        } catch (e: any) {
-            logger.error(`[ImportWorker] Failed to mark job as failed: ${e.message}`);
+        } catch (e) {
+            logger.error(`[ImportWorker] Failed to mark job as failed: ${(e as Error).message}`);
         }
     }
 });

@@ -20,7 +20,7 @@ const app = express()
 const ask = (path: string, query: Record<string, string | string[]>) =>
     request(app).get(path).query({ u: USER, f: "json", ...query }).expect(200).then((r) => r.body["subsonic-response"]);
 
-let songIds: string[] = [];
+const songIds: string[] = [];
 
 async function cleanup() {
     await prisma.playlist.deleteMany({ where: { userId: USER } });

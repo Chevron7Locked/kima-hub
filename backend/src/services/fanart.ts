@@ -49,7 +49,7 @@ class FanartService {
                 this.initialized = true;
                 return;
             }
-        } catch (error) {
+        } catch {
             // Silently continue to check .env
         }
 

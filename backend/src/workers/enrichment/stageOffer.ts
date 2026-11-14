@@ -4,7 +4,23 @@
  * how the offer is gated (one heavy model at a time, paused sources) or how claims are made.
  */
 
-import type { StageWork } from "../unifiedEnrichment";
+import type { StageName } from "../../services/stages/stageRecords";
+
+/** One unit of work: a track, the stage it owes, and how to key the attempt. */
+export interface StageWork {
+    trackId: string;
+    stage: StageName;
+    status: string;
+    attempt: number;
+    source: string | null;
+    filePath: string | null;
+    duration: number;
+    title: string;
+    /** Stable identity of the question: `track-<id>-<stage>`. */
+    jobKey: string;
+    /** Identity of THIS offer: `track-<id>-<stage>-<attempt>-r<redelivery>`. */
+    jobId: string;
+}
 
 export interface StageOffer {
     /** How many answers this stage may have in flight now (the scheduler's drain-rate cap). */

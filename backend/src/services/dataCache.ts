@@ -38,7 +38,7 @@ class DataCacheService {
                 this.setRedisCache(cacheKey, displayHeroUrl, ARTIST_IMAGE_TTL);
                 return displayHeroUrl;
             }
-        } catch (err) {
+        } catch {
             logger.warn("[DataCache] DB lookup failed for artist:", artistId);
         }
 
@@ -51,7 +51,7 @@ class DataCacheService {
                 this.updateArtistHeroUrl(artistId, cached);
                 return cached;
             }
-        } catch (err) {
+        } catch {
             // Redis errors are non-critical
         }
 
@@ -98,7 +98,7 @@ class DataCacheService {
             }
             artistName = album?.artist?.name ?? "";
             albumTitle = album?.title ?? "";
-        } catch (err) {
+        } catch {
             logger.warn("[DataCache] DB lookup failed for album:", albumId);
         }
 
@@ -110,7 +110,7 @@ class DataCacheService {
                 this.updateAlbumCoverUrl(albumId, cached);
                 return cached;
             }
-        } catch (err) {
+        } catch {
             // Redis errors are non-critical
         }
 
@@ -190,7 +190,7 @@ class DataCacheService {
                         results.set(id, value);
                     }
                 });
-            } catch (err) {
+            } catch {
                 // Redis errors are non-critical
             }
         }
@@ -266,7 +266,7 @@ class DataCacheService {
     private async setRedisCache(key: string, value: string, ttl: number): Promise<void> {
         try {
             await redisClient.setex(key, ttl, value);
-        } catch (err) {
+        } catch {
             // Redis errors are non-critical
         }
     }

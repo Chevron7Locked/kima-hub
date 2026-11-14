@@ -25,7 +25,7 @@ import { createMoodStep } from "./enrichment/moods";
 import { runSimilarityStep } from "./enrichment/similarity";
 import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "./enrichment/audioAnalysisJob";
 import { queueSoundVector, runSoundVectors } from "./enrichment/soundVectorJob";
-import type { StageOffer } from "./enrichment/stageOffer";
+import type { StageOffer, StageWork } from "./enrichment/stageOffer";
 import { runFingerprints, startFingerprint } from "./enrichment/fingerprint";
 import { queueIdentification, runIdentification } from "./enrichment/identification";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
@@ -64,22 +64,6 @@ export const STAGE_QUEUES: Record<StageName, string> = {
     embedding: QUEUE_NAMES.VIBE,
     fingerprint: "inline",
 };
-
-/** One unit of work: a track, the stage it owes, and how to key the attempt. */
-export interface StageWork {
-    trackId: string;
-    stage: StageName;
-    status: string;
-    attempt: number;
-    source: string | null;
-    filePath: string | null;
-    duration: number;
-    title: string;
-    /** Stable identity of the question: `track-<id>-<stage>`. */
-    jobKey: string;
-    /** Identity of THIS offer: `track-<id>-<stage>-<attempt>-r<redelivery>`. */
-    jobId: string;
-}
 
 /** The statuses a record can be due in by its `nextRetryAt`; a `working` record whose lease ran out is due as well. */
 const DUE_STATUSES = ["pending", "failed"] as const;
@@ -1141,7 +1125,7 @@ async function runPhase(
         });
         result = await executor();
     } finally {
-        run.leavePhase();
+        run.leavePhase(phaseName);
     }
 
     if (await shouldHaltCycle()) {

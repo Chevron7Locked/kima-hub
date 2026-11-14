@@ -510,7 +510,7 @@ class DeezerService {
                 return null;
             }
 
-            let allTrackData: any[] = data.tracks?.data || [];
+            const allTrackData: any[] = data.tracks?.data || [];
             const totalTracks = data.nb_tracks || allTrackData.length;
 
             // Paginate if the initial response doesn't contain all tracks

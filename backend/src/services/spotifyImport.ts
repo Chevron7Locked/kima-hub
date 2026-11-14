@@ -1032,7 +1032,7 @@ class SpotifyImportService {
     await Promise.all(
       playlist.tracks.map((track, idx) =>
         limit(async () => {
-          let coverUrl: string | null = track.thumbnailUrl;
+          const coverUrl: string | null = track.thumbnailUrl;
 
           if (!track.hasNativeMetadata) {
             try {

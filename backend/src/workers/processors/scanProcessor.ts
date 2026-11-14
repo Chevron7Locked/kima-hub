@@ -166,10 +166,10 @@ export async function processScan(
                 logger.debug(
                     `[ScanJob ${job.id}] Discovery Weekly playlist complete`
                 );
-            } catch (error: any) {
+            } catch (error) {
                 logger.error(
                     `[ScanJob ${job.id}] Failed to build Discovery playlist:`,
-                    error.message
+                    (error as Error).message
                 );
             }
         }
@@ -189,10 +189,10 @@ export async function processScan(
                 logger.debug(
                     `[ScanJob ${job.id}] Spotify Import playlist complete`
                 );
-            } catch (error: any) {
+            } catch (error) {
                 logger.error(
                     `[ScanJob ${job.id}] Failed to build Spotify Import playlist:`,
-                    error.message
+                    (error as Error).message
                 );
             }
         }
@@ -201,8 +201,8 @@ export async function processScan(
         try {
             const { queueCleaner } = await import("../../jobs/queueCleaner");
             await queueCleaner.reconcileWithLocalLibrary();
-        } catch (error: any) {
-            logger.error(`[ScanJob ${job.id}] Failed to reconcile download jobs:`, error.message);
+        } catch (error) {
+            logger.error(`[ScanJob ${job.id}] Failed to reconcile download jobs:`, (error as Error).message);
         }
 
         // Songs still waiting in imported and Discover playlists are matched again when the scan added or updated
@@ -231,7 +231,7 @@ export async function processScan(
         }
 
         return result;
-    } catch (error: any) {
+    } catch (error) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);
         // A scan that fails part-way has filed songs the next scan will skip, and its counts are lost with the throw,
         // so the marker moves: a client re-lists once, never misses a change.
@@ -240,7 +240,7 @@ export async function processScan(
             eventBus.emit({
                 type: "scan:complete",
                 userId,
-                payload: { jobId: String(job.id), error: error.message || "Scan failed" },
+                payload: { jobId: String(job.id), error: (error as Error).message || "Scan failed" },
             });
             if (manual) {
                 await notificationService
@@ -248,7 +248,7 @@ export async function processScan(
                         userId,
                         type: "error",
                         title: "Library scan failed",
-                        message: error.message || undefined,
+                        message: (error as Error).message || undefined,
                         groupKey: SCAN_RESULT_KEY,
                         renotify: true,
                     })

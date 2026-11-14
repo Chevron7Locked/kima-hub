@@ -34,8 +34,8 @@ export function startLibrarySyncCron() {
             } else {
                 logger.debug(`[LibrarySync] ${result.reason}, skipping`);
             }
-        } catch (error: any) {
-            logger.error("[LibrarySync] cron error:", error.message);
+        } catch (error) {
+            logger.error("[LibrarySync] cron error:", (error as Error).message);
         }
     });
 

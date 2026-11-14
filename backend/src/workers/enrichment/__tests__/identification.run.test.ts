@@ -26,8 +26,7 @@ jest.mock("../../../services/albumIdentification", () => ({
     identifyAlbumsBySound: (...args: unknown[]) => mockIdentifyAlbums(...args),
 }));
 
-import type { StageWork } from "../../unifiedEnrichment";
-import type { StageOffer } from "../stageOffer";
+import type { StageOffer, StageWork } from "../stageOffer";
 import { IDENTIFICATION_LOOKAHEAD, queueIdentification, runIdentification } from "../identification";
 
 const work = (n: number): StageWork =>
