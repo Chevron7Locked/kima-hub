@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { playableSongSql } from "../../utils/playableSong";
-import { artistHasPlayableSongSql } from "../../services/libraryFilters";
+import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
@@ -124,7 +124,7 @@ async function playableArtistsInOrder(ids: string[]): Promise<ArtistHit[]> {
         FROM "Artist" ar
         JOIN "Album" al ON al."artistId" = ar.id
         WHERE ar.id = ANY(${ids}::text[])
-          AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND ${PLAYABLE_SQL})
+          AND ${albumHasPlayableSongSql("al")}
         GROUP BY ar.id`;
     const byId = new Map(rows.map((r) => [r.id, r]));
     return ids.flatMap((id) => byId.get(id) ?? []);
@@ -172,7 +172,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
             albumCount > 0
                 ? prisma.$queryRaw<{ id: string }[]>`
                       SELECT al.id FROM "Album" al
-                      WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND ${PLAYABLE_SQL})
+                      WHERE ${albumHasPlayableSongSql("al")}
                       ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                       .then((rows) => rows.map((r) => r.id))
