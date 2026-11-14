@@ -21,6 +21,7 @@ const ME = `${P}me`;
 const OTHER = `${P}other`;
 const WIDE = `${P}many`;
 const CROWDED = `${P}crowded`;
+const BLEND = `${P}blend`;
 const id = (s: string) => `${P}${s}`;
 const mins = (n: number) => new Date(Date.now() - n * 60_000);
 
@@ -43,33 +44,38 @@ let n = 0;
 const plays = (user: string, artist: string, count: number) =>
     Array.from({ length: count }, (_, k) => ({ id: id(`play_${n++}`), userId: user, trackId: id(`t_${artist}`), playedAt: mins(k + 1) }));
 
+// A seed artist with one album and one song of the given location and file state.
+async function seedArtist(a: string, location: "LIBRARY" | "DISCOVER" = "LIBRARY", missing = false) {
+    await prisma.artist.create({ data: { id: id(`art_${a}`), name: `Seed ${a}`, normalizedName: `seed ${a}`, identityKey: id(`ak_${a}`) } });
+    await prisma.album.create({
+        data: { id: id(`alb_${a}`), rgMbid: id(`rg_${a}`), artistId: id(`art_${a}`), identityKey: id(`ik_${a}`), title: `Seed ${a}`, primaryType: "Album", location },
+    });
+    await prisma.track.create({
+        data: {
+            id: id(`t_${a}`), albumId: id(`alb_${a}`), title: a, trackNo: 1, duration: 200, filePath: `/tmp/${P}${a}.flac`,
+            fileModified: new Date(), fileSize: 1000, missingSince: missing ? new Date() : null,
+        },
+    });
+}
+
+// A similar artist of a seed, with the weight the similarity carries.
+async function similarTo(seed: string, key: string, weight: number) {
+    await prisma.artist.create({ data: { id: id(key), name: key, normalizedName: key, identityKey: id(`${key}_k`) } });
+    await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${seed}`), toArtistId: id(key), weight } });
+}
+
 beforeAll(async () => {
     await cleanup();
-    for (const u of [ME, OTHER, WIDE, CROWDED]) await prisma.user.create({ data: { id: u, username: u, passwordHash: "x" } });
+    for (const u of [ME, OTHER, WIDE, CROWDED, BLEND]) await prisma.user.create({ data: { id: u, username: u, passwordHash: "x" } });
     for (const [a, location, missing] of ARTISTS) {
-        await prisma.artist.create({ data: { id: id(`art_${a}`), name: `Seed ${a}`, normalizedName: `seed ${a}`, identityKey: id(`ak_${a}`) } });
-        await prisma.album.create({
-            data: { id: id(`alb_${a}`), rgMbid: id(`rg_${a}`), artistId: id(`art_${a}`), identityKey: id(`ik_${a}`), title: `Seed ${a}`, primaryType: "Album", location },
-        });
-        await prisma.track.create({
-            data: {
-                id: id(`t_${a}`), albumId: id(`alb_${a}`), title: a, trackNo: 1, duration: 200, filePath: `/tmp/${P}${a}.flac`,
-                fileModified: new Date(), fileSize: 1000, missingSince: missing ? new Date() : null,
-            },
-        });
+        await seedArtist(a, location, missing);
         // Each seed artist has one similar artist, a stranger to the library.
         await prisma.artist.create({ data: { id: id(`sim_${a}`), name: `Similar to ${a}`, normalizedName: `similar to ${a}`, identityKey: id(`sk_${a}`) } });
         await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${a}`), toArtistId: id(`sim_${a}`), weight: 1 } });
     }
     // A listener with two seed artists of ten similar artists each (20 in all), so a page size of 10 shows.
     for (const seed of ["z1", "z2"]) {
-        await prisma.artist.create({ data: { id: id(`art_${seed}`), name: `Seed ${seed}`, normalizedName: `seed ${seed}`, identityKey: id(`ak_${seed}`) } });
-        await prisma.album.create({
-            data: { id: id(`alb_${seed}`), rgMbid: id(`rg_${seed}`), artistId: id(`art_${seed}`), identityKey: id(`ik_${seed}`), title: `Seed ${seed}`, primaryType: "Album", location: "LIBRARY" },
-        });
-        await prisma.track.create({
-            data: { id: id(`t_${seed}`), albumId: id(`alb_${seed}`), title: seed, trackNo: 1, duration: 200, filePath: `/tmp/${P}${seed}.flac`, fileModified: new Date(), fileSize: 1000 },
-        });
+        await seedArtist(seed);
         for (let k = 0; k < 10; k++) {
             await prisma.artist.create({ data: { id: id(`${seed}_sim_${k}`), name: `${seed} similar ${k}`, normalizedName: `${seed} similar ${k}`, identityKey: id(`${seed}_sk_${k}`) } });
             await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${seed}`), toArtistId: id(`${seed}_sim_${k}`), weight: 1 } });
@@ -77,13 +83,7 @@ beforeAll(async () => {
     }
     // A listener whose one seed artist has 12 similar artists the library already owns (weighted highest) and 13 it does
     // not. The unowned ones share one weight and are inserted in reverse id order, so only the tie-break orders them.
-    await prisma.artist.create({ data: { id: id("art_q"), name: "Seed q", normalizedName: "seed q", identityKey: id("ak_q") } });
-    await prisma.album.create({
-        data: { id: id("alb_q"), rgMbid: id("rg_q"), artistId: id("art_q"), identityKey: id("ik_q"), title: "Seed q", primaryType: "Album", location: "LIBRARY" },
-    });
-    await prisma.track.create({
-        data: { id: id("t_q"), albumId: id("alb_q"), title: "q", trackNo: 1, duration: 200, filePath: `/tmp/${P}q.flac`, fileModified: new Date(), fileSize: 1000 },
-    });
+    await seedArtist("q");
     for (let k = 0; k < 12; k++) {
         const owned = id(`q_owned_${k}`);
         await prisma.artist.create({ data: { id: owned, name: `q owned ${k}`, normalizedName: `q owned ${k}`, identityKey: id(`qok_${k}`) } });
@@ -95,8 +95,20 @@ beforeAll(async () => {
         await prisma.artist.create({ data: { id: free, name: `q free ${k}`, normalizedName: `q free ${k}`, identityKey: id(`qfk_${k}`) } });
         await prisma.similarArtist.create({ data: { fromArtistId: id("art_q"), toArtistId: free, weight: 1 } });
     }
+    // A listener with two seed artists, b1 played more. b1 has a light similar artist, b2 a heavy one and one both share
+    // (heavier from b2). Each seed also lists the other and itself, at the highest weight of all.
+    await seedArtist("b1");
+    await seedArtist("b2");
+    await similarTo("b1", "b_light", 1);
+    await similarTo("b2", "b_heavy", 5);
+    await similarTo("b2", "b_shared", 3);
+    await prisma.similarArtist.create({ data: { fromArtistId: id("art_b1"), toArtistId: id("b_shared"), weight: 1 } });
+    for (const [from, to] of [["b1", "b2"], ["b2", "b1"], ["b1", "b1"], ["b2", "b2"]]) {
+        await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${from}`), toArtistId: id(`art_${to}`), weight: 9 } });
+    }
     await prisma.play.createMany({
         data: [
+            ...plays(BLEND, "b1", 3), ...plays(BLEND, "b2", 2),
             ...plays(CROWDED, "q", 4),
             ...plays(WIDE, "z1", 3), ...plays(WIDE, "z2", 2),
             ...plays(ME, "x", 5), ...plays(ME, "y", 2),
@@ -180,5 +192,25 @@ describe("a seed artist whose most similar artists the library already owns", ()
     it("breaks equal weights by artist id, the same order every time", async () => {
         expect(await forYou("?limit=5")).toEqual(freeIds(5));
         expect(await forYou("?limit=5")).toEqual(freeIds(5));
+    });
+});
+
+describe("a listener with more than one seed artist", () => {
+    const forYou = async (query: string) => {
+        const res = await request(appFor(BLEND)).get(`/recommendations/for-you${query}`);
+        expect(res.status).toBe(200);
+        return res.body.artists.map((a: { id: string }) => a.id);
+    };
+
+    it("ranks all the seeds' candidates together by weight, so a heavier artist of the second seed beats a lighter one of the first", async () => {
+        expect(await forYou("?limit=1")).toEqual([id("b_heavy")]);
+        // The artist both seeds list comes once, at its heaviest.
+        expect(await forYou("?limit=10")).toEqual([id("b_heavy"), id("b_shared"), id("b_light")]);
+    });
+
+    it("never recommends a seed artist back, not even to itself", async () => {
+        const got: string[] = await forYou("?limit=10");
+        expect(got).not.toContain(id("art_b1"));
+        expect(got).not.toContain(id("art_b2"));
     });
 });

@@ -45,13 +45,15 @@ router.get("/for-you", async (req, res) => {
             return res.json({ artists: [] });
         }
 
-        // Get similar artists for each top artist: only ones the library does not own, so `limit` per seed is enough for
-        // `limit` in all. Equal weights go by artist id, so the same listener gets the same page every time.
-        const allSimilarArtists = await Promise.all(
-            topArtists.map(async ({ artist }) => {
-                const similar = await prisma.similarArtist.findMany({
+        // Similar artists of each top artist: only ones the library does not own and never a seed itself, `limit` per seed
+        // (enough for `limit` in all).
+        const seedIds = topArtists.map(({ artist }) => artist.id);
+        const perSeed = await Promise.all(
+            seedIds.map((fromArtistId) =>
+                prisma.similarArtist.findMany({
                     where: {
-                        fromArtistId: artist.id,
+                        fromArtistId,
+                        toArtistId: { notIn: seedIds },
                         toArtist: { ownedAlbums: { none: {} } },
                     },
                     orderBy: [{ weight: "desc" }, { toArtistId: "asc" }],
@@ -66,22 +68,21 @@ router.get("/for-you", async (req, res) => {
                             },
                         },
                     },
-                });
-                return similar.map((s) => s.toArtist);
-            })
+                })
+            )
         );
 
-        // Flatten and deduplicate
-        const newArtists = Array.from(
-            new Map(
-                allSimilarArtists.flat().map((artist) => [artist.id, artist])
-            ).values()
-        );
+        // One ranking across the seeds: heaviest first, equal weights by artist id, so the same listener gets the same
+        // page every time. An artist listed by more than one seed comes once, at its heaviest.
+        const ranked = perSeed
+            .flat()
+            .sort((x, y) => y.weight - x.weight || (x.toArtistId < y.toArtistId ? -1 : x.toArtistId > y.toArtistId ? 1 : 0));
+        const artistsToCheck = Array.from(
+            new Map(ranked.map((row) => [row.toArtistId, row.toArtist])).values()
+        ).slice(0, limitNum);
 
         // Get album counts for recommended artists (from enriched discography)
-        const recommendedArtistIds = newArtists
-            .slice(0, limitNum)
-            .map((a) => a.id);
+        const recommendedArtistIds = artistsToCheck.map((a) => a.id);
         const albumCounts = await prisma.album.groupBy({
             by: ["artistId"],
             where: { artistId: { in: recommendedArtistIds } },
@@ -92,7 +93,6 @@ router.get("/for-you", async (req, res) => {
         );
 
         // Pictures come from what is stored (the artist row, then the Redis cache), never a lookup during a page load.
-        const artistsToCheck = newArtists.slice(0, limitNum);
         const cacheKeys = artistsToCheck
             .filter(a => !a.heroUrl)
             .map(a => `hero:${a.id}`);
