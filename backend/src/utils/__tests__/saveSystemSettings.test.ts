@@ -60,6 +60,32 @@ describe("saveSystemSettings", () => {
         expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).transcodeCacheMaxGb).toBe(12);
     });
 
+    it("does not cache what a read that began before the save saw", async () => {
+        const read = prisma.systemSettings.findUnique.bind(prisma.systemSettings);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let sawOldRow!: () => void;
+        const oldRowSeen = new Promise<void>((resolve) => { sawOldRow = resolve; });
+        const slow = jest.spyOn(prisma.systemSettings, "findUnique").mockImplementationOnce(((args: never) => (async () => {
+            const row = await read(args);
+            sawOldRow();
+            await gate;
+            return row;
+        })()) as never);
+
+        try {
+            const stale = getSystemSettings();
+            await oldRowSeen;
+            await saveSystemSettings({ transcodeCacheMaxGb: 12 });
+            release();
+
+            expect((await stale)?.transcodeCacheMaxGb).toBe(10);
+        } finally {
+            slow.mockRestore();
+        }
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(12);
+    });
+
     it("encrypts a credential in the row and reads it back plain", async () => {
         await saveSystemSettings({ fanartApiKey: "fa-key" });
 

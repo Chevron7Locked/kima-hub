@@ -15,8 +15,11 @@ async function buildSettings() {
 
 let cachedSettings: Awaited<ReturnType<typeof buildSettings>> | null = null;
 let cacheExpiry = 0;
+// Bumped by every invalidation, so a read that began before one can tell its answer may be out of date.
+let generation = 0;
 
 export function invalidateSystemSettingsCache() {
+    generation++;
     cachedSettings = null;
     cacheExpiry = 0;
 }
@@ -30,7 +33,10 @@ export async function getSystemSettings() {
         return { ...cachedSettings };
     }
 
+    const started = generation;
     const resolved = await buildSettings();
+    // An invalidation while the row was being read means the answer may predate a save: it is returned, not kept.
+    if (started !== generation) return resolved && { ...resolved };
     if (!resolved) {
         cachedSettings = null;
         cacheExpiry = 0;
