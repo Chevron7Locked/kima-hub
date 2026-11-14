@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { sharePreviewImage } from "@/lib/sharePreviewImage";
 import SharePageClient from "./SharePageClient";
 import { backendUrl } from "@/lib/backend-url";
 
@@ -20,15 +22,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
             data.entity?.artist?.name ||
             data.entity?.album?.artist?.name ||
             "kima";
-        const coverUrl: string | undefined =
-            data.entity?.coverUrl ||
-            data.entity?.items?.[0]?.track?.album?.coverUrl;
+        const image = sharePreviewImage(token, data.entity, await headers());
         return {
             title: `${title} - kima`.toLowerCase(),
             openGraph: {
                 title: title.toLowerCase(),
                 description: `by ${artistName} -- shared on kima`.toLowerCase(),
-                images: coverUrl ? [{ url: coverUrl }] : [],
+                images: image ? [{ url: image }] : [],
                 type: "music.song",
                 siteName: "kima",
             },
