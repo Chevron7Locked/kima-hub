@@ -72,6 +72,13 @@ describe("EnrichmentFailureService", () => {
             expect(song.entityType).toBe("audio");
         });
 
+        it("a repeat failure that names no code does not keep the earlier failure's code", async () => {
+            await enrichmentFailureService.recordFailure(baseInput);
+            await enrichmentFailureService.recordFailure({ ...baseInput, errorCode: undefined, errorMessage: "another way" });
+
+            expect(await stored(baseInput.entityId)).toMatchObject({ errorCode: null, errorMessage: "another way" });
+        });
+
         it("a repeat failure records the entity's current name", async () => {
             await enrichmentFailureService.recordFailure(baseInput);
             await enrichmentFailureService.recordFailure({ ...baseInput, entityName: "Renamed Artist" });

@@ -178,7 +178,8 @@ class EnrichmentFailureService {
             update: {
                 entityName,
                 errorMessage,
-                errorCode,
+                // The latest failure's code: a repeat that names none must not keep the earlier one's.
+                errorCode: errorCode ?? null,
                 retryCount: { increment: 1 },
                 maxRetries: STAGE_RETRY_CAP,
                 lastFailedAt: new Date(),

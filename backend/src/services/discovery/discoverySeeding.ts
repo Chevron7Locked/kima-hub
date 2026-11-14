@@ -95,7 +95,8 @@ export class DiscoverySeeding {
     private async getFallbackSeedArtists(limit: number): Promise<SeedArtist[]> {
         logger.debug('[DiscoverySeeding] Insufficient play history, falling back to library');
 
-        // Score: album count + track count / 10, over library albums; an artist with no real MBID cannot seed.
+        // Score: album count + track count / 10, over library albums; an artist with no real MBID cannot seed
+        // (hasRealArtistId's rule: no MBID, or a temp- placeholder).
         const rows = await prisma.$queryRaw<Array<{ name: string; mbid: string }>>`
             SELECT ar.name, ar.mbid
             FROM "Artist" ar
