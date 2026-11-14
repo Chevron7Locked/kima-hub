@@ -50,6 +50,21 @@ async function seed(key: string, artistName: string, titleOf: (n: number) => str
     }
 }
 
+/** An artist named `artistName` with one song, `title`, in file `filePath`. Returns the song's id. */
+async function seedOne(key: string, artistName: string, title: string, filePath = `/${P}/${key}.flac`) {
+    const artist = await prisma.artist.create({
+        data: { name: artistName, normalizedName: artistName.toLowerCase(), identityKey: `${P}-${key}-artist` },
+    });
+    const album = await prisma.album.create({
+        data: { rgMbid: `${P}-${key}-rg`, identityKey: `${P}-${key}-album`, primaryType: "Album", title: `${P} ${key} album`, artistId: artist.id, location: "LIBRARY" },
+    });
+    const id = `${P}-${key}-one`;
+    await prisma.track.create({
+        data: { id, title, albumId: album.id, trackNo: 1, duration: 100, filePath, fileModified: new Date(), fileSize: 1 },
+    });
+    return id;
+}
+
 const SAME = (title: string) => () => title;
 /** Distinct filler titles, with the wanted one last (so on the highest id). */
 const LAST_IS = (title: string) => (n: number) => (n === COUNT - 1 ? title : `lorem ipsum ${n}`);
@@ -62,9 +77,9 @@ const previewMatch = async (artist: string, title: string) => {
 };
 
 let m3uCount = 0;
-const m3uMatch = async (artist: string, title: string) => {
+const m3uMatch = async (artist: string | null, title: string | null, filePath = `/nowhere/${P}-${m3uCount + 1}.mp3`) => {
     const { playlistId } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++m3uCount}`, [
-        { filePath: `/nowhere/${P}-${m3uCount}.mp3`, durationSeconds: null, artist, title },
+        { filePath, durationSeconds: null, artist, title },
     ]);
     const items = await prisma.playlistItem.findMany({ where: { playlistId } });
     return items.length ? items[0].trackId : null;
@@ -148,5 +163,88 @@ describe("80 namesake songs inserted highest id first", () => {
         const title = `${P} seven song`;
         await seed("seven", "qzgseven band", SAME(title));
         expect(await m3uMatch("qzgseven", title)).toBe(lowest("seven"));
+    });
+});
+
+describe("a word boundary is any character that is not a letter or digit", () => {
+    // The stored name holds the source's word next to punctuation, with or without a space.
+    it.each([
+        ["slash", "qzislash/other", "Qzislash"],
+        ["comma", "qzjcomma, other", "Qzjcomma"],
+        ["parenthesis", "(qzkparen)", "Qzkparen"],
+        ["leading slash", "x/qzlslash", "Qzlslash"],
+    ])("an artist stored as %s is offered to the matcher", async (key, stored, source) => {
+        const title = `${P} ${key} wanted`;
+        const id = await seedOne(`b-${key.replace(" ", "-")}`, stored, title);
+        expect(await previewMatch(source, title)).toBe(id);
+        expect(await m3uMatch(source, title)).toBe(id);
+    });
+
+    it("a word inside a longer word is not offered", async () => {
+        const title = `${P} mother wanted`;
+        await seedOne("b-mother", "mother qzpband", title);
+        expect(await previewMatch("The Qzpband", title)).toBeNull();
+        expect(await m3uMatch("The Qzpband", title)).toBeNull();
+    });
+
+    it("a word with a regex metacharacter matches only itself", async () => {
+        const wanted = "lorem dot alpha";
+        const decoy = "zebra dash omega";
+        const id = await seedOne("b-dot", "qzq.x band", wanted);
+        await seedOne("b-dash", "qzq-x band", decoy);
+        expect(await previewMatch("Qzq.x", wanted)).toBe(id);
+        expect(await previewMatch("Qzq.x", decoy)).toBeNull();
+        expect(await m3uMatch("Qzq.x", decoy)).toBeNull();
+    });
+
+    it("a word ending in plus signs is a word, not a quantifier", async () => {
+        const wanted = `${P} plus wanted`;
+        const decoy = `${P} plain decoy`;
+        const id = await seedOne("b-plus", "qzr++ band", wanted);
+        await seedOne("b-plain", "qzr band", decoy);
+        expect(await previewMatch("Qzr++", wanted)).toBe(id);
+        expect(await previewMatch("Qzr++", decoy)).toBeNull();
+    });
+});
+
+describe("the five-letter prefix sweep needs three characters", () => {
+    it("a two-character source artist does not read every artist that starts with them", async () => {
+        const title = `${P} short wanted`;
+        await seedOne("s-short", "qysweep band", title);
+        expect(await previewMatch("Qy", title)).toBeNull();
+    });
+
+    it("a two-character source artist still matches the artist of that name", async () => {
+        const title = `${P} short exact`;
+        const id = await seedOne("s-exact", "qx", title);
+        expect(await previewMatch("Qx", title)).toBe(id);
+    });
+});
+
+describe("an M3U filename match agrees with the entry", () => {
+    const file = (dir: string, name: string) => `/${P}/${dir}/${name}.flac`;
+
+    it("a same-named file by an unrelated artist is not matched, and the right one is", async () => {
+        const title = `${P} tier two song`;
+        // The unrelated file is created first, so it has the lower id.
+        await seedOne("t-other", "qzsother artist", `${P} unrelated song`, file("t-other", "qzs-same-name"));
+        const right = await seedOne("t-right", "qzsone artist", title, file("t-right", "qzs-same-name"));
+        expect(await m3uMatch("qzsone artist", title, `/nowhere/qzs-same-name.flac`)).toBe(right);
+    });
+
+    it("a file only an unrelated artist has is not matched", async () => {
+        await seedOne("t-only", "qztonly artist", `${P} only song`, file("t-only", "qzt-only-name"));
+        expect(await m3uMatch("qzsnobody", `${P} nothing here`, `/nowhere/qzt-only-name.flac`)).toBeNull();
+    });
+
+    it("an entry with no artist or title still matches by filename", async () => {
+        const id = await seedOne("t-bare", "qzubare artist", `${P} bare song`, file("t-bare", "qzu-bare-name"));
+        expect(await m3uMatch(null, null, `/nowhere/qzu-bare-name.flac`)).toBe(id);
+    });
+
+    it("a matching title is enough when the artist differs", async () => {
+        const title = `${P} title agrees`;
+        const id = await seedOne("t-title", "qzvtitle artist", title, file("t-title", "qzv-title-name"));
+        expect(await m3uMatch("qzvwrong artist", title, `/nowhere/qzv-title-name.flac`)).toBe(id);
     });
 });
