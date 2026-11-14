@@ -94,6 +94,35 @@ describe("ApiClient.request -- 401 refresh three-way", () => {
         expect(localStorage.getItem("refresh_token")).toBeNull();
     });
 
+    it.each([429, 502, 503, 504])("refresh answered %i -> a NetworkError, tokens left intact", async (status) => {
+        // A busy or restarting server has not judged the session: only a 4xx other than 429 ends it.
+        const fetchMock = vi
+            .fn()
+            .mockImplementationOnce(async () => makeResponse({ ok: false, status: 401 }))
+            .mockImplementationOnce(async () => makeResponse({ ok: false, status }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(api.request("/library/tracks")).rejects.toBeInstanceOf(NetworkError);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(localStorage.getItem("auth_token")).toBe("expired-token");
+        expect(localStorage.getItem("refresh_token")).toBe("refresh-abc");
+    });
+
+    it("refresh that brings no new refresh token -> the stored one is kept", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockImplementationOnce(async () => makeResponse({ ok: false, status: 401 }))
+            .mockImplementationOnce(async () => makeResponse({ ok: true, status: 200, body: { token: "new-token" } }))
+            .mockImplementationOnce(async () => makeResponse({ ok: true, status: 200, body: { data: "ok" } }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await api.request("/library/tracks");
+
+        expect(localStorage.getItem("auth_token")).toBe("new-token");
+        expect(localStorage.getItem("refresh_token")).toBe("refresh-abc");
+    });
+
     it("refresh refreshed -> the request is retried once and succeeds", async () => {
         const fetchMock = vi
             .fn()

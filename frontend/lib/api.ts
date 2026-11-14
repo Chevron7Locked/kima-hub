@@ -329,6 +329,7 @@ class ApiClient {
         return this.token;
     }
 
+    /** A sign-in replaces both tokens: one that brings no refresh token removes the older session's. */
     setToken(token: string, refreshToken?: string) {
         this.token = token;
         const storage = authStorage();
@@ -336,6 +337,8 @@ class ApiClient {
             storage.setItem(AUTH_TOKEN_KEY, token);
             if (refreshToken) {
                 storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+            } else {
+                storage.removeItem(REFRESH_TOKEN_KEY);
             }
         }
     }
@@ -441,6 +444,12 @@ class ApiClient {
             return "network-error";
         }
 
+        if (response.status === 429 || response.status >= 500) {
+            // A busy or restarting server has not judged the session: keep tokens, as for a network failure.
+            if (!leavingPage) console.error(`[API] Token refresh answered ${response.status}`);
+            return "network-error";
+        }
+
         if (!response.ok) {
             // Server explicitly rejected the refresh token -- session is invalid.
             this.clearToken();
@@ -457,7 +466,8 @@ class ApiClient {
         }
 
         if (data.token) {
-            this.setToken(data.token, data.refreshToken);
+            // A renewal that brings no new refresh token keeps the one it used: it is the same session.
+            this.setToken(data.token, data.refreshToken ?? refreshToken);
             return "refreshed";
         }
 
