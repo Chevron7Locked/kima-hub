@@ -333,12 +333,13 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
 /**
  * The shortest word the primary artist's first-word sweep and the five-letter prefix sweep look up, the M3U fuzzy tier's
  * first word, and the shortest file name the M3U filename tier tries: shorter ones are too common to mean anything. The
- * credit sweep has no minimum ("DJ Shadow"): it reads whole words only, which bounds it.
+ * credit sweep has no minimum, so a credit like "DJ Shadow" still finds its artist; it matches whole words only, and it
+ * runs only when the three sweeps before it found nothing.
  */
 const MIN_WORD_LENGTH = 3;
 
 /** Songs loaded per query when the artists a word finds have many: a query carries at most this many ids. */
-const SONG_CHUNK_MAX = 10_000;
+export const SONG_CHUNK_MAX = 10_000;
 
 /**
  * Every playable song, in id order, of the artists whose `normalizedName` holds `word` as a whole word, anywhere in the
@@ -347,13 +348,15 @@ const SONG_CHUNK_MAX = 10_000;
  * whole word, not a substring, so a common word ("the") finds the artists that have it and not every name with those
  * letters inside. `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word.
  * One query joins the match to the playable songs and returns their ids, so the number of artists never reaches a
- * query's bind-parameter limit; the songs are then loaded in chunks of SONG_CHUNK_MAX ids, in id order. "Letter" follows
+ * query's bind-parameter limit; the songs are then loaded in chunks of `chunkSize` ids (SONG_CHUNK_MAX; a test passes a
+ * small one), in id order. "Letter" follows
  * the database's character classes: where they know only ASCII (a C locale, SQL_ASCII), every accented or non-Latin
  * letter counts as a boundary, so such names are offered more often, never less; the matcher narrows the pool afterwards.
  */
-async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
+export async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
   word: string,
   include: I,
+  chunkSize: number = SONG_CHUNK_MAX,
 ): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = `(^|[^[:alnum:]])${escaped}($|[^[:alnum:]])`;
@@ -364,8 +367,8 @@ async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
     WHERE ar."normalizedName" ~ ${pattern} AND ${playableSongSql("t", "al")}
     ORDER BY t.id`;
   const songs: Prisma.TrackGetPayload<{ include: I }>[] = [];
-  for (let from = 0; from < ids.length; from += SONG_CHUNK_MAX) {
-    const chunk = ids.slice(from, from + SONG_CHUNK_MAX).map((r) => r.id);
+  for (let from = 0; from < ids.length; from += chunkSize) {
+    const chunk = ids.slice(from, from + chunkSize).map((r) => r.id);
     songs.push(...(await prisma.track.findMany({ where: { id: { in: chunk } }, include, orderBy: { id: "asc" } })));
   }
   return songs;

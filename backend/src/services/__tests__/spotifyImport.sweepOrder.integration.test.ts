@@ -1,15 +1,18 @@
 /**
  * An import's first-word artist sweeps offer the matcher every song of the artists they find, in a stable order. Two
  * properties, each checked through the preview (all three sweeps of the per-song lookup) and the M3U import (its fuzzy
- * tier). Real database.
+ * tier). Real database. Four properties:
  *
  * - Nothing is cut by id: the right song is found when it has the highest id of an artist with more than 50 songs, and
  *   when the first word is a common one ("the") shared by dozens of artists with lower ids.
  * - The same song comes back whatever order the rows were inserted: 80 songs with one title, inserted highest id first,
  *   match the lowest id.
+ * - A word held by more artists than one query can carry ids for still finds its songs, and the songs load in chunks
+ *   of at most the chunk size (a small one is passed in), in id order across chunks.
+ * - A credit whose first word is short ("DJ Qzsw feat. Someone") still reaches the matcher through the credit sweep.
  */
 import { prisma } from "../../utils/db";
-import { spotifyImportService } from "../spotifyImport";
+import { spotifyImportService, songsOfArtistsHoldingWord } from "../spotifyImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -209,12 +212,11 @@ describe("a word boundary is any character that is not a letter or digit", () =>
 
 describe("a word held by more artists than a query can carry ids for", () => {
     const ARTISTS = 32_800; // past Postgres's limit of 32767 bind parameters
-    const SONGS = 10_050; // past one load chunk of 10000
+    const SONGS = 60;
     const songId = (n: number) => `${P}-wide-${String(n).padStart(5, "0")}`;
     const wanted = "wide wanted";
     const tie = "wide tie";
-    // The wanted song sits in the second chunk of ids; the tie's two songs sit in both chunks.
-    const titleOf = (n: number) => (n === 10_040 ? wanted : n === 5 || n === SONGS - 1 ? tie : `lorem ipsum ${n}`);
+    const titleOf = (n: number) => (n === 50 ? wanted : n === 5 || n === SONGS - 1 ? tie : `lorem ipsum ${n}`);
 
     beforeAll(async () => {
         await prisma.artist.createMany({
@@ -238,16 +240,30 @@ describe("a word held by more artists than a query can carry ids for", () => {
         for (const table of ["Artist", "Album", "Track"]) await prisma.$executeRawUnsafe(`ANALYZE "${table}"`);
     });
 
-    it("the preview still finds a song that loads in a later chunk", async () => {
-        expect(await previewMatch("Qzwide", wanted)).toBe(songId(10_040));
+    it("the preview still finds a song", async () => {
+        expect(await previewMatch("Qzwide", wanted)).toBe(songId(50));
     });
 
     it("the M3U fuzzy tier still finds it", async () => {
-        expect(await m3uMatch("Qzwide", wanted)).toBe(songId(10_040));
+        expect(await m3uMatch("Qzwide", wanted)).toBe(songId(50));
     });
 
-    it("the lowest id wins a tie across chunks", async () => {
+    it("the lowest id wins a tie", async () => {
         expect(await previewMatch("Qzwide", tie)).toBe(songId(5));
+    });
+
+    // The chunk size is passed in (a small one) rather than seeding past 10000 songs.
+    it("loads the songs in chunks of at most the chunk size, in id order across chunks", async () => {
+        const load = jest.spyOn(prisma.track, "findMany");
+        try {
+            const songs = await songsOfArtistsHoldingWord("qzwide", {}, 7);
+            const asked = load.mock.calls.map(([args]) => (args?.where?.id as { in: string[] }).in);
+            expect(asked.length).toBe(Math.ceil(SONGS / 7));
+            expect(Math.max(...asked.map((ids) => ids.length))).toBe(7);
+            expect(songs.map((s) => s.id)).toEqual(Array.from({ length: SONGS }, (_, n) => songId(n)));
+        } finally {
+            load.mockRestore();
+        }
     });
 });
 
