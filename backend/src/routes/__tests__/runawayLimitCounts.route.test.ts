@@ -88,6 +88,48 @@ describe("streams are not counted", () => {
     });
 });
 
+describe("a refused request is counted, even on an exempt path", () => {
+    const remainingFor = async (server: express.Express, path: string, header?: string) => {
+        const req = request(server).get(path);
+        const res = await (header ? req.set("Authorization", header) : req);
+        return { status: res.status, remaining: Number(res.headers["ratelimit-remaining"]) };
+    };
+
+    it.each([
+        "/api/audiobooks/none/stream",
+        "/api/podcasts/1/episodes/none/stream",
+        "/api/library/tracks/none/stream",
+        "/api/soulseek/search/abc-123",
+        "/api/spotify/import/job1/status",
+    ])("a stranger's %s", async (path) => {
+        const server = app();
+        const first = await remainingFor(server, path);
+        const second = await remainingFor(server, path);
+        expect(first.status).toBe(401);
+        expect(second.status).toBe(401);
+        expect(first.remaining).toBeGreaterThan(0);
+        expect(second.remaining).toBe(first.remaining - 1);
+    });
+
+    it("a bad token on a stream is counted too", async () => {
+        const server = app();
+        const first = await remainingFor(server, "/api/library/tracks/none/stream?token=not-a-token");
+        const second = await remainingFor(server, "/api/library/tracks/none/stream?token=not-a-token");
+        expect(first.status).toBe(401);
+        expect(first.remaining).toBeGreaterThan(0);
+        expect(second.remaining).toBe(first.remaining - 1);
+    });
+
+    it("a signed-in person's stream stays uncounted", async () => {
+        const server = app();
+        const before = await remaining(server, "/api/stats/hour");
+        const streamed = await remainingFor(server, "/api/library/tracks/none/stream", auth);
+        expect(streamed.status).not.toBe(401);
+        expect(streamed.remaining).toBeNaN();
+        expect(await remaining(server, "/api/stats/hour")).toBe(before - 1);
+    });
+});
+
 describe("a path that only starts like an exempt one is counted", () => {
     it.each(["/api/library/album-coverX/a", "/api/library/cover-artX/a"])("%s", async (path) => {
         const server = app();

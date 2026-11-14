@@ -59,6 +59,17 @@ function mount(path: string, router: RequestHandler): Mount {
     return { path, router, ...mountAccess[path] };
 }
 
+/** Where the queue dashboard (Bull Board) answers. */
+export const QUEUE_BOARD_PATH = "/api/admin/queues";
+
+/**
+ * The queue dashboard at its path with the access `mountAccess` declares for it. It is mounted by the server once the
+ * workers have started, so it is not in `apiMounts`; its router belongs to Bull Board and its routes cannot be listed.
+ */
+export function queueBoardMount(router: RequestHandler): Mount {
+    return mount(QUEUE_BOARD_PATH, router);
+}
+
 /** Every mount, in the order they answer. */
 export function apiMounts(options: MountOptions): Mount[] {
     const health = Router().get("/", options.health);

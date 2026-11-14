@@ -21,7 +21,7 @@
 
 import { Router, type Express, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import { requireAdmin, requireAuth, requireAuthOrToken } from "../middleware/auth";
-import { apiLimiter } from "../middleware/rateLimiter";
+import { ACCESS_PASSED, apiLimiter, isUncountedPath } from "../middleware/rateLimiter";
 import { logger } from "../utils/logger";
 
 export type AccessFamily = "public" | "signed-in" | "admin" | "internal" | "webhook" | "share-token" | "subsonic";
@@ -142,9 +142,47 @@ async function runInOrder(handlers: RequestHandler[], req: Request, res: Respons
     next();
 }
 
+/** A stand-in response that swallows whatever a check says, so a check can be asked its verdict and not answer. */
+function silentResponse(real: Response): Response {
+    const silent: Response = new Proxy({} as Response, {
+        // `res.status(401).json(...)` is a chain of calls that all land here. It is not a promise: a check returns it.
+        get: (_target, name) => (name === "locals" ? real.locals : name === "then" ? undefined : () => silent),
+    });
+    return silent;
+}
+
+/** Whether every check passes for this request, without anything being sent. A refusal or an error is a no. */
+async function passes(checks: RequestHandler[], req: Request, res: Response): Promise<boolean> {
+    let passed = false;
+    await runInOrder(checks, req, silentResponse(res), (error?: unknown) => {
+        passed = error === undefined;
+    });
+    return passed;
+}
+
+/**
+ * In front of the runaway limit, for the addresses it does not count (streams, polling): asks the access check first
+ * and tells the limit whether it passed. A request the check refuses is not exempt, so it is counted.
+ */
+function settleUncounted(access: Access): RequestHandler {
+    const declared = declaredResolver(access);
+    return async (req, res, next) => {
+        if (!isUncountedPath(req.baseUrl + req.path)) return next();
+        try {
+            const { family, urlToken } = await declared(req.method, req.url);
+            if (await passes(checksFor(family, urlToken), req, res)) res.locals[ACCESS_PASSED] = true;
+        } catch (error) {
+            return next(error);
+        }
+        next();
+    };
+}
+
 function accessCheck(access: Access): RequestHandler {
     const declared = declaredResolver(access);
     return async (req, res, next) => {
+        // Already passed in front of the runaway limit.
+        if (res.locals[ACCESS_PASSED] === true) return next();
         const { family, urlToken } = await declared(req.method, req.url);
         return runInOrder(checksFor(family, urlToken), req, res, next);
     };
@@ -229,7 +267,7 @@ export function mountRoute(app: Express, mount: Mount): void {
         return;
     }
     const handlers: RequestHandler[] = [];
-    if (mount.runawayLimit) handlers.push(apiLimiter);
+    if (mount.runawayLimit) handlers.push(settleUncounted(mount.access), apiLimiter);
     // A mount of one family that the router checks itself needs nothing in front of it.
     if (mount.access.family === "signed-in" || mount.access.family === "admin" || mount.access.routes) {
         handlers.push(accessCheck(mount.access));

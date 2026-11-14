@@ -1,44 +1,57 @@
-import { apiLimiter, createRateLimiter, trustOneProxyHop } from '../rateLimiter';
+import { ACCESS_PASSED, apiLimiter, createRateLimiter, trustOneProxyHop } from '../rateLimiter';
 import express from 'express';
 import request from 'supertest';
 
 // express-rate-limit does not expose its options, so the skip behaviour is
 // checked through a throwaway express app: a skipped request carries no RateLimit-* headers.
-function makeSkipApp() {
-    const app = express();
-    app.use(apiLimiter);
-    app.get('*', (_req, res) => res.status(200).json({ ok: true }));
-    return app;
-}
 
 describe('apiLimiter skip predicate', () => {
-    let app: express.Application;
+    // The access check sets this once it has passed a request; a stream or poll is uncounted only after that.
+    function appWhere(passed: boolean) {
+        const app = express();
+        app.use((_req, res, next) => {
+            if (passed) res.locals[ACCESS_PASSED] = true;
+            next();
+        });
+        app.use(apiLimiter);
+        app.get('*', (_req, res) => res.status(200).json({ ok: true }));
+        return app;
+    }
 
-    beforeAll(() => { app = makeSkipApp(); });
+    const streams = [
+        '/api/podcasts/p1/episodes/e1/stream?token=eyJhbGci',
+        '/api/library/tracks/track-123/stream?token=abc',
+        '/api/audiobooks/book-1/stream',
+        '/api/library/cover-art/abc',
+        '/api/library/album-cover/abc',
+        '/api/soulseek/search/abc-123',
+        '/api/spotify/import/job1/status',
+    ];
 
-    it('skips a podcast stream URL that includes a ?token= query string', async () => {
-        const res = await request(app)
-            .get('/api/podcasts/p1/episodes/e1/stream?token=eyJhbGci')
-            .expect(200);
+    it.each(streams)('skips %s once access has passed', async (path) => {
+        const res = await request(appWhere(true)).get(path).expect(200);
         expect(res.headers['ratelimit-limit']).toBeUndefined();
     });
 
-    it('skips a track stream URL', async () => {
-        const res = await request(app)
-            .get('/api/library/tracks/track-123/stream?token=abc')
-            .expect(200);
-        expect(res.headers['ratelimit-limit']).toBeUndefined();
+    it.each(streams)('counts %s when access has not passed', async (path) => {
+        const res = await request(appWhere(false)).get(path).expect(200);
+        expect(res.headers['ratelimit-limit']).toBeDefined();
     });
 
     it('skips the health endpoint', async () => {
-        const res = await request(app).get('/health').expect(200);
+        const res = await request(appWhere(false)).get('/health').expect(200);
         expect(res.headers['ratelimit-limit']).toBeUndefined();
     });
 
     it('does not skip a non-stream podcast path', async () => {
-        const res = await request(app)
+        const res = await request(appWhere(true))
             .get('/api/podcasts/p1/episodes?token=abc')
             .expect(200);
+        expect(res.headers['ratelimit-limit']).toBeDefined();
+    });
+
+    it('does not skip an address that only starts like a cover route', async () => {
+        const res = await request(appWhere(true)).get('/api/library/cover-artX/a').expect(200);
         expect(res.headers['ratelimit-limit']).toBeDefined();
     });
 });

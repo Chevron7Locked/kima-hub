@@ -8,7 +8,7 @@ import { redisClient, waitForRedisReady } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 
-import { mountApi } from "./routes/mounts";
+import { mountApi, queueBoardMount, QUEUE_BOARD_PATH } from "./routes/mounts";
 import { mountRoute } from "./routes/access";
 import { dataCacheService } from "./services/dataCache";
 import { enrichmentStateService } from "./services/enrichmentState";
@@ -21,6 +21,7 @@ import { combineAnalyzerStatus, heartbeatFresh } from "./utils/analyzerStatus";
 import { errorHandler } from "./middleware/errorHandler";
 import { resetAdminPassword } from "./services/users/accounts";
 import { trustOneProxyHop } from "./middleware/rateLimiter";
+import { jsonBodyParser } from "./middleware/jsonBody";
 const app = express();
 
 // Middleware
@@ -65,14 +66,7 @@ app.use(
         credentials: true,
     })
 );
-const defaultJsonParser = express.json({ limit: "1mb" });
-const largeJsonParser = express.json({ limit: "5mb" });
-app.use((req, res, next) => {
-    if (req.path.startsWith("/api/playback-state")) {
-        return largeJsonParser(req, res, next);
-    }
-    return defaultJsonParser(req, res, next);
-});
+app.use(jsonBodyParser);
 
 // Session
 trustOneProxyHop(app);
@@ -362,7 +356,7 @@ async function main() {
     );
 
     const serverAdapter = new ExpressAdapter();
-    serverAdapter.setBasePath("/api/admin/queues");
+    serverAdapter.setBasePath(QUEUE_BOARD_PATH);
 
     createBullBoard({
         queues: [
@@ -377,11 +371,7 @@ async function main() {
         serverAdapter,
     });
 
-    mountRoute(app, {
-        path: "/api/admin/queues",
-        router: serverAdapter.getRouter(),
-        access: { family: "admin" },
-    });
+    mountRoute(app, queueBoardMount(serverAdapter.getRouter()));
     logger.debug(
         "Bull Board dashboard available at /api/admin/queues (admin-only)"
     );

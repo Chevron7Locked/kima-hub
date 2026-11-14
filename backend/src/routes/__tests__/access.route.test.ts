@@ -8,9 +8,11 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { listRoutes, mountRoute, parseRouteKey, type AccessFamily, type Mount, type RouteListing } from "../access";
-import { apiMounts, mountApi } from "../mounts";
+import { apiMounts, mountApi, queueBoardMount, QUEUE_BOARD_PATH } from "../mounts";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAccess } from "../mountAccess";
+import { createBullBoard } from "@bull-board/api";
+import { ExpressAdapter } from "@bull-board/express";
 
 const P = "zz-access";
 const MEMBER = `${P}-member`;
@@ -115,7 +117,10 @@ describe("the route listing", () => {
     it("every mounted path has its access declared, and every declaration has a mount", () => {
         const mounted = apiMounts(options).map((m) => m.path);
         expect(mounted.filter((path) => !mountAccess[path])).toEqual([]);
-        expect(Object.keys(mountAccess).filter((path) => !mounted.includes(path))).toEqual([]);
+        // The queue dashboard is mounted when the workers start, not with the rest, and is no router of ours to list.
+        const lateMounts = [QUEUE_BOARD_PATH];
+        expect(Object.keys(mountAccess).filter((path) => !mounted.includes(path) && !lateMounts.includes(path))).toEqual([]);
+        expect(mountAccess[QUEUE_BOARD_PATH]?.access.family).toBe("admin");
     });
 
     it("no router guards its own routes: access is declared at the mount only", () => {
@@ -268,6 +273,70 @@ describe("the declared families are enforced in front of the routers", () => {
         // A stranger counts too: the limit comes before the sign-in check.
         const stranger = await request(app).get("/api/metrics");
         expect(Number(stranger.headers["ratelimit-remaining"])).toBe(Number(second.headers["ratelimit-remaining"]) - 1);
+    });
+
+    it.each(["/api/library", "/api/enrichment"])("%s is closed by default: a route nobody listed is for admins", async (path) => {
+        const declared = mountAccess[path].access;
+        expect(declared.family).toBe("admin");
+        // What the mount lets members use is exactly its listed exceptions.
+        expect(new Set(Object.values(declared.routes ?? {}))).toEqual(new Set(["signed-in"]));
+
+        const router = Router().get("/brand-new-route", (_req, res) => void res.json({ reached: true }));
+        const app = express();
+        mountRoute(app, { path, router, access: declared });
+        expect((await request(app).get(`${path}/brand-new-route`).set("Authorization", as(MEMBER, "user"))).status).toBe(403);
+        expect((await request(app).get(`${path}/brand-new-route`).set("Authorization", as(ADMIN, "admin"))).status).toBe(200);
+    });
+
+    it("the library and enrichment routes members can use are exactly these", async () => {
+        const rows = await listRoutes(apiMounts(options));
+        const memberRoutes = (mount: string) =>
+            rows.filter((r) => r.mount === mount && r.family === "signed-in").map((r) => `${r.method} ${r.path}`).sort();
+        expect(memberRoutes("/api/enrichment")).toEqual(
+            ["GET /concurrency", "GET /failures", "GET /failures/counts", "GET /progress", "GET /status"].sort(),
+        );
+        expect(memberRoutes("/api/library")).toEqual(
+            [
+                "GET /album-cover/:mbid",
+                "GET /albums",
+                "GET /albums/:id",
+                "GET /artist-counts/status",
+                "GET /artists",
+                "GET /artists/:id",
+                "GET /artists/:id/play-tracks",
+                "GET /cover-art/:id?",
+                "GET /decades",
+                "GET /genres",
+                "GET /image-backfill/status",
+                "GET /radio",
+                "GET /radio/row",
+                "GET /radio/stations",
+                "GET /recently-added",
+                "GET /recently-listened",
+                "GET /scan/status/:jobId",
+                "GET /tracks",
+                "GET /tracks/:id",
+                "GET /tracks/:id/lyrics",
+                "GET /tracks/:id/stream",
+                "GET /tracks/:id/waveform",
+                "GET /tracks/shuffle",
+                "POST /tracks/:id/prewarm",
+            ].sort(),
+        );
+    });
+
+    it("the queue dashboard is for admins: a stranger and a member are refused", async () => {
+        const serverAdapter = new ExpressAdapter();
+        serverAdapter.setBasePath(QUEUE_BOARD_PATH);
+        createBullBoard({ queues: [], serverAdapter });
+        const app = express();
+        mountRoute(app, queueBoardMount(serverAdapter.getRouter()));
+
+        const path = `${QUEUE_BOARD_PATH}/api/queues`;
+        expect((await request(app).get(path)).status).toBe(401);
+        expect((await request(app).get(path).set("Authorization", as(MEMBER, "user"))).status).toBe(403);
+        expect((await request(app).get(`${QUEUE_BOARD_PATH}/`).set("Authorization", as(MEMBER, "user"))).status).toBe(403);
+        expect((await request(app).get(path).set("Authorization", as(ADMIN, "admin"))).status).toBe(200);
     });
 
     it("the public vibe feed exists only when asked for", async () => {
