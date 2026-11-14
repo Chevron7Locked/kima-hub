@@ -26,6 +26,7 @@ const USER = 'zz-auth-user';
 const ADMIN = 'zz-auth-admin';
 const VICTIM = 'zz-auth-victim';
 const NEW_USER = 'zz-auth-newuser';
+const PADDED = ' zz-auth-padded';
 const PASSWORD = 'correct-password';
 const ALL = [USER, ADMIN, VICTIM];
 
@@ -35,7 +36,7 @@ function tokenFor(userId: string, role = 'user', tokenVersion = 1): string {
 }
 
 const clean = async () => {
-    await prisma.user.deleteMany({ where: { OR: [{ id: { in: ALL } }, { username: NEW_USER }] } });
+    await prisma.user.deleteMany({ where: { OR: [{ id: { in: ALL } }, { username: NEW_USER }, { username: PADDED }, { username: PADDED.trim() }] } });
 };
 
 beforeAll(async () => {
@@ -51,6 +52,7 @@ beforeAll(async () => {
 afterAll(clean);
 
 beforeEach(async () => {
+    await prisma.user.deleteMany({ where: { username: { in: [PADDED, PADDED.trim()] } } });
     // A test that changes a password or token version must not leak into the next.
     await prisma.user.updateMany({
         where: { id: { in: ALL } },
@@ -108,6 +110,26 @@ describe('POST /auth/login', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.user.username).toBe(USER);
+    });
+
+    it('signs in an account stored with padding, by the name as stored', async () => {
+        const passwordHash = await bcrypt.hash(PASSWORD, 4);
+        await prisma.user.create({ data: { username: PADDED, passwordHash, onboardingComplete: true } });
+
+        const exact = await request(app).post('/auth/login').send({ username: PADDED, password: PASSWORD });
+
+        expect(exact.status).toBe(200);
+        expect(exact.body.user.username).toBe(PADDED);
+    });
+
+    it('signs in the trimmed account, not the padded one, when both exist', async () => {
+        await prisma.user.create({ data: { username: PADDED, passwordHash: await bcrypt.hash('padded-password', 4) } });
+        await prisma.user.create({ data: { username: PADDED.trim(), passwordHash: await bcrypt.hash(PASSWORD, 4) } });
+
+        const res = await request(app).post('/auth/login').send({ username: PADDED, password: PASSWORD });
+
+        expect(res.status).toBe(200);
+        expect(res.body.user.username).toBe(PADDED.trim());
     });
 
     it('answers a username of only spaces like an empty one, with 400', async () => {

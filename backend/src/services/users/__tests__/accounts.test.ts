@@ -17,6 +17,7 @@ import {
     changePassword,
     createAccount,
     deleteAccount,
+    findUserByUsername,
     LastAdminError,
     normalizeUsername,
     refusalMessage,
@@ -158,7 +159,9 @@ describe("the password's longest length", () => {
         const admin = await seedUser("root", { role: "admin" });
         expect(await resetAdminPassword(bytes73)).toBe("password-too-long");
         expect(await matches(admin.id, "original-pass")).toBe(true);
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/ADMIN_RESET_PASSWORD.*at most 72/));
+        expect(logger.error).toHaveBeenCalledWith(
+            expect.stringMatching(/ADMIN_RESET_PASSWORD.*at most 72.*not changed/),
+        );
     });
 
     it("keeps every character of a 72-byte password: the stored hash matches it whole", async () => {
@@ -413,7 +416,9 @@ describe("resetAdminPassword (the startup reset)", () => {
 
         expect(await matches(admin.id, "original-pass")).toBe(true);
         expect((await prisma.user.findUniqueOrThrow({ where: { id: admin.id } })).tokenVersion).toBe(0);
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/ADMIN_RESET_PASSWORD.*at least 6/));
+        expect(logger.error).toHaveBeenCalledWith(
+            expect.stringMatching(/ADMIN_RESET_PASSWORD.*at least 6.*not changed/),
+        );
     });
 
     it("says so when there is no admin", async () => {
@@ -421,6 +426,35 @@ describe("resetAdminPassword (the startup reset)", () => {
 
         expect(await resetAdminPassword("rescue-pass")).toBe("no-admin");
         expect(logger.warn).toHaveBeenCalled();
+    });
+});
+
+describe("findUserByUsername (a name as a person typed it)", () => {
+    it("finds an account by the trimmed name", async () => {
+        const bob = await seedUser("bob");
+        expect((await findUserByUsername("  bob\t", { id: true }))?.id).toBe(bob.id);
+    });
+
+    it("finds an account stored with padding by the name exactly as given", async () => {
+        const padded = await seedUser(" bob");
+        expect((await findUserByUsername(" bob", { id: true }))?.id).toBe(padded.id);
+    });
+
+    it("does not find an account stored with padding by the trimmed name: only the name as stored", async () => {
+        await seedUser(" bob");
+        expect(await findUserByUsername("bob", { id: true })).toBeNull();
+    });
+
+    it("prefers the trimmed account over a padded one", async () => {
+        await seedUser(" bob");
+        const trimmed = await seedUser("bob");
+        expect((await findUserByUsername(" bob", { id: true }))?.id).toBe(trimmed.id);
+    });
+
+    it("answers null when no account has the name, and returns only the fields asked for", async () => {
+        await seedUser("bob");
+        expect(await findUserByUsername(" nobody ", { id: true })).toBeNull();
+        expect(await findUserByUsername("bob", { username: true })).toEqual({ username: "bob" });
     });
 });
 

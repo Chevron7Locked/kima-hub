@@ -1,19 +1,25 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import { NO_ACCOUNT_PASSWORD_HASH } from "../services/users/credentials";
-import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
 import { subsonicGuesses } from "../services/users/guessLimits";
-import { normalizeUsername } from "../services/users/accounts";
+import { findUserByUsername, normalizeUsername } from "../services/users/accounts";
 import { one } from "../utils/subsonicParams";
+
+/** Whether the typed name means this account: the same lookup the password path uses. */
+async function isNamedAccount(given: string, userId: string): Promise<boolean> {
+    return (await findUserByUsername(given, { id: true }))?.id === userId;
+}
 
 export async function subsonicAuth(
     req: Request,
     res: Response,
     next: NextFunction
 ): Promise<void> {
-    const username = normalizeUsername(one(req, "u") ?? "");
+    // The name as sent, for finding an account stored with padding; counted and compared by the trimmed name.
+    const given = one(req, "u") ?? "";
+    const username = normalizeUsername(given);
     const apiKey = one(req, "apiKey");
     const password = one(req, "p");
     const tokenMd5 = one(req, "t");
@@ -41,7 +47,7 @@ export async function subsonicAuth(
         // OpenSubsonic API key auth (preferred)
         if (apiKey) {
             const keyUser = await findApiKeyUser(apiKey);
-            if (!keyUser || keyUser.username !== username) {
+            if (!keyUser || !(await isNamedAccount(given, keyUser.id))) {
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
@@ -63,7 +69,7 @@ export async function subsonicAuth(
             // adds no enumeration timing gap. Scoped to the claimed user. A key skips the
             // 2FA check below: it was minted from a 2FA-verified session.
             const keyUser = await findApiKeyUser(plainPassword);
-            if (keyUser && keyUser.username === username) {
+            if (keyUser && (await isNamedAccount(given, keyUser.id))) {
                 req.user = keyUser;
                 next();
                 return;
@@ -71,9 +77,12 @@ export async function subsonicAuth(
 
             // Not a key for this user (wrong value, or a key that belongs
             // to someone else) -- fall through to the account password.
-            const user = await prisma.user.findUnique({
-                where: { username },
-                select: { id: true, username: true, role: true, passwordHash: true, twoFactorEnabled: true },
+            const user = await findUserByUsername(given, {
+                id: true,
+                username: true,
+                role: true,
+                passwordHash: true,
+                twoFactorEnabled: true,
             });
 
             // Subsonic reports failures inside HTTP 200 replies, so this is counted here, not from a status code.

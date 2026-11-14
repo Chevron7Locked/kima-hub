@@ -1,24 +1,23 @@
 import { Router } from "express";
-import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap } from "./mappers";
 import { mapSubsonicUser, requireSubsonicAdmin } from "./userHelpers";
 import { one } from "../../utils/subsonicParams";
-import { normalizeUsername } from "../../services/users/accounts";
+import { findUserByUsername, normalizeUsername } from "../../services/users/accounts";
 
 export const profileRouter = Router();
 
 profileRouter.all("/getUser.view", wrap(async (req, res) => {
-    const requested = normalizeUsername(one(req, "username") ?? "");
-    if (requested && requested !== req.user!.username && !requireSubsonicAdmin(req, res)) {
+    const given = one(req, "username") ?? "";
+    const requested = normalizeUsername(given);
+    // Asking about oneself needs no admin, including an account stored with padding, named as stored.
+    const isSelf = requested === req.user!.username || given === req.user!.username;
+    if (requested && !isSelf && !requireSubsonicAdmin(req, res)) {
         return;
     }
 
     const target = requested
-        ? await prisma.user.findUnique({
-              where: { username: requested },
-              select: { username: true, role: true },
-          })
+        ? await findUserByUsername(given, { username: true, role: true })
         : { username: req.user!.username, role: req.user!.role };
 
     if (!target) {

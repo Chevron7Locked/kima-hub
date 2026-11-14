@@ -14,7 +14,7 @@ import {
 } from "../../services/shareService";
 import { logger } from "../../utils/logger";
 import { one, many } from "../../utils/subsonicParams";
-import { normalizeUsername } from "../../services/users/accounts";
+import { findUserByUsername, normalizeUsername } from "../../services/users/accounts";
 
 export const compatRouter = Router();
 
@@ -107,15 +107,12 @@ compatRouter.all(
 // (a dropped connection, a pool timeout), and an unwrapped rejection in
 // Express 4 answers nothing at all.
 compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => {
-    const username = normalizeUsername(one(req, "username") ?? "");
-    if (!username) {
+    const given = one(req, "username") ?? "";
+    if (!normalizeUsername(given)) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: username");
     }
 
-    const user = await prisma.user.findUnique({
-        where: { username },
-        select: { id: true },
-    });
+    const user = await findUserByUsername(given, { id: true });
 
     if (!user) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "User not found");

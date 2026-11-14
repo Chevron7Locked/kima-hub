@@ -74,6 +74,21 @@ function passwordRefusal(password: unknown): PasswordRefusal | null {
  */
 export const normalizeUsername = (username: string): string => username.trim();
 
+/**
+ * The account a person means by a typed name: the trimmed name first, then the name exactly as given, so an account
+ * stored with padding before the trim rule still signs in. The trimmed account wins when both exist. Every sign-in
+ * and username lookup goes through here. Returns only the fields in `select`, or null.
+ */
+export async function findUserByUsername<S extends Prisma.UserSelect>(
+    given: string,
+    select: S,
+): Promise<Prisma.UserGetPayload<{ select: S }> | null> {
+    const trimmed = normalizeUsername(given);
+    const found = await prisma.user.findUnique({ where: { username: trimmed }, select });
+    if (found || given === trimmed) return found;
+    return prisma.user.findUnique({ where: { username: given }, select });
+}
+
 /** The username rule, applied to the name as it will be stored: null when the name is fine, else the refusal. */
 function usernameRefusal(username: unknown): UsernameInvalid | null {
     const length = typeof username === "string" ? Array.from(normalizeUsername(username)).length : 0;
@@ -253,7 +268,9 @@ export async function deleteAccount(userId: string): Promise<void> {
 export async function resetAdminPassword(password: string): Promise<"reset" | PasswordRefusal["reason"] | "no-admin"> {
     const refused = passwordRefusal(password);
     if (refused) {
-        logger.warn(`[Password Reset] ADMIN_RESET_PASSWORD: ${refusalMessage(refused, "the password")}; the admin password was not changed.`);
+        logger.error(
+            `[Password Reset] ADMIN_RESET_PASSWORD refused: ${refusalMessage(refused, "the password")}. The admin password was not changed.`,
+        );
         return refused.reason;
     }
     const admin = await prisma.user.findFirst({ where: { role: "admin" }, orderBy: { createdAt: "asc" }, select: { id: true } });

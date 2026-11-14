@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
-import { changePassword, createAccount, deleteAccount, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
+import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
     generateRefreshToken,
@@ -25,18 +25,29 @@ import { isTransactionConflict } from "../utils/dbConflict";
 const router = Router();
 
 const loginSchema = z.object({
-    username: z.string().transform(normalizeUsername).pipe(z.string().min(1)),
+    username: z.string().refine((name) => normalizeUsername(name) !== ""),
     password: z.string().min(1),
 });
 
 // POST /auth/login
 router.post("/login", async (req, res) => {
     try {
-        const { username, password } = loginSchema.parse(req.body);
+        const { username: given, password } = loginSchema.parse(req.body);
+        // Counted by the trimmed name; the account is found by it first, then by the name as given.
+        const username = normalizeUsername(given);
         // The two-factor code, if sent; a client may send it as a number.
         const token = req.body.token == null || req.body.token === "" ? undefined : String(req.body.token);
 
-        const user = await prisma.user.findUnique({ where: { username } });
+        const user = await findUserByUsername(given, {
+            id: true,
+            username: true,
+            role: true,
+            passwordHash: true,
+            twoFactorEnabled: true,
+            twoFactorSecret: true,
+            twoFactorRecoveryCodes: true,
+            tokenVersion: true,
+        });
 
         if (!webLoginGuesses.take(username)) {
             return res.status(429).json({ error: "Too many login attempts, please try again in 15 minutes." });

@@ -40,8 +40,10 @@ async function mkUser(tag: string, opts: { twoFactorEnabled?: boolean } = {}) {
 }
 
 async function wipe() {
-    // Cascades ApiKey (relation FK, onDelete: Cascade).
-    await prisma.user.deleteMany({ where: { username: { startsWith: "subauth_" } } });
+    // Cascades ApiKey (relation FK, onDelete: Cascade). A padded name starts with a space.
+    await prisma.user.deleteMany({
+        where: { OR: [{ username: { startsWith: "subauth_" } }, { username: { startsWith: " subauth_" } }] },
+    });
 }
 
 beforeAll(async () => {
@@ -180,6 +182,59 @@ describe("subsonicAuth: the username is trimmed", () => {
 
         expect(profile.body["subsonic-response"].status).toBe("ok");
         expect(profile.body["subsonic-response"].user.username).toBe(user.username);
+        expect(avatar.status).toBe(200);
+        expect(avatar.headers["content-type"]).toBe("image/png");
+    });
+
+    it("signs in an account stored with padding, by password and by API key, under the name as stored", async () => {
+        seq += 1;
+        const stored = ` subauth_padded_${seq}`;
+        const user = await prisma.user.create({
+            data: { username: stored, passwordHash: await bcrypt.hash(PLAIN_PASSWORD, 10) },
+        });
+        const { key } = await createApiKey(user.id, "test device");
+        const ping = (extra: Record<string, string>) =>
+            request(app).get("/rest/ping.view").query({ f: "json", v: "1.16.1", c: "test", ...extra });
+
+        const byPassword = await ping({ u: stored, p: PLAIN_PASSWORD });
+        const byKey = await ping({ u: stored, apiKey: key });
+        const keyInPasswordField = await ping({ u: stored, p: key });
+        expect(byPassword.body["subsonic-response"].status).toBe("ok");
+        expect(byKey.body["subsonic-response"].status).toBe("ok");
+        expect(keyInPasswordField.body["subsonic-response"].status).toBe("ok");
+
+        const wrong = await ping({ u: stored, p: "not the password" });
+        expect(wrong.body["subsonic-response"].error.code).toBe(40);
+    });
+
+    it("signs in the trimmed account, not the padded one, when both exist", async () => {
+        seq += 1;
+        const name = `subauth_both_${seq}`;
+        await prisma.user.create({ data: { username: ` ${name}`, passwordHash: await bcrypt.hash("padded-password", 10) } });
+        await prisma.user.create({ data: { username: name, passwordHash: await bcrypt.hash(PLAIN_PASSWORD, 10) } });
+
+        const res = await request(app)
+            .get("/rest/getUser.view")
+            .query({ u: ` ${name}`, p: PLAIN_PASSWORD, f: "json", v: "1.16.1", c: "test" });
+
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        expect(res.body["subsonic-response"].user.username).toBe(name);
+    });
+
+    it("answers getUser and getAvatar for an account stored with padding, and lets it ask about itself", async () => {
+        seq += 1;
+        const stored = ` subauth_self_${seq}`;
+        await prisma.user.create({ data: { username: stored, passwordHash: await bcrypt.hash(PLAIN_PASSWORD, 10) } });
+
+        const profile = await request(app)
+            .get("/rest/getUser.view")
+            .query({ u: stored, p: PLAIN_PASSWORD, username: stored, f: "json", v: "1.16.1", c: "test" });
+        const avatar = await request(app)
+            .get("/rest/getAvatar.view")
+            .query({ u: stored, p: PLAIN_PASSWORD, username: stored, v: "1.16.1", c: "test" });
+
+        expect(profile.body["subsonic-response"].status).toBe("ok");
+        expect(profile.body["subsonic-response"].user.username).toBe(stored);
         expect(avatar.status).toBe(200);
         expect(avatar.headers["content-type"]).toBe("image/png");
     });
