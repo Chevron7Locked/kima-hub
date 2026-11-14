@@ -12,6 +12,7 @@ import { logger } from "../../utils/logger";
 import { announcePlaylistChange } from "../playlistEvents";
 import { moodBucketService, VALID_MOODS, type MoodType } from "../moodBucketService";
 import { addTracks } from "../playlistService";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 
 /** The ReleaseChoice key the answer is stored under (the catalog items are "moods.mixes*"). */
 const MOOD_MIX_DECISION_KEY = "moods.mixes.rebuild";
@@ -146,7 +147,8 @@ export class MoodMixNotFoundError extends Error {}
 /**
  * Save the user's current mood mix (`mixId`, else MoodMixNotFoundError) as a
  * playlist keyed by that id, so repeat saves reuse it and skip tracks already
- * there. A retired mix is named after its old mood.
+ * there. A retired mix is named after its old mood. Only the mix's playable songs
+ * are saved; when none is, nothing is made or changed and it is MoodMixNotFoundError.
  */
 export async function saveMoodMixAsPlaylist(
     userId: string,
@@ -154,6 +156,14 @@ export async function saveMoodMixAsPlaylist(
 ): Promise<{ id: string; name: string; trackCount: number; created: boolean }> {
     const mix = await savedMoodMix(userId);
     if (!mix || mix.id !== mixId) throw new MoodMixNotFoundError(mixId);
+
+    const playable = await prisma.track.findMany({
+        where: { id: { in: mix.trackIds }, ...PLAYABLE_SONG },
+        select: { id: true },
+    });
+    const playableIds = new Set(playable.map((t) => t.id));
+    const trackIds = mix.trackIds.filter((id) => playableIds.has(id));
+    if (trackIds.length === 0) throw new MoodMixNotFoundError(mixId);
 
     let created = false;
     let playlist = await prisma.playlist.findFirst({
@@ -178,7 +188,7 @@ export async function saveMoodMixAsPlaylist(
         }
     }
 
-    const { added } = await addTracks(playlist.id, mix.trackIds);
+    const { added } = await addTracks(playlist.id, trackIds);
     if (created || added > 0) announcePlaylistChange(userId, playlist.id);
     const trackCount = await prisma.playlistItem.count({ where: { playlistId: playlist.id } });
     return { ...playlist, trackCount, created };
