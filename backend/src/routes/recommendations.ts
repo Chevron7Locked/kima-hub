@@ -45,13 +45,17 @@ router.get("/for-you", async (req, res) => {
             return res.json({ artists: [] });
         }
 
-        // Get similar artists for each top artist
+        // Get similar artists for each top artist: only ones the library does not own, so `limit` per seed is enough for
+        // `limit` in all. Equal weights go by artist id, so the same listener gets the same page every time.
         const allSimilarArtists = await Promise.all(
             topArtists.map(async ({ artist }) => {
                 const similar = await prisma.similarArtist.findMany({
-                    where: { fromArtistId: artist.id },
-                    orderBy: { weight: "desc" },
-                    take: 10,
+                    where: {
+                        fromArtistId: artist.id,
+                        toArtist: { ownedAlbums: { none: {} } },
+                    },
+                    orderBy: [{ weight: "desc" }, { toArtistId: "asc" }],
+                    take: limitNum,
                     include: {
                         toArtist: {
                             select: {
@@ -68,21 +72,10 @@ router.get("/for-you", async (req, res) => {
         );
 
         // Flatten and deduplicate
-        const recommendedArtists = Array.from(
+        const newArtists = Array.from(
             new Map(
                 allSimilarArtists.flat().map((artist) => [artist.id, artist])
             ).values()
-        );
-
-        // Filter out artists user already owns (from native library)
-        const ownedArtists = await prisma.ownedAlbum.findMany({
-            select: { artistId: true },
-            distinct: ["artistId"],
-        });
-        const ownedArtistIds = new Set(ownedArtists.map((a) => a.artistId));
-
-        const newArtists = recommendedArtists.filter(
-            (artist) => !ownedArtistIds.has(artist.id)
         );
 
         // Get album counts for recommended artists (from enriched discography)
