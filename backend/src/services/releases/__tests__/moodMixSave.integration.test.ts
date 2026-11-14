@@ -1,11 +1,12 @@
 /**
  * Saving a mood mix as a playlist keeps only playable songs. A song the mix remembers can have left the library
  * since (its file went missing, it was found corrupt, its album was moved to Discover); the saved playlist offers
- * only the songs that are still playable, and when none are, no playlist is made. Real database.
+ * only the songs that are still playable, and when none are, no playlist is made. The mix's state counts the same
+ * songs, so the window never promises more than a save keeps. Real database.
  */
 import { prisma } from "../../../utils/db";
 import { VALID_MOODS, type MoodType } from "../../moodBucketService";
-import { MoodMixNotFoundError, saveMoodMixAsPlaylist } from "../moodMixes";
+import { MoodMixNotFoundError, moodMixState, saveMoodMixAsPlaylist } from "../moodMixes";
 
 jest.setTimeout(60_000);
 
@@ -73,6 +74,23 @@ afterEach(async () => {
 });
 
 afterAll(clean);
+
+describe("moodMixState", () => {
+    it("counts only the playable songs of a retired mix", async () => {
+        await saveMix([SONG.a, SONG.missing, SONG.corrupt, SONG.discover, SONG.b, `${P}-gone`]);
+        expect((await moodMixState(USER)).mix).toMatchObject({ retired: true, trackCount: 2 });
+    });
+
+    it("keeps a retired mix with no playable songs, at 0, so its question stays open", async () => {
+        await saveMix([SONG.missing, SONG.corrupt]);
+        expect((await moodMixState(USER)).mix).toMatchObject({ id: MIX_ID, retired: true, trackCount: 0 });
+    });
+
+    it("counts a current mood's mix as it is shown", async () => {
+        await saveMix([SONG.a, SONG.missing, SONG.b], "happy");
+        expect((await moodMixState(USER)).mix).toMatchObject({ retired: false, trackCount: 2 });
+    });
+});
 
 describe("saveMoodMixAsPlaylist", () => {
     it("is tested with a retired mood and a current one", () => {

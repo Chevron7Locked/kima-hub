@@ -74,8 +74,18 @@ async function savedMoodMix(userId: string): Promise<SavedMix | null> {
     };
 }
 
+/** The ids that are playable songs now, in the order given. */
+async function playableIdsOf(ids: string[]): Promise<string[]> {
+    const rows = await prisma.track.findMany({ where: { id: { in: ids }, ...PLAYABLE_SONG }, select: { id: true } });
+    const playable = new Set(rows.map((t) => t.id));
+    return ids.filter((id) => playable.has(id));
+}
+
 export interface MoodMixState {
-    /** The user's saved mood mix, or null when they have none (or cleared it). */
+    /**
+     * The user's saved mood mix, or null when they have none (or cleared it). `trackCount` is its playable songs,
+     * what a save would keep; a retired mix whose songs have all gone stays here with 0, so its question stays open.
+     */
     mix: { id: string; name: string; mood: string; trackCount: number; retired: boolean } | null;
     /** "rebuild" means the mix was cleared, by Rebuild or Remove. */
     decision: "rebuild" | "keep" | null;
@@ -97,10 +107,9 @@ export async function moodMixState(userId: string): Promise<MoodMixState> {
               select: { id: true, name: true },
           })
         : null;
+    const trackCount = mix ? (await playableIdsOf(mix.trackIds)).length : 0;
     return {
-        mix: mix
-            ? { id: mix.id, name: mix.name, mood: mix.mood, trackCount: mix.trackIds.length, retired: mix.retired }
-            : null,
+        mix: mix ? { id: mix.id, name: mix.name, mood: mix.mood, trackCount, retired: mix.retired } : null,
         decision:
             choice?.decidedBy === ChoiceDecidedBy.EXPLICIT ? (choice.enabled ? "rebuild" : "keep") : null,
         playlist,
@@ -157,12 +166,7 @@ export async function saveMoodMixAsPlaylist(
     const mix = await savedMoodMix(userId);
     if (!mix || mix.id !== mixId) throw new MoodMixNotFoundError(mixId);
 
-    const playableRows = await prisma.track.findMany({
-        where: { id: { in: mix.trackIds }, ...PLAYABLE_SONG },
-        select: { id: true },
-    });
-    const playableSet = new Set(playableRows.map((t) => t.id));
-    const playableTrackIds = mix.trackIds.filter((id) => playableSet.has(id));
+    const playableTrackIds = await playableIdsOf(mix.trackIds);
     if (playableTrackIds.length === 0) throw new MoodMixNotFoundError(mixId);
 
     let created = false;

@@ -170,6 +170,14 @@ describe("MoodMixChoice", () => {
             expect(q("moodmix-rebuild")).toBeNull();
         });
 
+        it("offers only Remove when none of its songs is left", async () => {
+            getState.mockResolvedValue({ mix: { ...RETIRED, trackCount: 0 }, decision: null, playlist: null });
+            await render();
+            expect(q("moodmix-name")!.textContent).toContain("0 tracks");
+            expect(q("moodmix-save")).toBeNull();
+            expect(q("moodmix-remove")).not.toBeNull();
+        });
+
         it("save then remove: the playlist is still named, and the item says Removed", async () => {
             getState.mockResolvedValue({ mix: RETIRED, decision: null, playlist: null });
             save.mockResolvedValue({ id: "pl2", name: "Your Focus Mode Mix", trackCount: 12, created: true });

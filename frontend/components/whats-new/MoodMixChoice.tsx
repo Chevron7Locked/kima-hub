@@ -2,7 +2,8 @@
 
 /**
  * The mood-mix item: save as playlist, rebuild, or keep. Nothing clears until
- * Rebuild. A retired mix offers save or remove only. Loads the server's
+ * Rebuild. A retired mix offers save or remove only, and no save when none of
+ * its songs is left (the count is its playable songs). Loads the server's
  * recorded answer first, so another device's answer shows here.
  */
 
@@ -111,12 +112,12 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
             <p className="text-sm text-white/80" data-testid="moodmix-name">
                 {mix.name} &middot; {mix.trackCount} {mix.trackCount === 1 ? "track" : "tracks"}
             </p>
-            {savedNote ?? (
+            {savedNote ?? (mix.trackCount === 0 ? null : (
                 <Button onClick={save} disabled={busy !== null} data-testid="moodmix-save" className="self-start">
                     {busy === "save" && <Loader2 className="w-4 h-4 animate-spin" />}
                     {busy === "save" ? "Saving..." : "Save as playlist"}
                 </Button>
-            )}
+            ))}
             <div className="flex gap-2">
                 {mix.retired ? (
                     // Can't be shown any more, so there is nothing to keep.
