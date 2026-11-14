@@ -9,7 +9,7 @@ import { logger } from "../../utils/logger";
 import { featureDetection } from "../../services/featureDetection";
 import { buildMatching } from "../../services/matching/state";
 import { updateMap } from "../../services/matching/map";
-import { soundInputsSettled, type SoundInputs } from "./moods";
+import { soundInputsSettled, type SoundInputs } from "./soundInputs";
 
 /** The counts the step is judged by: the moods' inputs, plus the artists still owing their genres. */
 export interface SimilarityInputs extends SoundInputs {

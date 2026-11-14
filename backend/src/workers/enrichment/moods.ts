@@ -3,6 +3,9 @@
  * their inputs changed, then every track's tags (services/moods/). The scheduler decides when the step runs and
  * in what order; everything the step does once it runs is here, and it is tried without the scheduler.
  *
+ * Shape: a factory, because the step keeps one fact between calls (the unwritten note); a step with no such fact
+ * is a plain function (similarity.ts).
+ *
  * The step reads the scheduler's progress through `readProgress` and its Redis through `redis`, so it holds no
  * connection of its own. The one fact it keeps in this process is a note it could not yet write to Redis.
  */
@@ -12,17 +15,12 @@ import { logger } from "../../utils/logger";
 import { buildMoods } from "../../services/moods/state";
 import { writeMoodTags } from "../../services/moods/tags";
 import { dropCachedMixes } from "../../services/mixes/dropCache";
-
-/** The counts the moods' inputs are judged by: analysis (MusiCNN) and sound vectors (CLAP). */
-export interface SoundInputs {
-    audioAnalysis: { pending: number; processing: number; failed: number };
-    clapEmbeddings: { pending: number; processing: number; retrying: number };
-}
+import { soundInputsSettled, type SoundInputs } from "./soundInputs";
 
 export interface MoodStepDeps {
     /** The scheduler's progress counts. */
     readProgress: () => Promise<SoundInputs>;
-    /** The scheduler's Redis, read when the step needs it. */
+    /** The scheduler's Redis, asked for when the step needs it: the scheduler opens its connection on first use. */
     redis: () => Pick<Redis, "get" | "set" | "del" | "scan">;
 }
 
@@ -34,22 +32,6 @@ export interface MoodStepDeps {
 const MOOD_MIXES_OWED_KEY = "enrichment:mood-mixes-owed";
 
 /**
- * True when nothing that feeds the moods is still being answered: no analysis waiting, running or failed and due a
- * retry, and no sound vector waiting, running or retrying. The moods are scored from both, and the similarity step
- * waits on the same inputs.
- */
-export function soundInputsSettled(progress: SoundInputs): boolean {
-    return (
-        progress.audioAnalysis.pending === 0 &&
-        progress.audioAnalysis.processing === 0 &&
-        progress.audioAnalysis.failed === 0 &&
-        progress.clapEmbeddings.pending === 0 &&
-        progress.clapEmbeddings.processing === 0 &&
-        progress.clapEmbeddings.retrying === 0
-    );
-}
-
-/**
  * The mood step, once analysis and sound vectors have finished for the whole library (the moods read the vectors, and
  * their statistics the whole library). Each call: mood scores for new or changed vectors, the mood statistics when
  * their inputs changed, then every track's tags. A change drops the cached mood mixes, and the drop stays owed
@@ -59,7 +41,7 @@ export function soundInputsSettled(progress: SoundInputs): boolean {
 export function createMoodStep({ readProgress, redis }: MoodStepDeps): () => Promise<number> {
     // A change whose note could not be written to Redis, held here until it is: the moods are already committed,
     // so the next cycle will not see the change again.
-    let ownedUnwritten = false;
+    let owedNoteUnwritten = false;
 
     /**
      * Writes down that the moods changed (when they did) and, once the moods' inputs have settled, drops the cached
@@ -67,12 +49,12 @@ export function createMoodStep({ readProgress, redis }: MoodStepDeps): () => Pro
      * written, and a note already written down stays for the next cycle.
      */
     async function dropMixesIfOwed(changed: boolean): Promise<void> {
-        if (changed) ownedUnwritten = true;
+        if (changed) owedNoteUnwritten = true;
         try {
             const client = redis();
-            if (ownedUnwritten) {
+            if (owedNoteUnwritten) {
                 await client.set(MOOD_MIXES_OWED_KEY, "1");
-                ownedUnwritten = false;
+                owedNoteUnwritten = false;
             }
             if ((await client.get(MOOD_MIXES_OWED_KEY)) && soundInputsSettled(await readProgress())) {
                 const dropped = await dropCachedMixes(client, true);

@@ -16,7 +16,8 @@ jest.mock("../../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
-import { createMoodStep, soundInputsSettled, type SoundInputs } from "../moods";
+import { createMoodStep } from "../moods";
+import { soundInputsSettled, type SoundInputs } from "../soundInputs";
 import { logger } from "../../../utils/logger";
 
 const OWED = "enrichment:mood-mixes-owed";

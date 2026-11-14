@@ -483,6 +483,9 @@ function getRedis(): Redis {
     return redis;
 }
 
+/** The mood step (workers/enrichment/moods.ts): it reads this scheduler's progress counts and Redis. */
+const moodStep = createMoodStep({ readProgress: () => getEnrichmentProgress(), redis: () => getRedis() });
+
 /**
  * Setup subscription to enrichment control channel
  */
@@ -2020,9 +2023,6 @@ export async function executeVibePhase(): Promise<number> {
     const work = await getNextWork(await drainCap("embedding"), "embedding");
     return dispatchStageWork("embedding", work, STAGE_PRODUCERS.embedding);
 }
-
-/** The mood step (workers/enrichment/moods.ts): it reads this scheduler's progress counts and Redis. */
-const moodStep = createMoodStep({ readProgress: () => getEnrichmentProgress(), redis: () => getRedis() });
 
 export async function executePodcastRefreshPhase(): Promise<number> {
     const podcastCount = await prisma.podcast.count();

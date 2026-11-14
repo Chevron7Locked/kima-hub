@@ -15,7 +15,7 @@ import { AXIS_ZERO, insertEmbeddings } from "../../__tests__/helpers/embeddingFi
 
 const P = "crerun";
 
-const executeMoodPhase = createMoodStep({ readProgress: getEnrichmentProgress, redis: () => redisClient });
+const runMoodStep = createMoodStep({ readProgress: getEnrichmentProgress, redis: () => redisClient });
 
 async function seedEnrichedTrack(id: string, withVector: boolean) {
     await prisma.track.create({
@@ -135,7 +135,7 @@ describe("a moods re-run", () => {
         const cached = `mixes:${P}user`;
         // The readings the mood statistics need, then a mood pass: the vector scored, the statistics built.
         await prisma.track.update({ where: { id: `${P}trk` }, data: { arousal: 0.5, instrumentalness: 0.5, acousticness: 0.5 } });
-        await executeMoodPhase();
+        await runMoodStep();
         expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
 
         await redisClient.set(cached, "[]");
@@ -143,7 +143,7 @@ describe("a moods re-run", () => {
         expect(await moodsLeft()).toEqual({ scores: 0, state: 0 });
         expect(await redisClient.exists(cached)).toBe(1);
 
-        await executeMoodPhase();
+        await runMoodStep();
         expect(await moodsLeft()).toEqual({ scores: 1, state: 1 });
         expect(await redisClient.exists(cached)).toBe(0);
     });
