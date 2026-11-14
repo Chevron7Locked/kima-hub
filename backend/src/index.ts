@@ -22,6 +22,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { resetAdminPassword } from "./services/users/accounts";
 import { trustOneProxyHop } from "./middleware/rateLimiter";
 import { jsonBodyParser } from "./middleware/jsonBody";
+import { createShutdown } from "./shutdown";
 const app = express();
 
 // Middleware
@@ -283,6 +284,7 @@ async function main() {
     await checkPasswordReset();
 
     const server = app.listen(config.port, "0.0.0.0", async () => {
+    httpServer = server;
     logger.debug(
         `Kima API running on port ${config.port} (accessible on all network interfaces)`
     );
@@ -451,67 +453,74 @@ main().catch((err) => {
 });
 
 // Graceful shutdown handling
-let isShuttingDown = false;
+let httpServer: ReturnType<typeof app.listen> | undefined;
 let healthCheckInterval: NodeJS.Timeout | null = null;
 let podcastCleanupInterval: NodeJS.Timeout | null = null;
 let webhookCleanupInterval: NodeJS.Timeout | null = null;
 
-async function gracefulShutdown(signal: string) {
-    if (isShuttingDown) {
-        logger.debug("Shutdown already in progress...");
-        return;
-    }
+/**
+ * Longest a shutdown may take before the process exits anyway (code 1). It covers the 3 s drain below, with room for
+ * the workers, Redis and the database to close, and ends before Docker's default 10 s stop timeout sends SIGKILL, so
+ * the log says what stalled. `tsx watch` waits for the old process to exit before it starts the next, so a shutdown
+ * that stalled would otherwise hang a restart for good.
+ */
+const SHUTDOWN_DEADLINE_MS = 8_000;
 
-    isShuttingDown = true;
-    logger.debug(`\nReceived ${signal}. Starting graceful shutdown...`);
-
-    try {
-        // Let the batch and import checks a settled download job started, and the webhook events being
-        // processed, finish while the queues and the database are still open. One waiting on Lidarr for a
-        // minute is not held for: both wait together for the same moment. A webhook event left unfinished is
-        // replayed by the reconciliation job on the next start.
+const gracefulShutdown = createShutdown({
+    // Nothing new starts while the rest drains: no new connections, no new reconciliation cycle or event, no new
+    // health check or cleanup run. The listener is not waited for: an open stream or event connection would hold it.
+    stopAccepting: [
+        () => {
+            httpServer?.close();
+            httpServer?.closeIdleConnections();
+        },
+        async () => {
+            const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
+            webhookReconciliation.stop();
+        },
+        () => lidarrHealthMonitor.stop(),
+        () => {
+            if (healthCheckInterval) clearInterval(healthCheckInterval);
+            if (podcastCleanupInterval) clearInterval(podcastCleanupInterval);
+            if (webhookCleanupInterval) clearInterval(webhookCleanupInterval);
+        },
+    ],
+    // Let the batch and import checks a settled download job started, and the webhook events being processed,
+    // finish while the queues and the database are still open. One waiting on Lidarr for a minute is not held for:
+    // both wait together for the same moment. A webhook event left unfinished is replayed by the reconciliation job
+    // on the next start.
+    drain: async () => {
         const { whenIdle } = await import("./services/downloads/jobs");
         const { whenWebhooksIdle } = await import("./services/webhookHandlers");
         await Promise.all([whenIdle(3000), whenWebhooksIdle(3000)]);
-
-        // Shutdown workers (intervals, crons, queues)
-        const { shutdownWorkers } = await import("./workers");
-        await shutdownWorkers();
-
-        // Clear scheduled intervals
-        if (healthCheckInterval) clearInterval(healthCheckInterval);
-        if (podcastCleanupInterval) clearInterval(podcastCleanupInterval);
-        if (webhookCleanupInterval) clearInterval(webhookCleanupInterval);
-
-        // Stop the Lidarr background loops
-        const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
-        webhookReconciliation.stop();
-        lidarrHealthMonitor.stop();
-
-        // Disconnect Soulseek
-        logger.debug("Disconnecting Soulseek...");
-        const { soulseekService } = await import("./services/soulseek");
-        soulseekService.disconnect();
-
-        // Disconnect enrichment state Redis connections
-        logger.debug("Disconnecting enrichment state service...");
-        await enrichmentStateService.disconnect();
-
-        // Close Redis connection
-        logger.debug("Closing Redis connection...");
-        await redisClient.quit();
-
-        // Close Prisma connection
-        logger.debug("Closing database connection...");
-        await prisma.$disconnect();
-
-        logger.debug("Graceful shutdown complete");
-        process.exit(0);
-    } catch (error) {
-        logger.error("Error during shutdown:", error);
-        process.exit(1);
-    }
-}
+    },
+    close: [
+        // Workers (intervals, crons, queues)
+        async () => {
+            const { shutdownWorkers } = await import("./workers");
+            await shutdownWorkers();
+        },
+        async () => {
+            logger.debug("Disconnecting Soulseek...");
+            const { soulseekService } = await import("./services/soulseek");
+            soulseekService.disconnect();
+        },
+        async () => {
+            logger.debug("Disconnecting enrichment state service...");
+            await enrichmentStateService.disconnect();
+        },
+        async () => {
+            logger.debug("Closing Redis connection...");
+            await redisClient.quit();
+        },
+        async () => {
+            logger.debug("Closing database connection...");
+            await prisma.$disconnect();
+        },
+    ],
+    deadlineMs: SHUTDOWN_DEADLINE_MS,
+    exit: (code) => process.exit(code),
+});
 
 // Handle termination signals
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

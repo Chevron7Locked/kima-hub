@@ -90,16 +90,20 @@ async function processEvent(
     const startTime = Date.now();
     let status = "success";
     try {
-        const correlationId = await dispatchWebhookEvent(eventType, payload);
-        await webhookEventStore.markProcessed(id, correlationId);
-    } catch (error: any) {
-        status = "failed";
-        logger.error(`[WEBHOOK] ${eventType} event ${id} failed:`, error.message);
+        let correlationId: string | undefined;
         try {
-            await webhookEventStore.markFailed(id, error.message);
-        } catch (markError: any) {
-            logger.error(`[WEBHOOK] Could not record the failure of ${id}:`, markError.message);
+            correlationId = await dispatchWebhookEvent(eventType, payload);
+        } catch (error: any) {
+            status = "failed";
+            logger.error(`[WEBHOOK] ${eventType} event ${id} failed:`, error.message);
+            try {
+                await webhookEventStore.markFailed(id, error.message);
+            } catch (markError: any) {
+                logger.error(`[WEBHOOK] Could not record the failure of ${id}:`, markError.message);
+            }
+            return;
         }
+        await markProcessed(id, eventType, correlationId);
     } finally {
         // The outcome is recorded; a metrics call that throws must not turn this into a rejection.
         try {
@@ -107,6 +111,29 @@ async function processEvent(
             webhookProcessingDuration.observe({ event_type: eventType }, (Date.now() - startTime) / 1000);
         } catch (metricsError: any) {
             logger.warn(`[WEBHOOK] Could not record metrics for ${id}:`, metricsError.message);
+        }
+    }
+}
+
+/**
+ * Records that an event's handlers ran. They have run by now, so a mark that will not stick is not a failed event:
+ * it is tried once more, and then left unmarked. The reconciliation job replays an unmarked event like any not yet
+ * processed (the handlers are safe to run again), instead of an error and a retry count being recorded against it.
+ */
+async function markProcessed(id: string, eventType: string, correlationId: string | undefined): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            await webhookEventStore.markProcessed(id, correlationId);
+            return;
+        } catch (error: any) {
+            if (attempt === 2) {
+                logger.error(
+                    `[WEBHOOK] ${eventType} event ${id} ran but could not be marked processed; leaving it for reconciliation:`,
+                    error.message
+                );
+                return;
+            }
+            logger.warn(`[WEBHOOK] Could not mark ${id} processed, trying once more:`, error.message);
         }
     }
 }

@@ -70,6 +70,8 @@ class WebhookReconciliationService {
                 this.IN_FLIGHT_MS
             );
             for (const event of unprocessedEvents) {
+                // Stopped (shutdown) mid-cycle: start no further event.
+                if (!this.isRunning) break;
                 await processStoredEvent(event.id, event.eventType, event.payload);
             }
         } catch (error: any) {
