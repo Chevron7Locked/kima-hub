@@ -82,14 +82,14 @@ it("holds the shutdown's drain until the re-file has ended", async () => {
     mockRefile.mockReturnValue(new Promise<typeof clean>((resolve) => (finish = resolve)));
     const running = processRefile(job);
     let drained = false;
-    void whenRequestWorkEnded().then(() => (drained = true));
+    const waiting = whenRequestWorkEnded().then(() => (drained = true));
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     expect(drained).toBe(false);
 
     finish(clean);
     await running;
-    await whenRequestWorkEnded();
+    await waiting;
     expect(drained).toBe(true);
 });
 

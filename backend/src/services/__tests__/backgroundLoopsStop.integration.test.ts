@@ -33,6 +33,9 @@ async function clean() {
 beforeEach(async () => {
     await clean();
     jest.restoreAllMocks();
+    // restoreAllMocks leaves a jest.fn's implementation alone, so a download one test held open would hold the next.
+    download.mockReset();
+    download.mockResolvedValue(null);
 });
 
 afterAll(async () => {
@@ -113,6 +116,7 @@ describe("backfillAllArtistCounts", () => {
         const findMany = jest.spyOn(prisma.artist, "findMany");
 
         const first = backfillAllArtistCounts();
+        await new Promise((resolve) => setImmediate(resolve)); // the first pass is under way, waiting on the database
         const second = backfillAllArtistCounts();
         await Promise.all([first, second]);
 
@@ -224,7 +228,11 @@ describe("backfillAllImages", () => {
                     () => (settled = true),
                     () => (settled = true),
                 );
-                while (!settled) await jest.advanceTimersByTimeAsync(1000);
+                // Each step also yields a real turn, so the database replies the run waits on are not starved by the loop.
+                while (!settled) {
+                    await jest.advanceTimersByTimeAsync(1000);
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                }
                 return await running;
             } finally {
                 jest.useRealTimers();
