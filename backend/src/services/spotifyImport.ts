@@ -26,7 +26,7 @@ import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import * as jobMoves from "./downloads/jobs";
 import { sourcePauseController } from "./sourcePauseController";
-import { artistIdentityKey, artistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
+import { artistNamed, isArtistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
 import { containsSql, containsText, hasNonAscii } from "./textMatch";
 import { rankAfter, rankForPosition } from "../utils/lexoRank";
@@ -330,15 +330,20 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
   };
 }
 
+/** The shortest word the first-word sweeps look up and the shortest file name the M3U filename tier tries: shorter ones are too common to mean anything. */
+const MIN_WORD_LENGTH = 3;
+
 /**
  * The artists whose `normalizedName` holds `word` as a whole word, anywhere in the name: the pool for a source credit
  * stored under a compound name ("artist a feat. b", "artist/other", "artist, other", "(artist)", "x/artist"). A word
  * ends at any character that is not a letter or a digit, and at the ends of the name. A whole word, not a substring,
  * so a common word ("the") finds the artists that have it and not every name with those letters inside.
  * `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word, found in one
- * query and handed back as ids.
+ * query and handed back as ids. "Letter" follows the database's character classes: where they know only ASCII (a C
+ * locale, SQL_ASCII), every accented or non-Latin letter counts as a boundary, so such names are offered more often,
+ * never less; the matcher narrows the pool afterwards.
  */
-async function artistNameHolds(word: string): Promise<Prisma.ArtistWhereInput> {
+async function artistsHoldingWord(word: string): Promise<Prisma.ArtistWhereInput> {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = `(^|[^[:alnum:]])${escaped}($|[^[:alnum:]])`;
   const rows = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "Artist" WHERE "normalizedName" ~ ${pattern}`;
@@ -482,18 +487,18 @@ class SpotifyImportService {
     // to exact-artist candidates.
     if (candidates.size === 0) {
       const firstWord = normalizedPrimaryArtist.split(" ")[0];
-      if (firstWord.length >= 3) {
+      if (firstWord.length >= MIN_WORD_LENGTH) {
         add(
           (
             await prisma.track.findMany({
-              ...SONGS_OF_ARTISTS(await artistNameHolds(firstWord)),
+              ...SONGS_OF_ARTISTS(await artistsHoldingWord(firstWord)),
               ...withAlbum,
             })
           ).flatMap(toMatchCandidates),
         );
       }
       // Shorter than sweep 1's minimum, the prefix starts too many artists to read ("" starts every one).
-      if (candidates.size === 0 && normalizedPrimaryArtist.length >= 3) {
+      if (candidates.size === 0 && normalizedPrimaryArtist.length >= MIN_WORD_LENGTH) {
         add(
           (
             await prisma.track.findMany({
@@ -508,11 +513,11 @@ class SpotifyImportService {
         );
       }
       const creditFirstWord = dbNormalizedArtist.split(" ")[0];
-      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length > 0) {
+      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length >= MIN_WORD_LENGTH) {
         add(
           (
             await prisma.track.findMany({
-              ...SONGS_OF_ARTISTS(await artistNameHolds(creditFirstWord)),
+              ...SONGS_OF_ARTISTS(await artistsHoldingWord(creditFirstWord)),
               ...withAlbum,
             })
           ).flatMap(toMatchCandidates),
@@ -2656,24 +2661,22 @@ class SpotifyImportService {
       // Tier 2: Filename match (basename without extension)
       if (!track) {
         const basename = path.basename(entry.filePath, path.extname(entry.filePath));
-        if (basename.length >= 3) {
+        if (basename.length >= MIN_WORD_LENGTH) {
           const sameFile = await prisma.track.findMany({
             where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } }] },
             select: { id: true, title: true, album: { select: { artist: { select: { name: true, identityKey: true } } } } },
             orderBy: { id: "asc" },
           });
           // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title,
-          // the file's artist or title must agree, compared as tiers 3 and 4 compare them. A bare entry has nothing to
-          // disagree with.
+          // the file's artist or title must agree, each compared as tier 3 compares it (either one is enough here,
+          // where tier 3 needs both). A bare entry has nothing to disagree with.
           const named = !!(entry.artist || entry.title);
-          const entryKey = entry.artist ? artistIdentityKey(entry.artist) : "";
           track =
             sameFile.find(
               (t) =>
                 !named ||
                 (!!entry.title && sameName(t.title, entry.title)) ||
-                (!!entry.artist &&
-                  (entryKey ? t.album.artist.identityKey === entryKey : t.album.artist.name === entry.artist)),
+                (!!entry.artist && isArtistNamed(t.album.artist, entry.artist)),
             ) ?? null;
         }
       }
@@ -2693,9 +2696,9 @@ class SpotifyImportService {
       if (!track && entry.artist && entry.title) {
         const dbArtist = normalizeArtistName(entry.artist);
         const firstWord = dbArtist.split(" ")[0];
-        if (firstWord.length >= 3) {
+        if (firstWord.length >= MIN_WORD_LENGTH) {
           const candidates = await prisma.track.findMany({
-            ...SONGS_OF_ARTISTS(await artistNameHolds(firstWord)),
+            ...SONGS_OF_ARTISTS(await artistsHoldingWord(firstWord)),
             include: {
               album: { include: { artist: { select: { name: true } } } },
             },

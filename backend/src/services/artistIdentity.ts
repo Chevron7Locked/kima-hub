@@ -83,7 +83,13 @@ export function artistNamed(name: string): Prisma.ArtistWhereInput {
     return identityKey ? { identityKey } : { name };
 }
 
-const MBID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Whether `artist` is the artist `name` names, by the same rule `artistNamed` selects with (identity key, else exact name). */
+export function isArtistNamed(artist: { name: string; identityKey: string }, name: string): boolean {
+    const identityKey = artistIdentityKey(name);
+    return identityKey ? artist.identityKey === identityKey : artist.name === name;
+}
+
+const MBID_FORMAT =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True for a value shaped like a MusicBrainz id; temp- and row ids fail. */
 export function isMbid(value: unknown): value is string {
