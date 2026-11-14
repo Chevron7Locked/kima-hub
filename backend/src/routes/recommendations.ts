@@ -4,6 +4,7 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { recentPlayArtists } from "../services/stats/listens";
+import { parseLimit } from "./library/paging";
 import type { Artist } from "@prisma/client";
 
 const router = Router();
@@ -11,9 +12,9 @@ const router = Router();
 // GET /recommendations/for-you?limit=10
 router.get("/for-you", async (req, res) => {
     try {
-        const { limit = "10" } = req.query;
         const userId = req.user!.id;
-        const limitNum = parseInt(limit as string, 10);
+        // Default 10, at least 1, at most 50: a value that is not a number is the default, not NaN.
+        const limitNum = parseLimit(req.query.limit, 10, 50);
 
         // Get user's most played artists
         // Plays of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
