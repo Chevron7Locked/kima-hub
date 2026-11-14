@@ -235,8 +235,10 @@ export async function backfillAllImages(stop: StopCheck = {}): Promise<void> {
     // The signal ends a download under way as soon as the stop comes, rather than after its own 30 s.
     const { signal, release } = stopSignal(stop);
     try {
+        // Reset first, so a failed count never leaves the last run's numbers on the status page.
+        backfillProgress = { total: 0, processed: 0, success: 0, failed: 0, skipped: 0 };
         const [artists, albums] = await Promise.all([countExternal("artist"), countExternal("album")]);
-        backfillProgress = { total: artists + albums, processed: 0, success: 0, failed: 0, skipped: 0 };
+        backfillProgress.total = artists + albums;
         logger.info(`[ImageBackfill] Found ${artists} artists and ${albums} albums with external URLs`);
 
         const finished = (await backfillImages("artist", stop, signal)) && (await backfillImages("album", stop, signal));

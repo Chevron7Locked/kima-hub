@@ -2,6 +2,7 @@
 
 import { fetchChecked } from "../utils/ssrf";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import path from "path";
 import { logger } from "../utils/logger";
 import { config, USER_AGENT } from "../config";
@@ -57,7 +58,7 @@ async function asJpeg(bytes: Buffer): Promise<Buffer | null> {
  * the final name, and a reader never finds one.
  */
 async function writeAtomically(filePath: string, bytes: Buffer): Promise<void> {
-    const partial = `${filePath}.${process.pid}.${Date.now()}.part`;
+    const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
     try {
         await fs.promises.writeFile(partial, bytes);
         await fs.promises.rename(partial, filePath);
