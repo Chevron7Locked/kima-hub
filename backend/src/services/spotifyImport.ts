@@ -38,7 +38,7 @@ import { titlesAgree } from "./albumIdentity";
 import { requireMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
-import { M3UEntry } from "./m3uParser";
+import { M3UEntry, libraryPathReadings } from "./m3uParser";
 import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
@@ -433,6 +433,98 @@ class ShownArtists {
   /** Ids of the artists whose shown name begins with `prefix` (normalized). */
   beginningWith(prefix: string): string[] {
     return this.shown.filter((a) => a.name.startsWith(prefix)).map((a) => a.id);
+  }
+}
+
+/** What one read found, kept by its key; with a limit, the oldest keys are dropped once there are more than it. */
+class Remembered<V> {
+  private readonly found = new Map<string, V>();
+  constructor(private readonly limit = Infinity) {}
+
+  async get(key: string, load: () => Promise<V>): Promise<V> {
+    if (this.found.has(key)) return this.found.get(key) as V;
+    const value = await load();
+    this.found.set(key, value);
+    if (this.found.size > this.limit) this.found.delete(this.found.keys().next().value as string);
+    return value;
+  }
+}
+
+/** The most first-word sweeps (each loads every song of the artists holding the word) one import keeps. */
+const WORD_SWEEPS_KEPT = 16;
+
+/**
+ * What one M3U import has read from the library, so an entry that asks what an earlier entry asked does not read it
+ * again: an artist's songs (tier 3), the songs of a file name (tier 2), the songs of the artists holding a word (tier 4)
+ * and the song a path names (tier 1). It lives as long as the import and is never shared with another.
+ */
+class M3UReads {
+  readonly fileName = new Remembered<
+    {
+      id: string;
+      title: string;
+      displayTitle: string | null;
+      album: { artist: { name: string; identityKey: string; displayName: string | null } };
+    }[]
+  >();
+  readonly ofArtist = new Remembered<{ id: string; title: string; displayTitle: string | null }[]>();
+  readonly holdingWord = new Remembered<Awaited<ReturnType<typeof songsOfArtistsHoldingWord<{ album: { include: { artist: { select: { name: true; displayName: true } } } } }>>>>(WORD_SWEEPS_KEPT);
+  private readonly path = new Remembered<{ id: string } | null>();
+  private lowerCasePaths: Promise<Map<string, string>> | null = null;
+
+  /** `everyReading` is every library path any entry of the import may stand for (libraryPathReadings of each). */
+  constructor(private readonly everyReading: string[]) {}
+
+  /**
+   * The id of the playable song at each path any entry may stand for, by the path in lower case, read once for the
+   * import and only when an exact path first misses: no index serves a case-blind compare, so one scan stands in for a
+   * scan per entry, and what it keeps is bounded by the playlist, not the library. Ids come in order and the first of
+   * a lower-case path keeps it.
+   */
+  private pathsByLowerCase(): Promise<Map<string, string>> {
+    this.lowerCasePaths ??= (async () => {
+      const lowered = [...new Set(this.everyReading.map((r) => r.toLowerCase()))];
+      const songs = await prisma.$queryRaw<{ id: string; filePath: string }[]>`
+        SELECT t.id, t."filePath" FROM "Track" t
+        JOIN "Album" al ON al.id = t."albumId"
+        WHERE lower(t."filePath") = ANY(${lowered}::text[]) AND ${playableSongSql("t", "al")}
+        ORDER BY t.id`;
+      const byLowerCase = new Map<string, string>();
+      for (const song of songs) {
+        const key = song.filePath.toLowerCase();
+        if (!byLowerCase.has(key)) byLowerCase.set(key, song.id);
+      }
+      return byLowerCase;
+    })();
+    return this.lowerCasePaths;
+  }
+
+  /**
+   * The playable song one of `readings` (library paths, most literal first) names: the first reading that names a song
+   * exactly, else the first that names one with the case of letters ignored. A path stands for the same song to every
+   * entry that holds it, so the answer is kept by the readings.
+   */
+  pathMatch(readings: string[]): Promise<{ id: string } | null> {
+    return this.path.get(readings.join("\n"), async () => {
+      const exact = await prisma.track.findMany({
+        where: { AND: [PLAYABLE_SONG, { filePath: { in: readings } }] },
+        select: { id: true, filePath: true },
+        orderBy: { id: "asc" },
+      });
+      for (const reading of readings) {
+        const hit = exact.find((t) => t.filePath === reading);
+        if (hit) return { id: hit.id };
+      }
+      // The exact paths missed: the same paths with a letter's case ignored (a library kept on a case-sensitive disk and
+      // a playlist written on a case-insensitive one). The first reading that names a song so wins; of songs whose paths
+      // differ by case alone, the lowest id.
+      const byLowerCase = await this.pathsByLowerCase();
+      for (const reading of readings) {
+        const id = byLowerCase.get(reading.toLowerCase());
+        if (id) return { id };
+      }
+      return null;
+    });
   }
 }
 
@@ -2686,54 +2778,34 @@ class SpotifyImportService {
     const matchedTrackIds: string[] = [];
     const unmatchedEntries: M3UEntry[] = [];
     const shownArtists = await ShownArtists.load();
+    const readingsOf = entries.map((entry) => libraryPathReadings(entry.filePath, musicRoot));
+    const reads = new M3UReads(readingsOf.flat());
 
-    for (const entry of entries) {
+    for (const [at, entry] of entries.entries()) {
       let track: { id: string } | null = null;
 
       // Tier 1: File path match
-      // DB stores paths relative to musicRoot (e.g. "Artist/Album/track.flac")
-      // M3U may have absolute paths like "/music/Artist/Album/track.flac"
-      let relativePath = entry.filePath;
-      const musicPrefix = musicRoot.endsWith("/") ? musicRoot : musicRoot + "/";
-      if (relativePath.startsWith(musicPrefix)) {
-        relativePath = relativePath.slice(musicPrefix.length);
-      } else if (relativePath.startsWith("/")) {
-        // Try stripping any leading /music/ variant
-        const stripped = relativePath.replace(/^\/music\/?/, "");
-        if (stripped !== relativePath) {
-          relativePath = stripped;
-        }
-      }
-
-      track = await prisma.track.findFirst({
-        where: { AND: [PLAYABLE_SONG, { filePath: relativePath }] },
-        select: { id: true },
-        orderBy: { id: "asc" },
-      });
-
-      // Also try the original path as-is (in case DB stores absolute paths)
-      if (!track && relativePath !== entry.filePath) {
-        track = await prisma.track.findFirst({
-          where: { AND: [PLAYABLE_SONG, { filePath: entry.filePath }] },
-          select: { id: true },
-          orderBy: { id: "asc" },
-        });
-      }
+      // The library stores paths relative to the music folder ("Artist/Album/track.flac"); an M3U path is read the way
+      // a music player reads it (see libraryPathReadings), then matched exactly, then by case alone.
+      track = await reads.pathMatch(readingsOf[at]);
 
       // Tier 2: Filename match (basename without extension)
       if (!track) {
         const basename = path.basename(entry.filePath, path.extname(entry.filePath));
         if (basename.length >= MIN_WORD_LENGTH) {
-          const sameFile = await prisma.track.findMany({
-            where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } }] },
-            select: {
-              id: true,
-              title: true,
-              displayTitle: true,
-              album: { select: { artist: { select: { name: true, identityKey: true, displayName: true } } } },
-            },
-            orderBy: { id: "asc" },
-          });
+          const fileName = `${basename}${path.extname(entry.filePath)}`;
+          const sameFile = await reads.fileName.get(fileName, () =>
+            prisma.track.findMany({
+              where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${fileName}` } }] },
+              select: {
+                id: true,
+                title: true,
+                displayTitle: true,
+                album: { select: { artist: { select: { name: true, identityKey: true, displayName: true } } } },
+              },
+              orderBy: { id: "asc" },
+            }),
+          );
           // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title,
           // the file's artist or title must agree, each compared as tier 3 compares it, by the stored or the edited
           // name (either one is enough here, where tier 3 needs both). A bare entry has nothing to disagree with.
@@ -2753,17 +2825,20 @@ class SpotifyImportService {
         // The artist by its stored identity key, or by id when its edited name is the one named; the title by nameKey,
         // stored or edited: both fold case and accents in TypeScript.
         const entryTitle = entry.title;
+        const entryArtist = entry.artist;
         const shownAs = shownArtists.named(entry.artist);
-        const ofArtist = await prisma.track.findMany({
-          where: {
-            AND: [
-              PLAYABLE_SONG,
-              { album: { artist: { OR: [artistNamed(entry.artist), ...(shownAs.length > 0 ? [{ id: { in: shownAs } }] : [])] } } },
-            ],
-          },
-          select: { id: true, title: true, displayTitle: true },
-          orderBy: { id: "asc" },
-        });
+        const ofArtist = await reads.ofArtist.get(entry.artist, () =>
+          prisma.track.findMany({
+            where: {
+              AND: [
+                PLAYABLE_SONG,
+                { album: { artist: { OR: [artistNamed(entryArtist), ...(shownAs.length > 0 ? [{ id: { in: shownAs } }] : [])] } } },
+              ],
+            },
+            select: { id: true, title: true, displayTitle: true },
+            orderBy: { id: "asc" },
+          }),
+        );
         track = ofArtist.find((t) => isTitled(t, entryTitle)) ?? null;
       }
 
@@ -2772,10 +2847,12 @@ class SpotifyImportService {
         const dbArtist = normalizeArtistName(entry.artist);
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= MIN_WORD_LENGTH) {
-          const candidates = await songsOfArtistsHoldingWord(
-            firstWord,
-            { album: { include: { artist: { select: { name: true, displayName: true } } } } },
-            shownArtists.holding(firstWord),
+          const candidates = await reads.holdingWord.get(firstWord, () =>
+            songsOfArtistsHoldingWord(
+              firstWord,
+              { album: { include: { artist: { select: { name: true, displayName: true } } } } },
+              shownArtists.holding(firstWord),
+            ),
           );
 
           let bestMatch: { id: string } | null = null;
