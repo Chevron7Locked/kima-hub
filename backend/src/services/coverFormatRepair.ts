@@ -47,6 +47,11 @@ function coverFolders(): string[] {
     return [covers, path.join(covers, "artists"), path.join(covers, "albums"), audiobookCoversPath()];
 }
 
+/** The path of a file under the covers folder, as stored values spell it (forward slashes). */
+function relativeToCovers(file: string): string {
+    return path.relative(coversBasePath(), file).split(path.sep).join("/");
+}
+
 /** Whether the file starts with the JPEG signature. */
 async function isJpeg(file: string): Promise<boolean> {
     const handle = await fs.promises.open(file, "r");
@@ -101,12 +106,13 @@ async function convertOldArtistPicture(dir: string, name: string, id: string, re
  */
 async function versionConvertedCover(dir: string, file: string): Promise<void> {
     const version = await versionOfFile(file);
-    if (!version) return;
+    // A JPEG whose values keep the old version would be served as the new bytes under an address kept for good: a failure, so the marker stays unset.
+    if (!version) throw new Error("the converted file cannot be read for its version");
     if (dir === audiobookCoversPath()) {
         await prisma.audiobook.updateMany({ where: { localCoverPath: file }, data: { coverVersion: version } });
         return;
     }
-    await rewriteCoverValues(path.relative(coversBasePath(), file).split(path.sep).join("/"), version);
+    await rewriteCoverValues(relativeToCovers(file), version);
 }
 
 /** The versions stored on values and on audiobooks, read once for the pass. */
@@ -130,7 +136,7 @@ async function readStoredVersions(): Promise<StoredVersionIndex> {
  * failed left one). Answers whether it re-versioned anything.
  */
 async function reversionStaleCover(dir: string, file: string, index: StoredVersionIndex): Promise<boolean> {
-    const relativePath = path.relative(coversBasePath(), file).split(path.sep).join("/");
+    const relativePath = relativeToCovers(file);
     if (dir === audiobookCoversPath()) {
         const stored = index.audiobooks.get(file);
         if (!stored) return false;
@@ -143,7 +149,7 @@ async function reversionStaleCover(dir: string, file: string, index: StoredVersi
     if (!stored) return false;
     const version = await versionOfFile(file);
     if (!version || (stored.size === 1 && stored.has(version))) return false;
-    await rewriteCoverValues(relativePath, version, relativePath, true);
+    await rewriteCoverValues(relativePath, version, { onlyOtherVersions: true });
     return true;
 }
 

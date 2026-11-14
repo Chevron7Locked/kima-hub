@@ -56,8 +56,7 @@ const ADDRESS_COLUMNS = [
 export async function rewriteCoverValues(
     relativePath: string,
     version: string,
-    newRelativePath = relativePath,
-    onlyOtherVersions = false,
+    { newRelativePath = relativePath, onlyOtherVersions = false }: { newRelativePath?: string; onlyOtherVersions?: boolean } = {},
 ): Promise<number> {
     const value = storedCoverValue(newRelativePath, version);
     const points = (v: string | null) => {

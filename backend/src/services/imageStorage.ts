@@ -124,6 +124,9 @@ const sweptFolders = new Map<string, Promise<void>>();
 /** A smaller copy's name, `<cover name>_w<width>.jpg`: the cover's own name is the first group. */
 const RESIZED_COPY_NAME = /^(.+)_w\d+\.jpg$/;
 
+/** A cover is stored as `.jpg`; an old artist picture may still be `.png` or `.webp`, and its smaller copy is named after it. */
+const COVER_EXTENSIONS = ["jpg", "png", "webp"];
+
 /**
  * Removes the leftovers in `dir`: the `.part` files a crash left, and the smaller copies whose cover has been deleted
  * (nothing would ever serve or refresh them). A failure only means they stay for the next start.
@@ -138,7 +141,7 @@ function sweepOrphanParts(dir: string): Promise<void> {
                 const present = new Set(names);
                 for (const name of names) {
                     const copyOf = RESIZED_COPY_NAME.exec(name)?.[1];
-                    const orphanCopy = copyOf !== undefined && !present.has(`${copyOf}.jpg`);
+                    const orphanCopy = copyOf !== undefined && !COVER_EXTENSIONS.some((ext) => present.has(`${copyOf}.${ext}`));
                     if (!orphanCopy && !name.endsWith(".part")) continue;
                     const file = path.join(dir, name);
                     try {

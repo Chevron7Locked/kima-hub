@@ -117,6 +117,18 @@ describe("the sweep of orphan .part files", () => {
         expect(fs.readdirSync(albums).sort()).toEqual(["kept.jpg", "kept_w300.jpg", "new.jpg", "odd_w.jpg", "other_w300.png", "other_wide.jpg"]);
     });
 
+    it("keeps the smaller copy of an old-named artist picture (.png or .webp) that is still there", async () => {
+        plant(path.join(albums, "a.png"), 60 * 24);
+        plant(path.join(albums, "a_w300.jpg"), 60 * 24);
+        plant(path.join(albums, "b.webp"), 60 * 24);
+        plant(path.join(albums, "b_w64.jpg"), 60 * 24);
+        const { storeAsJpeg } = freshStorage();
+
+        await storeAsJpeg(path.join(albums, "new.jpg"), await picture("jpeg"));
+
+        expect(fs.readdirSync(albums).sort()).toEqual(["a.png", "a_w300.jpg", "b.webp", "b_w64.jpg", "new.jpg"]);
+    });
+
     it("sweeps a folder once per start: a leftover appearing later waits for the next start", async () => {
         const { storeAsJpeg } = freshStorage();
         fs.mkdirSync(albums, { recursive: true });
