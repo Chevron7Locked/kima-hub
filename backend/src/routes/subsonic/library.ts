@@ -2,8 +2,8 @@ import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapArtist, mapAlbum, mapAlbumChild, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
-import { LEADING_ARTICLES } from "../../services/pgTextRules";
-import { LIBRARY_LOCATION, albumHasPlayableSongSql } from "../../services/libraryFilters";
+import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
+import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { playRowsSql } from "../../services/stats/listens";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
@@ -18,6 +18,30 @@ const IGNORED_ARTICLES = LEADING_ARTICLES
     .join(" ");
 
 // ===================== ARTISTS =====================
+
+/**
+ * The index an artist is filed under: the accent-folded first letter of its sort name, upper case. A letter outside A-Z
+ * after folding keeps its own index, as Navidrome files it; "#" holds digits, symbols and nameless artists only.
+ */
+function indexLetter(sortName: string): string {
+    const first = [...sortName][0];
+    if (first === undefined) return "#";
+    const folded = [...unaccent(first)][0]?.toUpperCase() ?? first;
+    return /^\p{L}$/u.test(folded) ? folded : "#";
+}
+
+/**
+ * When the library last changed, in milliseconds since the epoch, as clients compare it with the one they hold: the newest
+ * song change (a file flagged missing counts) or artist sync. More changes than a client lists move it, never fewer.
+ */
+async function libraryLastModified(): Promise<number> {
+    const [row] = await prisma.$queryRaw<{ ms: number | null }[]>`
+        SELECT (EXTRACT(EPOCH FROM GREATEST(
+                   (SELECT MAX("updatedAt") FROM "Track"),
+                   (SELECT MAX("lastSynced") FROM "Artist")
+               )) * 1000)::float8 AS ms`;
+    return Math.floor(row?.ms ?? 0);
+}
 
 // getIndexes is the legacy alias for getArtists used by DSub and some older clients
 libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res) => {
@@ -35,8 +59,7 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
 
     const buckets: Record<string, ReturnType<typeof mapArtist>[]> = {};
     for (const a of artists) {
-        const first = a.sortName[0]?.toUpperCase() ?? "#";
-        const key = /[A-Z]/.test(first) ? first : "#";
+        const key = indexLetter(a.sortName);
         if (!buckets[key]) buckets[key] = [];
         buckets[key].push(mapArtist(a));
     }
@@ -51,6 +74,7 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
     const responseKey = req.path.includes("getIndexes") ? "indexes" : "artists";
     subsonicOk(req, res, {
         [responseKey]: {
+            "@_lastModified": await libraryLastModified(),
             "@_ignoredArticles": IGNORED_ARTICLES,
             index: indexes,
         },
@@ -103,7 +127,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
 
     if (id === "1") {
         const artists = await prisma.artist.findMany({
-            where: { libraryAlbumCount: { gt: 0 } },
+            where: { albums: { some: PLAYABLE_ALBUM_WHERE } },
             orderBy: { sortName: "asc" },
             select: { id: true, name: true, displayName: true },
         });

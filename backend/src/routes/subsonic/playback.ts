@@ -11,7 +11,7 @@ import { config } from "../../config";
 import { firstArtistGenre, mapSong, serveFromTranscodeParams, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
-import { foldedPattern, hasNonAscii } from "../../services/textMatch";
+import { containsSql } from "../../services/textMatch";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
@@ -452,38 +452,32 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
         return subsonicOk(req, res, { lyrics: {} });
     }
 
-    const normalizedArtist = artist ? normalizeArtistName(artist) : undefined;
-
-    const ofArtist: Prisma.TrackWhereInput = normalizedArtist
-        ? { album: { artist: { normalizedName: normalizedArtist } } }
-        : {};
-    // A title with a non-ASCII letter is matched by the database with a case-blind pattern, since it folds ASCII case
-    // only; only the artist's songs are looked at when an artist is given.
-    let titleMatch: Prisma.TrackWhereInput = {};
-    if (title && hasNonAscii(title)) {
-        const pattern = foldedPattern(title);
-        const [hit] = normalizedArtist
-            ? await prisma.$queryRaw<{ id: string }[]>`
-                SELECT t.id FROM "Track" t
-                  JOIN "Album" al ON al.id = t."albumId"
-                  JOIN "Artist" ar ON ar.id = al."artistId"
-                 WHERE ar."normalizedName" = ${normalizedArtist} AND t.title ~ ${pattern} AND ${playableSongSql("t", "al")}
-                 ORDER BY t.id LIMIT 1`
-            : await prisma.$queryRaw<{ id: string }[]>`
-                SELECT t.id FROM "Track" t
-                  JOIN "Album" al ON al.id = t."albumId"
-                 WHERE t.title ~ ${pattern} AND ${playableSongSql("t", "al")}
-                 ORDER BY t.id LIMIT 1`;
-        if (!hit) return subsonicOk(req, res, { lyrics: {} });
-        titleMatch = { id: hit.id };
-    } else if (title) {
-        titleMatch = { title: { contains: title, mode: "insensitive" } };
+    // The artist is matched whole, by the name the file carries or the name shown (the two a search finds it by).
+    let artistIds: string[] | undefined;
+    if (artist) {
+        const wanted = normalizeArtistName(artist);
+        const named = await prisma.artist.findMany({
+            where: { OR: [{ normalizedName: wanted }, { displayName: { not: null } }] },
+            select: { id: true, normalizedName: true, displayName: true },
+        });
+        artistIds = named
+            .filter((a) => a.normalizedName === wanted || normalizeArtistName(a.displayName) === wanted)
+            .map((a) => a.id);
+        if (artistIds.length === 0) return subsonicOk(req, res, { lyrics: {} });
     }
 
-    const track = await prisma.track.findFirst({
-        where: { ...titleMatch, ...ofArtist, ...PLAYABLE_SONG },
+    // The title is matched as part of the title shown or of the file's, in any letter case and any script.
+    const [hit] = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+         WHERE ${playableSongSql("t", "al")}
+           ${title ? Prisma.sql`AND ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
+           ${artistIds ? Prisma.sql`AND al."artistId" = ANY(${artistIds}::text[])` : Prisma.empty}
+         ORDER BY t.id LIMIT 1`;
+    if (!hit) return subsonicOk(req, res, { lyrics: {} });
+
+    const track = await prisma.track.findUnique({
+        where: { id: hit.id },
         include: { trackLyrics: true, album: { include: { artist: true } } },
-        orderBy: { id: "asc" },
     });
 
     if (!track?.trackLyrics) {

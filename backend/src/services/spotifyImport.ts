@@ -28,7 +28,7 @@ import * as jobMoves from "./downloads/jobs";
 import { sourcePauseController } from "./sourcePauseController";
 import { artistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
-import { containsText, foldedPattern, hasNonAscii } from "./textMatch";
+import { containsSql, containsText, hasNonAscii } from "./textMatch";
 import { rankAfter, rankForPosition } from "../utils/lexoRank";
 import { allocateAppendRanks } from "./playlistService";
 import { trackIdentityService } from "./trackIdentity";
@@ -217,19 +217,25 @@ async function saveImportJob(job: ImportJob): Promise<void> {
   });
 }
 
-function toMatchCandidate(t: {
+/**
+ * The candidates one library song gives the matcher: one under the title in the file and, when a person edited the
+ * title, one under the title shown. Both carry the song's id, so either name finds it.
+ */
+function toMatchCandidates(t: {
   id: string;
   title: string;
+  displayTitle?: string | null;
   albumId: string;
   album: { title: string; artist: { name: string } };
-}): MatchCandidate {
-  return {
+}): MatchCandidate[] {
+  const candidate = (title: string): MatchCandidate => ({
     id: t.id,
-    title: t.title,
+    title,
     albumId: t.albumId,
     albumTitle: t.album.title,
     artistName: t.album.artist.name,
-  };
+  });
+  return t.displayTitle && t.displayTitle !== t.title ? [candidate(t.title), candidate(t.displayTitle)] : [candidate(t.title)];
 }
 
 function toImportJob(
@@ -329,22 +335,23 @@ function tracksOfArtistsStartingWith(words: string[]): Prisma.TrackWhereInput {
 const TITLE_CANDIDATES_MAX = 500;
 
 /**
- * Playable songs whose title holds one of `terms`, in any letter case. The database folds case for ASCII only, so a
+ * Playable songs whose title, as in the file or as shown, holds one of `terms`, in any letter case. The database folds case for ASCII only, so a
  * term with a non-ASCII letter is matched with a case-blind pattern (foldedPattern), at most the candidate limit of ids,
  * counted among playable songs only so songs that cannot play never use up the places.
  */
 async function tracksTitledLike<I extends Prisma.TrackInclude>(terms: string[], include: I) {
   const asciiTerms = terms.filter((t) => !hasNonAscii(t));
   const otherTerms = terms.filter(hasNonAscii);
-  const titleMatches: Prisma.TrackWhereInput[] = asciiTerms.map((term) => ({
-    title: { contains: term, mode: "insensitive" as const },
-  }));
+  const titleMatches: Prisma.TrackWhereInput[] = asciiTerms.flatMap((term) => [
+    { title: { contains: term, mode: "insensitive" as const } },
+    { displayTitle: { contains: term, mode: "insensitive" as const } },
+  ]);
   if (otherTerms.length > 0) {
     const ids = new Set<string>();
     for (const term of otherTerms) {
       const rows = await prisma.$queryRaw<{ id: string }[]>`
         SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-        WHERE t.title ~ ${foldedPattern(term)} AND ${playableSongSql("t", "a")}
+        WHERE ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], term)} AND ${playableSongSql("t", "a")}
         ORDER BY t.id LIMIT ${TITLE_CANDIDATES_MAX}`;
       for (const row of rows) ids.add(row.id);
     }
@@ -377,10 +384,12 @@ class SpotifyImportService {
    * services/trackMatching picks the verdict.
    */
   private async matchTrack(spotifyTrack: SpotifyTrack): Promise<MatchedTrack> {
+    // A song edited to a shown title is in twice, once under each title, so the key holds both.
     const candidates = new Map<string, MatchCandidate>();
     const add = (rows: MatchCandidate[]) => {
       for (const c of rows) {
-        if (!candidates.has(c.id)) candidates.set(c.id, c);
+        const key = `${c.id}\n${c.title}`;
+        if (!candidates.has(key)) candidates.set(key, c);
       }
     };
     const withAlbum = {
@@ -392,7 +401,7 @@ class SpotifyImportService {
         where: { AND: [PLAYABLE_SONG, { isrc: spotifyTrack.isrc }] },
         ...withAlbum,
       });
-      add(rows.map(toMatchCandidate));
+      add(rows.flatMap(toMatchCandidates));
     }
 
     const primaryArtist =
@@ -409,7 +418,7 @@ class SpotifyImportService {
       },
       ...withAlbum,
     });
-    add(artistRows.map(toMatchCandidate));
+    add(artistRows.flatMap(toMatchCandidates));
 
     // Fuzzy sweeps: artists whose normalizedName contains the first word (covers
     // "Artist A feat. B" stored under a compound name); the matcher narrows them
@@ -426,7 +435,7 @@ class SpotifyImportService {
               ...withAlbum,
               take: 50,
             })
-          ).map(toMatchCandidate),
+          ).flatMap(toMatchCandidates),
         );
       }
       if (candidates.size === 0) {
@@ -453,7 +462,7 @@ class SpotifyImportService {
               ...withAlbum,
               take: 50,
             })
-          ).map(toMatchCandidate),
+          ).flatMap(toMatchCandidates),
         );
       }
       if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist) {
@@ -469,7 +478,7 @@ class SpotifyImportService {
               ...withAlbum,
               take: 50,
             })
-          ).map(toMatchCandidate),
+          ).flatMap(toMatchCandidates),
         );
       }
     }
@@ -1664,6 +1673,7 @@ class SpotifyImportService {
     type TrackWithRelations = {
       id: string;
       title: string;
+      displayTitle: string | null;
       albumId: string;
       album: {
         title: string;
@@ -1683,7 +1693,7 @@ class SpotifyImportService {
       const artistName = track.album.artist.normalizedName || track.album.artist.name;
       const firstWord = artistName.toLowerCase().split(" ")[0];
       const existing = tracksByArtistWord.get(firstWord) || [];
-      existing.push(toMatchCandidate(track));
+      existing.push(...toMatchCandidates(track));
       tracksByArtistWord.set(firstWord, existing);
     }
 
@@ -1788,7 +1798,7 @@ class SpotifyImportService {
       const titleCandidateRows = await tracksTitledLike(titleSearchTerms, {
         album: { include: { artist: { select: { name: true, normalizedName: true } } } },
       });
-      const titleCandidates: MatchCandidate[] = titleCandidateRows.map(toMatchCandidate);
+      const titleCandidates: MatchCandidate[] = titleCandidateRows.flatMap(toMatchCandidates);
 
       for (const { pendingTrack, trackIndex: tIdx } of unmatchedForTitleOnly) {
         // Same ladder, pool widened to any artist (title-only fallback).
@@ -2359,7 +2369,7 @@ class SpotifyImportService {
           where: tracksOfArtistsStartingWith([artistFirstWord]),
           include: { album: { include: { artist: true } } },
         });
-        const artistCandidates: MatchCandidate[] = artistCandidateRows.map(toMatchCandidate);
+        const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);
 
         let match = matchTrackToLibrary(
           {
@@ -2376,7 +2386,7 @@ class SpotifyImportService {
           const titleCandidateRows = await tracksTitledLike([strippedTitle.split(" ").slice(0, 4).join(" ")], {
             album: { include: { artist: true } },
           });
-          const titleCandidates: MatchCandidate[] = titleCandidateRows.map(toMatchCandidate);
+          const titleCandidates: MatchCandidate[] = titleCandidateRows.flatMap(toMatchCandidates);
           match = matchTrackToLibrary(
             {
               title: pendingTrack.spotifyTitle,

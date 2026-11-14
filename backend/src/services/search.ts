@@ -635,6 +635,7 @@ export class SearchService {
                             { author: { contains: query, mode: "insensitive" } },
                             { narrator: { contains: query, mode: "insensitive" } },
                             { series: { contains: query, mode: "insensitive" } },
+                            { description: { contains: query, mode: "insensitive" } },
                         ],
                     },
                     select: AUDIOBOOK_FIELDS,
@@ -644,7 +645,7 @@ export class SearchService {
                 }),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT b.id FROM "Audiobook" b
-                 WHERE b.title ~ ${pattern} OR b.author ~ ${pattern} OR b.narrator ~ ${pattern} OR b.series ~ ${pattern}
+                 WHERE b.title ~ ${pattern} OR b.author ~ ${pattern} OR b.narrator ~ ${pattern} OR b.series ~ ${pattern} OR b.description ~ ${pattern}
                  ORDER BY b.title ASC, b.id ASC LIMIT ${take} OFFSET ${skip}`,
             (ids) => prisma.audiobook.findMany({ where: { id: { in: ids } }, select: AUDIOBOOK_FIELDS }),
         );

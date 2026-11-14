@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { playableSongSql } from "../../utils/playableSong";
-import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
+import { PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
@@ -339,7 +339,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
     // The exact name is found by its identity key (indexed, built in TypeScript); a display name is compared the same
     // way over the few artists that have one; otherwise the text is matched inside a name with a case-blind pattern,
     // since the database folds ASCII case only.
-    const inLibrary = { libraryAlbumCount: { gt: 0 } };
+    const inLibrary = { albums: { some: PLAYABLE_ALBUM_WHERE } };
     const wantedKey = artistIdentityKey(artistParam);
     let chosenId: string | undefined = wantedKey
         ? (await prisma.artist.findFirst({ where: { ...inLibrary, identityKey: wantedKey }, select: { id: true }, orderBy: { id: "asc" } }))?.id
@@ -356,7 +356,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
         const pattern = foldedPattern(artistParam);
         [{ id: chosenId } = { id: undefined }] = await prisma.$queryRaw<{ id: string | undefined }[]>`
             SELECT a.id FROM "Artist" a
-             WHERE a."libraryAlbumCount" > 0 AND (a.name ~ ${pattern} OR a."displayName" ~ ${pattern})
+             WHERE ${artistHasPlayableSongSql("a")} AND (a.name ~ ${pattern} OR a."displayName" ~ ${pattern})
              ORDER BY a.id LIMIT 1`;
     }
     const artist = chosenId
@@ -416,7 +416,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     const similarArtists = await prisma.similarArtist.findMany({
         where: {
             fromArtistId: artistId,
-            toArtist: { libraryAlbumCount: { gt: 0 } },
+            toArtist: { albums: { some: PLAYABLE_ALBUM_WHERE } },
         },
         orderBy: { weight: "desc" },
         take: 50,
