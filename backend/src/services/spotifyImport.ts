@@ -38,7 +38,7 @@ import { titlesAgree } from "./albumIdentity";
 import { requireMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
-import { M3UEntry, libraryPathReadings } from "./m3uParser";
+import { M3UEntry, caseSpellings, libraryFileNames, libraryPathReadings, unicodeForms } from "./m3uParser";
 import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
@@ -459,9 +459,10 @@ const WORD_SWEEPS_KEPT = 16;
  * and the song a path names (tier 1). It lives as long as the import and is never shared with another.
  */
 class M3UReads {
-  readonly fileName = new Remembered<
+  private readonly fileName = new Remembered<
     {
       id: string;
+      filePath: string;
       title: string;
       displayTitle: string | null;
       album: { artist: { name: string; identityKey: string; displayName: string | null } };
@@ -470,63 +471,109 @@ class M3UReads {
   readonly ofArtist = new Remembered<{ id: string; title: string; displayTitle: string | null }[]>();
   readonly holdingWord = new Remembered<Awaited<ReturnType<typeof songsOfArtistsHoldingWord<{ album: { include: { artist: { select: { name: true; displayName: true } } } } }>>>>(WORD_SWEEPS_KEPT);
   private readonly path = new Remembered<{ id: string } | null>();
-  private lowerCasePaths: Promise<Map<string, string>> | null = null;
+  private caseBlindPaths: Promise<{ plain: Map<string, string>; folded: Map<string, string> }> | null = null;
 
   /** `everyReading` is every library path any entry of the import may stand for (libraryPathReadings of each). */
   constructor(private readonly everyReading: string[]) {}
 
   /**
-   * The id of the playable song at each path any entry may stand for, by the path in lower case, read once for the
-   * import and only when an exact path first misses: no index serves a case-blind compare, so one scan stands in for a
-   * scan per entry, and what it keeps is bounded by the playlist, not the library. Ids come in order and the first of
-   * a lower-case path keeps it.
+   * The id of the playable song at each path any entry may stand for, by the path in lower case (`plain`) and by the
+   * path in lower case and composed Unicode form (`folded`), read once for the import and only when an exact path first
+   * misses: no index serves a case-blind compare, so one scan stands in for a scan per entry, and what it keeps is
+   * bounded by the playlist, not the library. Ids come in order and the first of a key keeps it. The database cannot
+   * normalise text (installs run on SQL_ASCII), so it is asked for each path in both Unicode forms and the keys are
+   * folded here.
    */
-  private pathsByLowerCase(): Promise<Map<string, string>> {
-    this.lowerCasePaths ??= (async () => {
-      const lowered = [...new Set(this.everyReading.map((r) => r.toLowerCase()))];
+  private caseBlind(): Promise<{ plain: Map<string, string>; folded: Map<string, string> }> {
+    this.caseBlindPaths ??= (async () => {
+      const lowered = [...new Set(this.everyReading.flatMap((r) => [r, ...unicodeForms(r)]).flatMap((r) => [r.toLowerCase(), ...caseSpellings(r)]))];
       const songs = await prisma.$queryRaw<{ id: string; filePath: string }[]>`
         SELECT t.id, t."filePath" FROM "Track" t
         JOIN "Album" al ON al.id = t."albumId"
         WHERE lower(t."filePath") = ANY(${lowered}::text[]) AND ${playableSongSql("t", "al")}
         ORDER BY t.id`;
-      const byLowerCase = new Map<string, string>();
+      const plain = new Map<string, string>();
+      const folded = new Map<string, string>();
       for (const song of songs) {
         const key = song.filePath.toLowerCase();
-        if (!byLowerCase.has(key)) byLowerCase.set(key, song.id);
+        if (!plain.has(key)) plain.set(key, song.id);
+        const foldedKey = foldedForm(song.filePath);
+        if (!folded.has(foldedKey)) folded.set(foldedKey, song.id);
       }
-      return byLowerCase;
+      return { plain, folded };
     })();
-    return this.lowerCasePaths;
+    return this.caseBlindPaths;
   }
 
   /**
-   * The playable song one of `readings` (library paths, most literal first) names: the first reading that names a song
-   * exactly, else the first that names one with the case of letters ignored. A path stands for the same song to every
-   * entry that holds it, so the answer is kept by the readings.
+   * The playable song one of `readings` (library paths, most literal first) names, the first of these that does:
+   * a reading as written, a reading with the case of letters ignored, a reading in the other Unicode form (a Mac writes
+   * accented names decomposed, a Linux library stores them composed), then that with the case ignored too. A path stands
+   * for the same song to every entry that holds it, so the answer is kept by the readings.
    */
   pathMatch(readings: string[]): Promise<{ id: string } | null> {
     return this.path.get(readings.join("\n"), async () => {
-      const exact = await prisma.track.findMany({
-        where: { AND: [PLAYABLE_SONG, { filePath: { in: readings } }] },
+      const otherForms = [...new Set(readings.flatMap(unicodeForms))].filter((form) => !readings.includes(form));
+      const found = await prisma.track.findMany({
+        where: { AND: [PLAYABLE_SONG, { filePath: { in: [...readings, ...otherForms] } }] },
         select: { id: true, filePath: true },
         orderBy: { id: "asc" },
       });
-      for (const reading of readings) {
-        const hit = exact.find((t) => t.filePath === reading);
-        if (hit) return { id: hit.id };
-      }
+      const exact = (paths: string[]) => {
+        for (const reading of paths) {
+          const hit = found.find((t) => t.filePath === reading);
+          if (hit) return { id: hit.id };
+        }
+        return null;
+      };
+      const asWritten = exact(readings);
+      if (asWritten) return asWritten;
       // The exact paths missed: the same paths with a letter's case ignored (a library kept on a case-sensitive disk and
       // a playlist written on a case-insensitive one). The first reading that names a song so wins; of songs whose paths
       // differ by case alone, the lowest id.
-      const byLowerCase = await this.pathsByLowerCase();
+      const { plain, folded } = await this.caseBlind();
       for (const reading of readings) {
-        const id = byLowerCase.get(reading.toLowerCase());
+        const id = plain.get(reading.toLowerCase());
+        if (id) return { id };
+      }
+      const otherForm = exact(otherForms);
+      if (otherForm) return otherForm;
+      for (const reading of readings) {
+        const id = folded.get(foldedForm(reading));
         if (id) return { id };
       }
       return null;
     });
   }
+
+  /**
+   * The playable songs whose file is named `name` (the last part of the path), in id order, the case of letters and the
+   * Unicode form ignored. The database matches the name loosely (its own case-blind compare folds ASCII only, and a
+   * wildcard in a name reaches further than it should) and the file names are compared here, so only a real match stays.
+   * The same name in another case or form is one read.
+   */
+  songsNamed(name: string) {
+    const folded = foldedForm(name);
+    return this.fileName.get(folded, async () => {
+      const named = [...new Set([name, ...unicodeForms(name)].flatMap((n) => [n, ...caseSpellings(n)]))].map((n) => ({ filePath: { endsWith: `/${n}`, mode: "insensitive" as const } }));
+      const songs = await prisma.track.findMany({
+        where: { AND: [PLAYABLE_SONG, { OR: named }] },
+        select: {
+          id: true,
+          filePath: true,
+          title: true,
+          displayTitle: true,
+          album: { select: { artist: { select: { name: true, identityKey: true, displayName: true } } } },
+        },
+        orderBy: { id: "asc" },
+      });
+      return songs.filter((song) => foldedForm(song.filePath).endsWith(`/${folded}`));
+    });
+  }
 }
+
+/** `text` with the case of letters and the Unicode form ignored: two paths that name the same file to a player fold alike. */
+const foldedForm = (text: string): string => text.normalize("NFC").toLowerCase();
 
 /** Whether `shownName`, an artist's edited name, is the artist `name` names: the rule `isArtistNamed` applies to the stored name. */
 const isShownAs = (shownName: string, name: string): boolean =>
@@ -2789,34 +2836,23 @@ class SpotifyImportService {
       // a music player reads it (see libraryPathReadings), then matched exactly, then by case alone.
       track = await reads.pathMatch(readingsOf[at]);
 
-      // Tier 2: Filename match (basename without extension)
+      // Tier 2: Filename match (the name as typed, then as a player reads it: see libraryFileNames), the case of letters
+      // and the Unicode form ignored; a file of the name in exactly the case written comes before one in another case.
+      // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title, the
+      // file's artist or title must agree, each compared as tier 3 compares it, by the stored or the edited name
+      // (either one is enough here, where tier 3 needs both). A bare entry has nothing to disagree with.
+      const named = !!(entry.artist || entry.title);
+      const agrees = (t: { title: string; displayTitle: string | null; album: { artist: { name: string; identityKey: string; displayName: string | null } } }) =>
+        !named ||
+        (!!entry.title && isTitled(t, entry.title)) ||
+        (!!entry.artist && isByArtistNamed(t.album.artist, entry.artist));
       if (!track) {
-        const basename = path.basename(entry.filePath, path.extname(entry.filePath));
-        if (basename.length >= MIN_WORD_LENGTH) {
-          const fileName = `${basename}${path.extname(entry.filePath)}`;
-          const sameFile = await reads.fileName.get(fileName, () =>
-            prisma.track.findMany({
-              where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${fileName}` } }] },
-              select: {
-                id: true,
-                title: true,
-                displayTitle: true,
-                album: { select: { artist: { select: { name: true, identityKey: true, displayName: true } } } },
-              },
-              orderBy: { id: "asc" },
-            }),
-          );
-          // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title,
-          // the file's artist or title must agree, each compared as tier 3 compares it, by the stored or the edited
-          // name (either one is enough here, where tier 3 needs both). A bare entry has nothing to disagree with.
-          const named = !!(entry.artist || entry.title);
-          track =
-            sameFile.find(
-              (t) =>
-                !named ||
-                (!!entry.title && isTitled(t, entry.title)) ||
-                (!!entry.artist && isByArtistNamed(t.album.artist, entry.artist)),
-            ) ?? null;
+        for (const fileName of libraryFileNames(entry.filePath, readingsOf[at])) {
+          if (path.basename(fileName, path.extname(fileName)).length < MIN_WORD_LENGTH) continue;
+          const sameFile = await reads.songsNamed(fileName);
+          const written = (t: { filePath: string }) => t.filePath.endsWith(`/${fileName}`);
+          track = [...sameFile.filter(written), ...sameFile.filter((t) => !written(t))].find(agrees) ?? null;
+          if (track) break;
         }
       }
 

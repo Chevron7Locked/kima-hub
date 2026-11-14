@@ -127,3 +127,64 @@ export function libraryPathReadings(filePath: string, root: string): string[] {
     }
     return [...new Set(candidates)];
 }
+
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+const windows1252 = new TextDecoder("windows-1252");
+
+/**
+ * An uploaded playlist file's text, read the way `.m3u` and `.m3u8` files are read: as UTF-16 when it opens with a UTF-16
+ * byte order mark (what Windows Notepad's "Unicode" saves), as UTF-8 when it opens with a UTF-8 byte order mark (dropped)
+ * or is valid UTF-8, otherwise as Windows-1252, the "Latin-1" every player takes it for.
+ */
+export function decodeM3U(bytes: Buffer): string {
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString("utf16le");
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return Buffer.from(bytes.subarray(2)).swap16().toString("utf16le");
+    if (bytes.subarray(0, 3).equals(UTF8_BOM)) return bytes.subarray(3).toString("utf-8");
+    try {
+        return strictUtf8.decode(bytes);
+    } catch {
+        return windows1252.decode(bytes);
+    }
+}
+
+/**
+ * The other Unicode form of `text` (composed or decomposed), when it has one: macOS writes accented names decomposed
+ * (NFD) and Linux libraries keep them composed (NFC), and players take the two as the same name. Empty for text whose
+ * two forms are alike.
+ */
+export function unicodeForms(text: string): string[] {
+    const forms = [text.normalize("NFC"), text.normalize("NFD")];
+    return forms.filter((form) => form !== text);
+}
+
+/** The most spellings `caseSpellings` gives for one text. */
+const SPELLINGS_MAX = 8;
+
+/**
+ * `text` with its ASCII letters lower-cased and each non-ASCII letter written as it is, in lower case and in upper case:
+ * what Postgres's `lower()` can return for a stored name that differs from `text` by letter case alone. The database
+ * runs on SQL_ASCII, where `lower()` folds ASCII letters only, so "Café" and "CAFÉ" can be told apart there and the
+ * stored spelling has to be asked for. Past `SPELLINGS_MAX` spellings, only the text as written, all lower and all upper.
+ */
+export function caseSpellings(text: string): string[] {
+    const asciiLower = (c: string) => (/[A-Z]/.test(c) ? c.toLowerCase() : c);
+    let spellings = [""];
+    for (const c of text) {
+        const forms = /[^\x00-\x7f]/.test(c) ? [...new Set([c, c.toLowerCase(), c.toUpperCase()])] : [asciiLower(c)];
+        if (spellings.length * forms.length > SPELLINGS_MAX) {
+            const nonAscii = (f: (s: string) => string) => [...text].map((ch) => (/[^\x00-\x7f]/.test(ch) ? f(ch) : asciiLower(ch))).join("");
+            return [...new Set([nonAscii((ch) => ch), nonAscii((ch) => ch.toLowerCase()), nonAscii((ch) => ch.toUpperCase())])];
+        }
+        spellings = spellings.flatMap((s) => forms.map((f) => s + f));
+    }
+    return spellings;
+}
+
+/**
+ * The file names an M3U entry's path may stand for, most literal first: the name of the path as typed, then of each of
+ * its readings (see libraryPathReadings), so a name written percent-encoded or after a `\` is the name a player reads.
+ */
+export function libraryFileNames(filePath: string, readings: string[]): string[] {
+    return [...new Set([filePath, ...readings].map((path) => posix.basename(path)))];
+}

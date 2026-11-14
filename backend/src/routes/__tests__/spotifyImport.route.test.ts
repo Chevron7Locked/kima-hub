@@ -217,3 +217,44 @@ describe("an import job", () => {
         expect((await request(app).post("/spotify/import/job-1/cancel")).body).toEqual({ message: "Import cancelled.", playlistId: null, tracksMatched: 0 });
     });
 });
+
+describe("POST /spotify/import/m3u reads the file's bytes the way a playlist file is read", () => {
+    const LINE = "Beyoncé/Lemonade/Hold Up.flac";
+    const upload = (bytes: Buffer, name = "mix.m3u") =>
+        request(app).post("/spotify/import/m3u").field("playlistName", "Mix").attach("file", bytes, name);
+    const pathsRead = () => (mockService.importFromM3U.mock.calls[0][2] as { filePath: string }[]).map((e) => e.filePath);
+
+    beforeEach(() => {
+        mockService.importFromM3U.mockResolvedValue({ playlistId: "p", matched: 1, unmatched: 0, total: 1 });
+    });
+
+    it("reads UTF-8 as UTF-8", async () => {
+        expect((await upload(Buffer.from(`#EXTM3U\n${LINE}\n`, "utf-8"), "mix.m3u8")).status).toBe(200);
+        expect(pathsRead()).toEqual([LINE]);
+    });
+
+    it("reads a file with a UTF-8 byte order mark as UTF-8, the mark dropped", async () => {
+        const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(`${LINE}\n`, "utf-8")]);
+        expect((await upload(bytes)).status).toBe(200);
+        expect(pathsRead()).toEqual([LINE]);
+    });
+
+    it("reads a file that is not valid UTF-8 as Latin-1 (Windows-1252)", async () => {
+        // "é" is the single byte 0xE9 here, and 0x92 is Windows-1252's right single quote.
+        const bytes = Buffer.concat([Buffer.from("Beyonc"), Buffer.from([0xe9]), Buffer.from("/Don"), Buffer.from([0x92]), Buffer.from("t.flac\n")]);
+        expect((await upload(bytes)).status).toBe(200);
+        expect(pathsRead()).toEqual(["Beyoncé/Don’t.flac"]);
+    });
+
+    it("reads a UTF-16 file with a byte order mark", async () => {
+        const bytes = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`${LINE}\r\n`, "utf16le")]);
+        expect((await upload(bytes)).status).toBe(200);
+        expect(pathsRead()).toEqual([LINE]);
+    });
+
+    it("still refuses a file with a null byte", async () => {
+        const res = await upload(Buffer.from("a\0b.flac\n"));
+        expect(res.status).toBe(400);
+        expect(mockService.importFromM3U).not.toHaveBeenCalled();
+    });
+});

@@ -7,7 +7,7 @@ import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
-import { parseM3U } from "../services/m3uParser";
+import { decodeM3U, parseM3U } from "../services/m3uParser";
 import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE, MusicLink, MusicPlatform } from "../services/musicLink";
 
 const router = Router();
@@ -321,8 +321,7 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
             return res.status(400).json({ error: "playlistName is required (1-200 chars)" });
         }
 
-        const content = req.file.buffer.toString("utf-8");
-        const entries = parseM3U(content);
+        const entries = parseM3U(decodeM3U(req.file.buffer));
 
         if (entries.length === 0) {
             return res.status(400).json({ error: "M3U file contains no entries" });
