@@ -354,7 +354,11 @@ router.options("/:id/cover/:version([A-Za-z0-9_-]+)?", (req, res) => {
     res.status(204).end();
 });
 
-/** Answers with the cover Audiobookshelf holds, read capped and only as an image, or with the route's 404. */
+/**
+ * Answers with the cover Audiobookshelf holds, read capped and only as an image, or with the route's 404. It reads
+ * through `readPicture` itself rather than `fetchPicture`: the host is the admin's own Audiobookshelf, called with its
+ * API key and not through the address guard (which refuses a LAN host).
+ */
 async function proxyAudiobookshelfCover(req: Request, res: Response, id: string, coverUrl: string | null | undefined): Promise<void> {
     const notFound = () => void res.status(404).json({ error: "Cover not found" });
     const settings = coverUrl ? await getSystemSettings() : null;

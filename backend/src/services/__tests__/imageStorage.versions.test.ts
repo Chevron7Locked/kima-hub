@@ -188,6 +188,15 @@ describe("a picture read from a proxied reply", () => {
         expect(await readPicture(reply(new Uint8Array([1]), { "content-type": type }))).toBeNull();
     });
 
+    // An SVG is a document that can carry script; served from Kima's own address it would run there.
+    it.each(["image/svg+xml", "image/x-icon", "image/tiff"])("is nothing when its type is %p, not a picture a browser draws as a plain image", async (type) => {
+        expect(await readPicture(reply(new Uint8Array([1]), { "content-type": type }))).toBeNull();
+    });
+
+    it.each(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"])("is read when its type is %p", async (type) => {
+        expect((await readPicture(reply(new Uint8Array([1]), { "content-type": type })))?.contentType).toBe(type);
+    });
+
     it("is nothing when it names no type", async () => {
         expect(await readPicture(new Response(new Uint8Array([1]), { status: 200 }))).toBeNull();
     });

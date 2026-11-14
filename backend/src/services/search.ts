@@ -6,6 +6,7 @@ import { playableSongSql } from "../utils/playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
+import { audiobookCoverAddress } from "./imageStorage";
 
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
@@ -64,7 +65,19 @@ const EPISODE_FIELDS = {
 } as const;
 const AUDIOBOOK_FIELDS = {
     id: true, title: true, author: true, narrator: true, series: true, description: true, coverUrl: true, duration: true,
+    localCoverPath: true, lastSyncedAt: true,
 } as const;
+
+/** What a search row reads to name an audiobook's cover; the result shows the address, not these. */
+type AudiobookCoverColumns = { localCoverPath: string | null; lastSyncedAt: Date };
+
+/** An audiobook row as search shows it: the cover as its versioned address, without the columns the address is made from. */
+function audiobookResult<T extends { id: string; coverUrl: string | null } & AudiobookCoverColumns>(
+    row: T,
+): Omit<T, "localCoverPath" | "lastSyncedAt"> {
+    const { localCoverPath, lastSyncedAt, ...rest } = row;
+    return { ...rest, coverUrl: audiobookCoverAddress({ id: row.id, localCoverPath, coverUrl: row.coverUrl, lastSyncedAt }) };
+}
 const PODCAST_FIELDS = { id: true, title: true, author: true, description: true, imageUrl: true, episodeCount: true } as const;
 
 /** Shows and episodes are each user's own: only those of the shows they follow are searched. */
@@ -594,7 +607,7 @@ export class SearchService {
             query,
             "Audiobook FTS",
             async (tsquery, { skip, take }) => {
-                const results = await prisma.$queryRaw<AudiobookSearchResult[]>`
+                const results = await prisma.$queryRaw<Array<Omit<AudiobookSearchResult, "coverUrl"> & AudiobookCoverColumns & { coverUrl: string | null }>>`
             SELECT
               id,
               title,
@@ -603,6 +616,8 @@ export class SearchService {
               series,
               description,
               "coverUrl",
+              "localCoverPath",
+              "lastSyncedAt",
               duration,
               ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
             FROM "Audiobook"
@@ -611,7 +626,7 @@ export class SearchService {
             LIMIT ${take}
             OFFSET ${skip}
           `;
-                return results.map((r) => ({ ...r, coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null }));
+                return results.map(audiobookResult);
             },
             () => this.searchAudiobooksFallback({ query, limit, offset }),
             { limit, offset, fallbackOnEmpty: true },
@@ -650,11 +665,7 @@ export class SearchService {
             (ids) => prisma.audiobook.findMany({ where: { id: { in: ids } }, select: AUDIOBOOK_FIELDS }),
         );
 
-        return results.map((r) => ({
-            ...r,
-            coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null,
-            rank: 0,
-        }));
+        return results.map((r) => ({ ...audiobookResult(r), rank: 0 }));
     }
 
     /**

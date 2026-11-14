@@ -238,14 +238,17 @@ export async function readCapped(response: Response): Promise<Buffer | null> {
     return Buffer.concat(chunks);
 }
 
+const PROXIED_PICTURE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+
 /**
- * A picture a route proxies from another host: its bytes (read through `readCapped`) and its `image/*` type, without
- * parameters. Null when it is over the cap or the host named no image type, so the route answers not found rather than
- * send a stranger's page or an unbounded body to a browser under Kima's address.
+ * A picture a route proxies from another host: its bytes (read through `readCapped`) and its type, without parameters.
+ * Null when it is over the cap or the host named no picture type, so the route answers not found rather than send a
+ * stranger's page or an unbounded body to a browser under Kima's address. Only the types a browser draws as a plain
+ * image are read: an SVG is a document that can carry script, and would run under Kima's address.
  */
 export async function readPicture(response: Response): Promise<{ bytes: Buffer; contentType: string } | null> {
     const contentType = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
-    if (!contentType) {
+    if (!contentType || !PROXIED_PICTURE_TYPES.has(contentType)) {
         await response.body?.cancel().catch(() => undefined);
         return null;
     }

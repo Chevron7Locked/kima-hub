@@ -288,4 +288,22 @@ describe("getCoverArt for a cover at an outside address", () => {
 
         notFound(await request(app).get(`/rest/getCoverArt.view?id=${P}-al&f=json`));
     });
+
+    it("is not-found when the site names an SVG, which would run script under Kima's address", async () => {
+        expectLog("warn");
+        reply("<svg xmlns='http://www.w3.org/2000/svg'/>", { headers: { "content-type": "image/svg+xml" } });
+
+        notFound(await request(app).get(`/rest/getCoverArt.view?id=${P}-al&f=json`));
+    });
+});
+
+describe("getCoverArt for a cover value that is neither a stored cover nor an outside address", () => {
+    it.each(["audiobook__zz", "ftp://host/cover.jpg", "javascript:alert(1)"])("is not-found for %p, never a redirect", async (value) => {
+        await setAlbumCover(value);
+
+        const res = await request(app).get(`/rest/getCoverArt.view?id=${P}-al&f=json`);
+
+        expect(res.headers.location).toBeUndefined();
+        expect(res.body["subsonic-response"]).toMatchObject({ status: "failed", error: { code: 70 } });
+    });
 });

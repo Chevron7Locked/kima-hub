@@ -331,8 +331,8 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
         return sendStoredFile(res, file, { headers }, () => void subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art file not found"));
     }
 
-    // Unknown URL format — redirect as a last resort
-    return res.redirect(302, coverUrl);
+    // Neither an outside address nor a stored cover: there is nothing to serve, and no address to send an app to.
+    return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
 }));
 
 // ===================== SCROBBLE =====================

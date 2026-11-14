@@ -40,6 +40,9 @@ export type TrackRow = {
     fileSize: number | null;
 };
 
+// The versions Kima stores are ten hex characters; only those are told from an id's own characters.
+const ID_VERSION = /^[0-9a-f]{10}$/;
+
 /**
  * The `coverArt` id an app loads a cover by: the id, with the stored cover's version after an underscore when it has one
  * (`<id>_<version>`, as Navidrome does), so a changed cover is a new id and an app may keep the old one for good.
@@ -49,9 +52,6 @@ export function coverArtId(id: string, stored: string | null | undefined): strin
     const version = parseStoredCover(stored)?.version;
     return version && ID_VERSION.test(version) ? `${id}_${version}` : id;
 }
-
-// The versions Kima stores are ten hex characters; only those are told from an id's own characters.
-const ID_VERSION = /^[0-9a-f]{10}$/;
 
 /** A `coverArt` id's parts: the entity id (the `ar-`, `al-` or `tr-` an app puts before it dropped) and the version after it, if any. */
 export function splitCoverArtId(raw: string): { id: string; prefix: string; version: string | null } {
