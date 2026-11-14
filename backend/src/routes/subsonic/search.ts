@@ -6,7 +6,7 @@ import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { searchService } from "../../services/search";
+import { searchService, shownSongTitleSql } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
@@ -132,7 +132,25 @@ async function playableArtistsInOrder(ids: string[]): Promise<ArtistHit[]> {
 
 // ===================== SEARCH =====================
 
-searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
+// The old `search` call (before search2): song matches by `any`, `artist`, `album` or `title`, paged by `count` and `offset`.
+searchRouter.all("/search.view", wrap(async (req, res) => {
+    const count = clamp(parseIntParam(one(req, "count"), 20), 0, 500);
+    const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
+    const { ids, total } = await searchService.searchSongsByFields({
+        any: one(req, "any"),
+        artist: one(req, "artist"),
+        album: one(req, "album"),
+        title: one(req, "title"),
+        limit: count,
+        offset,
+    });
+    const songs = (await playableSongsInOrder(ids)).map(songOf);
+    const result: Record<string, unknown> = { "@_offset": offset, "@_totalHits": total };
+    if (songs.length > 0) result.match = songs;
+    return subsonicOk(req, res, { searchResult: result });
+}));
+
+searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
     const query = one(req, "query") ?? "";
 
     const artistCount = clamp(parseIntParam(one(req, "artistCount"), 20), 0, 500);
@@ -142,11 +160,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const albumOffset  = Math.max(0, parseIntParam(one(req, "albumOffset"), 0));
     const songOffset   = Math.max(0, parseIntParam(one(req, "songOffset"), 0));
 
-    const responseKey = req.path.startsWith("/search3")
-        ? "searchResult3"
-        : req.path.startsWith("/search2")
-          ? "searchResult2"
-          : "searchResult";
+    const responseKey = req.path.startsWith("/search3") ? "searchResult3" : "searchResult2";
 
     // OpenSubsonic clients (Symfonium, DSub, Substreamer) sync by paginating
     // search3 over an empty query: `query=`, a missing query, or the literal
@@ -181,7 +195,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                 ? prisma.$queryRaw<SongRow[]>`
                       SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
                       WHERE ${PLAYABLE_SQL}
-                      ORDER BY LOWER(t.title) ASC, t.id ASC
+                      ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC
                       LIMIT ${songCount} OFFSET ${songOffset}`
                 : Promise.resolve([]),
         ]);
@@ -215,8 +229,7 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     }
 
     if (albums.length > 0) {
-        // search3 answers AlbumID3. search2 answers the albums as Child entries, as the spec's searchResult2 does;
-        // the deprecated search keeps the ID3 shape it has always had.
+        // search3 answers AlbumID3. search2 answers the albums as Child entries, as the spec's searchResult2 does.
         const mapAlbumHit = responseKey === "searchResult2" ? mapAlbumChild : mapAlbum;
         result.album = albums.map((al) =>
             mapAlbumHit(
@@ -302,7 +315,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
         WHERE ${PLAYABLE_SQL}
           AND ${genreArtistIds.length > 0 ? Prisma.sql`al."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
-        ORDER BY LOWER(t.title) ASC, t.title ASC
+        ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC
         OFFSET ${offset}
         LIMIT ${count}
     `;

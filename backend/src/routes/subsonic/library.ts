@@ -3,7 +3,7 @@ import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapArtist, mapAlbum, mapAlbumChild, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
-import { LIBRARY_LOCATION } from "../../services/libraryFilters";
+import { LIBRARY_LOCATION, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { playRowsSql } from "../../services/stats/listens";
 import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
@@ -21,26 +21,24 @@ const IGNORED_ARTICLES = LEADING_ARTICLES
 
 // getIndexes is the legacy alias for getArtists used by DSub and some older clients
 libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res) => {
-    const artists = await prisma.artist.findMany({
-        where: { libraryAlbumCount: { gt: 0 } },
-        // Ordered by the same sortName the buckets are keyed on.
-        orderBy: { sortName: "asc" },
-        select: {
-            id: true,
-            name: true,
-            displayName: true,
-            heroUrl: true,
-            libraryAlbumCount: true,
-            sortName: true,
-        },
-    });
+    // Artists with a playable album, each counting those albums as search3 does (the cached count ignores playability).
+    // Ordered by the same sortName the buckets are keyed on.
+    const artists = await prisma.$queryRaw<
+        { id: string; name: string; displayName: string | null; heroUrl: string | null; sortName: string; albumCount: number }[]
+    >`
+        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", ar."sortName", COUNT(al.id)::int AS "albumCount"
+        FROM "Artist" ar
+        JOIN "Album" al ON al."artistId" = ar.id
+        WHERE ${albumHasPlayableSongSql("al")}
+        GROUP BY ar.id
+        ORDER BY ar."sortName" ASC, ar.id ASC`;
 
     const buckets: Record<string, ReturnType<typeof mapArtist>[]> = {};
     for (const a of artists) {
         const first = a.sortName[0]?.toUpperCase() ?? "#";
         const key = /[A-Z]/.test(first) ? first : "#";
         if (!buckets[key]) buckets[key] = [];
-        buckets[key].push(mapArtist({ ...a, albumCount: a.libraryAlbumCount }));
+        buckets[key].push(mapArtist(a));
     }
 
     const indexes = Object.entries(buckets)

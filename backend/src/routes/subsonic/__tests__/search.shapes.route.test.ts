@@ -24,13 +24,15 @@ const ask = (view: string, query: Record<string, string>) =>
 // Raw order and shown order are opposite: apple shows as zulu, mango as itself; aaa shows as zzz, bbb as itself.
 const A = {
     edited: { id: `${P}-ar-edited`, name: "zzshartistapple", displayName: "zzshartistzulu" },
-    plain: { id: `${P}-ar-plain`, name: "zzshartistmango", displayName: null },
+    // The "plain" rows carry a shown name too (a different word from the file's), so both rows of a pair hold two words
+    // the query matches and the ranked search ties them: a row with only one matching word would rank below.
+    plain: { id: `${P}-ar-plain`, name: "zzshartistmango", displayName: "zzshartistmangoz" },
     uniEdited: { id: `${P}-ar-unie`, name: "zzshunié apple", displayName: "zzshunié zulu" },
     uniPlain: { id: `${P}-ar-unip`, name: "zzshunié mango", displayName: null },
 };
 const L = {
     edited: { id: `${P}-al-edited`, title: "zzshalbumaaa", displayTitle: "zzshalbumzzz", artist: A.edited.id },
-    plain: { id: `${P}-al-plain`, title: "zzshalbumbbb", displayTitle: null, artist: A.plain.id },
+    plain: { id: `${P}-al-plain`, title: "zzshalbumbbb", displayTitle: "zzshalbumbbbx", artist: A.plain.id },
     gone: { id: `${P}-al-gone`, title: "zzshalbumgone", displayTitle: null, artist: A.edited.id },
     disc: { id: `${P}-al-disc`, title: "zzshalbumdisc", displayTitle: null, artist: A.edited.id },
     uniEdited: { id: `${P}-al-unie`, title: "zzshunié aaa", displayTitle: "zzshunié zzz", artist: A.uniEdited.id },
@@ -132,7 +134,7 @@ describe("search3 artists are full entries", () => {
             const body = await ask("search3", { query, artistCount: "500" });
             // The edited artist has three albums here: one playable, one whose only song is missing, one in Discover.
             expect(entry(body, A.edited.id)).toMatchObject({ name: A.edited.displayName, albumCount: 1, coverArt: `ar-${A.edited.id}` });
-            expect(entry(body, A.plain.id)).toMatchObject({ name: A.plain.name, albumCount: 1 });
+            expect(entry(body, A.plain.id)).toMatchObject({ name: A.plain.displayName, albumCount: 1 });
         }
     });
 });
@@ -159,7 +161,7 @@ describe("search2 answers albums as Child entries", () => {
 
     it("search2 artists are the same full entries as search3's", async () => {
         const body = await ask("search2", { query: "zzshartistmango", artistCount: "5" });
-        expect([body.searchResult2.artist].flat().find((a: any) => a.id === A.plain.id)).toMatchObject({ name: A.plain.name, albumCount: 1 });
+        expect([body.searchResult2.artist].flat().find((a: any) => a.id === A.plain.id)).toMatchObject({ name: A.plain.displayName, albumCount: 1 });
     });
 });
 

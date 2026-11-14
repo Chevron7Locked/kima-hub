@@ -3,6 +3,7 @@
  * ASCII letters only, so a query holding a non-ASCII letter ("björk", "ддт") gets a pattern built here that lists every
  * case form of each letter, and Postgres matches that pattern and pages the ids.
  */
+import { Prisma } from "@prisma/client";
 
 /** Whether the text holds any character outside ASCII, which the database cannot fold case for. */
 export const hasNonAscii = (text: string): boolean => /[^\x00-\x7f]/.test(text);
@@ -57,4 +58,15 @@ export async function searchRows<T extends { id: string }>(
     if (ids.length === 0) return [];
     const byId = new Map((await load(ids)).map((row) => [row.id, row]));
     return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
+/**
+ * A SQL condition that holds when any of `columns` (SQL expressions, such as `a.name`) holds `text`, ignoring letter case.
+ * ASCII text is matched by the database; any other text by `foldedPattern`, since the database folds ASCII case only.
+ */
+export function containsSql(columns: Prisma.Sql[], text: string): Prisma.Sql {
+    const lowered = text.toLowerCase();
+    const pattern = hasNonAscii(text) ? foldedPattern(text) : null;
+    const tests = columns.map((c) => (pattern === null ? Prisma.sql`strpos(lower(${c}), ${lowered}) > 0` : Prisma.sql`${c} ~ ${pattern}`));
+    return Prisma.sql`(${Prisma.join(tests, " OR ")})`;
 }

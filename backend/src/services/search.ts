@@ -2,10 +2,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
+import { playableSongSql } from "../utils/playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
-import { searchRows } from "./textMatch";
+import { searchRows, containsSql, hasNonAscii } from "./textMatch";
 
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
@@ -44,15 +44,10 @@ function genreSql(scope: GenreScope | undefined): Prisma.Sql {
               OR EXISTS (SELECT 1 FROM "TrackGenre" tg WHERE tg."trackId" = t.id AND tg."genreId" = ANY(${scope.genreIds}::text[])))`;
 }
 
-/** The genre condition for a Prisma song query; nothing when there is no scope. */
-function genreWhere(scope: GenreScope | undefined) {
-    if (!scope) return {};
-    return {
-        OR: [
-            { album: { artistId: { in: scope.artistIds } } },
-            { trackGenres: { some: { genreId: { in: scope.genreIds } } } },
-        ],
-    };
+/** A song's title as shown, lower-cased, for ordering: the edited title, else the file's. `song` is the table name or alias. */
+export function shownSongTitleSql(song: string): Prisma.Sql {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(song)) throw new Error(`"${song}" is not a table name or alias`);
+    return Prisma.sql`LOWER(COALESCE(NULLIF("${Prisma.raw(song)}"."displayTitle", ''), "${Prisma.raw(song)}".title))`;
 }
 
 const ARTIST_FIELDS = { id: true, name: true, mbid: true, heroUrl: true } as const;
@@ -189,24 +184,26 @@ async function inOrder<T extends { id: string }>(found: { id: string }[], load: 
 
 export class SearchService {
     /**
-     * Full-text search first; the LIKE search when the query has no searchable words, when full-text search fails,
-     * and when it finds nothing and `fallbackOnEmpty` says so (true, or a function that answers for the query's
-     * tsquery). An empty query finds nothing.
+     * Full-text search first; the substring search when the query has no searchable words, holds a letter outside ASCII
+     * (full-text search would read "hunié" as "huni"), or when full-text search fails; and, when `fallbackOnEmpty` is
+     * set, when full-text search finds nothing for the query. A page past the end of the full-text hits is empty: only
+     * a query full-text search finds nothing for at all falls back, on every page of it, so one search keeps one
+     * result set across its pages. An empty query finds nothing.
      */
     private async ftsOrFallback<T>(
         query: string,
         label: string,
-        fts: (tsquery: string) => Promise<T[]>,
+        fts: (tsquery: string, page: { skip: number; take: number }) => Promise<T[]>,
         fallback: () => Promise<T[]>,
-        fallbackOnEmpty: boolean | ((tsquery: string) => Promise<boolean>),
+        page: { limit: number; offset: number; fallbackOnEmpty: boolean },
     ): Promise<T[]> {
         if (!query || query.trim().length === 0) return [];
-        const tsquery = this.queryToTsquery(query);
+        const tsquery = hasNonAscii(query) ? "" : this.queryToTsquery(query);
         if (!tsquery) return fallback();
         try {
-            const results = await fts(tsquery);
-            if (results.length > 0 || !fallbackOnEmpty) return results;
-            if (fallbackOnEmpty === true || (await fallbackOnEmpty(tsquery))) return fallback();
+            const results = await fts(tsquery, { skip: page.offset, take: page.limit });
+            if (results.length > 0 || !page.fallbackOnEmpty) return results;
+            if (page.offset === 0 || (await fts(tsquery, { skip: 0, take: 1 })).length === 0) return fallback();
             return results;
         } catch (error) {
             logger.error(`${label} search error:`, error);
@@ -237,28 +234,13 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
-        // Both pages are read by id, in the order of the name shown (Prisma cannot order by an edited name or the file's).
-        const load = (ids: string[]) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS });
-        const results = await searchRows(
-            query,
-            limit,
-            offset,
-            async ({ skip, take }) => inOrder(
-                await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT a.id FROM "Artist" a
-                     WHERE strpos(lower(a.name), ${query.toLowerCase()}) > 0
-                       AND ${artistHasPlayableSongSql("a")}
-                     ORDER BY LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
-                load,
-            ),
-            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
-                SELECT a.id FROM "Artist" a
-                 WHERE a.name ~ ${pattern}
-                   AND ${artistHasPlayableSongSql("a")}
-                 ORDER BY LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
-            load,
-        );
-
+        // The ids are paged in the order of the name shown (Prisma cannot order by an edited name or the file's), then read.
+        const found = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT a.id FROM "Artist" a
+             WHERE ${containsSql([Prisma.sql`a.name`, Prisma.sql`a."displayName"`], query)}
+               AND ${artistHasPlayableSongSql("a")}
+             ORDER BY LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC LIMIT ${limit} OFFSET ${offset}`;
+        const results = await inOrder(found, (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS }));
         return results.map((r) => ({ ...r, rank: 0 }));
     }
 
@@ -270,8 +252,7 @@ export class SearchService {
         return this.ftsOrFallback(
             query,
             "Artist",
-            async (tsquery) => {
-                const results = await prisma.$queryRaw<ArtistSearchResult[]>`
+            (tsquery, { skip, take }) => prisma.$queryRaw<ArtistSearchResult[]>`
             SELECT
               a.id,
               a.name,
@@ -283,13 +264,11 @@ export class SearchService {
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
               AND ${artistHasPlayableSongSql("a")}
             ORDER BY rank DESC, LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC
-            LIMIT ${limit}
-            OFFSET ${offset}
-          `;
-                return results;
-            },
+            LIMIT ${take}
+            OFFSET ${skip}
+          `,
             () => this.searchArtistsFallback({ query, limit, offset }),
-            true,
+            { limit, offset, fallbackOnEmpty: true },
         );
     }
 
@@ -298,27 +277,16 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
-        // Both pages are read by id, in the order of the title shown (Prisma cannot order by an edited title or the file's).
-        const load = (ids: string[]) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS });
-        const wanted = query.toLowerCase();
-        const results = await searchRows(
+        // The ids are paged in the order of the title shown (Prisma cannot order by an edited title or the file's), then read.
+        const match = containsSql(
+            [Prisma.sql`al.title`, Prisma.sql`al."displayTitle"`, Prisma.sql`ar.name`, Prisma.sql`ar."displayName"`],
             query,
-            limit,
-            offset,
-            async ({ skip, take }) => inOrder(
-                await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
-                     WHERE ${albumHasPlayableSongSql("al")}
-                       AND (strpos(lower(al.title), ${wanted}) > 0 OR strpos(lower(ar.name), ${wanted}) > 0)
-                     ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
-                load,
-            ),
-            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
-                SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
-                 WHERE ${albumHasPlayableSongSql("al")} AND (al.title ~ ${pattern} OR ar.name ~ ${pattern})
-                 ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
-            load,
         );
+        const found = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
+             WHERE ${albumHasPlayableSongSql("al")} AND ${match}
+             ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC LIMIT ${limit} OFFSET ${offset}`;
+        const results = await inOrder(found, (ids) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS }));
 
         return results.map((r) => ({
             id: r.id,
@@ -339,8 +307,7 @@ export class SearchService {
         return this.ftsOrFallback(
             query,
             "Album",
-            async (tsquery) => {
-                const results = await prisma.$queryRaw<AlbumSearchResult[]>`
+            (tsquery, { skip, take }) => prisma.$queryRaw<AlbumSearchResult[]>`
             SELECT id, title, "artistId", "artistName", year, "coverUrl", rank FROM (
               SELECT DISTINCT ON (id) id, title, "displayTitle", "artistId", "artistName", year, "coverUrl", rank
               FROM (
@@ -357,9 +324,9 @@ export class SearchService {
                 LEFT JOIN "Artist" ar ON a."artistId" = ar.id
                 WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
                   AND ${albumHasPlayableSongSql("a")}
-    
+
                 UNION ALL
-    
+
                 SELECT
                   a.id,
                   a.title,
@@ -377,13 +344,11 @@ export class SearchService {
               ORDER BY id, rank DESC
             ) deduped
             ORDER BY rank DESC, LOWER(COALESCE(NULLIF("displayTitle", ''), title)) ASC, id ASC
-            LIMIT ${limit}
-            OFFSET ${offset}
-          `;
-                return results;
-            },
+            LIMIT ${take}
+            OFFSET ${skip}
+          `,
             () => this.searchAlbumsFallback({ query, limit, offset }),
-            true,
+            { limit, offset, fallbackOnEmpty: true },
         );
     }
 
@@ -393,25 +358,13 @@ export class SearchService {
         offset = 0,
         scope,
     }: SearchOptions & { scope?: GenreScope }): Promise<TrackSearchResult[]> {
-        const results = await searchRows(
-            query,
-            limit,
-            offset,
-            ({ skip, take }) =>
-                prisma.track.findMany({
-                    where: { title: { contains: query, mode: "insensitive" }, ...PLAYABLE_SONG, ...genreWhere(scope) },
-                    select: TRACK_FIELDS,
-                    take,
-                    skip,
-                    orderBy: [{ title: "asc" }, { id: "asc" }],
-                }),
-            (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
-                SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
-                 WHERE t.title ~ ${pattern} AND ${playableSongSql("t", "a")}
-                 ${genreSql(scope)}
-                 ORDER BY t.title ASC, t.id ASC LIMIT ${take} OFFSET ${skip}`,
-            (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }),
-        );
+        // The ids are paged in the order of the title shown (Prisma cannot order by an edited title or the file's), then read.
+        const found = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
+             WHERE ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], query)} AND ${playableSongSql("t", "a")}
+             ${genreSql(scope)}
+             ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC LIMIT ${limit} OFFSET ${offset}`;
+        const results = await inOrder(found, (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }));
 
         return results.map((r) => ({
             id: r.id,
@@ -439,7 +392,10 @@ export class SearchService {
     }: SearchOptions & { genre?: string }): Promise<TrackSearchResult[]> {
         if (!query || query.trim().length === 0) return [];
         const scope = genre ? await genreScopeOf(genre) : undefined;
-        const ftsPage = (tsquery: string, skip: number, take: number) => prisma.$queryRaw<TrackSearchResult[]>`
+        return this.ftsOrFallback(
+            query,
+            "Track",
+            (tsquery, { skip, take }) => prisma.$queryRaw<TrackSearchResult[]>`
             SELECT
               t.id,
               t.title,
@@ -456,18 +412,56 @@ export class SearchService {
             WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
             AND ${playableSongSql("t", "a")}
             ${genreSql(scope)}
-            ORDER BY rank DESC, t.title ASC, t.id ASC
+            ORDER BY rank DESC, ${shownSongTitleSql("t")} ASC, t.id ASC
             LIMIT ${take}
             OFFSET ${skip}
-          `;
-        return this.ftsOrFallback(
-            query,
-            "Track",
-            (tsquery) => ftsPage(tsquery, offset, limit),
+          `,
             () => this.searchTracksFallback({ query, limit, offset, scope }),
-            // A later page that is empty is the end of the full-text results, unless there were none at all.
-            offset === 0 ? true : async (tsquery) => (await ftsPage(tsquery, 0, 1)).length === 0,
+            { limit, offset, fallbackOnEmpty: true },
         );
+    }
+
+    /**
+     * The songs the old Subsonic `search` call asks for: each field given must hold (a blank one is not asked). `any` holds
+     * when every word of it is found in the song's title, album or artist, as shown or as in the file; `title`,
+     * `album` and `artist` hold when their text is found in that one name. Songs come in the order of the title shown.
+     */
+    async searchSongsByFields({
+        any,
+        artist,
+        album,
+        title,
+        limit = 20,
+        offset = 0,
+    }: {
+        any?: string;
+        artist?: string;
+        album?: string;
+        title?: string;
+        limit?: number;
+        offset?: number;
+    }): Promise<{ ids: string[]; total: number }> {
+        const names = {
+            title: [Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`],
+            album: [Prisma.sql`a.title`, Prisma.sql`a."displayTitle"`],
+            artist: [Prisma.sql`ar.name`, Prisma.sql`ar."displayName"`],
+        };
+        const asked: Prisma.Sql[] = [];
+        for (const word of (any ?? "").split(/\s+/).filter((w) => w.length > 0)) {
+            asked.push(containsSql([...names.title, ...names.album, ...names.artist], word));
+        }
+        for (const [field, text] of [["title", title], ["album", album], ["artist", artist]] as const) {
+            if (text && text.trim().length > 0) asked.push(containsSql(names[field], text.trim()));
+        }
+        const where = Prisma.join([playableSongSql("t", "a"), ...asked], " AND ");
+        const from = Prisma.sql`"Track" t JOIN "Album" a ON a.id = t."albumId" JOIN "Artist" ar ON ar.id = a."artistId"`;
+        const [found, counted] = await Promise.all([
+            prisma.$queryRaw<{ id: string }[]>`
+                SELECT t.id FROM ${from} WHERE ${where}
+                ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC LIMIT ${limit} OFFSET ${offset}`,
+            prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM ${from} WHERE ${where}`,
+        ]);
+        return { ids: found.map((r) => r.id), total: counted[0]?.n ?? 0 };
     }
 
     /**
@@ -482,7 +476,7 @@ export class SearchService {
         return this.ftsOrFallback(
             query,
             "Podcast FTS",
-            async (tsquery) => {
+            async (tsquery, { skip, take }) => {
                 const results = await prisma.$queryRaw<PodcastSearchResult[]>`
             SELECT
               p.id,
@@ -496,13 +490,13 @@ export class SearchService {
             JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
             WHERE p."searchVector" @@ to_tsquery('english', ${tsquery})
             ORDER BY rank DESC, p.title ASC
-            LIMIT ${limit}
-            OFFSET ${offset}
+            LIMIT ${take}
+            OFFSET ${skip}
           `;
                 return results;
             },
             () => this.searchPodcasts({ query, limit, offset, userId }),
-            false,
+            { limit, offset, fallbackOnEmpty: false },
         );
     }
 
@@ -560,7 +554,7 @@ export class SearchService {
         return this.ftsOrFallback(
             query,
             "Episode",
-            async (tsquery) => {
+            async (tsquery, { skip, take }) => {
                 const results = await prisma.$queryRaw<EpisodeSearchResult[]>`
             SELECT
               e.id,
@@ -577,13 +571,13 @@ export class SearchService {
             JOIN "PodcastSubscription" s ON s."podcastId" = p.id AND s."userId" = ${userId}
             WHERE e."searchVector" @@ to_tsquery('english', ${tsquery})
             ORDER BY rank DESC, e."publishedAt" DESC
-            LIMIT ${limit}
-            OFFSET ${offset}
+            LIMIT ${take}
+            OFFSET ${skip}
           `;
                 return results;
             },
             () => this.searchEpisodesFallback({ query, limit, offset, userId }),
-            false,
+            { limit, offset, fallbackOnEmpty: false },
         );
     }
 
@@ -599,7 +593,7 @@ export class SearchService {
         return this.ftsOrFallback(
             query,
             "Audiobook FTS",
-            async (tsquery) => {
+            async (tsquery, { skip, take }) => {
                 const results = await prisma.$queryRaw<AudiobookSearchResult[]>`
             SELECT
               id,
@@ -614,13 +608,13 @@ export class SearchService {
             FROM "Audiobook"
             WHERE "searchVector" @@ to_tsquery('english', ${tsquery})
             ORDER BY rank DESC, title ASC
-            LIMIT ${limit}
-            OFFSET ${offset}
+            LIMIT ${take}
+            OFFSET ${skip}
           `;
                 return results.map((r) => ({ ...r, coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null }));
             },
             () => this.searchAudiobooksFallback({ query, limit, offset }),
-            true,
+            { limit, offset, fallbackOnEmpty: true },
         );
     }
 
