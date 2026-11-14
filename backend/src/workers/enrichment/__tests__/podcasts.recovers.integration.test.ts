@@ -6,11 +6,11 @@
 import http from "http";
 import type { AddressInfo } from "net";
 import type { Job } from "bullmq";
-import { prisma } from "../../utils/db";
-import { processPodcastJob } from "../podcastEnrichmentWorker";
-import { enrichmentFailureService } from "../../services/enrichmentFailureService";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { publicUrl, routePublicHost } from "../../__tests__/helpers/publicHost";
+import { prisma } from "../../../utils/db";
+import { processPodcastJob } from "../podcasts";
+import { enrichmentFailureService } from "../../../services/enrichmentFailureService";
+import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { publicUrl, routePublicHost } from "../../../__tests__/helpers/publicHost";
 
 const FEED = `<?xml version="1.0"?><rss version="2.0"><channel><title>Recovering Show</title>
 <item><title>One</title><guid>rec-1</guid><pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>

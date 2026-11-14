@@ -1,20 +1,38 @@
+/**
+ * The artist enrichment job: everything the scheduler's artist phase and its worker do, behind a few calls.
+ *
+ *   queueOwedArtists()          the scheduler's turn each cycle: asks again an artist whose job was lost, then
+ *                               queues a batch of the artists still owed (a library album; pending, failed, or
+ *                               unresolvable for a week) and returns how many it queued
+ *   startArtistWorker()         the queue's worker: one artist per job
+ *   enrichSimilarArtist(artist) one artist's whole enrichment (the worker's work, callable on its own)
+ *   failedArtistStatus(n)       the status an artist takes after its nth failure in a row
+ *
+ * Artists have no stage record: `Artist.enrichmentStatus` and `enrichmentFailures` are the truth, and a failed
+ * job's id keeps blocking a re-add until a grace cleans it. The scheduler keeps the order of phases, the locks and
+ * the run state; it only calls this module.
+ */
+import { Worker, Job } from "bullmq";
 import { Artist, Prisma } from "@prisma/client";
-import { config } from "../config";
-import { artistsAgree } from "../services/recordingMatch";
-import { logger } from "../utils/logger";
-import { prisma } from "../utils/db";
-import { wikidataService } from "../services/wikidata";
-import { findSimilarArtists } from "../services/artistSimilarity";
-import { STAGE_RETRY_CAP } from "./stageRetry";
-import { musicBrainzService } from "../services/musicbrainz";
-import { normalizeArtistName } from "../services/artistIdentity";
-import { isMbid } from "../services/artistIdentity";
-import { findAlbumArtwork, findArtistArtwork } from "../services/artwork";
-import { redisClient } from "../utils/redis";
-import { downloadAndStoreImage, findLocalArtistImage, isNativePath, nativeFileExists } from "../services/imageStorage";
-import { failureCause } from "../utils/outcome";
-import { resolveArtistMbidFromDiscography } from "../services/artistCorrection";
-import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { config } from "../../config";
+import { artistsAgree } from "../../services/recordingMatch";
+import { logger } from "../../utils/logger";
+import { prisma } from "../../utils/db";
+import { wikidataService } from "../../services/wikidata";
+import { findSimilarArtists } from "../../services/artistSimilarity";
+import { STAGE_RETRY_CAP } from "../stageRetry";
+import { musicBrainzService } from "../../services/musicbrainz";
+import { normalizeArtistName } from "../../services/artistIdentity";
+import { isMbid } from "../../services/artistIdentity";
+import { findAlbumArtwork, findArtistArtwork } from "../../services/artwork";
+import { redisClient } from "../../utils/redis";
+import { downloadAndStoreImage, findLocalArtistImage, isNativePath, nativeFileExists } from "../../services/imageStorage";
+import { failureCause } from "../../utils/outcome";
+import { resolveArtistMbidFromDiscography } from "../../services/artistCorrection";
+import { enrichmentFailureService } from "../../services/enrichmentFailureService";
+import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQueues";
+import { entityGoneError, isEntityGone } from "../entityGone";
+import { getSystemSettings } from "../../utils/systemSettings";
 
 /**
  * An artist row's MusicBrainz id must name this artist (its name, sort name or an alias agrees with the row's): a track
@@ -476,4 +494,171 @@ async function enrichAlbumCovers(
         logger.error(`    Failed to enrich album covers:`, error);
         // Don't throw - album cover failures shouldn't fail the entire enrichment
     }
+}
+
+// ── Queueing: the scheduler's artist phase ───────────────────────────────
+
+/** Artists queued per cycle. */
+export const ARTIST_BATCH_SIZE = 10;
+// A failed job keeps its jobId, and the queueing skips an artist whose jobId is still held, so a failure backs
+// off until this grace cleans the job. Completed jobs are cleaned immediately so a reset artist can be queued again.
+const FAILED_JOB_RETRY_GRACE_MS = 15 * 60 * 1000; // 15 minutes
+
+export async function queueOwedArtists(): Promise<number> {
+    // Reset temp-MBID artists that have been unresolvable for >24h
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.artist.updateMany({
+        where: {
+            mbid: { startsWith: "temp-" },
+            enrichmentStatus: "unresolvable",
+            lastEnriched: { lt: oneDayAgo },
+        },
+        data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
+    });
+
+    // With nothing queued or running, no artist is really being enriched: one still marked so
+    // lost its job (Redis emptied, a crash) and is asked again.
+    const inQueue = await artistQueue.getJobCounts("waiting", "active", "delayed", "prioritized");
+    if (Object.values(inQueue).every((n) => n === 0)) {
+        await prisma.artist.updateMany({
+            where: { enrichmentStatus: "enriching" },
+            data: { enrichmentStatus: "pending" },
+        });
+    }
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const pendingArtists = await prisma.artist.findMany({
+        where: {
+            OR: [
+                { enrichmentStatus: "pending" },
+                { enrichmentStatus: "failed" },
+                { enrichmentStatus: "unresolvable", lastEnriched: { lt: sevenDaysAgo } },
+            ],
+            // An artist known only from Discover is not enriched: Discover shows its name, nothing more.
+            albums: { some: { location: "LIBRARY" } },
+        },
+        select: { id: true, name: true },
+        take: ARTIST_BATCH_SIZE,
+    });
+
+    if (pendingArtists.length === 0) return 0;
+
+    // Free reusable jobIds: completed immediately, failed after a backoff grace.
+    // Without this a failed artist's `artist-<id>` marker blocks every re-add
+    // until BullMQ's removeOnFail age (24h) expires -- far slower than intended.
+    try {
+        await artistQueue.clean(0, 0, "completed");
+        await artistQueue.clean(FAILED_JOB_RETRY_GRACE_MS, 0, "failed");
+    } catch (err) {
+        logger.warn(`[Enrichment] artistQueue clean failed: ${(err as Error).message}`);
+    }
+
+    let queued = 0;
+    for (const artist of pendingArtists) {
+        try {
+            // Enqueue and mark "enriching" only when the jobId slot is free. A failed job
+            // inside the grace still holds it, so add() would no-op and the artist would sit
+            // "enriching" until restart.
+            const jobId = `artist-${artist.id}`;
+            if (await artistQueue.getJob(jobId)) continue;
+            // Add FIRST — if Redis is down, status stays "pending" and retries naturally
+            await artistQueue.add(
+                "enrich",
+                { artistId: artist.id, artistName: artist.name },
+                { jobId },
+            );
+            // Update AFTER successful add
+            await prisma.artist.update({
+                where: { id: artist.id },
+                data: { enrichmentStatus: "enriching" },
+            });
+            queued++;
+        } catch (err) {
+            logger.warn(`[Enrichment] Failed to queue artist ${artist.id}: ${(err as Error).message}`);
+        }
+    }
+
+    if (queued > 0) {
+        logger.debug(`[Enrichment] Queued ${queued} artists`);
+    }
+    return queued;
+}
+
+// ── The worker ───────────────────────────────────────────────────────────
+
+interface ArtistJobData {
+    artistId: string;
+    artistName: string;
+}
+
+/** One artist's job. An artist deleted since the job was queued throws the entity-gone error. */
+export async function processArtistJob(job: Job<ArtistJobData>): Promise<void> {
+    const { artistId, artistName } = job.data;
+    logger.debug(`[ArtistWorker] Processing ${artistId} (${artistName})`);
+
+    const artist = await prisma.artist.findUnique({ where: { id: artistId } });
+    if (!artist) {
+        throw entityGoneError("Artist", artistId);
+    }
+
+    // enrichSimilarArtist records the artist's status: completed, or failed and
+    // counted toward unresolvable.
+    await enrichSimilarArtist(artist);
+}
+
+/** A job that failed: an artist that no longer exists resolves silently; any other failure is recorded. */
+export async function recordArtistJobFailure(job: Job<ArtistJobData>, err: Error): Promise<void> {
+    const { artistId } = job.data;
+
+    if (isEntityGone(err)) {
+        logger.info(`[ArtistWorker] Artist ${artistId} no longer exists, resolving silently`);
+        return;
+    }
+
+    logger.error(`[ArtistWorker] Artist ${artistId} failed: ${err.message}`);
+
+    // enrichSimilarArtist records its own failures; one that threw before it could
+    // (still pending or enriching) is recorded here the same way.
+    try {
+        const artist = await prisma.artist.findUnique({
+            where: { id: artistId },
+            select: { enrichmentStatus: true, enrichmentFailures: true },
+        });
+        if (artist && (artist.enrichmentStatus === "pending" || artist.enrichmentStatus === "enriching")) {
+            await prisma.artist.update({
+                where: { id: artistId },
+                data: failedArtistStatus(artist.enrichmentFailures),
+            });
+        }
+        await enrichmentFailureService.recordFailure({
+            entityType: "artist",
+            entityId: artistId,
+            entityName: job.data.artistName,
+            errorMessage: err.message,
+        });
+    } catch (reportErr) {
+        logger.warn(`[ArtistWorker] Could not record artist ${artistId}'s failure: ${(reportErr as Error).message}`);
+    }
+}
+
+export async function startArtistWorker(): Promise<Worker> {
+    const settings = await getSystemSettings();
+    const concurrency = settings?.enrichmentConcurrency ?? 3;
+
+    const worker = new Worker<ArtistJobData>(QUEUE_NAMES.ARTISTS, processArtistJob, {
+        connection: createWorkerConnection(),
+        concurrency,
+        lockDuration: 120000,
+        stalledInterval: 30000,
+        maxStalledCount: 2,
+    });
+
+    worker.on("failed", async (job, err) => {
+        if (!job) return;
+        await recordArtistJobFailure(job, err);
+    });
+
+    worker.on("error", (err) => logger.error(`[ArtistWorker] Error: ${err.message}`));
+    logger.info(`[ArtistWorker] Started (concurrency: ${concurrency})`);
+    return worker;
 }

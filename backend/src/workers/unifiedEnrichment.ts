@@ -13,16 +13,14 @@ import { config } from "../config";
 import os from "os";
 import type { Worker as BullWorker } from "bullmq";
 import {
-    artistQueue,
     trackQueue,
-    podcastQueue,
     closeEnrichmentQueues,
     QUEUE_NAMES,
 } from "./enrichmentQueues";
 import { entityGoneError } from "./entityGone";
-import { startArtistEnrichmentWorker } from "./artistEnrichmentWorker";
+import { ARTIST_BATCH_SIZE, queueOwedArtists, startArtistWorker } from "./enrichment/artists";
 import { startTrackEnrichmentWorker } from "./trackEnrichmentWorker";
-import { startPodcastEnrichmentWorker } from "./podcastEnrichmentWorker";
+import { queueStalePodcasts, startPodcastWorker } from "./enrichment/podcasts";
 import {
     startAudioCompletionSubscriber,
     stopAudioCompletionSubscriber,
@@ -329,7 +327,6 @@ export async function getNextWork(
 }
 
 // Configuration
-const ARTIST_BATCH_SIZE = 10;
 const TRACK_BATCH_SIZE = 20;
 const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API limits
 // Idle backoff. The cycle is cheap only when it finds work; when there is none
@@ -337,10 +334,6 @@ const ENRICHMENT_INTERVAL_MS = 5 * 1000; // 5 seconds - rate limiter handles API
 // A library that is fully enriched -- the steady state -- was paying that every
 // 5 seconds forever against the pool that also serves audio streaming.
 const ENRICHMENT_IDLE_INTERVAL_MS = 60 * 1000;
-// A failed job keeps its jobId, and the phases skip an entity whose jobId is
-// still held, so a failure backs off until this grace cleans the job. Completed
-// jobs are cleaned immediately so a reset entity can be queued again.
-const FAILED_JOB_RETRY_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * One enrichment cycle at a time across processes, so a second backend cannot
@@ -562,9 +555,9 @@ export async function startUnifiedEnrichmentWorker() {
 
     // Start BullMQ Workers (artist, track, podcast)
     activeEnrichmentWorkers = await Promise.all([
-        startArtistEnrichmentWorker(),
+        startArtistWorker(),
         startTrackEnrichmentWorker(),
-        startPodcastEnrichmentWorker(),
+        startPodcastWorker(),
     ]);
 
     if (honoringPause) {
@@ -1110,7 +1103,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         await syncWaitingAlerts();
 
         // Run phases sequentially, halting if stopped/paused
-        const artistResult = await runPhase("artists", executeArtistsPhase);
+        const artistResult = await runPhase("artists", queueOwedArtists);
         if (artistResult === null) {
             return { artists: 0, tracks: 0, audioQueued: 0 };
         }
@@ -1139,7 +1132,7 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         audioQueued = audioResult;
 
         // Podcast refresh phase -- only runs if subscriptions exist
-        await runPhase("podcasts", executePodcastRefreshPhase);
+        await runPhase("podcasts", queueStalePodcasts);
 
         // Vibe embedding sweep — catches tracks missed by the event-driven subscriber
         const vibeResult = await runPhase("vibe", executeVibePhase);
@@ -1755,86 +1748,6 @@ async function runPhase(
     return result;
 }
 
-export async function executeArtistsPhase(): Promise<number> {
-    // Reset temp-MBID artists that have been unresolvable for >24h
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await prisma.artist.updateMany({
-        where: {
-            mbid: { startsWith: "temp-" },
-            enrichmentStatus: "unresolvable",
-            lastEnriched: { lt: oneDayAgo },
-        },
-        data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
-    });
-
-    // With nothing queued or running, no artist is really being enriched: one still marked so
-    // lost its job (Redis emptied, a crash) and is asked again.
-    const inQueue = await artistQueue.getJobCounts("waiting", "active", "delayed", "prioritized");
-    if (Object.values(inQueue).every((n) => n === 0)) {
-        await prisma.artist.updateMany({
-            where: { enrichmentStatus: "enriching" },
-            data: { enrichmentStatus: "pending" },
-        });
-    }
-
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const pendingArtists = await prisma.artist.findMany({
-        where: {
-            OR: [
-                { enrichmentStatus: "pending" },
-                { enrichmentStatus: "failed" },
-                { enrichmentStatus: "unresolvable", lastEnriched: { lt: sevenDaysAgo } },
-            ],
-            // An artist known only from Discover is not enriched: Discover shows its name, nothing more.
-            albums: { some: { location: "LIBRARY" } },
-        },
-        select: { id: true, name: true },
-        take: ARTIST_BATCH_SIZE,
-    });
-
-    if (pendingArtists.length === 0) return 0;
-
-    // Free reusable jobIds: completed immediately, failed after a backoff grace.
-    // Without this a failed artist's `artist-<id>` marker blocks every re-add
-    // until BullMQ's removeOnFail age (24h) expires -- far slower than intended.
-    try {
-        await artistQueue.clean(0, 0, "completed");
-        await artistQueue.clean(FAILED_JOB_RETRY_GRACE_MS, 0, "failed");
-    } catch (err) {
-        logger.warn(`[Enrichment] artistQueue clean failed: ${(err as Error).message}`);
-    }
-
-    let queued = 0;
-    for (const artist of pendingArtists) {
-        try {
-            // Enqueue and mark "enriching" only when the jobId slot is free. A failed job
-            // inside the grace still holds it, so add() would no-op and the artist would sit
-            // "enriching" until restart.
-            const jobId = `artist-${artist.id}`;
-            if (await artistQueue.getJob(jobId)) continue;
-            // Add FIRST — if Redis is down, status stays "pending" and retries naturally
-            await artistQueue.add(
-                "enrich",
-                { artistId: artist.id, artistName: artist.name },
-                { jobId },
-            );
-            // Update AFTER successful add
-            await prisma.artist.update({
-                where: { id: artist.id },
-                data: { enrichmentStatus: "enriching" },
-            });
-            queued++;
-        } catch (err) {
-            logger.warn(`[Enrichment] Failed to queue artist ${artist.id}: ${(err as Error).message}`);
-        }
-    }
-
-    if (queued > 0) {
-        logger.debug(`[Enrichment] Queued ${queued} artists`);
-    }
-    return queued;
-}
-
 /**
  * Claim the owed records for `stage` and queue one job per track: the only
  * producer for each stage's queue.
@@ -2004,55 +1917,6 @@ function offerFor(stage: "analysis" | "embedding"): StageOffer {
     };
 }
 
-export async function executePodcastRefreshPhase(): Promise<number> {
-    const podcastCount = await prisma.podcast.count();
-    if (podcastCount === 0) return 0;
-
-    const ONE_HOUR = 60 * 60 * 1000;
-    const staleThreshold = new Date(Date.now() - ONE_HOUR);
-    const stalePodcasts = await prisma.podcast.findMany({
-        where: { lastRefreshed: { lt: staleThreshold } },
-        select: { id: true, title: true },
-    });
-
-    if (stalePodcasts.length === 0) return 0;
-
-    // BullMQ keeps the jobId marker after completed and failed jobs alike; a kept
-    // failed job would make every later add() for that podcast a silent no-op. Clean both.
-    try {
-        await podcastQueue.clean(0, 0, "completed");
-        await podcastQueue.clean(0, 0, "failed");
-    } catch (err) {
-        logger.warn(`[Enrichment] podcastQueue clean failed: ${(err as Error).message}`);
-    }
-
-    // Advance lastRefreshed before queuing so every outcome, including an
-    // unreachable feed, gets a full backoff window instead of re-queuing each cycle.
-    await prisma.podcast.updateMany({
-        where: { id: { in: stalePodcasts.map((p) => p.id) } },
-        data: { lastRefreshed: new Date() },
-    });
-
-    let queued = 0;
-    for (const podcast of stalePodcasts) {
-        try {
-            await podcastQueue.add(
-                "refresh",
-                { podcastId: podcast.id, podcastTitle: podcast.title },
-                { jobId: `podcast-${podcast.id}` }, // dedup: completed jobs are cleaned above
-            );
-            queued++;
-        } catch (err) {
-            logger.warn(`[Enrichment] Failed to queue podcast ${podcast.id}: ${(err as Error).message}`);
-        }
-    }
-
-    if (queued > 0) {
-        logger.debug(`[Enrichment] Queued ${queued} podcast refreshes`);
-    }
-    return queued;
-}
-
 /** Memo for the progress readout, polled by the scheduler and every open
  * settings tab; it lives no longer than a cycle interval. */
 let progressMemo: { at: number; value: EnrichmentProgress } | null = null;
@@ -2086,7 +1950,7 @@ export function invalidateEnrichmentProgress(): void {
 /** Enrichment progress per stage, read from the records and the analysis queue. */
 async function computeEnrichmentProgress() {
     // Artist progress
-    // The artists enrichment works on: those with a library album (executeArtistsPhase).
+    // The artists enrichment works on: those with a library album (queueOwedArtists).
     const artistCounts = await prisma.artist.groupBy({
         by: ["enrichmentStatus"],
         where: { albums: { some: { location: "LIBRARY" } } },

@@ -4,9 +4,9 @@
  * Real database.
  */
 import type { Job } from "bullmq";
-import { prisma } from "../../utils/db";
-import { processPodcastJob } from "../podcastEnrichmentWorker";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { prisma } from "../../../utils/db";
+import { processPodcastJob } from "../podcasts";
+import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
 afterAll(async () => {
     await closeEngineConnections();

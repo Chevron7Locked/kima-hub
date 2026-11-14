@@ -28,9 +28,9 @@ jest.mock("../../services/albumIdentification", () => ({
 }));
 jest.mock("../../services/sourcePauseController", () => require("../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
 jest.mock("../audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
-jest.mock("../artistEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").artistEnrichmentWorkerMock);
+jest.mock("../enrichment/artists", () => require("../../__tests__/helpers/enrichmentMocks").artistJobMock);
 jest.mock("../trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
-jest.mock("../podcastEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").podcastEnrichmentWorkerMock);
+jest.mock("../enrichment/podcasts", () => require("../../__tests__/helpers/enrichmentMocks").podcastJobMock);
 jest.mock("../../services/moods/state", () => ({
     buildMoods: jest.fn().mockResolvedValue({ scored: 0, stateChanged: false }),
     moodProgress: jest.fn().mockResolvedValue({ total: 0, completed: 0 }),

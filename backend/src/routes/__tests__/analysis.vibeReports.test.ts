@@ -39,8 +39,8 @@ jest.mock("../../workers/enrichmentQueues", () => {
 });
 // The real scheduler is the point of these tests; the podcast worker it boots
 // pulls the podcast routes and their rate limiters, which are not under test.
-jest.mock("../../workers/podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn(),
+jest.mock("../../workers/enrichment/podcasts", () => ({
+    queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: jest.fn(),
 }));
 
 import express from "express";

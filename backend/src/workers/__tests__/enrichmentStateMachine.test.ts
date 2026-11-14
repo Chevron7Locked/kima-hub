@@ -122,14 +122,14 @@ jest.mock("../enrichmentQueues", () => ({
     closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock("../artistEnrichmentWorker", () => ({
-    startArtistEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+jest.mock("../enrichment/artists", () => ({
+    queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
 jest.mock("../trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
-jest.mock("../podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+jest.mock("../enrichment/podcasts", () => ({
+    queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
 jest.mock("../audioCompletionSubscriber", () => ({
     startAudioCompletionSubscriber: jest.fn(),

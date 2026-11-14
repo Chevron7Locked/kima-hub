@@ -169,6 +169,6 @@ function startedWorker() {
     });
 }
 
-export const artistEnrichmentWorkerMock = { startArtistEnrichmentWorker: startedWorker() };
+export const artistJobMock = { queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: startedWorker() };
 export const trackEnrichmentWorkerMock = { startTrackEnrichmentWorker: startedWorker() };
-export const podcastEnrichmentWorkerMock = { startPodcastEnrichmentWorker: startedWorker() };
+export const podcastJobMock = { queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: startedWorker() };

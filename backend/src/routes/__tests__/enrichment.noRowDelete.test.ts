@@ -126,14 +126,14 @@ jest.mock("../../workers/audioCompletionSubscriber", () => ({
     resumeVibeQueuing: jest.fn(),
 }));
 
-jest.mock("../../workers/artistEnrichmentWorker", () => ({
-    startArtistEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+jest.mock("../../workers/enrichment/artists", () => ({
+    queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
 jest.mock("../../workers/trackEnrichmentWorker", () => ({
     startTrackEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
-jest.mock("../../workers/podcastEnrichmentWorker", () => ({
-    startPodcastEnrichmentWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
+jest.mock("../../workers/enrichment/podcasts", () => ({
+    queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: jest.fn().mockResolvedValue({ pause: jest.fn(), resume: jest.fn(), close: jest.fn() }),
 }));
 
 // Services the control routes reach through to the network.

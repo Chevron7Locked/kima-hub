@@ -1,35 +1,27 @@
 /**
- * Job keys and backoff for the enrichment phases. Track jobs get a per-attempt
- * id from their `TrackStage` record. Artists have no stage record, so the
- * artist phase still selects on `Track.enrichmentStatus` with its own backoff.
+ * Job keys and backoff for the track enrichment phase. Track jobs get a per-attempt
+ * id from their `TrackStage` record. (The artist job's queueing is tested at its own
+ * module: workers/enrichment/__tests__/artists.queue.test.ts.)
  */
 
-const mockArtistAdd = jest.fn().mockResolvedValue({ id: "j" });
-const mockArtistClean = jest.fn().mockResolvedValue([]);
-const mockArtistGetJob = jest.fn().mockResolvedValue(null);
 const mockTrackAdd = jest.fn().mockResolvedValue({ id: "j" });
 const mockTrackClean = jest.fn().mockResolvedValue([]);
 const mockTrackGetJob = jest.fn().mockResolvedValue(null);
 
 jest.mock("../enrichmentQueues", () => ({
     QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
         TRACKS: "enrichment-tracks",
         VIBE: "enrichment-vibe",
         PODCASTS: "enrichment-podcasts",
-    },
-    artistQueue: {
-        add: mockArtistAdd, clean: mockArtistClean, getJob: mockArtistGetJob, resume: jest.fn(),
-        getJobCounts: jest.fn().mockResolvedValue({ waiting: 1, active: 0, delayed: 0, prioritized: 0 }),
     },
     trackQueue: { add: mockTrackAdd, clean: mockTrackClean, getJob: mockTrackGetJob, resume: jest.fn() },
     vibeQueue: { add: jest.fn(), clean: jest.fn(), getJob: jest.fn(), resume: jest.fn() },
     podcastQueue: { add: jest.fn(), clean: jest.fn(), getJob: jest.fn(), resume: jest.fn() },
     closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("../artistEnrichmentWorker", () => ({ startArtistEnrichmentWorker: jest.fn() }));
+jest.mock("../enrichment/artists", () => ({ queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn() }));
 jest.mock("../trackEnrichmentWorker", () => ({ startTrackEnrichmentWorker: jest.fn() }));
-jest.mock("../podcastEnrichmentWorker", () => ({ startPodcastEnrichmentWorker: jest.fn() }));
+jest.mock("../enrichment/podcasts", () => ({ queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: jest.fn() }));
 jest.mock("../audioCompletionSubscriber", () => ({
     startAudioCompletionSubscriber: jest.fn(),
     stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
@@ -55,9 +47,6 @@ jest.mock("../../config", () => ({
     config: { redis: { host: "localhost", port: 6379 }, music: { musicPath: "/music" }, nodeEnv: "test" },
 }));
 
-const mockArtistFindMany = jest.fn();
-const mockArtistUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
-const mockArtistUpdate = jest.fn().mockResolvedValue({});
 const mockTrackFindMany = jest.fn();
 const mockTrackUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
 const mockTrackUpdate = jest.fn().mockResolvedValue({});
@@ -67,11 +56,6 @@ const mockQueryRawUnsafe = jest.fn();
 
 jest.mock("../../utils/db", () => ({
     prisma: {
-        artist: {
-            findMany: mockArtistFindMany,
-            updateMany: mockArtistUpdateMany,
-            update: mockArtistUpdate,
-        },
         track: {
             findMany: mockTrackFindMany,
             updateMany: mockTrackUpdateMany,
@@ -98,14 +82,7 @@ jest.mock("../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
-import {
-    executeArtistsPhase,
-    executeIdentificationPhase,
-} from "../unifiedEnrichment";
-
-// clean(grace, limit, type)
-const cleanCallsFor = (mock: jest.Mock, type: string) =>
-    mock.mock.calls.filter((c) => c[2] === type);
+import { executeIdentificationPhase } from "../unifiedEnrichment";
 
 /** One owed stage row for the stage the phase under test consults. */
 function stageRow(trackId: string, stage: string, attempt = 0) {
@@ -118,71 +95,11 @@ function stageRow(trackId: string, stage: string, attempt = 0) {
 describe("enrichment phases -- job keys and backoff", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        mockArtistGetJob.mockResolvedValue(null);
         mockTrackGetJob.mockResolvedValue(null);
-        // Artists still select from Track.enrichmentStatus; the track phase
-        // selects from TrackStage.
-        mockArtistFindMany.mockResolvedValue([{ id: "a1", name: "Artist One" }]);
         mockTrackFindMany.mockResolvedValue([]);
         mockQueryRawUnsafe.mockImplementation(async (_sql: string, stage: string) => {
             if (stage === "recording") return [stageRow("t1", "recording")];
             return [];
-        });
-    });
-
-    describe("artist phase (artists have no per-stage record)", () => {
-        it("cleans completed (grace 0) and failed (grace > 0) before queuing", async () => {
-            await executeArtistsPhase();
-
-            const completed = cleanCallsFor(mockArtistClean, "completed");
-            const failed = cleanCallsFor(mockArtistClean, "failed");
-            expect(completed).toHaveLength(1);
-            expect(completed[0][0]).toBe(0); // grace 0 -- immediate reuse on success
-            expect(failed).toHaveLength(1);
-            expect(failed[0][0]).toBeGreaterThan(0); // backoff grace before retry
-            expect(mockArtistAdd).toHaveBeenCalledWith(
-                "enrich",
-                { artistId: "a1", artistName: "Artist One" },
-                { jobId: "artist-a1" },
-            );
-        });
-
-        it("backs off (does not re-add or park) when the jobId slot is still held", async () => {
-            // A failed job younger than the grace still holds the jobId; getJob
-            // returns it, so the phase must skip -- not re-add, not park the entity
-            // out of selection.
-            mockArtistGetJob.mockResolvedValue({ id: "artist-a1" }); // slot held
-
-            await executeArtistsPhase();
-
-            expect(mockArtistAdd).not.toHaveBeenCalled();
-            expect(mockArtistUpdate).not.toHaveBeenCalled(); // not parked "enriching"
-        });
-
-        it("an artist left enriching with nothing queued or running is asked again", async () => {
-            const { artistQueue } = jest.requireMock("../enrichmentQueues");
-            artistQueue.getJobCounts.mockResolvedValueOnce({ waiting: 0, active: 0, delayed: 0, prioritized: 0 });
-            await executeArtistsPhase();
-            expect(mockArtistUpdateMany).toHaveBeenCalledWith({
-                where: { enrichmentStatus: "enriching" },
-                data: { enrichmentStatus: "pending" },
-            });
-        });
-
-        it("while jobs are queued, enriching artists are left alone", async () => {
-            await executeArtistsPhase();
-            expect(mockArtistUpdateMany).not.toHaveBeenCalledWith(
-                expect.objectContaining({ where: { enrichmentStatus: "enriching" } }),
-            );
-        });
-
-        it("no work: no clean, no queue", async () => {
-            mockArtistFindMany.mockResolvedValue([]);
-
-            await executeArtistsPhase();
-
-            expect(mockArtistClean).not.toHaveBeenCalled();
-            expect(mockArtistAdd).not.toHaveBeenCalled();
         });
     });
 

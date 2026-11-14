@@ -7,11 +7,11 @@
 
 const mockFindLocalArtistImage = jest.fn().mockResolvedValue(null);
 
-jest.mock("../../utils/logger", () => ({
+jest.mock("../../../utils/logger", () => ({
     logger: { warn: jest.fn(), debug: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
 
-jest.mock("../../utils/redis", () => ({
+jest.mock("../../../utils/redis", () => ({
     redisClient: {
         get: jest.fn().mockResolvedValue(null),
         setex: jest.fn().mockResolvedValue("OK"),
@@ -19,16 +19,16 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
-jest.mock("../../services/wikidata", () => ({
+jest.mock("../../../services/wikidata", () => ({
     wikidataService: { getArtistInfo: jest.fn().mockResolvedValue(null) },
 }));
 
 const mockResolveByEntity = jest.fn().mockResolvedValue(true);
-jest.mock("../../services/enrichmentFailureService", () => ({
+jest.mock("../../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: { resolveByEntity: (...a: unknown[]) => mockResolveByEntity(...a) },
 }));
 
-jest.mock("../../services/artistSimilarity", () => ({
+jest.mock("../../../services/artistSimilarity", () => ({
     getSimilarArtists: jest.fn().mockResolvedValue([]),
     findSimilarArtists: jest.fn().mockResolvedValue({ artists: [], failed: false }),
 }));
@@ -39,7 +39,7 @@ const answeredWith = (value: unknown) =>
 
 const mockSearchArtist = jest.fn();
 const mockGetArtist = jest.fn();
-jest.mock("../../services/musicbrainz", () => ({
+jest.mock("../../../services/musicbrainz", () => ({
     musicBrainzService: {
         searchArtist: (...a: unknown[]) => mockSearchArtist(...a),
         getArtist: (...a: unknown[]) => mockGetArtist(...a),
@@ -48,21 +48,21 @@ jest.mock("../../services/musicbrainz", () => ({
 
 const mockFindAlbumArtwork = jest.fn();
 const mockFindArtistArtwork = jest.fn();
-jest.mock("../../services/artwork", () => ({
+jest.mock("../../../services/artwork", () => ({
     findAlbumArtwork: (...a: unknown[]) => mockFindAlbumArtwork(...a),
     findArtistArtwork: (...a: unknown[]) => mockFindArtistArtwork(...a),
 }));
 
 const mockDownloadAndStoreImage = jest.fn();
-jest.mock("../../services/imageStorage", () => ({
+jest.mock("../../../services/imageStorage", () => ({
     downloadAndStoreImage: (...a: unknown[]) => mockDownloadAndStoreImage(...a),
     isNativePath: (p: string) => typeof p === "string" && p.startsWith("native:"),
     nativeFileExists: jest.fn().mockReturnValue(false),
     findLocalArtistImage: (...a: unknown[]) => mockFindLocalArtistImage(...a),
 }));
 
-import { enrichSimilarArtist } from "../artistEnrichment";
-import { prisma } from "../../utils/db";
+import { enrichSimilarArtist } from "../artists";
+import { prisma } from "../../../utils/db";
 
 const P = "zz-artEnrich-";
 const REAL_MBID = "11111111-2222-3333-4444-555555555555";
@@ -285,7 +285,7 @@ describe("an artist row holding another artist's MusicBrainz id", () => {
 
     it("leaves the row alone while MusicBrainz is unreachable", async () => {
         mockGetArtist.mockResolvedValue({ kind: "transient", error: { code: "NETWORK", message: "down" } });
-        jest.requireMock("../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
+        jest.requireMock("../../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
         const artist = await seedArtist("4");
         await seedSimilarTo(artist.id);
 
@@ -301,7 +301,7 @@ describe("an artist row holding another artist's MusicBrainz id", () => {
 
     it("waits for MusicBrainz's rate limit without counting a failure or calling the artist done", async () => {
         mockGetArtist.mockResolvedValue({ kind: "rateLimited", retryAfter: new Date(Date.now() + 5000), evidence: {} });
-        jest.requireMock("../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
+        jest.requireMock("../../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
 
         const artist = await seedArtist("6", { enrichmentFailures: 2 });
         await enrichSimilarArtist(artist);
@@ -313,7 +313,7 @@ describe("an artist row holding another artist's MusicBrainz id", () => {
 
     it("clears the artist's earlier failures from the failures list once it is answered", async () => {
         mockGetArtist.mockResolvedValue(answeredWith({ name: "Perturbator", "sort-name": "Perturbator", aliases: [], genres: [] }));
-        jest.requireMock("../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
+        jest.requireMock("../../../services/wikidata").wikidataService.getArtistInfo.mockResolvedValueOnce({});
 
         const artist = await seedArtist("7", { enrichmentFailures: 2 });
         await enrichSimilarArtist(artist);

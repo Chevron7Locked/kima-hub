@@ -4,10 +4,10 @@
  * mark stands. Real database, real queue.
  */
 
-import { prisma } from "../../utils/db";
-import { artistQueue } from "../enrichmentQueues";
-import { executeArtistsPhase } from "../unifiedEnrichment";
-import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { prisma } from "../../../utils/db";
+import { artistQueue } from "../../enrichmentQueues";
+import { queueOwedArtists } from "../artists";
+import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(30_000);
 
@@ -33,13 +33,13 @@ afterAll(async () => {
 
 it("asks an artist again when its job is gone from an empty queue", async () => {
     await stuckArtist();
-    await executeArtistsPhase();
+    await queueOwedArtists();
     expect(await status()).toBe("pending");
 });
 
 it("leaves the mark while the queue still holds an artist job", async () => {
     await stuckArtist();
     await artistQueue.add("enrich", { artistId: "someone_else", artistName: "Someone Else" }, { jobId: "artist-someone_else" });
-    await executeArtistsPhase();
+    await queueOwedArtists();
     expect(await status()).toBe("enriching");
 });

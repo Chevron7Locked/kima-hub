@@ -2,8 +2,8 @@
  * An artist whose enrichment keeps failing stops being asked: each failure counts, and at the
  * stage retry cap the artist is closed as unresolvable rather than retried every cycle.
  */
-import { failedArtistStatus } from "../artistEnrichment";
-import { STAGE_RETRY_CAP } from "../stageRetry";
+import { failedArtistStatus } from "../artists";
+import { STAGE_RETRY_CAP } from "../../stageRetry";
 
 describe("an artist's failures are counted and capped", () => {
     it("counts each failure and stays retryable below the cap", () => {

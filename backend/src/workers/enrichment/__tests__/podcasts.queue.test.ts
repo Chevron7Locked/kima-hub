@@ -1,5 +1,5 @@
 /**
- * The podcast refresh phase cleans both completed and failed jobs, since BullMQ
+ * The podcast refresh queueing cleans both completed and failed jobs, since BullMQ
  * keeps a failed job's id and silently ignores a re-add. It advances
  * lastRefreshed before queuing, so a failing feed waits a full window.
  * Failure paths first, happy path last.
@@ -7,49 +7,26 @@
 
 const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job" });
 const mockQueueClean = jest.fn().mockResolvedValue([]);
-const mockQueueResume = jest.fn().mockResolvedValue(undefined);
 
-jest.mock("../enrichmentQueues", () => ({
+jest.mock("../../enrichmentQueues", () => ({
     QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
-        TRACKS: "enrichment-tracks",
-        VIBE: "enrichment-vibe",
         PODCASTS: "enrichment-podcasts",
     },
-    artistQueue: { add: mockQueueAdd, clean: mockQueueClean, resume: mockQueueResume },
-    trackQueue: { add: mockQueueAdd, clean: mockQueueClean, resume: mockQueueResume },
-    vibeQueue: { add: mockQueueAdd, clean: mockQueueClean, resume: mockQueueResume },
-    podcastQueue: { add: mockQueueAdd, clean: mockQueueClean, resume: mockQueueResume },
-    closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
+    podcastQueue: { add: mockQueueAdd, clean: mockQueueClean },
+    createWorkerConnection: jest.fn(),
 }));
 
-jest.mock("../artistEnrichmentWorker", () => ({ startArtistEnrichmentWorker: jest.fn() }));
-jest.mock("../trackEnrichmentWorker", () => ({ startTrackEnrichmentWorker: jest.fn() }));
-jest.mock("../podcastEnrichmentWorker", () => ({ startPodcastEnrichmentWorker: jest.fn() }));
-jest.mock("../audioCompletionSubscriber", () => ({
-    startAudioCompletionSubscriber: jest.fn(),
-    stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
-    haltVibeQueuing: jest.fn(),
-    resumeVibeQueuing: jest.fn(),
-}));
-jest.mock("../../services/enrichmentState", () => ({
-    enrichmentStateService: { getState: jest.fn(), setState: jest.fn() },
-}));
-jest.mock("../../services/enrichmentFailureService", () => ({
+// Only the queueing is under test; the feed refresh the worker runs is not.
+jest.mock("../../../routes/podcasts", () => ({ refreshPodcastFeed: jest.fn() }));
+jest.mock("../../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: { recordFailure: jest.fn(), getFailures: jest.fn() },
 }));
-jest.mock("ioredis", () => jest.fn().mockImplementation(() => ({
-    on: jest.fn(), publish: jest.fn(), subscribe: jest.fn(), quit: jest.fn(),
-})));
-jest.mock("../../config", () => ({
-    config: { redis: { host: "localhost", port: 6379 }, music: {}, nodeEnv: "test" },
-}));
-jest.mock("../../utils/logger", () => ({
+jest.mock("../../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
-import { executePodcastRefreshPhase } from "../unifiedEnrichment";
-import { prisma } from "../../utils/db";
+import { queueStalePodcasts } from "../podcasts";
+import { prisma } from "../../../utils/db";
 
 const P = "zz-podcastRefresh-";
 const HOUR = 60 * 60 * 1000;
@@ -66,7 +43,7 @@ const seedPodcast = (n: string, title: string, hoursAgo: number) =>
 
 const lastRefreshed = async (n: string) => (await prisma.podcast.findUniqueOrThrow({ where: { id: `${P}${n}` } })).lastRefreshed;
 
-describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
+describe("queueStalePodcasts -- dedup wedge regression", () => {
     beforeAll(wipe);
     afterAll(wipe);
     beforeEach(async () => {
@@ -77,7 +54,7 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
     });
 
     it("no podcasts: does nothing", async () => {
-        const n = await executePodcastRefreshPhase();
+        const n = await queueStalePodcasts();
         expect(n).toBe(0);
         expect(mockQueueClean).not.toHaveBeenCalled();
         expect(mockQueueAdd).not.toHaveBeenCalled();
@@ -88,7 +65,7 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
         await seedPodcast("2", "Pod Two", 0.5);
         const before = await lastRefreshed("1");
 
-        const n = await executePodcastRefreshPhase();
+        const n = await queueStalePodcasts();
 
         expect(n).toBe(0);
         expect(mockQueueClean).not.toHaveBeenCalled();
@@ -98,7 +75,7 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
 
     it("cleans the failed set, not only completed", async () => {
         await seedPodcast("1", "Pod One", 3);
-        await executePodcastRefreshPhase();
+        await queueStalePodcasts();
         const cleanedStates = mockQueueClean.mock.calls.map((c) => c[2]);
         expect(cleanedStates).toContain("completed");
         expect(cleanedStates).toContain("failed");
@@ -118,7 +95,7 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
             return { id: "j" };
         });
 
-        await executePodcastRefreshPhase();
+        await queueStalePodcasts();
 
         // the bump happens before any job is queued, and only the stale podcasts are bumped
         expect(claimedWhenQueued).toEqual([true, true]);
@@ -130,7 +107,7 @@ describe("executePodcastRefreshPhase -- dedup wedge regression", () => {
     it("queues each stale podcast with its real data and stable jobId", async () => {
         await seedPodcast("1", "Pod One", 3);
 
-        const n = await executePodcastRefreshPhase();
+        const n = await queueStalePodcasts();
 
         expect(n).toBe(1);
         expect(mockQueueAdd).toHaveBeenCalledWith(

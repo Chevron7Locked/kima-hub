@@ -16,9 +16,9 @@ jest.mock("../../services/trackIdentity", () => require("../../__tests__/helpers
 jest.mock("../../services/musicbrainz", () => require("../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
 jest.mock("../../services/acoustidIdentification", () => require("../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
 jest.mock("../../workers/audioCompletionSubscriber", () => require("../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
-jest.mock("../../workers/artistEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").artistEnrichmentWorkerMock);
+jest.mock("../../workers/enrichment/artists", () => require("../../__tests__/helpers/enrichmentMocks").artistJobMock);
 jest.mock("../../workers/trackEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
-jest.mock("../../workers/podcastEnrichmentWorker", () => require("../../__tests__/helpers/enrichmentMocks").podcastEnrichmentWorkerMock);
+jest.mock("../../workers/enrichment/podcasts", () => require("../../__tests__/helpers/enrichmentMocks").podcastJobMock);
 
 // NOTE: `../../utils/db` is deliberately NOT mocked — the gating must be
 // proven against the real TrackStage table that the migration creates.
