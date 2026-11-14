@@ -173,6 +173,7 @@ class EnrichmentFailureService {
                 metadata: serializedMeta,
             },
             update: {
+                entityName,
                 errorMessage,
                 errorCode,
                 retryCount: { increment: 1 },

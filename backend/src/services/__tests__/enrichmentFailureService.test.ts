@@ -54,6 +54,20 @@ describe("EnrichmentFailureService", () => {
             expect(rows[0]).toMatchObject({ retryCount: 2, errorMessage: "second try" });
         });
 
+        it("a repeat failure records the entity's current name", async () => {
+            await enrichmentFailureService.recordFailure(baseInput);
+            await enrichmentFailureService.recordFailure({ ...baseInput, entityName: "Renamed Artist" });
+
+            expect(await stored(baseInput.entityId)).toMatchObject({ entityName: "Renamed Artist", retryCount: 2 });
+        });
+
+        it("a repeat failure with no metadata keeps the stored metadata", async () => {
+            await enrichmentFailureService.recordFailure(baseInput);
+            await enrichmentFailureService.recordFailure({ ...baseInput, metadata: undefined });
+
+            expect(await stored(baseInput.entityId)).toMatchObject({ metadata: { filePath: "/music/test.flac" } });
+        });
+
         it("two failures recorded at once make one row, not a unique-key error", async () => {
             await Promise.all([
                 enrichmentFailureService.recordFailure(baseInput),

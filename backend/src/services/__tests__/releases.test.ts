@@ -12,7 +12,7 @@ import { prisma } from "../../utils/db";
 jest.mock("../releases/moodMixes", () => ({ MOOD_MIX_RELEASE: "1.11.0", moodMixState: jest.fn() }));
 // The GPU choice is part of the tested catalog; pin the platform answer so the
 // suite sees it on arm/macOS runners too, as on the linux/x86_64 target.
-jest.mock("../gpuPlatform", () => ({ gpuSupported: () => true }));
+jest.mock("../gpuRuntime", () => ({ gpuSupported: () => true }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { moodMixState } = require("../releases/moodMixes");
