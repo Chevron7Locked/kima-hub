@@ -1,5 +1,5 @@
 /**
- * The one save of system settings: it writes, drops the cache, and tells each subscriber which of its own fields
+ * The one save of system settings: it writes, drops the cache, and calls each listener with the fields of its own that
  * changed, never the others and never a value that was sent back unchanged (the settings page sends every field on
  * every save). Real database and cipher.
  */
@@ -13,10 +13,10 @@ import { queues } from "../../workers/queues";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 
 let before: Record<string, unknown> | null;
-const unsubscribe: Array<() => void> = [];
+const removers: Array<() => void> = [];
 const listen = (fields: Parameters<typeof onSystemSettingsChange>[1]) => {
     const heard = jest.fn();
-    unsubscribe.push(onSystemSettingsChange("test listener", fields, heard));
+    removers.push(onSystemSettingsChange("test listener", fields, heard));
     return heard;
 };
 
@@ -39,7 +39,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-    while (unsubscribe.length) unsubscribe.pop()!();
+    while (removers.length) removers.pop()!();
 });
 
 afterAll(async () => {
@@ -157,7 +157,7 @@ describe("saveSystemSettings", () => {
 });
 
 describe("onSystemSettingsChange", () => {
-    it("tells a subscriber only about its own fields", async () => {
+    it("tells a listener only about its own fields", async () => {
         const fanart = listen(["fanartEnabled", "fanartApiKey"]);
         const lidarr = listen(["lidarrUrl", "lidarrApiKey"]);
 
@@ -168,7 +168,7 @@ describe("onSystemSettingsChange", () => {
         expect(lidarr).not.toHaveBeenCalled();
     });
 
-    it("names only the subscriber's fields that changed", async () => {
+    it("names only the listener's fields that changed", async () => {
         await saveSystemSettings({ fanartEnabled: true });
         const fanart = listen(["fanartEnabled", "fanartApiKey"]);
 
@@ -196,9 +196,9 @@ describe("onSystemSettingsChange", () => {
         expect(heard).toHaveBeenCalledTimes(2);
     });
 
-    it("runs a subscriber after the save is readable", async () => {
+    it("runs a listener after the save is readable", async () => {
         const seen = new Promise<unknown>((resolve) => {
-            unsubscribe.push(
+            removers.push(
                 onSystemSettingsChange("test listener", ["transcodeCacheMaxGb"], async () => {
                     resolve((await getSystemSettings())?.transcodeCacheMaxGb);
                 }),
@@ -210,9 +210,9 @@ describe("onSystemSettingsChange", () => {
         await expect(seen).resolves.toBe(14);
     });
 
-    it("lets a subscriber that throws neither fail the save nor silence the others", async () => {
-        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], () => { throw new Error("subscriber broke"); }));
-        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], async () => { throw new Error("async subscriber broke"); }));
+    it("lets a listener that throws neither fail the save nor silence the others", async () => {
+        removers.push(onSystemSettingsChange("test listener", ["fanartEnabled"], () => { throw new Error("listener broke"); }));
+        removers.push(onSystemSettingsChange("test listener", ["fanartEnabled"], async () => { throw new Error("async listener broke"); }));
         const other = listen(["fanartEnabled"]);
 
         await expect(saveSystemSettings({ fanartEnabled: true })).resolves.toEqual(["fanartEnabled"]);
@@ -220,9 +220,9 @@ describe("onSystemSettingsChange", () => {
         expect(other).toHaveBeenCalledTimes(1);
     });
 
-    it("does not wait for a subscriber that never finishes", async () => {
+    it("does not wait for a listener that never finishes", async () => {
         const never = jest.fn(() => new Promise<void>(() => {}));
-        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], never));
+        removers.push(onSystemSettingsChange("test listener", ["fanartEnabled"], never));
         const other = listen(["fanartEnabled"]);
         const held = Symbol("held");
 
@@ -236,9 +236,9 @@ describe("onSystemSettingsChange", () => {
         expect(other).toHaveBeenCalledTimes(1);
     });
 
-    it("logs a subscriber that fails after the save has returned, and the save is unharmed", async () => {
+    it("logs a listener that fails after the save has returned, and the save is unharmed", async () => {
         let fail!: (error: Error) => void;
-        unsubscribe.push(onSystemSettingsChange("cover art", ["fanartEnabled"], () => new Promise<void>((_, reject) => { fail = reject; })));
+        removers.push(onSystemSettingsChange("cover art", ["fanartEnabled"], () => new Promise<void>((_, reject) => { fail = reject; })));
         const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
 
         try {
@@ -252,7 +252,7 @@ describe("onSystemSettingsChange", () => {
         }
     });
 
-    it("stops telling a subscriber that signed off", async () => {
+    it("stops telling a listener that was removed", async () => {
         const heard = jest.fn();
         const off = onSystemSettingsChange("test listener", ["fanartEnabled"], heard);
         off();

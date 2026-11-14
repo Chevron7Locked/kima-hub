@@ -13,7 +13,7 @@ import { configureSlskd } from "../lib/soulseek/slskd-client";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
 import { getSystemSettings } from "../utils/systemSettings";
-import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
+import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { sessionLog } from "../utils/playlistLogger";
 import { distributedLock } from "../utils/distributedLock";
 import { redisClient } from "../utils/redis";

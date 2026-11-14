@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { getSystemSettings } from "../utils/systemSettings";
-import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
+import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { USER_AGENT } from "../config";
 import { INTERACTIVE_PRIORITY, rateLimiter } from "./rateLimiter";
 

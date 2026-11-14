@@ -90,7 +90,7 @@ it("a server with no settings yet starts from the schema's defaults", async () =
     expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).musicPath).toBe("/music");
 });
 
-it("the settings page sending every field back tells a subscriber only about what changed", async () => {
+it("the settings page sending every field back tells a listener only about what changed", async () => {
     const heard = jest.fn();
     const off = onSystemSettingsChange("test listener", ["soulseekUsername", "soulseekMode", "slskdUrl"], heard);
     try {

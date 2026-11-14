@@ -2,7 +2,7 @@ import { AxiosInstance } from "axios";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { getSystemSettings } from "../utils/systemSettings";
-import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
+import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { createLidarrClient } from "./lidarrClient";
 import { sourcePauseController } from "./sourcePauseController";
 import { lidarrHealthMonitor } from "./lidarrHealth";

@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { tellSettingsSubscribers, type SystemSettingsChanges, type SystemSettingsField } from "./systemSettingsSubscribers";
+import { callSettingsListeners, type SystemSettingsChanges, type SystemSettingsField } from "./systemSettingsListeners";
 import { decryptOrNull, ENCRYPTED_FIELDS, encryptSettings, resolveEncryptedSettings, type EncryptedField } from "./encryptedFields";
 import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 
@@ -48,8 +48,8 @@ export async function getSystemSettings() {
     return { ...resolved };
 }
 
-export { onSystemSettingsChange } from "./systemSettingsSubscribers";
-export type { SystemSettingsChanges, SystemSettingsField } from "./systemSettingsSubscribers";
+export { onSystemSettingsChange } from "./systemSettingsListeners";
+export type { SystemSettingsChanges, SystemSettingsField } from "./systemSettingsListeners";
 
 /** What a stored value means: unset and blank are the same, a credential is its plain text, a date its time. */
 function meaning(field: string, stored: unknown): unknown {
@@ -60,7 +60,7 @@ function meaning(field: string, stored: unknown): unknown {
 
 /**
  * The one way system settings are saved: writes the supplied fields (a credential given blank is cleared, except one
- * the server cannot read, which stays), drops the settings cache, then tells each subscriber which of its fields
+ * the server cannot read, which stays), drops the settings cache, then calls each listener with the fields of its own that
  * changed, without waiting for any of them to finish. Answers the fields whose value changed. The row is read and
  * written under its lock, so two saves at the same time each see the other's result and a change is reported once.
  */
@@ -79,6 +79,6 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
         );
     }, { timeout: 15_000 }); // time spent waiting for the lock counts against it
     invalidateSystemSettingsCache();
-    tellSettingsSubscribers(changed);
+    callSettingsListeners(changed);
     return changed;
 }

@@ -3,7 +3,7 @@ import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
-import { onSystemSettingsChange } from "../utils/systemSettingsSubscribers";
+import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { fpcalcService } from "./fpcalc";
 
 // Analyzer script paths in the Docker image
