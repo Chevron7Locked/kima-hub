@@ -1,5 +1,5 @@
-// The playback state save takes up to 5 MB of queue; every other address takes 1 MB. The large parser goes by whole
-// path segment, so an address that only starts like the playback state's does not get it.
+// The playback state save takes up to 5 MB of queue; every other path takes 1 MB. The large parser goes by whole
+// path segment, so a path that only starts like the playback state's does not get it.
 
 import express from "express";
 import request from "supertest";

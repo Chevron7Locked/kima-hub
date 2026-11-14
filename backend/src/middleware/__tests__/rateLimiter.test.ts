@@ -50,7 +50,7 @@ describe('apiLimiter skip predicate', () => {
         expect(res.headers['ratelimit-limit']).toBeDefined();
     });
 
-    it('does not skip an address that only starts like a cover route', async () => {
+    it('does not skip a path that only starts like a cover route', async () => {
         const res = await request(appWhere(true)).get('/api/library/cover-artX/a').expect(200);
         expect(res.headers['ratelimit-limit']).toBeDefined();
     });

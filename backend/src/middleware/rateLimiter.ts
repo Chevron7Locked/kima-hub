@@ -26,7 +26,7 @@ export const ACCESS_PASSED = "accessPassed";
 const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
 
 /**
- * Addresses the general runaway limit does not count, for a caller who has passed the access check: streaming and
+ * Paths the general runaway limit does not count, for a caller who has passed the access check: streaming and
  * status polling. They are counted like any other request when the check refuses them. `fullPath` is the mount plus
  * the path, not the original URL, which carries `?token=` on stream URLs.
  */
