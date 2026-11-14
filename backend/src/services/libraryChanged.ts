@@ -8,6 +8,7 @@
  * Discover item, a song that is missing or corrupt, an empty album. Analysis writes, Discover songs and artist syncs do
  * not move it either, and it never goes backwards. It is stored in the system settings, so every process reads the same one.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -38,17 +39,14 @@ export async function markLibraryChangedQuietly(what: string): Promise<void> {
     await markLibraryChanged().catch((e) => logger.error(`Failed to record the library change (${what}):`, e));
 }
 
+const holdsPlayableSong = async (where: Prisma.TrackWhereInput): Promise<boolean> =>
+    (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, where] }, select: { id: true } })) !== null;
+
 /** Whether a client lists the song: it is playable. Ask before a delete or an edit, for a row that is gone cannot be asked. */
-export async function songIsListed(songId: string): Promise<boolean> {
-    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { id: songId }] }, select: { id: true } })) !== null;
-}
+export const songIsListed = (songId: string) => holdsPlayableSong({ id: songId });
 
 /** Whether a client lists the album: it holds a playable song. */
-export async function albumIsListed(albumId: string): Promise<boolean> {
-    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { albumId }] }, select: { id: true } })) !== null;
-}
+export const albumIsListed = (albumId: string) => holdsPlayableSong({ albumId });
 
 /** Whether a client lists the artist: one of its albums holds a playable song. */
-export async function artistIsListed(artistId: string): Promise<boolean> {
-    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { album: { artistId } }] }, select: { id: true } })) !== null;
-}
+export const artistIsListed = (artistId: string) => holdsPlayableSong({ album: { artistId } });

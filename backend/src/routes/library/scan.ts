@@ -166,15 +166,17 @@ router.delete("/corrupt-tracks", async (_req, res) => {
     // next scan re-checks the file. The songs play again, so their artists are recounted.
     const albums = await prisma.album.findMany({
       where: { tracks: { some: { corrupt: true } } },
-      select: { artistId: true, location: true },
+      select: { artistId: true },
     });
+    // Asked before the clear: the songs that play again are the corrupt ones whose file is there on a library album.
+    const returning = await prisma.track.count({ where: { corrupt: true, missingSince: null, album: { location: "LIBRARY" } } });
     const result = await prisma.track.updateMany({
       where: { corrupt: true },
       data: { corrupt: false },
     });
     for (const artistId of new Set(albums.map((a) => a.artistId))) await updateArtistCounts(artistId);
-    // Songs on library albums play again, so a client lists them again; Discover's were never listed.
-    if (result.count > 0 && albums.some((a) => a.location === "LIBRARY")) await markLibraryChangedQuietly("corrupt flags cleared");
+    // Songs that play again are listed again; Discover's and missing ones still are not.
+    if (returning > 0) await markLibraryChangedQuietly("corrupt flags cleared");
     res.json({
       cleared: result.count,
       message: `Cleared the corrupt flag on ${result.count} tracks (rows kept)`,

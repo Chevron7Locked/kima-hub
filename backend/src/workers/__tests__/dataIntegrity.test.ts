@@ -203,20 +203,24 @@ describe("data integrity check", () => {
         expect(report.expiredExclusions).toBeGreaterThanOrEqual(1);
         expect(report.orphanedDiscoveryTracks).toBeGreaterThanOrEqual(1);
     });
-    it("moves the library-changed marker when a temp artist's library albums merge into the real artist, and not for a Discover album", async () => {
-        const make = async (key: string, location: "LIBRARY" | "DISCOVER") => {
-            await prisma.artist.create({ data: { id: id(`${key}_real`), name: `Dint ${key}`, normalizedName: `dint ${key}`, mbid: `0000aaaa-0000-4000-8000-${key === "lib" ? "000000000001" : "000000000002"}`, identityKey: id(`${key}_rk`) } });
+    it("moves the library-changed marker when a temp artist's listed albums merge into the real artist, and not for a Discover album or one with no playable song", async () => {
+        const make = async (key: string, location: "LIBRARY" | "DISCOVER", missing = false) => {
+            await prisma.artist.create({ data: { id: id(`${key}_real`), name: `Dint ${key}`, normalizedName: `dint ${key}`, mbid: `0000aaaa-0000-4000-8000-00000000000${{ lib: 1, dis: 2, gone: 3 }[key]}`, identityKey: id(`${key}_rk`) } });
             await prisma.artist.create({ data: { id: id(`${key}_temp`), name: `Dint ${key}`, normalizedName: `dint ${key}`, mbid: `temp-dint-${key}`, identityKey: id(`${key}_tk`) } });
             await prisma.album.create({
                 data: { id: id(`${key}_alb`), rgMbid: id(`${key}_rg`), artistId: id(`${key}_temp`), identityKey: id(`${key}_ak`), title: `Dint ${key} Album`, primaryType: "Album", location },
             });
             await prisma.track.create({
-                data: { id: id(`${key}_t`), albumId: id(`${key}_alb`), title: "x", trackNo: 1, duration: 1, filePath: `/tmp/dint_${key}.flac`, fileModified: new Date(), fileSize: 1 },
+                data: { id: id(`${key}_t`), albumId: id(`${key}_alb`), title: "x", trackNo: 1, duration: 1, filePath: `/tmp/dint_${key}.flac`, fileModified: new Date(), fileSize: 1, ...(missing ? { missingSince: new Date() } : {}) },
             });
         };
         await make("dis", "DISCOVER");
         expect(await markerMoves(() => runDataIntegrityCheck())).toBe(false);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: id("dis_alb") } })).artistId).toBe(id("dis_real"));
+
+        await make("gone", "LIBRARY", true);
+        expect(await markerMoves(() => runDataIntegrityCheck())).toBe(false);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: id("gone_alb") } })).artistId).toBe(id("gone_real"));
 
         await make("lib", "LIBRARY");
         expect(await markerMoves(() => runDataIntegrityCheck())).toBe(true);

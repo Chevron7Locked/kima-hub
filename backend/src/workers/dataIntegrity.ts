@@ -8,6 +8,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { markLibraryChangedQuietly } from "../services/libraryChanged";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -141,7 +142,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             const realArtist = realArtistByNormalizedName.get(tempArtist.normalizedName);
 
             if (realArtist) {
-                libraryAlbumsMoved += await prisma.album.count({ where: { artistId: tempArtist.id, location: "LIBRARY" } });
+                libraryAlbumsMoved += await prisma.album.count({ where: { artistId: tempArtist.id, tracks: { some: PLAYABLE_SONG } } });
                 await prisma.album.updateMany({
                     where: { artistId: tempArtist.id },
                     data: { artistId: realArtist.id },
@@ -158,7 +159,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
             }
         }
-        // Library albums under another artist change what a client lists; Discover's were never listed.
+        // Albums holding a playable song under another artist change what a client lists; Discover's, and ones with no playable song, were never listed.
         if (libraryAlbumsMoved > 0) await markLibraryChangedQuietly("temp artists merged into real ones");
     }
 

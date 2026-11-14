@@ -156,6 +156,13 @@ describe("the library-changed marker on DELETE /library/corrupt-tracks", () => {
         expect(await markerMoves(() => clear(token))).toBe(false);
     });
 
+    it("leaves it when the cleared song is also missing, because the library still does not list it", async () => {
+        const token = await makeUser(id("boss6"), "admin");
+        await prisma.track.update({ where: { id: id("t1") }, data: { missingSince: new Date() } });
+        expect(await markerMoves(() => clear(token))).toBe(false);
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: id("t1") } })).corrupt).toBe(false);
+    });
+
     it("leaves it when no song is flagged", async () => {
         const token = await makeUser(id("boss5"), "admin");
         await prisma.track.update({ where: { id: id("t1") }, data: { corrupt: false } });
