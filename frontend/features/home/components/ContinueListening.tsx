@@ -14,7 +14,9 @@ interface ContinueListeningProps {
 
 function imageFor(item: ListenedItem) {
     if (item.type === "audiobook") {
-        return api.getCoverArtUrl(`/audiobooks/${item.id}/cover`, 300);
+        // The versioned address the server sent, so a changed cover is a new address; the plain one for an older reply.
+        const address = item.coverArt?.startsWith("/audiobooks/") ? item.coverArt : `/audiobooks/${item.id}/cover`;
+        return api.getCoverArtUrl(address, 300);
     }
     return item.coverArt ? api.getCoverArtUrl(item.coverArt, 300) : null;
 }

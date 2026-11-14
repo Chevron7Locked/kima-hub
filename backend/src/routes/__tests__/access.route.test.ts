@@ -163,8 +163,8 @@ describe("the route listing", () => {
     it("the routes outside signed-in and admin are exactly these", () => {
         expect(inFamily(rows, "public")).toEqual(
             [
-                "GET /api/audiobooks/:id/cover",
-                "OPTIONS /api/audiobooks/:id/cover",
+                "GET /api/audiobooks/:id/cover/:version([A-Za-z0-9_-]+)?",
+                "OPTIONS /api/audiobooks/:id/cover/:version([A-Za-z0-9_-]+)?",
                 "GET /api/events",
                 "GET /health",
                 "GET /api/health",
@@ -223,6 +223,7 @@ describe("the declared families are enforced in front of the routers", () => {
         expect((await request(app).post("/api/enrichment/pause").set("Authorization", as(MEMBER, "user"))).status).toBe(403);
         // The audiobook cover answers without a session; its neighbours do not.
         expect((await request(app).get("/api/audiobooks/none/cover")).status).not.toBe(401);
+        expect((await request(app).get("/api/audiobooks/none/cover/lq3k9x")).status).not.toBe(401);
         expect((await request(app).get("/api/audiobooks/none")).status).toBe(401);
     });
 

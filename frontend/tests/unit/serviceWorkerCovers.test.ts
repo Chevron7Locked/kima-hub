@@ -1,7 +1,8 @@
 /**
- * The web service worker shows a stored cover from its cache at once and checks the server for a changed one meanwhile,
- * so a changed cover reaches the web app without the cache being cleared. A cover fetched from another site's address
- * keeps the plain cache-first rule. The worker file is run as it ships, against a small in-memory cache and fetch.
+ * The web service worker serves a cover from its cache whenever it has one and never asks the server again: a cover's
+ * address carries its version, so a changed cover is a new address and is fetched fresh. This holds for a stored cover,
+ * an audiobook's and a cover from another site alike. The worker file is run as it ships, against a small in-memory cache
+ * and fetch.
  */
 
 import { readFileSync } from "node:fs";
@@ -58,12 +59,14 @@ function load() {
     return { request, fetchMock, store };
 }
 
-const photo = (body: string, etag: string) =>
-    new Response(body, { status: 200, headers: { "content-type": "image/jpeg", etag } });
-const NATIVE = "http://kima.test/api/library/cover-art?url=native%3Aalbums%2Fa1.jpg&size=300&token=abc";
-const KEY = "http://kima.test/api/library/cover-art?url=native%3Aalbums%2Fa1.jpg&size=300";
+const photo = (body: string) => new Response(body, { status: 200, headers: { "content-type": "image/jpeg" } });
+const CACHE = "kima-images-v4";
+const NATIVE = "http://kima.test/api/library/cover-art?url=native%3Aalbums%2Fa1.jpg%3Fv%3Daaaaaaaaaa&size=300&token=abc";
+const KEY = "http://kima.test/api/library/cover-art?url=native%3Aalbums%2Fa1.jpg%3Fv%3Daaaaaaaaaa&size=300";
+const CHANGED = "http://kima.test/api/library/cover-art?url=native%3Aalbums%2Fa1.jpg%3Fv%3Dbbbbbbbbbb&size=300&token=abc";
 const REMOTE = "http://kima.test/api/library/cover-art?url=https%3A%2F%2Fexample.org%2Fc.jpg&size=300&token=abc";
 const REMOTE_KEY = "http://kima.test/api/library/cover-art?url=https%3A%2F%2Fexample.org%2Fc.jpg&size=300";
+const BOOK = "http://kima.test/api/audiobooks/book-1/cover/lq3x9z?token=abc";
 
 let sw: ReturnType<typeof load>;
 beforeEach(() => {
@@ -72,89 +75,73 @@ beforeEach(() => {
 
 describe("a stored cover (native address)", () => {
     it("is fetched and cached the first time", async () => {
-        sw.fetchMock.mockResolvedValue(photo("one", '"v1"'));
+        sw.fetchMock.mockResolvedValue(photo("one"));
 
         const res = await sw.request(NATIVE);
 
         expect(await res!.text()).toBe("one");
-        expect(await sw.store("kima-images-v3").get(KEY)!.text()).toBe("one");
+        expect(await sw.store(CACHE).get(KEY)!.text()).toBe("one");
     });
 
-    it("is shown from the cache at once, and the server is asked meanwhile whether it changed", async () => {
-        sw.fetchMock.mockResolvedValueOnce(photo("one", '"v1"'));
+    it("is shown from the cache with no request to the server", async () => {
+        sw.fetchMock.mockResolvedValueOnce(photo("one"));
         await sw.request(NATIVE);
-        sw.fetchMock.mockResolvedValueOnce(photo("two", '"v2"'));
 
         const res = await sw.request(NATIVE);
 
         expect(await res!.text()).toBe("one");
-        expect(sw.fetchMock).toHaveBeenCalledTimes(2);
-        expect(sw.fetchMock.mock.calls[1][1]).toMatchObject({ cache: "no-cache" });
+        expect(sw.fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps the changed cover for the next time it is shown", async () => {
-        sw.fetchMock.mockResolvedValueOnce(photo("one", '"v1"'));
+    it("is fetched fresh when its version changed, because that is another address", async () => {
+        sw.fetchMock.mockResolvedValueOnce(photo("one"));
         await sw.request(NATIVE);
-        sw.fetchMock.mockResolvedValueOnce(photo("two", '"v2"'));
-        await sw.request(NATIVE);
-        sw.fetchMock.mockResolvedValueOnce(photo("two", '"v2"'));
+        sw.fetchMock.mockResolvedValueOnce(photo("two"));
 
-        const res = await sw.request(NATIVE);
+        const res = await sw.request(CHANGED);
 
         expect(await res!.text()).toBe("two");
+        expect(sw.fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    it("keeps the cached picture when the server cannot be reached or does not have the cover", async () => {
-        sw.fetchMock.mockResolvedValueOnce(photo("one", '"v1"'));
-        await sw.request(NATIVE);
-        sw.fetchMock.mockRejectedValueOnce(new Error("offline"));
-        await sw.request(NATIVE);
+    it("does not cache a failed answer", async () => {
         sw.fetchMock.mockResolvedValueOnce(new Response("gone", { status: 404 }));
+
         await sw.request(NATIVE);
-        sw.fetchMock.mockResolvedValueOnce(new Response("down", { status: 500 }));
 
-        const res = await sw.request(NATIVE);
-
-        expect(await res!.text()).toBe("one");
-        expect(await sw.store("kima-images-v3").get(KEY)!.text()).toBe("one");
+        expect(sw.store(CACHE).has(KEY)).toBe(false);
     });
 
     it("does not store the sign-in token in the cache key", async () => {
-        sw.fetchMock.mockResolvedValue(photo("one", '"v1"'));
+        sw.fetchMock.mockResolvedValue(photo("one"));
 
         await sw.request(NATIVE);
 
-        expect([...sw.store("kima-images-v3").keys()]).toEqual([KEY]);
+        expect([...sw.store(CACHE).keys()]).toEqual([KEY]);
     });
 });
 
 describe("an audiobook cover", () => {
-    const BOOK = "http://kima.test/api/audiobooks/book-1/cover?token=abc";
-    const BOOK_KEY = "http://kima.test/api/audiobooks/book-1/cover";
-
-    it("is shown from the cache at once and checked with the server meanwhile, and the changed cover is kept", async () => {
-        sw.fetchMock.mockResolvedValueOnce(photo("one", '"v1"'));
+    it("is shown from the cache with no request to the server", async () => {
+        sw.fetchMock.mockResolvedValueOnce(photo("one"));
         await sw.request(BOOK);
-        sw.fetchMock.mockResolvedValueOnce(photo("two", '"v2"'));
 
         const shown = await sw.request(BOOK);
 
         expect(await shown!.text()).toBe("one");
-        expect(sw.fetchMock).toHaveBeenCalledTimes(2);
-        expect(sw.fetchMock.mock.calls[1][1]).toMatchObject({ cache: "no-cache" });
-        expect(await sw.store("kima-images-v3").get(BOOK_KEY)!.text()).toBe("two");
+        expect(sw.fetchMock).toHaveBeenCalledTimes(1);
     });
 });
 
 describe("a cover from another site's address", () => {
-    it("stays cache-first: shown from the cache with no request to the server", async () => {
-        sw.fetchMock.mockResolvedValueOnce(photo("remote", '"r1"'));
+    it("is shown from the cache with no request to the server", async () => {
+        sw.fetchMock.mockResolvedValueOnce(photo("remote"));
         await sw.request(REMOTE);
 
         const res = await sw.request(REMOTE);
 
         expect(await res!.text()).toBe("remote");
         expect(sw.fetchMock).toHaveBeenCalledTimes(1);
-        expect(sw.store("kima-images-v3").has(REMOTE_KEY)).toBe(true);
+        expect(sw.store(CACHE).has(REMOTE_KEY)).toBe(true);
     });
 });

@@ -18,6 +18,7 @@ jest.mock("../../config", () => ({
 jest.mock("../../services/publicLibraryExport", () => ({ latestLibraryExport: jest.fn() }));
 jest.mock("../../services/textEmbeddingBridge", () => ({ searchTracksByText: jest.fn() }));
 jest.mock("../../services/artwork", () => ({ findAlbumArtwork: jest.fn(async () => null) }));
+jest.mock("../../utils/ssrf", () => ({ fetchChecked: jest.fn() }));
 
 import fs from "fs";
 import os from "os";
@@ -30,6 +31,9 @@ import publicVibeRouter from "../publicVibe";
 import { prisma } from "../../utils/db";
 import { latestLibraryExport } from "../../services/publicLibraryExport";
 import { searchTracksByText } from "../../services/textEmbeddingBridge";
+import { findAlbumArtwork } from "../../services/artwork";
+import { fetchChecked } from "../../utils/ssrf";
+import { MAX_PICTURE_BYTES } from "../../services/imageStorage";
 import { coversBasePath } from "../../services/imageStorage";
 import { reportLive, resetLive, setLiveHidden } from "../../services/liveListening";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
@@ -264,5 +268,34 @@ describe("GET /cover/:trackId", () => {
     it("answers 404 for a track that is not in the library", async () => {
         const res = await request(app).get("/api/public/vibe/cover/cpvibesmokenosuchtrack").set(auth);
         expect(res.status).toBe(404);
+    });
+
+    describe("when the stored file has gone and a source has a copy", () => {
+        const ask = (reply: Response) => {
+            (findAlbumArtwork as jest.Mock).mockResolvedValueOnce({ url: "https://covers.test/a.jpg" });
+            (fetchChecked as jest.Mock).mockResolvedValueOnce(reply);
+            return request(app).get(`/api/public/vibe/cover/${MISSING_FILE_TRACK}`).set(auth);
+        };
+
+        it("serves the copy with its image type", async () => {
+            const res = await ask(new Response(bytes, { status: 200, headers: { "content-type": "image/png" } }));
+            expect(res.status).toBe(200);
+            expect(res.headers["content-type"]).toBe("image/png");
+            expect(Buffer.from(res.body)).toEqual(bytes);
+        });
+
+        it("answers 404 for a copy over the size cap", async () => {
+            expectLog("warn");
+            const res = await ask(
+                new Response(bytes, { status: 200, headers: { "content-type": "image/jpeg", "content-length": String(MAX_PICTURE_BYTES + 1) } }),
+            );
+            expect(res.status).toBe(404);
+        });
+
+        it("answers 404 for a reply that is no image", async () => {
+            expectLog("warn");
+            const res = await ask(new Response("<html>", { status: 200, headers: { "content-type": "text/html" } }));
+            expect(res.status).toBe(404);
+        });
     });
 });

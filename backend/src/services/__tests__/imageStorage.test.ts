@@ -52,7 +52,7 @@ describe("downloadAndStoreImage and a stop", () => {
     it("still downloads with no signal", async () => {
         fetchMock.mockResolvedValue(imageResponse(await picture("jpeg"), "image/jpeg"));
 
-        expect(await downloadAndStoreImage("https://example.com/a.jpg", "a3", "artist")).toBe("native:artists/a3.jpg");
+        expect(await downloadAndStoreImage("https://example.com/a.jpg", "a3", "artist")).toMatch(/^native:artists\/a3\.jpg\?v=[0-9a-f]{10}$/);
     });
 });
 
@@ -80,14 +80,14 @@ describe("downloadAndStoreImage writes", () => {
         const jpeg = await picture("jpeg");
         fetchMock.mockResolvedValue(imageResponse(jpeg, "image/jpeg"));
 
-        expect(await downloadAndStoreImage("https://example.com/c", "w1", "album")).toBe("native:albums/w1.jpg");
+        expect(await downloadAndStoreImage("https://example.com/c", "w1", "album")).toMatch(/^native:albums\/w1\.jpg\?v=[0-9a-f]{10}$/);
         expect(fs.readFileSync(path.join(albums, "w1.jpg")).equals(jpeg)).toBe(true);
     });
 
     it("turns a png into a jpeg, so the .jpg the readers look for holds a jpeg", async () => {
         fetchMock.mockResolvedValue(imageResponse(await picture("png"), "image/png"));
 
-        expect(await downloadAndStoreImage("https://example.com/c", "w2", "album")).toBe("native:albums/w2.jpg");
+        expect(await downloadAndStoreImage("https://example.com/c", "w2", "album")).toMatch(/^native:albums\/w2\.jpg\?v=[0-9a-f]{10}$/);
         const sharp = (await import("sharp")).default;
         expect((await sharp(path.join(albums, "w2.jpg")).metadata()).format).toBe("jpeg");
     });

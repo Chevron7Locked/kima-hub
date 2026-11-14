@@ -12,7 +12,10 @@ jest.mock("../artwork", () => ({
     findAlbumArtwork: (...a: unknown[]) => mockFindAlbumArtwork(...a),
 }));
 
+import { createHash } from "crypto";
 import fs from "fs";
+import os from "os";
+import path from "path";
 import { MusicScannerService } from "../musicScanner";
 import { prisma } from "../../utils/db";
 
@@ -74,6 +77,33 @@ describe("the scanner finding a cover for an album", () => {
         expect(extractCoverArt).not.toHaveBeenCalled();
         expect(mockFindAlbumArtwork).not.toHaveBeenCalled();
         expect(await storedCover()).toBe("native:albums/alb-1.jpg");
+    });
+
+    it("finds the stored file of a versioned cover address, the version playing no part", async () => {
+        await prisma.album.update({ where: { id: ID }, data: { coverUrl: "native:albums/alb-1.jpg?v=abc123" } });
+
+        await ensure({ ...ALBUM, coverUrl: "native:albums/alb-1.jpg?v=abc123" });
+
+        expect(existsSpy).toHaveBeenCalledWith(path.join("/cache/covers", "albums/alb-1.jpg"));
+        expect(extractCoverArt).not.toHaveBeenCalled();
+        expect(await storedCover()).toBe("native:albums/alb-1.jpg?v=abc123");
+    });
+
+    it("stores the extracted cover with the version of the picture it saved", async () => {
+        const folder = fs.mkdtempSync(path.join(os.tmpdir(), "kima-scancover-"));
+        try {
+            const bytes = Buffer.from("a picture");
+            fs.writeFileSync(path.join(folder, "alb-1.jpg"), bytes);
+            scanner.coverCachePath = folder;
+            extractCoverArt.mockResolvedValue("alb-1.jpg");
+
+            await ensure();
+
+            const version = createHash("sha1").update(bytes).digest("hex").slice(0, 10);
+            expect(await storedCover()).toBe(`native:alb-1.jpg?v=${version}`);
+        } finally {
+            fs.rmSync(folder, { recursive: true, force: true });
+        }
     });
 
     it("goes looking again when the stored cover file has gone missing", async () => {

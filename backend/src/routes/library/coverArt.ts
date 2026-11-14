@@ -13,18 +13,22 @@ import {
   resizeImageBuffer,
   coverFileForSize,
   resolveInCoversDir,
-  STORED_COVER_CACHE_CONTROL,
+  coverCacheControl,
+  parseStoredCover,
+  readPicture,
 } from "../../services/imageStorage";
 import { sendStoredFile } from "../../utils/sendStoredFile";
 import crypto from "crypto";
 import fs from "fs";
+import path from "path";
 
 /** A picture at another address never changes there, so it is kept for good. */
 const FIXED_PICTURE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 /**
  * Every cover answer's headers: readable from any page (with credentials for a named origin). A picture fetched from
- * another address is cached for good; a stored cover is not (see `STORED_COVER_CACHE_CONTROL`).
+ * another address is cached for good; a stored cover is too when its address carries a version, and is asked about again
+ * each time when it does not (see `coverCacheControl`).
  */
 function coverHeaders(origin: string | undefined, cacheControl = FIXED_PICTURE_CACHE_CONTROL): Record<string, string> {
   return {
@@ -38,11 +42,12 @@ function coverHeaders(origin: string | undefined, cacheControl = FIXED_PICTURE_C
 async function serveNativeImage(
   coverCachePath: string,
   nativePath: string,
+  version: string | null,
   size: string | undefined,
   req: Request,
   res: Response,
 ) {
-  const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin, STORED_COVER_CACHE_CONTROL) };
+  const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin, coverCacheControl(version)) };
 
   // A stored file that cannot be sent (deleted since the caller looked) is a 404, not Express's default error page.
   const send = (file: string) =>
@@ -96,15 +101,16 @@ async function serveAudiobookCover(
     return res.status(404).json({ error: "Audiobook cover art not found" });
   }
 
-  const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-  const contentType = imageResponse.headers.get("content-type");
-
-  if (contentType) {
-    res.setHeader("Content-Type", contentType);
+  const picture = await readPicture(imageResponse);
+  if (!picture) {
+    logger.warn(`[COVER-ART] Audiobook cover ${coverUrl} is over the size cap or no image; not sent`);
+    return res.status(404).json({ error: "Audiobook cover art not found" });
   }
+
+  res.setHeader("Content-Type", picture.contentType);
   res.set(coverHeaders(req.headers.origin));
 
-  return res.send(imageBuffer);
+  return res.send(picture.bytes);
 }
 
 /**
@@ -113,19 +119,21 @@ async function serveAudiobookCover(
  * Kima (never a redirect off-site: the web app's service worker may only fetch Kima itself); otherwise 404.
  * Returns the address to serve, or null once it has answered.
  */
-async function serveStoredCover(nativePath: string, size: string | undefined, req: Request, res: Response): Promise<string | null> {
+async function serveStoredCover(address: string, size: string | undefined, req: Request, res: Response): Promise<string | null> {
+  const { relativePath: nativePath, version } = parseStoredCover(address)!;
   const file = resolveInCoversDir(nativePath);
   if (!file) {
     res.status(400).json({ error: "Invalid cover path" });
     return null;
   }
   if (fs.existsSync(file)) {
-    await serveNativeImage(file, nativePath, size, req, res);
+    await serveNativeImage(file, nativePath, version, size, req, res);
     return null;
   }
 
   logger.warn(`[COVER-ART] Stored cover not found: ${file}, asking the artwork sources`);
-  const albumId = nativePath.replace(".jpg", "");
+  // The file is named for its album, in the covers folder itself (the scanner) or under albums/ (downloaded covers).
+  const albumId = path.basename(nativePath, ".jpg");
   try {
     const album = await prisma.album.findUnique({
       where: { id: albumId },
@@ -138,9 +146,12 @@ async function serveStoredCover(nativePath: string, size: string | undefined, re
         albumTitle: album.title,
       });
       if (found) {
-        // Remembered only on the album whose cover this path is.
+        // Remembered only on the album whose cover this path is, whatever version its address carries.
         await prisma.album.updateMany({
-          where: { id: albumId, coverUrl: `native:${nativePath}` },
+          where: {
+            id: albumId,
+            OR: [{ coverUrl: `native:${nativePath}` }, { coverUrl: { startsWith: `native:${nativePath}?v=` } }],
+          },
           data: { coverUrl: found.url },
         });
         return found.url;
@@ -215,7 +226,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     }
     let coverUrl = address;
     if (address.startsWith("native:")) {
-      const found = await serveStoredCover(address.replace("native:", ""), size, req, res);
+      const found = await serveStoredCover(address, size, req, res);
       if (!found) return;
       coverUrl = found;
     } else if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
@@ -297,8 +308,12 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     }
     logger.debug(`[COVER-ART] Successfully fetched, caching...`);
 
-    const buffer = await imageResponse.arrayBuffer();
-    let imageBuffer: Buffer = Buffer.from(buffer);
+    const picture = await readPicture(imageResponse);
+    if (!picture) {
+      logger.warn(`[COVER-ART] ${coverUrl.substring(0, 100)} is over the size cap or no image; not sent`);
+      return res.status(404).json({ error: "Cover art not found" });
+    }
+    let imageBuffer = picture.bytes;
 
     const requestedWidth = size ? parseInt(size as string, 10) : 0;
     if (requestedWidth > 0) {
@@ -306,7 +321,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     }
 
     const etag = crypto.createHash("md5").update(imageBuffer).digest("hex");
-    const contentType = imageResponse.headers.get("content-type");
+    const contentType = picture.contentType;
 
     try {
       await redisClient.setex(

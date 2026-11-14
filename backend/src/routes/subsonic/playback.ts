@@ -8,13 +8,21 @@ import { isFileGone } from "../../utils/errors";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
-import { firstArtistGenre, mapSong, serveFromTranscodeParams, type SubsonicServe, wrap } from "./mappers";
+import { firstArtistGenre, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
 import { resolveWithinMusicRoot } from "../library/trackPath";
-import { coverFileForSize, resolveInCoversDir } from "../../services/imageStorage";
+import {
+    coverCacheControl,
+    coverFileForSize,
+    coverWidthOf,
+    fetchPicture,
+    parseStoredCover,
+    resizeImageBuffer,
+    resolveInCoversDir,
+} from "../../services/imageStorage";
 import { sendStoredFile } from "../../utils/sendStoredFile";
 import { recordPlay } from "../../services/playRecording";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -235,14 +243,15 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
     const rawId = one(req, "id");
     if (!rawId) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
-    // Strip client-applied prefixes (ar-, al-, tr-)
-    const id = rawId.replace(/^(ar-|al-|tr-)/, "");
+    // Strip the version Kima put after the id (`<id>_<version>`) and any prefix a client applied (ar-, al-, tr-): the
+    // version plays no part in finding the cover, only in how long it may be cached.
+    const { id, prefix, version: idVersion } = splitCoverArtId(rawId);
 
     let coverUrl: string | null = null;
 
     // Clients send any prefix for any entity, so try album, artist and track in
     // turn; `ar-` skips the album lookup.
-    if (!rawId.startsWith("ar-")) {
+    if (prefix !== "ar-") {
         const album = await prisma.album.findUnique({
             where: { id },
             select: { coverUrl: true, userCoverUrl: true },
@@ -278,14 +287,25 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
     }
 
-    // External URLs are publicly accessible — redirect directly
+    // A cover at an outside address is fetched and served as Kima's own (no redirect: an app may not reach that host, and
+    // `size` applies to it as to a stored cover). Its id does not change with the address, so it is cached for a day.
     if (coverUrl.startsWith("http://") || coverUrl.startsWith("https://")) {
-        return res.redirect(302, coverUrl);
+        const picture = await fetchPicture(coverUrl);
+        if (!picture) return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
+        const width = coverWidthOf(one(req, "size"));
+        const scaled = width ? await resizeImageBuffer(picture.bytes, width) : picture.bytes;
+        res.set({
+            "Content-Type": scaled === picture.bytes ? picture.contentType : "image/jpeg",
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+        });
+        return res.send(scaled);
     }
 
     // Native paths use "native:" prefix; resolve against the covers cache directory
-    if (coverUrl.startsWith("native:")) {
-        const nativePath = coverUrl.slice("native:".length);
+    const stored = parseStoredCover(coverUrl);
+    if (stored) {
+        const nativePath = stored.relativePath;
         if (!nativePath) {
             return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
         }
@@ -305,7 +325,9 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
 
         const ext = path.extname(file).toLowerCase();
         const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-        const headers = { "Content-Type": contentType, "Cache-Control": "public, max-age=86400", "Access-Control-Allow-Origin": "*" };
+        // Immutable for the id that names the cover as it is now; a day for an id without a version or with an older one.
+        const cacheControl = idVersion && idVersion === stored.version ? coverCacheControl(idVersion) : "public, max-age=86400";
+        const headers = { "Content-Type": contentType, "Cache-Control": cacheControl, "Access-Control-Allow-Origin": "*" };
         return sendStoredFile(res, file, { headers }, () => void subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art file not found"));
     }
 
@@ -448,7 +470,7 @@ playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
 
 // ===================== LYRICS =====================
 
-/** The most songs one getLyrics weighs: those spelled exactly as asked first, then those with lyrics, then the smallest ids. */
+/** The most songs one getLyrics weighs: those with lyrics first, then those spelled exactly as asked, then the smallest ids. */
 const LYRICS_CANDIDATES_MAX = 200;
 
 playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
@@ -481,19 +503,21 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
          WHERE ${playableSongSql("t", "al")}
            ${title ? Prisma.sql`AND ${containsAccentBlindSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
            ${artistIds ? Prisma.sql`AND al."artistId" = ANY(${artistIds}::text[])` : Prisma.empty}
-         ORDER BY ${title ? Prisma.sql`(lower(unaccent(t.title)) = ${accentBlind(title)} OR lower(unaccent(t."displayTitle")) = ${accentBlind(title)}) DESC,` : Prisma.empty}
-                  (tl.track_id IS NOT NULL) DESC, t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
+         ORDER BY (tl.track_id IS NOT NULL) DESC,
+                  ${title ? Prisma.sql`(lower(unaccent(t.title)) = ${accentBlind(title)} OR lower(unaccent(t."displayTitle")) = ${accentBlind(title)}) DESC,` : Prisma.empty}
+                  t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
 
-    // The best match: a song whose title, as shown or in the file, is the one asked for (the same name as far as case,
-    // accents and apostrophes go) before one that only holds it ("tune" is not "tune extended"), then one with lyrics,
-    // then the smallest id. Lyrics never come from a song other than the best match, so an exact song with none answers
-    // empty rather than another song's words.
+    // The best match: a song with lyrics before one without (a client asks for words, so an exact title with none does
+    // not hide a song that has them), then a song whose title, as shown or in the file, is the one asked for (the same
+    // name as far as case, accents and apostrophes go) before one that only holds it ("tune" is not "tune extended"),
+    // then the smallest id. Lyrics never come from a song other than the best match, so when no candidate has any the
+    // answer is empty.
     const exact = (t: { title: string; displayTitle: string | null }) =>
         title ? sameName(t.displayTitle, title) || sameName(t.title, title) : false;
     const [best] = hits.sort(
         (x, y) =>
-            Number(exact(y)) - Number(exact(x)) ||
             Number(y.hasLyrics) - Number(x.hasLyrics) ||
+            Number(exact(y)) - Number(exact(x)) ||
             (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
     );
     if (!best?.hasLyrics) return subsonicOk(req, res, { lyrics: {} });

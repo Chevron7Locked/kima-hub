@@ -8,7 +8,7 @@ import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
-import { coverFileForSize, getLocalImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { coverCacheControl, coverFileForSize, getLocalImagePath, parseStoredCover } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
 import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
@@ -155,17 +155,18 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
         }
 
         const localPath = getLocalImagePath(coverArtId);
-        if (!localPath) {
+        const stored = parseStoredCover(coverArtId);
+        if (!localPath || !stored) {
             return res.status(404).json({ error: "Cover art not found" });
         }
 
         // The same width limits and stored-copy rules as the library cover route: a copy older than its cover is made again.
-        const file = await coverFileForSize(localPath, coverArtId.slice("native:".length), size);
+        const file = await coverFileForSize(localPath, stored.relativePath, size);
 
         return sendStoredFile(
             res,
             file,
-            { headers: { "Content-Type": "image/jpeg", "Cache-Control": STORED_COVER_CACHE_CONTROL } },
+            { headers: { "Content-Type": "image/jpeg", "Cache-Control": coverCacheControl(stored.version) } },
             () => void res.status(404).json({ error: "Cover art not found" }),
         );
     } catch (error: any) {

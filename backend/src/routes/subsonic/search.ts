@@ -18,6 +18,7 @@ export const searchRouter = Router();
 const SONG_COLUMNS = Prisma.sql`
     t.id, t.title, t."displayTitle", t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
     al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
+    al."coverUrl" AS "albumCoverUrl", al."userCoverUrl" AS "albumUserCoverUrl",
     ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
     ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"`;
 const SONG_FROM = Prisma.sql`"Track" t JOIN "Album" al ON t."albumId" = al.id JOIN "Artist" ar ON al."artistId" = ar.id`;
@@ -37,6 +38,8 @@ type SongRow = {
     albumTitle: string;
     albumDisplayTitle: string | null;
     albumYear: number | null;
+    albumCoverUrl: string | null;
+    albumUserCoverUrl: string | null;
     artistId: string;
     artistName: string;
     artistDisplayName: string | null;
@@ -57,7 +60,14 @@ function songOf(row: SongRow) {
             mime: row.mime,
             fileSize: row.fileSize,
         },
-        { id: row.albumId, title: row.albumTitle, displayTitle: row.albumDisplayTitle, year: row.albumYear },
+        {
+            id: row.albumId,
+            title: row.albumTitle,
+            displayTitle: row.albumDisplayTitle,
+            year: row.albumYear,
+            coverUrl: row.albumCoverUrl,
+            userCoverUrl: row.albumUserCoverUrl,
+        },
         row.artistDisplayName || row.artistName,
         row.artistId,
         firstArtistGenre(row.artistGenres, row.artistUserGenres),

@@ -32,6 +32,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { repairCoverFormatsOnce } from "../coverFormatRepair";
+import { versionOfFile } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(30_000);
@@ -287,7 +288,7 @@ describe("an old artist picture saved as .png or .webp", () => {
 
         expect(result).toMatchObject({ artistPicturesConverted: 1, failed: 0 });
         expect(await formatOf(path.join(artists, `${P}_a.jpg`))).toBe("jpeg");
-        expect(await hero("a")).toBe(`native:artists/${P}_a.jpg`);
+        expect(await hero("a")).toBe(`native:artists/${P}_a.jpg?v=${await versionOfFile(path.join(artists, `${P}_a.jpg`))}`);
         expect(fs.readdirSync(artists)).toEqual([`${P}_a.jpg`]);
         expect(await marker()).not.toBeNull();
     });
@@ -300,7 +301,7 @@ describe("an old artist picture saved as .png or .webp", () => {
 
         await repairCoverFormatsOnce({});
 
-        expect(await hero("b")).toBe(`native:artists/${P}_b.jpg`);
+        expect(await hero("b")).toBe(`native:artists/${P}_b.jpg?v=${await versionOfFile(path.join(artists, `${P}_b.jpg`))}`);
         expect(await hero("other")).toBe(`native:artists/${P}_other.jpg`);
         expect(await hero("remote")).toBe("https://img.example/x.jpg");
     });
@@ -317,7 +318,7 @@ describe("an old artist picture saved as .png or .webp", () => {
         expect(fs.readdirSync(artists)).toEqual([`${P}_c.jpg`]);
         expect(await formatOf(path.join(artists, `${P}_c.jpg`))).toBe("jpeg");
         expect(fs.readFileSync(path.join(artists, `${P}_c.jpg`)).equals(olderJpeg)).toBe(false);
-        expect(await hero("c")).toBe(`native:artists/${P}_c.jpg`);
+        expect(await hero("c")).toBe(`native:artists/${P}_c.jpg?v=${await versionOfFile(path.join(artists, `${P}_c.jpg`))}`);
     });
 
     it("is removed when no row points at it and the artist's .jpg stands; the .jpg is left as it is", async () => {
@@ -394,7 +395,7 @@ describe("an old artist picture saved as .png or .webp", () => {
 
         jest.restoreAllMocks();
         expect(await repairCoverFormatsOnce({})).toMatchObject({ artistPicturesConverted: 1, failed: 0 });
-        expect(await hero("i")).toBe(`native:artists/${P}_i.jpg`);
+        expect(await hero("i")).toBe(`native:artists/${P}_i.jpg?v=${await versionOfFile(path.join(artists, `${P}_i.jpg`))}`);
         expect(await marker()).not.toBeNull();
     });
 

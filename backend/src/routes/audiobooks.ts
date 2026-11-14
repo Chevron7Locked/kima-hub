@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import * as fs from "fs";
 import { logger } from "../utils/logger";
 import { safeError, UserFacingError } from "../utils/errors";
@@ -10,7 +10,7 @@ import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
 import { artistSortName } from "../services/artistIdentity";
 import { upstreamHeader } from "../utils/upstreamHeaders";
-import { STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { audiobookCoverAddress, coverCacheControl, readPicture } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
 import { runAsRequestWork } from "../utils/stopCheck";
 import type { Audiobook, AudiobookProgress } from "@prisma/client";
@@ -71,12 +71,9 @@ function toAudiobookDto(book: Audiobook, progress: AudiobookProgress | null) {
         author: book.author || "Unknown Author",
         narrator: book.narrator,
         description: book.description,
-        // The /audiobooks/:id/cover endpoint finds the file on disk even when
-        // localCoverPath is not set.
-        coverUrl:
-            book.localCoverPath || book.coverUrl
-                ? `/audiobooks/${book.id}/cover`
-                : null,
+        // The cover route finds the file on disk even when localCoverPath is not set. The address carries a version,
+        // so a cover that changed is a new address and the old one can be kept for good.
+        coverUrl: audiobookCoverAddress(book),
         duration: book.duration || 0,
         libraryId: book.libraryId,
         series: book.series
@@ -343,9 +340,9 @@ router.get(
 
 /**
  * OPTIONS /audiobooks/:id/cover
- * Handle CORS preflight request for cover images
+ * Handle CORS preflight request for cover images. The address may end in the cover's version.
  */
-router.options("/:id/cover", (req, res) => {
+router.options("/:id/cover/:version([A-Za-z0-9_-]+)?", (req, res) => {
     const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
     if (origin) {
         res.setHeader("Access-Control-Allow-Origin", origin);
@@ -357,14 +354,50 @@ router.options("/:id/cover", (req, res) => {
     res.status(204).end();
 });
 
+/** Answers with the cover Audiobookshelf holds, read capped and only as an image, or with the route's 404. */
+async function proxyAudiobookshelfCover(req: Request, res: Response, id: string, coverUrl: string | null | undefined): Promise<void> {
+    const notFound = () => void res.status(404).json({ error: "Cover not found" });
+    const settings = coverUrl ? await getSystemSettings() : null;
+    if (!coverUrl || !settings?.audiobookshelfUrl || !settings?.audiobookshelfApiKey) return notFound();
+
+    const baseUrl = settings.audiobookshelfUrl.replace(/\/$/, "");
+    try {
+        const response = await fetch(`${baseUrl}/api/${coverUrl}`, {
+            headers: { Authorization: `Bearer ${settings.audiobookshelfApiKey}` },
+        });
+        if (!response.ok) {
+            await response.body?.cancel().catch(() => undefined);
+            return notFound();
+        }
+        const picture = await readPicture(response);
+        if (!picture) {
+            logger.warn(`[Audiobook Cover] Audiobookshelf's cover for ${id} is no image or is over the size cap`);
+            return notFound();
+        }
+        const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
+        res.setHeader("Content-Type", picture.contentType);
+        res.setHeader("Cache-Control", "public, max-age=86400"); // 24 hours for proxied
+        if (origin) {
+            res.setHeader("Access-Control-Allow-Origin", origin);
+            res.setHeader("Access-Control-Allow-Credentials", "true");
+        }
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        res.send(picture.bytes);
+    } catch (proxyError: any) {
+        logger.error(`[Audiobook Cover] Proxy error for ${id}:`, proxyError.message);
+        notFound();
+    }
+}
+
 /**
- * GET /audiobooks/:id/cover
- * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
+ * GET /audiobooks/:id/cover[/:version]
+ * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached.
+ * The version only makes the address new when the cover changes: the file is found without it.
  * NO RATE LIMITING - These are static files served from disk with aggressive caching
  */
-router.get("/:id/cover", async (req, res) => {
+router.get("/:id/cover/:version([A-Za-z0-9_-]+)?", async (req, res) => {
     try {
-        const { id } = req.params;
+        const { id, version } = req.params;
         // This route is unauthenticated and `id` names a file below, so it must be a plain id.
         if (!/^[A-Za-z0-9_-]+$/.test(id)) {
             return res.status(404).json({ error: "Cover not found" });
@@ -401,58 +434,24 @@ router.get("/:id/cover", async (req, res) => {
         const resolvedCover = coverPath
             ? resolveWithinMusicRoot(coverPath)
             : null;
-        if (resolvedCover && fs.existsSync(resolvedCover)) {
+        if (resolvedCover) {
             const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
-            // The cover keeps its address when it changes, so clients ask again each time (see `STORED_COVER_CACHE_CONTROL`).
-            // Headers go through the send, so a file that is gone answers a plain 404 without them.
+            // Headers go through the send, so a file that is gone is answered by the fallback without them.
             const headers: Record<string, string> = {
-                "Cache-Control": STORED_COVER_CACHE_CONTROL,
+                "Cache-Control": coverCacheControl(version ?? null),
                 "Cross-Origin-Resource-Policy": "cross-origin",
             };
             if (origin) {
                 headers["Access-Control-Allow-Origin"] = origin;
                 headers["Access-Control-Allow-Credentials"] = "true";
             }
-            return sendStoredFile(res, resolvedCover, { headers }, () => void res.status(404).json({ error: "Cover not found" }));
+            return sendStoredFile(res, resolvedCover, { headers }, () => {
+                proxyAudiobookshelfCover(req, res, id, audiobook?.coverUrl).catch((error) => safeError(res, "Failed to serve cover", error));
+            });
         }
 
-        // Fallback: proxy from Audiobookshelf if coverUrl is available
-        if (audiobook?.coverUrl) {
-            const settings = await getSystemSettings();
-
-            if (settings?.audiobookshelfUrl && settings?.audiobookshelfApiKey) {
-                const baseUrl = settings.audiobookshelfUrl.replace(/\/$/, "");
-                const coverApiUrl = `${baseUrl}/api/${audiobook.coverUrl}`;
-                
-                try {
-                    const response = await fetch(coverApiUrl, {
-                        headers: {
-                            Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
-                        },
-                    });
-                    
-                    if (response.ok) {
-                        const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
-                        res.setHeader("Content-Type", response.headers.get("content-type") || "image/jpeg");
-                        res.setHeader("Cache-Control", "public, max-age=86400"); // 24 hours for proxied
-                        if (origin) {
-                            res.setHeader("Access-Control-Allow-Origin", origin);
-                            res.setHeader("Access-Control-Allow-Credentials", "true");
-                        }
-                        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-                        
-                        // Stream the response body to client
-                        const buffer = await response.arrayBuffer();
-                        return res.send(Buffer.from(buffer));
-                    }
-                } catch (proxyError: any) {
-                    logger.error(`[Audiobook Cover] Proxy error for ${id}:`, proxyError.message);
-                }
-            }
-        }
-
-        // No cover available
-        return res.status(404).json({ error: "Cover not found" });
+        // Audiobookshelf's copy, if it holds one; otherwise there is no cover.
+        return await proxyAudiobookshelfCover(req, res, id, audiobook?.coverUrl);
     } catch (error) {
         safeError(res, "Failed to serve cover", error);
     }
@@ -511,10 +510,7 @@ router.get("/:id", async (req, res) => {
             author: audiobook.author || "Unknown Author",
             narrator: audiobook.narrator,
             description: audiobook.description,
-            coverUrl:
-                audiobook.localCoverPath || audiobook.coverUrl
-                    ? `/audiobooks/${audiobook.id}/cover`
-                    : null,
+            coverUrl: audiobookCoverAddress(audiobook),
             duration: audiobook.duration || 0,
             tracks,
             sections,

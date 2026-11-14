@@ -2,7 +2,7 @@
  * What the shown-names work (ticket 94) left over, on the real routers and the suite database:
  * - getGenres counts a genre's albums and songs from the songs that play, as every other Subsonic list does, not from
  *   the artist's cached counts.
- * - getLyrics answers with the best match: the exact title as shown first, then a song that has lyrics, then id.
+ * - getLyrics answers with the best match: a song that has lyrics first, then the exact title as shown, then id.
  * - A playlist import finds an artist by the name shown too.
  * - getLyrics finds a title apart from accents ("cafe" finds "Café"), as the rest of the import and the name keys fold.
  * - A playlist import's title and album checks fold case, accents and punctuation like the rest of the import.
@@ -125,6 +125,9 @@ beforeAll(async () => {
             { id: `${P}-lyr-b0`, songs: [{ id: `${P}-lyr-b0s`, title: `${P} zeta shown extra`, lyrics: "the extra lyrics" }] },
             { id: `${P}-lyr-b1`, songs: [{ id: `${P}-lyr-b1s`, title: `${P} zeta file`, shown: `${P} zeta shown`, lyrics: "the shown lyrics" }] },
             { id: `${P}-lyr-c`, songs: [{ id: `${P}-lyr-cs`, title: `${P} mute` }] },
+            // The exact title has the smaller id and no lyrics; the longer one holds the words.
+            { id: `${P}-lyr-f`, songs: [{ id: `${P}-lyr-fs`, title: `${P} ballad` }] },
+            { id: `${P}-lyr-g`, songs: [{ id: `${P}-lyr-gs`, title: `${P} ballad reprise`, lyrics: "the reprise lyrics" }] },
             { id: `${P}-lyr-d`, songs: [{ id: `${P}-lyr-ds`, title: `${P} Café Tune`, lyrics: "the café lyrics" }, { id: `${P}-lyr-es`, title: `${P} plain song`, lyrics: "the plain lyrics" }] },
         ],
     });
@@ -162,7 +165,7 @@ describe("getGenres counts what plays", () => {
 describe("getLyrics picks the best match", () => {
     const lyricsOf = async (query: Record<string, string>) => (await ask("getLyrics", query)).lyrics;
 
-    it("takes the exact title over a longer one that holds it, and a song with lyrics over one without", async () => {
+    it("takes a song with lyrics, then the exact title over a longer one that holds it", async () => {
         // Four songs hold "tune": the longer title (smallest id, has lyrics), then two exact ones, the first with none.
         expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} tune` })).toMatchObject({ value: "the tune lyrics" });
     });
@@ -182,7 +185,11 @@ describe("getLyrics picks the best match", () => {
         expect(await lyricsOf({ artist: `${P} lyricband and friends`, title: `${P} tune` })).toMatchObject({ value: "the friends lyrics" });
     });
 
-    it("answers empty when the exact match has no lyrics, rather than another song's lyrics", async () => {
+    it("prefers a song that has lyrics over an exact title that has none", async () => {
+        expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} ballad` })).toMatchObject({ value: "the reprise lyrics" });
+    });
+
+    it("answers empty when no song that holds the title has lyrics", async () => {
         expect(await lyricsOf({ artist: `${P} lyricband`, title: `${P} mute` })).toEqual({});
     });
 

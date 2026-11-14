@@ -61,7 +61,7 @@ describe("storing a cover drops its smaller copies", () => {
         put(path.join(albums, "a1_w100.jpg.1.abc.part"), "a write in progress");
         put(path.join(artistsDir, "a1_w100.jpg"), "same id, other folder");
 
-        expect(await storeAsJpeg(path.join(albums, "a1.jpg"), await wide(3))).toBe(true);
+        expect(await storeAsJpeg(path.join(albums, "a1.jpg"), await wide(3))).toMatch(/^[0-9a-f]{10}$/);
 
         expect(fs.readdirSync(albums).sort()).toEqual([
             "a1.jpg",
@@ -78,7 +78,7 @@ describe("storing a cover drops its smaller copies", () => {
         put(path.join(albums, "a1.jpg"), await wide(1));
         put(path.join(albums, "a1_w100.jpg"), "copy");
 
-        expect(await storeAsJpeg(path.join(albums, "a1.jpg"), Buffer.alloc(2000, 7))).toBe(false);
+        expect(await storeAsJpeg(path.join(albums, "a1.jpg"), Buffer.alloc(2000, 7))).toBeNull();
 
         expect(fs.existsSync(path.join(albums, "a1_w100.jpg"))).toBe(true);
     });
@@ -114,7 +114,7 @@ describe("storing a cover drops its smaller copies", () => {
             new Response(new Uint8Array(await wide(2)), { status: 200, headers: { "content-type": "image/jpeg" } }),
         );
 
-        expect(await downloadAndStoreImage("https://example.org/c.jpg", "d1", "album")).toBe("native:albums/d1.jpg");
+        expect(await downloadAndStoreImage("https://example.org/c.jpg", "d1", "album")).toMatch(/^native:albums\/d1\.jpg\?v=[0-9a-f]{10}$/);
 
         expect(fs.readdirSync(albums)).toEqual(["d1.jpg"]);
     });
@@ -124,7 +124,7 @@ describe("storing a cover drops its smaller copies", () => {
         put(path.join(artistsDir, "ar1_w300.jpg"), "old copy");
         put(path.join(music, "Band", "artist.jpg"), await wide(2));
 
-        expect(await findLocalArtistImage(music, path.join("Band", "Album", "01.flac"), "ar1")).toBe("native:artists/ar1.jpg");
+        expect(await findLocalArtistImage(music, path.join("Band", "Album", "01.flac"), "ar1")).toMatch(/^native:artists\/ar1\.jpg\?v=[0-9a-f]{10}$/);
 
         expect(fs.readdirSync(artistsDir)).toEqual(["ar1.jpg"]);
     });

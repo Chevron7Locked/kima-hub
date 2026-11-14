@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
+import { parseStoredCover } from "./imageStorage";
 
 const albumTrackFields = {
     id: true,
@@ -58,7 +59,12 @@ export async function shareHoldsCover(share: { entityType: string; entityId: str
         : entityType === "playlist" ? { tracks: { some: { ...PLAYABLE_SONG, playlistItems: { some: { playlistId: entityId } } } } }
         : null;
     if (!holds) return false;
-    const album = await prisma.album.findFirst({ where: { coverUrl: coverArtId, ...holds }, select: { id: true } });
+    // The cover's file, whatever version either address carries: a page loaded before the cover was stored again still asks by the old one.
+    const stored = parseStoredCover(coverArtId);
+    const sameCover: Prisma.AlbumWhereInput = stored
+        ? { OR: [{ coverUrl: `native:${stored.relativePath}` }, { coverUrl: { startsWith: `native:${stored.relativePath}?v=` } }] }
+        : { coverUrl: coverArtId };
+    const album = await prisma.album.findFirst({ where: { AND: [sameCover, holds] }, select: { id: true } });
     return album !== null;
 }
 

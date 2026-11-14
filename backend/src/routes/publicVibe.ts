@@ -17,7 +17,7 @@ import { latestLibraryExport } from "../services/publicLibraryExport";
 import { getLiveState, liveListenerCount, publicUserId, subscribeLive, LiveEvent } from "../services/liveListening";
 import { searchTracksByText, TextSearchRow } from "../services/textEmbeddingBridge";
 import { findAlbumArtwork } from "../services/artwork";
-import { getLocalImagePath } from "../services/imageStorage";
+import { getLocalImagePath, readPicture } from "../services/imageStorage";
 import { parseLimit } from "./library/paging";
 
 const TRACK_ID_RE = /^c[a-z0-9]{16,30}$/;
@@ -89,13 +89,17 @@ async function resolveCoverBytes(trackId: string): Promise<CoverBytes | null> {
         headers: { "User-Agent": USER_AGENT },
         signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS),
     }).catch(() => null);
-    if (response?.status !== 200) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return {
-        buffer,
-        etag: etagFor(buffer),
-        contentType: response.headers.get("content-type"),
-    };
+    if (response?.status !== 200) {
+        await response?.body?.cancel().catch(() => undefined);
+        return null;
+    }
+    // Read capped and only as an image: a source's reply is not trusted to be a picture or a sane size.
+    const picture = await readPicture(response).catch(() => null);
+    if (!picture) {
+        logger.warn(`[PublicVibe] A cover source's reply for ${trackId} is no image or is over the size cap`);
+        return null;
+    }
+    return { buffer: picture.bytes, etag: etagFor(picture.bytes), contentType: picture.contentType };
 }
 
 const gunzipAsync = promisify(zlib.gunzip);

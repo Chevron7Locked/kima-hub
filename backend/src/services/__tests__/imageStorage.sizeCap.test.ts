@@ -127,8 +127,8 @@ describe("a downloaded picture at the cap's edge", () => {
             ),
         );
 
-        expect(await downloadAndStoreImage("https://example.org/a.jpg", "ok1", "album")).toBe("native:albums/ok1.jpg");
-        expect(await downloadAndStoreImage("https://example.org/b.jpg", "ok2", "album")).toBe("native:albums/ok2.jpg");
+        expect(await downloadAndStoreImage("https://example.org/a.jpg", "ok1", "album")).toMatch(/^native:albums\/ok1\.jpg\?v=[0-9a-f]{10}$/);
+        expect(await downloadAndStoreImage("https://example.org/b.jpg", "ok2", "album")).toMatch(/^native:albums\/ok2\.jpg\?v=[0-9a-f]{10}$/);
 
         expect(fs.readFileSync(path.join(albums, "ok1.jpg")).equals(jpeg)).toBe(true);
         expect(fs.readFileSync(path.join(albums, "ok2.jpg")).equals(jpeg)).toBe(true);
@@ -153,7 +153,7 @@ describe("a local artist picture over the cap", () => {
         fs.writeFileSync(path.join(music, "Band", "folder.jpg"), jpeg);
         const read = jest.spyOn(fs.promises, "readFile");
 
-        expect(await findLocalArtistImage(music, trackPath, "ar1")).toBe("native:artists/ar1.jpg");
+        expect(await findLocalArtistImage(music, trackPath, "ar1")).toMatch(/^native:artists\/ar1\.jpg\?v=[0-9a-f]{10}$/);
 
         expect(read.mock.calls.some((c) => String(c[0]).endsWith("artist.jpg"))).toBe(false);
         expect(fs.readFileSync(path.join(artistsDir, "ar1.jpg")).equals(jpeg)).toBe(true);

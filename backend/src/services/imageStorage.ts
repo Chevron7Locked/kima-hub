@@ -2,7 +2,7 @@
 
 import { fetchChecked } from "../utils/ssrf";
 import fs from "fs";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import path from "path";
 import { logger } from "../utils/logger";
 import { config, USER_AGENT } from "../config";
@@ -14,10 +14,53 @@ const ALBUM_IMAGES_DIR = "albums";
 export const MAX_PICTURE_BYTES = 20 * 1024 * 1024;
 
 /**
- * What a stored cover is served with. A stored cover keeps the same address when it changes (`native:albums/<id>.jpg`),
- * so clients ask again each time (answered 304 while unchanged) rather than holding a copy for good.
+ * What a stored cover is served with. An address that carries a version (`native:albums/<id>.jpg?v=<version>`) names one
+ * picture for good, because a changed cover is stored under a new version, so clients keep it for a year. An address with
+ * none (stored before versions) can still change under it, so clients ask again each time (answered 304 while unchanged).
  */
-export const STORED_COVER_CACHE_CONTROL = "public, no-cache";
+export function coverCacheControl(version: string | null): string {
+    return version ? "public, max-age=31536000, immutable" : "public, no-cache";
+}
+
+/** A short digest of a stored cover's bytes: it changes when the picture does, and not when the same picture is stored again. */
+function coverVersion(bytes: Buffer): string {
+    return createHash("sha1").update(bytes).digest("hex").slice(0, 10);
+}
+
+/** The version of the cover stored at `filePath` as it is now, or null when the file cannot be read. */
+export async function versionOfFile(filePath: string): Promise<string | null> {
+    try {
+        return coverVersion(await fs.promises.readFile(filePath));
+    } catch {
+        return null;
+    }
+}
+
+const VERSION_SUFFIX = /\?v=([A-Za-z0-9_-]{1,64})$/;
+
+/** The address of a stored cover: its path under the covers folder, then its version when it has one. */
+export function storedCoverValue(relativePath: string, version: string | null): string {
+    return version ? `native:${relativePath}?v=${version}` : `native:${relativePath}`;
+}
+
+/**
+ * A stored cover's address as its path under the covers folder and its version (null for an address stored before
+ * versions), or null when it is not a stored cover's address. The version plays no part in finding the file.
+ */
+export function parseStoredCover(value: string | null | undefined): { relativePath: string; version: string | null } | null {
+    if (!value?.startsWith("native:")) return null;
+    const rest = value.slice("native:".length);
+    const match = VERSION_SUFFIX.exec(rest);
+    return match ? { relativePath: rest.slice(0, match.index), version: match[1] } : { relativePath: rest, version: null };
+}
+
+/**
+ * The address clients load an audiobook's cover from, or null when the book has none. Its version is the time of the
+ * book's last sync, the one place its cover is stored anew, so the address changes when the cover can have.
+ */
+export function audiobookCoverAddress(book: { id: string; localCoverPath: string | null; coverUrl: string | null; lastSyncedAt: Date }): string | null {
+    return book.localCoverPath || book.coverUrl ? `/audiobooks/${book.id}/cover/${book.lastSyncedAt.getTime().toString(36)}` : null;
+}
 
 /** The folder stored covers live in, beside the transcode cache. */
 export function coversBasePath(): string {
@@ -138,15 +181,16 @@ async function writeAtomically(filePath: string, bytes: Buffer, readAs?: FileVer
 }
 
 /**
- * The one way a stored picture is written: `bytes` as a JPEG (converted unless already one), atomically. Answers false
- * and writes nothing when the bytes are no picture; throws when the write fails, leaving no partial file.
+ * The one way a stored picture is written: `bytes` as a JPEG (converted unless already one), atomically. Answers the
+ * stored picture's version, and null (writing nothing) when the bytes are no picture; throws when the write fails,
+ * leaving no partial file.
  */
-export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<boolean> {
+export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<string | null> {
     const picture = await asJpeg(bytes);
-    if (!picture) return false;
+    if (!picture) return null;
     await writeAtomically(filePath, picture);
     await dropResizedCopies(filePath);
-    return true;
+    return coverVersion(picture);
 }
 
 /**
@@ -195,6 +239,42 @@ export async function readCapped(response: Response): Promise<Buffer | null> {
 }
 
 /**
+ * A picture a route proxies from another host: its bytes (read through `readCapped`) and its `image/*` type, without
+ * parameters. Null when it is over the cap or the host named no image type, so the route answers not found rather than
+ * send a stranger's page or an unbounded body to a browser under Kima's address.
+ */
+export async function readPicture(response: Response): Promise<{ bytes: Buffer; contentType: string } | null> {
+    const contentType = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+    if (!contentType) {
+        await response.body?.cancel().catch(() => undefined);
+        return null;
+    }
+    const bytes = await readCapped(response);
+    return bytes ? { bytes, contentType } : null;
+}
+
+/**
+ * A picture at an outside address, for a route that serves it as its own: fetched through the address guard with a time
+ * limit and read as `readPicture` does. Null (with a warning) when the host cannot be reached or refuses, answers with
+ * an error, is over the size cap or names no image type.
+ */
+export async function fetchPicture(url: string, timeoutMs = 15_000): Promise<{ bytes: Buffer; contentType: string } | null> {
+    try {
+        const response = await fetchChecked(url, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
+        if (response.status !== 200) {
+            await response.body?.cancel().catch(() => undefined);
+            return null;
+        }
+        const picture = await readPicture(response);
+        if (!picture) logger.warn(`[ImageStorage] The reply from ${url.substring(0, 100)} is no image or is over the size cap`);
+        return picture;
+    } catch (err) {
+        logger.warn(`[ImageStorage] Could not fetch ${url.substring(0, 100)}: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+    }
+}
+
+/**
  * Replaces a stored file with its bytes as a JPEG, unless the file was written to since `readAs` (its time and size
  * when `bytes` were read): then the newer write stands and nothing changes. Otherwise as `storeAsJpeg`.
  */
@@ -210,7 +290,7 @@ export async function replaceWithJpeg(
 
 /**
  * Download an image from URL and save locally, as a JPEG
- * Returns the native path (e.g., "native:artists/artistId.jpg") or null on failure
+ * Returns the stored cover's address (e.g., "native:artists/artistId.jpg?v=<version>") or null on failure
  */
 export async function downloadAndStoreImage(
     url: string,
@@ -258,13 +338,14 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        if (!(await storeAsJpeg(filePath, buffer))) {
+        const version = await storeAsJpeg(filePath, buffer);
+        if (!version) {
             logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
             return null;
         }
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
-        return `native:${subdir}/${filename}`;
+        return storedCoverValue(`${subdir}/${filename}`, version);
     } catch (error: any) {
         logger.debug(`[ImageStorage] Download failed: ${error.message}`);
         return null;
@@ -276,9 +357,10 @@ export async function downloadAndStoreImage(
  * a native path, escapes the covers directory, or points at no file.
  */
 export function getLocalImagePath(nativePath: string): string | null {
-    if (!nativePath.startsWith("native:")) return null;
+    const cover = parseStoredCover(nativePath);
+    if (!cover) return null;
 
-    const fullPath = resolveInCoversDir(nativePath.replace("native:", ""));
+    const fullPath = resolveInCoversDir(cover.relativePath);
     return fullPath && fs.existsSync(fullPath) ? fullPath : null;
 }
 
@@ -322,12 +404,13 @@ async function checkLocalArtistImage(
             if (lstat.isFile() && lstat.size > 1000) {
                 const dirPath = ensureCoversDir(ARTIST_IMAGES_DIR);
                 const stored = `${artistId}.jpg`;
-                if (!(await storeAsJpeg(path.join(dirPath, stored), await fs.promises.readFile(filePath)))) {
+                const version = await storeAsJpeg(path.join(dirPath, stored), await fs.promises.readFile(filePath));
+                if (!version) {
                     logger.debug(`[ImageStorage] Not a readable picture: ${filePath}`);
                     continue;
                 }
                 logger.debug(`[ImageStorage] Local artist image found: ${filePath}`);
-                return `native:${ARTIST_IMAGES_DIR}/${stored}`;
+                return storedCoverValue(`${ARTIST_IMAGES_DIR}/${stored}`, version);
             }
         } catch {
             // Most candidate names do not exist, and a file that cannot be read or stored is passed over; try the next.
@@ -394,11 +477,17 @@ export async function resizeImageBuffer(
  * Format: {basePath}/{subdir}/{id}_w{width}.jpg
  */
 export function getResizedImagePath(nativePath: string, width: number): string | null {
-    if (!nativePath.startsWith("native:")) return null;
+    const cover = parseStoredCover(nativePath);
+    if (!cover) return null;
 
-    const relativePath = nativePath.replace("native:", "");
-    const parsed = path.parse(relativePath);
+    const parsed = path.parse(cover.relativePath);
     return resolveInCoversDir(path.join(parsed.dir, `${parsed.name}_w${width}.jpg`));
+}
+
+/** The width a client's `size` (the raw query value) asks for: a whole number from 16 to 2048, else null (the whole picture). */
+export function coverWidthOf(size: string | undefined): number | null {
+    const width = size ? parseInt(size, 10) : 0;
+    return width >= 16 && width <= 2048 ? width : null;
 }
 
 /**
@@ -407,8 +496,8 @@ export function getResizedImagePath(nativePath: string, width: number): string |
  * a stored cover. A copy that cannot be made leaves the cover itself, with a warning.
  */
 export async function coverFileForSize(coverPath: string, relativePath: string, size: string | undefined): Promise<string> {
-    const width = size ? parseInt(size, 10) : 0;
-    if (!(width >= 16 && width <= 2048)) return coverPath;
+    const width = coverWidthOf(size);
+    if (!width) return coverPath;
     try {
         return await coverFileForWidth(coverPath, relativePath, width);
     } catch (err) {

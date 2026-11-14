@@ -1,0 +1,204 @@
+/**
+ * A stored cover's address carries a version set when the cover is stored: a short digest of the bytes, so it changes when
+ * the picture does and not when the same picture is stored again. The address still finds its file without the version,
+ * and an address without one (stored before versions) still works. Real files in a temp folder.
+ */
+
+import { randomBytes } from "crypto";
+import fs from "fs";
+import path from "path";
+
+const ROOT = `/tmp/kima-test-coververs-${process.pid}`;
+
+jest.mock("../../config", () => ({
+    config: { music: { transcodeCachePath: `/tmp/kima-test-coververs-${process.pid}/transcode` } },
+    USER_AGENT: "Kima/test",
+}));
+jest.mock("../../utils/ssrf", () => ({ fetchChecked: jest.fn() }));
+
+import { fetchChecked } from "../../utils/ssrf";
+import {
+    audiobookCoverAddress,
+    coverCacheControl,
+    downloadAndStoreImage,
+    findLocalArtistImage,
+    getLocalImagePath,
+    getResizedImagePath,
+    MAX_PICTURE_BYTES,
+    nativeFileExists,
+    parseStoredCover,
+    readPicture,
+    storeAsJpeg,
+    storedCoverValue,
+    versionOfFile,
+} from "../imageStorage";
+
+const albums = path.join(ROOT, "covers", "albums");
+const music = path.join(ROOT, "music");
+const VERSION = /^[0-9a-f]{10}$/;
+
+async function picture(seed: number): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    const noise = randomBytes(300 * 300 * 3);
+    noise.fill(seed, 0, 3);
+    return sharp(noise, { raw: { width: 300, height: 300, channels: 3 } }).jpeg().toBuffer();
+}
+
+afterEach(() => {
+    (fetchChecked as jest.Mock).mockReset();
+    fs.rmSync(ROOT, { recursive: true, force: true });
+});
+
+describe("storeAsJpeg answers the version of what it stored", () => {
+    it("is a short digest, the same for the same picture and different for another", async () => {
+        fs.mkdirSync(albums, { recursive: true });
+        const one = await picture(1);
+
+        const first = await storeAsJpeg(path.join(albums, "a.jpg"), one);
+        const again = await storeAsJpeg(path.join(albums, "b.jpg"), one);
+        const other = await storeAsJpeg(path.join(albums, "a.jpg"), await picture(2));
+
+        expect(first).toMatch(VERSION);
+        expect(again).toBe(first);
+        expect(other).toMatch(VERSION);
+        expect(other).not.toBe(first);
+    });
+
+    it("answers null when the bytes are no picture", async () => {
+        fs.mkdirSync(albums, { recursive: true });
+
+        expect(await storeAsJpeg(path.join(albums, "a.jpg"), Buffer.alloc(2000, 7))).toBeNull();
+    });
+
+    it("is the version of the file that is on disk", async () => {
+        fs.mkdirSync(albums, { recursive: true });
+        const file = path.join(albums, "a.jpg");
+
+        const stored = await storeAsJpeg(file, await picture(4));
+
+        expect(await versionOfFile(file)).toBe(stored);
+        expect(await versionOfFile(path.join(albums, "none.jpg"))).toBeNull();
+    });
+});
+
+describe("a stored cover's address", () => {
+    it("is the stored path, then the version", () => {
+        expect(storedCoverValue("albums/a1.jpg", "abc123")).toBe("native:albums/a1.jpg?v=abc123");
+        expect(storedCoverValue("albums/a1.jpg", null)).toBe("native:albums/a1.jpg");
+    });
+
+    it("reads back into its path and version, or only a path when it has none", () => {
+        expect(parseStoredCover("native:albums/a1.jpg?v=abc123")).toEqual({ relativePath: "albums/a1.jpg", version: "abc123" });
+        expect(parseStoredCover("native:albums/a1.jpg")).toEqual({ relativePath: "albums/a1.jpg", version: null });
+        expect(parseStoredCover("https://example.org/a.jpg")).toBeNull();
+        expect(parseStoredCover("")).toBeNull();
+    });
+
+    it("finds its file with or without the version", async () => {
+        fs.mkdirSync(albums, { recursive: true });
+        const file = path.join(albums, "a1.jpg");
+        await storeAsJpeg(file, await picture(5));
+
+        expect(getLocalImagePath("native:albums/a1.jpg?v=abc123")).toBe(file);
+        expect(getLocalImagePath("native:albums/a1.jpg")).toBe(file);
+        expect(nativeFileExists("native:albums/a1.jpg?v=abc123")).toBe(true);
+        expect(nativeFileExists("native:albums/none.jpg?v=abc123")).toBe(false);
+        expect(getResizedImagePath("native:albums/a1.jpg?v=abc123", 300)).toBe(path.join(albums, "a1_w300.jpg"));
+    });
+
+    it("still refuses a path that leaves the covers folder, version or not", () => {
+        expect(getLocalImagePath("native:../../etc/passwd?v=abc123")).toBeNull();
+        expect(getLocalImagePath("native:../../etc/passwd")).toBeNull();
+    });
+});
+
+describe("what a cover is served with", () => {
+    it("is kept for a year, for good, when the address carries a version", () => {
+        expect(coverCacheControl("abc123")).toBe("public, max-age=31536000, immutable");
+    });
+
+    it("is checked each time when the address has no version, as a stored cover can change under it", () => {
+        expect(coverCacheControl(null)).toBe("public, no-cache");
+    });
+});
+
+describe("a stored cover handed back by the writers carries its version", () => {
+    it("is the address of a downloaded image", async () => {
+        const bytes = await picture(6);
+        (fetchChecked as jest.Mock).mockResolvedValue(
+            new Response(bytes, { status: 200, headers: { "content-type": "image/jpeg" } }),
+        );
+
+        const value = await downloadAndStoreImage("https://example.org/a.jpg", "art1", "artist");
+
+        const version = await versionOfFile(path.join(ROOT, "covers", "artists", "art1.jpg"));
+        expect(value).toBe(`native:artists/art1.jpg?v=${version}`);
+        expect(version).toMatch(VERSION);
+    });
+
+    it("is the address of a picture found in the artist's folder", async () => {
+        fs.mkdirSync(path.join(music, "Band", "Album"), { recursive: true });
+        fs.writeFileSync(path.join(music, "Band", "artist.jpg"), await picture(7));
+
+        const value = await findLocalArtistImage(music, path.join("Band", "Album", "01.flac"), "art2");
+
+        const version = await versionOfFile(path.join(ROOT, "covers", "artists", "art2.jpg"));
+        expect(value).toBe(`native:artists/art2.jpg?v=${version}`);
+    });
+});
+
+describe("an audiobook's cover address", () => {
+    const synced = new Date(1_700_000_000_000);
+
+    it("carries the time of its last sync as the version, as the sync stores the cover each time", () => {
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "/music/cover.jpg", coverUrl: null, lastSyncedAt: synced })).toBe(
+            `/audiobooks/bk1/cover/${synced.getTime().toString(36)}`,
+        );
+    });
+
+    it("is there when only Audiobookshelf holds the cover", () => {
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: "items/bk1/cover", lastSyncedAt: synced })).toMatch(/^\/audiobooks\/bk1\/cover\/[0-9a-z]+$/);
+    });
+
+    it("is null when the book has no cover", () => {
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: null, lastSyncedAt: synced })).toBeNull();
+    });
+
+    it("changes when a sync stores the cover again", () => {
+        const later = new Date(synced.getTime() + 1000);
+        const a = audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, lastSyncedAt: synced });
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, lastSyncedAt: later })).not.toBe(a);
+    });
+});
+
+describe("a picture read from a proxied reply", () => {
+    const reply = (body: Uint8Array | string, headers: Record<string, string>) => new Response(body, { status: 200, headers });
+
+    it("is its bytes and its image type", async () => {
+        const read = await readPicture(reply(new Uint8Array([1, 2, 3]), { "content-type": "image/png" }));
+        expect(read).toEqual({ bytes: Buffer.from([1, 2, 3]), contentType: "image/png" });
+    });
+
+    it("is given as its type alone, without parameters", async () => {
+        const read = await readPicture(reply(new Uint8Array([1]), { "content-type": "image/jpeg; charset=binary" }));
+        expect(read?.contentType).toBe("image/jpeg");
+    });
+
+    it.each(["text/html", "application/octet-stream", "image"])("is nothing when its type is %p, not an image", async (type) => {
+        expect(await readPicture(reply(new Uint8Array([1]), { "content-type": type }))).toBeNull();
+    });
+
+    it("is nothing when it names no type", async () => {
+        expect(await readPicture(new Response(new Uint8Array([1]), { status: 200 }))).toBeNull();
+    });
+
+    it("is nothing when it is over the cap, judged by its declared length", async () => {
+        const over = reply(new Uint8Array([1]), { "content-type": "image/jpeg", "content-length": String(MAX_PICTURE_BYTES + 1) });
+        expect(await readPicture(over)).toBeNull();
+    });
+
+    it("is nothing when it is over the cap, judged by the bytes that arrive", async () => {
+        const over = reply(new Uint8Array(MAX_PICTURE_BYTES + 1), { "content-type": "image/jpeg" });
+        expect(await readPicture(over)).toBeNull();
+    });
+});

@@ -54,7 +54,7 @@ describe("storeAsJpeg keeps orientation and transparency", () => {
     it("turns a rotated jpeg upright", async () => {
         fs.mkdirSync(albums, { recursive: true });
 
-        expect(await storeAsJpeg(path.join(albums, "r.jpg"), await sideways("jpeg"))).toBe(true);
+        expect(await storeAsJpeg(path.join(albums, "r.jpg"), await sideways("jpeg"))).toMatch(/^[0-9a-f]{10}$/);
 
         const stored = await metadataOf(path.join(albums, "r.jpg"));
         expect(stored).toMatchObject({ format: "jpeg", width: 30, height: 60 });
@@ -102,7 +102,7 @@ describe("a local artist picture", () => {
     it("is stored as a jpeg named for the artist, whatever format the folder's picture is in", async () => {
         put(path.join(music, "Band", "artist.png"), await picture("png"));
 
-        expect(await findLocalArtistImage(music, trackPath, "a1")).toBe("native:artists/a1.jpg");
+        expect(await findLocalArtistImage(music, trackPath, "a1")).toMatch(/^native:artists\/a1\.jpg\?v=[0-9a-f]{10}$/);
 
         expect((await metadataOf(path.join(artistsDir, "a1.jpg"))).format).toBe("jpeg");
         expect(fs.readdirSync(artistsDir)).toEqual(["a1.jpg"]);
@@ -112,7 +112,7 @@ describe("a local artist picture", () => {
         const jpeg = await picture("jpeg");
         put(path.join(music, "Band", "folder.jpg"), jpeg);
 
-        expect(await findLocalArtistImage(music, trackPath, "a2")).toBe("native:artists/a2.jpg");
+        expect(await findLocalArtistImage(music, trackPath, "a2")).toMatch(/^native:artists\/a2\.jpg\?v=[0-9a-f]{10}$/);
         expect(fs.readFileSync(path.join(artistsDir, "a2.jpg")).equals(jpeg)).toBe(true);
     });
 
@@ -120,7 +120,7 @@ describe("a local artist picture", () => {
         put(path.join(music, "Band", "artist.jpg"), Buffer.alloc(2000, 7));
         put(path.join(music, "Band", "folder.png"), await picture("png"));
 
-        expect(await findLocalArtistImage(music, trackPath, "a3")).toBe("native:artists/a3.jpg");
+        expect(await findLocalArtistImage(music, trackPath, "a3")).toMatch(/^native:artists\/a3\.jpg\?v=[0-9a-f]{10}$/);
         expect((await metadataOf(path.join(artistsDir, "a3.jpg"))).format).toBe("jpeg");
 
         fs.rmSync(path.join(music, "Band", "folder.png"));

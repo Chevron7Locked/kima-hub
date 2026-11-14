@@ -214,9 +214,9 @@ interface StackLayer {
     regexp: { fast_slash?: boolean };
 }
 
-/** A concrete address for a route path, so the resolver can match it: parameters become "x". */
+/** A concrete address for a route path, so the resolver can match it: parameters become "x", a pattern written after one included. */
 function concretePath(path: string): string {
-    return path.replace(/:[A-Za-z0-9_]+\??/g, "x").replace(/\*/g, "x") || "/";
+    return path.replace(/:[A-Za-z0-9_]+(\([^)]*\))?\??/g, "x").replace(/\*/g, "x") || "/";
 }
 
 type RouteInRouter = Pick<RouteListing, "method" | "path">;

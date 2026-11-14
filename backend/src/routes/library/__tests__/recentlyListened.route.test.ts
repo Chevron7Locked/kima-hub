@@ -143,3 +143,48 @@ describe("the page is full", () => {
         expect(await artistsAsked(10)).not.toContain(`${P} d`);
     });
 });
+
+describe("an audiobook in progress", () => {
+    const LISTENER = `${P}-booklistener`;
+    const BOOK = `${P}-book`;
+    const GONE = `${P}-bookgone`;
+    const asListener = () =>
+        express()
+            .use((req: any, _res, next) => { req.user = { id: LISTENER, role: "user" }; next(); })
+            .use("/library", tracksRouter);
+    const SYNCED = new Date(1_700_000_000_000);
+
+    beforeAll(async () => {
+        await prisma.user.create({ data: { id: LISTENER, username: LISTENER, passwordHash: "x" } });
+        await prisma.audiobook.create({
+            data: { id: BOOK, title: "Book", audioUrl: "https://abs.invalid/b", coverUrl: "items/b/cover", lastSyncedAt: SYNCED },
+        });
+        for (const id of [BOOK, GONE]) {
+            await prisma.audiobookProgress.create({
+                data: { userId: LISTENER, audiobookshelfId: id, title: id, coverUrl: "items/b/cover", currentTime: 60, duration: 600 },
+            });
+        }
+    });
+
+    afterAll(async () => {
+        await prisma.audiobookProgress.deleteMany({ where: { userId: LISTENER } });
+        await prisma.audiobook.deleteMany({ where: { id: BOOK } });
+        await prisma.user.deleteMany({ where: { id: LISTENER } });
+    });
+
+    const cards = async () => {
+        const res = await request(asListener()).get("/library/recently-listened?limit=10");
+        expect(res.status).toBe(200);
+        return res.body.items as { type: string; id: string; coverArt: string | null }[];
+    };
+
+    it("shows the book's cover by its versioned address", async () => {
+        const card = (await cards()).find((c) => c.id === BOOK);
+        expect(card?.coverArt).toBe(`/audiobooks/${BOOK}/cover/${SYNCED.getTime().toString(36)}`);
+    });
+
+    it("keeps the stored cover value for a book that has left the library", async () => {
+        const card = (await cards()).find((c) => c.id === GONE);
+        expect(card?.coverArt).toBe("audiobook__items/b/cover");
+    });
+});

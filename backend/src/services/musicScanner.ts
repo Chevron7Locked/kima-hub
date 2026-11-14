@@ -15,7 +15,7 @@ import { albumFolder, electAlbumArtist, fileCredit, type ArtistCandidate, type F
 import { normalizeIsrc } from "./recordingMatch";
 import { albumIdentityKey, resolveAlbum } from "./albumIdentity";
 import { updateArtistCounts } from "./artistCountsService";
-import { findLocalArtistImage } from "./imageStorage";
+import { findLocalArtistImage, parseStoredCover, storedCoverValue, versionOfFile } from "./imageStorage";
 import * as stageRecords from "./stages/stageRecords";
 import { runReconcile } from "./libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
@@ -583,11 +583,11 @@ export class MusicScannerService {
 
         let needsExtraction = !album.coverUrl;
 
-        if (album.coverUrl?.startsWith("native:")) {
-            const nativePath = album.coverUrl.replace("native:", "");
+        const stored = parseStoredCover(album.coverUrl);
+        if (stored) {
             const extractorCachePath = path.join(
                 this.coverCachePath,
-                nativePath
+                stored.relativePath
             );
             if (!fs.existsSync(extractorCachePath)) {
                 needsExtraction = true;
@@ -604,7 +604,12 @@ export class MusicScannerService {
         if (coverPath) {
             await prisma.album.update({
                 where: { id: album.id },
-                data: { coverUrl: `native:${coverPath}` },
+                data: {
+                    coverUrl: storedCoverValue(
+                        coverPath,
+                        await versionOfFile(path.join(this.coverCachePath, coverPath))
+                    ),
+                },
             });
             return;
         }

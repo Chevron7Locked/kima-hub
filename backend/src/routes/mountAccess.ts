@@ -122,7 +122,7 @@ export const mountAccess: Record<string, MountAccess> = {
     "/api/audiobooks": {
         access: {
             ...signedInByUrlToken,
-            routes: { "GET /:id/cover": "public", "OPTIONS /:id/cover": "public" },
+            routes: { "GET /:id/cover/:version([A-Za-z0-9_-]+)?": "public", "OPTIONS /:id/cover/:version([A-Za-z0-9_-]+)?": "public" },
         },
         runawayLimit: true,
     },

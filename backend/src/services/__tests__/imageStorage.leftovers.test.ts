@@ -55,9 +55,9 @@ describe("storeAsJpeg", () => {
         const jpeg = await picture("jpeg");
         fs.mkdirSync(albums, { recursive: true });
 
-        expect(await storeAsJpeg(path.join(albums, "a.jpg"), jpeg)).toBe(true);
-        expect(await storeAsJpeg(path.join(albums, "b.jpg"), await picture("png"))).toBe(true);
-        expect(await storeAsJpeg(path.join(albums, "c.jpg"), await picture("webp"))).toBe(true);
+        expect(await storeAsJpeg(path.join(albums, "a.jpg"), jpeg)).toMatch(/^[0-9a-f]{10}$/);
+        expect(await storeAsJpeg(path.join(albums, "b.jpg"), await picture("png"))).toMatch(/^[0-9a-f]{10}$/);
+        expect(await storeAsJpeg(path.join(albums, "c.jpg"), await picture("webp"))).toMatch(/^[0-9a-f]{10}$/);
 
         expect(fs.readFileSync(path.join(albums, "a.jpg")).equals(jpeg)).toBe(true);
         expect(await formatOf(path.join(albums, "b.jpg"))).toBe("jpeg");
@@ -70,8 +70,8 @@ describe("storeAsJpeg", () => {
         fs.mkdirSync(albums, { recursive: true });
         fs.writeFileSync(path.join(albums, "a.jpg"), earlier);
 
-        expect(await storeAsJpeg(path.join(albums, "a.jpg"), Buffer.alloc(2000, 7))).toBe(false);
-        expect(await storeAsJpeg(path.join(albums, "n.jpg"), Buffer.alloc(2000, 7))).toBe(false);
+        expect(await storeAsJpeg(path.join(albums, "a.jpg"), Buffer.alloc(2000, 7))).toBeNull();
+        expect(await storeAsJpeg(path.join(albums, "n.jpg"), Buffer.alloc(2000, 7))).toBeNull();
 
         expect(fs.readFileSync(path.join(albums, "a.jpg")).equals(earlier)).toBe(true);
         expect(fs.existsSync(path.join(albums, "n.jpg"))).toBe(false);
@@ -131,7 +131,7 @@ describe("the sweep of orphan .part files", () => {
         fs.mkdirSync(albums, { recursive: true });
         jest.spyOn(fs.promises, "readdir").mockRejectedValueOnce(new Error("EACCES"));
 
-        expect(await storeAsJpeg(path.join(albums, "a.jpg"), await picture("jpeg"))).toBe(true);
+        expect(await storeAsJpeg(path.join(albums, "a.jpg"), await picture("jpeg"))).toMatch(/^[0-9a-f]{10}$/);
         expect(fs.existsSync(path.join(albums, "a.jpg"))).toBe(true);
     });
 

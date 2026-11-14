@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapAlbumChild, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
+import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
-import { playRowsSql } from "../../services/stats/listens";
+import { listenRows } from "../../services/stats/listens";
 import { libraryGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { libraryChangedAt } from "../../services/libraryChanged";
@@ -119,7 +119,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         const artists = await prisma.artist.findMany({
             where: { albums: { some: PLAYABLE_ALBUM_WHERE } },
             orderBy: [{ sortName: "asc" }, { id: "asc" }],
-            select: { id: true, name: true, displayName: true },
+            select: { id: true, name: true, displayName: true, heroUrl: true },
         });
 
         return subsonicOk(req, res, {
@@ -136,7 +136,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                                   "@_isDir": true,
                                   "@_title": artistName,
                                   "@_artist": artistName,
-                                  "@_coverArt": `ar-${artist.id}`,
+                                  "@_coverArt": coverArtId(`ar-${artist.id}`, artist.heroUrl),
                               };
                           }),
                       }
@@ -437,14 +437,16 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         }
 
         case "recent": {
+            // Listens, not plays: a song replayed in a burst is one listen, as on the stats pages.
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
+                ${listenRows(userId)}
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
-                JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
+                JOIN p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
-                ORDER BY MAX(p."playedAt") DESC
+                ORDER BY MAX(p."playedAt") DESC, a.id
                 LIMIT ${size} OFFSET ${offset}
             `);
             albums = rows;
@@ -453,13 +455,14 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
         case "frequent": {
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
+                ${listenRows(userId)}
                 ${ALBUM_LIST_SELECT}
                 JOIN "Track" t ON t."albumId" = a.id
-                JOIN (${playRowsSql(userId)}) p ON p."trackId" = t.id
+                JOIN p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
                 GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
-                ORDER BY COUNT(p.id) DESC
+                ORDER BY COUNT(p.id) DESC, a.id
                 LIMIT ${size} OFFSET ${offset}
             `);
             albums = rows;

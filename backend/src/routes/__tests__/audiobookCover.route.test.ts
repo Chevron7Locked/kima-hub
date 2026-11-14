@@ -54,6 +54,8 @@ import path from "path";
 import audiobookRoutes from "../../routes/audiobooks";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
+import { getSystemSettings } from "../../utils/systemSettings";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
 
 const BOOK = "cover_rt_book";
@@ -154,6 +156,68 @@ describe("GET /audiobooks/:id/cover", () => {
         expect(changed.body.toString()).toBe("a changed cover");
         await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
         fs.rmSync(inside);
+    });
+
+    it("with a version in its address is kept for good, and found without it", async () => {
+        const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
+        fs.mkdirSync(path.dirname(inside), { recursive: true });
+        fs.writeFileSync(inside, "a versioned cover");
+
+        const res = await request(app).get(`/${BOOK}/cover/lq3k9x`);
+
+        expect(res.status).toBe(200);
+        expect(res.body.toString()).toBe("a versioned cover");
+        expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+        fs.rmSync(inside);
+    });
+
+    it("answers the preflight for an address with a version too", async () => {
+        const res = await request(app).options(`/${BOOK}/cover/lq3k9x`);
+        expect(res.status).toBe(204);
+        expect(res.headers["access-control-allow-methods"]).toBe("GET, OPTIONS");
+    });
+
+    it("refuses a version that is no plain token", async () => {
+        const res = await request(app).get(`/${BOOK}/cover/${encodeURIComponent("../x")}`);
+        expect(res.status).toBe(404);
+    });
+
+    describe("whose stored file is gone, with Audiobookshelf holding it", () => {
+        let fetchSpy: jest.SpyInstance | undefined;
+        const absFetch = (reply: Response) => (fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(reply));
+        beforeEach(async () => {
+            (getSystemSettings as jest.Mock).mockResolvedValue({ audiobookshelfUrl: "http://abs.test:13378", audiobookshelfApiKey: "abs-key" });
+            await prisma.audiobook.update({
+                where: { id: BOOK },
+                data: { coverUrl: "items/li_9/cover", localCoverPath: path.join(MUSIC, "cover-cache", "audiobooks", "gone.jpg") },
+            });
+        });
+        afterEach(async () => {
+            fetchSpy?.mockRestore();
+            (getSystemSettings as jest.Mock).mockResolvedValue(null);
+            await prisma.audiobook.update({ where: { id: BOOK }, data: { coverUrl: null, localCoverPath: null } });
+        });
+
+        it("is proxied from there, with its image type", async () => {
+            const spy = absFetch(new Response(new Uint8Array([1, 2]), { headers: { "content-type": "image/png" } }));
+            const res = await request(app).get(`/${BOOK}/cover/lq3k9x`);
+            expect(res.status).toBe(200);
+            expect(res.headers["content-type"]).toBe("image/png");
+            expect(String(spy.mock.calls[0][0])).toBe("http://abs.test:13378/api/items/li_9/cover");
+        });
+
+        it("is a 404 when what comes back is over the size cap", async () => {
+            expectLog("warn");
+            absFetch(new Response(new Uint8Array([1]), { headers: { "content-type": "image/png", "content-length": String(20 * 1024 * 1024 + 1) } }));
+            expect((await request(app).get(`/${BOOK}/cover`)).status).toBe(404);
+        });
+
+        it("is a 404 when what comes back is no image", async () => {
+            expectLog("warn");
+            absFetch(new Response("<html>", { headers: { "content-type": "text/html" } }));
+            expect((await request(app).get(`/${BOOK}/cover`)).status).toBe(404);
+        });
     });
 
     it("answers the route's own 404 when the cover file is gone between the check and the send", async () => {

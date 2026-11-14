@@ -1,7 +1,7 @@
 import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { wrap } from "./mappers";
+import { wrap, coverArtId } from "./mappers";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { one, many } from "../../utils/subsonicParams";
 
@@ -35,7 +35,9 @@ function mapQueueEntry(item: QueueTrack) {
         "@_album": item.album?.title || undefined,
         "@_artistId": item.artist?.id || undefined,
         "@_artist": item.artist?.name || undefined,
-        "@_coverArt": item.album?.coverArt || item.album?.id || undefined,
+        // The album's id, versioned by the stored cover the queue item carries; a stored value that is no cover (the web
+        // player keeps an address of its own for some) leaves the plain id.
+        "@_coverArt": item.album?.id ? coverArtId(item.album.id, item.album.coverArt) : undefined,
         "@_duration": item.duration || 0,
     };
 }

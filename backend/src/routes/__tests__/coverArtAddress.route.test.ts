@@ -38,7 +38,8 @@ import { mountAsServer } from "./helpers/serverMount";
 const app = mountAsServer(express(), "/library", libraryCoverArtRoutes, "/api/library", { standIn: true });
 const COVERS = path.join(COVERS_PARENT, "covers");
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
-const picture = () => ({ ok: true, status: 200, statusText: "OK", headers: new Headers({ "content-type": "image/png" }), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+const picture = () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } });
+const OVER_CAP = String(20 * 1024 * 1024 + 1);
 const P = "cvaddr";
 
 beforeAll(async () => {
@@ -87,6 +88,21 @@ describe("a picture's address", () => {
         expect(mockFetchChecked).not.toHaveBeenCalled();
     });
 
+    it("over the size cap is a 404, never sent on", async () => {
+        expectLog("warn");
+        mockFetchChecked.mockResolvedValue(new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "image/png", "content-length": OVER_CAP } }));
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent("https://covers.example.org/huge.png")}`);
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: "Cover art not found" });
+    });
+
+    it.each(["text/html", "application/json"])("that the host calls %s is a 404, not served as a picture", async (type) => {
+        expectLog("warn");
+        mockFetchChecked.mockResolvedValue(new Response("<html>", { status: 200, headers: { "content-type": type } }));
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent("https://covers.example.org/page")}`);
+        expect(res.status).toBe(404);
+    });
+
     it("comes back with the picture's type and the cover headers", async () => {
         const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent("https://covers.example.org/a.png")}`).set("Origin", "https://app.example");
         expect(res.headers).toMatchObject({
@@ -118,7 +134,27 @@ describe("a stored cover", () => {
         });
     });
 
-    it("is revalidated, so a changed cover is sent again and an unchanged one is not", async () => {
+    it.each([
+        ["by query", `/library/cover-art?url=${encodeURIComponent(`native:${P}_stored.jpg?v=abc123def0`)}`],
+        ["by path", `/library/cover-art/${encodeURIComponent(`native:${P}_stored.jpg?v=abc123def0`)}`],
+    ])("with a version is found without it and kept for good %s", async (_how, url) => {
+        const res = await request(app).get(url);
+        expect(res.status).toBe(200);
+        expect(Buffer.from(res.body)).toEqual(JPEG);
+        expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    });
+
+    it("with a version, at a width, is the smaller copy of the same file, kept for good", async () => {
+        const sharp = (await import("sharp")).default;
+        const big = await sharp({ create: { width: 400, height: 400, channels: 3, background: "#369" } }).jpeg().toBuffer();
+        fs.writeFileSync(path.join(COVERS, `${P}_wide.jpg`), big);
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:${P}_wide.jpg?v=abc123def0`)}&size=100`);
+        expect(res.status).toBe(200);
+        expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+        expect((await sharp(Buffer.from(res.body)).metadata()).width).toBe(100);
+    });
+
+    it("without a version is revalidated, so a changed cover is sent again and an unchanged one is not", async () => {
         const file = path.join(COVERS, `${P}_revalidate.jpg`);
         fs.writeFileSync(file, JPEG);
         const url = `/library/cover-art?url=${encodeURIComponent(`native:${P}_revalidate.jpg`)}`;
@@ -155,6 +191,42 @@ describe("a stored cover", () => {
         expect(res.status).toBe(200);
         expect(Buffer.from(res.body)).toEqual(JPEG);
         expect(mockFetchChecked).toHaveBeenCalledWith("https://covers.example.org/found.jpg", expect.anything());
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
+    });
+
+    it("under the albums folder, whose file is gone, is looked up again too", async () => {
+        expectLog("warn");
+        await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: `native:albums/${P}_gone.jpg?v=abc123def0` } });
+        mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
+
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:albums/${P}_gone.jpg?v=abc123def0`)}`);
+
+        expect(res.status).toBe(200);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
+    });
+
+    it("with a version, whose file is gone, is remembered on the album that holds that versioned address", async () => {
+        expectLog("warn");
+        await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: `native:${P}_gone.jpg?v=abc123def0` } });
+        mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
+
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:${P}_gone.jpg?v=abc123def0`)}`);
+
+        expect(res.status).toBe(200);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
+    });
+
+    it("with a version, whose file is gone, is remembered on the album holding another version of the same file", async () => {
+        expectLog("warn");
+        await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: `native:${P}_gone.jpg?v=0000000000` } });
+        mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
+
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:${P}_gone.jpg?v=abc123def0`)}`);
+
+        expect(res.status).toBe(200);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
     });
 
@@ -213,6 +285,18 @@ describe("an audiobook cover", () => {
             expect(fetchSpy).not.toHaveBeenCalled();
         },
     );
+
+    it("over the size cap is a 404, not sent on", async () => {
+        expectLog("warn");
+        jest.spyOn(global, "fetch").mockResolvedValue(new Response(new Uint8Array([1]), { headers: { "content-type": "image/jpeg", "content-length": OVER_CAP } }));
+        expect((await ask("items/li_1/cover")).status).toBe(404);
+    });
+
+    it("that Audiobookshelf calls something other than an image is a 404", async () => {
+        expectLog("warn");
+        jest.spyOn(global, "fetch").mockResolvedValue(new Response("<html>", { headers: { "content-type": "text/html" } }));
+        expect((await ask("items/li_1/cover")).status).toBe(404);
+    });
 
     it("without Audiobookshelf set up is a 404", async () => {
         const fetchSpy = absFetch();

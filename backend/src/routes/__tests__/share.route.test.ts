@@ -258,7 +258,37 @@ describe('GET /share/:token/cover-art/:coverArtId', () => {
         expect(res.status).toBe(200);
     });
 
-    it('asks the client to revalidate a stored cover, so a changed cover is sent again and an unchanged one is not', async () => {
+    it('keeps a versioned cover for good, found without its version', async () => {
+        const id = `native:albums/${TAG}-versioned.jpg?v=abc123def0`;
+        putFile(path.join(coversBasePath(), 'albums', `${TAG}-versioned.jpg`));
+        await setCover(id);
+
+        const res = await request(app).get(coverUrl(id));
+
+        expect(res.status).toBe(200);
+        expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    });
+
+    it('serves the same stored cover to a page that holds an older version of its address', async () => {
+        // The cover was stored again after the page loaded: its old address must still show the picture.
+        putFile(path.join(coversBasePath(), 'albums', `${TAG}-moved-on.jpg`));
+        await setCover(`native:albums/${TAG}-moved-on.jpg?v=1111111111`);
+
+        const res = await request(app).get(coverUrl(`native:albums/${TAG}-moved-on.jpg?v=0000000000`));
+
+        expect(res.status).toBe(200);
+    });
+
+    it('still refuses a versioned address of a cover the share does not hold', async () => {
+        putFile(path.join(coversBasePath(), 'albums', `${TAG}-other.jpg`));
+        await setCover(`native:albums/${TAG}-mine.jpg?v=1111111111`);
+
+        const res = await request(app).get(coverUrl(`native:albums/${TAG}-other.jpg?v=1111111111`));
+
+        expect(res.status).toBe(404);
+    });
+
+    it('asks the client to revalidate a stored cover without a version, so a changed cover is sent again and an unchanged one is not', async () => {
         const id = `native:albums/${TAG}-revalidate.jpg`;
         const full = path.join(coversBasePath(), 'albums', `${TAG}-revalidate.jpg`);
         putFile(full);

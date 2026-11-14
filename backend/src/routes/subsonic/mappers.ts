@@ -2,6 +2,7 @@
 // attributes for fast-xml-parser; subsonicResponse.ts strips it for JSON.
 import { Request, Response } from "express";
 import { subsonicError, SubsonicError } from "../../utils/subsonicResponse";
+import { parseStoredCover } from "../../services/imageStorage";
 
 export type ArtistRow = {
     id: string;
@@ -39,12 +40,38 @@ export type TrackRow = {
     fileSize: number | null;
 };
 
+/**
+ * The `coverArt` id an app loads a cover by: the id, with the stored cover's version after an underscore when it has one
+ * (`<id>_<version>`, as Navidrome does), so a changed cover is a new id and an app may keep the old one for good.
+ * `stored` is the value the cover is read from: an album's `userCoverUrl || coverUrl`, an artist's `heroUrl`.
+ */
+export function coverArtId(id: string, stored: string | null | undefined): string {
+    const version = parseStoredCover(stored)?.version;
+    return version && ID_VERSION.test(version) ? `${id}_${version}` : id;
+}
+
+// The versions Kima stores are ten hex characters; only those are told from an id's own characters.
+const ID_VERSION = /^[0-9a-f]{10}$/;
+
+/** A `coverArt` id's parts: the entity id (the `ar-`, `al-` or `tr-` an app puts before it dropped) and the version after it, if any. */
+export function splitCoverArtId(raw: string): { id: string; prefix: string; version: string | null } {
+    const prefix = /^(ar-|al-|tr-)/.exec(raw)?.[0] ?? "";
+    const rest = raw.slice(prefix.length);
+    const match = /_([0-9a-f]{10})$/.exec(rest);
+    return match ? { id: rest.slice(0, match.index), prefix, version: match[1] } : { id: rest, prefix, version: null };
+}
+
+/** An album's `coverArt` id: the cover shown is the person's own when set, else the found one. */
+function albumCoverArtId(album: { id: string; coverUrl?: string | null; userCoverUrl?: string | null }): string {
+    return coverArtId(album.id, album.userCoverUrl || album.coverUrl);
+}
+
 export function mapArtist(a: ArtistRow) {
     return {
         "@_id": a.id,
         "@_name": a.displayName || a.name,
         "@_albumCount": a.albumCount ?? 0,
-        "@_coverArt": `ar-${a.id}`,
+        "@_coverArt": coverArtId(`ar-${a.id}`, a.heroUrl),
         "@_artistImageUrl": a.heroUrl || undefined,
     };
 }
@@ -55,7 +82,7 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
         "@_name": album.displayTitle || album.title,
         "@_artist": artistName,
         "@_artistId": album.artistId,
-        "@_coverArt": album.id,
+        "@_coverArt": albumCoverArtId(album),
         "@_songCount": album.songCount ?? 0,
         "@_duration": album.duration !== undefined ? Math.round(album.duration) : 0,
         "@_year": album.year || undefined,
@@ -78,7 +105,7 @@ export function mapAlbumChild(album: AlbumRow, artistName: string) {
         "@_album": title,
         "@_artist": artistName,
         "@_artistId": album.artistId,
-        "@_coverArt": album.id,
+        "@_coverArt": albumCoverArtId(album),
         "@_year": album.year || undefined,
         "@_genre": album.genre || undefined,
         "@_created": album.createdAt.toISOString(),
@@ -87,7 +114,7 @@ export function mapAlbumChild(album: AlbumRow, artistName: string) {
 
 export function mapSong(
     track: TrackRow,
-    album: { id: string; title: string; displayTitle: string | null; year: number | null },
+    album: { id: string; title: string; displayTitle: string | null; year: number | null; coverUrl?: string | null; userCoverUrl?: string | null },
     artistName: string,
     artistId: string,
     genre?: string | null
@@ -99,7 +126,7 @@ export function mapSong(
         "@_album": album.displayTitle || album.title,
         "@_artist": artistName,
         "@_isDir": false,
-        "@_coverArt": album.id,
+        "@_coverArt": albumCoverArtId(album),
         "@_duration": track.duration ? Math.round(track.duration) : 0,
         "@_bitRate": estimateBitrateFromMime(track.mime),
         "@_track": track.trackNo || undefined,

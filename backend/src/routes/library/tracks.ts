@@ -15,6 +15,7 @@ import {
 import { songArtistKey } from "../../services/mixes/recipes";
 import { noOneKeys } from "../../services/mixes/artistCap";
 import { recentListenArtists } from "../../services/stats/listens";
+import { audiobookCoverAddress } from "../../services/imageStorage";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
@@ -110,11 +111,20 @@ router.get("/recently-listened", async (req, res) => {
       return artist ? [{ ...artist, type: "artist", lastPlayedAt: r.lastListenedAt }] : [];
     });
 
+    // A book still in the library is shown by its versioned cover address, so a changed cover is a new address.
+    const bookRows = await prisma.audiobook.findMany({
+      where: { id: { in: inProgressAudiobooks.map((ab) => ab.audiobookshelfId) } },
+      select: { id: true, localCoverPath: true, coverUrl: true, lastSyncedAt: true },
+    });
+    const bookById = new Map(bookRows.map((b) => [b.id, b]));
+
     const combined = [
       ...artistCards,
       ...inProgressAudiobooks.map((ab: any) => {
-        const coverArt =
-          ab.coverUrl && !ab.coverUrl.startsWith("http")
+        const book = bookById.get(ab.audiobookshelfId);
+        const coverArt = book
+          ? audiobookCoverAddress(book)
+          : ab.coverUrl && !ab.coverUrl.startsWith("http")
             ? `audiobook__${ab.coverUrl}`
             : ab.coverUrl;
 

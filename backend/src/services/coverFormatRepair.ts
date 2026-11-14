@@ -17,7 +17,7 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
-import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg } from "./imageStorage";
+import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
 
 export interface CoverRepairResult {
@@ -77,12 +77,13 @@ async function convertOldArtistPicture(dir: string, name: string, id: string, re
         logger.warn(`[COVER-REPAIR] ${file} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; left as it is`);
         return;
     }
-    if (!(await storeAsJpeg(jpeg, await fs.promises.readFile(file)))) {
+    const version = await storeAsJpeg(jpeg, await fs.promises.readFile(file));
+    if (!version) {
         result.notPictures++;
         logger.warn(`[COVER-REPAIR] ${file} is no picture; left as it is`);
         return;
     }
-    await prisma.artist.updateMany({ where: { heroUrl: was }, data: { heroUrl: `native:artists/${id}.jpg` } });
+    await prisma.artist.updateMany({ where: { heroUrl: was }, data: { heroUrl: storedCoverValue(`artists/${id}.jpg`, version) } });
     await fs.promises.rm(file, { force: true });
     result.artistPicturesConverted++;
     logger.debug(`[COVER-REPAIR] Converted ${file} to ${jpeg}`);
