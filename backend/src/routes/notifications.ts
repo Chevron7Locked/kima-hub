@@ -28,25 +28,34 @@ type RetryOutcome<T> = { running: DownloadJob | null } | { replacement: T };
  * Retries a failed download once. In one transaction the failed job leaves the list (the first retry to clear it wins),
  * and then either the replacement is made or nothing is: `running` is the job already downloading the album, or null
  * when another retry cleared the failed job first and its replacement has since ended. A failed job is cleared
- * whenever its retry exists, so an answer of "already running" leaves no stale entry behind. `make` creates the
+ * whenever its retry exists, so an answer of "already running" leaves no stale entry behind. `createReplacement` makes the
  * replacement in the same transaction, so the user sees the failed job or its replacement, never neither.
  */
 async function retryOnce<T>(
     failedJob: DownloadJob,
-    running: { targetMbid: string } | null,
-    make: (tx: Prisma.TransactionClient) => Promise<T>
+    sameAlbum: { targetMbid: string } | null,
+    createReplacement: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<RetryOutcome<T>> {
-    return prisma.$transaction(async (tx) => {
-        // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
-        const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
-        const existing = running
-            ? await tx.downloadJob.findFirst({
-                  where: { userId: failedJob.userId, ...running, status: { in: ["pending", "processing"] }, cleared: { not: true } },
-              })
-            : null;
-        if (claimed.count === 0 || existing) return { running: existing };
-        return { replacement: await make(tx) };
-    });
+    const attempt = () =>
+        prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
+            // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
+            const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
+            const running = sameAlbum
+                ? await tx.downloadJob.findFirst({
+                      where: { userId: failedJob.userId, ...sameAlbum, status: { in: ["pending", "processing"] }, cleared: { not: true } },
+                  })
+                : null;
+            if (claimed.count === 0 || running) return { running };
+            return { replacement: await createReplacement(tx) };
+        });
+    try {
+        return await attempt();
+    } catch (error: any) {
+        // Two different failed jobs of one album, retried together: the loser's insert meets the one active job an album
+        // may have. Its transaction rolled back whole, so it runs again and now finds the winner's job running.
+        if (error?.code !== "P2002") throw error;
+        return attempt();
+    }
 }
 
 const deduplicated = (running: DownloadJob | null) => ({ success: true, newJobId: running?.id, deduplicated: true });
@@ -531,12 +540,11 @@ router.post(
             }
 
             // The job's own record names the artist; a job from before that was recorded has only its "Artist - Album" subject.
-            const subjectParts = failedJob.subject.split(" - ");
-            const artistName = (metadata?.artistName as string) || subjectParts[0] || failedJob.subject;
+            const split = failedJob.subject.indexOf(" - ");
+            const artistName = (metadata?.artistName as string) || (split > 0 ? failedJob.subject.slice(0, split) : failedJob.subject);
             const albumTitle =
                 (metadata?.albumTitle as string) ||
-                subjectParts[1] ||
-                failedJob.subject;
+                (split > 0 ? failedJob.subject.slice(split + 3) : failedJob.subject);
 
             const outcome = await retryOnce(failedJob, { targetMbid }, (tx) =>
                 downloadJobs.create({

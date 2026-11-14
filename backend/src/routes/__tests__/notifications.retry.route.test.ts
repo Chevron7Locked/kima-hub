@@ -313,6 +313,32 @@ describe("retrying the same failed download twice", () => {
         expect(await replacementsOf(old.id)).toHaveLength(1);
         await whenIdle();
     });
+
+    it("makes one replacement when two failed jobs of one album are retried at once", async () => {
+        mockStartDownload.mockResolvedValue({ success: true });
+        const libraryMeta = { downloadType: "library", albumTitle: "Things We Lost in the Fire" };
+        const first = await failedJob({ metadata: libraryMeta });
+        const second = await failedJob({ metadata: libraryMeta });
+
+        const [a, b] = await Promise.all([retry(first.id), retry(second.id)]);
+
+        expect([a.status, b.status]).toEqual([200, 200]);
+        expect([a.body, b.body].filter((body) => body.deduplicated)).toHaveLength(1);
+        const active = await prisma.downloadJob.findMany({ where: { userId: USER, status: { in: ["pending", "processing"] } } });
+        expect(active).toHaveLength(1);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, cleared: true } })).toBe(2);
+    });
+});
+
+describe("a retried library album from before its artist and album were recorded", () => {
+    it("takes the artist before the first ' - ' of the subject and the album after it", async () => {
+        const old = await failedJob({ subject: "Low - Songs for a Dead Pilot - Part 2", metadata: { downloadType: "library" } });
+        mockStartDownload.mockResolvedValue({ success: true });
+
+        const res = await retry(old.id).expect(200);
+
+        expect(mockStartDownload).toHaveBeenCalledWith(res.body.newJobId, "Low", "Songs for a Dead Pilot - Part 2", MBID, false);
+    });
 });
 
 describe("a retried library album whose artist's name holds ' - '", () => {
