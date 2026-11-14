@@ -25,9 +25,12 @@ const CACHE_TTL = 60000;
 class FeatureDetectionService {
     private cache: AvailableFeatures | null = null;
     private lastCheck: number = 0;
+    /** Counts refreshes, so a check that began before one can tell its answer is out of date. */
+    private generation = 0;
 
-    /** Forget the last answer, so the next one is worked out afresh. */
+    /** Forget the last answer, so the next one is worked out afresh. A check already running does not cache its answer. */
     refresh(): void {
+        this.generation++;
         this.cache = null;
         this.lastCheck = 0;
     }
@@ -37,6 +40,7 @@ class FeatureDetectionService {
         if (this.cache && now - this.lastCheck < CACHE_TTL) {
             return this.cache;
         }
+        const generation = this.generation;
 
         const [musicCNN, vibeEmbeddings, audiobookshelfEnabled, fpcalc] =
             await Promise.all([
@@ -46,14 +50,17 @@ class FeatureDetectionService {
                 this.checkFpcalc(),
             ]);
 
-        this.cache = { musicCNN, vibeEmbeddings, audiobookshelfEnabled, fpcalc };
-        this.lastCheck = now;
+        const features = { musicCNN, vibeEmbeddings, audiobookshelfEnabled, fpcalc };
+        if (generation === this.generation) {
+            this.cache = features;
+            this.lastCheck = now;
+        }
 
         logger.debug(
             `[FEATURE-DETECTION] Features: musicCNN=${musicCNN}, vibeEmbeddings=${vibeEmbeddings}, audiobookshelf=${audiobookshelfEnabled}, fpcalc=${fpcalc}`
         );
 
-        return this.cache;
+        return features;
     }
 
     private async workerAlive(heartbeatKey: string, withinMs = HEARTBEAT_TTL): Promise<boolean> {
@@ -133,4 +140,4 @@ class FeatureDetectionService {
 export const featureDetection = new FeatureDetectionService();
 
 // Whether Audiobookshelf is on is the one setting the list holds.
-onSystemSettingsChange(["audiobookshelfEnabled"], () => featureDetection.refresh());
+onSystemSettingsChange("feature detection", ["audiobookshelfEnabled"], () => featureDetection.refresh());

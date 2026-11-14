@@ -2034,6 +2034,7 @@ export const soulseekService = new SoulseekService();
 
 // It reconnects only when what it connects with changed: whether it is on, the account, or the slskd backend and its folder.
 onSystemSettingsChange(
+    "soulseek",
     ["soulseekEnabled", "soulseekUsername", "soulseekPassword", "soulseekMode", "slskdUrl", "slskdApiKey", "soulseekDownloadPath"],
     async () => {
         try {

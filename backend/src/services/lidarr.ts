@@ -1492,6 +1492,7 @@ export const lidarrService = new LidarrService();
 
 // A saved change to what Lidarr is reached with makes it read the settings again.
 onSystemSettingsChange(
+    "lidarr",
     ["lidarrEnabled", "lidarrUrl", "lidarrApiKey", "lidarrQualityProfileId", "lidarrMetadataProfileId"],
     () => lidarrService.reinitialize(),
 );

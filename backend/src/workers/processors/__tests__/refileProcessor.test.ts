@@ -96,7 +96,7 @@ it("holds the shutdown's drain until the re-file has ended", async () => {
 it("records a finished re-file through the settings save, so whoever reads the marker is told", async () => {
     mockRefile.mockResolvedValue(clean);
     const heard = jest.fn();
-    const signOff = onSystemSettingsChange(["albumsRefiledAt"], heard);
+    const signOff = onSystemSettingsChange("test", ["albumsRefiledAt"], heard);
     try {
         await processRefile(job);
         expect(heard).toHaveBeenCalledWith(["albumsRefiledAt"]);

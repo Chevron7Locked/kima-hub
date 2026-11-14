@@ -55,21 +55,23 @@ function meaning(field: string, stored: unknown): unknown {
 /**
  * The one way system settings are saved: writes the supplied fields (a credential given blank is cleared, except one
  * the server cannot read, which stays), drops the settings cache, then tells each subscriber which of its fields
- * changed, without waiting for any of them to finish. Answers the fields whose value changed.
+ * changed, without waiting for any of them to finish. Answers the fields whose value changed. The row is read and
+ * written under its lock, so two saves at the same time each see the other's result and a change is reported once.
  */
 export async function saveSystemSettings(changes: SystemSettingsChanges): Promise<SystemSettingsField[]> {
-    const before = await prisma.systemSettings.findUnique({ where: { id: "default" } });
-    const data = encryptSettings(changes as Record<string, unknown>, before) as SystemSettingsChanges;
-    const after = await prisma.systemSettings.upsert({
-        where: { id: "default" },
-        create: { id: "default", ...data },
-        update: data,
+    const changed = await prisma.$transaction(async (tx) => {
+        // The row exists before it is locked; a save that creates it has nothing before it to compare with.
+        const created = (await tx.systemSettings.createMany({ data: [{ id: "default" }], skipDuplicates: true })).count > 0;
+        await tx.$queryRaw`SELECT id FROM "SystemSettings" WHERE id = 'default' FOR UPDATE`;
+        const before = created ? null : await tx.systemSettings.findUnique({ where: { id: "default" } });
+        const data = encryptSettings(changes as Record<string, unknown>, before) as SystemSettingsChanges;
+        const after = await tx.systemSettings.update({ where: { id: "default" }, data });
+
+        return (Object.keys(changes) as SystemSettingsField[]).filter(
+            (field) => changes[field] !== undefined && meaning(field, before?.[field]) !== meaning(field, after[field]),
+        );
     });
     invalidateSystemSettingsCache();
-
-    const changed = (Object.keys(changes) as SystemSettingsField[]).filter(
-        (field) => changes[field] !== undefined && meaning(field, before?.[field]) !== meaning(field, after[field]),
-    );
     tellSettingsSubscribers(changed);
     return changed;
 }

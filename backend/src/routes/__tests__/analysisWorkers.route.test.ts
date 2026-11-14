@@ -169,7 +169,7 @@ describe('analysis worker sliders', () => {
     it('tells whoever reads a slider\'s setting that it changed, through the settings save', async () => {
         expectLog('warn');
         const heard = jest.fn();
-        const signOff = onSystemSettingsChange(['audioAnalyzerWorkers', 'clapWorkers'], heard);
+        const signOff = onSystemSettingsChange("test", ['audioAnalyzerWorkers', 'clapWorkers'], heard);
         try {
             await request(app).put('/analysis/workers').send({ workers: 4 }).expect(200);
             expect(heard).toHaveBeenLastCalledWith(['audioAnalyzerWorkers']);

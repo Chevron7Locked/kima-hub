@@ -14,9 +14,9 @@ import { closeQueue } from "../../__tests__/helpers/closeQueue";
 
 let before: Record<string, unknown> | null;
 const unsubscribe: Array<() => void> = [];
-const listen = (fields: Parameters<typeof onSystemSettingsChange>[0]) => {
+const listen = (fields: Parameters<typeof onSystemSettingsChange>[1]) => {
     const heard = jest.fn();
-    unsubscribe.push(onSystemSettingsChange(fields, heard));
+    unsubscribe.push(onSystemSettingsChange("test listener", fields, heard));
     return heard;
 };
 
@@ -83,6 +83,39 @@ describe("saveSystemSettings", () => {
         expect(changed).toEqual(["fanartEnabled"]);
     });
 
+    it("reports each change once when two saves of the same value run at the same time", async () => {
+        const heard = listen(["fanartEnabled"]);
+
+        const answers = await Promise.all(Array.from({ length: 4 }, () => saveSystemSettings({ fanartEnabled: true })));
+
+        expect(answers.filter((changed) => changed.length > 0)).toEqual([["fanartEnabled"]]);
+        expect(heard).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps both changes when two saves of different fields run at the same time", async () => {
+        const [first, second] = await Promise.all([
+            saveSystemSettings({ fanartEnabled: true }),
+            saveSystemSettings({ transcodeCacheMaxGb: 21 }),
+        ]);
+
+        expect(first).toEqual(["fanartEnabled"]);
+        expect(second).toEqual(["transcodeCacheMaxGb"]);
+        const row = await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } });
+        expect([row.fanartEnabled, row.transcodeCacheMaxGb]).toEqual([true, 21]);
+    });
+
+    it("creates the row once when two saves arrive and there is none", async () => {
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+        invalidateSystemSettingsCache();
+
+        await expect(
+            Promise.all([saveSystemSettings({ transcodeCacheMaxGb: 5 }), saveSystemSettings({ fanartEnabled: true })]),
+        ).resolves.toHaveLength(2);
+
+        const row = await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } });
+        expect([row.transcodeCacheMaxGb, row.fanartEnabled]).toEqual([5, true]);
+    });
+
     it("keeps an unreadable credential when a blank is saved over it, and says nothing changed", async () => {
         const heard = listen(["fanartApiKey"]);
         // A well-formed ciphertext that this key cannot open.
@@ -140,7 +173,7 @@ describe("onSystemSettingsChange", () => {
     it("runs a subscriber after the save is readable", async () => {
         const seen = new Promise<unknown>((resolve) => {
             unsubscribe.push(
-                onSystemSettingsChange(["transcodeCacheMaxGb"], async () => {
+                onSystemSettingsChange("test listener", ["transcodeCacheMaxGb"], async () => {
                     resolve((await getSystemSettings())?.transcodeCacheMaxGb);
                 }),
             );
@@ -152,8 +185,8 @@ describe("onSystemSettingsChange", () => {
     });
 
     it("lets a subscriber that throws neither fail the save nor silence the others", async () => {
-        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], () => { throw new Error("subscriber broke"); }));
-        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], async () => { throw new Error("async subscriber broke"); }));
+        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], () => { throw new Error("subscriber broke"); }));
+        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], async () => { throw new Error("async subscriber broke"); }));
         const other = listen(["fanartEnabled"]);
 
         await expect(saveSystemSettings({ fanartEnabled: true })).resolves.toEqual(["fanartEnabled"]);
@@ -163,7 +196,7 @@ describe("onSystemSettingsChange", () => {
 
     it("does not wait for a subscriber that never finishes", async () => {
         const never = jest.fn(() => new Promise<void>(() => {}));
-        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], never));
+        unsubscribe.push(onSystemSettingsChange("test listener", ["fanartEnabled"], never));
         const other = listen(["fanartEnabled"]);
         const held = Symbol("held");
 
@@ -179,7 +212,7 @@ describe("onSystemSettingsChange", () => {
 
     it("logs a subscriber that fails after the save has returned, and the save is unharmed", async () => {
         let fail!: (error: Error) => void;
-        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], () => new Promise<void>((_, reject) => { fail = reject; })));
+        unsubscribe.push(onSystemSettingsChange("cover art", ["fanartEnabled"], () => new Promise<void>((_, reject) => { fail = reject; })));
         const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
 
         try {
@@ -187,7 +220,7 @@ describe("onSystemSettingsChange", () => {
             fail(new Error("late failure"));
             await new Promise((resolve) => setImmediate(resolve));
 
-            expect(warn).toHaveBeenCalledWith(expect.stringContaining("fanartEnabled"), expect.objectContaining({ message: "late failure" }));
+            expect(warn).toHaveBeenCalledWith(expect.stringMatching(/cover art.*fanartEnabled/), expect.objectContaining({ message: "late failure" }));
         } finally {
             warn.mockRestore();
         }
@@ -195,7 +228,7 @@ describe("onSystemSettingsChange", () => {
 
     it("stops telling a subscriber that signed off", async () => {
         const heard = jest.fn();
-        const off = onSystemSettingsChange(["fanartEnabled"], heard);
+        const off = onSystemSettingsChange("test listener", ["fanartEnabled"], heard);
         off();
 
         await saveSystemSettings({ fanartEnabled: true });

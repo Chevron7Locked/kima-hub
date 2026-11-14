@@ -12,6 +12,7 @@ export type SystemSettingsChanges = Partial<Omit<SystemSettings, "id" | "created
 export type SystemSettingsField = keyof SystemSettingsChanges;
 
 interface Subscriber {
+    name: string;
     fields: ReadonlySet<SystemSettingsField>;
     listener: (changed: SystemSettingsField[]) => void | Promise<void>;
 }
@@ -19,15 +20,17 @@ interface Subscriber {
 const subscribers = new Set<Subscriber>();
 
 /**
- * Be told, in this process, when a save changes any of `fields`; the listener gets the ones that changed. A value
+ * Be told, in this process, when a save changes any of `fields`; the listener gets the ones that changed. `name` says
+ * who is listening, for the log when the listener fails. A value
  * sent back as it was is no change. Returns the way to sign off. The save does not wait for a listener; one that
  * throws or rejects is logged and does not fail the save or the other listeners.
  */
 export function onSystemSettingsChange<F extends SystemSettingsField>(
+    name: string,
     fields: readonly F[],
     listener: (changed: F[]) => void | Promise<void>,
 ): () => void {
-    const subscriber: Subscriber = { fields: new Set(fields), listener: listener as Subscriber["listener"] };
+    const subscriber: Subscriber = { name, fields: new Set(fields), listener: listener as Subscriber["listener"] };
     subscribers.add(subscriber);
     return () => {
         subscribers.delete(subscriber);
@@ -40,10 +43,10 @@ export function onSystemSettingsChange<F extends SystemSettingsField>(
  * take a while), and a listener that throws or rejects is logged without touching the others.
  */
 export function tellSettingsSubscribers(changed: SystemSettingsField[]): void {
-    for (const { fields, listener } of [...subscribers]) {
+    for (const { name, fields, listener } of [...subscribers]) {
         const heard = changed.filter((field) => fields.has(field));
         if (heard.length === 0) continue;
-        const failed = (error: unknown) => logger.warn(`[SETTINGS] A listener failed after the save (${heard.join(", ")}):`, error);
+        const failed = (error: unknown) => logger.warn(`[SETTINGS] The "${name}" listener failed after the save (${heard.join(", ")}):`, error);
         try {
             Promise.resolve(listener(heard)).catch(failed);
         } catch (error) {

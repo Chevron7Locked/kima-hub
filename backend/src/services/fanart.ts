@@ -206,4 +206,4 @@ class FanartService {
 
 export const fanartService = new FanartService();
 
-onSystemSettingsChange(["fanartEnabled", "fanartApiKey"], () => fanartService.reinitialize());
+onSystemSettingsChange("fanart", ["fanartEnabled", "fanartApiKey"], () => fanartService.reinitialize());

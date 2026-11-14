@@ -277,6 +277,6 @@ class AudiobookshelfService {
 
 export const audiobookshelfService = new AudiobookshelfService();
 
-onSystemSettingsChange(["audiobookshelfEnabled", "audiobookshelfUrl", "audiobookshelfApiKey"], () =>
+onSystemSettingsChange("audiobookshelf", ["audiobookshelfEnabled", "audiobookshelfUrl", "audiobookshelfApiKey"], () =>
     audiobookshelfService.reinitialize(),
 );

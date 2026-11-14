@@ -309,7 +309,7 @@ describe("the sort itself", () => {
         const heard = jest.fn(async () => {
             seen.push(await location("gwam"));
         });
-        const signOff = onSystemSettingsChange(["discoverAlbumsSortedAt"], heard);
+        const signOff = onSystemSettingsChange("test", ["discoverAlbumsSortedAt"], heard);
         try {
             await sortDiscoverAlbums();
             expect(heard).toHaveBeenCalledWith(["discoverAlbumsSortedAt"]);

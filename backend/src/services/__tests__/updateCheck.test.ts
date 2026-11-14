@@ -139,7 +139,7 @@ describe("getUpdateStatus", () => {
 describe("the check's own record", () => {
     it("is saved through the settings save, so whoever reads it is told what changed", async () => {
         const heard = jest.fn();
-        const signOff = onSystemSettingsChange(["lastUpdateCheck", "latestKnownVersion"], heard);
+        const signOff = onSystemSettingsChange("test", ["lastUpdateCheck", "latestKnownVersion"], heard);
         try {
             get.mockResolvedValue({ status: 200, data: { tag_name: "v99.0.0" } });
             await getUpdateStatus({ force: true });

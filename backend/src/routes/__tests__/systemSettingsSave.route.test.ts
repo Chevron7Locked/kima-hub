@@ -92,7 +92,7 @@ it("a server with no settings yet starts from the schema's defaults", async () =
 
 it("the settings page sending every field back tells a subscriber only about what changed", async () => {
     const heard = jest.fn();
-    const off = onSystemSettingsChange(["soulseekUsername", "soulseekMode", "slskdUrl"], heard);
+    const off = onSystemSettingsChange("test", ["soulseekUsername", "soulseekMode", "slskdUrl"], heard);
     try {
         const page = { soulseekUsername: "listener", soulseekMode: "p2p", slskdUrl: "", transcodeCacheMaxGb: 9 };
         await request(app()).post("/system-settings").set("Authorization", asAdmin()).send(page).expect(200);

@@ -52,7 +52,7 @@ it("refuses a value that is not true or false", async () => {
 
 it("tells whoever reads the setting that it changed, through the settings save", async () => {
     const heard = jest.fn();
-    const signOff = onSystemSettingsChange(["analysisAndVectorsTogether"], heard);
+    const signOff = onSystemSettingsChange("test", ["analysisAndVectorsTogether"], heard);
     try {
         await request(app).put("/analysis/together").send({ together: true }).expect(200);
         expect(heard).toHaveBeenCalledWith(["analysisAndVectorsTogether"]);
