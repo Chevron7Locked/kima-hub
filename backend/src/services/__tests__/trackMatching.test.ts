@@ -231,6 +231,14 @@ describe("a song's twin candidates (one per name it is known by)", () => {
     }
   });
 
+  it("keeps its song when another song's own artist name is the shown name, whatever the pool order", () => {
+    const namesake = candidate("song-c", "Midnight Drive Reprise", "Shownname Band");
+    for (const pool of permutations([...twins, namesake])) {
+      expect(matchTrackToLibrary({ title: "Midnight Drive", artist: "Shownname Band" }, pool)?.candidate.id).toBe("song-a");
+      expect(matchTrackToLibrary({ title: "Midnight Drive (Shown)", artist: "Shownname Band" }, pool)?.candidate.id).toBe("song-a");
+    }
+  });
+
   it("does not match a source of another artist and another song", () => {
     expect(matchTrackToLibrary({ title: "Completely Other Song", artist: "Zxqv Jkw Ptyl" }, twins)).toBeNull();
   });

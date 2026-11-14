@@ -1,9 +1,9 @@
 /**
  * The genre key (genreKey), the shared genre matching built on it (genreMatchesWanted,
  * artistTaggedWithGenre, libraryArtistIdsForGenre), and the genre list built on getMergedGenres
- * (computeGenreTotals). Matching and totals are computed in TypeScript, never in SQL: a database
+ * (computeGenreTotals, libraryGenreTotals). Matching and totals are computed in TypeScript, never in SQL: a database
  * in the SQL_ASCII encoding can neither normalize nor lower-case beyond ASCII, and the list is
- * one rule every surface shares (the web's GET /genres and Subsonic's getGenres).
+ * one rule every surface shares (Subsonic's getGenres and the radio stations).
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
@@ -126,11 +126,10 @@ export function computeGenreTotals(artists: GenreCountedArtist[]): GenreTotals[]
     }));
 }
 
-
 /**
  * Every artist with a genre tag and a playable song, with the playable songs it has and the library albums that hold
- * them, counted from the songs themselves. A cached count on the artist or album can be stale (a file went missing since
- * the last scan), a song count that includes songs that cannot play is not what a person finds there, so nothing cached is read.
+ * them, counted from the songs themselves. Nothing cached is read: a count kept on the artist or album can be stale (a
+ * file went missing since the last scan) and can include songs that cannot play.
  */
 export async function libraryGenreArtists(): Promise<GenreCountedArtist[]> {
     const rows = await prisma.$queryRaw<

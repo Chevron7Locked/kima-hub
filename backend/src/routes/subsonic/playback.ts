@@ -445,7 +445,7 @@ playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
 
 // ===================== LYRICS =====================
 
-/** The most songs one getLyrics weighs; the smallest ids when more hold the title. */
+/** The most songs one getLyrics weighs: those spelled exactly as asked first, then those with lyrics, then the smallest ids. */
 const LYRICS_CANDIDATES_MAX = 200;
 
 playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
@@ -477,7 +477,8 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
          WHERE ${playableSongSql("t", "al")}
            ${title ? Prisma.sql`AND ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
            ${artistIds ? Prisma.sql`AND al."artistId" = ANY(${artistIds}::text[])` : Prisma.empty}
-         ORDER BY t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
+         ORDER BY ${title ? Prisma.sql`(lower(t.title) = lower(${title}) OR lower(t."displayTitle") = lower(${title})) DESC,` : Prisma.empty}
+                  (tl.track_id IS NOT NULL) DESC, t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
 
     // The best match: a song whose title, as shown or in the file, is the one asked for (the same name as far as case,
     // accents and apostrophes go) before one that only holds it ("tune" is not "tune extended"), then one with lyrics,

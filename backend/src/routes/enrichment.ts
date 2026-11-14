@@ -473,8 +473,9 @@ router.put("/artists/:id/metadata", async (req, res) => {
       });
       await forgetArtistHero(req.params.id);
   
-      // A shown name is what a Subsonic client lists, so an edit of it moves the library's change marker.
-      if (name !== undefined) await markLibraryChanged();
+      // A shown name is what a Subsonic client lists, so an edit of it moves the library's change marker; so does a
+      // new MBID, which can rename the artist or merge it into another.
+      if (name !== undefined || trimmedMbid !== "") await markLibraryChanged();
       res.json(artist);
     } catch (error) {
       if (!respondIfDeleted(res, error, "artist")) {

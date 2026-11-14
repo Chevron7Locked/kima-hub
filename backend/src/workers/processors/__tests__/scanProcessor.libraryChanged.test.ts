@@ -53,10 +53,10 @@ it("leaves the marker alone when a scan changed nothing, even one asked for by h
     expect(await libraryChangedAt()).toBe(before);
 });
 
-it("leaves the marker alone when the scan fails", async () => {
+it("moves the marker when the scan fails part-way, since songs it filed are skipped by the next scan", async () => {
     const before = (await markLibraryChanged()).getTime();
     await tick();
     mockScanLibrary.mockRejectedValue(new Error("disk gone"));
     await expect(processScan(job())).rejects.toThrow("disk gone");
-    expect(await libraryChangedAt()).toBe(before);
+    expect(await libraryChangedAt()).toBeGreaterThan(before);
 });

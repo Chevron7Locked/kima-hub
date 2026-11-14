@@ -233,6 +233,9 @@ export async function processScan(
         return result;
     } catch (error: any) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);
+        // A scan that fails part-way has filed songs the next scan will skip, and its counts are lost with the throw,
+        // so the marker moves: a client re-lists once, never misses a change.
+        await markLibraryChanged().catch((e) => logger.error(`[ScanJob ${job.id}] Failed to record the library change:`, e));
         if (userId) {
             eventBus.emit({
                 type: "scan:complete",

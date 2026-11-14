@@ -36,7 +36,7 @@ export interface RadioRowStation {
     cover: string | null;
 }
 
-/** The library's genres with enough songs for a station, most songs first (computeGenreTotals is the shared tally). */
+/** The library's genres with enough songs for a station, most songs first (libraryGenreTotals is the shared tally, counted from playable songs). */
 export async function libraryGenres(): Promise<{ genre: string; count: number }[]> {
     return (await libraryGenreTotals())
         .filter((g) => g.songs >= MIN_STATION_SONGS)
