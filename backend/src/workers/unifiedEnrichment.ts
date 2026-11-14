@@ -15,7 +15,6 @@ import type { Worker as BullWorker } from "bullmq";
 import {
     artistQueue,
     trackQueue,
-    vibeQueue,
     podcastQueue,
     closeEnrichmentQueues,
     QUEUE_NAMES,
@@ -33,6 +32,9 @@ import {
 import { createRunState } from "./enrichment/runState";
 import { createMoodStep } from "./enrichment/moods";
 import { runSimilarityStep } from "./enrichment/similarity";
+import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "./enrichment/audioAnalysisJob";
+import { queueSoundVector, runSoundVectors } from "./enrichment/soundVectorJob";
+import type { StageOffer } from "./enrichment/stageOffer";
 import { enrichmentStateService, type EnrichmentPhase } from "../services/enrichmentState";
 // The stage vocabulary and every change to a stage record live in services/stages/stageRecords.ts.
 import * as stageRecords from "../services/stages/stageRecords";
@@ -83,7 +85,7 @@ import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording }
 export const STAGE_QUEUES: Record<StageName, string> = {
     recording: QUEUE_NAMES.TRACKS,
     // The analyzer consumes a plain Redis list, not a BullMQ queue.
-    analysis: "audio:analysis:queue",
+    analysis: ANALYSIS_QUEUE,
     embedding: QUEUE_NAMES.VIBE,
     fingerprint: "inline",
 };
@@ -708,6 +710,9 @@ async function clearMixCache(
     }
 }
 
+/** The analyzer's list on the scheduler's Redis client, opened on first use. */
+const analysisList = { rpush: (key: string, value: string) => getRedis().rpush(key, value) };
+
 /** Where a claimed attempt is handed to its queue, shared by the phases and
  * "Retry failed and blocked" so each queue keeps one producer. */
 const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
@@ -720,27 +725,8 @@ const STAGE_PRODUCERS: Record<StageName, (item: StageWork) => Promise<void>> = {
             { jobId: item.jobId },
         );
     },
-    analysis: async (item) => {
-        // The analyzer consumes a plain Redis list, not a BullMQ queue. The job id names
-        // the claim, and the analyzer's report carries it back. The claim already put the song's
-        // status column to `processing`; nothing is written after the push, so a fast report cannot be undone.
-        await getRedis().rpush(
-            STAGE_QUEUES.analysis,
-            JSON.stringify({
-                trackId: item.trackId,
-                filePath: item.filePath,
-                duration: item.duration,
-                jobId: item.jobId,
-            }),
-        );
-    },
-    embedding: async (item) => {
-        await vibeQueue.add(
-            "embed",
-            { trackId: item.trackId, filePath: item.filePath, duration: item.duration },
-            { jobId: item.jobId },
-        );
-    },
+    analysis: (item) => pushToAnalyzer(analysisList, item),
+    embedding: queueSoundVector,
     fingerprint: async (item) => {
         // The fingerprint pool runs fpcalc at machine concurrency and returns at once,
         // so no stage or cycle waits on the sweep. dispatchStageWork owns the claim;
@@ -1999,29 +1985,23 @@ async function prefetchAcoustidForWork(work: StageWork[]): Promise<void> {
     }
 }
 
-/**
- * The `analysis` question (Essentia decode and measure), offered from the
- * records. Nothing here flushes the analysis list or rewrites columns, which
- * would let a queued job and its record disagree.
- */
+/** The `analysis` question: its own work is in enrichment/audioAnalysisJob.ts; this binds the offer to the stage. */
 export async function executeAudioPhase(): Promise<number> {
-    // Its own window, as deep as the stage may hold in flight, so analysis overlaps
-    // network-bound identification and every worker always has its next track queued.
-    const work = await getNextWork(await drainCap("analysis"), "analysis");
-    return dispatchStageWork("analysis", work, STAGE_PRODUCERS.analysis);
+    return runAudioAnalysis(offerFor("analysis"), analysisList);
 }
 
-/**
- * The `embedding` question (CLAP), offered only for tracks whose own analysis
- * is `done`, so one unanalysable file cannot hold back anyone else's.
- */
+/** The `embedding` question: its own work is in enrichment/soundVectorJob.ts. */
 export async function executeVibePhase(): Promise<number> {
-    const features = await featureDetection.getFeatures();
-    if (!features.vibeEmbeddings) {
-        return 0;
-    }
-    const work = await getNextWork(await drainCap("embedding"), "embedding");
-    return dispatchStageWork("embedding", work, STAGE_PRODUCERS.embedding);
+    return runSoundVectors(offerFor("embedding"));
+}
+
+/** What a stage job asks of the scheduler: its window, the work owed to it, and the claim-and-queue dispatch. */
+function offerFor(stage: "analysis" | "embedding"): StageOffer {
+    return {
+        window: () => drainCap(stage),
+        nextWork: (limit) => getNextWork(limit, stage),
+        dispatch: (work, produce) => dispatchStageWork(stage, work, produce),
+    };
 }
 
 export async function executePodcastRefreshPhase(): Promise<number> {
@@ -2174,7 +2154,7 @@ async function computeEnrichmentProgress() {
 
     // The analysis queue is a Redis list, so its depth is read from the list. The
     // embedding queue's jobs are all covered by `working` records.
-    const audioQueueLength = await getRedis().llen("audio:analysis:queue");
+    const audioQueueLength = await getRedis().llen(ANALYSIS_QUEUE);
 
     // Recording records whose fingerprint is not settled are blocked, not owed:
     // the gate keeps them unoffered. Reported separately so the UI does not show
