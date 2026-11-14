@@ -107,12 +107,15 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
         );
     }
 
+    // A current mood's mix with no playable songs is not offered at all, so 0 here is a retired mix.
+    const hasSongsToSave = mix.trackCount > 0;
+
     return (
         <div className="flex flex-col gap-3">
             <p className="text-sm text-white/80" data-testid="moodmix-name">
                 {mix.name} &middot; {mix.trackCount} {mix.trackCount === 1 ? "track" : "tracks"}
             </p>
-            {savedNote ?? (mix.trackCount === 0 ? null : (
+            {savedNote ?? (hasSongsToSave && (
                 <Button onClick={save} disabled={busy !== null} data-testid="moodmix-save" className="self-start">
                     {busy === "save" && <Loader2 className="w-4 h-4 animate-spin" />}
                     {busy === "save" ? "Saving..." : "Save as playlist"}
