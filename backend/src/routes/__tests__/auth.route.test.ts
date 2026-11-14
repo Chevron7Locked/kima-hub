@@ -112,14 +112,18 @@ describe('POST /auth/login', () => {
         expect(res.body.user.username).toBe(USER);
     });
 
-    it('signs in an account stored with padding, by the name as stored', async () => {
+    it('signs in an account stored with padding, by the name as stored or the trimmed name', async () => {
         const passwordHash = await bcrypt.hash(PASSWORD, 4);
         await prisma.user.create({ data: { username: PADDED, passwordHash, onboardingComplete: true } });
 
         const exact = await request(app).post('/auth/login').send({ username: PADDED, password: PASSWORD });
 
+        const trimmed = await request(app).post('/auth/login').send({ username: PADDED.trim(), password: PASSWORD });
+
         expect(exact.status).toBe(200);
         expect(exact.body.user.username).toBe(PADDED);
+        expect(trimmed.status).toBe(200);
+        expect(trimmed.body.user.username).toBe(PADDED);
     });
 
     it('signs in the trimmed account, not the padded one, when both exist', async () => {

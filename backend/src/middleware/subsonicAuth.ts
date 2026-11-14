@@ -8,13 +8,14 @@ import { findUserByUsername, normalizeUsername } from "../services/users/account
 import { one } from "../utils/subsonicParams";
 
 /**
- * Whether the typed name means the account that owns a key: the same answer the password path's lookup gives. The
- * trimmed name is the common case and costs no query; only a name stored with padding needs the lookup, to see that no
- * trimmed account shadows it.
+ * Whether the typed name means the account that owns a key: the same answer the password path's lookup gives. A key
+ * owner stored under the trimmed name costs no query; one stored with padding needs the lookup, to see that no other
+ * account takes the name first.
  */
 async function namesKeyOwner(given: string, keyOwner: { id: string; username: string }): Promise<boolean> {
-    if (keyOwner.username === normalizeUsername(given)) return true;
-    if (keyOwner.username !== given) return false;
+    const typed = normalizeUsername(given);
+    if (keyOwner.username === typed) return true;
+    if (normalizeUsername(keyOwner.username) !== typed) return false;
     return (await findUserByUsername(given, { id: true }))?.id === keyOwner.id;
 }
 

@@ -74,18 +74,30 @@ function passwordRefusal(password: unknown): PasswordRefusal | null {
  */
 export const normalizeUsername = (username: string): string => username.trim();
 
+/** The stored name with its padding removed, as SQL: the same whitespace `normalizeUsername` trims. */
+const TRIMMED_STORED_USERNAME = Prisma.sql`regexp_replace(username, '^[[:space:]]+|[[:space:]]+$', '', 'g')`;
+
 /**
- * The account a person means by a typed name: the trimmed name first, then the name exactly as given, so an account
- * stored with padding before the trim rule still signs in. The trimmed account wins when both exist. Every sign-in
- * and username lookup goes through here. Returns only the fields in `select`, or null.
+ * The account a person means by a typed name. Names are compared trimmed on both sides, so an account stored with
+ * padding before the trim rule still signs in. In order:
+ *   1. the account stored under exactly the trimmed name;
+ *   2. the one account whose stored name trims to it, when there is exactly one;
+ *   3. the account stored under the name exactly as typed (the way to reach either of two legacy rows that trim to
+ *      the same name, which step 2 will not guess between).
+ * Every sign-in and username lookup goes through here. Returns only the fields in `select`, or null.
  */
 export async function findUserByUsername<S extends Prisma.UserSelect>(
     given: string,
     select: S,
 ): Promise<Prisma.UserGetPayload<{ select: S }> | null> {
     const trimmed = normalizeUsername(given);
-    const found = await prisma.user.findUnique({ where: { username: trimmed }, select });
-    if (found || given === trimmed) return found;
+    const exact = await prisma.user.findUnique({ where: { username: trimmed }, select });
+    if (exact) return exact;
+    const padded = await prisma.$queryRaw<{ id: string }[]>(
+        Prisma.sql`SELECT id FROM "User" WHERE ${TRIMMED_STORED_USERNAME} = ${trimmed} LIMIT 2`,
+    );
+    if (padded.length === 1) return prisma.user.findUnique({ where: { id: padded[0].id }, select });
+    if (given === trimmed) return null;
     return prisma.user.findUnique({ where: { username: given }, select });
 }
 
@@ -117,11 +129,18 @@ const hashPassword = (password: string) => bcrypt.hash(password, HASH_COST);
 
 const ACCOUNT_FIELDS = { id: true, username: true, role: true, onboardingComplete: true, tokenVersion: true, createdAt: true } as const;
 
-/** The user row and its settings in the one transaction, so neither is ever left without the other. */
+/**
+ * The user row and its settings in the one transaction, so neither is ever left without the other. Null when the name
+ * is taken, which includes a stored name that only trims to it: a new account never shadows an old padded one.
+ */
 async function insertAccount(
     tx: Prisma.TransactionClient,
     input: { username: string; passwordHash: string; role: AccountRole; onboardingComplete: boolean },
-): Promise<Account> {
+): Promise<Account | null> {
+    const shadowed = await tx.$queryRaw<{ id: string }[]>(
+        Prisma.sql`SELECT id FROM "User" WHERE ${TRIMMED_STORED_USERNAME} = ${input.username} LIMIT 1`,
+    );
+    if (shadowed.length > 0) return null;
     const user = await tx.user.create({ data: input, select: ACCOUNT_FIELDS });
     await tx.userSettings.create({ data: defaultUserSettingsFor(user.id) });
     return user as Account;
@@ -148,7 +167,7 @@ export async function createAccount(input: {
                 onboardingComplete: input.onboardingComplete,
             }),
         );
-        return { ok: true, user };
+        return user ? { ok: true, user } : { ok: false, reason: "username-taken" };
     } catch (error) {
         if (isUniqueClash(error)) return { ok: false, reason: "username-taken" };
         throw error;
@@ -182,7 +201,7 @@ export async function signUp(input: {
                 role: isFirst ? "admin" : "user",
                 onboardingComplete: false,
             });
-            return { ok: true, user } as const;
+            return user ? ({ ok: true, user } as const) : ({ ok: false, reason: "username-taken" } as const);
         });
     } catch (error) {
         if (isUniqueClash(error)) return { ok: false, reason: "username-taken" };

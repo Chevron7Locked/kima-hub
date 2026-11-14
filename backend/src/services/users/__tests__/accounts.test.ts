@@ -91,6 +91,18 @@ describe("createAccount", () => {
         expect(await prisma.user.count()).toBe(1);
     });
 
+    it("answers username taken when a stored name trims to the new one, on create and on sign-up", async () => {
+        await seedUser(" alice ");
+
+        expect(await plain("alice")).toEqual({ ok: false, reason: "username-taken" });
+        expect(await plain("  alice\t")).toEqual({ ok: false, reason: "username-taken" });
+        expect(await signUp({ username: "alice", password: "secret1", registrationOpen: true })).toEqual({
+            ok: false,
+            reason: "username-taken",
+        });
+        expect(await prisma.user.count()).toBe(1);
+    });
+
     it("answers username taken, not an error, when accounts race for one name", async () => {
         const made = await Promise.all([1, 2, 3].map(() => plain("racer")));
 
@@ -440,9 +452,23 @@ describe("findUserByUsername (a name as a person typed it)", () => {
         expect((await findUserByUsername(" bob", { id: true }))?.id).toBe(padded.id);
     });
 
-    it("does not find an account stored with padding by the trimmed name: only the name as stored", async () => {
-        await seedUser(" bob");
+    it("finds an account stored with padding by its trimmed name", async () => {
+        const padded = await seedUser(" bob");
+        expect((await findUserByUsername("bob", { id: true }))?.id).toBe(padded.id);
+        expect((await findUserByUsername(" bob\t", { id: true }))?.id).toBe(padded.id);
+    });
+
+    it("finds an account stored with tab padding by its trimmed name", async () => {
+        const padded = await seedUser("\tbob");
+        expect((await findUserByUsername("bob", { id: true }))?.id).toBe(padded.id);
+    });
+
+    it("finds neither of two legacy rows that trim to the same name by that name, and each by its exact form", async () => {
+        const left = await seedUser(" bob");
+        const right = await seedUser("bob ");
         expect(await findUserByUsername("bob", { id: true })).toBeNull();
+        expect((await findUserByUsername(" bob", { id: true }))?.id).toBe(left.id);
+        expect((await findUserByUsername("bob ", { id: true }))?.id).toBe(right.id);
     });
 
     it("prefers the trimmed account over a padded one", async () => {

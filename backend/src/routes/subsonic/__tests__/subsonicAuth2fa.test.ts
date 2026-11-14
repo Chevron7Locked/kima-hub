@@ -186,7 +186,7 @@ describe("subsonicAuth: the username is trimmed", () => {
         expect(avatar.headers["content-type"]).toBe("image/png");
     });
 
-    it("signs in an account stored with padding, by password and by API key, under the name as stored", async () => {
+    it("signs in an account stored with padding, by password and by API key, under the name as stored or trimmed", async () => {
         seq += 1;
         const stored = ` subauth_padded_${seq}`;
         const user = await prisma.user.create({
@@ -196,12 +196,14 @@ describe("subsonicAuth: the username is trimmed", () => {
         const ping = (extra: Record<string, string>) =>
             request(app).get("/rest/ping.view").query({ f: "json", v: "1.16.1", c: "test", ...extra });
 
-        const byPassword = await ping({ u: stored, p: PLAIN_PASSWORD });
-        const byKey = await ping({ u: stored, apiKey: key });
-        const keyInPasswordField = await ping({ u: stored, p: key });
-        expect(byPassword.body["subsonic-response"].status).toBe("ok");
-        expect(byKey.body["subsonic-response"].status).toBe("ok");
-        expect(keyInPasswordField.body["subsonic-response"].status).toBe("ok");
+        for (const u of [stored, stored.trim()]) {
+            const byPassword = await ping({ u, p: PLAIN_PASSWORD });
+            const byKey = await ping({ u, apiKey: key });
+            const keyInPasswordField = await ping({ u, p: key });
+            expect(byPassword.body["subsonic-response"].status).toBe("ok");
+            expect(byKey.body["subsonic-response"].status).toBe("ok");
+            expect(keyInPasswordField.body["subsonic-response"].status).toBe("ok");
+        }
 
         const wrong = await ping({ u: stored, p: "not the password" });
         expect(wrong.body["subsonic-response"].error.code).toBe(40);
