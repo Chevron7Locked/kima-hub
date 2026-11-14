@@ -311,11 +311,15 @@ describe("GET /discover/batch-status -- reports the latest finished batch when n
 });
 
 describe("GET /discover/current -- the stand-in song for a suggestion with no recorded songs", () => {
-    /** A suggestion with an album and songs but no DiscoveryTrack rows, so /current picks one stand-in song. */
+    /**
+     * A suggestion with an album and songs. It has no DiscoveryTrack rows unless `recorded` names the track numbers
+     * to record, so /current otherwise picks one stand-in song.
+     */
     async function suggestWithSongs(
         name: string,
         songs: Array<{ trackNo: number; missing?: boolean; corrupt?: boolean }>,
         status: "ACTIVE" | "LIKED" = "ACTIVE",
+        recorded: number[] = [],
     ) {
         const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: `${MARK}-${name}` } });
         const album = await prisma.album.create({
@@ -333,10 +337,12 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
                 },
             });
         }
+        const kept = await prisma.track.findMany({ where: { albumId: album.id, trackNo: { in: recorded } } });
         await prisma.discoveryAlbum.create({
             data: {
                 userId: listener, rgMbid: album.rgMbid, artistName: artist.name, albumTitle: album.title,
                 weekStartDate: THIS_WEEK, status, downloadedAt: THIS_WEEK, similarity: 0.9, tier: "core",
+                tracks: { create: kept.map((t) => ({ trackId: t.id, fileName: `${t.trackNo}.flac`, filePath: t.filePath })) },
             },
         });
         return (n: number) => `${MARK} ${name} song ${n}`;
@@ -378,12 +384,7 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
     });
 
     it("does not list a recorded song whose file is missing, and stands in the next song of the album", async () => {
-        const song = await suggestWithSongs("rec", [{ trackNo: 1, missing: true }, { trackNo: 2 }]);
-        const recorded = await prisma.track.findFirstOrThrow({ where: { title: song(1) } });
-        const suggestion = await prisma.discoveryAlbum.findFirstOrThrow({ where: { rgMbid: `${MARK}-rg-rec` } });
-        await prisma.discoveryTrack.create({
-            data: { discoveryAlbumId: suggestion.id, trackId: recorded.id, fileName: "1.flac", filePath: recorded.filePath },
-        });
+        const song = await suggestWithSongs("rec", [{ trackNo: 1, missing: true }, { trackNo: 2 }], "ACTIVE", [1]);
 
         const res = await request(app).get("/discover/current");
 
@@ -446,12 +447,33 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
             spies.forEach((spy) => spy.mockRestore());
             return calls;
         };
-        await suggestWithSongs("q0", [{ trackNo: 1 }]);
-        const one = await count();
-        expect(one).toBeGreaterThan(0);
-        for (const n of [1, 2, 3, 4, 5]) await suggestWithSongs(`q${n}`, [{ trackNo: 1, missing: true }, { trackNo: 2 }], n % 2 ? "LIKED" : "ACTIVE");
+        // One suggestion of each kind, one listing a recorded song and one needing a stand-in, so every query runs.
+        await suggestWithSongs("q-a", [{ trackNo: 1 }], "LIKED", [1]);
+        await suggestWithSongs("q-b", [{ trackNo: 1 }], "ACTIVE");
+        await suggestWithSongs("q-c", [{ trackNo: 1 }], "LIKED");
+        await suggestWithSongs("q-d", [{ trackNo: 1 }], "ACTIVE", [1]);
+        const few = await count();
+        expect(few).toBeGreaterThan(0);
+        for (const n of [1, 2, 3, 4]) {
+            await suggestWithSongs(`q${n}`, [{ trackNo: 1, missing: true }, { trackNo: 2 }], n % 2 ? "LIKED" : "ACTIVE", n > 2 ? [2] : []);
+        }
 
-        expect(await count()).toBeLessThanOrEqual(one + 2);
+        expect(await count()).toBe(few);
+    });
+
+    it("never lists a library song under a Discover suggestion that records it", async () => {
+        const libraryLiked = await suggestWithSongs("lib", [{ trackNo: 1 }], "LIKED");
+        const own = await suggestWithSongs("own", [{ trackNo: 1 }], "ACTIVE");
+        const librarySong = await prisma.track.findFirstOrThrow({ where: { title: libraryLiked(1) } });
+        const ownSuggestion = await prisma.discoveryAlbum.findFirstOrThrow({ where: { rgMbid: `${MARK}-rg-own` } });
+        await prisma.discoveryTrack.create({
+            data: { discoveryAlbumId: ownSuggestion.id, trackId: librarySong.id, fileName: "x.flac", filePath: librarySong.filePath },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        const own1 = res.body.tracks.filter((t: { album: string }) => t.album === `${MARK} own LP`);
+        expect(own1.map((t: { title: string }) => t.title)).toEqual([own(1)]);
     });
 
     it("applies the same pick to a liked suggestion, whose album is in the library now", async () => {

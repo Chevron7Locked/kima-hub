@@ -334,6 +334,8 @@ function suggestionSong(
 }
 
 type SuggestionWithSongs = Prisma.DiscoveryAlbumGetPayload<{ include: { tracks: true } }>;
+type RecordedSong = Awaited<ReturnType<typeof recordedSongs>>[number];
+type StandIn = { song: { id: string; title: string; duration: number }; coverUrl: string | null };
 
 /**
  * The songs GET /current lists for a week's suggestions, in suggestion order, in a fixed number of queries. A
@@ -342,20 +344,44 @@ type SuggestionWithSongs = Prisma.DiscoveryAlbumGetPayload<{ include: { tracks: 
  * playable song yet, a pending placeholder.
  */
 async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
-    const recorded = new Map<string, Awaited<ReturnType<typeof recordedSongs>>[number]>();
-    const standIns = new Map<string, { song: { id: string; title: string; duration: number }; coverUrl: string | null }>();
-
-    // A liked suggestion's album is in the library now; any other's is a Discover album, never a library album of the same name.
+    // A liked suggestion's album is in the library now; any other's is a Discover album, never a library album of the
+    // same name, so each kind is looked up under its own rule.
+    const found = new Map<string, ReturnType<typeof suggestionSong>[]>();
     for (const liked of [true, false]) {
         const group = suggestions.filter((s) => (s.status === "LIKED") === liked);
-        if (group.length === 0) continue;
-        const rule = suggestionSongRule(group[0].status);
+        if (group.length > 0) for (const [id, songs] of await songsOfGroup(group, liked)) found.set(id, songs);
+    }
 
-        const ids = group.flatMap((s) => s.tracks.map((dt) => dt.trackId).filter((id): id is string => id !== null));
-        for (const song of await recordedSongs(rule, ids)) recorded.set(song.id, song);
+    return suggestions.flatMap((s) => {
+        const songs = found.get(s.id);
+        if (songs && songs.length > 0) return songs;
+        // The album is not in the library yet (downloading or pending), or none of its songs can play.
+        return [
+            {
+                ...suggestionSong(s, {
+                    id: `pending-${s.id}`,
+                    title: `${s.albumTitle} (pending import)`,
+                    duration: 0,
+                    coverUrl: null,
+                }),
+                available: false,
+                isPending: true,
+            },
+        ];
+    });
+}
 
-        const needy = group.filter((s) => !s.tracks.some((dt) => dt.trackId !== null && recorded.has(dt.trackId)));
-        if (needy.length === 0) continue;
+/** The playable songs of suggestions that are all liked, or all not, by suggestion id: recorded songs, else the stand-in. */
+async function songsOfGroup(group: SuggestionWithSongs[], liked: boolean) {
+    const rule = suggestionSongRule(liked ? "LIKED" : "ACTIVE");
+    const ids = group.flatMap((s) => s.tracks.map((dt) => dt.trackId).filter((id): id is string => id !== null));
+    const recorded = new Map<string, RecordedSong>((await recordedSongs(rule, ids)).map((song) => [song.id, song]));
+    const recordedOf = (s: SuggestionWithSongs) =>
+        s.tracks.flatMap((dt) => (dt.trackId && recorded.has(dt.trackId) ? [recorded.get(dt.trackId)!] : []));
+
+    const needy = group.filter((s) => recordedOf(s).length === 0);
+    const standIns = new Map<string, StandIn>();
+    if (needy.length > 0) {
         const matches = [
             { rgMbid: { in: needy.filter((s) => s.rgMbid).map((s) => s.rgMbid) } },
             ...needy.filter((s) => !s.rgMbid).map((s) => ({ title: s.albumTitle, artist: { name: s.artistName } })),
@@ -375,28 +401,17 @@ async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
         }
     }
 
-    return suggestions.flatMap((s) => {
-        const listed = s.tracks.flatMap((dt) => {
-            const song = dt.trackId ? recorded.get(dt.trackId) : undefined;
-            return song ? [suggestionSong(s, { ...song, coverUrl: song.album?.coverUrl ?? null })] : [];
-        });
-        if (listed.length > 0) return listed;
-        const standIn = standIns.get(s.id);
-        if (standIn) return [suggestionSong(s, { ...standIn.song, coverUrl: standIn.coverUrl })];
-        // The album is not in the library yet (downloading or pending), or none of its songs can play.
-        return [
-            {
-                ...suggestionSong(s, {
-                    id: `pending-${s.id}`,
-                    title: `${s.albumTitle} (pending import)`,
-                    duration: 0,
-                    coverUrl: null,
-                }),
-                available: false,
-                isPending: true,
-            },
-        ];
-    });
+    return new Map(
+        group.map((s) => {
+            const standIn = standIns.get(s.id);
+            return [
+                s.id,
+                standIn
+                    ? [suggestionSong(s, { ...standIn.song, coverUrl: standIn.coverUrl })]
+                    : recordedOf(s).map((song) => suggestionSong(s, { ...song, coverUrl: song.album?.coverUrl ?? null })),
+            ] as const;
+        }),
+    );
 }
 
 /** The recorded songs among `ids` that satisfy the playable-song rule, each with its album. */
