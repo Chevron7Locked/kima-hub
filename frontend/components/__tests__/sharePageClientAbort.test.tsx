@@ -11,6 +11,9 @@ import SharePageClient from "@/app/share/[token]/SharePageClient";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+/** The share token in a resolve address ("/api/share/<token>"). */
+const tokenOf = (url: string) => decodeURIComponent(url.split("?")[0].split("/").pop() ?? "");
+
 let root: Root;
 let host: HTMLDivElement;
 let signal: AbortSignal | undefined;
@@ -28,10 +31,10 @@ beforeEach(() => {
         "fetch",
         vi.fn((url: string, init?: RequestInit) => {
             signal = init?.signal ?? undefined;
-            if (missing.some((tok) => url.includes(`/${tok}`))) {
+            if (missing.includes(tokenOf(url))) {
                 return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: "Share link not found" }) });
             }
-            const answered = Object.entries(answers).find(([tok]) => url.includes(`/${tok}`));
+            const answered = Object.entries(answers).find(([tok]) => tok === tokenOf(url));
             if (answered) return Promise.resolve({ ok: true, status: 200, json: async () => answered[1] });
             return new Promise((_resolve, reject) => {
                 signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
