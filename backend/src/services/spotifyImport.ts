@@ -383,7 +383,7 @@ async function tracksTitledLike<I extends Prisma.TrackInclude>(terms: string[], 
     }
     titleMatches.push({ id: { in: [...ids].slice(0, TITLE_CANDIDATES_MAX) } });
   }
-  return prisma.track.findMany({ where: { AND: [PLAYABLE_SONG, { OR: titleMatches }] }, include, take: TITLE_CANDIDATES_MAX });
+  return prisma.track.findMany({ where: { AND: [PLAYABLE_SONG, { OR: titleMatches }] }, include, orderBy: { id: "asc" }, take: TITLE_CANDIDATES_MAX });
 }
 
 /** Titles this short ("Intro", "Home") are too common to match without the artist. */
@@ -2660,6 +2660,7 @@ class SpotifyImportService {
           track = await prisma.track.findFirst({
             where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } }] },
             select: { id: true },
+            orderBy: { id: "asc" },
           });
         }
       }
