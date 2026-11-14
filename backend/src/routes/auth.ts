@@ -216,16 +216,14 @@ router.post("/change-password", authLimiter, async (req, res) => {
 
         const changed = await changePassword({ userId: req.user!.id, currentPassword, newPassword });
         if (!changed.ok) {
-            if (changed.reason === "password-too-short" || changed.reason === "password-too-long") {
-                return res.status(400).json({ error: refusalMessage(changed, "New password") });
-            }
             if (changed.reason === "not-found") {
                 return res.status(404).json({ error: "User not found" });
             }
-            // 401 means "not signed in"; a wrong password from a signed-in user is a bad request.
-            return res
-                .status(400)
-                .json({ error: "Current password is incorrect" });
+            if (changed.reason === "wrong-password") {
+                // 401 means "not signed in"; a wrong password from a signed-in user is a bad request.
+                return res.status(400).json({ error: "Current password is incorrect" });
+            }
+            return res.status(400).json({ error: refusalMessage(changed, "New password") });
         }
         const updated = changed.user;
 

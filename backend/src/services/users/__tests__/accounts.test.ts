@@ -19,6 +19,7 @@ import {
     deleteAccount,
     LastAdminError,
     refusalMessage,
+    type Refusal,
     resetAdminPassword,
     signUp,
 } from "../accounts";
@@ -117,7 +118,7 @@ describe("createAccount", () => {
 
 // bcrypt reads only the first 72 bytes, so a longer password would be silently cut. The limit is in bytes, and
 // the answers say it in characters.
-const TOO_LONG = { ok: false, reason: "password-too-long", maximum: 72 };
+const TOO_LONG: Refusal = { ok: false, reason: "password-too-long", maximum: 72 };
 const bytes72 = "a".repeat(72);
 const bytes73 = "a".repeat(73);
 const accents36 = "é".repeat(36); // 72 bytes
@@ -166,7 +167,7 @@ describe("the password's longest length", () => {
     });
 
     it("says the limit in characters a person can follow", () => {
-        expect(refusalMessage(TOO_LONG as never)).toBe(
+        expect(refusalMessage(TOO_LONG)).toBe(
             "Password must be at most 72 characters (accented letters, other alphabets and emoji count as more than one)",
         );
         expect(refusalMessage({ ok: false, reason: "password-too-short", minimum: 6 }, "New password")).toBe(
@@ -176,7 +177,7 @@ describe("the password's longest length", () => {
 });
 
 describe("the username rule", () => {
-    const BAD = { ok: false, reason: "username-invalid", minimum: 3, maximum: 50 };
+    const BAD: Refusal = { ok: false, reason: "username-invalid", minimum: 3, maximum: 50 };
 
     it.each([["abc"], ["a".repeat(50)], ["ü".repeat(50)]])("takes %j on create", async (name) => {
         expect((await plain(name)).ok).toBe(true);
@@ -199,7 +200,7 @@ describe("the username rule", () => {
     });
 
     it("says the rule in plain words", () => {
-        expect(refusalMessage(BAD as never)).toBe("Username must be 3 to 50 characters");
+        expect(refusalMessage(BAD)).toBe("Username must be 3 to 50 characters");
     });
 });
 

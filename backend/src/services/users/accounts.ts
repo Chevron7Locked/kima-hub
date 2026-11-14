@@ -76,6 +76,10 @@ function usernameRefusal(username: unknown): UsernameInvalid | null {
     return null;
 }
 
+/** The username and the password together, as a new account is given them. */
+const signUpRefusal = (input: { username: unknown; password: unknown }): Refusal | null =>
+    usernameRefusal(input.username) ?? passwordRefusal(input.password);
+
 /** What to tell a person whose input was refused; `subject` names the password ("New password") where it differs. */
 export function refusalMessage(refusal: Refusal, subject = "Password"): string {
     switch (refusal.reason) {
@@ -110,7 +114,7 @@ export async function createAccount(input: {
     role: AccountRole;
     onboardingComplete: boolean;
 }): Promise<Created | UsernameTaken | Refusal> {
-    const refused = usernameRefusal(input.username) ?? passwordRefusal(input.password);
+    const refused = signUpRefusal(input);
     if (refused) return refused;
     const passwordHash = await hashPassword(input.password);
     try {
@@ -139,7 +143,7 @@ export async function signUp(input: {
     password: string;
     registrationOpen: boolean;
 }): Promise<Created | UsernameTaken | Refusal | { ok: false; reason: "registration-closed" }> {
-    const refused = usernameRefusal(input.username) ?? passwordRefusal(input.password);
+    const refused = signUpRefusal(input);
     if (refused) return refused;
     // Refuse a closed sign-up before the costly hash, so a stranger cannot make the server hash for nothing. The check
     // inside the transaction below is the one that counts.
