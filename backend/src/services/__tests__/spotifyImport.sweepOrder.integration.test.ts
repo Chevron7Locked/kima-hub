@@ -5,7 +5,7 @@
  *
  * - Nothing is cut by id: the right song is found when it has the highest id of an artist with more than 50 songs, and
  *   when the first word is a common one ("the") shared by dozens of artists with lower ids.
- * - The same song comes back whatever order the rows were inserted: 60 songs with one title, inserted highest id first,
+ * - The same song comes back whatever order the rows were inserted: 80 songs with one title, inserted highest id first,
  *   match the lowest id.
  */
 import { prisma } from "../../utils/db";
@@ -136,7 +136,7 @@ describe("a common first word shared by many artists with lower ids", () => {
     });
 });
 
-describe("60 namesake songs inserted highest id first", () => {
+describe("80 namesake songs inserted highest id first", () => {
     it("the first-word sweeps match the same song", async () => {
         const title = `${P} six song`;
         await seed("six", "qzfsix band", SAME(title));

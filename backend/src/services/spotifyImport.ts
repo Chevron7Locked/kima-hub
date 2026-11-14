@@ -493,7 +493,8 @@ class SpotifyImportService {
           ).flatMap(toMatchCandidates),
         );
       }
-      if (candidates.size === 0) {
+      // An empty source artist has an empty prefix, which every artist starts with: nothing to look up.
+      if (candidates.size === 0 && normalizedPrimaryArtist.length > 0) {
         add(
           (
             await prisma.track.findMany({
@@ -507,11 +508,12 @@ class SpotifyImportService {
           ).flatMap(toMatchCandidates),
         );
       }
-      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist) {
+      const creditFirstWord = dbNormalizedArtist.split(" ")[0];
+      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length > 0) {
         add(
           (
             await prisma.track.findMany({
-              ...SONGS_OF_ARTISTS(artistNameHolds(dbNormalizedArtist.split(" ")[0])),
+              ...SONGS_OF_ARTISTS(artistNameHolds(creditFirstWord)),
               ...withAlbum,
             })
           ).flatMap(toMatchCandidates),
