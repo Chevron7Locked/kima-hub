@@ -13,7 +13,7 @@ import { acoustidService } from "./acoustidService";
 import { readIdentityTagsOnce } from "./acoustidIdentification";
 import { fingerprintsToAsk, type FingerprintQuestion } from "./fingerprintChoice";
 import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumIdentity";
-import { lookupKey } from "./discovery/discoverEvidence";
+import { NameIndex } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
@@ -142,6 +142,7 @@ interface CandidateAlbum {
     rgMbid: string;
     artistId: string;
     artist: string;
+    artistMbid: string | null;
     year: number | null;
     label: string | null;
     genres: Prisma.JsonValue;
@@ -154,7 +155,7 @@ interface CandidateAlbum {
  */
 function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): Promise<CandidateAlbum[]> {
     return prisma.$queryRaw<CandidateAlbum[]>`
-        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, a.year, a.label, a.genres, a."coverUrl",
+        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, ar.mbid AS "artistMbid", a.year, a.label, a.genres, a."coverUrl",
                (SELECT encode(sha256(convert_to(string_agg(
                            t.id || ':' || COALESCE(encode(sha256(convert_to(t."acoustidFingerprint", 'UTF8')), 'hex'), '-')
                                || ':' || (extract(epoch from t."fileModified") * 1000)::bigint::text,
@@ -188,14 +189,15 @@ export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<s
     const assigned: string[] = [];
     let worked = 0;
     const spent = () => worked >= ALBUMS_PER_ROUND || Date.now() - started > ROUND_BUDGET_MS;
-    // Albums Discover manages by artist and title are Discover's, not the library's to identify.
+    // Albums Discover manages by artist (sameArtist) and title are Discover's, not the library's to identify.
     const suggestions = await prisma.discoveryAlbum.findMany({
         where: { status: { in: ["ACTIVE", "LIKED"] } },
-        select: { artistName: true, albumTitle: true },
+        select: { artistName: true, artistMbid: true, albumTitle: true },
     });
-    const discoverNames = new Set(suggestions.map((d) => lookupKey(d.artistName, d.albumTitle)));
+    const discoverNames = new NameIndex();
+    for (const d of suggestions) discoverNames.add(d.artistName, d.artistMbid, d.albumTitle);
     const work = async (album: CandidateAlbum) => {
-        if (discoverNames.has(lookupKey(album.artist, album.title))) return;
+        if (discoverNames.has(album.artist, album.artistMbid, album.title)) return;
         try {
             const outcome = await identifyAlbum(album);
             if (outcome !== "already-decided") worked += 1;

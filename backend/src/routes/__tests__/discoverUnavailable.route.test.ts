@@ -94,6 +94,51 @@ describe("unavailable albums that have turned up", () => {
     });
 });
 
+describe("a namesake's album does not mark an unavailable album as turned up", () => {
+    const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+    const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
+    const missingIds = async () =>
+        (await request(app).get("/discover/current").expect(200)).body.unavailable
+            .map((a: { albumId: string }) => a.albumId)
+            .filter((id: string) => id.startsWith(`${MARK}-rg-ns`))
+            .sort();
+
+    /** An unavailable album (artist id `wanted`) and a library album of the same name and title under artist id `held`. */
+    async function seedNamesake(wanted: string | null, held: string | null) {
+        const artist = await prisma.artist.create({ data: { name: `${MARK} Twin`, identityKey: `${MARK}-twin`, mbid: held } });
+        await prisma.album.create({
+            data: { rgMbid: `${MARK}-rg-ns-held`, identityKey: `${MARK}-ns`, title: `${MARK} Shared Title`, primaryType: "Album", artistId: artist.id },
+        });
+        await prisma.unavailableAlbum.create({
+            data: {
+                userId: listener,
+                albumMbid: `${MARK}-rg-ns-wanted`,
+                artistName: `${MARK} Twin`,
+                artistMbid: wanted,
+                albumTitle: `${MARK} Shared Title`,
+                similarity: 0.5,
+                tier: "medium",
+                weekStartDate: week(),
+            },
+        });
+    }
+
+    it("keeps it listed as missing when the album is another artist's under another MusicBrainz id", async () => {
+        await seedNamesake(ARTIST, NAMESAKE);
+        expect(await missingIds()).toEqual([`${MARK}-rg-ns-wanted`]);
+    });
+
+    it.each([
+        ["the same id", ARTIST, ARTIST],
+        ["the unavailable row has no id", null, NAMESAKE],
+        ["the unavailable row's id is a placeholder", "temp-1793617784650-0.5", NAMESAKE],
+        ["the library artist has no id", ARTIST, null],
+    ])("still counts it as turned up by name when %s", async (_what, wanted, held) => {
+        await seedNamesake(wanted, held);
+        expect(await missingIds()).toEqual([]);
+    });
+});
+
 describe("an unavailable album a download is working on", () => {
     it("is left alone by a retry, even when it has turned up", async () => {
         await prisma.unavailableAlbum.deleteMany({ where: { userId: listener, albumMbid: { not: `${MARK}-rg-owned` } } });

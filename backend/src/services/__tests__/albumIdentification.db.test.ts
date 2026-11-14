@@ -80,8 +80,8 @@ async function cleanup() {
 }
 
 /** The album as scanned from untagged files: placeholder id, native-scan ownership, fingerprints in. */
-async function seedAlbum(opts: { location?: "LIBRARY" | "DISCOVER"; unfingerprinted?: boolean; title?: string } = {}) {
-    await prisma.artist.create({ data: { id: id("art"), name: "Perturbator", identityKey: id("art") } });
+async function seedAlbum(opts: { location?: "LIBRARY" | "DISCOVER"; unfingerprinted?: boolean; title?: string; artistMbid?: string | null } = {}) {
+    await prisma.artist.create({ data: { id: id("art"), name: "Perturbator", identityKey: id("art"), mbid: opts.artistMbid ?? null } });
     await prisma.album.create({
         data: { id: id("alb"), title: opts.title ?? "Dangerous Days", identityKey: "dangerousdays", artistId: id("art"), rgMbid: TEMP, primaryType: "Album", location: opts.location ?? "LIBRARY" },
     });
@@ -282,5 +282,46 @@ describe("identifyAlbumsBySound", () => {
 
         expect(await identifyAlbumsBySound([id("alb")])).toEqual([]);
         expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    describe("an album Discover suggested under the same artist name and title", () => {
+        const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+        const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
+
+        async function suggest(artistMbid: string | null) {
+            await prisma.user.create({ data: { id: id("u1"), username: id("user1"), passwordHash: "x" } });
+            await prisma.discoveryAlbum.create({
+                data: {
+                    id: id("disc"),
+                    userId: id("u1"),
+                    rgMbid: "f0f0f0f0-0000-4000-8000-000000000001",
+                    artistName: "Perturbator",
+                    artistMbid,
+                    albumTitle: "Dangerous Days",
+                    weekStartDate: new Date("2026-10-12T05:00:00.000Z"),
+                    status: "ACTIVE",
+                },
+            });
+        }
+
+        it("does not skip a library album by another artist under another MusicBrainz id", async () => {
+            await seedAlbum({ artistMbid: NAMESAKE });
+            await suggest(ARTIST);
+
+            expect(await identifyAlbumsBySound([id("alb")])).toEqual([id("alb")]);
+        });
+
+        it.each([
+            ["the same id", ARTIST, ARTIST],
+            ["the suggestion has no id", null, NAMESAKE],
+            ["the suggestion's id is a placeholder", "temp-1793617784650-0.5", NAMESAKE],
+            ["the library artist has no id", ARTIST, null],
+        ])("still skips the library album when %s", async (_what, suggested, held) => {
+            await seedAlbum({ artistMbid: held });
+            await suggest(suggested);
+
+            expect(await identifyAlbumsBySound([id("alb")])).toEqual([]);
+            expect(mockPost).not.toHaveBeenCalled();
+        });
     });
 });

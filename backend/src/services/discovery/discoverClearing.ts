@@ -15,7 +15,7 @@ import { notificationService } from "../notificationService";
 import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
-import { RUNNING_BATCH, couldBeArtist, lookupKey, sameArtist, sameName } from "./discoverEvidence";
+import { NameIndex, RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
 
 /** A suggestion row's names and artist id, for comparing with a record's. */
 interface NamedRow {
@@ -435,23 +435,6 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
         }
     }
     return failures;
-}
-
-/**
- * Artist-and-title keys of Discover records, each with the artist it names, so `has` tells a namesake under another
- * MusicBrainz id apart (sameArtist) and a record with no real id still matches by name.
- */
-class NameIndex {
-    private readonly byKey = new Map<string, { artistName: string; artistMbid: string | null }[]>();
-
-    add(artistName: string, artistMbid: string | null, title: string): void {
-        const key = lookupKey(artistName, title);
-        this.byKey.set(key, [...(this.byKey.get(key) ?? []), { artistName, artistMbid }]);
-    }
-
-    has(artistName: string, artistMbid: string | null, title: string): boolean {
-        return (this.byKey.get(lookupKey(artistName, title)) ?? []).some((entry) => sameArtist(entry, { artistName, artistMbid }));
-    }
 }
 
 /**

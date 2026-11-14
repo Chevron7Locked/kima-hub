@@ -78,6 +78,23 @@ const albumNameKey = (artist: string, title: string) => {
 /** An artist and title as one lookup key; a name with no letters or digits keys on its exact text. */
 export const lookupKey = (artist: string, title: string) => albumNameKey(artist, title) ?? `exact\u0000${artist}\u0000${title}`;
 
+/**
+ * Artist-and-title keys of Discover records, each with the artist it names, so `has` tells a namesake under another
+ * MusicBrainz id apart (sameArtist) and a record with no real id still matches by name.
+ */
+export class NameIndex {
+    private readonly byKey = new Map<string, { artistName: string; artistMbid: string | null }[]>();
+
+    add(artistName: string, artistMbid: string | null, title: string): void {
+        const key = lookupKey(artistName, title);
+        this.byKey.set(key, [...(this.byKey.get(key) ?? []), { artistName, artistMbid }]);
+    }
+
+    has(artistName: string, artistMbid: string | null, title: string): boolean {
+        return (this.byKey.get(lookupKey(artistName, title)) ?? []).some((entry) => sameArtist(entry, { artistName, artistMbid }));
+    }
+}
+
 export async function loadDiscoverRecords(options: { everyWeek?: boolean } = {}): Promise<DiscoverRecords> {
     const [suggestions, allJobs, batches] = await Promise.all([
         prisma.discoveryAlbum.findMany({ select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true, status: true } }),

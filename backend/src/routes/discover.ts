@@ -15,7 +15,7 @@ import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist 
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -267,8 +267,8 @@ type UnavailableRow = Awaited<ReturnType<typeof prisma.unavailableAlbum.findMany
 
 /**
  * Splits a week's unavailable albums into those still missing and those that turned up since: a suggestion of the
- * week downloaded the release, an album with its release id exists, or an album of the same artist and title by
- * `lookupKey` exists. Another edition is not the album asked for.
+ * week downloaded the release, an album with its release id exists, or an album of the same artist (sameArtist: a
+ * namesake under another MusicBrainz id is not) and title by the name fold exists. Another edition is not the album asked for.
  */
 async function unavailableStillMissing(
     userId: string,
@@ -283,11 +283,12 @@ async function unavailableStillMissing(
             select: { rgMbid: true },
         }),
         prisma.album.findMany({ where: { rgMbid: { in: mbids } }, select: { rgMbid: true } }),
-        prisma.album.findMany({ select: { title: true, artist: { select: { name: true } } } }),
+        prisma.album.findMany({ select: { title: true, artist: { select: { name: true, mbid: true } } } }),
     ]);
     const suggestedMbids = new Set(suggested.map((a) => a.rgMbid));
     const existingMbids = new Set(withMbid.map((a) => a.rgMbid));
-    const byName = new Set(everyAlbum.map((a) => lookupKey(a.artist.name, a.title)));
+    const byName = new NameIndex();
+    for (const a of everyAlbum) byName.add(a.artist.name, a.artist.mbid, a.title);
 
     const missing: UnavailableRow[] = [];
     const turnedUp: UnavailableRow[] = [];
@@ -295,7 +296,7 @@ async function unavailableStillMissing(
         const found =
             suggestedMbids.has(album.albumMbid) ||
             existingMbids.has(album.albumMbid) ||
-            byName.has(lookupKey(album.artistName, album.albumTitle));
+            byName.has(album.artistName, album.artistMbid, album.albumTitle);
         (found ? turnedUp : missing).push(album);
     }
     return { missing, turnedUp };
