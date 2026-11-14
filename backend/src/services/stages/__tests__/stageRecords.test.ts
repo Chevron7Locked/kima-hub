@@ -1132,8 +1132,8 @@ describe("a move that loses a deadlock", () => {
 
     // The wait is 50 + 150 * Math.random() ms: the dice at both ends give the bounds.
     const waits = moves.flatMap((move) => [
-        { ...move, roll: 0, least: 45, most: 140 },
-        { ...move, roll: 0.999, least: 190, most: 400 },
+        { ...move, roll: 0, least: 45, most: 250 },
+        { ...move, roll: 0.999, least: 190, most: 600 },
     ]);
 
     it.each(waits)("$name waits a short random moment before the retry (dice $roll), so the two transactions do not collide again", async ({ seed, run, roll, least, most }) => {

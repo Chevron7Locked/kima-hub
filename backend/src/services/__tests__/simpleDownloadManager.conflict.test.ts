@@ -31,8 +31,12 @@ beforeEach(() =>
     }),
 );
 
+/** Every holder a test opened: a test that fails midway must not leave one holding the row. */
+const holders: Holder[] = [];
+
 afterEach(async () => {
     jest.restoreAllMocks();
+    await Promise.all(holders.splice(0).map((holder) => holder.release().catch(() => undefined)));
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
 });
 
@@ -59,13 +63,15 @@ function holdJob(): Holder {
         await letGoPromise;
         await tx.$executeRawUnsafe(`UPDATE "DownloadJob" SET "updatedAt" = now() WHERE id = $1`, JOB);
     }, TX);
-    return {
+    const holder: Holder = {
         held,
         release: async () => {
             letGo();
             await done;
         },
     };
+    holders.push(holder);
+    return holder;
 }
 
 /** Counts the event's own transactions: the ones the download manager runs Serializable. */
