@@ -175,3 +175,30 @@ describe("a Lidarr album", () => {
         expect((await read(job.id)).metadata).toMatchObject({ webhookNote: "kept", lidarrAttempts: 3, statusText: "Lidarr #3" });
     });
 });
+
+describe("finding a job for an album, on the active-album index's own key", () => {
+    const MBID = "a0c10000-1111-2222-3333-444455556666";
+    const find = () =>
+        acquisitionService.findOrCreateDownloadJob({ artistName: "Brad Sucks", albumTitle: "Guess Who's a Mess", mbid: MBID }, { userId: USER });
+    afterEach(async () => {
+        await prisma.downloadJob.deleteMany({ where: { userId: USER, targetMbid: MBID } });
+    });
+
+    it("takes a running job of the album even when the listener dismissed it from the list", async () => {
+        const running = await newJob("processing", { targetMbid: MBID, cleared: true });
+
+        const found = await find();
+
+        expect(found).toMatchObject({ created: false, job: { id: running.id } });
+    });
+
+    it("makes an album job beside a track job that shares the target", async () => {
+        const track = await newJob("processing", { targetMbid: MBID, type: "track" });
+
+        const found = await find();
+
+        expect(found.created).toBe(true);
+        expect(found.job.id).not.toBe(track.id);
+        expect(found.job.type).toBe("album");
+    });
+});

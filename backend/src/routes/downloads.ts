@@ -16,18 +16,9 @@ import { isMbid } from "../services/artistIdentity";
 
 const router = Router();
 
-/** The caller's own pending or running job for this album, locked for the transaction, if there is one. */
-async function activeJobFor(tx: Prisma.TransactionClient, userId: string, mbid: string) {
-    const [job] = await tx.$queryRaw<Array<{ id: string; status: string }>>`
-        SELECT id, status
-        FROM "DownloadJob"
-        WHERE "targetMbid" = ${mbid}
-        AND "userId" = ${userId}
-        AND "discoveryBatchId" IS NULL
-        AND status IN ('pending', 'processing')
-        FOR UPDATE SKIP LOCKED
-    `;
-    return job;
+/** The caller's own pending or running library job for this album, if there is one. */
+function activeJobFor(tx: Pick<Prisma.TransactionClient, "downloadJob">, userId: string, mbid: string) {
+    return downloadJobs.findActive({ userId, type: "album", targetMbid: mbid }, tx);
 }
 
 router.post("/", requireAcquirePermission, async (req, res) => {
@@ -167,14 +158,7 @@ router.post("/", requireAcquirePermission, async (req, res) => {
         // Two inserts that both saw no row: the unique index rejects the loser.
         if (error.code === "P2002") {
             const { mbid } = req.body;
-            const existingJob = await prisma.downloadJob.findFirst({
-                where: {
-                    userId: req.user!.id,
-                    targetMbid: mbid,
-                    discoveryBatchId: null,
-                    status: { in: ["pending", "processing"] },
-                },
-            });
+            const existingJob = await activeJobFor(prisma, req.user!.id, mbid);
             if (existingJob) {
                 return res.json({
                     id: existingJob.id,

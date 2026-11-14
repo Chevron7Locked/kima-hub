@@ -22,7 +22,8 @@ const mockSearchAndDownloadBatch = jest.fn();
 jest.mock("../../services/soulseek", () => ({
     soulseekService: { searchAndDownloadBatch: (...a: unknown[]) => mockSearchAndDownloadBatch(...a) },
 }));
-jest.mock("../../workers/scanRequest", () => ({ requestScan: jest.fn().mockResolvedValue({ queued: true }) }));
+const mockRequestScan = jest.fn();
+jest.mock("../../workers/scanRequest", () => ({ requestScan: (...a: unknown[]) => mockRequestScan(...a) }));
 const mockStartDownload = jest.fn();
 jest.mock("../../services/simpleDownloadManager", () => ({
     simpleDownloadManager: { startDownload: (...a: unknown[]) => mockStartDownload(...a) },
@@ -99,12 +100,14 @@ beforeAll(async () => {
 beforeEach(() => {
     mockSearchAndDownloadBatch.mockReset();
     mockStartDownload.mockReset();
+    mockRequestScan.mockReset().mockResolvedValue({ queued: true });
     mockCheckImportCompletion.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
     jest.restoreAllMocks();
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
+    await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
 });
 
@@ -183,6 +186,41 @@ describe("a retried Spotify import album, tried on Soulseek first", () => {
         expect(await newJobOf(old.id, res.body.newJobId)).toMatchObject({ status: "failed", error: "slskd unreachable" });
         await importTold();
         expect(mockCheckImportCompletion).toHaveBeenCalledWith(IMPORT);
+    });
+});
+
+describe("a retried Spotify import album that Soulseek found", () => {
+    it("asks for its scan before the job reads completed", async () => {
+        const old = await failedJob();
+        let statusWhenScanAsked = "";
+        mockSearchAndDownloadBatch.mockResolvedValue({ successful: 2, failed: 0, files: ["a.flac"] });
+        mockRequestScan.mockImplementation(async () => {
+            statusWhenScanAsked = (await prisma.downloadJob.findFirstOrThrow({ where: { userId: USER, id: { not: old.id } } })).status;
+            return { queued: true };
+        });
+
+        const res = await retry(old.id);
+        await waitFor(settled(res.body.newJobId), "new job settled");
+
+        expect(statusWhenScanAsked).toBe("processing");
+        expect(mockRequestScan).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, source: "retry-spotify-import" }));
+        expect((await newJobOf(old.id, res.body.newJobId)).status).toBe("completed");
+        await importTold();
+    });
+
+    it("logs a scan that could not be asked for, and the job still completes", async () => {
+        const logged = expectLog("error");
+        const old = await failedJob();
+        mockSearchAndDownloadBatch.mockResolvedValue({ successful: 2, failed: 0, files: ["a.flac"] });
+        mockRequestScan.mockRejectedValue(new Error("queue is down"));
+
+        const res = await retry(old.id);
+        await waitFor(settled(res.body.newJobId), "new job settled");
+
+        const job = await newJobOf(old.id, res.body.newJobId);
+        expect(job).toMatchObject({ status: "completed", error: null });
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining("scan"), expect.any(Error));
+        await importTold();
     });
 });
 
@@ -274,6 +312,74 @@ describe("a retry of a download whose album is already downloading", () => {
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(2);
         expect(mockSearchAndDownloadBatch).not.toHaveBeenCalled();
         expect(mockStartDownload).not.toHaveBeenCalled();
+    });
+});
+
+describe("a retry beside a job the dedupe must read the way the active-album index does", () => {
+    const libraryMeta = { downloadType: "library", albumTitle: "Things We Lost in the Fire" };
+    const sibling = (data: Record<string, unknown>) =>
+        prisma.downloadJob.create({
+            data: { userId: USER, subject: "Low - Things We Lost in the Fire", type: "album", status: "processing", targetMbid: MBID, metadata: {}, ...data },
+        });
+    const batch = () =>
+        prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-12T00:00:00.000Z"), targetSongCount: 1, totalAlbums: 1, status: "downloading" },
+        });
+
+    it.each([
+        ["Spotify import album", () => failedJob()],
+        ["library album", () => failedJob({ metadata: libraryMeta })],
+    ])("answers deduplicated, not 500, for a %s whose album has a running job the user dismissed", async (_name, make) => {
+        const old = await make();
+        const running = await sibling({ cleared: true });
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body).toEqual({ success: true, newJobId: running.id, deduplicated: true });
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(2);
+    });
+
+    it("does not dedupe a library retry against a track job of the same target", async () => {
+        mockStartDownload.mockResolvedValue({ success: true });
+        const old = await failedJob({ metadata: libraryMeta });
+        const track = await sibling({ type: "track", subject: "Low - Sunflower" });
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body.deduplicated).toBeUndefined();
+        expect(res.body.newJobId).not.toBe(track.id);
+        expect(await newJobOf(old.id, res.body.newJobId)).toMatchObject({ type: "album", status: "pending" });
+    });
+
+    it("does not dedupe a library retry against a Discover batch's job of the same album", async () => {
+        mockStartDownload.mockResolvedValue({ success: true });
+        const old = await failedJob({ metadata: libraryMeta });
+        const week = await batch();
+        const inBatch = await sibling({ discoveryBatchId: week.id });
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body.deduplicated).toBeUndefined();
+        expect(res.body.newJobId).not.toBe(inBatch.id);
+        expect((await newJobOf(old.id, res.body.newJobId)).discoveryBatchId).toBeNull();
+    });
+
+    it.each([
+        ["Spotify import album", (week: string) => failedJob({ discoveryBatchId: week })],
+        ["library album", (week: string) => failedJob({ discoveryBatchId: week, metadata: libraryMeta })],
+    ])("keeps the Discover batch on the replacement of a %s job", async (_name, make) => {
+        mockStartDownload.mockResolvedValue({ success: true });
+        mockSearchAndDownloadBatch.mockResolvedValue({ successful: 0, failed: 1, files: [] });
+        const week = await batch();
+        const old = await make(week.id);
+        // A library job of the same album running beside the batch's own failed job is no duplicate of it.
+        await sibling({});
+
+        const res = await retry(old.id).expect(200);
+
+        expect(res.body.deduplicated).toBeUndefined();
+        expect((await newJobOf(old.id, res.body.newJobId)).discoveryBatchId).toBe(week.id);
+        await whenIdle();
     });
 });
 

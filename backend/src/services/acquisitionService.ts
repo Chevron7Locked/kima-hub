@@ -697,20 +697,23 @@ class AcquisitionService {
     ): Promise<{ job: any; created: boolean }> {
         const dedupKey = request.mbid || `${request.artistName}::${request.albumTitle}`;
 
-        const existingJobWhere: any = {
-            userId: context.userId,
-            discoveryBatchId: context.discoveryBatchId || null,
-            status: { in: ['pending', 'processing'] },
-        };
-        if (request.mbid) {
-            existingJobWhere.targetMbid = request.mbid;
-        } else {
-            existingJobWhere.subject = `${request.artistName} - ${request.albumTitle}`;
-        }
+        // With an album id the lookup is the active-album index's own (person, album job, id and Discover batch, a
+        // dismissed job included). By name there is no index, so the subject stands in for the id.
+        const batchId = context.discoveryBatchId || null;
+        const findExisting = () =>
+            request.mbid
+                ? downloadJobs.findActive({ userId: context.userId, type: "album", targetMbid: request.mbid, discoveryBatchId: batchId })
+                : prisma.downloadJob.findFirst({
+                      where: {
+                          userId: context.userId,
+                          type: "album",
+                          discoveryBatchId: batchId,
+                          status: { in: ["pending", "processing"] },
+                          subject: `${request.artistName} - ${request.albumTitle}`,
+                      },
+                  });
 
-        const existingJob = await prisma.downloadJob.findFirst({
-            where: existingJobWhere,
-        });
+        const existingJob = await findExisting();
         if (existingJob) {
             logger.info(
                 `[Acquisition] Download job already exists for album ${dedupKey}, returning existing job ${existingJob.id}`
@@ -750,7 +753,7 @@ class AcquisitionService {
                 return await create();
             } catch (error: any) {
                 if (error?.code !== "P2002") throw error;
-                const winner = await prisma.downloadJob.findFirst({ where: existingJobWhere });
+                const winner = await findExisting();
                 if (!winner) throw error;
                 return { job: winner, created: false };
             }
@@ -759,9 +762,7 @@ class AcquisitionService {
         const lockKey = `download-job:${context.userId}:${dedupKey}:${context.discoveryBatchId || 'null'}`;
         return await distributedLock.withLock(lockKey, 5000, async () => {
             // Another request may have made it while this one waited for the lock.
-            const doubleCheck = await prisma.downloadJob.findFirst({
-                where: existingJobWhere,
-            });
+            const doubleCheck = await findExisting();
             if (doubleCheck) return { job: doubleCheck, created: false };
             return create();
         });

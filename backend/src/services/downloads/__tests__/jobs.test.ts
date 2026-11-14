@@ -710,3 +710,145 @@ describe("withoutFailureMarks", () => {
         }
     });
 });
+
+describe("findActive asks what the active-album index enforces", () => {
+    const key = (data: Record<string, unknown> = {}) => ({
+        userId: USER, type: "album", targetMbid: "rg-same", discoveryBatchId: null as string | null, ...data,
+    });
+
+    it("finds a running job of the album even when it was dismissed from the list", async () => {
+        const running = await job("dl_find_cleared", { targetMbid: "rg-same", cleared: true });
+
+        expect((await downloadJobs.findActive(key()))?.id).toBe(running.id);
+    });
+
+    it("finds a pending job and ignores a settled one", async () => {
+        await job("dl_find_done", { targetMbid: "rg-same", status: "completed" });
+        await job("dl_find_failed", { targetMbid: "rg-same", status: "failed" });
+        expect(await downloadJobs.findActive(key())).toBeNull();
+
+        const pending = await job("dl_find_pending", { targetMbid: "rg-same", status: "pending" });
+        expect((await downloadJobs.findActive(key()))?.id).toBe(pending.id);
+    });
+
+    it("keeps a track job, a job of another type, and another person's job apart from the album's", async () => {
+        await job("dl_find_track", { targetMbid: "rg-same", type: "track" });
+        await prisma.user.deleteMany({ where: { id: "dl_jobs_other" } });
+        await prisma.user.create({ data: { id: "dl_jobs_other", username: "dl_jobs_other", passwordHash: "x", role: "user", tokenVersion: 0 } });
+        await job("dl_find_other_user", { targetMbid: "rg-same", userId: "dl_jobs_other" });
+
+        expect(await downloadJobs.findActive(key())).toBeNull();
+        expect((await downloadJobs.findActive(key({ type: "track" })))?.id).toBe("dl_find_track");
+        await prisma.user.deleteMany({ where: { id: "dl_jobs_other" } });
+    });
+
+    it("keeps a Discover batch's job apart from a library job, and one batch's from another's", async () => {
+        const week = await batchOf(1);
+        const other = await prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-19T00:00:00.000Z"), targetSongCount: 1, totalAlbums: 1, status: "downloading" },
+        });
+        const inBatch = await job("dl_find_batch", { targetMbid: "rg-same", discoveryBatchId: week.id });
+
+        expect(await downloadJobs.findActive(key())).toBeNull();
+        expect(await downloadJobs.findActive(key({ discoveryBatchId: other.id }))).toBeNull();
+        expect((await downloadJobs.findActive(key({ discoveryBatchId: week.id })))?.id).toBe(inBatch.id);
+
+        const library = await job("dl_find_library", { targetMbid: "rg-same" });
+        expect((await downloadJobs.findActive(key()))?.id).toBe(library.id);
+    });
+
+    it("sees the job the index would collide with", async () => {
+        await job("dl_find_collide", { targetMbid: "rg-same", cleared: true });
+
+        expect(await downloadJobs.findActive(key())).not.toBeNull();
+        await expect(job("dl_find_collide2", { targetMbid: "rg-same" })).rejects.toMatchObject({ code: "P2002" });
+    });
+});
+
+describe("dismiss takes a settled job off the list and leaves a running one", () => {
+    it.each(["completed", "failed", "exhausted"])("dismisses a %s job", async (status) => {
+        const j = await job(`dl_dismiss_${status}`, { status });
+
+        expect(await downloadJobs.dismiss(USER, j.id)).toBe("dismissed");
+        expect((await row(j.id)).cleared).toBe(true);
+    });
+
+    it.each(["pending", "processing"])("refuses a %s job and leaves it untouched", async (status) => {
+        const j = await job(`dl_dismiss_${status}`, { status });
+
+        expect(await downloadJobs.dismiss(USER, j.id)).toBe("running");
+        expect((await row(j.id)).cleared).toBe(false);
+    });
+
+    it("answers missing for a job that is not there or is another person's", async () => {
+        const j = await job("dl_dismiss_other", { status: "failed" });
+
+        expect(await downloadJobs.dismiss("someone-else", j.id)).toBe("missing");
+        expect(await downloadJobs.dismiss(USER, "dl_dismiss_nothing")).toBe("missing");
+        expect((await row(j.id)).cleared).toBe(false);
+    });
+
+    it("dismisses every settled job of the person in bulk and no running one", async () => {
+        const done = await job("dl_bulk_done", { status: "completed" });
+        const failed = await job("dl_bulk_failed", { status: "failed", targetMbid: "rg-b" });
+        const running = await job("dl_bulk_running", { status: "processing", targetMbid: "rg-c" });
+        const pending = await job("dl_bulk_pending", { status: "pending", targetMbid: "rg-d" });
+
+        expect(await downloadJobs.dismissAllSettled(USER)).toBe(2);
+
+        expect((await row(done.id)).cleared).toBe(true);
+        expect((await row(failed.id)).cleared).toBe(true);
+        expect((await row(running.id)).cleared).toBe(false);
+        expect((await row(pending.id)).cleared).toBe(false);
+    });
+});
+
+describe("retryOnce", () => {
+    const album = { type: "album", targetMbid: "rg-retry" };
+    const replacement = (tx: Parameters<typeof downloadJobs.create>[1], data: Record<string, unknown> = {}) =>
+        downloadJobs.create({ userId: USER, subject: "x", type: "album", targetMbid: "rg-retry", status: "pending", ...data }, tx);
+
+    it("clears the failed job and makes the replacement in one go", async () => {
+        const failed = await job("dl_ro_failed", { status: "failed", targetMbid: "rg-retry" });
+
+        const outcome = await downloadJobs.retryOnce(failed, album, (tx) => replacement(tx));
+
+        expect(outcome).toHaveProperty("replacement");
+        expect((await row(failed.id)).cleared).toBe(true);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, status: "pending" } })).toBe(1);
+    });
+
+    it("answers with the running job, even a dismissed one, clears the failed job and creates nothing", async () => {
+        const failed = await job("dl_ro_failed2", { status: "failed", targetMbid: "rg-retry" });
+        const running = await job("dl_ro_running", { status: "processing", targetMbid: "rg-retry", cleared: true });
+        const make = jest.fn();
+
+        const outcome = await downloadJobs.retryOnce(failed, album, make);
+
+        expect(outcome).toEqual({ running: expect.objectContaining({ id: running.id }) });
+        expect(make).not.toHaveBeenCalled();
+        expect((await row(failed.id)).cleared).toBe(true);
+    });
+
+    it("looks for the failed job's own Discover batch, so another batch's running job does not stand in", async () => {
+        const week = await batchOf(1);
+        const failed = await job("dl_ro_batch_failed", { status: "failed", targetMbid: "rg-retry", discoveryBatchId: week.id });
+        await job("dl_ro_library_running", { status: "processing", targetMbid: "rg-retry" });
+
+        const outcome = await downloadJobs.retryOnce(failed, album, (tx) =>
+            replacement(tx, { discoveryBatchId: failed.discoveryBatchId })
+        );
+
+        expect(outcome).toHaveProperty("replacement");
+        const made = (outcome as { replacement: { discoveryBatchId: string | null } }).replacement;
+        expect(made.discoveryBatchId).toBe(week.id);
+    });
+
+    it("makes nothing when no album is named and the failed job was already cleared", async () => {
+        const failed = await job("dl_ro_cleared", { status: "failed", cleared: true });
+        const make = jest.fn();
+
+        expect(await downloadJobs.retryOnce(failed, null, make)).toEqual({ running: null });
+        expect(make).not.toHaveBeenCalled();
+    });
+});

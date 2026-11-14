@@ -22,6 +22,11 @@
  * telling, for tests and shutdown. `withoutFailureMarks` is the metadata of a job with what a failure left
  * on it removed, for a retry or a re-queue.
  *
+ * Around the moves: `findActive` is the one dedupe lookup, asking what the active-album unique index enforces (person,
+ * kind, album id and Discover batch, a dismissed job included); `retryOnce` clears a failed job and makes its replacement
+ * in one transaction, or answers the job already running; `dismiss` and `dismissAllSettled` take settled jobs off the
+ * list and leave running ones.
+ *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
  * can see which of its jobs it was that settled.
@@ -63,6 +68,8 @@ export const JOB_STATUSES: readonly string[] = ["pending", "processing", "comple
 
 const ACTIVE = ["pending", "processing"];
 const FAILED = ["failed", "exhausted"];
+/** A settled job has left pending and processing: completed or failed. */
+const SETTLED = ["completed", ...FAILED];
 
 /** Whether a settled job ended because the user stopped it, not because the download failed. */
 export function isCancelled(job: { metadata: Prisma.JsonValue }): boolean {
@@ -88,6 +95,98 @@ export function create(input: CreateInput, db: Pick<Prisma.TransactionClient, "d
     return db.downloadJob.create({
         data: { ...fields, status, ...(status === "processing" ? { attempts: 1, startedAt: new Date() } : {}) },
     });
+}
+
+/** What the active-album index calls one album: the same person, kind of job, album and Discover batch (none for a library job). */
+export type ActiveKey = {
+    userId: string;
+    type: string;
+    targetMbid: string;
+    discoveryBatchId?: string | null;
+};
+
+type JobDb = Pick<Prisma.TransactionClient, "downloadJob">;
+
+/**
+ * The pending or running job the active-album unique index would collide with, or null. It asks the index's own
+ * question: a dismissed job still counts (the index ignores `cleared`), and a library job, a Discover batch's job
+ * and a track job of one album id are different jobs. Every dedupe before a create asks this.
+ */
+export function findActive(key: ActiveKey, db: JobDb = prisma) {
+    return db.downloadJob.findFirst({
+        where: {
+            userId: key.userId,
+            type: key.type,
+            targetMbid: key.targetMbid,
+            discoveryBatchId: key.discoveryBatchId ?? null,
+            status: { in: ACTIVE },
+        },
+        orderBy: { createdAt: "asc" },
+    });
+}
+
+/** Whether a dismiss took the job off the list, found it still running, or found no such job of the person's. */
+export type DismissResult = "dismissed" | "running" | "missing";
+
+/**
+ * Takes a settled job (completed or failed) off the person's list. A job still pending or processing stays: it is
+ * someone's download, and dismissing it would hide it while it works. Not a status move: `cleared` is only a
+ * flag on the list.
+ */
+export async function dismiss(userId: string, id: string): Promise<DismissResult> {
+    const settled = { where: { id, userId, status: { in: SETTLED } }, data: { cleared: true } };
+    if ((await prisma.downloadJob.updateMany(settled)).count > 0) return "dismissed";
+    const stays = await prisma.downloadJob.findFirst({ where: { id, userId }, select: { status: true } });
+    if (!stays) return "missing";
+    if (ACTIVE.includes(stays.status)) return "running";
+    // It settled between the two reads.
+    await prisma.downloadJob.updateMany(settled);
+    return "dismissed";
+}
+
+/** Takes every settled job off the person's list and leaves the running ones. Returns how many it took. */
+export async function dismissAllSettled(userId: string): Promise<number> {
+    const { count } = await prisma.downloadJob.updateMany({
+        where: { userId, status: { in: SETTLED }, cleared: false },
+        data: { cleared: true },
+    });
+    return count;
+}
+
+/** What a retry made: the job already downloading the album (null when another retry cleared the failed job first and its replacement has since ended), or the replacement. */
+export type RetryOutcome<T> = { running: Awaited<ReturnType<typeof findActive>> } | { replacement: T };
+
+/**
+ * Retries a failed download once. In one transaction the failed job leaves the list (the first retry to clear it wins),
+ * and then either the replacement is made or nothing is. `sameAlbum` names what the replacement would be (its kind of
+ * job and album id), or null when it has no album id to collide on; the failed job's person and Discover batch complete
+ * the key, so the lookup is the index's own. A failed job is cleared whenever its retry exists, so an answer of "already
+ * running" leaves no stale entry behind. `createReplacement` makes the replacement in the same transaction, and
+ * should copy the failed job's `discoveryBatchId`, so the user sees the failed job or its replacement, never neither.
+ */
+export async function retryOnce<T>(
+    failedJob: { id: string; userId: string; discoveryBatchId: string | null },
+    sameAlbum: { type: string; targetMbid: string } | null,
+    createReplacement: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<RetryOutcome<T>> {
+    const attempt = () =>
+        prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
+            // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
+            const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
+            const running = sameAlbum
+                ? await findActive({ userId: failedJob.userId, discoveryBatchId: failedJob.discoveryBatchId, ...sameAlbum }, tx)
+                : null;
+            if (claimed.count === 0 || running) return { running };
+            return { replacement: await createReplacement(tx) };
+        });
+    try {
+        return await attempt();
+    } catch (error: any) {
+        // Two different failed jobs of one album, retried together: the loser's insert meets the one active job an album
+        // may have. Its transaction rolled back whole, so it runs again and now finds the winner's job running.
+        if (error?.code !== "P2002") throw error;
+        return attempt();
+    }
 }
 
 /** The metadata column with `patch` merged in: a null value clears its field, an undefined one is ignored. */

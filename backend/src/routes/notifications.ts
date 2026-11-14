@@ -4,7 +4,7 @@ import { notificationService } from "../services/notificationService";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
-import type { DownloadJob, Prisma } from "@prisma/client";
+import type { DownloadJob } from "@prisma/client";
 import { config } from "../config";
 import * as downloadJobs from "../services/downloads/jobs";
 import {
@@ -21,42 +21,6 @@ const router = Router();
 
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
-
-type RetryOutcome<T> = { running: DownloadJob | null } | { replacement: T };
-
-/**
- * Retries a failed download once. In one transaction the failed job leaves the list (the first retry to clear it wins),
- * and then either the replacement is made or nothing is: `running` is the job already downloading the album, or null
- * when another retry cleared the failed job first and its replacement has since ended. A failed job is cleared
- * whenever its retry exists, so an answer of "already running" leaves no stale entry behind. `createReplacement` makes the
- * replacement in the same transaction, so the user sees the failed job or its replacement, never neither.
- */
-async function retryOnce<T>(
-    failedJob: DownloadJob,
-    sameAlbum: { targetMbid: string } | null,
-    createReplacement: (tx: Prisma.TransactionClient) => Promise<T>
-): Promise<RetryOutcome<T>> {
-    const attempt = () =>
-        prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
-            // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
-            const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
-            const running = sameAlbum
-                ? await tx.downloadJob.findFirst({
-                      where: { userId: failedJob.userId, ...sameAlbum, status: { in: ["pending", "processing"] }, cleared: { not: true } },
-                  })
-                : null;
-            if (claimed.count === 0 || running) return { running };
-            return { replacement: await createReplacement(tx) };
-        });
-    try {
-        return await attempt();
-    } catch (error: any) {
-        // Two different failed jobs of one album, retried together: the loser's insert meets the one active job an album
-        // may have. Its transaction rolled back whole, so it runs again and now finds the winner's job running.
-        if (error?.code !== "P2002") throw error;
-        return attempt();
-    }
-}
 
 const deduplicated = (running: DownloadJob | null) => ({ success: true, newJobId: running?.id, deduplicated: true });
 
@@ -279,19 +243,16 @@ router.get(
 
 /**
  * POST /notifications/downloads/:id/clear
- * Clear a download from history
+ * Clear a download from history. A download still running answers 409.
  */
 router.post(
     "/downloads/:id/clear",
     async (req: Request, res: Response) => {
         try {
-            await prisma.downloadJob.updateMany({
-                where: {
-                    id: req.params.id,
-                    userId: req.user!.id,
-                },
-                data: { cleared: true },
-            });
+            // A job still pending or processing is someone's running download: only a settled one is dismissed.
+            if ((await downloadJobs.dismiss(req.user!.id, req.params.id)) === "running") {
+                return res.status(409).json({ error: "Download is still running" });
+            }
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing download:", error);
@@ -308,14 +269,7 @@ router.post(
     "/downloads/clear-all",
     async (req: Request, res: Response) => {
         try {
-            await prisma.downloadJob.updateMany({
-                where: {
-                    userId: req.user!.id,
-                    status: { in: ["completed", "failed", "exhausted"] },
-                    cleared: false,
-                },
-                data: { cleared: true },
-            });
+            await downloadJobs.dismissAllSettled(req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing all downloads:", error);
@@ -373,7 +327,7 @@ router.post(
                 }
 
                 const target = await soulseekTarget();
-                const outcome = await retryOnce(failedJob, { targetMbid: retryJobTarget(pendingTrack) }, (tx) =>
+                const outcome = await downloadJobs.retryOnce(failedJob, { type: "track", targetMbid: retryJobTarget(pendingTrack) }, (tx) =>
                     createRetryJob(req.user!.id, pendingTrack, {}, tx)
                 );
                 if ("running" in outcome) return res.json(deduplicated(outcome.running));
@@ -412,12 +366,13 @@ router.post(
 
                 // A placeholder id is no album: nothing running can share it.
                 const hasAlbumId = !!failedJob.targetMbid && !failedJob.targetMbid.startsWith(NO_ALBUM_ID);
-                const outcome = await retryOnce(failedJob, hasAlbumId ? { targetMbid: failedJob.targetMbid! } : null, (tx) =>
+                const outcome = await downloadJobs.retryOnce(failedJob, hasAlbumId ? { type: "album", targetMbid: failedJob.targetMbid! } : null, (tx) =>
                     downloadJobs.create({
                         userId: req.user!.id,
                         type: "album",
                         targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
                         artistMbid: failedJob.artistMbid,
+                        discoveryBatchId: failedJob.discoveryBatchId,
                         subject: `${artistName} - ${albumTitle}`,
                         status: "processing",
                         metadata: {
@@ -459,6 +414,19 @@ router.post(
                         .searchAndDownloadBatch(tracks, musicPath, settings?.soulseekConcurrentDownloads ?? 4)
                         .then(async (result) => {
                             if (result.successful > 0) {
+                                // The scan is asked for before the job reads completed, so nobody who sees it completed
+                                // finds the scan still to come, and a scan that cannot be asked for is logged without
+                                // losing the completion. A full walk: the download folder is not recorded, so there is
+                                // nothing narrower to scan.
+                                const { requestScan } = await import(
+                                    "../workers/scanRequest"
+                                );
+                                await requestScan({
+                                    userId: req.user!.id,
+                                    source: "retry-spotify-import",
+                                }).catch((scanError) =>
+                                    logger.error(`[Retry] Could not queue a scan for job ${newJobRecord.id}:`, scanError)
+                                );
                                 await downloadJobs.complete([newJobRecord], {
                                     source: "soulseek",
                                     tracksDownloaded: result.successful,
@@ -467,17 +435,6 @@ router.post(
                                 logger.debug(
                                     `[Retry] ✓ Soulseek downloaded ${result.successful} tracks for ${artistName} - ${albumTitle}`
                                 );
-
-                                // Trigger library scan (full walk — the
-                                // download folder is not recorded, so there is
-                                // nothing narrower to scan)
-                                const { requestScan } = await import(
-                                    "../workers/scanRequest"
-                                );
-                                await requestScan({
-                                    userId: req.user!.id,
-                                    source: "retry-spotify-import",
-                                });
                             } else {
                                 // Soulseek failed, try Lidarr if we have an MBID
                                 logger.debug(
@@ -546,12 +503,13 @@ router.post(
                 (metadata?.albumTitle as string) ||
                 (split > 0 ? failedJob.subject.slice(split + 3) : failedJob.subject);
 
-            const outcome = await retryOnce(failedJob, { targetMbid }, (tx) =>
+            const outcome = await downloadJobs.retryOnce(failedJob, { type: failedJob.type, targetMbid }, (tx) =>
                 downloadJobs.create({
                     userId: req.user!.id,
                     type: failedJob.type,
                     targetMbid,
                     artistMbid: failedJob.artistMbid,
+                    discoveryBatchId: failedJob.discoveryBatchId,
                     subject: failedJob.subject,
                     metadata: downloadJobs.withoutFailureMarks(metadata) as any,
                 }, tx)

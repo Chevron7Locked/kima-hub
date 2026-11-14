@@ -187,6 +187,19 @@ describe("POST /downloads", () => {
         expect(mockStartDownload).not.toHaveBeenCalled();
     });
 
+    it("makes an album job beside a track job that shares the album id", async () => {
+        mockGetReleaseGroup.mockResolvedValue({ kind: "answered", value: {} });
+        const track = await prisma.downloadJob.create({
+            data: { userId: USER, subject: "low - Sunflower", type: "track", targetMbid: RG, status: "processing" },
+        });
+
+        const res = await post(RG).expect(200);
+
+        expect(res.body.duplicate).toBeUndefined();
+        expect(res.body.id).not.toBe(track.id);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, targetMbid: RG } })).toBe(2);
+    });
+
     describe("artist", () => {
         const postArtist = () =>
             request(app).post("/downloads").send({ type: "artist", mbid: RG, subject: "low" });
