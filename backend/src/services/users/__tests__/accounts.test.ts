@@ -18,6 +18,7 @@ import {
     createAccount,
     deleteAccount,
     LastAdminError,
+    normalizeUsername,
     refusalMessage,
     type Refusal,
     resetAdminPassword,
@@ -197,6 +198,40 @@ describe("the username rule", () => {
 
     it("refuses a username that is not text", async () => {
         expect(await createAccount({ username: 5 as never, password: "secret1", role: "user", onboardingComplete: true })).toEqual(BAD);
+    });
+
+    it("trims the name on create, so the stored name has no padding", async () => {
+        const made = await plain("  alice\t ");
+        expect(made.ok && made.user.username).toBe("alice");
+        expect(await prisma.user.findUnique({ where: { username: "alice" } })).not.toBeNull();
+    });
+
+    it("trims the name on sign-up, so a padded and a plain name are one name", async () => {
+        const first = await signUp({ username: " bob ", password: "secret1", registrationOpen: true });
+        expect(first.ok && first.user.username).toBe("bob");
+        expect(await signUp({ username: "bob", password: "secret1", registrationOpen: true })).toEqual({
+            ok: false,
+            reason: "username-taken",
+        });
+    });
+
+    it.each([["   "], ["\t\n "], ["\u00a0\u00a0\u00a0"], ["  ab  "], [`  ${"a".repeat(51)}  `]])(
+        "refuses %j: a blank, or short or long once trimmed",
+        async (name) => {
+            expect(await plain(name)).toEqual(BAD);
+            expect(await signUp({ username: name, password: "secret1", registrationOpen: true })).toEqual(BAD);
+            expect(await prisma.user.count()).toBe(0);
+        },
+    );
+
+    it("measures the length after trimming: 50 characters inside padding pass", async () => {
+        expect((await plain(`  ${"a".repeat(50)}  `)).ok).toBe(true);
+    });
+
+    it("gives sign-in the same trim: normalizeUsername", () => {
+        expect(normalizeUsername("  alice \n")).toBe("alice");
+        expect(normalizeUsername("alice")).toBe("alice");
+        expect(normalizeUsername("   ")).toBe("");
     });
 
     it("says the rule in plain words", () => {

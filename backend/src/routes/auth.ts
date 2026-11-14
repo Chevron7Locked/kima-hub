@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
-import { changePassword, createAccount, deleteAccount, LastAdminError, refusalMessage } from "../services/users/accounts";
+import { changePassword, createAccount, deleteAccount, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
     generateRefreshToken,
@@ -25,7 +25,7 @@ import { isTransactionConflict } from "../utils/dbConflict";
 const router = Router();
 
 const loginSchema = z.object({
-    username: z.string().min(1),
+    username: z.string().transform(normalizeUsername).pipe(z.string().min(1)),
     password: z.string().min(1),
 });
 

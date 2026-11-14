@@ -5,6 +5,7 @@ import { prisma } from "../utils/db";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
 import { subsonicGuesses } from "../services/users/guessLimits";
+import { normalizeUsername } from "../services/users/accounts";
 import { one } from "../utils/subsonicParams";
 
 export async function subsonicAuth(
@@ -12,7 +13,7 @@ export async function subsonicAuth(
     res: Response,
     next: NextFunction
 ): Promise<void> {
-    const username = one(req, "u");
+    const username = normalizeUsername(one(req, "u") ?? "");
     const apiKey = one(req, "apiKey");
     const password = one(req, "p");
     const tokenMd5 = one(req, "t");

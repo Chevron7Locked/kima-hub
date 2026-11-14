@@ -67,9 +67,16 @@ function passwordRefusal(password: unknown): PasswordRefusal | null {
     return null;
 }
 
-/** The username rule: null when the name is fine, else the refusal. */
+/**
+ * A username as it is stored and looked up: without the spaces around it. Sign-up and account creation store it so,
+ * and both sign-in surfaces look it up so, which is why a name typed with a stray space still signs in. Accounts
+ * stored with padding before this rule are not rewritten.
+ */
+export const normalizeUsername = (username: string): string => username.trim();
+
+/** The username rule, applied to the name as it will be stored: null when the name is fine, else the refusal. */
 function usernameRefusal(username: unknown): UsernameInvalid | null {
-    const length = typeof username === "string" ? Array.from(username).length : 0;
+    const length = typeof username === "string" ? Array.from(normalizeUsername(username)).length : 0;
     if (length < MIN_USERNAME_LENGTH || length > MAX_USERNAME_LENGTH) {
         return { ok: false, reason: "username-invalid", minimum: MIN_USERNAME_LENGTH, maximum: MAX_USERNAME_LENGTH };
     }
@@ -120,7 +127,7 @@ export async function createAccount(input: {
     try {
         const user = await prisma.$transaction((tx) =>
             insertAccount(tx, {
-                username: input.username,
+                username: normalizeUsername(input.username),
                 passwordHash,
                 role: input.role,
                 onboardingComplete: input.onboardingComplete,
@@ -155,7 +162,7 @@ export async function signUp(input: {
             const isFirst = (await tx.user.count()) === 0;
             if (!isFirst && !input.registrationOpen) return { ok: false, reason: "registration-closed" } as const;
             const user = await insertAccount(tx, {
-                username: input.username,
+                username: normalizeUsername(input.username),
                 passwordHash,
                 role: isFirst ? "admin" : "user",
                 onboardingComplete: false,

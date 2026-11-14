@@ -150,6 +150,32 @@ describe("subsonicAuth: 2FA on the password path", () => {
     });
 });
 
+describe("subsonicAuth: the username is trimmed", () => {
+    it("signs in with a padded username by password, and by API key", async () => {
+        const user = await mkUser("padded");
+        const { key } = await createApiKey(user.id, "test device");
+        const padded = ` ${user.username}\t`;
+
+        const byPassword = await request(app)
+            .get("/rest/ping.view")
+            .query({ u: padded, p: PLAIN_PASSWORD, f: "json", v: "1.16.1", c: "test" });
+        const byKey = await request(app)
+            .get("/rest/ping.view")
+            .query({ u: padded, apiKey: key, f: "json", v: "1.16.1", c: "test" });
+
+        expect(byPassword.body["subsonic-response"].status).toBe("ok");
+        expect(byKey.body["subsonic-response"].status).toBe("ok");
+    });
+
+    it("answers a username of only spaces as a missing parameter", async () => {
+        const res = await request(app)
+            .get("/rest/ping.view")
+            .query({ u: "   ", p: PLAIN_PASSWORD, f: "json", v: "1.16.1", c: "test" });
+
+        expect(res.body["subsonic-response"].error.code).toBe(10); // MISSING_PARAM
+    });
+});
+
 describe("startScan.view admin check", () => {
     it("refuses a non-admin user", async () => {
         const user = await mkUser("scanner");

@@ -141,6 +141,15 @@ describe("POST /onboarding/register", () => {
         expect(await prisma.user.count()).toBe(before);
     });
 
+    it("trims the username, and refuses one of only spaces", async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
+
+        await request(app).post("/onboarding/register").send({ username: "      ", password: "secret1" }).expect(400);
+        const res = await request(app).post("/onboarding/register").send({ username: `  ${P}-padded `, password: "secret1" }).expect(200);
+        expect(res.body.user.username).toBe(`${P}-padded`);
+        expect(await prisma.user.count({ where: { username: `${P}-padded` } })).toBe(1);
+    });
+
     it("answers two sign-ups for one name with one account and 'taken' for the other", async () => {
         await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
 

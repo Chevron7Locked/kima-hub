@@ -103,6 +103,18 @@ describe('POST /auth/login', () => {
         expect(res.body.user).toEqual({ id: USER, username: USER, role: 'user' });
     });
 
+    it('trims the username it is given, so a padded name still signs in', async () => {
+        const res = await request(app).post('/auth/login').send({ username: ` ${USER}\t`, password: PASSWORD });
+
+        expect(res.status).toBe(200);
+        expect(res.body.user.username).toBe(USER);
+    });
+
+    it('answers a username of only spaces like an empty one, with 400', async () => {
+        const res = await request(app).post('/auth/login').send({ username: '   ', password: PASSWORD });
+        expect(res.status).toBe(400);
+    });
+
     it('login response never contains passwordHash', async () => {
         const res = await request(app).post('/auth/login').send({
             username: USER,
@@ -233,6 +245,25 @@ describe('Admin-only routes', () => {
             .send({ username: NEW_USER, password: 'a'.repeat(72) });
 
         expect(res.status).toBe(200);
+        await prisma.user.deleteMany({ where: { username: NEW_USER } });
+    });
+
+    it('POST /auth/create-user trims the username, refuses a blank one, and the trimmed account signs in', async () => {
+        const blank = await request(app)
+            .post('/auth/create-user')
+            .set('Authorization', `Bearer ${tokenFor(ADMIN, 'admin')}`)
+            .send({ username: '     ', password: 'password123' });
+        expect(blank.status).toBe(400);
+
+        const made = await request(app)
+            .post('/auth/create-user')
+            .set('Authorization', `Bearer ${tokenFor(ADMIN, 'admin')}`)
+            .send({ username: `  ${NEW_USER}  `, password: 'password123' });
+        expect(made.status).toBe(200);
+        expect(made.body.username).toBe(NEW_USER);
+
+        const signedIn = await request(app).post('/auth/login').send({ username: ` ${NEW_USER} `, password: 'password123' });
+        expect(signedIn.status).toBe(200);
         await prisma.user.deleteMany({ where: { username: NEW_USER } });
     });
 
