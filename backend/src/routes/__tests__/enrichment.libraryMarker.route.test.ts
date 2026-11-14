@@ -83,10 +83,35 @@ describe("editing a shown name", () => {
         expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).displayTitle).toBe("New");
     });
 
+    it("leaves the marker when the name sent is the one already shown", async () => {
+        const plain = await seed("eq", "playable", false);
+        // Sent as the canonical name; sent empty, which clears an override that is not there; sent again as it stands.
+        expect(await markerMoves(() => put(`/enrichment/artists/${plain.artist}/metadata`, { name: `${P}artist eq` }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${plain.artist}/metadata`, { name: "" }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${plain.album}/metadata`, { title: `${P}album eq` }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${plain.album}/metadata`, { title: null }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/tracks/${plain.track}/metadata`, { title: `${P}song eq` }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/tracks/${plain.track}/metadata`, { title: "" }))).toBe(false);
+
+        const edited = await seed("eq2", "playable");
+        expect(await markerMoves(() => put(`/enrichment/artists/${edited.artist}/metadata`, { name: "Edited" }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${edited.album}/metadata`, { title: "Edited" }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/tracks/${edited.track}/metadata`, { title: "Edited" }))).toBe(false);
+    });
+
+    it("moves the marker when an edit clears a name that was edited, so the original shows again", async () => {
+        const s = await seed("clr", "playable");
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { name: "" }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { title: null }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/tracks/${s.track}/metadata`, { title: "" }))).toBe(true);
+    });
+
     it("leaves the marker when an edit sends no name", async () => {
         const s = await seed("nn", "playable", false);
         expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { bio: "text" }))).toBe(false);
         expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { year: 1999 }))).toBe(false);
+        // A new MusicBrainz id changes no name a client lists.
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { mbid: "11111111-1111-4111-8111-111111111111" }))).toBe(false);
     });
 });
 

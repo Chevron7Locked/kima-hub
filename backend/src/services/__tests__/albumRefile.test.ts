@@ -323,6 +323,70 @@ describe("re-filing albums by their tags", () => {
         expect(await markerMoves(() => refileLibrary(musicDir))).toBe(false);
     });
 
+    it("leaves the marker when the album that moves holds no playable song", async () => {
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Unlisted Album", { rgMbid: REAL_RG });
+        const unreadable = await song(a.id, "Refile Cut and Band/Refile Unlisted Album/01.flac", {
+            album: "Refile Unlisted Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+        await prisma.track.update({ where: { id: unreadable.id }, data: { corrupt: true } });
+
+        let result!: Awaited<ReturnType<typeof refileLibrary>>;
+        expect(await markerMoves(async () => (result = await refileLibrary(musicDir)))).toBe(false);
+
+        // It still moved: only what a client lists decides the marker.
+        expect(result.albumsMoved).toBe(1);
+        expect(await filing("Refile Unlisted Album")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 1 }]);
+    });
+
+    it("moves the marker when a merge brings a playable song onto the right artist's copy, though the copy's own song is corrupt", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Merge Album", { rgMbid: REAL_RG });
+        const kept = await album(full.id, "Refile Merge Album");
+        await song(stray.id, "Refile Cut and Band/Refile Merge Album/01.flac", { album: "Refile Merge Album", artist: "Refile Cut & Band" });
+        const own2 = await song(kept.id, "Refile Cut and Band/Refile Merge Album/02.flac", {
+            album: "Refile Merge Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+        await prisma.track.update({ where: { id: own2.id }, data: { corrupt: true } });
+
+        expect(await markerMoves(() => refileLibrary(musicDir))).toBe(true);
+    });
+
+    it("leaves the marker when only the already-filed song is playable and the moved one is corrupt", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Half Album", { rgMbid: REAL_RG });
+        const kept = await album(full.id, "Refile Half Album");
+        const moved = await song(stray.id, "Refile Cut and Band/Refile Half Album/01.flac", { album: "Refile Half Album", artist: "Refile Cut & Band" });
+        await song(kept.id, "Refile Cut and Band/Refile Half Album/02.flac", {
+            album: "Refile Half Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+        await prisma.track.update({ where: { id: moved.id }, data: { corrupt: true } });
+
+        expect(await markerMoves(() => refileLibrary(musicDir))).toBe(false);
+    });
+
+    it("moves the marker when an artist is given its full name back, and leaves it when the artist holds no playable song", async () => {
+        mockGetArtist.mockResolvedValue({ kind: "answered", value: { name: "Refile Cut and Band", aliases: [] }, evidence: {} });
+        const cut = await artist("Refile Cut", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Renamed Album", { rgMbid: REAL_RG });
+        const s = await song(a.id, "Refile Cut and Band/Refile Renamed Album/01.flac", {
+            album: "Refile Renamed Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+
+        let result!: Awaited<ReturnType<typeof refileLibrary>>;
+        expect(await markerMoves(async () => (result = await refileLibrary(musicDir)))).toBe(true);
+        expect(result).toMatchObject({ artistsRenamed: 1, albumsMoved: 0, albumsMerged: 0 });
+
+        // The same again for an artist whose only song is corrupt.
+        await prisma.artist.update({ where: { id: cut.id }, data: { name: "Refile Cut", identityKey: "refilecut", normalizedName: "refile cut" } });
+        await prisma.track.update({ where: { id: s.id }, data: { corrupt: true } });
+        expect(await markerMoves(async () => (result = await refileLibrary(musicDir)))).toBe(false);
+        expect(result.artistsRenamed).toBe(1);
+    });
+
     it("never deletes or adds to the right artist's own copy when it was edited", async () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { mbid: FULL_ID });

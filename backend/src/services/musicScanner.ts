@@ -19,6 +19,7 @@ import { findLocalArtistImage } from "./imageStorage";
 import * as stageRecords from "./stages/stageRecords";
 import { runReconcile } from "./libraryReconcile";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
 /**
@@ -219,18 +220,21 @@ export class MusicScannerService {
             errors: [],
         };
 
-        // `listed`: the songs are about to change (or have just), so a library song among them changes what a client lists.
-        // A song already flagged corrupt is not listed: a corrupt file is read again on every scan and fails the same
-        // way, which must not move the marker each time. If it reads this time, the filing below moves it.
-        const touchArtistsWhere = async (where: Prisma.TrackWhereInput, listed = true) => {
-            const rows = await prisma.track.findMany({ where, select: { corrupt: true, album: { select: { artistId: true, location: true } } } });
-            for (const row of rows) {
-                touchedArtists.add(row.album.artistId);
-                if (listed && !row.corrupt && row.album.location === "LIBRARY") this.libraryMoved = true;
+        // `listed`: the songs are about to change (or have just), so a song a client lists among them changes what it
+        // lists. That is the playable-song rule (utils/playableSong.ts): a song already flagged corrupt or missing is
+        // not listed, so a corrupt file read again on every scan, or a flagged song failing again, must not move the
+        // marker each time. A song that is `returning` has its missing flag cleared next, so it is listed by every
+        // other part of the rule; if it reads this time, the filing below moves it.
+        const touchArtistsWhere = async (where: Prisma.TrackWhereInput, listed: "now" | "returning" | false = "now") => {
+            const rows = await prisma.track.findMany({ where, select: { album: { select: { artistId: true } } } });
+            for (const row of rows) touchedArtists.add(row.album.artistId);
+            if (listed && !this.libraryMoved) {
+                const rule = listed === "returning" ? { ...PLAYABLE_SONG, missingSince: undefined } : PLAYABLE_SONG;
+                this.libraryMoved = (await prisma.track.findFirst({ where: { AND: [rule, where] }, select: { id: true } })) !== null;
             }
         };
-        const touchArtistsOf = async (songIds: string[]) => {
-            if (songIds.length > 0) await touchArtistsWhere({ id: { in: songIds } });
+        const touchArtistsOf = async (songIds: string[], listed: "now" | "returning" = "now") => {
+            if (songIds.length > 0) await touchArtistsWhere({ id: { in: songIds } }, listed);
         };
 
         const markFailed = async (audioFile: string, err: any) => {
@@ -379,7 +383,7 @@ export class MusicScannerService {
         );
         if (returned.length > 0) {
             const returnedIds = returned.map((t) => t.id);
-            await touchArtistsOf(returnedIds);
+            await touchArtistsOf(returnedIds, "returning");
             await prisma.$transaction(async (tx) => {
                 await tx.track.updateMany({
                     where: { id: { in: returnedIds } },

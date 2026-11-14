@@ -15,7 +15,8 @@ import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist }
 import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
-import { markLibraryChangedQuietly } from "./libraryChanged";
+import { artistIsListed, markLibraryChangedQuietly } from "./libraryChanged";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { backfillAllArtistCounts } from "./artistCountsService";
 import type { StopCheck } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
@@ -184,13 +185,21 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
         filings.push(...byTarget.values());
     }
 
+    // Whether anything the re-file changed is something a client lists: an album that moved or merged with a playable
+    // song among the songs it moved, or an artist renamed that holds a playable song.
+    let listedChange = false;
+
     // 3. Names the old splitter cut, where the cut row holds the files' MusicBrainz id: their full names back.
     const named = new Map<string, string>();
     for (const { candidate } of filings) if (candidate.mbid && !named.has(candidate.mbid)) named.set(candidate.mbid, candidate.name);
     for (const [mbid, name] of named) {
         if (shouldStop()) return halted();
         try {
-            if (await restoreCutName(mbid, name)) result.artistsRenamed++;
+            const renamedId = await restoreCutName(mbid, name);
+            if (renamedId) {
+                result.artistsRenamed++;
+                if (!listedChange && (await artistIsListed(renamedId))) listedChange = true;
+            }
         } catch (error) {
             result.albumsFailed++;
             logger.warn(`[Refile] Could not give the artist with MusicBrainz id ${mbid} its name ${name}:`, error);
@@ -201,18 +210,19 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
     for (const { candidate, songs: targetSongs } of filings) {
         if (shouldStop()) return halted();
         try {
-            const outcome = await refileAlbum(candidate, targetSongs);
+            const { outcome, listed } = await refileAlbum(candidate, targetSongs);
             if (outcome === "edited") result.keptEdited++;
             else if (outcome === "moved") result.albumsMoved++;
             else if (outcome === "merged") result.albumsMerged++;
+            if (listed) listedChange = true;
         } catch (error) {
             result.albumsFailed++;
             logger.warn(`[Refile] Could not re-file "${targetSongs[0].credit!.albumTitle}" under ${candidate.name}:`, error);
         }
     }
 
-    // Library albums moved, merged or under a renamed artist: a client lists them differently.
-    if (result.albumsMoved + result.albumsMerged + result.artistsRenamed > 0) await markLibraryChangedQuietly("albums re-filed");
+    // Only a moved or merged album holding a playable song, or a renamed artist holding one, is listed differently.
+    if (listedChange) await markLibraryChangedQuietly("albums re-filed");
     if (shouldStop()) return halted();
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
     await backfillAllArtistCounts(undefined, { shouldStop }).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
@@ -230,30 +240,30 @@ export async function refileLibrary(musicPath: string, { shouldStop = () => fals
  * Restores an artist's full name where the old splitter cut it, once MusicBrainz confirms the files' name is that id's
  * (a wrong tag must not rename a real artist). A row already under the full name with no id is folded in first; if
  * both hold a copy of an album and either was edited or is Discover's, nothing is renamed. Other name differences
- * (translation, spelling) are the row's own.
+ * (translation, spelling) are the row's own. Answers the renamed artist's id, or null when nothing was renamed.
  */
-async function restoreCutName(mbid: string, filesName: string): Promise<boolean> {
+async function restoreCutName(mbid: string, filesName: string): Promise<string | null> {
     const holder = await prisma.artist.findUnique({ where: { mbid }, select: { name: true, identityKey: true, hasUserOverrides: true } });
     if (!holder || holder.hasUserOverrides || holder.identityKey === artistIdentityKey(filesName) || !isOldCut(holder.name, filesName)) {
-        return false;
+        return null;
     }
     const found = await musicBrainzService.getArtist(mbid, ["aliases"]);
-    if (found.kind !== "answered") return false;
+    if (found.kind !== "answered") return null;
     const names = [found.value?.name, ...((found.value?.aliases ?? []) as Array<{ name?: string }>).map((alias) => alias.name)]
         .filter((n): n is string => typeof n === "string");
-    if (!names.some((n) => artistIdentityKey(n) === artistIdentityKey(filesName))) return false;
+    if (!names.some((n) => artistIdentityKey(n) === artistIdentityKey(filesName))) return null;
     const name: string = found.value.name;
-    if (!isOldCut(holder.name, name)) return false;
+    if (!isOldCut(holder.name, name)) return null;
     const identityKey = artistIdentityKey(name);
 
     return prisma.$transaction(
         async (tx) => {
             const current = await tx.artist.findUnique({ where: { mbid } });
-            if (!current || current.hasUserOverrides || current.name !== holder.name) return false;
+            if (!current || current.hasUserOverrides || current.name !== holder.name) return null;
 
             const twin = await tx.artist.findUnique({ where: { identityKey } });
             if (twin && twin.id !== current.id) {
-                if (twin.mbid || twin.hasUserOverrides) return false;
+                if (twin.mbid || twin.hasUserOverrides) return null;
                 const rows = await tx.album.findMany({ where: { artistId: twin.id }, select: ALBUM_FIELDS });
                 for (const row of rows) {
                     const same = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: current.id, identityKey: row.identityKey } }, select: ALBUM_FIELDS });
@@ -278,13 +288,13 @@ async function restoreCutName(mbid: string, filesName: string): Promise<boolean>
                 where: { id: current.id },
                 data: { name, identityKey, normalizedName: normalizeArtistName(name), sortName: artistSortName(name) },
             });
-            return true;
+            return current.id;
         },
         { timeout: ALBUM_TRANSACTION_MS },
     ).catch((error) => {
         if (!(error instanceof KeptAsItIs)) throw error;
         logger.info(`[Refile] Kept "${holder.name}" as it is: "${name}" holds a copy of one of its albums a person edited or Discover holds`);
-        return false;
+        return null;
     });
 }
 
@@ -295,11 +305,15 @@ class KeptAsItIs extends Error {}
  * Re-file one album's songs under the artist their tags name. What it finds is read inside the transaction, so an
  * album re-filed just before is seen as it is now.
  */
-async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"settled" | "edited" | "moved" | "merged"> {
+async function refileAlbum(
+    candidate: ArtistCandidate,
+    songs: Song[],
+): Promise<{ outcome: "settled" | "edited" | "moved" | "merged"; listed: boolean }> {
+    const unchanged = (outcome: "settled" | "edited") => ({ outcome, listed: false });
     const holder = candidate.mbid ? await prisma.artist.findUnique({ where: { mbid: candidate.mbid }, select: { id: true } }) : null;
     const isMisfiled = (row: AlbumRow) => row.location === "LIBRARY" && !isNamed(row, candidate, holder?.id ?? null);
     const peek = await prisma.track.findMany({ where: { id: { in: songs.map((s) => s.id) } }, select: { album: { select: ALBUM_FIELDS } } });
-    if (!peek.some((t) => isMisfiled(t.album))) return "settled";
+    if (!peek.some((t) => isMisfiled(t.album))) return unchanged("settled");
 
     // Outside the transaction: a new artist row's unique-name race is retried by resolveArtist itself.
     const target = await resolveArtist(prisma, { name: candidate.name, mbid: candidate.mbid });
@@ -313,14 +327,14 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 select: { id: true, album: { select: ALBUM_FIELDS } },
             });
             const misfiled = tracks.filter((t) => t.album.location === "LIBRARY" && t.album.artistId !== target.id);
-            if (misfiled.length === 0) return "settled";
+            if (misfiled.length === 0) return unchanged("settled");
             const involved = [...new Map(misfiled.map((t) => [t.album.id, t.album])).values()];
-            if (involved.some((row) => row.hasUserOverrides || row.artist.hasUserOverrides)) return "edited";
+            if (involved.some((row) => row.hasUserOverrides || row.artist.hasUserOverrides)) return unchanged("edited");
 
             let keeper = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: target.id, identityKey } }, select: ALBUM_FIELDS });
             // A copy a person edited, or Discover's, is not merged into (as restoreCutName does not).
             const closed = (row: AlbumRow) => row.location !== "LIBRARY" || row.hasUserOverrides;
-            if (keeper && closed(keeper)) return "edited";
+            if (keeper && closed(keeper)) return unchanged("edited");
             let outcome: "moved" | "merged" = "merged";
             // Whether the artist gains an album title; songs joining an album it has gain none.
             let gained = false;
@@ -338,7 +352,7 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                 const best = whole[0];
                 // The target may hold the album under the row's own name key rather than the tags' title.
                 const clash = best && (await tx.album.findUnique({ where: { artistId_identityKey: { artistId: target.id, identityKey: best.identityKey } }, select: ALBUM_FIELDS }));
-                if (clash && closed(clash)) return "edited";
+                if (clash && closed(clash)) return unchanged("edited");
                 if (clash) {
                     keeper = clash;
                 } else if (best) {
@@ -386,7 +400,9 @@ async function refileAlbum(candidate: ArtistCandidate, songs: Song[]): Promise<"
                     data: { enrichmentStatus: "pending", enrichmentFailures: 0 },
                 });
             }
-            return outcome;
+            // Listed: a song that moved is one a client lists, now under its new artist.
+            const listed = (await tx.track.count({ where: { AND: [PLAYABLE_SONG, { id: { in: misfiled.map((t) => t.id) } }] } })) > 0;
+            return { outcome, listed };
         },
         { timeout: ALBUM_TRANSACTION_MS },
     );

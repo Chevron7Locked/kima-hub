@@ -411,26 +411,25 @@ router.post("/retry", async (req, res) => {
 router.put("/artists/:id/metadata", async (req, res) => {
     try {
       const { name, bio, genres, heroUrl, mbid } = req.body;
-  
+
       const updateData: any = {};
       let hasOverrides = false;
-  
+
+      // The name shown before the edit, to tell afterwards whether the edit changed it.
+      const before = await prisma.artist.findUnique({
+        where: { id: req.params.id },
+        select: { name: true, displayName: true },
+      });
+
       // Map user edits to override fields (non-destructive)
       if (name !== undefined) {
         updateData.displayName = name;
         hasOverrides = true;
 
         // sortName follows displayName. Clearing the override files the artist under
-        // its canonical name, fetched only in that case.
+        // its canonical name.
         const effectiveName =
-          typeof name === "string" && name.trim() !== ""
-            ? name
-            : ((
-                await prisma.artist.findUnique({
-                  where: { id: req.params.id },
-                  select: { name: true },
-                })
-              )?.name ?? "");
+          typeof name === "string" && name.trim() !== "" ? name : (before?.name ?? "");
         updateData.sortName = artistSortName(effectiveName);
       }
       if (bio !== undefined) {
@@ -473,10 +472,12 @@ router.put("/artists/:id/metadata", async (req, res) => {
       });
       await forgetArtistHero(req.params.id);
   
-      // A shown name is what a Subsonic client lists, so an edit of it moves the library's change marker; so does a
-      // new MBID, which can rename the artist or merge it into another. An artist no client lists (Discover's, or one
-      // whose songs are missing or corrupt) moves nothing.
-      if ((name !== undefined || trimmedMbid !== "") && (await artistIsListed(req.params.id))) await markLibraryChanged();
+      // A shown name is what a Subsonic client lists, so an edit that changes it moves the library's change marker. An
+      // edit that sends the name already shown, a new MBID (it renames nothing), or an artist no client lists (Discover's,
+      // or one whose songs are missing or corrupt) moves nothing.
+      if (before && (artist.displayName || artist.name) !== (before.displayName || before.name) && (await artistIsListed(req.params.id))) {
+        await markLibraryChanged();
+      }
       res.json(artist);
     } catch (error) {
       if (!respondIfDeleted(res, error, "artist")) {
@@ -496,7 +497,13 @@ router.put("/albums/:id/metadata", async (req, res) => {
   
       const updateData: any = {};
       let hasOverrides = false;
-  
+
+      // The title shown before the edit, to tell afterwards whether the edit changed it.
+      const before = await prisma.album.findUnique({
+        where: { id: req.params.id },
+        select: { title: true, displayTitle: true },
+      });
+
       // Map user edits to override fields (non-destructive)
       if (title !== undefined) {
         updateData.displayTitle = title;
@@ -505,14 +512,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
         // sortName follows displayTitle, like the artist override. artistSortName is
         // text-generic, so it serves albums too.
         const effectiveTitle =
-          typeof title === "string" && title.trim() !== ""
-            ? title
-            : ((
-                await prisma.album.findUnique({
-                  where: { id: req.params.id },
-                  select: { title: true },
-                })
-              )?.title ?? "");
+          typeof title === "string" && title.trim() !== "" ? title : (before?.title ?? "");
         updateData.sortName = artistSortName(effectiveTitle);
       }
       if (year !== undefined) {
@@ -560,7 +560,10 @@ router.put("/albums/:id/metadata", async (req, res) => {
         include: ALBUM_EDIT_REPLY,
       });
   
-      if (title !== undefined && (await albumIsListed(req.params.id))) await markLibraryChanged();
+      // Only a shown title that changed is a change to what a client lists.
+      if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title) && (await albumIsListed(req.params.id))) {
+        await markLibraryChanged();
+      }
       res.json(album);
     } catch (error) {
       if (!respondIfDeleted(res, error, "album")) {
@@ -580,6 +583,12 @@ router.put("/tracks/:id/metadata", async (req, res) => {
 
     const updateData: any = {};
     let hasOverrides = false;
+
+    // The title shown before the edit, to tell afterwards whether the edit changed it.
+    const before = await prisma.track.findUnique({
+      where: { id: req.params.id },
+      select: { title: true, displayTitle: true },
+    });
 
     // Map user edits to override fields (non-destructive)
     if (title !== undefined) {
@@ -608,7 +617,10 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       include: TRACK_EDIT_REPLY,
     });
 
-    if (title !== undefined && (await songIsListed(req.params.id))) await markLibraryChanged();
+    // Only a shown title that changed is a change to what a client lists.
+    if (before && (track.displayTitle || track.title) !== (before.displayTitle || before.title) && (await songIsListed(req.params.id))) {
+      await markLibraryChanged();
+    }
     res.json(track);
   } catch (error) {
     if (!respondIfDeleted(res, error, "track")) {

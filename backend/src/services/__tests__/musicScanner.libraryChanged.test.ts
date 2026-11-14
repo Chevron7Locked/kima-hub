@@ -200,6 +200,26 @@ describe("a scan's libraryChanged", () => {
     });
 });
 
+describe("a scan's libraryChanged for a song flagged missing", () => {
+    it("is false when its file is back but still cannot be read, since the song is no more listed than it was", async () => {
+        const lib = put(LIB);
+        await new MusicScannerService().scanLibrary(musicDir);
+        fs.unlinkSync(lib);
+        expect((await new MusicScannerService().scanLibrary(musicDir)).tracksMissing).toBe(1);
+
+        put(LIB);
+        const later = new Date(Date.now() + 60_000);
+        fs.utimesSync(lib, later, later);
+        (parseFile as jest.Mock).mockRejectedValue(new Error("unreadable"));
+        const scan = await new MusicScannerService().scanLibrary(musicDir);
+
+        expect(scan.tracksCorrupt).toBe(1);
+        const song = await prisma.track.findFirstOrThrow({ where: { filePath: LIB.rel } });
+        expect(song.corrupt).toBe(true);
+        expect(scan.libraryChanged).toBe(false);
+    });
+});
+
 describe("a scan that fails", () => {
     it("before filing anything has changed no library song", async () => {
         const lib = put(LIB);
