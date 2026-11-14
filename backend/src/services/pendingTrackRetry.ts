@@ -86,7 +86,7 @@ export async function findSources(job: DownloadJob, pendingTrack: PlaylistPendin
 
 /**
  * Downloads the best of the files and records the outcome on the job; a finished download asks for a scan of its
- * album. Never throws: a failure is the job's failed state.
+ * album, then completes the job. Never throws: a failure is the job's failed state.
  */
 export async function downloadSources(
     job: DownloadJob,
@@ -108,9 +108,8 @@ export async function downloadSources(
             await failRetryJob(job.id, result.error || "Download failed");
             return;
         }
-        const settled = await downloadJobs.complete([job], { filePath: result.filePath });
+        // The scan is asked for before the job reads completed, so nobody who sees it completed finds the scan still to come.
         // A job cancelled while the file downloaded stays cancelled; the file is on disk, so the scan still finds it.
-        if (settled.length === 0) logger.debug(`[Pending retry] Job ${job.id} was settled before its download finished`);
         await requestScan({
             userId: job.userId,
             source: scanSource,
@@ -119,6 +118,8 @@ export async function downloadSources(
             priority: 1,
             removeOnComplete: true,
         }).catch((error) => logger.error(`[Pending retry] Could not queue a scan for job ${job.id}:`, error));
+        const settled = await downloadJobs.complete([job], { filePath: result.filePath });
+        if (settled.length === 0) logger.debug(`[Pending retry] Job ${job.id} was settled before its download finished`);
     } catch (error: any) {
         logger.error(`[Pending retry] Download of job ${job.id} failed:`, error);
         await failRetryJob(job.id, error?.message || "Download exception").catch(() => undefined);

@@ -4,7 +4,7 @@ import { notificationService } from "../services/notificationService";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import type { DownloadJob, Prisma } from "@prisma/client";
 import { config } from "../config";
 import * as downloadJobs from "../services/downloads/jobs";
 import {
@@ -22,10 +22,34 @@ const router = Router();
 /** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
 const NO_ALBUM_ID = "retry_";
 
-/** Takes a failed download off the user's list. Done in the transaction that creates its replacement. */
-function clearFailedJob(id: string, db: Pick<Prisma.TransactionClient, "downloadJob"> = prisma) {
-    return db.downloadJob.update({ where: { id }, data: { cleared: true } });
+type RetryOutcome<T> = { running: DownloadJob | null } | { replacement: T };
+
+/**
+ * Retries a failed download once. In one transaction the failed job leaves the list (the first retry to clear it wins),
+ * and then either the replacement is made or nothing is: `running` is the job already downloading the album, or null
+ * when another retry cleared the failed job first and its replacement has since ended. A failed job is cleared
+ * whenever its retry exists, so an answer of "already running" leaves no stale entry behind. `make` creates the
+ * replacement in the same transaction, so the user sees the failed job or its replacement, never neither.
+ */
+async function retryOnce<T>(
+    failedJob: DownloadJob,
+    running: { targetMbid: string } | null,
+    make: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<RetryOutcome<T>> {
+    return prisma.$transaction(async (tx) => {
+        // The claim comes before anything is created: a second retry waits here for the first to commit, then finds the job cleared.
+        const claimed = await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
+        const existing = running
+            ? await tx.downloadJob.findFirst({
+                  where: { userId: failedJob.userId, ...running, status: { in: ["pending", "processing"] }, cleared: { not: true } },
+              })
+            : null;
+        if (claimed.count === 0 || existing) return { running: existing };
+        return { replacement: await make(tx) };
+    });
 }
+
+const deduplicated = (running: DownloadJob | null) => ({ success: true, newJobId: running?.id, deduplicated: true });
 
 /**
  * GET /notifications
@@ -340,27 +364,11 @@ router.post(
                 }
 
                 const target = await soulseekTarget();
-                const existingActiveJob = await prisma.downloadJob.findFirst({
-                    where: {
-                        userId: req.user!.id,
-                        targetMbid: retryJobTarget(pendingTrack),
-                        status: { in: ["pending", "processing"] },
-                        cleared: { not: true },
-                    },
-                });
-                if (existingActiveJob) {
-                    await clearFailedJob(failedJob.id);
-                    return res.json({
-                        success: true,
-                        newJobId: existingActiveJob.id,
-                        deduplicated: true,
-                    });
-                }
-
-                const job = await prisma.$transaction(async (tx) => {
-                    await clearFailedJob(failedJob.id, tx);
-                    return createRetryJob(req.user!.id, pendingTrack, {}, tx);
-                });
+                const outcome = await retryOnce(failedJob, { targetMbid: retryJobTarget(pendingTrack) }, (tx) =>
+                    createRetryJob(req.user!.id, pendingTrack, {}, tx)
+                );
+                if ("running" in outcome) return res.json(deduplicated(outcome.running));
+                const job = outcome.replacement;
                 if ("problem" in target) {
                     await failRetryJob(job.id, target.problem);
                     return res.json({ success: false, newJobId: job.id, error: target.problem });
@@ -393,30 +401,10 @@ router.post(
                     });
                 }
 
-                // Dedup: check for an existing active download job (not for a placeholder id)
-                if (failedJob.targetMbid && !failedJob.targetMbid.startsWith(NO_ALBUM_ID)) {
-                    const existingActiveJob = await prisma.downloadJob.findFirst({
-                        where: {
-                            userId: req.user!.id,
-                            targetMbid: failedJob.targetMbid,
-                            status: { in: ["pending", "processing"] },
-                            cleared: { not: true },
-                        },
-                    });
-
-                    if (existingActiveJob) {
-                        return res.json({
-                            success: true,
-                            newJobId: existingActiveJob.id,
-                            deduplicated: true,
-                        });
-                    }
-                }
-
-                // The failed job leaves the list only together with the creation of its replacement.
-                const newJobRecord = await prisma.$transaction(async (tx) => {
-                    await clearFailedJob(failedJob.id, tx);
-                    return downloadJobs.create({
+                // A placeholder id is no album: nothing running can share it.
+                const hasAlbumId = !!failedJob.targetMbid && !failedJob.targetMbid.startsWith(NO_ALBUM_ID);
+                const outcome = await retryOnce(failedJob, hasAlbumId ? { targetMbid: failedJob.targetMbid! } : null, (tx) =>
+                    downloadJobs.create({
                         userId: req.user!.id,
                         type: "album",
                         targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
@@ -427,8 +415,10 @@ router.post(
                             ...downloadJobs.withoutFailureMarks(metadata),
                             retryAttempt: true,
                         } as any,
-                    }, tx);
-                });
+                    }, tx)
+                );
+                if ("running" in outcome) return res.json(deduplicated(outcome.running));
+                const newJobRecord = outcome.replacement;
 
                 try {
                     // Try Soulseek first (async)
@@ -540,44 +530,26 @@ router.post(
                     .json({ error: "Cannot retry: missing album MBID" });
             }
 
-            // Dedup: check for existing active download job
-            const existingActiveJob = await prisma.downloadJob.findFirst({
-                where: {
-                    userId: req.user!.id,
-                    targetMbid,
-                    status: { in: ["pending", "processing"] },
-                    cleared: { not: true },
-                },
-            });
-
-            if (existingActiveJob) {
-                return res.json({
-                    success: true,
-                    newJobId: existingActiveJob.id,
-                    deduplicated: true,
-                });
-            }
-
-            // Subject is typically "Artist - Album" format
+            // The job's own record names the artist; a job from before that was recorded has only its "Artist - Album" subject.
             const subjectParts = failedJob.subject.split(" - ");
-            const artistName = subjectParts[0] || failedJob.subject;
+            const artistName = (metadata?.artistName as string) || subjectParts[0] || failedJob.subject;
             const albumTitle =
                 (metadata?.albumTitle as string) ||
                 subjectParts[1] ||
                 failedJob.subject;
 
-            // The failed job leaves the list only together with the creation of its replacement.
-            const newJobRecord = await prisma.$transaction(async (tx) => {
-                await clearFailedJob(failedJob.id, tx);
-                return downloadJobs.create({
+            const outcome = await retryOnce(failedJob, { targetMbid }, (tx) =>
+                downloadJobs.create({
                     userId: req.user!.id,
                     type: failedJob.type,
                     targetMbid,
                     artistMbid: failedJob.artistMbid,
                     subject: failedJob.subject,
                     metadata: downloadJobs.withoutFailureMarks(metadata) as any,
-                }, tx);
-            });
+                }, tx)
+            );
+            if ("running" in outcome) return res.json(deduplicated(outcome.running));
+            const newJobRecord = outcome.replacement;
 
             let result: { success: boolean; error?: string };
             try {

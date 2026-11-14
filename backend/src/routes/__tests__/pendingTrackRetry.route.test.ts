@@ -112,6 +112,12 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
 
     it("downloads the best match, completes the job with the file and asks for a scan", async () => {
         const pt = await pending("Sunflower");
+        // A job that reads completed has had its scan asked for: the scan goes first, so nothing sees one without the other.
+        let statusWhenScanAsked = "";
+        mockScan.mockImplementation(async () => {
+            statusWhenScanAsked = (await prisma.downloadJob.findFirstOrThrow({ where: { userId: OWNER } })).status;
+            return { queued: true, jobId: "scan-1" };
+        });
 
         const res = await retry(pt.id).expect(200);
 
@@ -121,6 +127,7 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
         expect(job.metadata).toMatchObject({ downloadType: "pending-track-retry", playlistId, pendingTrackId: pt.id, filePath: "/music/Low/a.flac" });
         expect(mockDownload).toHaveBeenCalledWith("Low", "Sunflower", "Things We Lost", MATCH, "/music");
         expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ userId: OWNER, source: "retry-pending-track", albumMbid: pt.albumMbid }));
+        expect(statusWhenScanAsked).toBe("processing");
     });
 
     it("says so when Soulseek has nothing, and fails the job", async () => {
@@ -249,6 +256,46 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
 
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: failed.id } })).cleared).toBe(false);
         expect(await jobsFor(pt.id)).toHaveLength(1);
+    });
+
+    it("answers deduplicated with the running job and clears the failed one when the song is already being retried", async () => {
+        const pt = await pending("Pretend");
+        const failed = await failedRetryOf(pt.id);
+        const running = await prisma.downloadJob.create({
+            data: { userId: OWNER, subject: "Low - Pretend", type: "track", targetMbid: pt.albumMbid, status: "processing", metadata: { downloadType: "pending-track-retry" } },
+        });
+
+        const res = await retryFromActivity(failed.id).expect(200);
+
+        expect(res.body).toEqual({ success: true, newJobId: running.id, deduplicated: true });
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: failed.id } })).cleared).toBe(true);
+        expect(await prisma.downloadJob.count({ where: { userId: OWNER } })).toBe(2);
+        expect(mockSearch).not.toHaveBeenCalled();
+    });
+
+    it("makes one replacement for a double-click", async () => {
+        const pt = await pending("Violence");
+        const failed = await failedRetryOf(pt.id);
+
+        const [a, b] = await Promise.all([retryFromActivity(failed.id), retryFromActivity(failed.id)]);
+
+        expect([a.status, b.status]).toEqual([200, 200]);
+        expect([a.body, b.body].filter((body) => body.deduplicated)).toHaveLength(1);
+        const replacements = (await jobsFor(pt.id)).filter((j) => j.id !== failed.id);
+        expect(replacements).toHaveLength(1);
+        await settled(replacements[0].id);
+    });
+
+    it("creates nothing for a second retry once the replacement has ended", async () => {
+        const pt = await pending("Weight");
+        const failed = await failedRetryOf(pt.id);
+        mockSearch.mockResolvedValue({ found: false, allMatches: [] });
+        await retryFromActivity(failed.id).expect(200);
+
+        const second = await retryFromActivity(failed.id).expect(200);
+
+        expect(second.body).toMatchObject({ success: true, deduplicated: true });
+        expect((await jobsFor(pt.id)).filter((j) => j.id !== failed.id)).toHaveLength(1);
     });
 
     it("fails the new job, which stays on the list, when its Soulseek search throws", async () => {
