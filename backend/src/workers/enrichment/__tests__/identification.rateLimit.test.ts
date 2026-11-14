@@ -4,21 +4,11 @@
  * record `done` with the asked sources as evidence.
  */
 
-jest.mock("../../../workers/enrichmentQueues", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentQueuesMock);
-jest.mock("ioredis", () => require("../../../__tests__/helpers/enrichmentMocks").ioredisMock);
-jest.mock("../../../config", () => require("../../../__tests__/helpers/enrichmentMocks").configMock);
 jest.mock("../../../utils/logger", () => require("../../../__tests__/helpers/enrichmentMocks").loggerMock);
-jest.mock("../../../services/enrichmentState", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentStateMock);
-jest.mock("../../../services/enrichmentFailureService", () => require("../../../__tests__/helpers/enrichmentMocks").enrichmentFailureServiceMock);
-jest.mock("../../../services/featureDetection", () => require("../../../__tests__/helpers/enrichmentMocks").featureDetectionMock);
 jest.mock("../../../services/trackIdentity", () => require("../../../__tests__/helpers/enrichmentMocks").trackIdentityMock);
 jest.mock("../../../services/musicbrainz", () => require("../../../__tests__/helpers/enrichmentMocks").musicBrainzMock);
 jest.mock("../../../services/acoustidIdentification", () => require("../../../__tests__/helpers/enrichmentMocks").acoustidIdentificationMock);
 jest.mock("../../../services/sourcePauseController", () => require("../../../__tests__/helpers/enrichmentMocks").sourcePauseControllerMock);
-jest.mock("../../../workers/audioCompletionSubscriber", () => require("../../../__tests__/helpers/enrichmentMocks").audioCompletionSubscriberMock);
-jest.mock("../../../workers/enrichment/artists", () => require("../../../__tests__/helpers/enrichmentMocks").artistJobMock);
-jest.mock("../../../workers/trackEnrichmentWorker", () => require("../../../__tests__/helpers/enrichmentMocks").trackEnrichmentWorkerMock);
-jest.mock("../../../workers/enrichment/podcasts", () => require("../../../__tests__/helpers/enrichmentMocks").podcastJobMock);
 
 import {
     mockRecordFailure,

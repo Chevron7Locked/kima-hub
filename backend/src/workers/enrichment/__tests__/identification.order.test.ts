@@ -11,28 +11,6 @@ const noData = { kind: "absent", evidence: { mocked: true } } as const;
 const answeredWith = (value: unknown) =>
     ({ kind: "answered", value, evidence: { mocked: true } }) as const;
 
-jest.mock("../../../services/enrichmentState", () => ({
-    enrichmentStateService: {
-        updateState: jest.fn().mockResolvedValue({}),
-        getState: jest.fn().mockResolvedValue(null),
-        initializeState: jest.fn().mockResolvedValue({}),
-        clear: jest.fn().mockResolvedValue(undefined),
-        detectHang: jest.fn().mockResolvedValue(false),
-        clearGate: jest.fn().mockResolvedValue(undefined),
-        publishToChannel: jest.fn().mockResolvedValue(undefined),
-    },
-}));
-
-jest.mock("../../../services/enrichmentFailureService", () => ({
-    enrichmentFailureService: {
-        cleanupOrphanedFailures: jest.fn().mockResolvedValue({ cleaned: 0, checked: 0 }),
-        cleanupOldResolved: jest.fn().mockResolvedValue(0),
-        recordFailure: jest.fn().mockResolvedValue({}),
-        resolveByEntity: jest.fn().mockResolvedValue(true),
-    },
-}));
-
-// fpcalc gate: on by default; individual tests change it through `mockGetFeatures`.
 const mockGetFeatures = jest.fn().mockResolvedValue({ fpcalc: true });
 jest.mock("../../../services/featureDetection", () => ({
     featureDetection: {
@@ -77,65 +55,6 @@ jest.mock("../../../services/trackIdentity", () => ({
     trackIdentityService: {
         populateTrackGenres: (...args: unknown[]) => mockPopulateTrackGenres(...args),
     },
-}));
-
-const mockRedisPublish = jest.fn().mockResolvedValue(1);
-const mockRedisQuit = jest.fn().mockResolvedValue(undefined);
-const mockRedisSubscribe = jest.fn().mockResolvedValue(undefined);
-const mockRedisOn = jest.fn();
-const mockRedisSet = jest.fn().mockResolvedValue("OK");
-const mockRedisRpush = jest.fn().mockResolvedValue(1);
-const mockRedisLlen = jest.fn().mockResolvedValue(0);
-const mockRedisDel = jest.fn().mockResolvedValue(1);
-const mockRedisGet = jest.fn().mockResolvedValue(null);
-
-jest.mock("ioredis", () => {
-    return jest.fn().mockImplementation(() => ({
-        publish: mockRedisPublish,
-        quit: mockRedisQuit,
-        subscribe: mockRedisSubscribe,
-        on: mockRedisOn,
-        set: mockRedisSet,
-        rpush: mockRedisRpush,
-        llen: mockRedisLlen,
-        del: mockRedisDel,
-        get: mockRedisGet,
-        status: "ready",
-    }));
-});
-
-jest.mock("../../../config", () => ({
-    config: { redisUrl: "redis://localhost:6379" },
-}));
-
-jest.mock("../../enrichmentQueues", () => ({
-    QUEUE_NAMES: {
-        ARTISTS: "enrichment-artists",
-        TRACKS: "enrichment-tracks",
-        VIBE: "enrichment-vibe",
-        PODCASTS: "enrichment-podcasts",
-    },
-    artistQueue: { add: jest.fn() },
-    trackQueue: { add: jest.fn() },
-    vibeQueue: { add: jest.fn() },
-    podcastQueue: { add: jest.fn() },
-    closeEnrichmentQueues: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock("../artists", () => ({
-    queueOwedArtists: jest.fn().mockResolvedValue(0), startArtistWorker: jest.fn().mockResolvedValue({}),
-}));
-jest.mock("../../trackEnrichmentWorker", () => ({
-    startTrackEnrichmentWorker: jest.fn().mockResolvedValue({}),
-}));
-jest.mock("../podcasts", () => ({
-    queueStalePodcasts: jest.fn().mockResolvedValue(0), startPodcastWorker: jest.fn().mockResolvedValue({}),
-}));
-jest.mock("../../audioCompletionSubscriber", () => ({
-    startAudioCompletionSubscriber: jest.fn(),
-    stopAudioCompletionSubscriber: jest.fn().mockResolvedValue(undefined),
-    haltVibeQueuing: jest.fn(),
-    resumeVibeQueuing: jest.fn(),
 }));
 
 jest.mock("../../../utils/logger", () => ({
