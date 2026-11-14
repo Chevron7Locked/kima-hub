@@ -11,7 +11,7 @@ import {
 } from "../workers/unifiedEnrichment";
 import { wipeEnrichment, rerunEnrichment, RERUN_STEPS, type RerunStep } from "../services/enrichmentRestart";
 import { enrichmentStateService } from "../services/enrichmentState";
-import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { enrichmentFailureService, isFailureType, type GetFailuresOptions } from "../services/enrichmentFailureService";
 import {
   getSystemSettings,
   saveSystemSettings,
@@ -269,8 +269,12 @@ router.get("/failures", async (req, res) => {
     const { entityType, includeSkipped, includeResolved, limit, offset } =
       req.query;
 
-    const options: any = {};
-    if (entityType) options.entityType = entityType as string;
+    if (entityType !== undefined && !isFailureType(entityType)) {
+      return res.status(400).json({ error: "Unknown failure type" });
+    }
+
+    const options: GetFailuresOptions = {};
+    if (entityType) options.entityType = entityType;
     if (includeSkipped === "true") options.includeSkipped = true;
     if (includeResolved === "true") options.includeResolved = true;
     if (limit) options.limit = parseLimit(limit, 100);

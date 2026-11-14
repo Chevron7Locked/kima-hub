@@ -3,40 +3,54 @@
  * EnrichmentFailure shape; the EnrichmentFailure table holds artists and podcasts. Resolved rows are deleted 30 days on.
  */
 
+import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { STAGE_RETRY_CAP } from "../workers/stageRetry";
 import * as stageRecords from "./stages/stageRecords";
+import type { StageName } from "./stages/stageRecords";
 
 type StageFailureType = "track" | "audio" | "vibe" | "scan";
 /** Each song stage's failure type, as the settings screen names it. */
-const ENTITY_TYPE_BY_STAGE: Record<string, StageFailureType> = {
+const ENTITY_TYPE_BY_STAGE: Record<StageName, StageFailureType> = {
     recording: "track",
     analysis: "audio",
     embedding: "vibe",
     fingerprint: "scan",
 };
-const STAGES_BY_ENTITY_TYPE: Record<string, string[]> = Object.entries(
-    ENTITY_TYPE_BY_STAGE,
-).reduce<Record<string, string[]>>((acc, [stage, entityType]) => {
-    (acc[entityType] ??= []).push(stage);
-    return acc;
-}, {});
+const STAGES_BY_ENTITY_TYPE: Record<StageFailureType, StageName[]> = {
+    track: ["recording"],
+    audio: ["analysis"],
+    vibe: ["embedding"],
+    scan: ["fingerprint"],
+};
+const STAGE_NAMES = Object.keys(ENTITY_TYPE_BY_STAGE) as StageName[];
 
-const STAGE_ENTITY_TYPES = new Set<string>(Object.values(ENTITY_TYPE_BY_STAGE));
+/** The failure type of a stored stage name, or undefined for a name Kima has no stage by. */
+function failureTypeOfStage(stage: string): StageFailureType | undefined {
+    return Object.hasOwn(ENTITY_TYPE_BY_STAGE, stage) ? ENTITY_TYPE_BY_STAGE[stage as StageName] : undefined;
+}
 
 /** True for the failure types that are a song's stage records. */
-function isTrackStageEntityType(entityType: string | undefined): boolean {
-    return entityType !== undefined && STAGE_ENTITY_TYPES.has(entityType);
+function isTrackStageEntityType(entityType: string | undefined): entityType is StageFailureType {
+    return entityType !== undefined && Object.hasOwn(STAGES_BY_ENTITY_TYPE, entityType);
 }
 
 /** The types the ledger holds. A song's failures are its stage records, never ledger rows. */
 const LEDGER_TYPES = ["artist", "podcast"] as const;
 type LedgerType = (typeof LEDGER_TYPES)[number];
 
+/** Every type a failure read can be asked for: the song types and the ledger types. */
+export type FailureType = StageFailureType | LedgerType;
+
+/** True for a value that names a failure type; the route answers 400 for anything else. */
+export function isFailureType(value: unknown): value is FailureType {
+    return typeof value === "string" && (isTrackStageEntityType(value) || LEDGER_TYPES.some((t) => t === value));
+}
+
 /** The stages and ledger types a failure type covers; no type covers them all. */
-function failureScope(entityType: string | undefined): { stages: string[]; ledgerTypes: LedgerType[] } {
-    if (entityType === undefined) return { stages: Object.keys(ENTITY_TYPE_BY_STAGE), ledgerTypes: [...LEDGER_TYPES] };
+function failureScope(entityType: string | undefined): { stages: StageName[]; ledgerTypes: LedgerType[] } {
+    if (entityType === undefined) return { stages: STAGE_NAMES, ledgerTypes: [...LEDGER_TYPES] };
     const ledgerType = LEDGER_TYPES.find((t) => t === entityType);
     return {
         stages: isTrackStageEntityType(entityType) ? STAGES_BY_ENTITY_TYPE[entityType] : [],
@@ -62,13 +76,21 @@ interface StageFailureRow {
     track: { title: string | null };
 }
 
-/** A stage record in the failure shape the settings screen shows. */
-function mapStageFailure(row: StageFailureRow): EnrichmentFailure {
+/**
+ * A stage record in the failure shape the settings screen shows. A record of a stage Kima has no type for is
+ * logged and left out (null): calling it a recording failure would send its retry to the wrong question.
+ */
+export function mapStageFailure(row: StageFailureRow): EnrichmentFailure | null {
+    const entityType = failureTypeOfStage(row.stage);
+    if (!entityType) {
+        logger.warn(`[EnrichmentFailures] Skipping stage record ${row.id}: unknown stage "${row.stage}"`);
+        return null;
+    }
     const blocked = row.status === "blocked";
     const lastFailedAt = row.finishedAt ?? row.startedAt ?? new Date(0);
     return {
         id: row.id,
-        entityType: ENTITY_TYPE_BY_STAGE[row.stage] ?? "track",
+        entityType,
         entityId: row.trackId,
         entityName: row.track?.title ?? row.trackId,
         errorMessage: row.lastErrorMessage,
@@ -102,18 +124,19 @@ const NOT_FILE_MISSING = { OR: [{ failureClass: null }, { failureClass: { not: "
 const LIBRARY_SONG_STAGE = { track: { album: { location: "LIBRARY" as const } } };
 
 /** The TrackStage `where` for the failure list: open failures only. */
-function stageFailureWhere(stages: string[], includeSkipped: boolean): any {
-    const where: any = { stage: { in: stages }, status: "failed", ...NOT_FILE_MISSING, ...LIBRARY_SONG_STAGE };
-    if (includeSkipped) {
+function stageFailureWhere(stages: StageName[], includeSkipped: boolean): Prisma.TrackStageWhereInput {
+    return {
+        stage: { in: stages },
         // Blocked rows are the parked ones; only list them when asked for.
-        where.status = { in: ["failed", "blocked"] };
-    }
-    return where;
+        status: includeSkipped ? { in: ["failed", "blocked"] } : "failed",
+        ...NOT_FILE_MISSING,
+        ...LIBRARY_SONG_STAGE,
+    };
 }
 
 interface EnrichmentFailure {
     id: string;
-    entityType: StageFailureType | LedgerType;
+    entityType: FailureType;
     entityId: string;
     entityName: string | null;
     errorMessage: string | null;
@@ -138,9 +161,9 @@ interface RecordFailureInput {
     metadata?: any;
 }
 
-interface GetFailuresOptions {
+export interface GetFailuresOptions {
     /** A read covers both kinds of failure: a song stage's type (from TrackStage) or a ledger type. */
-    entityType?: StageFailureType | LedgerType;
+    entityType?: FailureType;
     includeSkipped?: boolean;
     includeResolved?: boolean;
     limit?: number;
@@ -247,7 +270,7 @@ class EnrichmentFailureService {
         ]);
 
         const merged = [
-            ...(stageRows as unknown as StageFailureRow[]).map(mapStageFailure),
+            ...(stageRows as unknown as StageFailureRow[]).flatMap((row) => mapStageFailure(row) ?? []),
             ...(ledgerRows as unknown as EnrichmentFailure[]),
         ].sort(
             (a, b) => new Date(b.lastFailedAt).getTime() - new Date(a.lastFailedAt).getTime(),
@@ -308,7 +331,7 @@ class EnrichmentFailureService {
     /** One failure by id: a stage record's id, else a ledger row's. */
     async getFailure(id: string): Promise<EnrichmentFailure | null> {
         const stage = await prisma.trackStage.findFirst({
-            where: { id, stage: { in: Object.keys(ENTITY_TYPE_BY_STAGE) } },
+            where: { id, stage: { in: STAGE_NAMES } },
             include: { track: { select: { title: true } } },
         });
         if (stage) {

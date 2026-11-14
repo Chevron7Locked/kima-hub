@@ -222,10 +222,12 @@ interface EnrichmentState {
     };
 }
 
+/** track/audio/vibe/scan failures come from TrackStage records, artist and podcast ones from the failure ledger. */
+export type EnrichmentFailureType = "artist" | "podcast" | "track" | "audio" | "vibe" | "scan";
+
 export interface EnrichmentFailure {
     id: string;
-    /** track/audio/vibe/scan failures come from TrackStage records, artist ones from the failure ledger. */
-    entityType: "artist" | "track" | "audio" | "vibe" | "scan";
+    entityType: EnrichmentFailureType;
     entityId: string;
     entityName: string | null;
     errorMessage: string | null;
@@ -1850,7 +1852,7 @@ class ApiClient {
     }
 
     async getEnrichmentFailures(params?: {
-        entityType?: "artist" | "track" | "audio" | "vibe" | "scan";
+        entityType?: EnrichmentFailureType;
         includeSkipped?: boolean;
         includeResolved?: boolean;
         limit?: number;

@@ -24,7 +24,8 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 import { prisma } from "../../utils/db";
-import { enrichmentFailureService } from "../enrichmentFailureService";
+import { enrichmentFailureService, mapStageFailure } from "../enrichmentFailureService";
+import { logger } from "../../utils/logger";
 import * as stageRecords from "../stages/stageRecords";
 
 const PREFIX = "fstrk";
@@ -282,5 +283,26 @@ describe("entities without a TrackStage keep using EnrichmentFailure", () => {
         const failure = await enrichmentFailureService.getFailure(created.id);
         expect(failure).not.toBeNull();
         expect(failure!.entityType).toBe("artist");
+    });
+});
+
+describe("mapStageFailure", () => {
+    const row = (stage: string) => ({
+        id: "r1", trackId: "t1", stage, status: "failed", source: null, attempt: 1, failures: 1,
+        lastErrorCode: null, lastErrorMessage: "x", evidence: null,
+        startedAt: new Date(), finishedAt: new Date(), decidedAt: null, track: { title: "T" },
+    });
+
+    it("shows a known stage under its failure type", () => {
+        expect(mapStageFailure(row("analysis"))).toMatchObject({ entityType: "audio", entityId: "t1" });
+    });
+
+    it("skips a row with an unknown stage and logs it, rather than calling it a recording failure", () => {
+        for (const stage of ["mood", "constructor", "__proto__"]) {
+            (logger.warn as jest.Mock).mockClear();
+            expect(mapStageFailure(row(stage))).toBeNull();
+            expect(logger.warn).toHaveBeenCalledTimes(1);
+            expect((logger.warn as jest.Mock).mock.calls[0][0]).toContain(stage);
+        }
     });
 });

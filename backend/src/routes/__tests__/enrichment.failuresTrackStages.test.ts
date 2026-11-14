@@ -162,6 +162,24 @@ describe("GET /enrichment/failures reads track stages from TrackStage", () => {
         });
     });
 
+    it("answers 400 for a type that is neither a song type nor a ledger type", async () => {
+        for (const entityType of ["nonsense", "constructor", "__proto__", "Track"]) {
+            const res = await request(app).get("/api/enrichment/failures").query({ entityType });
+            expect(res.status).toBe(400);
+            expect(res.body.error).toEqual(expect.any(String));
+        }
+        // A repeated parameter arrives as an array, which names no type either.
+        const repeated = await request(app).get("/api/enrichment/failures?entityType=track&entityType=audio");
+        expect(repeated.status).toBe(400);
+    });
+
+    it("accepts every song type and ledger type", async () => {
+        for (const entityType of ["track", "audio", "vibe", "scan", "artist", "podcast"]) {
+            const res = await request(app).get("/api/enrichment/failures").query({ entityType });
+            expect(res.status).toBe(200);
+        }
+    });
+
     it("GET /enrichment/failures/counts counts the track bucket from TrackStage", async () => {
         await seedFailedRecording(id("t2"));
 
