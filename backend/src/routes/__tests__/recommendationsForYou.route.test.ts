@@ -1,7 +1,7 @@
 /**
  * GET /recommendations/for-you seeds from the artists of the listener's 50 most recent plays of playable songs: a
  * Discover or missing song's plays seed nothing, another listener's plays seed nothing, and the three most played
- * artists give their similar artists. Real test database.
+ * artists give their similar artists. `limit` is a number from 1 to 50, 10 when absent or not a number. Real test database.
  */
 jest.mock("../../utils/redis", () => ({ redisClient: { mget: jest.fn(async () => []), get: jest.fn(async () => null) } }));
 jest.mock("../../middleware/auth", () => ({
@@ -19,7 +19,7 @@ jest.setTimeout(60_000);
 const P = "rfy_";
 const ME = `${P}me`;
 const OTHER = `${P}other`;
-const MANY = `${P}many`;
+const WIDE = `${P}many`;
 const id = (s: string) => `${P}${s}`;
 const mins = (n: number) => new Date(Date.now() - n * 60_000);
 
@@ -44,7 +44,7 @@ const plays = (user: string, artist: string, count: number) =>
 
 beforeAll(async () => {
     await cleanup();
-    for (const u of [ME, OTHER, MANY]) await prisma.user.create({ data: { id: u, username: u, passwordHash: "x" } });
+    for (const u of [ME, OTHER, WIDE]) await prisma.user.create({ data: { id: u, username: u, passwordHash: "x" } });
     for (const [a, location, missing] of ARTISTS) {
         await prisma.artist.create({ data: { id: id(`art_${a}`), name: `Seed ${a}`, normalizedName: `seed ${a}`, identityKey: id(`ak_${a}`) } });
         await prisma.album.create({
@@ -60,21 +60,23 @@ beforeAll(async () => {
         await prisma.artist.create({ data: { id: id(`sim_${a}`), name: `Similar to ${a}`, normalizedName: `similar to ${a}`, identityKey: id(`sk_${a}`) } });
         await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${a}`), toArtistId: id(`sim_${a}`), weight: 1 } });
     }
-    // One listener whose seed artist has ten similar artists, so the page size shows: three seeds, ten each, at most 30.
-    await prisma.artist.create({ data: { id: id("art_z"), name: "Seed z", normalizedName: "seed z", identityKey: id("ak_z") } });
-    await prisma.album.create({
-        data: { id: id("alb_z"), rgMbid: id("rg_z"), artistId: id("art_z"), identityKey: id("ik_z"), title: "Seed z", primaryType: "Album", location: "LIBRARY" },
-    });
-    await prisma.track.create({
-        data: { id: id("t_z"), albumId: id("alb_z"), title: "z", trackNo: 1, duration: 200, filePath: `/tmp/${P}z.flac`, fileModified: new Date(), fileSize: 1000 },
-    });
-    for (let k = 0; k < 10; k++) {
-        await prisma.artist.create({ data: { id: id(`zs_${k}`), name: `Z similar ${k}`, normalizedName: `z similar ${k}`, identityKey: id(`zk_${k}`) } });
-        await prisma.similarArtist.create({ data: { fromArtistId: id("art_z"), toArtistId: id(`zs_${k}`), weight: 1 } });
+    // A listener with two seed artists of ten similar artists each (20 in all), so a page size of 10 shows.
+    for (const seed of ["z1", "z2"]) {
+        await prisma.artist.create({ data: { id: id(`art_${seed}`), name: `Seed ${seed}`, normalizedName: `seed ${seed}`, identityKey: id(`ak_${seed}`) } });
+        await prisma.album.create({
+            data: { id: id(`alb_${seed}`), rgMbid: id(`rg_${seed}`), artistId: id(`art_${seed}`), identityKey: id(`ik_${seed}`), title: `Seed ${seed}`, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: id(`t_${seed}`), albumId: id(`alb_${seed}`), title: seed, trackNo: 1, duration: 200, filePath: `/tmp/${P}${seed}.flac`, fileModified: new Date(), fileSize: 1000 },
+        });
+        for (let k = 0; k < 10; k++) {
+            await prisma.artist.create({ data: { id: id(`${seed}_sim_${k}`), name: `${seed} similar ${k}`, normalizedName: `${seed} similar ${k}`, identityKey: id(`${seed}_sk_${k}`) } });
+            await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${seed}`), toArtistId: id(`${seed}_sim_${k}`), weight: 1 } });
+        }
     }
     await prisma.play.createMany({
         data: [
-            ...plays(MANY, "z", 3),
+            ...plays(WIDE, "z1", 3), ...plays(WIDE, "z2", 2),
             ...plays(ME, "x", 5), ...plays(ME, "y", 2),
             // Heard most, but not of a playable song.
             ...plays(ME, "d", 9), ...plays(ME, "w", 9),
@@ -108,13 +110,13 @@ it("is the listener's own: another listener's plays seed their recommendations, 
 
 describe("the limit query value", () => {
     const count = async (query: string) => {
-        const res = await request(appFor(MANY)).get(`/recommendations/for-you${query}`);
+        const res = await request(appFor(WIDE)).get(`/recommendations/for-you${query}`);
         expect(res.status).toBe(200);
         return seeded(res.body).length;
     };
 
     it("is the default of 10 when absent or not a number", async () => {
-        // The artist has exactly ten similar artists, so a default above 10 would not show: 3 and abc tell them apart.
+        // There are 20 artists to give, so a default other than 10 (or NaN, which gave none) shows.
         expect(await count("")).toBe(10);
         expect(await count("?limit=abc")).toBe(10);
         expect(await count("?limit=")).toBe(10);
@@ -123,12 +125,13 @@ describe("the limit query value", () => {
     it("gives what was asked for within 1 to 50", async () => {
         expect(await count("?limit=3")).toBe(3);
         expect(await count("?limit=1")).toBe(1);
-        // Three seeds give at most 30 artists, so the cap of 50 shows only as "no error and everything there is".
-        expect(await count("?limit=9999")).toBe(10);
+        // The cap of 50 itself is parseLimit's, tested in library/__tests__/paging.test.ts: three seeds give at most 30 here.
+        expect(await count("?limit=9999")).toBe(20);
     });
 
     it("is at least 1 for zero or a negative number", async () => {
-        expect(await count("?limit=0")).toBeGreaterThanOrEqual(1);
-        expect(await count("?limit=-5")).toBeGreaterThanOrEqual(1);
+        // Zero is read as "no value": the default. A negative number is raised to 1.
+        expect(await count("?limit=0")).toBe(10);
+        expect(await count("?limit=-5")).toBe(1);
     });
 });
