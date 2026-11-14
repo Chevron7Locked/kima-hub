@@ -18,6 +18,14 @@ import { invalidateUserCache } from "../../middleware/auth";
 
 /** A password is at least this many characters. The only place the rule lives. */
 const MIN_PASSWORD_LENGTH = 6;
+/**
+ * A password is at most this many UTF-8 bytes: bcrypt reads only the first 72, so anything past that would be
+ * silently ignored. Bytes, not characters: an accented letter is two, an emoji four.
+ */
+const MAX_PASSWORD_BYTES = 72;
+/** A username is this many characters (counting a whole emoji as one), at the least and at the most. */
+const MIN_USERNAME_LENGTH = 3;
+const MAX_USERNAME_LENGTH = 50;
 const HASH_COST = 10;
 
 /**
@@ -39,11 +47,46 @@ export interface Account {
 }
 
 type PasswordTooShort = { ok: false; reason: "password-too-short"; minimum: number };
+type PasswordTooLong = { ok: false; reason: "password-too-long"; maximum: number };
+type UsernameInvalid = { ok: false; reason: "username-invalid"; minimum: number; maximum: number };
+/** A password the rule refuses. */
+export type PasswordRefusal = PasswordTooShort | PasswordTooLong;
+/** An input the rules refuse: a caller shows `refusalMessage` of it. */
+export type Refusal = PasswordRefusal | UsernameInvalid;
 type UsernameTaken = { ok: false; reason: "username-taken" };
 type Created = { ok: true; user: Account };
 
-const isTooShort = (password: unknown) => typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH;
-const passwordTooShort = (): PasswordTooShort => ({ ok: false, reason: "password-too-short", minimum: MIN_PASSWORD_LENGTH });
+/** The password rule: null when the password is fine, else the refusal. */
+function passwordRefusal(password: unknown): PasswordRefusal | null {
+    if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+        return { ok: false, reason: "password-too-short", minimum: MIN_PASSWORD_LENGTH };
+    }
+    if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+        return { ok: false, reason: "password-too-long", maximum: MAX_PASSWORD_BYTES };
+    }
+    return null;
+}
+
+/** The username rule: null when the name is fine, else the refusal. */
+function usernameRefusal(username: unknown): UsernameInvalid | null {
+    const length = typeof username === "string" ? Array.from(username).length : 0;
+    if (length < MIN_USERNAME_LENGTH || length > MAX_USERNAME_LENGTH) {
+        return { ok: false, reason: "username-invalid", minimum: MIN_USERNAME_LENGTH, maximum: MAX_USERNAME_LENGTH };
+    }
+    return null;
+}
+
+/** What to tell a person whose input was refused; `subject` names the password ("New password") where it differs. */
+export function refusalMessage(refusal: Refusal, subject = "Password"): string {
+    switch (refusal.reason) {
+        case "password-too-short":
+            return `${subject} must be at least ${refusal.minimum} characters`;
+        case "password-too-long":
+            return `${subject} must be at most ${refusal.maximum} characters (accented letters, other alphabets and emoji count as more than one)`;
+        case "username-invalid":
+            return `Username must be ${refusal.minimum} to ${refusal.maximum} characters`;
+    }
+}
 const hashPassword = (password: string) => bcrypt.hash(password, HASH_COST);
 
 const ACCOUNT_FIELDS = { id: true, username: true, role: true, onboardingComplete: true, tokenVersion: true, createdAt: true } as const;
@@ -66,8 +109,9 @@ export async function createAccount(input: {
     password: string;
     role: AccountRole;
     onboardingComplete: boolean;
-}): Promise<Created | UsernameTaken | PasswordTooShort> {
-    if (isTooShort(input.password)) return passwordTooShort();
+}): Promise<Created | UsernameTaken | Refusal> {
+    const refused = usernameRefusal(input.username) ?? passwordRefusal(input.password);
+    if (refused) return refused;
     const passwordHash = await hashPassword(input.password);
     try {
         const user = await prisma.$transaction((tx) =>
@@ -94,8 +138,9 @@ export async function signUp(input: {
     username: string;
     password: string;
     registrationOpen: boolean;
-}): Promise<Created | UsernameTaken | PasswordTooShort | { ok: false; reason: "registration-closed" }> {
-    if (isTooShort(input.password)) return passwordTooShort();
+}): Promise<Created | UsernameTaken | Refusal | { ok: false; reason: "registration-closed" }> {
+    const refused = usernameRefusal(input.username) ?? passwordRefusal(input.password);
+    if (refused) return refused;
     // Refuse a closed sign-up before the costly hash, so a stranger cannot make the server hash for nothing. The check
     // inside the transaction below is the one that counts.
     if (!input.registrationOpen && (await prisma.user.count()) > 0) return { ok: false, reason: "registration-closed" };
@@ -146,10 +191,11 @@ async function setPassword(userId: string, password: string, ifHashIs?: string) 
  */
 export async function changePassword(input: { userId: string; currentPassword: string; newPassword: string }): Promise<
     | { ok: true; user: { id: string; username: string; role: string; tokenVersion: number } }
-    | PasswordTooShort
+    | PasswordRefusal
     | { ok: false; reason: "not-found" | "wrong-password" }
 > {
-    if (isTooShort(input.newPassword)) return passwordTooShort();
+    const refused = passwordRefusal(input.newPassword);
+    if (refused) return refused;
     const stored = await prisma.user.findUnique({ where: { id: input.userId }, select: { passwordHash: true } });
     if (!stored) return { ok: false, reason: "not-found" };
     if (!(await bcrypt.compare(input.currentPassword, stored.passwordHash))) return { ok: false, reason: "wrong-password" };
@@ -191,14 +237,13 @@ export async function deleteAccount(userId: string): Promise<void> {
 
 /**
  * The startup reset (`ADMIN_RESET_PASSWORD`): sets one admin's password and signs it out everywhere. A password
- * under the rule is refused with a log line and the admin keeps the one it has.
+ * outside the rule is refused with a log line and the admin keeps the one it has.
  */
-export async function resetAdminPassword(password: string): Promise<"reset" | "password-too-short" | "no-admin"> {
-    if (isTooShort(password)) {
-        logger.warn(
-            `[Password Reset] ADMIN_RESET_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters; the admin password was not changed.`,
-        );
-        return "password-too-short";
+export async function resetAdminPassword(password: string): Promise<"reset" | PasswordRefusal["reason"] | "no-admin"> {
+    const refused = passwordRefusal(password);
+    if (refused) {
+        logger.warn(`[Password Reset] ADMIN_RESET_PASSWORD: ${refusalMessage(refused, "the password")}; the admin password was not changed.`);
+        return refused.reason;
     }
     const admin = await prisma.user.findFirst({ where: { role: "admin" }, orderBy: { createdAt: "asc" }, select: { id: true } });
     if (!admin) {

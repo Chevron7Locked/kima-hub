@@ -5,14 +5,14 @@ import { z } from "zod";
 import axios from "axios";
 import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type SystemSettingsField } from "../utils/systemSettings";
 import { generateRefreshToken, generateToken, signedInUser } from "../middleware/auth";
-import { signUp } from "../services/users/accounts";
+import { refusalMessage, signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
 import { runAsRequestWork } from "../utils/stopCheck";
 
 const router = Router();
 
 const registerSchema = z.object({
-    username: z.string().min(3).max(50),
+    username: z.string(),
     password: z.string(),
 });
 
@@ -103,7 +103,7 @@ router.post("/register", async (req, res) => {
                 logger.debug("[ONBOARDING] Username already taken:", username);
                 return res.status(400).json({ error: "Username already taken" });
             }
-            return res.status(400).json({ error: `Password must be at least ${made.minimum} characters` });
+            return res.status(400).json({ error: refusalMessage(made) });
         }
         const user = made.user;
 

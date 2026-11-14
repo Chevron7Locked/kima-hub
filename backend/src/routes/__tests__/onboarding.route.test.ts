@@ -126,6 +126,21 @@ describe("POST /onboarding/register", () => {
         expect(await prisma.user.count({ where: { username: `${P}-short` } })).toBe(0);
     });
 
+    it("answers a 73-byte password and 2- and 51-character usernames with 400, creating nothing", async () => {
+        await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
+        const before = await prisma.user.count();
+
+        const long = await request(app).post("/onboarding/register").send({ username: `${P}-long`, password: "a".repeat(73) }).expect(400);
+        expect(long.body.error).toMatch(/^Password must be at most 72 characters/);
+        const multibyte = await request(app).post("/onboarding/register").send({ username: `${P}-mb`, password: "é".repeat(37) }).expect(400);
+        expect(multibyte.body.error).toMatch(/at most 72 characters/);
+        const tiny = await request(app).post("/onboarding/register").send({ username: "ab", password: "secret1" }).expect(400);
+        expect(tiny.body.error).toBe("Username must be 3 to 50 characters");
+        await request(app).post("/onboarding/register").send({ username: "a".repeat(51), password: "secret1" }).expect(400);
+
+        expect(await prisma.user.count()).toBe(before);
+    });
+
     it("answers two sign-ups for one name with one account and 'taken' for the other", async () => {
         await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", registrationOpen: true }, update: { registrationOpen: true } });
 

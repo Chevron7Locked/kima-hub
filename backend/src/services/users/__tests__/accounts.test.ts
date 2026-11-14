@@ -13,7 +13,15 @@ import { logger } from "../../../utils/logger";
 import * as settingsDefaults from "../../../utils/userSettingsDefaults";
 import { clearUserCache, generateToken, signedInUser } from "../../../middleware/auth";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
-import { changePassword, createAccount, deleteAccount, LastAdminError, resetAdminPassword, signUp } from "../accounts";
+import {
+    changePassword,
+    createAccount,
+    deleteAccount,
+    LastAdminError,
+    refusalMessage,
+    resetAdminPassword,
+    signUp,
+} from "../accounts";
 import { isTransactionConflict } from "../../../utils/dbConflict";
 
 jest.setTimeout(60_000);
@@ -104,6 +112,94 @@ describe("createAccount", () => {
         expect(await prisma.user.count({ where: { username: "halfway" } })).toBe(0);
         // A retry works: the name is not stuck as taken.
         expect((await plain("halfway")).ok).toBe(true);
+    });
+});
+
+// bcrypt reads only the first 72 bytes, so a longer password would be silently cut. The limit is in bytes, and
+// the answers say it in characters.
+const TOO_LONG = { ok: false, reason: "password-too-long", maximum: 72 };
+const bytes72 = "a".repeat(72);
+const bytes73 = "a".repeat(73);
+const accents36 = "é".repeat(36); // 72 bytes
+const accents37 = "é".repeat(37); // 74 bytes, but only 37 characters
+
+describe("the password's longest length", () => {
+    it("takes 72 bytes and refuses 73, creating nothing", async () => {
+        expect((await plain("alice", bytes72)).ok).toBe(true);
+        expect(await plain("bob", bytes73)).toEqual(TOO_LONG);
+        expect(await prisma.user.count({ where: { username: "bob" } })).toBe(0);
+    });
+
+    it("counts bytes, not characters: 36 accented letters pass, 37 do not", async () => {
+        expect((await plain("alice", accents36)).ok).toBe(true);
+        expect(await plain("bob", accents37)).toEqual(TOO_LONG);
+    });
+
+    it("counts an emoji as its four bytes", async () => {
+        expect((await plain("alice", "😀".repeat(18))).ok).toBe(true);
+        expect(await plain("bob", "😀".repeat(19))).toEqual(TOO_LONG);
+    });
+
+    it("refuses it on sign-up before anything else, creating nothing", async () => {
+        expect(await signUp({ username: "first", password: bytes73, registrationOpen: false })).toEqual(TOO_LONG);
+        expect(await prisma.user.count()).toBe(0);
+    });
+
+    it("refuses it on a password change and keeps the old password", async () => {
+        const user = await seedUser("alice");
+        expect(await changePassword({ userId: user.id, currentPassword: "original-pass", newPassword: bytes73 })).toEqual(TOO_LONG);
+        expect(await matches(user.id, "original-pass")).toBe(true);
+        expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).tokenVersion).toBe(0);
+    });
+
+    it("refuses it in the startup reset, with a log line, and keeps the admin's password", async () => {
+        const admin = await seedUser("root", { role: "admin" });
+        expect(await resetAdminPassword(bytes73)).toBe("password-too-long");
+        expect(await matches(admin.id, "original-pass")).toBe(true);
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/ADMIN_RESET_PASSWORD.*at most 72/));
+    });
+
+    it("keeps every character of a 72-byte password: the stored hash matches it whole", async () => {
+        const made = await plain("alice", accents36);
+        expect(made.ok && (await matches(made.user.id, accents36))).toBe(true);
+        expect(made.ok && (await matches(made.user.id, accents36.slice(0, -1)))).toBe(false);
+    });
+
+    it("says the limit in characters a person can follow", () => {
+        expect(refusalMessage(TOO_LONG as never)).toBe(
+            "Password must be at most 72 characters (accented letters, other alphabets and emoji count as more than one)",
+        );
+        expect(refusalMessage({ ok: false, reason: "password-too-short", minimum: 6 }, "New password")).toBe(
+            "New password must be at least 6 characters",
+        );
+    });
+});
+
+describe("the username rule", () => {
+    const BAD = { ok: false, reason: "username-invalid", minimum: 3, maximum: 50 };
+
+    it.each([["abc"], ["a".repeat(50)], ["ü".repeat(50)]])("takes %j on create", async (name) => {
+        expect((await plain(name)).ok).toBe(true);
+    });
+
+    it.each([[""], ["ab"], ["a".repeat(51)], ["😀".repeat(51)]])("refuses %j on create, creating nothing", async (name) => {
+        expect(await plain(name)).toEqual(BAD);
+        expect(await prisma.user.count()).toBe(0);
+    });
+
+    it("applies the same rule on sign-up, before the closed check", async () => {
+        expect((await signUp({ username: "abc", password: "secret1", registrationOpen: true })).ok).toBe(true);
+        expect(await signUp({ username: "ab", password: "secret1", registrationOpen: false })).toEqual(BAD);
+        expect(await signUp({ username: "a".repeat(51), password: "secret1", registrationOpen: true })).toEqual(BAD);
+        expect(await prisma.user.count()).toBe(1);
+    });
+
+    it("refuses a username that is not text", async () => {
+        expect(await createAccount({ username: 5 as never, password: "secret1", role: "user", onboardingComplete: true })).toEqual(BAD);
+    });
+
+    it("says the rule in plain words", () => {
+        expect(refusalMessage(BAD as never)).toBe("Username must be 3 to 50 characters");
     });
 });
 

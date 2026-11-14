@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
-import { changePassword, createAccount, deleteAccount, LastAdminError } from "../services/users/accounts";
+import { changePassword, createAccount, deleteAccount, LastAdminError, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
     generateRefreshToken,
@@ -216,10 +216,8 @@ router.post("/change-password", authLimiter, async (req, res) => {
 
         const changed = await changePassword({ userId: req.user!.id, currentPassword, newPassword });
         if (!changed.ok) {
-            if (changed.reason === "password-too-short") {
-                return res
-                    .status(400)
-                    .json({ error: `New password must be at least ${changed.minimum} characters` });
+            if (changed.reason === "password-too-short" || changed.reason === "password-too-long") {
+                return res.status(400).json({ error: refusalMessage(changed, "New password") });
             }
             if (changed.reason === "not-found") {
                 return res.status(404).json({ error: "User not found" });
@@ -289,9 +287,7 @@ router.post("/create-user", async (req, res) => {
             if (made.reason === "username-taken") {
                 return res.status(400).json({ error: "Username already taken" });
             }
-            return res
-                .status(400)
-                .json({ error: `Password must be at least ${made.minimum} characters` });
+            return res.status(400).json({ error: refusalMessage(made) });
         }
         const user = made.user;
 

@@ -209,6 +209,33 @@ describe('Admin-only routes', () => {
         expect(await prisma.user.findUnique({ where: { username: NEW_USER } })).toBeNull();
     });
 
+    it.each([
+        ['a 73-byte password', { username: NEW_USER, password: 'a'.repeat(73) }, /^Password must be at most 72 characters/],
+        ['a 37-letter accented password (74 bytes)', { username: NEW_USER, password: 'é'.repeat(37) }, /at most 72 characters/],
+        ['a 2-character username', { username: 'ab', password: 'password123' }, /^Username must be 3 to 50 characters$/],
+        ['a 51-character username', { username: 'a'.repeat(51), password: 'password123' }, /^Username must be 3 to 50 characters$/],
+    ])('POST /auth/create-user answers 400 for %s and creates nothing', async (_label, body, message) => {
+        const before = await prisma.user.count();
+        const res = await request(app)
+            .post('/auth/create-user')
+            .set('Authorization', `Bearer ${tokenFor(ADMIN, 'admin')}`)
+            .send(body);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(message);
+        expect(await prisma.user.count()).toBe(before);
+    });
+
+    it('POST /auth/create-user takes a 72-byte password and a 3-character username', async () => {
+        const res = await request(app)
+            .post('/auth/create-user')
+            .set('Authorization', `Bearer ${tokenFor(ADMIN, 'admin')}`)
+            .send({ username: NEW_USER, password: 'a'.repeat(72) });
+
+        expect(res.status).toBe(200);
+        await prisma.user.deleteMany({ where: { username: NEW_USER } });
+    });
+
     it('a token that claims admin does not make a non-admin one', async () => {
         const res = await request(app)
             .get('/auth/users')
@@ -263,6 +290,20 @@ describe('POST /auth/change-password', () => {
         expect(withNew.status).toBe(200);
         const withOld = await request(app).get('/auth/me').set('Authorization', `Bearer ${oldToken}`);
         expect(withOld.status).toBe(401);
+    });
+});
+
+describe('POST /auth/change-password, the longest password', () => {
+    it('answers 400 for a 73-byte new password and keeps the old one', async () => {
+        const res = await request(app)
+            .post('/auth/change-password')
+            .set('Authorization', `Bearer ${tokenFor(USER)}`)
+            .send({ currentPassword: PASSWORD, newPassword: 'a'.repeat(73) });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/^New password must be at most 72 characters/);
+        const row = await prisma.user.findUniqueOrThrow({ where: { id: USER } });
+        expect(await bcrypt.compare(PASSWORD, row.passwordHash)).toBe(true);
     });
 });
 
