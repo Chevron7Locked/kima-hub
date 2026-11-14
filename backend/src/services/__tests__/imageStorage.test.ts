@@ -220,9 +220,7 @@ describe("coverFileForWidth leaves no partial files", () => {
 
     it("removes the partial file when putting the copy in place fails", async () => {
         const dir = `/tmp/kima-test-cache-${process.pid}/covers/albums`;
-        const rename = jest.spyOn(fs, "renameSync").mockImplementationOnce(() => {
-            throw new Error("disk full");
-        });
+        const rename = jest.spyOn(fs.promises, "rename").mockRejectedValueOnce(new Error("disk full"));
         await expect(coverFileForWidth(path.join(dir, "wide.jpg"), "albums/wide.jpg", 200)).rejects.toThrow("disk full");
         rename.mockRestore();
         expect(fs.readdirSync(dir).filter((f) => f.endsWith(".part"))).toEqual([]);

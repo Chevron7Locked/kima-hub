@@ -1,6 +1,7 @@
 /**
- * The catch-up work after start-up: the cache warmup, the audiobook sync, the one-time Discover sort, the artist counts
- * and the image backfill. Each is a start step that logs its own failure, so one that fails does not stop the next.
+ * The catch-up work after start-up: the cache warmup, the audiobook sync, the one-time Discover sort, the artist counts,
+ * the image backfill and the one-time cover format repair. Each is a start step that logs its own failure, so one that
+ * fails does not stop the next.
  * The long ones are handed `shutdownHasBegun` and stop quietly between batches once the server is shutting down.
  *
  * `whenEnded()` is what the shutdown's drain waits on before the close steps run: it resolves once the task under way
@@ -15,7 +16,7 @@ import { whenRequestWorkEnded } from "./utils/stopCheck";
 import type { StartStep } from "./startup";
 
 export interface BackgroundStart {
-    /** The four catch-up steps, in order, for `runStartSteps`. */
+    /** The five catch-up steps, in order, for `runStartSteps`. */
     steps: StartStep[];
     /** Starts the Redis cache warmup without waiting for it, so the next start step goes on. */
     startCacheWarmup(): void;
@@ -110,11 +111,29 @@ export function createBackgroundStart(shutdownHasBegun: () => boolean): Backgrou
         }
     }
 
+    async function repairCoverFormats() {
+        // Once: covers saved in an older version may hold PNG or WebP bytes under a .jpg name; converted in place,
+        // file by file, stopping between files at shutdown.
+        try {
+            const { repairCoverFormatsOnce } = await import("./services/coverFormatRepair");
+            const result = await repairCoverFormatsOnce({ shouldStop: shutdownHasBegun });
+            if (result && (result.converted > 0 || result.notPictures > 0 || result.failed > 0)) {
+                logger.info(
+                    `[STARTUP] Cover format repair: ${result.converted} converted, ${result.notPictures} not pictures, ` +
+                        `${result.failed} failed${result.stopped ? " (stopped at shutdown)" : ""}`,
+                );
+            }
+        } catch (err) {
+            logger.error("[STARTUP] Cover format repair failed:", err);
+        }
+    }
+
     const steps: StartStep[] = [
         { name: "audiobook auto-sync", run: () => track(syncAudiobooksIfEmpty()) },
         { name: "sorting albums filed as Discover", run: () => track(sortAlbumsFiledAsDiscover()) },
         { name: "artist counts backfill", run: () => track(backfillArtistCounts()) },
         { name: "image backfill", run: () => track(backfillImages()) },
+        { name: "cover format repair", run: () => track(repairCoverFormats()) },
     ];
 
     async function whenEnded() {

@@ -5,8 +5,8 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
-import { config } from "../config";
 import type { StopCheck } from "../utils/stopCheck";
+import { audiobookCoversPath, storeAsJpeg } from "./imageStorage";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -31,11 +31,7 @@ class AudiobookCacheService {
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/audiobooks/
-        this.coverCacheDir = path.join(
-            config.music.musicPath,
-            "cover-cache",
-            "audiobooks"
-        );
+        this.coverCacheDir = audiobookCoversPath();
     }
 
     /**
@@ -456,7 +452,10 @@ class AudiobookCacheService {
             const fileName = `${audiobookId}.jpg`;
             const filePath = path.join(this.coverCacheDir, fileName);
 
-            await fs.writeFile(filePath, Buffer.from(buffer));
+            if (!(await storeAsJpeg(filePath, Buffer.from(buffer)))) {
+                logger.warn(`Cover for ${audiobookId} is not a readable picture; not cached`);
+                return null;
+            }
 
             return filePath;
         } catch (error: any) {

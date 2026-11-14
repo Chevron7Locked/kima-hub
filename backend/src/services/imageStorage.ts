@@ -15,6 +15,11 @@ export function coversBasePath(): string {
     return path.join(config.music.transcodeCachePath, "../covers");
 }
 
+/** The folder audiobook covers are cached in, under the music folder. */
+export function audiobookCoversPath(): string {
+    return path.join(config.music.musicPath, "cover-cache", "audiobooks");
+}
+
 /**
  * Ensure the covers directory exists
  */
@@ -53,11 +58,46 @@ async function asJpeg(bytes: Buffer): Promise<Buffer | null> {
     }
 }
 
+/** A write that crashed leaves its temporary file; one this old cannot belong to a write still going. */
+const ORPHAN_PART_AGE_MS = 10 * 60 * 1000;
+
+/** Each folder is swept once per start, the first time it is written to; the promise is what a second write waits on. */
+const sweptFolders = new Map<string, Promise<void>>();
+
+/** Removes the `.part` files a crash left in `dir`. A failure only means they stay for the next start. */
+function sweepOrphanParts(dir: string): Promise<void> {
+    let swept = sweptFolders.get(dir);
+    if (!swept) {
+        swept = (async () => {
+            try {
+                const cutoff = Date.now() - ORPHAN_PART_AGE_MS;
+                for (const name of await fs.promises.readdir(dir)) {
+                    if (!name.endsWith(".part")) continue;
+                    const file = path.join(dir, name);
+                    try {
+                        if ((await fs.promises.stat(file)).mtimeMs < cutoff) {
+                            await fs.promises.rm(file, { force: true });
+                            logger.debug(`[ImageStorage] Removed an orphan partial file: ${file}`);
+                        }
+                    } catch {
+                        // Gone already, or not ours to remove: leave it.
+                    }
+                }
+            } catch (err) {
+                logger.debug(`[ImageStorage] Could not sweep ${dir}: ${(err as Error).message}`);
+            }
+        })();
+        sweptFolders.set(dir, swept);
+    }
+    return swept;
+}
+
 /**
  * Written under a temporary name and renamed into place, so a crash or a failed write never leaves half a file under
- * the final name, and a reader never finds one.
+ * the final name, and a reader never finds one. The folder's orphan temporary files are swept before its first write.
  */
 async function writeAtomically(filePath: string, bytes: Buffer): Promise<void> {
+    await sweepOrphanParts(path.dirname(filePath));
     const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
     try {
         await fs.promises.writeFile(partial, bytes);
@@ -66,6 +106,17 @@ async function writeAtomically(filePath: string, bytes: Buffer): Promise<void> {
         await fs.promises.rm(partial, { force: true });
         throw err;
     }
+}
+
+/**
+ * The one way a stored picture is written: `bytes` as a JPEG (converted unless already one), atomically. Answers false
+ * and writes nothing when the bytes are no picture; throws when the write fails, leaving no partial file.
+ */
+export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<boolean> {
+    const picture = await asJpeg(bytes);
+    if (!picture) return false;
+    await writeAtomically(filePath, picture);
+    return true;
 }
 
 /**
@@ -114,13 +165,10 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        const picture = await asJpeg(Buffer.from(buffer));
-        if (!picture) {
+        if (!(await storeAsJpeg(filePath, Buffer.from(buffer)))) {
             logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
             return null;
         }
-
-        await writeAtomically(filePath, picture);
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
         return `native:${subdir}/${filename}`;
@@ -265,15 +313,8 @@ export async function coverFileForWidth(coverPath: string, relativePath: string,
     const original = fs.readFileSync(coverPath);
     const resized = await resizeImageBuffer(original, width);
     if (resized === original) return coverPath;
-    // Written under a temporary name and renamed into place, so a request arriving mid-write (or after a crash)
-    // never finds, and caches for a year, a half-written copy.
-    const partial = `${resizedPath}.${process.pid}.${Date.now()}.part`;
-    try {
-        fs.writeFileSync(partial, resized);
-        fs.renameSync(partial, resizedPath);
-    } catch (err) {
-        fs.rmSync(partial, { force: true });
-        throw err;
-    }
+    // Written atomically, so a request arriving mid-write (or after a crash) never finds, and caches for a year, a
+    // half-written copy.
+    await writeAtomically(resizedPath, resized);
     return resizedPath;
 }

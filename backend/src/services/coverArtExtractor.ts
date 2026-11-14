@@ -2,6 +2,7 @@ import * as fs from "fs";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import { parseFile } from "music-metadata";
+import { storeAsJpeg } from "./imageStorage";
 
 export class CoverArtExtractor {
     private coverCachePath: string;
@@ -41,8 +42,11 @@ export class CoverArtExtractor {
                 return null;
             }
 
-            // Save to cache
-            await fs.promises.writeFile(cachePath, picture.data);
+            // Save to cache, as a JPEG whatever format the file embeds
+            if (!(await storeAsJpeg(cachePath, Buffer.from(picture.data)))) {
+                logger.debug(`[COVER-ART] Embedded picture in ${path.basename(audioFilePath)} is not readable`);
+                return null;
+            }
 
             logger.debug(
                 `[COVER-ART] Extracted cover art from ${path.basename(audioFilePath)}: ${cacheFileName}`

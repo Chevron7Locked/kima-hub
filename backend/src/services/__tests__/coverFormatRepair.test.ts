@@ -1,0 +1,215 @@
+/**
+ * The one-time pass over stored covers saved before every stored picture became a JPEG: a `.jpg` holding PNG or WebP bytes
+ * is converted in place, atomically; a file that is no picture is left alone and logged. Real files in a temp folder, and
+ * the done marker in the real test database.
+ */
+
+import { randomBytes } from "crypto";
+import fs from "fs";
+import path from "path";
+
+const ROOT = `/tmp/kima-test-coverrepair-${process.pid}`;
+
+jest.mock("../../config", () => {
+    const actual = jest.requireActual("../../config");
+    return {
+        ...actual,
+        config: {
+            ...actual.config,
+            music: {
+                ...actual.config.music,
+                transcodeCachePath: `/tmp/kima-test-coverrepair-${process.pid}/transcode`,
+                musicPath: `/tmp/kima-test-coverrepair-${process.pid}/music`,
+            },
+        },
+    };
+});
+jest.mock("../../utils/logger", () => ({
+    logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() },
+}));
+
+import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
+import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { repairCoverFormatsOnce } from "../coverFormatRepair";
+import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+
+jest.setTimeout(30_000);
+
+const covers = path.join(ROOT, "covers");
+const audiobooks = path.join(ROOT, "music", "cover-cache", "audiobooks");
+
+async function picture(format: "jpeg" | "png" | "webp"): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    return sharp(randomBytes(100 * 100 * 3), { raw: { width: 100, height: 100, channels: 3 } })[format]().toBuffer();
+}
+async function formatOf(file: string): Promise<string | undefined> {
+    const sharp = (await import("sharp")).default;
+    return (await sharp(file).metadata()).format;
+}
+function put(file: string, bytes: Buffer) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, bytes);
+}
+
+let hadSettings = false;
+let before: Date | null = null;
+beforeAll(async () => {
+    const row = await prisma.systemSettings.findUnique({ where: { id: "default" } });
+    hadSettings = row !== null;
+    before = row?.coverFormatsRepairedAt ?? null;
+});
+afterAll(async () => {
+    if (hadSettings) {
+        await prisma.systemSettings.upsert({
+            where: { id: "default" },
+            create: { id: "default", coverFormatsRepairedAt: before },
+            update: { coverFormatsRepairedAt: before },
+        });
+    } else {
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+    }
+    invalidateSystemSettingsCache();
+    fs.rmSync(ROOT, { recursive: true, force: true });
+    await closeEngineConnections();
+});
+
+/** The settings row, with the pass not yet run. */
+async function notYetRun() {
+    await prisma.systemSettings.upsert({
+        where: { id: "default" },
+        create: { id: "default", coverFormatsRepairedAt: null },
+        update: { coverFormatsRepairedAt: null },
+    });
+    invalidateSystemSettingsCache();
+}
+const marker = async () => (await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).coverFormatsRepairedAt;
+
+beforeEach(async () => {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+    jest.clearAllMocks();
+    await notYetRun();
+});
+afterEach(() => jest.restoreAllMocks());
+
+describe("repairCoverFormatsOnce", () => {
+    it("converts PNG and WebP bytes under a .jpg name, in the artists, albums, covers and audiobook folders", async () => {
+        const files = [
+            path.join(covers, "artists", "a1.jpg"),
+            path.join(covers, "albums", "b1.jpg"),
+            path.join(covers, "c1.jpg"),
+            path.join(audiobooks, "d1.jpg"),
+            path.join(covers, "albums", "b1_w300.jpg"),
+        ];
+        put(files[0], await picture("png"));
+        put(files[1], await picture("webp"));
+        put(files[2], await picture("png"));
+        put(files[3], await picture("webp"));
+        put(files[4], await picture("png"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 5, notPictures: 0, stopped: false });
+        for (const file of files) expect(await formatOf(file)).toBe("jpeg");
+    });
+
+    it("leaves a real jpeg byte for byte, and files of other names", async () => {
+        const jpeg = await picture("jpeg");
+        const png = await picture("png");
+        put(path.join(covers, "albums", "ok.jpg"), jpeg);
+        put(path.join(covers, "albums", "own.png"), png);
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 0 });
+        expect(fs.readFileSync(path.join(covers, "albums", "ok.jpg")).equals(jpeg)).toBe(true);
+        expect(fs.readFileSync(path.join(covers, "albums", "own.png")).equals(png)).toBe(true);
+    });
+
+    it("leaves a symbolic link named .jpg alone, and the file it points at", async () => {
+        const png = await picture("png");
+        put(path.join(ROOT, "elsewhere", "target.png"), png);
+        fs.mkdirSync(path.join(covers, "albums"), { recursive: true });
+        fs.symlinkSync(path.join(ROOT, "elsewhere", "target.png"), path.join(covers, "albums", "link.jpg"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 0, failed: 0 });
+        expect(fs.lstatSync(path.join(covers, "albums", "link.jpg")).isSymbolicLink()).toBe(true);
+        expect(fs.readFileSync(path.join(ROOT, "elsewhere", "target.png")).equals(png)).toBe(true);
+    });
+
+    it("leaves a file that is no picture alone, logs it, and still finishes", async () => {
+        const junk = Buffer.alloc(2000, 7);
+        put(path.join(covers, "albums", "junk.jpg"), junk);
+        put(path.join(covers, "albums", "empty.jpg"), Buffer.alloc(0));
+        put(path.join(covers, "albums", "p.jpg"), await picture("png"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 1, notPictures: 2 });
+        expect(fs.readFileSync(path.join(covers, "albums", "junk.jpg")).equals(junk)).toBe(true);
+        const logged = (logger.warn as jest.Mock).mock.calls.map((c) => String(c[0]));
+        expect(logged.some((line) => line.includes("junk.jpg"))).toBe(true);
+        expect(await marker()).not.toBeNull();
+    });
+
+    it("leaves no temporary file behind, and does not touch an orphan .part name", async () => {
+        put(path.join(covers, "albums", "p.jpg"), await picture("png"));
+        put(path.join(covers, "albums", "q.jpg.1.abc.part"), await picture("png"));
+
+        await repairCoverFormatsOnce({});
+
+        expect(fs.readdirSync(path.join(covers, "albums")).sort()).toEqual(["p.jpg", "q.jpg.1.abc.part"]);
+    });
+
+    it("records the marker through the settings save, and then does nothing on the next start", async () => {
+        put(path.join(covers, "albums", "p.jpg"), await picture("png"));
+        expect(await marker()).toBeNull();
+
+        await repairCoverFormatsOnce({});
+        expect(await marker()).not.toBeNull();
+
+        const late = await picture("webp");
+        put(path.join(covers, "albums", "late.jpg"), late);
+        expect(await repairCoverFormatsOnce({})).toBeNull();
+        expect(fs.readFileSync(path.join(covers, "albums", "late.jpg")).equals(late)).toBe(true);
+    });
+
+    it("does nothing on a new install, which has no settings row yet", async () => {
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+        invalidateSystemSettingsCache();
+        const png = await picture("png");
+        put(path.join(covers, "albums", "p.jpg"), png);
+
+        expect(await repairCoverFormatsOnce({})).toBeNull();
+        expect(fs.readFileSync(path.join(covers, "albums", "p.jpg")).equals(png)).toBe(true);
+    });
+
+    it("stops between files once the shutdown has begun, and then does not mark it done", async () => {
+        for (let i = 0; i < 4; i++) put(path.join(covers, "albums", `p${i}.jpg`), await picture("png"));
+        let asked = 0;
+
+        const result = await repairCoverFormatsOnce({ shouldStop: () => ++asked > 2 });
+
+        expect(result).toMatchObject({ stopped: true });
+        expect(result!.converted).toBeLessThan(4);
+        expect(await marker()).toBeNull();
+    });
+
+    it("does not mark it done when a file could not be written, so the next start tries again", async () => {
+        put(path.join(covers, "albums", "p.jpg"), await picture("png"));
+        jest.spyOn(fs.promises, "rename").mockRejectedValueOnce(new Error("read-only"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 0, failed: 1 });
+        expect(await marker()).toBeNull();
+        expect(await formatOf(path.join(covers, "albums", "p.jpg"))).toBe("png");
+    });
+
+    it("copes with folders that do not exist", async () => {
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, stopped: false });
+        expect(await marker()).not.toBeNull();
+    });
+});
