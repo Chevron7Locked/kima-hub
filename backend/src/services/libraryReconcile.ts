@@ -12,9 +12,11 @@ import { logger } from "../utils/logger";
 import { announcePlaylistsChanged, playlistsHoldingTracks, type HeldPlaylist } from "./playlistEvents";
 
 interface ReconcileResult {
+    /**
+     * How many songs were retired. They were flagged missing by an earlier scan, which is when a client stopped
+     * listing them, so retiring them changes nothing a client lists and moves no library-changed marker.
+     */
     removed: number;
-    /** How many of those were songs on a library album: Discover's are not in the library a client lists. */
-    libraryRemoved: number;
     /** Absolute transcode-cache paths to unlink after the transaction commits. */
     artifacts: string[];
     /** Playlists that held a retired song (their entries went with it): told after the transaction commits. */
@@ -45,7 +47,7 @@ export async function reconcileDeletedTracks(
         logger.warn(
             `[RECONCILE] ${missingEver}/${totalTracks} tracks missing at once — mass disappearance looks like a dropped mount, not a deletion; nothing retired`
         );
-        return { removed: 0, libraryRemoved: 0, artifacts: [], playlists: [] };
+        return { removed: 0, artifacts: [], playlists: [] };
     }
 
     // Confirmed gone: flagged by an earlier scan, still absent this one. Files that
@@ -57,10 +59,10 @@ export async function reconcileDeletedTracks(
             id: true,
             filePath: true,
             title: true,
-            album: { select: { title: true, location: true, artist: { select: { name: true } } } },
+            album: { select: { title: true, artist: { select: { name: true } } } },
         },
     });
-    if (missing.length === 0) return { removed: 0, libraryRemoved: 0, artifacts: [], playlists: [] };
+    if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
 
     const ids = missing.map((t) => t.id);
 
@@ -113,7 +115,7 @@ export async function reconcileDeletedTracks(
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
-    return { removed: ids.length, libraryRemoved: missing.filter((t) => t.album.location === "LIBRARY").length, artifacts, playlists };
+    return { removed: ids.length, artifacts, playlists };
 }
 
 /**
@@ -182,7 +184,7 @@ async function unlinkArtifacts(artifacts: string[]): Promise<void> {
  */
 export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult & { skipped: boolean }> {
     if (config.music.reconcileMode !== "delete") {
-        return { removed: 0, libraryRemoved: 0, artifacts: [], playlists: [], skipped: true };
+        return { removed: 0, artifacts: [], playlists: [], skipped: true };
     }
     // Retiring hundreds of tracks cascades through plays, stages and embeddings: Prisma's 5 s default would roll
     // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.

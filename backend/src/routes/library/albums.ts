@@ -7,7 +7,7 @@ import { lidarrService } from "../../services/lidarr";
 import { safeError } from "../../utils/errors";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
-import { markLibraryChangedQuietly } from "../../services/libraryChanged";
+import { albumIsListed, markLibraryChangedQuietly } from "../../services/libraryChanged";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
@@ -230,14 +230,16 @@ router.delete("/albums/:id", async (req, res) => {
       logger.warn("[DELETE] Could not delete album folder:", err);
     }
 
+    // Asked before the delete, for its songs are gone after it.
+    const wasListed = await albumIsListed(album.id);
     // Its songs' playlist entries go with it: tell those playlists once it is gone.
     const playlists = await playlistsHoldingTracks(prisma, { albumId: album.id });
     await prisma.album.delete({
       where: { id: album.id },
     });
     announcePlaylistsChanged(playlists);
-    // A library album gone is a change to what a client lists; a Discover album was never listed.
-    if (album.location === "LIBRARY") await markLibraryChangedQuietly("album deleted");
+    // An album holding a playable song gone is a change to what a client lists; one with only Discover, missing or corrupt songs was never listed.
+    if (wasListed) await markLibraryChangedQuietly("album deleted");
 
     logger.debug(
       `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,

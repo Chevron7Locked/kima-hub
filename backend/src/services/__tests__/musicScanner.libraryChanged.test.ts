@@ -147,7 +147,7 @@ describe("a scan's libraryChanged", () => {
         expect(back.libraryChanged).toBe(true);
     });
 
-    it("is true when a library song is retired, false for a Discover song", async () => {
+    it("is false when songs already flagged missing are retired, because the flag was the change a client listed", async () => {
         jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
         const lib = put(LIB);
         const dis = put(DIS);
@@ -160,10 +160,11 @@ describe("a scan's libraryChanged", () => {
         expect(discoverRetired.libraryChanged).toBe(false);
 
         fs.unlinkSync(lib);
-        await new MusicScannerService().scanLibrary(musicDir);
+        const flagged = await new MusicScannerService().scanLibrary(musicDir);
+        expect(flagged.libraryChanged).toBe(true);
         const libraryRetired = await new MusicScannerService().scanLibrary(musicDir);
         expect(libraryRetired.tracksRemoved).toBe(1);
-        expect(libraryRetired.libraryChanged).toBe(true);
+        expect(libraryRetired.libraryChanged).toBe(false);
     });
 
     it("is true when a library song is flagged corrupt, false for a Discover song", async () => {

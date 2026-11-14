@@ -444,11 +444,11 @@ export class MusicScannerService {
         }
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
-        if (reconcile.libraryRemoved > 0) this.libraryMoved = true;
 
         // Albums with no songs, then artists with no albums, go.
-        const pruned = await pruneEmptyAlbumsAndArtists();
-        if (pruned.libraryAlbums > 0) this.libraryMoved = true;
+        // Neither the retirement nor this pruning moves the library marker: the songs went off the client's list when
+        // an earlier scan flagged them missing, and an album with no songs was never listed.
+        await pruneEmptyAlbumsAndArtists();
 
         result.libraryChanged = this.libraryMoved;
         result.duration = Date.now() - startTime;

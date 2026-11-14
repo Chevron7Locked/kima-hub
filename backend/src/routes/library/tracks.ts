@@ -23,7 +23,7 @@ import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
-import { markLibraryChangedQuietly } from "../../services/libraryChanged";
+import { markLibraryChangedQuietly, songIsListed } from "../../services/libraryChanged";
 import fs from "fs";
 
 const TRACK_SORT_MAP: Record<string, any> = {
@@ -489,7 +489,7 @@ router.delete("/tracks/:id", async (req, res) => {
   try {
     const track = await prisma.track.findUnique({
       where: { id: req.params.id },
-      select: { id: true, title: true, filePath: true, album: { select: { location: true } } },
+      select: { id: true, title: true, filePath: true },
     });
 
     if (!track) {
@@ -517,14 +517,16 @@ router.delete("/tracks/:id", async (req, res) => {
       }
     }
 
+    // Asked before the delete, for the row is gone after it.
+    const wasListed = await songIsListed(track.id);
     // The song's playlist entries go with it: tell those playlists once it is gone.
     const playlists = await playlistsHoldingTracks(prisma, { id: track.id });
     await prisma.track.delete({
       where: { id: track.id },
     });
     announcePlaylistsChanged(playlists);
-    // A library song gone is a change to what a client lists; a Discover song was never listed.
-    if (track.album.location === "LIBRARY") await markLibraryChangedQuietly("song deleted");
+    // A playable song gone is a change to what a client lists; a Discover, missing or corrupt song was never listed.
+    if (wasListed) await markLibraryChangedQuietly("song deleted");
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 

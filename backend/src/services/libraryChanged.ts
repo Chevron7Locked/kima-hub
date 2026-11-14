@@ -3,11 +3,14 @@
  * the one it holds and refetches its artists only when it moved, so it moves only for what a client lists: a scan that
  * added, changed, flagged missing, retired or flagged corrupt a library song (workers/processors/scanProcessor.ts), a
  * person or job that deleted or moved library songs, albums or artists (routes/library, the Discover lifecycle, prune,
- * refile, data integrity), and a person's edit of a name shown (routes/enrichment.ts). Analysis writes, Discover songs
- * and artist syncs do not move it, and it never goes backwards. It is stored in the system settings, so every process reads the same one.
+ * refile, data integrity), and a person's edit of a name shown (routes/enrichment.ts). What a client lists is playable
+ * songs and the albums and artists holding one (utils/playableSong.ts), so a change to anything else leaves it: a
+ * Discover item, a song that is missing or corrupt, an empty album. Analysis writes, Discover songs and artist syncs do
+ * not move it either, and it never goes backwards. It is stored in the system settings, so every process reads the same one.
  */
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { saveSystemSettings } from "../utils/systemSettings";
 
 /** The moment of the last change, in milliseconds since the epoch; 0 before settings exist. */
@@ -33,4 +36,19 @@ export async function markLibraryChanged(at: Date = new Date()): Promise<Date> {
  */
 export async function markLibraryChangedQuietly(what: string): Promise<void> {
     await markLibraryChanged().catch((e) => logger.error(`Failed to record the library change (${what}):`, e));
+}
+
+/** Whether a client lists the song: it is playable. Ask before a delete or an edit, for a row that is gone cannot be asked. */
+export async function songIsListed(songId: string): Promise<boolean> {
+    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { id: songId }] }, select: { id: true } })) !== null;
+}
+
+/** Whether a client lists the album: it holds a playable song. */
+export async function albumIsListed(albumId: string): Promise<boolean> {
+    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { albumId }] }, select: { id: true } })) !== null;
+}
+
+/** Whether a client lists the artist: one of its albums holds a playable song. */
+export async function artistIsListed(artistId: string): Promise<boolean> {
+    return (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, { album: { artistId } }] }, select: { id: true } })) !== null;
 }

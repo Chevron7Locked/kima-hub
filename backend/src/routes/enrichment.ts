@@ -24,7 +24,7 @@ import {
   reassignArtistMbid,
 } from "../services/mbidReassign";
 import { artistSortName } from "../services/artistIdentity";
-import { markLibraryChanged } from "../services/libraryChanged";
+import { albumIsListed, artistIsListed, markLibraryChanged, songIsListed } from "../services/libraryChanged";
 import { parseLimit, parseOffset } from "./library/paging";
 
 const router = Router();
@@ -474,8 +474,9 @@ router.put("/artists/:id/metadata", async (req, res) => {
       await forgetArtistHero(req.params.id);
   
       // A shown name is what a Subsonic client lists, so an edit of it moves the library's change marker; so does a
-      // new MBID, which can rename the artist or merge it into another.
-      if (name !== undefined || trimmedMbid !== "") await markLibraryChanged();
+      // new MBID, which can rename the artist or merge it into another. An artist no client lists (Discover's, or one
+      // whose songs are missing or corrupt) moves nothing.
+      if ((name !== undefined || trimmedMbid !== "") && (await artistIsListed(req.params.id))) await markLibraryChanged();
       res.json(artist);
     } catch (error) {
       if (!respondIfDeleted(res, error, "artist")) {
@@ -559,7 +560,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
         include: ALBUM_EDIT_REPLY,
       });
   
-      if (title !== undefined) await markLibraryChanged();
+      if (title !== undefined && (await albumIsListed(req.params.id))) await markLibraryChanged();
       res.json(album);
     } catch (error) {
       if (!respondIfDeleted(res, error, "album")) {
@@ -607,7 +608,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       include: TRACK_EDIT_REPLY,
     });
 
-    if (title !== undefined) await markLibraryChanged();
+    if (title !== undefined && (await songIsListed(req.params.id))) await markLibraryChanged();
     res.json(track);
   } catch (error) {
     if (!respondIfDeleted(res, error, "track")) {
@@ -625,7 +626,7 @@ router.post("/artists/:id/reset", async (req, res) => {
     // Check if artist exists first
     const existingArtist = await prisma.artist.findUnique({
       where: { id: req.params.id },
-      select: { id: true, name: true },
+      select: { id: true, name: true, displayName: true },
     });
 
     if (!existingArtist) {
@@ -652,7 +653,8 @@ router.post("/artists/:id/reset", async (req, res) => {
     });
     await forgetArtistHero(req.params.id);
 
-    await markLibraryChanged();
+    // Only a shown name that changed back is a change to what a client lists.
+    if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name && (await artistIsListed(req.params.id))) await markLibraryChanged();
     res.json({
       message: "Artist metadata reset to original values",
       artist,
@@ -673,7 +675,7 @@ router.post("/albums/:id/reset", async (req, res) => {
     // Check if album exists first
     const existingAlbum = await prisma.album.findUnique({
       where: { id: req.params.id },
-      select: { id: true, title: true },
+      select: { id: true, title: true, displayTitle: true },
     });
 
     if (!existingAlbum) {
@@ -699,7 +701,8 @@ router.post("/albums/:id/reset", async (req, res) => {
       include: ALBUM_EDIT_REPLY,
     });
 
-    await markLibraryChanged();
+    // Only a shown title that changed back is a change to what a client lists.
+    if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title && (await albumIsListed(req.params.id))) await markLibraryChanged();
     res.json({
       message: "Album metadata reset to original values",
       album,
@@ -720,7 +723,7 @@ router.post("/tracks/:id/reset", async (req, res) => {
     // Check if track exists first
     const existingTrack = await prisma.track.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      select: { id: true, title: true, displayTitle: true },
     });
 
     if (!existingTrack) {
@@ -740,7 +743,8 @@ router.post("/tracks/:id/reset", async (req, res) => {
       include: TRACK_EDIT_REPLY,
     });
 
-    await markLibraryChanged();
+    // Only a shown title that changed back is a change to what a client lists.
+    if ((existingTrack.displayTitle || existingTrack.title) !== existingTrack.title && (await songIsListed(req.params.id))) await markLibraryChanged();
     res.json({
       message: "Track metadata reset to original values",
       track,

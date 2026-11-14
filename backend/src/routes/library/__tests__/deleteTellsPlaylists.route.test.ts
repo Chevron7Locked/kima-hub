@@ -144,6 +144,37 @@ describe("deleting from the library moves the library-changed marker", () => {
         expect(await markerMoves(() => request(app).delete(`/artists/${artist.artist}`))).toBe(false);
     });
 
+    it("not for songs a client does not list: a missing one or a corrupt one", async () => {
+        expectLog("warn");
+        const unlist = async (tag: string, data: { missingSince: Date } | { corrupt: true }) => {
+            const seeded = await seedArtist(tag);
+            await prisma.track.updateMany({ where: { id: { in: seeded.songs } }, data });
+            return seeded;
+        };
+        const song = await unlist("unlisted-song", { missingSince: new Date() });
+        expect(await markerMoves(() => request(app).delete(`/tracks/${song.songs[0]}`))).toBe(false);
+
+        const album = await unlist("unlisted-album", { corrupt: true });
+        expect(await markerMoves(() => request(app).delete(`/albums/${album.album}`))).toBe(false);
+
+        const artist = await unlist("unlisted-artist", { missingSince: new Date() });
+        expect(await markerMoves(() => request(app).delete(`/artists/${artist.artist}`))).toBe(false);
+    });
+
+    it("when an album or an artist is deleted with one playable song among unlisted ones", async () => {
+        expectLog("warn");
+        const mixed = async (tag: string) => {
+            const seeded = await seedArtist(tag);
+            await prisma.track.update({ where: { id: seeded.songs[0] }, data: { missingSince: new Date() } });
+            return seeded;
+        };
+        const album = await mixed("mixed-album");
+        expect(await markerMoves(() => request(app).delete(`/albums/${album.album}`))).toBe(true);
+
+        const artist = await mixed("mixed-artist");
+        expect(await markerMoves(() => request(app).delete(`/artists/${artist.artist}`))).toBe(true);
+    });
+
     it("not when the delete finds nothing", async () => {
         expect(await markerMoves(() => request(app).delete(`/tracks/${MARK}-nothing`))).toBe(false);
     });

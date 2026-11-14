@@ -146,13 +146,13 @@ describe("the one-time sort of Discover albums", () => {
 });
 
 describe("pruning empty albums and artists", () => {
-    it("moves the marker when an empty library album goes", async () => {
+    it("leaves the marker when an empty library album goes, because a client lists albums that hold a playable song", async () => {
         await album("emptylib", "LIBRARY", false);
-        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(true);
+        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(false);
         expect(await prisma.album.count({ where: { id: `${P}_alb_emptylib` } })).toBe(0);
     });
 
-    it("leaves the marker when only an empty Discover album and an artist with no albums go", async () => {
+    it("leaves the marker when an empty Discover album and an artist with no albums go", async () => {
         await album("emptydis", "DISCOVER", false);
         await prisma.artist.create({ data: { id: `${P}_art_bare`, name: `${P} artist bare`, normalizedName: `${P} artist bare`, identityKey: `${P}_ik_bare` } });
         expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(false);
