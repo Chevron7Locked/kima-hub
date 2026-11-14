@@ -7,6 +7,10 @@
  *   startArtistWorker()         the queue's worker: one artist per job
  *   enrichSimilarArtist(artist) one artist's whole enrichment (the worker's work, callable on its own)
  *   failedArtistStatus(n)       the status an artist takes after its nth failure in a row
+ *   processArtistJob(job)       the worker's job handler: finds the artist and enriches it (callable without a queue)
+ *   recordArtistJobFailure(job, err)  what the worker does with a failed job: an artist deleted since is let go,
+ *                               any other failure is recorded
+ *   ARTIST_BATCH_SIZE           artists queued per cycle (the scheduler's startup line prints it)
  *
  * Artists have no stage record: `Artist.enrichmentStatus` and `enrichmentFailures` are the truth, and a failed
  * job's id keeps blocking a re-add until a grace cleans it. The scheduler keeps the order of phases, the locks and
@@ -22,8 +26,7 @@ import { wikidataService } from "../../services/wikidata";
 import { findSimilarArtists } from "../../services/artistSimilarity";
 import { STAGE_RETRY_CAP } from "../stageRetry";
 import { musicBrainzService } from "../../services/musicbrainz";
-import { normalizeArtistName } from "../../services/artistIdentity";
-import { isMbid } from "../../services/artistIdentity";
+import { isMbid, normalizeArtistName } from "../../services/artistIdentity";
 import { findAlbumArtwork, findArtistArtwork } from "../../services/artwork";
 import { redisClient } from "../../utils/redis";
 import { downloadAndStoreImage, findLocalArtistImage, isNativePath, nativeFileExists } from "../../services/imageStorage";
@@ -593,7 +596,11 @@ interface ArtistJobData {
 
 /** One artist's job. An artist deleted since the job was queued throws the entity-gone error. */
 export async function processArtistJob(job: Job<ArtistJobData>): Promise<void> {
-    const { artistId, artistName } = job.data;
+    const { artistId, artistName } = job.data ?? {};
+    // A job hash stripped by Redis arrives without data.
+    if (!artistId) {
+        throw new Error("[ArtistWorker] Job has no artistId -- corrupt job data");
+    }
     logger.debug(`[ArtistWorker] Processing ${artistId} (${artistName})`);
 
     const artist = await prisma.artist.findUnique({ where: { id: artistId } });
@@ -608,7 +615,12 @@ export async function processArtistJob(job: Job<ArtistJobData>): Promise<void> {
 
 /** A job that failed: an artist that no longer exists resolves silently; any other failure is recorded. */
 export async function recordArtistJobFailure(job: Job<ArtistJobData>, err: Error): Promise<void> {
-    const { artistId } = job.data;
+    const { artistId } = job.data ?? {};
+    if (!artistId) {
+        // A data-less job has nothing to record against; the cleaned jobId lets the next cycle queue it again.
+        logger.error(`[ArtistWorker] A job with no artistId failed: ${err.message}`);
+        return;
+    }
 
     if (isEntityGone(err)) {
         logger.info(`[ArtistWorker] Artist ${artistId} no longer exists, resolving silently`);

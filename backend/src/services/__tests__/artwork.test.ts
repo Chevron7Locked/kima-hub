@@ -104,7 +104,7 @@ describe("the one door for artwork", () => {
 
     describe("album covers", () => {
         it("keeps asking after the first source comes up empty", async () => {
-            // The whole point. dataCache, musicScanner, artistEnrichment and
+            // The whole point. dataCache, musicScanner, enrichment/artists and
             // the cover-art route each stopped after one source.
             archiveCover.mockResolvedValue(ARCHIVE_URL);
 

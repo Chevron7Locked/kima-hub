@@ -5,6 +5,7 @@
  *                            the last hour and returns how many it queued
  *   startPodcastWorker()     the queue's worker: one feed per job
  *   processPodcastJob(job)   one podcast's refresh (the worker's work, callable on its own)
+ *   recordPodcastJobFailure(job, err)  what the worker does with a failed job: only the final attempt is recorded
  *
  * A podcast's `lastRefreshed` is advanced before its job is queued, so every outcome, an unreachable feed
  * included, waits a full window. The scheduler keeps the order of phases, the locks and the run state; it only
@@ -33,7 +34,7 @@ export async function queueStalePodcasts(): Promise<number> {
     const staleThreshold = new Date(Date.now() - STALE_AFTER_MS);
     const stalePodcasts = await prisma.podcast.findMany({
         where: { lastRefreshed: { lt: staleThreshold } },
-        select: { id: true, title: true },
+        select: { id: true, title: true, lastRefreshed: true },
     });
 
     if (stalePodcasts.length === 0) return 0;
@@ -65,6 +66,11 @@ export async function queueStalePodcasts(): Promise<number> {
             queued++;
         } catch (err) {
             logger.warn(`[Enrichment] Failed to queue podcast ${podcast.id}: ${(err as Error).message}`);
+            // The queue refused it, so no feed was tried: put the old time back and the next cycle asks again,
+            // instead of the podcast waiting a window for a refresh that never ran.
+            await prisma.podcast
+                .updateMany({ where: { id: podcast.id }, data: { lastRefreshed: podcast.lastRefreshed } })
+                .catch(() => {});
         }
     }
 
@@ -109,7 +115,9 @@ export async function recordPodcastJobFailure(job: Job<PodcastJobData>, err: Err
                 entityName: podcastTitle,
                 errorMessage: err.message,
             })
-            .catch(() => {});
+            .catch((reportErr: Error) =>
+                logger.warn(`[PodcastWorker] Could not record podcast ${podcastId}'s failure: ${reportErr.message}`),
+            );
     }
 }
 

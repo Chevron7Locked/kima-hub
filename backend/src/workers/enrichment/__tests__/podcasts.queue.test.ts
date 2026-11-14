@@ -116,4 +116,21 @@ describe("queueStalePodcasts -- dedup wedge regression", () => {
             { jobId: `podcast-${P}1` },
         );
     });
+
+    it("a podcast the queue refused gets its old time back, so the next cycle asks again", async () => {
+        await seedPodcast("1", "Pod One", 3);
+        await seedPodcast("2", "Pod Two", 5);
+        const before = await lastRefreshed("1");
+        mockQueueAdd.mockImplementation(async (_name: string, data: { podcastId: string }) => {
+            if (data.podcastId === `${P}1`) throw new Error("redis down");
+            return { id: "j" };
+        });
+        const started = Date.now();
+
+        const n = await queueStalePodcasts();
+
+        expect(n).toBe(1);
+        expect(await lastRefreshed("1")).toEqual(before);
+        expect((await lastRefreshed("2")).getTime()).toBeGreaterThanOrEqual(started);
+    });
 });

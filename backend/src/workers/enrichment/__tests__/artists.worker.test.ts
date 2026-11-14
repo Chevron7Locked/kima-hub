@@ -36,6 +36,12 @@ describe("processArtistJob", () => {
         const err = await processArtistJob(job("a1")).catch((e) => e);
         expect(isEntityGone(err)).toBe(true);
     });
+
+    it("a job with no data is refused without a lookup", async () => {
+        const err = await processArtistJob({} as unknown as Job<{ artistId: string; artistName: string }>).catch((e) => e);
+        expect((err as Error).message).toMatch(/no artistId/);
+        expect(mockFindUnique).not.toHaveBeenCalled();
+    });
 });
 
 describe("recordArtistJobFailure", () => {
@@ -62,6 +68,14 @@ describe("recordArtistJobFailure", () => {
         await recordArtistJobFailure(job("a1"), new Error("boom"));
         expect(mockUpdate).not.toHaveBeenCalled();
         expect(mockRecordFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it("a job with no data records nothing and does not throw", async () => {
+        await expect(
+            recordArtistJobFailure({} as unknown as Job<{ artistId: string; artistName: string }>, new Error("boom")),
+        ).resolves.toBeUndefined();
+        expect(mockFindUnique).not.toHaveBeenCalled();
+        expect(mockRecordFailure).not.toHaveBeenCalled();
     });
 
     it("a store that fails while recording does not throw out of the failed handler", async () => {

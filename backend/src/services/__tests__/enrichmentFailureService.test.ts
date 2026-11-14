@@ -30,7 +30,7 @@ describe("EnrichmentFailureService", () => {
             metadata: { filePath: "/music/test.flac" },
         };
 
-        // An artist is retried until STAGE_RETRY_CAP (artistEnrichment.ts), the cap stage records show too.
+        // An artist is retried until STAGE_RETRY_CAP (workers/enrichment/artists.ts), the cap stage records show too.
         it("stores a first failure with retryCount 1 and maxRetries STAGE_RETRY_CAP", async () => {
             await enrichmentFailureService.recordFailure(baseInput);
 
