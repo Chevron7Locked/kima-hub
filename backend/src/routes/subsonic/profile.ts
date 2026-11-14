@@ -4,11 +4,12 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { wrap } from "./mappers";
 import { mapSubsonicUser, requireSubsonicAdmin } from "./userHelpers";
 import { one } from "../../utils/subsonicParams";
+import { normalizeUsername } from "../../services/users/accounts";
 
 export const profileRouter = Router();
 
 profileRouter.all("/getUser.view", wrap(async (req, res) => {
-    const requested = one(req, "username");
+    const requested = normalizeUsername(one(req, "username") ?? "");
     if (requested && requested !== req.user!.username && !requireSubsonicAdmin(req, res)) {
         return;
     }

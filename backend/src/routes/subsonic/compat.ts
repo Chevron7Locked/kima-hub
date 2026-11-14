@@ -14,6 +14,7 @@ import {
 } from "../../services/shareService";
 import { logger } from "../../utils/logger";
 import { one, many } from "../../utils/subsonicParams";
+import { normalizeUsername } from "../../services/users/accounts";
 
 export const compatRouter = Router();
 
@@ -106,7 +107,7 @@ compatRouter.all(
 // (a dropped connection, a pool timeout), and an unwrapped rejection in
 // Express 4 answers nothing at all.
 compatRouter.all("/getAvatar.view", wrap(async (req: Request, res: Response) => {
-    const username = one(req, "username");
+    const username = normalizeUsername(one(req, "username") ?? "");
     if (!username) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: username");
     }

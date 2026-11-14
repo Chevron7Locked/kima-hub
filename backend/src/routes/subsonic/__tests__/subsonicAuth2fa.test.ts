@@ -167,6 +167,23 @@ describe("subsonicAuth: the username is trimmed", () => {
         expect(byKey.body["subsonic-response"].status).toBe("ok");
     });
 
+    it("finds the user named in getUser and getAvatar with the same trim", async () => {
+        const user = await mkUser("lookup");
+        const padded = ` ${user.username} `;
+
+        const profile = await request(app)
+            .get("/rest/getUser.view")
+            .query({ u: user.username, p: PLAIN_PASSWORD, username: padded, f: "json", v: "1.16.1", c: "test" });
+        const avatar = await request(app)
+            .get("/rest/getAvatar.view")
+            .query({ u: user.username, p: PLAIN_PASSWORD, username: padded, v: "1.16.1", c: "test" });
+
+        expect(profile.body["subsonic-response"].status).toBe("ok");
+        expect(profile.body["subsonic-response"].user.username).toBe(user.username);
+        expect(avatar.status).toBe(200);
+        expect(avatar.headers["content-type"]).toBe("image/png");
+    });
+
     it("answers a username of only spaces as a missing parameter", async () => {
         const res = await request(app)
             .get("/rest/ping.view")
