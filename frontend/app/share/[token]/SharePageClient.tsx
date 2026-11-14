@@ -104,10 +104,14 @@ function getEntitySubtitle(shareData: ShareData): string {
     return "";
 }
 
+/** One page per share link: a new link starts from nothing, so nothing of the old share, its failure or its playback shows under it. */
 export default function SharePageClient() {
     const params = useParams();
     const token = params.token as string;
+    return <SharePage key={token} token={token} />;
+}
 
+function SharePage({ token }: { token: string }) {
     const [data, setData] = useState<ShareData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);

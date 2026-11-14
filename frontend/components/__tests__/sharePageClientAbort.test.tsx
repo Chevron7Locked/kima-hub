@@ -14,14 +14,25 @@ import SharePageClient from "@/app/share/[token]/SharePageClient";
 let root: Root;
 let host: HTMLDivElement;
 let signal: AbortSignal | undefined;
+// What the server answers for a share token; a token with no entry never gets an answer.
+let answers: Record<string, unknown> = {};
+// Tokens the server answers with "not found".
+let missing: string[] = [];
 
 beforeEach(() => {
     token = "tok";
     signal = undefined;
+    answers = {};
+    missing = [];
     vi.stubGlobal(
         "fetch",
-        vi.fn((_url: string, init?: RequestInit) => {
+        vi.fn((url: string, init?: RequestInit) => {
             signal = init?.signal ?? undefined;
+            if (missing.some((tok) => url.includes(`/${tok}`))) {
+                return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: "Share link not found" }) });
+            }
+            const answered = Object.entries(answers).find(([tok]) => url.includes(`/${tok}`));
+            if (answered) return Promise.resolve({ ok: true, status: 200, json: async () => answered[1] });
             return new Promise((_resolve, reject) => {
                 signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
             });
@@ -59,6 +70,30 @@ describe("SharePageClient", () => {
         expect(first.aborted).toBe(true);
         expect(signal).not.toBe(first);
         expect(host.textContent).toBe(before);
+        await act(async () => root.unmount());
+    });
+
+    it("shows nothing of the old share under a new link: the page goes back to loading", async () => {
+        answers = { tok: { entityType: "album", entity: { id: "a1", title: "First Album", artist: { name: "First Artist" }, tracks: [] } } };
+        await act(async () => root.render(<SharePageClient />));
+        expect(host.textContent).toContain("First Album");
+
+        // The new share has not answered yet.
+        token = "other";
+        await act(async () => root.render(<SharePageClient />));
+        expect(host.textContent).not.toContain("First Album");
+        expect(host.textContent).not.toContain("First Artist");
+        await act(async () => root.unmount());
+    });
+
+    it("does not show the failure of the old link under a new one", async () => {
+        missing = ["tok"];
+        await act(async () => root.render(<SharePageClient />));
+        expect(host.textContent).toContain("Share link not found");
+
+        token = "other";
+        await act(async () => root.render(<SharePageClient />));
+        expect(host.textContent).not.toContain("Share link not found");
         await act(async () => root.unmount());
     });
 });

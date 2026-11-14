@@ -276,6 +276,22 @@ describe("the declared families are enforced in front of the routers", () => {
         expect(Number(stranger.headers["ratelimit-remaining"])).toBe(Number(second.headers["ratelimit-remaining"]) - 1);
     });
 
+    it("share cover requests carry their own limit: more of them than the general limit allows leave other calls from that address alone", async () => {
+        const app = appWithServer();
+        const remaining = async () => {
+            const res = await request(app).get("/api/metrics").set("Authorization", as(ADMIN, "admin"));
+            expect(res.status).toBe(200);
+            return Number(res.headers["ratelimit-remaining"]);
+        };
+        const before = await remaining();
+        // The general limit is 5000 a minute; a share page's covers are counted by the cover limit instead.
+        for (let i = 0; i <= before; i++) {
+            const res = await request(app).get(`/api/share/${P}-none/cover-art/native%3Aalbums%2F${P}-${i}.jpg`);
+            expect([i, res.status === 404 || res.status === 429]).toEqual([i, true]);
+        }
+        expect(await remaining()).toBe(before - 1);
+    }, 120_000);
+
     it.each(["/api/library", "/api/enrichment"])("%s is closed by default: a route nobody listed is for admins", async (path) => {
         const declared = mountAccess[path].access;
         expect(declared.family).toBe("admin");
