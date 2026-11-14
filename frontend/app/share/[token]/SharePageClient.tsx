@@ -104,6 +104,26 @@ function getEntitySubtitle(shareData: ShareData): string {
     return "";
 }
 
+/** The server answered, and refused. */
+class ShareRefused extends Error {
+    constructor(readonly status: number) {
+        super(`Share refused (${status})`);
+    }
+}
+
+/**
+ * What the page says when the share does not open, from the status the server answered with: 404 unknown link, 410 a
+ * link that has ended (the server sends 410 for both an expired link and one out of plays), 429 the per-address limit
+ * on opening shares, anything else, or no answer at all, a general failure.
+ */
+function failureText(failure: { status: number | null }): { title: string; hint: string } {
+    const askForNew = "Ask whoever shared it for a new link.";
+    if (failure.status === 404) return { title: "Share link not found", hint: askForNew };
+    if (failure.status === 410) return { title: "This link has expired or reached its play limit", hint: askForNew };
+    if (failure.status === 429) return { title: "Too many requests", hint: "Wait a minute and try again." };
+    return { title: "Couldn't open this share", hint: "Try again in a moment." };
+}
+
 /** One page per share link: a new link starts from nothing, so nothing of the old share, its failure or its playback shows under it. */
 export default function SharePageClient() {
     const params = useParams();
@@ -113,7 +133,8 @@ export default function SharePageClient() {
 
 function SharePage({ token }: { token: string }) {
     const [data, setData] = useState<ShareData | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    // How opening the share failed: the status the server answered with, or null when there was no answer.
+    const [failure, setFailure] = useState<{ status: number | null } | null>(null);
     const [loading, setLoading] = useState(true);
 
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -131,20 +152,15 @@ function SharePage({ token }: { token: string }) {
         // The request goes with the page (or with the token it was for); a cancelled one is not a failure to show.
         const request = new AbortController();
         fetch(shareResolvePath(token), { signal: request.signal })
-            .then(async (res) => {
-                if (!res.ok) {
-                    const body = await res.json().catch(() => ({}));
-                    throw new Error(
-                        body.error || `Failed to load (${res.status})`
-                    );
-                }
+            .then((res) => {
+                if (!res.ok) throw new ShareRefused(res.status);
                 return res.json();
             })
             .then((shared) => {
                 if (!request.signal.aborted) setData(shared);
             })
             .catch((err) => {
-                if (!request.signal.aborted) setError(err.message);
+                if (!request.signal.aborted) setFailure({ status: err instanceof ShareRefused ? err.status : null });
             })
             .finally(() => {
                 if (!request.signal.aborted) setLoading(false);
@@ -152,11 +168,15 @@ function SharePage({ token }: { token: string }) {
         return () => request.abort();
     }, [token]);
 
-    useEffect(() => {
-        const audio = audioRef.current;
+    // The audio element only exists once the share has loaded, so it stops with the element, not with an effect
+    // that could only see it at mount.
+    const attachAudio = useCallback((audio: HTMLAudioElement | null) => {
+        audioRef.current = audio;
+        if (!audio) return;
         return () => {
-            audio?.pause();
-            if (audio) audio.src = "";
+            audio.pause();
+            audio.src = "";
+            audioRef.current = null;
         };
     }, []);
 
@@ -277,7 +297,8 @@ function SharePage({ token }: { token: string }) {
         );
     }
 
-    if (error || !data) {
+    if (failure || !data) {
+        const { title, hint } = failureText(failure ?? { status: null });
         return (
             <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center px-4">
                 <div className="text-center max-w-sm">
@@ -285,14 +306,10 @@ function SharePage({ token }: { token: string }) {
                         <Music className="w-5 h-5 text-[var(--text-muted)]" />
                     </div>
                     <h1 className="text-xl font-bold tracking-tight text-white">
-                        {error?.includes("expired")
-                            ? "This link has expired"
-                            : error?.includes("limit")
-                              ? "This link has reached its play limit"
-                              : "Share link not found"}
+                        {title}
                     </h1>
                     <p className="mt-2 text-sm text-[var(--text-muted)]">
-                        Ask whoever shared it for a new link.
+                        {hint}
                     </p>
                 </div>
             </div>
@@ -302,7 +319,7 @@ function SharePage({ token }: { token: string }) {
     return (
         <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col">
             <audio
-                ref={audioRef}
+                ref={attachAudio}
                 onTimeUpdate={() => {
                     if (audioRef.current) {
                         setProgress(audioRef.current.currentTime);
