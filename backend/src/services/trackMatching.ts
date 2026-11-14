@@ -32,6 +32,31 @@ export interface MatchCandidate {
   artistName: string;
 }
 
+/**
+ * The candidates one library song gives the matcher: one for each name it is known by, so either name finds it. A person
+ * who edited the title adds the title shown; one who edited the artist's name adds the name shown. Every twin carries the
+ * song's id, so whichever the ladder reaches first (or ties between) answers with the same song.
+ */
+export function toMatchCandidates(t: {
+  id: string;
+  title: string;
+  displayTitle?: string | null;
+  albumId: string;
+  album: { title: string; artist: { name: string; displayName?: string | null } };
+}): MatchCandidate[] {
+  const other = (shown: string | null | undefined, name: string): string[] => (shown && shown !== name ? [name, shown] : [name]);
+  const artist = t.album.artist;
+  return other(t.displayTitle, t.title).flatMap((title) =>
+    other(artist.displayName, artist.name).map((artistName) => ({
+      id: t.id,
+      title,
+      albumId: t.albumId,
+      albumTitle: t.album.title,
+      artistName,
+    })),
+  );
+}
+
 export interface MatchResult {
   candidate: MatchCandidate;
   matchType: "exact" | "fuzzy";

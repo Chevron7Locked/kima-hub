@@ -6,9 +6,9 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
-import { computeGenreTotals } from "../../utils/genreSql";
+import { libraryGenreTotals } from "../../utils/genreSql";
 import { getEffectiveYear, getDecadeFromYear } from "../../utils/dateFilters";
-import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
+import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { featureDetection } from "../featureDetection";
 import { moodStationList } from "./stations";
 import { nightZone } from "./nightPlays";
@@ -38,17 +38,7 @@ export interface RadioRowStation {
 
 /** The library's genres with enough songs for a station, most songs first (computeGenreTotals is the shared tally). */
 export async function libraryGenres(): Promise<{ genre: string; count: number }[]> {
-    const artists = await prisma.$queryRaw<
-        { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; n: bigint }[]
-    >`
-        SELECT ar.name, ar."normalizedName", ar.genres, ar."userGenres", COUNT(t.id)::bigint AS n
-        FROM "Artist" ar
-        JOIN "Album" a ON a."artistId" = ar.id
-        JOIN "Track" t ON t."albumId" = a.id
-        WHERE ${playableSongSql("t", "a")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
-        GROUP BY ar.id
-    `;
-    return computeGenreTotals(artists.map((a) => ({ ...a, songs: Number(a.n), albums: 0 })))
+    return (await libraryGenreTotals())
         .filter((g) => g.songs >= MIN_STATION_SONGS)
         .map((g) => ({ genre: g.name.toLowerCase(), count: g.songs }))
         .sort((x, y) => y.count - x.count || (x.genre < y.genre ? -1 : x.genre > y.genre ? 1 : 0))

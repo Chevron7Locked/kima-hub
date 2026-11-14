@@ -17,6 +17,7 @@ jest.mock("../../../services/discoverWeekly", () => ({
 jest.mock("../../../jobs/queueCleaner", () => ({ queueCleaner: { reconcileWithLocalLibrary: jest.fn().mockResolvedValue(undefined) } }));
 jest.mock("../../../services/eventBus", () => ({ eventBus: { emit: jest.fn() } }));
 jest.mock("../../../services/notificationService", () => ({ notificationService: { create: jest.fn().mockResolvedValue(undefined) } }));
+jest.mock("../../../services/libraryChanged", () => ({ markLibraryChanged: jest.fn().mockResolvedValue(new Date()) }));
 jest.mock("../../../utils/logger", () => ({ logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() } }));
 
 import type { Job } from "bullmq";

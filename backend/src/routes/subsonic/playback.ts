@@ -12,6 +12,7 @@ import { firstArtistGenre, mapSong, serveFromTranscodeParams, type SubsonicServe
 import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { containsSql } from "../../services/textMatch";
+import { sameName } from "../../services/discovery/discoverEvidence";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { resolveInCoversDir } from "../../services/imageStorage";
 import { recordPlay } from "../../services/playRecording";
@@ -444,6 +445,9 @@ playbackRouter.all("/deleteBookmark.view", wrap(async (req, res) => {
 
 // ===================== LYRICS =====================
 
+/** The most songs one getLyrics weighs; the smallest ids when more hold the title. */
+const LYRICS_CANDIDATES_MAX = 200;
+
 playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
     const artist = one(req, "artist")?.trim();
     const title = one(req, "title")?.trim();
@@ -467,16 +471,30 @@ playbackRouter.all("/getLyrics.view", wrap(async (req, res) => {
     }
 
     // The title is matched as part of the title shown or of the file's, in any letter case and any script.
-    const [hit] = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+    const hits = await prisma.$queryRaw<{ id: string; title: string; displayTitle: string | null; hasLyrics: boolean }[]>`
+        SELECT t.id, t.title, t."displayTitle", (tl.track_id IS NOT NULL) AS "hasLyrics"
+          FROM "Track" t JOIN "Album" al ON al.id = t."albumId" LEFT JOIN track_lyrics tl ON tl.track_id = t.id
          WHERE ${playableSongSql("t", "al")}
            ${title ? Prisma.sql`AND ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], title)}` : Prisma.empty}
            ${artistIds ? Prisma.sql`AND al."artistId" = ANY(${artistIds}::text[])` : Prisma.empty}
-         ORDER BY t.id LIMIT 1`;
-    if (!hit) return subsonicOk(req, res, { lyrics: {} });
+         ORDER BY t.id LIMIT ${LYRICS_CANDIDATES_MAX}`;
+
+    // The best match: a song whose title, as shown or in the file, is the one asked for (the same name as far as case,
+    // accents and apostrophes go) before one that only holds it ("tune" is not "tune extended"), then one with lyrics,
+    // then the smallest id. Lyrics never come from a song other than the best match, so an exact song with none answers
+    // empty rather than another song's words.
+    const exact = (t: { title: string; displayTitle: string | null }) =>
+        title ? sameName(t.displayTitle, title) || sameName(t.title, title) : false;
+    const [best] = hits.sort(
+        (x, y) =>
+            Number(exact(y)) - Number(exact(x)) ||
+            Number(y.hasLyrics) - Number(x.hasLyrics) ||
+            (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
+    );
+    if (!best?.hasLyrics) return subsonicOk(req, res, { lyrics: {} });
 
     const track = await prisma.track.findUnique({
-        where: { id: hit.id },
+        where: { id: best.id },
         include: { trackLyrics: true, album: { include: { artist: true } } },
     });
 

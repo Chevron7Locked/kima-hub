@@ -42,10 +42,11 @@ import { M3UEntry } from "./m3uParser";
 import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
+  toMatchCandidates,
   type MatchCandidate,
 } from "./trackMatching";
 import { stripTrackSuffix, normalizeTrackTitle } from "../utils/normalization";
-import { nameWords } from "./nameFold";
+import { nameKey, nameWords } from "./nameFold";
 
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
@@ -218,24 +219,18 @@ async function saveImportJob(job: ImportJob): Promise<void> {
 }
 
 /**
- * The candidates one library song gives the matcher: one under the title in the file and, when a person edited the
- * title, one under the title shown. Both carry the song's id, so either name finds it.
+ * A show's extra tracks under another edition of one song ("Song", "SONG", "Song (Live)" apart) are one pick, not two:
+ * titles compare by `nameKey`, which folds letter case, accents and apostrophe shapes, so "DON'T STOP" and "Don’t Stop" are
+ * the same song. The first of each stays.
  */
-function toMatchCandidates(t: {
-  id: string;
-  title: string;
-  displayTitle?: string | null;
-  albumId: string;
-  album: { title: string; artist: { name: string } };
-}): MatchCandidate[] {
-  const candidate = (title: string): MatchCandidate => ({
-    id: t.id,
-    title,
-    albumId: t.albumId,
-    albumTitle: t.album.title,
-    artistName: t.album.artist.name,
+export function mergeEditionTracks(tracks: SpotifyTrack[]): SpotifyTrack[] {
+  const seen = new Set<string>();
+  return tracks.filter((t) => {
+    const key = nameKey(t.title);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  return t.displayTitle && t.displayTitle !== t.title ? [candidate(t.title), candidate(t.displayTitle)] : [candidate(t.title)];
 }
 
 function toImportJob(
@@ -316,20 +311,37 @@ function notifyImportFailed(job: ImportJob): void {
  * `normalizedName` is stored already folded to lower case, and `words` are normalized the same way, so a plain
  * comparison is exact for every script.
  */
-function tracksOfArtistsStartingWith(words: string[]): Prisma.TrackWhereInput {
+async function tracksOfArtistsStartingWith(words: string[]): Promise<Prisma.TrackWhereInput> {
+  const shown = await artistIdsShownStartingWith(words);
   return {
     AND: [
       PLAYABLE_SONG,
       {
         album: {
           artist: {
-            OR: words.flatMap((w) => [{ normalizedName: w }, { normalizedName: { startsWith: `${w} ` } }]),
+            OR: [
+              ...words.flatMap((w) => [{ normalizedName: w }, { normalizedName: { startsWith: `${w} ` } }]),
+              ...(shown.length > 0 ? [{ id: { in: shown } }] : []),
+            ],
           },
         },
       },
     ],
   };
 }
+
+/**
+ * Ids of the artists a person renamed (their `displayName`) whose shown name, normalized, passes `test`. Only the edited artists are read and compared here: there is no stored normalized form of a
+ * shown name, and the edited are few. A song of an artist so named is offered to the matcher under the shown name too
+ * (trackMatching `toMatchCandidates`), and this finds the songs to offer.
+ */
+async function artistIdsShown(test: (normalizedShown: string) => boolean): Promise<string[]> {
+  const edited = await prisma.artist.findMany({ where: { displayName: { not: null } }, select: { id: true, displayName: true } });
+  return edited.filter((a) => a.displayName && test(normalizeArtistName(a.displayName))).map((a) => a.id);
+}
+const artistIdsShownAs = (names: string[]) => artistIdsShown((shown) => names.includes(shown));
+const artistIdsShownStartingWith = (words: string[]) =>
+  artistIdsShown((shown) => words.some((w) => shown === w || shown.startsWith(`${w} `)));
 
 /** The most title-only candidates one lookup reads. */
 const TITLE_CANDIDATES_MAX = 500;
@@ -384,11 +396,11 @@ class SpotifyImportService {
    * services/trackMatching picks the verdict.
    */
   private async matchTrack(spotifyTrack: SpotifyTrack): Promise<MatchedTrack> {
-    // A song edited to a shown title is in twice, once under each title, so the key holds both.
+    // A song edited to a shown title or artist name is in once under each pairing, so the key holds both.
     const candidates = new Map<string, MatchCandidate>();
     const add = (rows: MatchCandidate[]) => {
       for (const c of rows) {
-        const key = `${c.id}\n${c.title}`;
+        const key = `${c.id}\n${c.title}\n${c.artistName}`;
         if (!candidates.has(key)) candidates.set(key, c);
       }
     };
@@ -409,11 +421,19 @@ class SpotifyImportService {
     const normalizedPrimaryArtist = normalizeArtistName(primaryArtist);
     const dbNormalizedArtist = normalizeArtistName(spotifyTrack.artist);
 
+    const exactArtistNames = [normalizedPrimaryArtist, dbNormalizedArtist];
+    const shownAsArtist = await artistIdsShownAs(exactArtistNames);
     const artistRows = await prisma.track.findMany({
       where: {
         AND: [
           PLAYABLE_SONG,
-          { album: { artist: { normalizedName: { in: [normalizedPrimaryArtist, dbNormalizedArtist] } } } },
+          {
+            album: {
+              artist: {
+                OR: [{ normalizedName: { in: exactArtistNames } }, ...(shownAsArtist.length > 0 ? [{ id: { in: shownAsArtist } }] : [])],
+              },
+            },
+          },
         ],
       },
       ...withAlbum,
@@ -1114,8 +1134,7 @@ class SpotifyImportService {
           a.tracksNeeded.some(
             (t) =>
               t.spotifyId === spotifyTrackId ||
-              (t.title.toLowerCase() === trackTitle.toLowerCase() &&
-                t.artist.toLowerCase() === spotifyArtist.toLowerCase()),
+              (sameName(t.title, trackTitle) && sameName(t.artist, spotifyArtist)),
           ),
         );
       }
@@ -1126,11 +1145,10 @@ class SpotifyImportService {
         spotifyAlbum &&
         spotifyAlbum !== "Unknown Album"
       ) {
-        const normalizedArtist = spotifyArtist.toLowerCase();
         const normalizedAlbum = spotifyAlbum.toLowerCase();
         albumToDownload = preview.albumsToDownload.find(
           (a) =>
-            a.artistName.toLowerCase() === normalizedArtist &&
+            sameName(a.artistName, spotifyArtist) &&
             a.albumName
               .toLowerCase()
               .includes(normalizedAlbum.substring(0, 10)),
@@ -1289,13 +1307,7 @@ class SpotifyImportService {
                 album = matchingAlbums[0];
               } else {
                 // Merge tracksNeeded, deduplicate by title
-                const seen = new Set<string>();
-                const mergedTracks = matchingAlbums.flatMap((a) => a.tracksNeeded).filter((t) => {
-                  const key = t.title.toLowerCase();
-                  if (seen.has(key)) return false;
-                  seen.add(key);
-                  return true;
-                });
+                const mergedTracks = mergeEditionTracks(matchingAlbums.flatMap((a) => a.tracksNeeded));
                 album = {
                   ...matchingAlbums[0],
                   tracksNeeded: mergedTracks,
@@ -1677,24 +1689,26 @@ class SpotifyImportService {
       albumId: string;
       album: {
         title: string;
-        artist: { name: string; normalizedName: string | null };
+        artist: { name: string; displayName: string | null };
       };
     };
     const allLibraryTracks: TrackWithRelations[] = allArtistFirstWords.length > 0
       ? await prisma.track.findMany({
-          where: tracksOfArtistsStartingWith(allArtistFirstWords),
-          include: { album: { include: { artist: { select: { name: true, normalizedName: true } } } } },
+          where: await tracksOfArtistsStartingWith(allArtistFirstWords),
+          include: { album: { include: { artist: { select: { name: true, displayName: true } } } } },
         }) as TrackWithRelations[]
       : [];
 
-    // Index by lowercase artist first-word for fast lookup
+    // Index by the first word of the artist name each candidate carries (the one in the file or the one shown),
+    // for fast lookup
     const tracksByArtistWord = new Map<string, MatchCandidate[]>();
     for (const track of allLibraryTracks) {
-      const artistName = track.album.artist.normalizedName || track.album.artist.name;
-      const firstWord = artistName.toLowerCase().split(" ")[0];
-      const existing = tracksByArtistWord.get(firstWord) || [];
-      existing.push(...toMatchCandidates(track));
-      tracksByArtistWord.set(firstWord, existing);
+      for (const candidate of toMatchCandidates(track)) {
+        const firstWord = normalizeArtistName(candidate.artistName).split(" ")[0];
+        const existing = tracksByArtistWord.get(firstWord) || [];
+        existing.push(candidate);
+        tracksByArtistWord.set(firstWord, existing);
+      }
     }
 
     // Matches by ISRC
@@ -1765,7 +1779,7 @@ class SpotifyImportService {
 
       jobLogger?.info(`   Matching: "${pendingTrack.title}" by ${pendingTrack.artist}`);
 
-      const candidates = tracksByArtistWord.get(artistFirstWord.toLowerCase()) || [];
+      const candidates = tracksByArtistWord.get(artistFirstWord) || [];
 
       // The matching ladder lives in one place (services/trackMatching);
       // this path only decides the candidate pool (the artist-word bucket).
@@ -1796,7 +1810,7 @@ class SpotifyImportService {
         (u) => u.strippedTitle.split(" ").slice(0, 4).join(" "),
       );
       const titleCandidateRows = await tracksTitledLike(titleSearchTerms, {
-        album: { include: { artist: { select: { name: true, normalizedName: true } } } },
+        album: { include: { artist: { select: { name: true, displayName: true } } } },
       });
       const titleCandidates: MatchCandidate[] = titleCandidateRows.flatMap(toMatchCandidates);
 
@@ -2366,7 +2380,7 @@ class SpotifyImportService {
 
         // Same pool and ladder as the import itself (services/trackMatching).
         const artistCandidateRows = await prisma.track.findMany({
-          where: tracksOfArtistsStartingWith([artistFirstWord]),
+          where: await tracksOfArtistsStartingWith([artistFirstWord]),
           include: { album: { include: { artist: true } } },
         });
         const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);

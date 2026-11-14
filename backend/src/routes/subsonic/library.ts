@@ -6,8 +6,9 @@ import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { playRowsSql } from "../../services/stats/listens";
-import { computeGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { libraryGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
+import { libraryChangedAt } from "../../services/libraryChanged";
 
 export const libraryRouter = Router();
 
@@ -28,20 +29,6 @@ function indexLetter(sortName: string): string {
     if (first === undefined) return "#";
     const folded = [...unaccent(first)][0]?.toUpperCase() ?? first;
     return /^\p{L}$/u.test(folded) ? folded : "#";
-}
-
-/**
- * When the library last changed, in milliseconds since the epoch, as clients compare it with the one they hold: the newest
- * song change (a file flagged missing counts) or artist sync. It also moves for changes a client does not list (Discover
- * songs, analysis writes), and a removal that is not of the newest row leaves it as it was. There is no scan time to read.
- */
-async function libraryLastModified(): Promise<number> {
-    const [row] = await prisma.$queryRaw<{ ms: number | null }[]>`
-        SELECT (EXTRACT(EPOCH FROM GREATEST(
-                   (SELECT MAX("updatedAt") FROM "Track"),
-                   (SELECT MAX("lastSynced") FROM "Artist")
-               )) * 1000)::float8 AS ms`;
-    return Math.floor(row?.ms ?? 0);
 }
 
 // getIndexes is the legacy alias for getArtists used by DSub and some older clients
@@ -75,7 +62,9 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
     const responseKey = req.path.includes("getIndexes") ? "indexes" : "artists";
     subsonicOk(req, res, {
         [responseKey]: {
-            "@_lastModified": await libraryLastModified(),
+            // When the library a client lists last changed: a scan that changed songs, or an edit of a shown name
+            // (services/libraryChanged.ts), never analysis writes, Discover songs or artist syncs.
+            "@_lastModified": await libraryChangedAt(),
             "@_ignoredArticles": IGNORED_ARTICLES,
             index: indexes,
         },
@@ -504,22 +493,8 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 // ===================== GENRES =====================
 
 libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
-    // Genres live on artists; computeGenreTotals is the one shared list, with its album and song counts.
-    const artists = await prisma.artist.findMany({
-        where: { libraryAlbumCount: { gt: 0 } },
-        select: {
-            name: true,
-            normalizedName: true,
-            genres: true,
-            userGenres: true,
-            libraryAlbumCount: true,
-            totalTrackCount: true,
-        },
-    });
-
-    const sorted = computeGenreTotals(
-        artists.map((a) => ({ ...a, songs: a.totalTrackCount, albums: a.libraryAlbumCount })),
-    )
+    // Genres live on artists; libraryGenreTotals is the one shared list, counted from the playable songs.
+    const sorted = (await libraryGenreTotals())
         .sort((x, y) => x.name.localeCompare(y.name))
         .map(({ name, albums, songs }) => ({
             "@_songCount": songs,

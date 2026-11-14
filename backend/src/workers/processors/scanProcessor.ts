@@ -5,6 +5,7 @@ import { config } from "../../config";
 import { eventBus } from "../../services/eventBus";
 import { notificationService } from "../../services/notificationService";
 import { coversBasePath } from "../../services/imageStorage";
+import { markLibraryChanged } from "../../services/libraryChanged";
 
 export interface ScanJobData {
     /** Absent for scans nobody asked for. */
@@ -87,6 +88,12 @@ export async function processScan(
         const result = await scanner.scanLibrary(scanPath);
 
         await job.updateProgress(100);
+
+        // What a Subsonic client lists changed when the scan added, changed, flagged or retired songs. A marker that
+        // cannot be written is logged and does not fail a scan that found the songs.
+        if (result.tracksAdded + result.tracksUpdated + result.tracksMissing + result.tracksRemoved + result.tracksCorrupt > 0) {
+            await markLibraryChanged().catch((e) => logger.error(`[ScanJob ${job.id}] Failed to record the library change:`, e));
+        }
 
         if (userId) {
             eventBus.emit({

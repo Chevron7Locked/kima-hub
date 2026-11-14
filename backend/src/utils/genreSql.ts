@@ -5,9 +5,11 @@
  * in the SQL_ASCII encoding can neither normalize nor lower-case beyond ASCII, and the list is
  * one rule every surface shares (the web's GET /genres and Subsonic's getGenres).
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getMergedGenres } from "./metadataOverrides";
 import { artistHasPlayableSongSql } from "../services/libraryFilters";
+import { playableSongSql } from "./playableSong";
 
 /**
  * Spaces (any width, no-break included), hyphens, dashes and the minus sign, underscores, slashes, dots and middle dots,
@@ -67,9 +69,9 @@ export interface GenreCountedArtist {
     normalizedName?: string | null;
     genres?: unknown;
     userGenres?: unknown;
-    /** Library songs this artist has. */
+    /** Playable songs this artist has. */
     songs: number;
-    /** Library albums this artist has. */
+    /** Library albums this artist has with a playable song. */
     albums: number;
 }
 
@@ -124,3 +126,28 @@ export function computeGenreTotals(artists: GenreCountedArtist[]): GenreTotals[]
     }));
 }
 
+
+/**
+ * Every artist with a genre tag and a playable song, with the playable songs it has and the library albums that hold
+ * them, counted from the songs themselves. A cached count on the artist or album can be stale (a file went missing since
+ * the last scan), a song count that includes songs that cannot play is not what a person finds there, so nothing cached is read.
+ */
+export async function libraryGenreArtists(): Promise<GenreCountedArtist[]> {
+    const rows = await prisma.$queryRaw<
+        { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; songs: bigint; albums: bigint }[]
+    >(Prisma.sql`
+        SELECT ar.name, ar."normalizedName", ar.genres, ar."userGenres",
+               COUNT(t.id)::bigint AS songs, COUNT(DISTINCT a.id)::bigint AS albums
+        FROM "Artist" ar
+        JOIN "Album" a ON a."artistId" = ar.id
+        JOIN "Track" t ON t."albumId" = a.id
+        WHERE ${playableSongSql("t", "a")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+        GROUP BY ar.id
+    `);
+    return rows.map((r) => ({ ...r, songs: Number(r.songs), albums: Number(r.albums) }));
+}
+
+/** The genre list of the library as it plays now: computeGenreTotals over libraryGenreArtists. */
+export async function libraryGenreTotals(): Promise<GenreTotals[]> {
+    return computeGenreTotals(await libraryGenreArtists());
+}

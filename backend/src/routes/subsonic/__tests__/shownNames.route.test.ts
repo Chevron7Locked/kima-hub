@@ -4,7 +4,7 @@
  * - getLyrics finds a song by the title and artist as shown (and by the file's), for any script.
  * - getMusicDirectory (the root), getSimilarSongs and getTopSongs agree with getArtists on which artists have playable
  *   albums: a stale cached count decides nothing.
- * - getArtists and getIndexes carry `lastModified`, and file an artist under the accent-folded first letter of its sort
+ * - getArtists and getIndexes carry the same `lastModified`, and file an artist under the accent-folded first letter of its sort
  *   name; a letter outside A-Z keeps its own bucket and "#" holds digits and symbols only.
  * - A playlist import finds a song by the title shown too, for any script.
  * - A podcast, episode or audiobook search with a non-ASCII letter reaches the same fields full-text search does.
@@ -216,17 +216,11 @@ describe("getArtists and getIndexes", () => {
         }
     });
 
-    it("gives lastModified (milliseconds since the epoch), and it moves when a song does", async () => {
-        const before = await ask("getArtists", {});
-        const asMs = before.artists.lastModified;
+    it("gives the same lastModified (milliseconds since the epoch) from getArtists and getIndexes", async () => {
+        // What moves it is pinned in genreLyricsImportNames.route.test.ts.
+        const asMs = (await ask("getArtists", {})).artists.lastModified;
         expect(Number.isInteger(asMs)).toBe(true);
-        const newest = await prisma.track.aggregate({ _max: { updatedAt: true } });
-        expect(asMs).toBeGreaterThanOrEqual(newest._max.updatedAt!.getTime());
-
-        await new Promise((r) => setTimeout(r, 15));
-        await prisma.track.update({ where: { id: ids.base.trackId }, data: { trackNo: 2 } });
-        const after = await ask("getIndexes", {});
-        expect(after.indexes.lastModified).toBeGreaterThan(asMs);
+        expect((await ask("getIndexes", {})).indexes.lastModified).toBe(asMs);
     });
 });
 
