@@ -5,7 +5,7 @@ import {
   getImageBackfillProgress,
   backfillAllImages,
 } from "../../services/imageBackfill";
-import { shutdownStop } from "../../utils/stopCheck";
+import { runAsRequestWork } from "../../utils/stopCheck";
 
 const router = Router();
 
@@ -39,7 +39,8 @@ router.post("/image-backfill/start", async (_req, res) => {
 
     res.json({ message: "Image backfill started", status: "processing" });
 
-    backfillAllImages(shutdownStop()).catch((error) => {
+    // Request-started work: the shutdown waits for the batch under way, and the backfill stops after it.
+    runAsRequestWork((stop) => backfillAllImages(stop)).catch((error) => {
       logger.error("[ImageBackfill] Backfill failed:", error);
     });
   } catch (error: any) {

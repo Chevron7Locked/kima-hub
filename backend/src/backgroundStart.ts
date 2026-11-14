@@ -5,11 +5,13 @@
  *
  * `whenEnded()` is what the shutdown's drain waits on before the close steps run: it resolves once the task under way
  * has ended (a batch already running finishes; the next never starts), so none of them touches the database after it
- * has closed. The wait is inside the shutdown's deadline.
+ * has closed. Work an admin's request started (the backfills, the re-file, the syncs) is awaited the same way: it is
+ * tracked by `runAsRequestWork`. The wait is inside the shutdown's deadline.
  */
 
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
+import { whenRequestWorkEnded } from "./utils/stopCheck";
 import type { StartStep } from "./startup";
 
 export interface BackgroundStart {
@@ -17,7 +19,7 @@ export interface BackgroundStart {
     steps: StartStep[];
     /** Starts the Redis cache warmup without waiting for it, so the next start step goes on. */
     startCacheWarmup(): void;
-    /** Resolves when no catch-up task is running. Never rejects: each task logs its own failure. */
+    /** Resolves when no catch-up task and no request-started work is running. Never rejects. */
     whenEnded(): Promise<void>;
 }
 
@@ -116,7 +118,11 @@ export function createBackgroundStart(shutdownHasBegun: () => boolean): Backgrou
     ];
 
     async function whenEnded() {
-        while (running.size > 0) await Promise.allSettled([...running]);
+        // Work started while waiting is awaited too, so loop until both sets are empty.
+        do {
+            while (running.size > 0) await Promise.allSettled([...running]);
+            await whenRequestWorkEnded();
+        } while (running.size > 0);
     }
 
     return { steps, startCacheWarmup, whenEnded };

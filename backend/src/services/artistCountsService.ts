@@ -64,8 +64,9 @@ export async function updateArtistCounts(artistId: string): Promise<void> {
   }
 }
 
-// Track backfill state
-let isBackfillRunning = false;
+// The recount under way, shared by every caller that asks while it runs. Set in the same tick as the first call, so
+// two callers cannot both start one; cleared by the run itself when it ends, whether it succeeded or failed.
+let currentRun: Promise<{ processed: number; errors: number }> | null = null;
 // A recount asked for while one runs: the running one goes over the artists once more when it finishes.
 let recountAsked = false;
 // The pass being counted, from 1: a queued extra pass starts from zero under the next number, so a status read never
@@ -73,7 +74,7 @@ let recountAsked = false;
 let backfillProgress = { pass: 0, processed: 0, total: 0, errors: 0 };
 
 export function isBackfillInProgress(): boolean {
-  return isBackfillRunning;
+  return currentRun !== null;
 }
 
 /**
@@ -81,20 +82,30 @@ export function isBackfillInProgress(): boolean {
  * pass starts.
  *
  * Recounts every artist in small batches with pauses, so it is safe on a running server. Asked for while a recount
- * runs, it returns at once and the running one goes over the artists once more when it finishes: any number of asks
- * cost one more pass, and the answer (processed, errors) of the running call covers every pass.
+ * runs, it waits for that run and answers what it answers (processed, errors, over every pass): the running one goes
+ * over the artists once more when it finishes, and any number of asks cost one more pass. The running call keeps its
+ * own `onProgress` and stop check.
  */
-export async function backfillAllArtistCounts(
+export function backfillAllArtistCounts(
   onProgress?: (processed: number, total: number) => void,
   { shouldStop = () => false }: StopCheck = {}
 ): Promise<{ processed: number; errors: number }> {
-  if (isBackfillRunning) {
+  if (currentRun) {
     recountAsked = true;
     logger.debug("[ArtistCounts] Backfill already in progress, will run once more when it finishes");
-    return { processed: 0, errors: 0 };
+    return currentRun;
   }
 
-  isBackfillRunning = true;
+  currentRun = runPasses(onProgress, shouldStop);
+  return currentRun;
+}
+
+async function runPasses(
+  onProgress: ((processed: number, total: number) => void) | undefined,
+  shouldStop: () => boolean
+): Promise<{ processed: number; errors: number }> {
+  // Yield first, so `currentRun` is set before anything here can end the run and clear it.
+  await Promise.resolve();
   const answer = { processed: 0, errors: 0 };
   let pass = 0;
 
@@ -110,7 +121,7 @@ export async function backfillAllArtistCounts(
     } while (recountAsked);
     return answer;
   } finally {
-    isBackfillRunning = false;
+    currentRun = null;
     recountAsked = false;
   }
 }
@@ -199,7 +210,7 @@ export async function getBackfillProgress(): Promise<{
   /** The pass being counted, from 1 (a queued extra pass is the next number); 0 when nothing runs. */
   pass: number;
 }> {
-  if (isBackfillRunning) {
+  if (currentRun) {
     return {
       processed: backfillProgress.processed,
       total: backfillProgress.total,

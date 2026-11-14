@@ -67,6 +67,73 @@ describe("syncAll -- prune pass", () => {
         expect(result.pruned).toBe(3);
     });
 
+    describe("on a library bigger than a page of ids", () => {
+        const STORED = 1100;
+        const seedMany = () =>
+            prisma.audiobook.createMany({
+                data: Array.from({ length: STORED }, (_, i) => {
+                    const id = `${P}bulk-${String(i).padStart(4, "0")}`;
+                    return { id, title: id, sortName: id, audioUrl: id };
+                }),
+            });
+
+        it("deletes the books ABS no longer lists in batches, never with one list of every id", async () => {
+            await seedMany();
+            await seed("keep-me");
+            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+            const prune = jest.spyOn(prisma.audiobook, "deleteMany");
+
+            const result = await audiobookCacheService.syncAll();
+
+            expect(await ids()).toEqual([`${P}keep-me`]);
+            expect(result.pruned).toBe(STORED);
+            const wheres = prune.mock.calls.map(([args]) => args?.where as { id?: { in?: string[]; notIn?: string[] } });
+            expect(wheres.length).toBeGreaterThanOrEqual(2);
+            for (const where of wheres) {
+                expect(where.id?.notIn).toBeUndefined();
+                expect(where.id?.in?.length).toBeLessThanOrEqual(500);
+            }
+        });
+
+        it("reads the stored ids a page at a time, by id", async () => {
+            await seedMany();
+            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+            const find = jest.spyOn(prisma.audiobook, "findMany");
+
+            await audiobookCacheService.syncAll();
+
+            expect(find.mock.calls[0][0]).toMatchObject({ take: 500, orderBy: { id: "asc" } });
+            expect((find.mock.calls[1][0] as { where?: { id?: { gt?: string } } }).where?.id?.gt).toEqual(expect.any(String));
+        });
+
+        it("keeps the books ABS still lists, wherever they fall among the pages", async () => {
+            await seedMany();
+            const live = [0, 499, 500, 501, 1099].map((i) => `bulk-${String(i).padStart(4, "0")}`);
+            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue(live.map((id) => minimalBook(id, id)));
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+
+            const result = await audiobookCacheService.syncAll();
+
+            expect(await ids()).toEqual(live.map((id) => `${P}${id}`));
+            expect(result.pruned).toBe(STORED - live.length);
+        });
+
+        it("stops between pages when told to stop: what was deleted stays deleted, the rest is left for the next sync", async () => {
+            await seedMany();
+            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+            const prune = jest.spyOn(prisma.audiobook, "deleteMany");
+
+            const result = await audiobookCacheService.syncAll({ shouldStop: () => prune.mock.calls.length >= 1 });
+
+            expect(prune).toHaveBeenCalledTimes(1);
+            expect(await prisma.audiobook.count()).toBe(STORED - 500);
+            expect(result.pruned).toBe(500);
+        });
+    });
+
     it("refuses to prune when ABS returns an empty list (failed fetch must not wipe the library)", async () => {
         await seed("kept-1");
         (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([]);

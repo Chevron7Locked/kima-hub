@@ -14,7 +14,7 @@ import { prisma } from "../../../utils/db";
 import { isBackfillInProgress } from "../../../services/artistCountsService";
 import { getImageBackfillProgress } from "../../../services/imageBackfill";
 import { downloadAndStoreImage } from "../../../services/imageStorage";
-import { useShutdownCheck } from "../../../utils/stopCheck";
+import { useShutdownCheck, whenRequestWorkEnded } from "../../../utils/stopCheck";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
 
@@ -70,6 +70,56 @@ describe("POST /library/image-backfill/start", () => {
         expect(res.status).toBe(200);
         expect(findMany).not.toHaveBeenCalled();
         expect(download).not.toHaveBeenCalled();
+    });
+});
+
+// The shutdown's drain waits for work a request started, not only for the catch-up work: the database stays open until
+// the batch under way has ended.
+describe("the shutdown's drain and a backfill an admin started", () => {
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const held = () => {
+        let release!: () => void;
+        const done = new Promise<void>((resolve) => (release = resolve));
+        return { done, release };
+    };
+    async function drainsOnlyAfter(release: () => void) {
+        let drained = false;
+        const waiting = whenRequestWorkEnded().then(() => (drained = true));
+        await flush();
+        await flush();
+        expect(drained).toBe(false);
+        release();
+        await waiting;
+        expect(drained).toBe(true);
+    }
+
+    it("holds the drain while the image backfill's download is under way", async () => {
+        const download_ = held();
+        download.mockImplementationOnce(async () => {
+            await download_.done;
+            return null;
+        });
+
+        await request(app).post("/library/image-backfill/start").expect(200);
+        for (let i = 0; i < 200 && download.mock.calls.length === 0; i++) await flush();
+        expect(download).toHaveBeenCalledTimes(1);
+
+        await drainsOnlyAfter(download_.release);
+    });
+
+    it("holds the drain while the artist recount's batch is under way", async () => {
+        const count = held();
+        const realCount = prisma.artist.count.bind(prisma.artist) as (...args: unknown[]) => Promise<number>;
+        const counting = jest.spyOn(prisma.artist, "count").mockImplementationOnce((async (...args: unknown[]) => {
+            await count.done;
+            return realCount(...args);
+        }) as never);
+
+        await request(app).post("/library/artist-counts/backfill").expect(200);
+        for (let i = 0; i < 200 && counting.mock.calls.length === 0; i++) await flush();
+        expect(counting).toHaveBeenCalled();
+
+        await drainsOnlyAfter(count.release);
     });
 });
 

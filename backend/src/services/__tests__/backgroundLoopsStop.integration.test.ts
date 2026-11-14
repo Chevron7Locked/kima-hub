@@ -96,6 +96,39 @@ describe("backfillAllArtistCounts", () => {
         // the batch, then the empty one that ends the pass
         expect(findMany).toHaveBeenCalledTimes(2);
     });
+
+    it("answers a second caller from the run in progress instead of with nothing, so whoever waits waits for the run", async () => {
+        await seedArtists(3);
+
+        const first = backfillAllArtistCounts();
+        const second = backfillAllArtistCounts();
+        const [ran, asked] = await Promise.all([first, second]);
+
+        expect(asked).toEqual(ran);
+        expect(asked.processed).toBeGreaterThanOrEqual(3);
+    });
+
+    it("keeps the second caller's ask: the running recount goes over the artists once more", async () => {
+        await seedArtists(1);
+        const findMany = jest.spyOn(prisma.artist, "findMany");
+
+        const first = backfillAllArtistCounts();
+        const second = backfillAllArtistCounts();
+        await Promise.all([first, second]);
+
+        // two passes, each the batch and the empty one that ends it
+        expect(findMany).toHaveBeenCalledTimes(4);
+    });
+
+    it("lets a later call run once the first has ended, and after one that failed", async () => {
+        await seedArtists(1);
+        jest.spyOn(prisma.artist, "count").mockRejectedValueOnce(new Error("database down"));
+
+        await expect(backfillAllArtistCounts()).rejects.toThrow("database down");
+        const answer = await backfillAllArtistCounts();
+
+        expect(answer.processed).toBeGreaterThanOrEqual(1);
+    });
 });
 
 describe("backfillAllImages", () => {
@@ -142,6 +175,93 @@ describe("backfillAllImages", () => {
         await backfillAllImages({ shouldStop: () => false });
 
         expect(download.mock.calls.filter(([, id]) => String(id).startsWith(P))).toHaveLength(12);
+    });
+
+    it("ends the pause between batches at once when told to stop, instead of waiting it out", async () => {
+        await seedArtists(12, "http://example.invalid/a.jpg");
+        let stop = false;
+        download.mockImplementation(async () => {
+            stop = true;
+            return null;
+        });
+
+        const started = Date.now();
+        await backfillAllImages({ shouldStop: () => stop });
+
+        expect(Date.now() - started).toBeLessThan(800);
+    });
+
+    it("hands each download a signal that aborts when told to stop, so one slow download cannot outlast the drain", async () => {
+        await seedArtists(1, "http://example.invalid/a.jpg");
+        let stop = false;
+        let abortedBy: "signal" | "never" = "never";
+        download.mockImplementation(async (_url: string, _id: string, _kind: string, signal?: AbortSignal) => {
+            stop = true;
+            // A download that would run for 30 s, ended only by the signal.
+            await new Promise<void>((resolve) => {
+                if (!signal) return resolve();
+                signal.addEventListener("abort", () => {
+                    abortedBy = "signal";
+                    resolve();
+                });
+            });
+            return null;
+        });
+
+        await backfillAllImages({ shouldStop: () => stop });
+
+        expect(abortedBy).toBe("signal");
+    });
+
+    describe("on a library bigger than a page", () => {
+        // The pause between batches is the real clock's second: a page of 500 is fifty of them, so the clock is driven.
+        async function withClock<T>(run: () => Promise<T>): Promise<T> {
+            jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate", "clearImmediate", "queueMicrotask"] });
+            try {
+                const running = run();
+                let settled = false;
+                running.then(
+                    () => (settled = true),
+                    () => (settled = true),
+                );
+                while (!settled) await jest.advanceTimersByTimeAsync(1000);
+                return await running;
+            } finally {
+                jest.useRealTimers();
+            }
+        }
+        const seedPage = () =>
+            prisma.artist.createMany({
+                data: Array.from({ length: 501 }, (_, i) => {
+                    const id = `${P}-pg-${String(i).padStart(3, "0")}`;
+                    return { id, name: id, normalizedName: id, identityKey: id, heroUrl: "http://example.invalid/a.jpg" };
+                }),
+            });
+
+        it("reads the artists 500 at a time, by id, and stops between pages", async () => {
+            await seedPage();
+            const artistFind = jest.spyOn(prisma.artist, "findMany");
+            const albumFind = jest.spyOn(prisma.album, "findMany");
+
+            await withClock(() => backfillAllImages({ shouldStop: () => download.mock.calls.length >= 500 }));
+
+            expect(artistFind).toHaveBeenCalledTimes(1);
+            expect(artistFind.mock.calls[0][0]).toMatchObject({ take: 500, orderBy: { id: "asc" } });
+            expect(albumFind).not.toHaveBeenCalled();
+        });
+
+        it("walks every page when never told to stop, each after the last id of the one before", async () => {
+            await seedPage();
+            const artistFind = jest.spyOn(prisma.artist, "findMany");
+
+            await withClock(() => backfillAllImages());
+
+            const pages = artistFind.mock.calls.map(([args]) => args as { where?: { id?: { gt?: string } } });
+            expect(pages.length).toBeGreaterThanOrEqual(2);
+            expect(pages[0].where?.id).toBeUndefined();
+            expect(pages[1].where?.id?.gt).toEqual(expect.any(String));
+            expect(download.mock.calls.filter(([, id]) => String(id).startsWith(P))).toHaveLength(501);
+        });
     });
 
     it("lets one run at a time: a second call in the same tick does nothing", async () => {
@@ -279,14 +399,68 @@ describe("audiobookCacheService.syncAll", () => {
     });
 
     it("syncs and prunes as before when never told to stop", async () => {
+        await prisma.audiobook.create({ data: { id: `${P}-stale`, title: "Stale", sortName: "stale", audioUrl: `${P}-stale` } });
         jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
         const syncOne = jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
-        const prune = jest.spyOn(prisma.audiobook, "deleteMany").mockResolvedValue({ count: 0 } as never);
+        const prune = jest.spyOn(prisma.audiobook, "deleteMany");
 
-        const result = await audiobookCacheService.syncAll({ shouldStop: () => false });
+        try {
+            const result = await audiobookCacheService.syncAll({ shouldStop: () => false });
 
-        expect(syncOne).toHaveBeenCalledTimes(3);
-        expect(result.synced).toBe(3);
-        expect(prune).toHaveBeenCalledTimes(1);
+            expect(syncOne).toHaveBeenCalledTimes(3);
+            expect(result.synced).toBe(3);
+            expect(prune).toHaveBeenCalledTimes(1);
+            expect(await prisma.audiobook.count({ where: { id: `${P}-stale` } })).toBe(0);
+        } finally {
+            await prisma.audiobook.deleteMany({ where: { id: { startsWith: P } } });
+        }
+    });
+
+    describe("one at a time", () => {
+        beforeEach(() => {
+            jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
+        });
+
+        it("claims the run before its first await: a second call in the same tick waits for the run and gets its result", async () => {
+            const fetchBooks = jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+
+            const first = audiobookCacheService.syncAll();
+            const second = audiobookCacheService.syncAll();
+            const [ran, asked] = await Promise.all([first, second]);
+
+            expect(fetchBooks).toHaveBeenCalledTimes(1);
+            expect(asked).toBe(ran);
+            expect(ran.synced).toBe(3);
+        });
+
+        it("does not answer the second caller until the run has ended", async () => {
+            let release!: () => void;
+            jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockImplementation(
+                () => new Promise((resolve) => (release = () => resolve(books as never))),
+            );
+
+            void audiobookCacheService.syncAll();
+            let answered = false;
+            void audiobookCacheService.syncAll().then(() => (answered = true));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(answered).toBe(false);
+
+            release();
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(answered).toBe(true);
+        });
+
+        it("lets a later call run once the first has ended, and after one that failed", async () => {
+            expectLog("error");
+            const fetchBooks = jest.spyOn(audiobookshelfService, "getAllAudiobooks");
+            fetchBooks.mockRejectedValueOnce(new Error("abs down"));
+            fetchBooks.mockResolvedValue(books as never);
+
+            await expect(audiobookCacheService.syncAll()).rejects.toThrow("abs down");
+            const result = await audiobookCacheService.syncAll();
+
+            expect(result.synced).toBe(3);
+            expect(fetchBooks).toHaveBeenCalledTimes(2);
+        });
     });
 });

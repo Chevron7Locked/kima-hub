@@ -4,6 +4,7 @@ import { config } from "../../config";
 import { saveSystemSettings } from "../../utils/systemSettings";
 import { notificationService } from "../../services/notificationService";
 import { refileLibrary, type RefileResult } from "../../services/albumRefile";
+import { runAsRequestWork } from "../../utils/stopCheck";
 
 export interface RefileJobData {
     /** The admin who asked; the outcome goes to their notification tray. */
@@ -25,31 +26,43 @@ function refileSummary(r: RefileResult): string {
 
 /**
  * The album re-file, run on the scan queue. A run counts as done (closing the 1.12 release item) only when songs
- * were read and every album could be re-filed.
+ * were read and every album could be re-filed. It is request-started work: the shutdown's drain waits for it, and a
+ * shutdown ends it between albums, which is not a finished run (nothing is recorded, and the admin is told to run it
+ * again).
  */
-export async function processRefile(job: Job<RefileJobData>): Promise<RefileResult> {
-    const { userId } = job.data;
-    const tell = (type: "system" | "error", title: string, message: string) =>
-        notificationService
-            .create({ userId, type, title, message, groupKey: REFILE_RESULT_KEY, renotify: true })
-            .catch((e) => logger.error(`[RefileJob ${job.id}] Could not record the outcome:`, e));
+export function processRefile(job: Job<RefileJobData>): Promise<RefileResult> {
+    return runAsRequestWork(async (stop) => {
+        const { userId } = job.data;
+        const tell = (type: "system" | "error", title: string, message: string) =>
+            notificationService
+                .create({ userId, type, title, message, groupKey: REFILE_RESULT_KEY, renotify: true })
+                .catch((e) => logger.error(`[RefileJob ${job.id}] Could not record the outcome:`, e));
 
-    let result: RefileResult;
-    try {
-        result = await refileLibrary(config.music.musicPath);
-    } catch (error) {
-        logger.error(`[RefileJob ${job.id}] Failed:`, error);
-        await tell("error", "Re-filing albums failed", (error as Error | undefined)?.message ?? String(error));
-        throw error;
-    }
+        let result: RefileResult;
+        try {
+            result = await refileLibrary(config.music.musicPath, stop);
+        } catch (error) {
+            logger.error(`[RefileJob ${job.id}] Failed:`, error);
+            await tell("error", "Re-filing albums failed", (error as Error | undefined)?.message ?? String(error));
+            throw error;
+        }
 
-    if (result.songsRead === 0 && result.songsUnreadable > 0) {
-        await tell("error", "Re-filing albums found no songs to read", `None of ${result.songsUnreadable} songs could be read. Is the music drive mounted?`);
+        if (result.stopped) {
+            await tell(
+                "system",
+                "Re-filing albums stopped",
+                `Re-filing stopped for the server shutting down (${refileSummary(result)}); run it again to finish.`,
+            );
+            return result;
+        }
+        if (result.songsRead === 0 && result.songsUnreadable > 0) {
+            await tell("error", "Re-filing albums found no songs to read", `None of ${result.songsUnreadable} songs could be read. Is the music drive mounted?`);
+            return result;
+        }
+        if (result.albumsFailed === 0) {
+            await saveSystemSettings({ albumsRefiledAt: new Date() });
+        }
+        await tell("system", "Albums re-filed by their tags", refileSummary(result));
         return result;
-    }
-    if (result.albumsFailed === 0) {
-        await saveSystemSettings({ albumsRefiledAt: new Date() });
-    }
-    await tell("system", "Albums re-filed by their tags", refileSummary(result));
-    return result;
+    });
 }

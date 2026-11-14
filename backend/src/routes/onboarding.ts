@@ -7,7 +7,7 @@ import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type
 import { generateRefreshToken, generateToken, signedInUser } from "../middleware/auth";
 import { signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
-import { shutdownStop } from "../utils/stopCheck";
+import { runAsRequestWork } from "../utils/stopCheck";
 
 const router = Router();
 
@@ -221,18 +221,19 @@ router.post("/complete", async (req, res) => {
         logger.debug("[ONBOARDING] User completed onboarding:", req.user!.id);
 
         // Fire-and-forget audiobook sync if Audiobookshelf was enabled
-        (async () => {
+        // Request-started work, tracked from the first step (the settings read too): the shutdown waits for it.
+        void runAsRequestWork(async (stop) => {
             try {
                 const settings = await getSystemSettings();
                 if (settings?.audiobookshelfEnabled) {
                     const { audiobookCacheService } = await import("../services/audiobookCache");
-                    const result = await audiobookCacheService.syncAll(shutdownStop());
+                    const result = await audiobookCacheService.syncAll(stop);
                     logger.info(`[ONBOARDING] Audiobook sync complete: ${result.synced} synced`);
                 }
             } catch (err) {
                 logger.warn("[ONBOARDING] Post-onboarding audiobook sync failed:", err);
             }
-        })();
+        });
 
         res.json({ success: true });
     } catch (err: any) {

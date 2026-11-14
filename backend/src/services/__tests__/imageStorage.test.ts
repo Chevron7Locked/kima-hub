@@ -10,7 +10,52 @@ jest.mock("../../config", () => ({
     USER_AGENT: "Kima/test",
 }));
 
-import { coverFileForWidth, nativeFileExists } from "../imageStorage";
+jest.mock("../../utils/ssrf", () => ({ fetchChecked: jest.fn() }));
+
+import { fetchChecked } from "../../utils/ssrf";
+import { coverFileForWidth, downloadAndStoreImage, nativeFileExists } from "../imageStorage";
+
+describe("downloadAndStoreImage and a stop", () => {
+    const fetchMock = fetchChecked as jest.Mock;
+    afterEach(() => {
+        fetchMock.mockReset();
+        fs.rmSync(`/tmp/kima-test-cache-${process.pid}`, { recursive: true, force: true });
+    });
+
+    it("gives up at once, without asking the network, when the signal is already aborted", async () => {
+        const stop = new AbortController();
+        stop.abort();
+
+        expect(await downloadAndStoreImage("https://example.com/a.jpg", "a1", "artist", stop.signal)).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("ends a download under way within a moment of the signal aborting, not after its own 30 s", async () => {
+        // A server that never answers: the request ends only when the signal handed to the fetch aborts.
+        fetchMock.mockImplementation(
+            (_url: string, init: RequestInit) =>
+                new Promise((_resolve, reject) => {
+                    init.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+                }),
+        );
+        const stop = new AbortController();
+
+        const started = Date.now();
+        const downloading = downloadAndStoreImage("https://example.com/a.jpg", "a2", "artist", stop.signal);
+        setTimeout(() => stop.abort(), 20);
+
+        expect(await downloading).toBeNull();
+        expect(Date.now() - started).toBeLessThan(5_000);
+    });
+
+    it("still downloads with no signal", async () => {
+        fetchMock.mockResolvedValue(
+            new Response(new Uint8Array(2000), { status: 200, headers: { "content-type": "image/jpeg" } }),
+        );
+
+        expect(await downloadAndStoreImage("https://example.com/a.jpg", "a3", "artist")).toBe("native:artists/a3.jpg");
+    });
+});
 
 describe("nativeFileExists", () => {
     const cacheRoot = `/tmp/kima-test-cache-${process.pid}`;

@@ -17,12 +17,14 @@ import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwner
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { markLibraryChangedQuietly } from "./libraryChanged";
 import { backfillAllArtistCounts } from "./artistCountsService";
-import { shutdownStop } from "../utils/stopCheck";
+import type { StopCheck } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
 import { JointCreditFiler, type JointFiling } from "./jointCredit";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
 
 export interface RefileResult {
+    /** The re-file ended early because the server is shutting down: some albums are still misfiled. */
+    stopped: boolean;
     songsRead: number;
     /** Songs whose tags could not be read; their albums are left where they are. */
     songsUnreadable: number;
@@ -72,11 +74,22 @@ function isNamed(row: AlbumRow, candidate: ArtistCandidate, holderId: string | n
 
 const isPlaceholder = (rgMbid: string) => rgMbid.startsWith("temp-");
 
-export async function refileLibrary(musicPath: string): Promise<RefileResult> {
+/**
+ * `shouldStop` is asked between songs read, between albums judged and between albums filed: once it says yes the
+ * re-file ends with what it did (the album under way is finished, every move is its own transaction) and answers
+ * `stopped`. It then prunes and recounts nothing; a later re-file does both, and finds the rest still misfiled.
+ */
+export async function refileLibrary(musicPath: string, { shouldStop = () => false }: StopCheck = {}): Promise<RefileResult> {
     const result: RefileResult = {
-        songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, artistsRenamed: 0, albumsFailed: 0,
-        artistsRemoved: 0,
+        stopped: false, songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, artistsRenamed: 0,
+        albumsFailed: 0, artistsRemoved: 0,
     };
+    const halted = (): RefileResult => {
+        result.stopped = true;
+        logger.info(`[Refile] Stopped for shutdown: ${result.albumsMoved} albums moved, ${result.albumsMerged} merged so far`);
+        return result;
+    };
+    if (shouldStop()) return halted();
 
     const songs: Song[] = (
         await prisma.track.findMany({
@@ -94,7 +107,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     let next = 0;
     await Promise.all(
         Array.from({ length: READ_CONCURRENCY }, async () => {
-            while (next < songs.length) {
+            while (next < songs.length && !shouldStop()) {
                 const song = songs[next++];
                 try {
                     const metadata = await parseFile(path.join(musicPath, song.relativePath), { skipCovers: true });
@@ -107,6 +120,8 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
             }
         }),
     );
+
+    if (shouldStop()) return halted();
 
     // 2. Each album's artist, elected as the scanner elects it; with no leader each song names its own.
     const albums = new Map<string, Song[]>();
@@ -140,6 +155,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     const discoverRecords = await loadDiscoverRecords();
     const filings: { candidate: ArtistCandidate; songs: Song[] }[] = [];
     for (const [groupKey, group] of albums) {
+        if (shouldStop()) return halted();
         const elected = electAlbumArtist(group.map((s) => s.credit!));
         const discovers =
             heldBy.has(groupKey) ||
@@ -172,6 +188,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
     const named = new Map<string, string>();
     for (const { candidate } of filings) if (candidate.mbid && !named.has(candidate.mbid)) named.set(candidate.mbid, candidate.name);
     for (const [mbid, name] of named) {
+        if (shouldStop()) return halted();
         try {
             if (await restoreCutName(mbid, name)) result.artistsRenamed++;
         } catch (error) {
@@ -182,6 +199,7 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
 
     // 4. Each album's songs under the artist their tags name.
     for (const { candidate, songs: targetSongs } of filings) {
+        if (shouldStop()) return halted();
         try {
             const outcome = await refileAlbum(candidate, targetSongs);
             if (outcome === "edited") result.keptEdited++;
@@ -195,8 +213,11 @@ export async function refileLibrary(musicPath: string): Promise<RefileResult> {
 
     // Library albums moved, merged or under a renamed artist: a client lists them differently.
     if (result.albumsMoved + result.albumsMerged + result.artistsRenamed > 0) await markLibraryChangedQuietly("albums re-filed");
+    if (shouldStop()) return halted();
     result.artistsRemoved = (await pruneEmptyAlbumsAndArtists()).artists;
-    await backfillAllArtistCounts(undefined, shutdownStop()).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
+    await backfillAllArtistCounts(undefined, { shouldStop }).catch((err) => logger.error("[Refile] Artist counts update failed:", err));
+    // A recount cut short leaves counts out of date: the re-file is not done until a later one recounts.
+    if (shouldStop()) return halted();
     logger.info(
         `[Refile] Read ${result.songsRead} songs (${result.songsUnreadable} unreadable): ${result.artistsRenamed} artists renamed, ` +
             `${result.albumsMoved} albums moved, ${result.albumsMerged} merged, ${result.keptEdited} kept as edited, ${result.albumsFailed} failed, ` +

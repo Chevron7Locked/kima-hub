@@ -44,9 +44,12 @@ export function resolveInCoversDir(relativePath: string): string | null {
 export async function downloadAndStoreImage(
     url: string,
     id: string,
-    type: "artist" | "album"
+    type: "artist" | "album",
+    signal?: AbortSignal
 ): Promise<string | null> {
     if (!url) return null;
+    // A stop ends the download at once; a download with no signal keeps its own 30 s limit.
+    if (signal?.aborted) return null;
 
     const subdir = type === "artist" ? ARTIST_IMAGES_DIR : ALBUM_IMAGES_DIR;
     const dirPath = ensureCoversDir(subdir);
@@ -60,11 +63,11 @@ export async function downloadAndStoreImage(
             headers: {
                 "User-Agent": USER_AGENT,
             },
-            signal: AbortSignal.timeout(30000),
+            signal: signal ? AbortSignal.any([AbortSignal.timeout(30000), signal]) : AbortSignal.timeout(30000),
         });
 
         if (!response.ok) {
-            logger.debug(`[ImageStorage] Failed to download: ${response.status}`);
+            logger.debug(`[ImageStorage] Failed to download:${response.status}`);
             return null;
         }
 

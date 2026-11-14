@@ -14,8 +14,9 @@ import { prisma } from "../../../utils/db";
 import { onSystemSettingsChange } from "../../../utils/systemSettings";
 import { config } from "../../../config";
 import { processRefile } from "../refileProcessor";
+import { whenRequestWorkEnded } from "../../../utils/stopCheck";
 
-const clean = { songsRead: 10, songsUnreadable: 0, albumsMoved: 2, albumsMerged: 1, keptEdited: 0, artistsRenamed: 0, albumsFailed: 0, artistsRemoved: 2 };
+const clean = { stopped: false, songsRead: 10, songsUnreadable: 0, albumsMoved: 2, albumsMerged: 1, keptEdited: 0, artistsRenamed: 0, albumsFailed: 0, artistsRemoved: 2 };
 const job = { id: "refile-albums", data: { userId: "refile-admin" } } as Job<{ userId: string }>;
 const stamped = async () => (await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } }))?.albumsRefiledAt ?? null;
 
@@ -34,7 +35,7 @@ afterAll(async () => {
 it("re-files the music folder, records it, and tells the admin what moved", async () => {
     mockRefile.mockResolvedValue(clean);
     await processRefile(job);
-    expect(mockRefile).toHaveBeenCalledWith(config.music.musicPath);
+    expect(mockRefile).toHaveBeenCalledWith(config.music.musicPath, { shouldStop: expect.any(Function) });
     expect(await stamped()).not.toBeNull();
     expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({ userId: "refile-admin", type: "system", groupKey: "library-refile", renotify: true }));
     expect(mockNotify.mock.calls[0][0].message).toMatch(/2 albums moved/);
@@ -66,6 +67,30 @@ it("still records a finished re-file when the notification cannot be sent", asyn
     mockNotify.mockRejectedValue(new Error("tray down"));
     await expect(processRefile(job)).resolves.toEqual(clean);
     expect(await stamped()).not.toBeNull();
+});
+
+it("does not record a re-file the shutdown cut short, and tells the admin to run it again", async () => {
+    mockRefile.mockResolvedValue({ ...clean, stopped: true, albumsMoved: 1 });
+    await processRefile(job);
+    expect(await stamped()).toBeNull();
+    expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({ type: "system", groupKey: "library-refile" }));
+    expect(mockNotify.mock.calls[0][0].message).toMatch(/stopped.*run it again/);
+});
+
+it("holds the shutdown's drain until the re-file has ended", async () => {
+    let finish!: (r: typeof clean) => void;
+    mockRefile.mockReturnValue(new Promise<typeof clean>((resolve) => (finish = resolve)));
+    const running = processRefile(job);
+    let drained = false;
+    void whenRequestWorkEnded().then(() => (drained = true));
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(drained).toBe(false);
+
+    finish(clean);
+    await running;
+    await whenRequestWorkEnded();
+    expect(drained).toBe(true);
 });
 
 it("records a finished re-file through the settings save, so whoever reads the marker is told", async () => {

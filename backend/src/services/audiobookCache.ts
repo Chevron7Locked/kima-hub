@@ -14,6 +14,8 @@ import type { StopCheck } from "../utils/stopCheck";
  * the Audiobookshelf API every time, dramatically improving performance
  */
 
+const PRUNE_PAGE_SIZE = 500;
+
 interface SyncResult {
     synced: number;
     failed: number;
@@ -25,6 +27,7 @@ interface SyncResult {
 class AudiobookCacheService {
     private coverCacheDir: string;
     private coverCacheAvailable: boolean = false;
+    private currentSync: Promise<SyncResult> | null = null;
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/audiobooks/
@@ -55,10 +58,27 @@ class AudiobookCacheService {
     /**
      * Sync all audiobooks from Audiobookshelf to our database.
      *
-     * `shouldStop` is asked before each book: once it says yes the sync ends quietly with what it did, and prunes
-     * nothing, since the list was not gone through. A run where a book failed prunes nothing either.
+     * One run at a time: a call made while one runs waits for it and answers what it answers (the running call keeps
+     * its own stop check). The run is claimed before the first await, so two calls in the same tick share one, and
+     * released when it ends, whether it succeeded or failed.
+     *
+     * `shouldStop` is asked before each book and each page of the prune: once it says yes the sync ends quietly with
+     * what it did. A stop before the prune prunes nothing, since the list was not gone through; a stop between pages
+     * leaves the rest of the stale books for the next sync. A run where a book failed prunes nothing either.
      */
-    async syncAll({ shouldStop = () => false }: StopCheck = {}): Promise<SyncResult> {
+    syncAll(stop: StopCheck = {}): Promise<SyncResult> {
+        if (this.currentSync) {
+            logger.debug("[AUDIOBOOK] Sync already running; waiting for it");
+            return this.currentSync;
+        }
+        const run = this.runSync(stop).finally(() => {
+            this.currentSync = null;
+        });
+        this.currentSync = run;
+        return run;
+    }
+
+    private async runSync({ shouldStop = () => false }: StopCheck): Promise<SyncResult> {
         const result: SyncResult = {
             synced: 0,
             failed: 0,
@@ -125,14 +145,10 @@ class AudiobookCacheService {
                     "(refusing to delete everything on a possibly-failed fetch)"
                 );
             } else {
-                const liveIds = audiobooks.map((b: any) => b.id);
-                const pruned = await prisma.audiobook.deleteMany({
-                    where: { id: { notIn: liveIds } },
-                });
-                if (pruned.count > 0) {
-                    result.pruned = pruned.count;
+                result.pruned = await this.pruneAbsent(new Set(audiobooks.map((b: any) => b.id as string)), shouldStop);
+                if (result.pruned > 0) {
                     logger.info(
-                        `[AUDIOBOOK] Pruned ${pruned.count} audiobooks no longer present in Audiobookshelf`
+                        `[AUDIOBOOK] Pruned ${result.pruned} audiobooks no longer present in Audiobookshelf`
                     );
                 }
             }
@@ -142,6 +158,38 @@ class AudiobookCacheService {
             logger.error("[AUDIOBOOK] Sync failed:", error);
             throw error;
         }
+    }
+
+    /**
+     * Deletes the stored books Audiobookshelf no longer lists. The stored ids are read a page at a time (by id) and
+     * the absent ones of each page deleted as one batch, so no query carries every id. A stop is checked before each
+     * page: what was deleted stays deleted, and the rest waits for the next sync. Returns how many were deleted.
+     */
+    private async pruneAbsent(liveIds: Set<string>, shouldStop: () => boolean): Promise<number> {
+        let pruned = 0;
+        let after: string | null = null;
+        for (;;) {
+            if (shouldStop()) {
+                logger.info("[AUDIOBOOK] Prune stopped for shutdown");
+                break;
+            }
+            const page: { id: string }[] = await prisma.audiobook.findMany({
+                where: after === null ? undefined : { id: { gt: after } },
+                select: { id: true },
+                orderBy: { id: "asc" },
+                take: PRUNE_PAGE_SIZE,
+            });
+            if (page.length === 0) break;
+            after = page[page.length - 1].id;
+
+            const absent = page.map((row) => row.id).filter((id) => !liveIds.has(id));
+            if (absent.length > 0) {
+                const deleted = await prisma.audiobook.deleteMany({ where: { id: { in: absent } } });
+                pruned += deleted.count;
+            }
+            if (page.length < PRUNE_PAGE_SIZE) break;
+        }
+        return pruned;
     }
 
     /**

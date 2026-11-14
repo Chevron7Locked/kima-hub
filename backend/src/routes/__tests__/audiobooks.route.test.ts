@@ -62,6 +62,7 @@ import { prisma } from "../../utils/db";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { audiobookCacheService } from "../../services/audiobookCache";
 import { audiobookshelfService } from "../../services/audiobookshelf";
+import { whenRequestWorkEnded } from "../../utils/stopCheck";
 import audiobooksRoutes from "../audiobooks";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
@@ -333,6 +334,32 @@ describe("POST /audiobooks/sync", () => {
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
         expect(res.body.result.synced).toBe(3);
+    });
+
+    it("is work the shutdown waits for, with the stop check handed to the sync", async () => {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        (audiobookCacheService.syncAll as jest.Mock).mockImplementation(async () => {
+            await held;
+            return { synced: 1, failed: 0, skipped: 0, errors: [] };
+        });
+
+        const responding = request(app).post("/audiobooks/sync").then((res) => res);
+        for (let i = 0; i < 200 && (audiobookCacheService.syncAll as jest.Mock).mock.calls.length === 0; i++) {
+            await new Promise((r) => setImmediate(r));
+        }
+        expect(audiobookCacheService.syncAll).toHaveBeenCalledWith({ shouldStop: expect.any(Function) });
+
+        let drained = false;
+        const waiting = whenRequestWorkEnded().then(() => (drained = true));
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+        expect(drained).toBe(false);
+
+        release();
+        await waiting;
+        expect((await responding).status).toBe(200);
+        expect(drained).toBe(true);
     });
 
     it("returns 400 when Audiobookshelf is not configured", async () => {

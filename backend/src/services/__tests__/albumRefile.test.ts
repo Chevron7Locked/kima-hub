@@ -20,7 +20,7 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { refileLibrary } from "../albumRefile";
 import { backfillAllArtistCounts } from "../artistCountsService";
-import { useShutdownCheck } from "../../utils/stopCheck";
+import { shutdownStop, useShutdownCheck } from "../../utils/stopCheck";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.setTimeout(60_000);
@@ -114,7 +114,7 @@ describe("re-filing albums by their tags", () => {
         useShutdownCheck(() => begun);
 
         try {
-            await refileLibrary(musicDir);
+            await refileLibrary(musicDir, shutdownStop());
 
             expect(recount).toHaveBeenCalledTimes(1);
             const shouldStop = recount.mock.calls[0][1]?.shouldStop as () => boolean;
@@ -123,6 +123,59 @@ describe("re-filing albums by their tags", () => {
             expect(shouldStop()).toBe(true);
         } finally {
             useShutdownCheck(() => false);
+        }
+    });
+
+    it("reads nothing and answers that it stopped when told to stop before it starts", async () => {
+        const recount = backfillAllArtistCounts as jest.Mock;
+        recount.mockClear();
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Album", { rgMbid: REAL_RG });
+        await song(a.id, "Refile Cut and Band/Refile Album/01.flac", {
+            album: "Refile Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+
+        const result = await refileLibrary(musicDir, { shouldStop: () => true });
+
+        expect(result).toMatchObject({ stopped: true, songsRead: 0, albumsMoved: 0 });
+        expect(parseFile).not.toHaveBeenCalled();
+        expect(recount).not.toHaveBeenCalled();
+        expect(await filing("Refile Album")).toEqual([{ artist: "Refile Cut", rgMbid: REAL_RG, songs: 1 }]);
+    });
+
+    it("stops between albums: the album under way is filed, the next is left, and nothing is pruned or recounted", async () => {
+        const recount = backfillAllArtistCounts as jest.Mock;
+        recount.mockClear();
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        for (const [title, rg] of [["Refile Alpha", REAL_RG], ["Refile Beta", OTHER_RG]] as const) {
+            const a = await album(cut.id, title, { rgMbid: rg });
+            await song(a.id, `Refile Cut and Band/${title}/01.flac`, {
+                album: title, albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+            });
+        }
+        // The server begins to shut down as the first album's move commits.
+        let stop = false;
+        const transaction = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+        const watched = jest.spyOn(prisma, "$transaction").mockImplementation((async (...args: unknown[]) => {
+            const done = await transaction(...args);
+            stop = true;
+            return done;
+        }) as never);
+        const prune = jest.spyOn(prisma.artist, "deleteMany");
+
+        try {
+            const result = await refileLibrary(musicDir, { shouldStop: () => stop });
+
+            expect(result).toMatchObject({ stopped: true, albumsMoved: 1 });
+            expect(await filing("Refile Alpha")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 1 }]);
+            expect(await filing("Refile Beta")).toEqual([{ artist: "Refile Cut", rgMbid: OTHER_RG, songs: 1 }]);
+            expect(recount).not.toHaveBeenCalled();
+            expect(prune).not.toHaveBeenCalled();
+        } finally {
+            watched.mockRestore();
+            prune.mockRestore();
         }
     });
 
@@ -143,6 +196,7 @@ describe("re-filing albums by their tags", () => {
         expect(await prisma.ownedAlbum.findMany({ where: { rgMbid: REAL_RG }, select: { artistId: true } })).toEqual([{ artistId: full.id }]);
         expect(await prisma.artist.count({ where: { name: "Refile Cut" } })).toBe(0);
         expect(result.albumsMoved).toBe(1);
+        expect(result.stopped).toBe(false);
     });
 
     it("merges an album onto the right artist's copy of it, keeping the row with a real id", async () => {

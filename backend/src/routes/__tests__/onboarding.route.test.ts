@@ -15,6 +15,8 @@ import { decrypt } from "../../utils/encryption";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { lidarrService } from "../../services/lidarr";
 import { audiobookshelfService } from "../../services/audiobookshelf";
+import { audiobookCacheService } from "../../services/audiobookCache";
+import { whenRequestWorkEnded } from "../../utils/stopCheck";
 import onboardingRoutes from "../onboarding";
 import authRoutes from "../auth";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
@@ -234,6 +236,41 @@ describe("a saved step reaches whatever holds the setting", () => {
 
         expect(reload.lidarr).not.toHaveBeenCalled();
         expect(reload.audiobookshelf).not.toHaveBeenCalled();
+    });
+
+    it("finishing setup starts the audiobook sync as work the shutdown waits for, and hands it the stop check", async () => {
+        await prisma.systemSettings.upsert({
+            where: { id: "default" },
+            create: { id: "default", audiobookshelfEnabled: true },
+            update: { audiobookshelfEnabled: true },
+        });
+        invalidateSystemSettingsCache();
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const sync = jest.spyOn(audiobookCacheService, "syncAll").mockImplementation(async () => {
+            await held;
+            return { synced: 0, failed: 0, skipped: 0, errors: [] };
+        });
+        try {
+            await request(app).post("/onboarding/complete").set(asAdmin()).expect(200);
+            for (let i = 0; i < 200 && sync.mock.calls.length === 0; i++) await new Promise((r) => setImmediate(r));
+            expect(sync).toHaveBeenCalledWith({ shouldStop: expect.any(Function) });
+
+            let drained = false;
+            const waiting = whenRequestWorkEnded().then(() => (drained = true));
+            await new Promise((r) => setImmediate(r));
+            await new Promise((r) => setImmediate(r));
+            expect(drained).toBe(false);
+
+            release();
+            await waiting;
+            expect(drained).toBe(true);
+        } finally {
+            release();
+            sync.mockRestore();
+            await prisma.systemSettings.update({ where: { id: "default" }, data: { audiobookshelfEnabled: false } });
+            invalidateSystemSettingsCache();
+        }
     });
 
     it("a new Soulseek account reconnects once, not twice", async () => {

@@ -28,7 +28,7 @@ import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { config } from "../../config";
 import { parseLimit, parseOffset } from "./paging";
-import { shutdownStop } from "../../utils/stopCheck";
+import { runAsRequestWork } from "../../utils/stopCheck";
 import { findArtistArtwork, withAlbumArtwork } from "../../services/artwork";
 import {
   CollectionFilter,
@@ -284,11 +284,14 @@ router.post("/artist-counts/backfill", async (_req, res) => {
         : { message: "Backfill started", status: "processing" },
     );
 
-    backfillAllArtistCounts((processed, total) => {
-      if (processed % 100 === 0) {
-        logger.debug(`[ArtistCounts] Progress: ${processed}/${total}`);
-      }
-    }, shutdownStop()).catch((error) => {
+    // Request-started work: the shutdown waits for the batch under way, and the recount stops after it.
+    runAsRequestWork((stop) =>
+      backfillAllArtistCounts((processed, total) => {
+        if (processed % 100 === 0) {
+          logger.debug(`[ArtistCounts] Progress: ${processed}/${total}`);
+        }
+      }, stop),
+    ).catch((error) => {
       logger.error("[ArtistCounts] Backfill failed:", error);
     });
   } catch (error: any) {

@@ -269,6 +269,26 @@ describe("createBackgroundStart: the shutdown waits for the catch-up work", () =
         expect(events).toEqual(["warmup ended", "database closed"]);
     });
 
+    it("waits for work a request started too (an admin backfill, a re-file, a sync), as it does for the catch-up work", async () => {
+        const work = held();
+        const { shutdown, events } = await start();
+        const { runAsRequestWork } = await import("../utils/stopCheck");
+
+        void runAsRequestWork(async () => {
+            await work.done;
+            events.push("request work ended");
+        });
+        const closing = shutdown("SIGTERM");
+        await flush();
+        await flush();
+        expect(events).toEqual([]);
+
+        work.release();
+        await closing;
+
+        expect(events).toEqual(["request work ended", "database closed"]);
+    });
+
     it("hands the warmup the shutdown's stop check", async () => {
         let begun = false;
         const { createBackgroundStart } = await import("../backgroundStart");
