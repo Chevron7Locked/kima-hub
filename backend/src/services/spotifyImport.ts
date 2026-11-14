@@ -330,30 +330,51 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
   };
 }
 
-/** The shortest word the first-word sweeps look up and the shortest file name the M3U filename tier tries: shorter ones are too common to mean anything. */
+/**
+ * The shortest word the primary artist's first-word sweep and the five-letter prefix sweep look up, the M3U fuzzy tier's
+ * first word, and the shortest file name the M3U filename tier tries: shorter ones are too common to mean anything. The
+ * credit sweep has no minimum ("DJ Shadow"): it reads whole words only, which bounds it.
+ */
 const MIN_WORD_LENGTH = 3;
 
+/** Songs loaded per query when the artists a word finds have many: a query carries at most this many ids. */
+const SONG_CHUNK_MAX = 10_000;
+
 /**
- * The artists whose `normalizedName` holds `word` as a whole word, anywhere in the name: the pool for a source credit
- * stored under a compound name ("artist a feat. b", "artist/other", "artist, other", "(artist)", "x/artist"). A word
- * ends at any character that is not a letter or a digit, and at the ends of the name. A whole word, not a substring,
- * so a common word ("the") finds the artists that have it and not every name with those letters inside.
- * `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word, found in one
- * query and handed back as ids. "Letter" follows the database's character classes: where they know only ASCII (a C
- * locale, SQL_ASCII), every accented or non-Latin letter counts as a boundary, so such names are offered more often,
- * never less; the matcher narrows the pool afterwards.
+ * Every playable song, in id order, of the artists whose `normalizedName` holds `word` as a whole word, anywhere in the
+ * name: the pool for a source credit stored under a compound name ("artist a feat. b", "artist/other", "artist, other",
+ * "(artist)", "x/artist"). A word ends at any character that is not a letter or a digit, and at the ends of the name. A
+ * whole word, not a substring, so a common word ("the") finds the artists that have it and not every name with those
+ * letters inside. `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word.
+ * One query joins the match to the playable songs and returns their ids, so the number of artists never reaches a
+ * query's bind-parameter limit; the songs are then loaded in chunks of SONG_CHUNK_MAX ids, in id order. "Letter" follows
+ * the database's character classes: where they know only ASCII (a C locale, SQL_ASCII), every accented or non-Latin
+ * letter counts as a boundary, so such names are offered more often, never less; the matcher narrows the pool afterwards.
  */
-async function artistsHoldingWord(word: string): Promise<Prisma.ArtistWhereInput> {
+async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
+  word: string,
+  include: I,
+): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = `(^|[^[:alnum:]])${escaped}($|[^[:alnum:]])`;
-  const rows = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "Artist" WHERE "normalizedName" ~ ${pattern}`;
-  return { id: { in: rows.map((r) => r.id) } };
+  const ids = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT t.id FROM "Track" t
+    JOIN "Album" al ON al.id = t."albumId"
+    JOIN "Artist" ar ON ar.id = al."artistId"
+    WHERE ar."normalizedName" ~ ${pattern} AND ${playableSongSql("t", "al")}
+    ORDER BY t.id`;
+  const songs: Prisma.TrackGetPayload<{ include: I }>[] = [];
+  for (let from = 0; from < ids.length; from += SONG_CHUNK_MAX) {
+    const chunk = ids.slice(from, from + SONG_CHUNK_MAX).map((r) => r.id);
+    songs.push(...(await prisma.track.findMany({ where: { id: { in: chunk } }, include, orderBy: { id: "asc" } })));
+  }
+  return songs;
 }
 
 /**
  * Every playable song of the artists `artist` selects, in id order, so the matcher reads the whole pool and the same
  * song wins whatever order the rows were stored in. The title check, not a row cap, decides the match: a cap would
- * drop the right song of an artist with many songs, or of a word many artists share.
+ * drop the right song of an artist with many songs.
  */
 const SONGS_OF_ARTISTS = (artist: Prisma.ArtistWhereInput) =>
   ({ where: { AND: [PLAYABLE_SONG, { album: { artist } }] }, orderBy: { id: "asc" } }) satisfies Prisma.TrackFindManyArgs;
@@ -489,12 +510,7 @@ class SpotifyImportService {
       const firstWord = normalizedPrimaryArtist.split(" ")[0];
       if (firstWord.length >= MIN_WORD_LENGTH) {
         add(
-          (
-            await prisma.track.findMany({
-              ...SONGS_OF_ARTISTS(await artistsHoldingWord(firstWord)),
-              ...withAlbum,
-            })
-          ).flatMap(toMatchCandidates),
+          (await songsOfArtistsHoldingWord(firstWord, withAlbum.include)).flatMap(toMatchCandidates),
         );
       }
       // Shorter than sweep 1's minimum, the prefix starts too many artists to read ("" starts every one).
@@ -513,14 +529,9 @@ class SpotifyImportService {
         );
       }
       const creditFirstWord = dbNormalizedArtist.split(" ")[0];
-      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length >= MIN_WORD_LENGTH) {
+      if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length > 0) {
         add(
-          (
-            await prisma.track.findMany({
-              ...SONGS_OF_ARTISTS(await artistsHoldingWord(creditFirstWord)),
-              ...withAlbum,
-            })
-          ).flatMap(toMatchCandidates),
+          (await songsOfArtistsHoldingWord(creditFirstWord, withAlbum.include)).flatMap(toMatchCandidates),
         );
       }
     }
@@ -2648,6 +2659,7 @@ class SpotifyImportService {
       track = await prisma.track.findFirst({
         where: { AND: [PLAYABLE_SONG, { filePath: relativePath }] },
         select: { id: true },
+        orderBy: { id: "asc" },
       });
 
       // Also try the original path as-is (in case DB stores absolute paths)
@@ -2655,6 +2667,7 @@ class SpotifyImportService {
         track = await prisma.track.findFirst({
           where: { AND: [PLAYABLE_SONG, { filePath: entry.filePath }] },
           select: { id: true },
+          orderBy: { id: "asc" },
         });
       }
 
@@ -2697,11 +2710,8 @@ class SpotifyImportService {
         const dbArtist = normalizeArtistName(entry.artist);
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= MIN_WORD_LENGTH) {
-          const candidates = await prisma.track.findMany({
-            ...SONGS_OF_ARTISTS(await artistsHoldingWord(firstWord)),
-            include: {
-              album: { include: { artist: { select: { name: true } } } },
-            },
+          const candidates = await songsOfArtistsHoldingWord(firstWord, {
+            album: { include: { artist: { select: { name: true } } } },
           });
 
           let bestMatch: { id: string } | null = null;

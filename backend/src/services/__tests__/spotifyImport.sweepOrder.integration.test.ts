@@ -207,6 +207,60 @@ describe("a word boundary is any character that is not a letter or digit", () =>
     });
 });
 
+describe("a word held by more artists than a query can carry ids for", () => {
+    const ARTISTS = 32_800; // past Postgres's limit of 32767 bind parameters
+    const SONGS = 10_050; // past one load chunk of 10000
+    const songId = (n: number) => `${P}-wide-${String(n).padStart(5, "0")}`;
+    const wanted = "wide wanted";
+    const tie = "wide tie";
+    // The wanted song sits in the second chunk of ids; the tie's two songs sit in both chunks.
+    const titleOf = (n: number) => (n === 10_040 ? wanted : n === 5 || n === SONGS - 1 ? tie : `lorem ipsum ${n}`);
+
+    beforeAll(async () => {
+        await prisma.artist.createMany({
+            data: Array.from({ length: ARTISTS }, (_, n) => ({
+                name: `qzwide ${n}`, normalizedName: `qzwide ${n}`, identityKey: `${P}-wide-artist-${n}`,
+            })),
+        });
+        const artist = await prisma.artist.create({
+            data: { name: "qzwide band", normalizedName: "qzwide band", identityKey: `${P}-wide-band` },
+        });
+        const album = await prisma.album.create({
+            data: { rgMbid: `${P}-wide-rg`, identityKey: `${P}-wide-album`, primaryType: "Album", title: `${P} wide album`, artistId: artist.id, location: "LIBRARY" },
+        });
+        await prisma.track.createMany({
+            data: Array.from({ length: SONGS }, (_, n) => ({
+                id: songId(n), title: titleOf(n), albumId: album.id, trackNo: n + 1, duration: 100,
+                filePath: `/${P}/wide/${songId(n)}.flac`, fileModified: new Date(), fileSize: 1,
+            })),
+        });
+        // Autovacuum has not seen 33000 new rows yet; the planner would still think the tables are empty.
+        for (const table of ["Artist", "Album", "Track"]) await prisma.$executeRawUnsafe(`ANALYZE "${table}"`);
+    });
+
+    it("the preview still finds a song that loads in a later chunk", async () => {
+        expect(await previewMatch("Qzwide", wanted)).toBe(songId(10_040));
+    });
+
+    it("the M3U fuzzy tier still finds it", async () => {
+        expect(await m3uMatch("Qzwide", wanted)).toBe(songId(10_040));
+    });
+
+    it("the lowest id wins a tie across chunks", async () => {
+        expect(await previewMatch("Qzwide", tie)).toBe(songId(5));
+    });
+});
+
+describe("a credit whose first word is short still reaches the matcher through the credit sweep", () => {
+    it("\"DJ ...\" finds an artist that holds dj", async () => {
+        const title = `${P} dj wanted`;
+        // The primary "DJ Qzsw" has a first word under the minimum (sweep 1 skips it) and starts no stored name
+        // (sweep 2 finds nothing); only the full credit's first word, "dj", reaches this artist.
+        const id = await seedOne("c-dj", "the dj qzsw", title);
+        expect(await previewMatch("DJ Qzsw feat. Someone", title)).toBe(id);
+    });
+});
+
 describe("the five-letter prefix sweep needs three characters", () => {
     it("a two-character source artist does not read every artist that starts with them", async () => {
         const title = `${P} short wanted`;
