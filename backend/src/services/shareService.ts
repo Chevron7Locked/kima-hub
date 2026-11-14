@@ -2,7 +2,7 @@
 
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
-import { isTransactionConflict } from "../utils/dbConflict";
+import { retryOnConflict } from "../utils/dbConflict";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
 
@@ -141,13 +141,8 @@ export async function createShareLink(
             { isolationLevel: "Serializable" }
         );
 
-    try {
-        return await attempt();
-    } catch (error: any) {
-        // One retry is enough for the read-then-insert race this guards.
-        if (isTransactionConflict(error)) return attempt();
-        throw error;
-    }
+    // One retry is enough for the read-then-insert race this guards.
+    return retryOnConflict(attempt, { runs: 2 });
 }
 
 /** A caller's live (unexpired) share links, newest first. */

@@ -38,7 +38,7 @@ import * as path from "path";
 import type { Prisma } from "@prisma/client";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
-import { isDeadlock } from "../../utils/dbConflict";
+import { retryOnConflict } from "../../utils/dbConflict";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../../workers/stageRetry";
@@ -122,20 +122,15 @@ const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 
 /**
  * Runs a move's own transaction, and once more when Postgres picked it as a deadlock victim: the other transaction
- * has finished by then and the rolled-back move left nothing behind. The retry waits a random 50 to 200 ms, so two
- * moves that lost to each other do not start again in step and collide again. Any other failure, and a second
- * deadlock, throw.
+ * has finished by then and the rolled-back move left nothing behind. The retry waits first (`retryOnConflict`). Any
+ * other failure, and a second deadlock, throw.
  * A move that joins its caller's transaction does not use this: the caller owns the retry.
  */
 async function retryOnDeadlock<T>(what: string, run: () => Promise<T>): Promise<T> {
-    try {
-        return await run();
-    } catch (err) {
-        if (!isDeadlock(err)) throw err;
-        logger.warn(`[Enrichment] ${what} lost a transaction conflict (deadlock); trying once more`);
-        await new Promise((resolve) => setTimeout(resolve, 50 + Math.random() * 150));
-        return run();
-    }
+    return retryOnConflict(run, {
+        runs: 2,
+        onLostRun: () => logger.warn(`[Enrichment] ${what} lost a transaction conflict (deadlock); trying once more`),
+    });
 }
 
 // ── Claim ids ────────────────────────────────────────────────────────────

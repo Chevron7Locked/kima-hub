@@ -9,7 +9,7 @@ import { prisma } from "../../utils/db";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { untilWaiting } from "./helpers/moodRows";
+import { untilLockWait } from "../../__tests__/helpers/lockWait";
 
 useLidarrCancelScenario();
 jest.setTimeout(60_000);
@@ -104,7 +104,7 @@ async function loseRuns<T>(start: () => Promise<T>, times: number): Promise<{ ou
     );
     for (let n = 1; n <= times; n++) {
         await until(() => runs() >= n);
-        await untilWaiting(EVENT_WRITE);
+        await untilLockWait(EVENT_WRITE);
         const next = n < times ? holdJob() : null;
         await holder.release();
         if (next) {

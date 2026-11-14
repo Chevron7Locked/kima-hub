@@ -39,3 +39,39 @@ export function isSerializationFailure(err: unknown): boolean {
 export function isTransactionConflict(err: unknown): boolean {
     return isDeadlock(err) || isSerializationFailure(err);
 }
+
+/** The shortest and longest wait before a lost transaction runs again. */
+const WAIT_MIN_MS = 50;
+const WAIT_MAX_MS = 200;
+
+export interface LostRun {
+    /** The run that lost, counting from 1. */
+    run: number;
+    /** How many runs there are in all. */
+    runs: number;
+    /** How long the next run waits. */
+    waitMs: number;
+    error: unknown;
+}
+
+/**
+ * Runs `fn` (a whole transaction, so a lost run left nothing behind), and runs it again when it lost to another
+ * transaction, up to `runs` runs in all. Each retry waits a random 50 to 200 ms first, so two transactions that
+ * lost to each other do not start again in step and collide again. A failure that is not a conflict is thrown at
+ * once; a conflict on the last run is thrown as it came. `onLostRun` is for the caller's log.
+ */
+export async function retryOnConflict<T>(
+    fn: () => Promise<T>,
+    options: { runs: number; onLostRun?: (lost: LostRun) => void },
+): Promise<T> {
+    for (let run = 1; ; run++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (run >= options.runs || !isTransactionConflict(error)) throw error;
+            const waitMs = WAIT_MIN_MS + Math.random() * (WAIT_MAX_MS - WAIT_MIN_MS);
+            options.onLostRun?.({ run, runs: options.runs, waitMs, error });
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+    }
+}

@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { isDeadlock, isSerializationFailure, isTransactionConflict } from "../dbConflict";
-import { untilWaiting } from "../../services/__tests__/helpers/moodRows";
+import { untilLockWait } from "../../__tests__/helpers/lockWait";
 
 jest.setTimeout(60_000);
 
@@ -35,7 +35,7 @@ async function deadlockVictim(touch: (tx: Prisma.TransactionClient, id: string) 
                 await touch(tx2, artistId(1));
             }, TX)
             .then(() => null, (error: unknown) => error);
-        await untilWaiting(`UPDATE "`);
+        await untilLockWait(`UPDATE "`);
         await touch(tx, artistId(2));
     }, TX);
     return victim;

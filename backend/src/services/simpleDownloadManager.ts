@@ -4,7 +4,7 @@
  */
 
 import { logger } from "../utils/logger";
-import { isTransactionConflict } from "../utils/dbConflict";
+import { retryOnConflict } from "../utils/dbConflict";
 import { prisma } from "../utils/db";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { lidarrService, AcquisitionError, AcquisitionErrorType, albumComplete, downloadProgress, type ReconciliationSnapshot } from "./lidarr";
@@ -92,8 +92,8 @@ class SimpleDownloadManager {
     }
 
     /**
-     * Runs a transaction at least once, and again after a conflict with another transaction, up to three runs in all.
-     * A conflict on the last run is thrown as it came.
+     * Runs a transaction at least once, and again after a conflict with another transaction, up to three runs in all,
+     * each retry after a short random wait. A conflict on the last run is thrown as it came.
      */
     private async withTransaction<T>(
         operation: (tx: TransactionClient) => Promise<T>,
@@ -101,23 +101,22 @@ class SimpleDownloadManager {
     ): Promise<T> {
         const logPrefix = options?.logPrefix ?? "[TX]";
 
-        for (let attempt = 1; ; attempt++) {
-            try {
-                return await prisma.$transaction(operation, {
+        return retryOnConflict(
+            () =>
+                prisma.$transaction(operation, {
                     isolationLevel:
                         Prisma.TransactionIsolationLevel.Serializable,
                     maxWait: 5000,
                     timeout: 10000,
-                });
-            } catch (error: unknown) {
-                if (!isTransactionConflict(error) || attempt >= TRANSACTION_RUNS) throw error;
-                const delay = Math.pow(2, attempt) * 100; // 200ms, 400ms
-                logger.debug(
-                    `${logPrefix} Transaction conflict, run ${attempt}/${TRANSACTION_RUNS} lost, again after ${delay}ms`
-                );
-                await new Promise((resolve) => setTimeout(resolve, delay));
+                }),
+            {
+                runs: TRANSACTION_RUNS,
+                onLostRun: ({ run, runs, waitMs }) =>
+                    logger.debug(
+                        `${logPrefix} Transaction conflict, run ${run}/${runs} lost, again after ${Math.round(waitMs)}ms`
+                    ),
             }
-        }
+        );
     }
 
     /**
