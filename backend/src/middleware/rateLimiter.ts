@@ -82,13 +82,19 @@ export const webhookLimiter = createRateLimiter({
     skip: (_req, res) => res.locals.webhookVerified === true,
 });
 
-// 3,000 image requests a minute per IP: a page shows 50 to 80 covers, so this is about 40 page visits a minute and
-// only stops a runaway loop.
-export const imageLimiter = createRateLimiter({
-    windowMs: 60 * 1000,
-    max: 3000,
-    message: "Too many image requests, please slow down.",
-});
+/**
+ * The cover runaway limit: 3,000 image requests a minute per IP. A page shows 50 to 80 covers, so this is about 40 page
+ * visits a minute and only stops a runaway loop. Each route family builds its own, so a page's covers count apart from
+ * that family's other requests.
+ */
+export const createCoverLimiter = () =>
+    createRateLimiter({
+        windowMs: 60 * 1000,
+        max: 3000,
+        message: "Too many image requests, please slow down.",
+    });
+
+export const imageLimiter = createCoverLimiter();
 
 /** Whether a Subsonic path (as the router sees it, under /rest) is the cover route, with or without `.view`. */
 export function isSubsonicCoverPath(path: string): boolean {
@@ -111,11 +117,7 @@ export const subsonicLimiter = createRateLimiter({
     requestWasSuccessful: (_req, res) => res.locals[SUBSONIC_COVER_COUNTED_APART] === true,
 });
 
-const subsonicSignedInCoverLimiter = createRateLimiter({
-    windowMs: 60 * 1000,
-    max: 3000,
-    message: "Too many image requests, please slow down.",
-});
+const subsonicSignedInCoverLimiter = createCoverLimiter();
 
 /**
  * Subsonic covers: the same runaway limit as the web cover route (3,000 a minute per address), for a request that has

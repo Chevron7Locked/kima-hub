@@ -5,7 +5,7 @@ import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover }
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { createRateLimiter } from "../middleware/rateLimiter";
+import { createCoverLimiter, createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
 import { coverCacheControl, coverFileForSize, getLocalImagePath, parseStoredCover } from "../services/imageStorage";
@@ -27,12 +27,8 @@ setInterval(() => {
 
 const shareResolveLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
-// A playlist page asks for one cover per song, so covers count apart from opening the share: the same runaway limit as the web and Subsonic cover routes.
-const shareCoverLimiter = createRateLimiter({
-    windowMs: 60 * 1000,
-    max: 3000,
-    message: "Too many image requests, please slow down.",
-});
+// A playlist page asks for one cover per song, so covers count apart from opening the share.
+const shareCoverLimiter = createCoverLimiter();
 
 const shareStreamLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 300 });
 

@@ -136,7 +136,9 @@ export default function SharePageClient() {
                 }
                 return res.json();
             })
-            .then(setData)
+            .then((shared) => {
+                if (!request.signal.aborted) setData(shared);
+            })
             .catch((err) => {
                 if (!request.signal.aborted) setError(err.message);
             })
