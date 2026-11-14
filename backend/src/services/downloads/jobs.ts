@@ -195,7 +195,11 @@ export async function retryOnce<T>(
         if (error?.code !== "P2002" || !key) throw error;
         return prisma.$transaction(async (tx): Promise<RetryOutcome<T>> => {
             const running = await findActive(key, tx);
-            if (!running) return { alreadyRetried: true };
+            if (!running) {
+                // Either the winner has ended since, or the conflict was another unique key: the log says which.
+                logger.warn(`[Retry] The replacement for job ${failedJob.id} conflicted and no job of the album is running:`, error?.message);
+                return { alreadyRetried: true };
+            }
             await tx.downloadJob.updateMany({ where: { id: failedJob.id, cleared: false }, data: { cleared: true } });
             return { running };
         });
