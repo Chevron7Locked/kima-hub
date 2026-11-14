@@ -176,6 +176,7 @@ function SharePage({ token }: { token: string }) {
         return () => {
             audio.pause();
             audio.src = "";
+            // React runs this cleanup instead of calling the ref with null.
             audioRef.current = null;
         };
     }, []);

@@ -23,8 +23,6 @@ let host: HTMLDivElement;
 let signal: AbortSignal | undefined;
 // What the server answers for a share token; a token with no entry never gets an answer.
 let answers: Record<string, unknown> = {};
-// Tokens the server answers with "not found".
-let missing: string[] = [];
 // Tokens the server refuses with a status and a message; the message is the backend's own wording.
 let refused: Record<string, { status: number; error?: string }> = {};
 
@@ -32,15 +30,11 @@ beforeEach(() => {
     token = "tok";
     signal = undefined;
     answers = {};
-    missing = [];
     refused = {};
     vi.stubGlobal(
         "fetch",
         vi.fn((url: string, init?: RequestInit) => {
             signal = init?.signal ?? undefined;
-            if (missing.includes(tokenOf(url))) {
-                return Promise.resolve({ ok: false, status: 404, json: async () => ({ error: "Share link not found" }) });
-            }
             const refusal = refused[tokenOf(url)];
             if (refusal) {
                 return Promise.resolve({
@@ -105,7 +99,7 @@ describe("SharePageClient", () => {
     });
 
     it("does not show the failure of the old link under a new one", async () => {
-        missing = ["tok"];
+        refused = { tok: { status: 404, error: "Share link not found" } };
         await act(async () => root.render(<SharePageClient />));
         expect(host.textContent).toContain("Share link not found");
 
