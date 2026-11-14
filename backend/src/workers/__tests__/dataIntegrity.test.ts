@@ -62,6 +62,59 @@ describe("data integrity check", () => {
         expect(report.emptyAlbums).toBeGreaterThanOrEqual(1);
     });
 
+    describe("a suggestion with the same artist name and title", () => {
+        const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+        const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
+
+        /** A DISCOVER album by artist id `held`, and a suggestion of the same name and title for artist id `suggested`. */
+        async function seed(suggested: string | null, held: string | null) {
+            await prisma.user.create({ data: { id: id("user9"), username: id("user9"), passwordHash: "x" } });
+            await prisma.artist.create({ data: { id: id("art9"), name: "Twin Namesake", identityKey: id("k9"), mbid: held } });
+            await prisma.discoveryAlbum.create({
+                data: {
+                    id: id("da9"),
+                    userId: id("user9"),
+                    rgMbid: id("rg-suggested9"),
+                    artistName: "Twin Namesake",
+                    artistMbid: suggested,
+                    albumTitle: "Shared Title",
+                    weekStartDate: new Date(),
+                },
+            });
+            await prisma.album.create({
+                data: { id: id("alb9"), rgMbid: id("rg-scanned9"), artistId: id("art9"), identityKey: id("ik9"), title: "Shared Title", primaryType: "Album", location: "DISCOVER" },
+            });
+            await prisma.track.create({
+                data: { id: id("t9"), albumId: id("alb9"), title: "x", trackNo: 1, duration: 1, filePath: "/tmp/dint9.flac", fileModified: new Date(), fileSize: 1 },
+            });
+        }
+
+        async function orphanWarned(): Promise<boolean> {
+            const warn = jest.spyOn(logger, "warn");
+            try {
+                await runDataIntegrityCheck();
+                return warn.mock.calls.some((c) => String(c[0]).includes("Orphaned album") && String(c[0]).includes("Shared Title"));
+            } finally {
+                warn.mockRestore();
+            }
+        }
+
+        it("does not cover another artist's album under another MusicBrainz id", async () => {
+            await seed(ARTIST, NAMESAKE);
+            expect(await orphanWarned()).toBe(true);
+        });
+
+        it.each([
+            ["the same id", ARTIST, ARTIST],
+            ["the suggestion has no id", null, NAMESAKE],
+            ["the suggestion's id is a placeholder", "temp-1793617784650-0.5", NAMESAKE],
+            ["the album's artist has no id", ARTIST, null],
+        ])("covers the album by name when %s", async (_what, suggested, held) => {
+            await seed(suggested, held);
+            expect(await orphanWarned()).toBe(false);
+        });
+    });
+
     it("keeps every OwnedAlbum keep whose album is missing and reports them", async () => {
         // A user kept a discovery album; its Album row was removed
         // out-of-band (pruned, rgMbid corrected). The keep is a decision.

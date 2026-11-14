@@ -7,7 +7,7 @@
 
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
-import { lookupKey, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
     expiredExclusions: number;
@@ -65,7 +65,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         logger.debug(`[DataIntegrity] Removed ${report.orphanedDiscoveryTracks} orphaned discovery track records`);
     }
 
-    // DISCOVER albums no live suggestion (by id, or artist and title by nameKey) and no keep names: reported, not
+    // DISCOVER albums no live suggestion (by id, or artist (sameArtist) and title by nameKey) and no keep names: reported, not
     // deleted, since a scan can bring them back.
     const discoverAlbums = await prisma.album.findMany({
         where: { location: "DISCOVER" },
@@ -74,15 +74,16 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     if (discoverAlbums.length > 0) {
         const suggestions = await prisma.discoveryAlbum.findMany({
             where: { status: { in: ["ACTIVE", "LIKED", "MOVED"] } },
-            select: { rgMbid: true, albumTitle: true, artistName: true },
+            select: { rgMbid: true, albumTitle: true, artistName: true, artistMbid: true },
         });
         const suggestedIds = new Set(suggestions.map((d) => d.rgMbid));
-        const suggestedNames = new Set(suggestions.map((d) => lookupKey(d.artistName, d.albumTitle)));
+        const suggestedNames = new NameIndex();
+        for (const d of suggestions) suggestedNames.add(d.artistName, d.artistMbid, d.albumTitle);
         const kept = new Set(
             (await prisma.ownedAlbum.findMany({ select: { artistId: true, rgMbid: true } })).map((o) => `${o.artistId}::${o.rgMbid}`),
         );
         for (const album of discoverAlbums) {
-            const suggested = suggestedIds.has(album.rgMbid) || suggestedNames.has(lookupKey(album.artist.name, album.title));
+            const suggested = suggestedIds.has(album.rgMbid) || suggestedNames.has(album.artist.name, album.artist.mbid, album.title);
             if (suggested || kept.has(`${album.artistId}::${album.rgMbid}`)) continue;
             report.orphanedAlbums++;
             logger.warn(`[DataIntegrity] Orphaned album (kept, needs a decision): ${album.artist.name} - ${album.title}`);
