@@ -117,9 +117,9 @@ export function createBackgroundStart(shutdownHasBegun: () => boolean): Backgrou
         try {
             const { repairCoverFormatsOnce } = await import("./services/coverFormatRepair");
             const result = await repairCoverFormatsOnce({ shouldStop: shutdownHasBegun });
-            if (result && (result.converted > 0 || result.notPictures > 0 || result.failed > 0)) {
+            if (result && (result.converted > 0 || result.reversioned > 0 || result.notPictures > 0 || result.failed > 0)) {
                 logger.info(
-                    `[STARTUP] Cover format repair: ${result.converted} converted, ${result.notPictures} not pictures, ` +
+                    `[STARTUP] Cover format repair: ${result.converted} converted, ${result.reversioned} re-versioned, ${result.notPictures} not pictures, ` +
                         `${result.failed} failed${result.stopped ? " (stopped at shutdown)" : ""}`,
                 );
             }

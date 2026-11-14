@@ -122,11 +122,8 @@ router.get("/recently-listened", async (req, res) => {
       ...artistCards,
       ...inProgressAudiobooks.map((ab: any) => {
         const book = bookById.get(ab.audiobookshelfId);
-        const coverArt = book
-          ? audiobookCoverAddress(book)
-          : ab.coverUrl && !ab.coverUrl.startsWith("http")
-            ? `audiobook__${ab.coverUrl}`
-            : ab.coverUrl;
+        // A book gone from the library has no cover, as in continue listening: the stored value names a file nobody keeps.
+        const coverArt = book ? audiobookCoverAddress(book) : null;
 
         return {
           id: ab.audiobookshelfId,

@@ -12,7 +12,9 @@
  * unset so the next start finishes. Values already versioned are never read again. A new install has no settings row yet
  * and no old values, so it skips the pass.
  *
- * `rewriteCoverValues` is the other writer of versions on stored values: the format repair uses it for a file it converts.
+ * `rewriteCoverValues` is the other writer of versions on stored values: the format repair uses it for a file it converts,
+ * and for a JPEG whose stored version is not the file's (a conversion whose database write failed). `storedVersions` lists
+ * the versions the stored values carry, so that repair reads only the files a version names.
  */
 
 import fs from "fs";
@@ -49,11 +51,20 @@ const ADDRESS_COLUMNS = [
 /**
  * Stores `version` on every value, in any column, that points at the file at `relativePath` (under the covers folder),
  * whether it carried a version or not. The value may also move to `newRelativePath` when the file did. Answers how many
- * values it wrote.
+ * values it wrote. With `onlyOtherVersions`, a value that has no version, or already has `version`, is left as it is.
  */
-export async function rewriteCoverValues(relativePath: string, version: string, newRelativePath = relativePath): Promise<number> {
+export async function rewriteCoverValues(
+    relativePath: string,
+    version: string,
+    newRelativePath = relativePath,
+    onlyOtherVersions = false,
+): Promise<number> {
     const value = storedCoverValue(newRelativePath, version);
-    const points = (v: string | null) => parseStoredCover(v)?.relativePath === relativePath;
+    const points = (v: string | null) => {
+        const cover = parseStoredCover(v);
+        if (cover?.relativePath !== relativePath) return false;
+        return !onlyOtherVersions || (cover.version !== null && cover.version !== version);
+    };
     // The database narrows by prefix (which can match a little more than the exact path); the exact test is here.
     const prefix = { startsWith: `native:${relativePath}` };
     let written = 0;
@@ -89,6 +100,26 @@ export async function rewriteCoverValues(relativePath: string, version: string, 
         }
     }
     return written;
+}
+
+/** The versions stored values carry, by the path under the covers folder they name (a value with no version adds none). */
+export async function storedVersions(): Promise<Map<string, Set<string>>> {
+    const found = new Map<string, Set<string>>();
+    const add = (values: (string | null)[]) => {
+        for (const value of values) {
+            const cover = parseStoredCover(value);
+            if (!cover?.version) continue;
+            const known = found.get(cover.relativePath) ?? new Set<string>();
+            known.add(cover.version);
+            found.set(cover.relativePath, known);
+        }
+    };
+    const where = (column: string) => ({ [column]: { startsWith: "native:", contains: "?v=" } });
+    add((await prisma.album.findMany({ where: where("coverUrl"), distinct: ["coverUrl"], select: { coverUrl: true } })).map((r) => r.coverUrl));
+    add((await prisma.album.findMany({ where: where("userCoverUrl"), distinct: ["userCoverUrl"], select: { userCoverUrl: true } })).map((r) => r.userCoverUrl));
+    add((await prisma.artist.findMany({ where: where("heroUrl"), distinct: ["heroUrl"], select: { heroUrl: true } })).map((r) => r.heroUrl));
+    add((await prisma.artist.findMany({ where: where("userHeroUrl"), distinct: ["userHeroUrl"], select: { userHeroUrl: true } })).map((r) => r.userHeroUrl));
+    return found;
 }
 
 /** Every distinct stored address, in any column, that has no version yet. */

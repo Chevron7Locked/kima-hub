@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit, { Options } from "express-rate-limit";
 
 /**
@@ -95,12 +95,39 @@ export function isSubsonicCoverPath(path: string): boolean {
     return /^\/getcoverart(\.view)?\/?$/i.test(path);
 }
 
-// Subsonic covers: the same runaway limit as the web cover route, counted apart from the rest of Subsonic so a page of
-// covers does not use up the 1,500 a minute that every other call shares.
-export const subsonicCoverLimiter = createRateLimiter({
+/** `res.locals` key set on a signed-in Subsonic cover request: the general Subsonic limit gives its count back. */
+export const SUBSONIC_COVER_COUNTED_APART = "subsonicCoverCountedApart";
+
+/**
+ * The general Subsonic runaway limit (1,500 a minute per address). It sits in front of sign-in, which queries the
+ * database on every request, so it counts every request, covers included: a stranger's cover requests cost no more
+ * sign-in queries than any other. A signed-in cover request gives its count back when it finishes, because the cover
+ * limit below counts it instead, so a page of covers does not use up the 1,500 that every other call shares.
+ */
+export const subsonicLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 1500,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => res.locals[SUBSONIC_COVER_COUNTED_APART] === true,
+});
+
+const subsonicSignedInCoverLimiter = createRateLimiter({
     windowMs: 60 * 1000,
     max: 3000,
     message: "Too many image requests, please slow down.",
-    skip: (req) => !isSubsonicCoverPath(req.path),
 });
+
+/**
+ * Subsonic covers: the same runaway limit as the web cover route (3,000 a minute per address), for a request that has
+ * signed in, so it is mounted after sign-in. Other paths pass through: a path that only starts like the cover route's
+ * is not a cover request and stays with the general limit.
+ */
+export function subsonicCoverLimiter(req: Request, res: Response, next: NextFunction): void {
+    if (!isSubsonicCoverPath(req.path)) {
+        next();
+        return;
+    }
+    res.locals[SUBSONIC_COVER_COUNTED_APART] = true;
+    subsonicSignedInCoverLimiter(req, res, next);
+}
 

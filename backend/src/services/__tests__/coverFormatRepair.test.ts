@@ -471,9 +471,9 @@ describe("the version of a cover the pass converts", () => {
         expect(converted).not.toBe(STALE);
         expect(one.coverUrl).toBe(`native:albums/${albumIds[0]}.jpg?v=${converted}`);
         expect(one.userCoverUrl).toBe(`native:albums/${albumIds[0]}.jpg?v=${converted}`);
-        // A file that was already a JPEG was not converted: its value is as it was.
+        // A file that was a JPEG already is not converted, but its value names other bytes: see the next group.
         const two = await prisma.album.findUniqueOrThrow({ where: { id: albumIds[1] } });
-        expect(two.coverUrl).toBe(`native:albums/${albumIds[1]}.jpg?v=${STALE}`);
+        expect(two.coverUrl).toBe(`native:albums/${albumIds[1]}.jpg?v=${await v(`albums/${albumIds[1]}.jpg`)}`);
     });
 
     it("is new on an audiobook whose cached cover it converts", async () => {
@@ -486,5 +486,118 @@ describe("the version of a cover the pass converts", () => {
         const book = await prisma.audiobook.findUniqueOrThrow({ where: { id: `${P}_book` } });
         expect(book.coverVersion).toBe(await versionOfFile(file));
         expect(book.coverVersion).not.toBe(STALE);
+    });
+});
+
+describe("a JPEG whose stored version is not the file's", () => {
+    // A conversion whose database write failed leaves a JPEG under a value that still names the old bytes; the next
+    // start meets it as a JPEG, so the repair re-versions it. A version always names the bytes served.
+    const STALE = "aaaaaaaaaa";
+    const version = (file: string) => versionOfFile(file);
+
+    async function seed(name: string, cover: Partial<{ coverUrl: string | null; userCoverUrl: string | null; heroUrl: string | null; userHeroUrl: string | null }>) {
+        await prisma.artist.create({ data: { id: `${P}_${name}_ar`, name: `Repair ${name}`, identityKey: `${P}_${name}_ik`, heroUrl: cover.heroUrl ?? null, userHeroUrl: cover.userHeroUrl ?? null } });
+        return prisma.album.create({
+            data: {
+                id: `${P}_${name}_al`, rgMbid: `${P}-${name}-rg`, artistId: `${P}_${name}_ar`, title: name, identityKey: `${P}-${name}`, primaryType: "Album",
+                coverUrl: cover.coverUrl ?? null, userCoverUrl: cover.userCoverUrl ?? null,
+            },
+        });
+    }
+    const album = (name: string) => prisma.album.findUniqueOrThrow({ where: { id: `${P}_${name}_al` } });
+    afterEach(async () => {
+        await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.audiobook.deleteMany({ where: { id: { startsWith: P } } });
+    });
+
+    it("has its stored version replaced by the file's, in every column that names it", async () => {
+        const file = path.join(covers, "albums", `${P}_a_al.jpg`);
+        const heroFile = path.join(covers, "artists", `${P}_a_ar.jpg`);
+        put(file, await picture("jpeg"));
+        put(heroFile, await picture("jpeg"));
+        await seed("a", {
+            coverUrl: `native:albums/${P}_a_al.jpg?v=${STALE}`,
+            userCoverUrl: `native:albums/${P}_a_al.jpg?v=${STALE}`,
+            heroUrl: `native:artists/${P}_a_ar.jpg?v=${STALE}`,
+            userHeroUrl: `native:artists/${P}_a_ar.jpg?v=${STALE}`,
+        });
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ converted: 0, reversioned: 2, failed: 0 });
+        const row = await album("a");
+        expect(row.coverUrl).toBe(`native:albums/${P}_a_al.jpg?v=${await version(file)}`);
+        expect(row.userCoverUrl).toBe(row.coverUrl);
+        const artist = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}_a_ar` } });
+        expect(artist.heroUrl).toBe(`native:artists/${P}_a_ar.jpg?v=${await version(heroFile)}`);
+        expect(artist.userHeroUrl).toBe(artist.heroUrl);
+        expect(await marker()).not.toBeNull();
+    });
+
+    it("leaves a value that has the file's version, a value with no version, and a value for another file", async () => {
+        const file = path.join(covers, "albums", `${P}_b_al.jpg`);
+        put(file, await picture("jpeg"));
+        const current = `native:albums/${P}_b_al.jpg?v=${await version(file)}`;
+        await seed("b", { coverUrl: current, userCoverUrl: `native:albums/${P}_b_other.jpg?v=${STALE}` });
+        put(path.join(covers, "albums", `${P}_b_u.jpg`), await picture("jpeg"));
+        await seed("c", { coverUrl: `native:albums/${P}_b_al.jpg` });
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ reversioned: 0 });
+        expect((await album("b")).coverUrl).toBe(current);
+        expect((await album("b")).userCoverUrl).toBe(`native:albums/${P}_b_other.jpg?v=${STALE}`);
+        expect((await album("c")).coverUrl).toBe(`native:albums/${P}_b_al.jpg`);
+    });
+
+    it("re-versions a root-folder cover too, where the scanner once stored it", async () => {
+        const file = path.join(covers, `${P}_d_al.jpg`);
+        put(file, await picture("jpeg"));
+        await seed("d", { coverUrl: `native:${P}_d_al.jpg?v=${STALE}` });
+
+        await repairCoverFormatsOnce({});
+
+        expect((await album("d")).coverUrl).toBe(`native:${P}_d_al.jpg?v=${await version(file)}`);
+    });
+
+    it("re-versions an audiobook whose stored version is not its cached cover's, and gives none to one with no version yet", async () => {
+        const stale = path.join(audiobooks, `${P}_book1.jpg`);
+        const bare = path.join(audiobooks, `${P}_book2.jpg`);
+        put(stale, await picture("jpeg"));
+        put(bare, await picture("jpeg"));
+        await prisma.audiobook.create({ data: { id: `${P}_book1`, title: "B1", audioUrl: "x", localCoverPath: stale, coverVersion: STALE } });
+        await prisma.audiobook.create({ data: { id: `${P}_book2`, title: "B2", audioUrl: "x", localCoverPath: bare, coverVersion: null } });
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ reversioned: 1, failed: 0 });
+        expect((await prisma.audiobook.findUniqueOrThrow({ where: { id: `${P}_book1` } })).coverVersion).toBe(await version(stale));
+        expect((await prisma.audiobook.findUniqueOrThrow({ where: { id: `${P}_book2` } })).coverVersion).toBeNull();
+    });
+
+    it("reads no JPEG that no stored version names", async () => {
+        put(path.join(covers, "albums", "nobody.jpg"), await picture("jpeg"));
+        const read = jest.spyOn(fs.promises, "readFile");
+
+        await repairCoverFormatsOnce({});
+
+        expect(read.mock.calls.some((c) => String(c[0]).endsWith("nobody.jpg"))).toBe(false);
+    });
+
+    it("converts a file and re-versions the next start's JPEG: the failed database write is repaired", async () => {
+        const file = path.join(covers, "albums", `${P}_e_al.jpg`);
+        put(file, await picture("png"));
+        await seed("e", { coverUrl: `native:albums/${P}_e_al.jpg?v=${STALE}` });
+        // The conversion lands, the database write after it fails: the file is a JPEG and the value is old.
+        const update = jest.spyOn(prisma.album, "update").mockRejectedValueOnce(new Error("db down"));
+
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 1, failed: 1 });
+        expect(await marker()).toBeNull();
+        expect((await album("e")).coverUrl).toBe(`native:albums/${P}_e_al.jpg?v=${STALE}`);
+        update.mockRestore();
+
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, reversioned: 1, failed: 0 });
+        expect((await album("e")).coverUrl).toBe(`native:albums/${P}_e_al.jpg?v=${await version(file)}`);
+        expect(await marker()).not.toBeNull();
     });
 });

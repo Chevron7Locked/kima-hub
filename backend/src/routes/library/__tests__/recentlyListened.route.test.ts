@@ -182,8 +182,9 @@ describe("an audiobook in progress", () => {
         expect(card?.coverArt).toBe(`/audiobooks/${BOOK}/cover/9f8e7d6c5b`);
     });
 
-    it("keeps the stored cover value for a book that has left the library", async () => {
+    it("has no cover for a book that has left the library, as continue listening has none", async () => {
         const card = (await cards()).find((c) => c.id === GONE);
-        expect(card?.coverArt).toBe("audiobook__items/b/cover");
+        expect(card).toBeDefined();
+        expect(card?.coverArt).toBeNull();
     });
 });

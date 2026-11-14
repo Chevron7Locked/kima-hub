@@ -1,7 +1,7 @@
 /**
  * The Subsonic cover route serves a cover held at another site as Kima's own, so a page of covers must not become a page
  * of fetches: a picture is kept in memory, per address and width, for a few hours, within a small bound on how many
- * pictures and how many bytes. The fetch itself (`fetchPicture`) is replaced; the scaling is real.
+ * pictures and how many bytes. An address that failed is remembered for a few minutes, within a bound. The fetch itself (`fetchPicture`) is replaced; the scaling is real.
  */
 
 jest.mock("../imageStorage", () => ({
@@ -88,12 +88,50 @@ describe("externalCoverPicture", () => {
         expect(EXTERNAL_COVER_CACHE.ttlMs).toBeGreaterThanOrEqual(60 * 60 * 1000);
     });
 
-    it("does not keep a failure: the next request tries the site again", async () => {
-        fetchMock.mockResolvedValueOnce(null);
+    it("remembers a failed address for a few minutes, at any width, so a page of dead covers is not fetched again each visit", async () => {
+        const start = Date.now();
+        const now = jest.spyOn(Date, "now").mockReturnValue(start);
+        fetchMock.mockResolvedValue(null);
 
         expect(await externalCoverPicture(URL_A, null)).toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        now.mockReturnValue(start + EXTERNAL_COVER_CACHE.failureMs - 1000);
+        expect(await externalCoverPicture(URL_A, null)).toBeNull();
+        expect(await externalCoverPicture(URL_A, 300)).toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        // Another address is its own question.
+        fetchMock.mockResolvedValue({ bytes: original, contentType: "image/jpeg" });
+        expect(await externalCoverPicture("https://img.example/b.jpg", null)).not.toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("tries a failed address again once its few minutes have passed, and keeps the picture if the site answers now", async () => {
+        const start = Date.now();
+        const now = jest.spyOn(Date, "now").mockReturnValue(start);
+        fetchMock.mockResolvedValueOnce(null);
+        expect(await externalCoverPicture(URL_A, null)).toBeNull();
+
+        expect(EXTERNAL_COVER_CACHE.failureMs).toBeLessThanOrEqual(10 * 60 * 1000);
+        expect(EXTERNAL_COVER_CACHE.failureMs).toBeGreaterThanOrEqual(60 * 1000);
+        now.mockReturnValue(start + EXTERNAL_COVER_CACHE.failureMs + 1000);
         expect(await externalCoverPicture(URL_A, null)).not.toBeNull();
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        await externalCoverPicture(URL_A, null);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("remembers no more failed addresses than its bound, forgetting the oldest first", async () => {
+        const n = EXTERNAL_COVER_CACHE.maxFailures;
+        fetchMock.mockResolvedValue(null);
+        for (let i = 0; i < n + 1; i++) await externalCoverPicture(`https://img.example/dead${i}.jpg`, null);
+        expect(fetchMock).toHaveBeenCalledTimes(n + 1);
+
+        await externalCoverPicture(`https://img.example/dead${n}.jpg`, null); // the newest is still remembered
+        expect(fetchMock).toHaveBeenCalledTimes(n + 1);
+        await externalCoverPicture("https://img.example/dead0.jpg", null); // the oldest is not
+        expect(fetchMock).toHaveBeenCalledTimes(n + 2);
     });
 
     it("lets requests that arrive together share one fetch", async () => {

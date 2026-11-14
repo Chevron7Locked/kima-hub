@@ -121,20 +121,30 @@ const ORPHAN_PART_AGE_MS = 10 * 60 * 1000;
 /** Each folder is swept once per start, the first time it is written to; the promise is what a second write waits on. */
 const sweptFolders = new Map<string, Promise<void>>();
 
-/** Removes the `.part` files a crash left in `dir`. A failure only means they stay for the next start. */
+/** A smaller copy's name, `<cover name>_w<width>.jpg`: the cover's own name is the first group. */
+const RESIZED_COPY_NAME = /^(.+)_w\d+\.jpg$/;
+
+/**
+ * Removes the leftovers in `dir`: the `.part` files a crash left, and the smaller copies whose cover has been deleted
+ * (nothing would ever serve or refresh them). A failure only means they stay for the next start.
+ */
 function sweepOrphanParts(dir: string): Promise<void> {
     let swept = sweptFolders.get(dir);
     if (!swept) {
         swept = (async () => {
             try {
                 const cutoff = Date.now() - ORPHAN_PART_AGE_MS;
-                for (const name of await fs.promises.readdir(dir)) {
-                    if (!name.endsWith(".part")) continue;
+                const names = await fs.promises.readdir(dir);
+                const present = new Set(names);
+                for (const name of names) {
+                    const copyOf = RESIZED_COPY_NAME.exec(name)?.[1];
+                    const orphanCopy = copyOf !== undefined && !present.has(`${copyOf}.jpg`);
+                    if (!orphanCopy && !name.endsWith(".part")) continue;
                     const file = path.join(dir, name);
                     try {
-                        if ((await fs.promises.stat(file)).mtimeMs < cutoff) {
+                        if (orphanCopy || (await fs.promises.stat(file)).mtimeMs < cutoff) {
                             await fs.promises.rm(file, { force: true });
-                            logger.debug(`[ImageStorage] Removed an orphan partial file: ${file}`);
+                            logger.debug(`[ImageStorage] Removed ${orphanCopy ? "a smaller copy of a deleted cover" : "an orphan partial file"}: ${file}`);
                         }
                     } catch {
                         // Gone already, or not ours to remove: leave it.

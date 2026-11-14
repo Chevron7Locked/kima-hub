@@ -6,7 +6,9 @@
  * then walks every covers folder once and converts the `.jpg` files in place through `replaceWithJpeg` (atomic, so a
  * reader never meets half a file; and dropped when the file was written anew since it was read, so the older bytes never
  * overwrite a newer write), gives every stored value that names a converted file a new version (the address clients keep
- * for good must change with the picture), and records the done marker.
+ * for good must change with the picture), and records the done marker. A file that is a JPEG already gets the same for
+ * any stored version that is not its own: a conversion whose database write failed left a JPEG under the old version, and
+ * a version always names the bytes served. Only the files a stored version names are read for this.
  *
  * A file that is no picture is left alone and logged: it is not this pass's to delete. A file that could not be written
  * keeps the marker unset, so the next start tries again. A stop (shutdown) ends the pass between files and also keeps
@@ -19,7 +21,7 @@ import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue, versionOfFile } from "./imageStorage";
-import { rewriteCoverValues } from "./coverVersionBackfill";
+import { rewriteCoverValues, storedVersions } from "./coverVersionBackfill";
 import type { StopCheck } from "../utils/stopCheck";
 
 export interface CoverRepairResult {
@@ -27,6 +29,8 @@ export interface CoverRepairResult {
     converted: number;
     /** Artist pictures saved as `.png` or `.webp` that are `<id>.jpg` now, their artists moved over to it. */
     artistPicturesConverted: number;
+    /** JPEGs whose stored version was not the file's: the stored values were re-versioned. */
+    reversioned: number;
     /** Files written anew after the pass read them: the newer write stands (it is a JPEG already). */
     superseded: number;
     /** Files that are no picture (a `.jpg`, or an old `.png` or `.webp` artist picture), left as they were. */
@@ -105,6 +109,44 @@ async function versionConvertedCover(dir: string, file: string): Promise<void> {
     await rewriteCoverValues(path.relative(coversBasePath(), file).split(path.sep).join("/"), version);
 }
 
+/** The versions stored on values and on audiobooks, read once for the pass. */
+interface StoredVersionIndex {
+    covers: Map<string, Set<string>>;
+    audiobooks: Map<string, string>;
+}
+
+async function readStoredVersions(): Promise<StoredVersionIndex> {
+    const books = await prisma.audiobook.findMany({
+        where: { localCoverPath: { not: null }, coverVersion: { not: null } },
+        select: { localCoverPath: true, coverVersion: true },
+    });
+    const audiobooks = new Map<string, string>();
+    for (const book of books) if (book.localCoverPath && book.coverVersion) audiobooks.set(book.localCoverPath, book.coverVersion);
+    return { covers: await storedVersions(), audiobooks };
+}
+
+/**
+ * A JPEG needs no conversion, but a stored version that names other bytes is wrong (a conversion whose database write
+ * failed left one). Answers whether it re-versioned anything.
+ */
+async function reversionStaleCover(dir: string, file: string, index: StoredVersionIndex): Promise<boolean> {
+    const relativePath = path.relative(coversBasePath(), file).split(path.sep).join("/");
+    if (dir === audiobookCoversPath()) {
+        const stored = index.audiobooks.get(file);
+        if (!stored) return false;
+        const version = await versionOfFile(file);
+        if (!version || version === stored) return false;
+        await prisma.audiobook.updateMany({ where: { localCoverPath: file, coverVersion: { not: null } }, data: { coverVersion: version } });
+        return true;
+    }
+    const stored = index.covers.get(relativePath);
+    if (!stored) return false;
+    const version = await versionOfFile(file);
+    if (!version || (stored.size === 1 && stored.has(version))) return false;
+    await rewriteCoverValues(relativePath, version, relativePath, true);
+    return true;
+}
+
 /**
  * Runs the pass unless it has run. Answers null when it did not run (already done, or no settings row yet), else what it
  * did. One file's trouble is counted, not thrown; a failure of the marker save throws, and the caller logs it.
@@ -117,6 +159,7 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
     const result: CoverRepairResult = {
         converted: 0,
         artistPicturesConverted: 0,
+        reversioned: 0,
         superseded: 0,
         notPictures: 0,
         failed: 0,
@@ -140,6 +183,7 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
         }
     }
 
+    let index: StoredVersionIndex | null = null;
     for (const dir of coverFolders()) {
         let names: string[];
         try {
@@ -157,7 +201,15 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
             try {
                 // lstat, not stat: a symbolic link is not ours to replace with a real file.
                 const read = await fs.promises.lstat(file);
-                if (!read.isFile() || (await isJpeg(file))) continue;
+                if (!read.isFile()) continue;
+                if (await isJpeg(file)) {
+                    index ??= await readStoredVersions();
+                    if (await reversionStaleCover(dir, file, index)) {
+                        result.reversioned++;
+                        logger.debug(`[COVER-REPAIR] ${file} had a stored version that was not its own; re-versioned`);
+                    }
+                    continue;
+                }
                 const bytes = await fs.promises.readFile(file);
                 const outcome = await replaceWithJpeg(file, bytes, { mtimeMs: read.mtimeMs, size: read.size });
                 if (outcome === "replaced") {

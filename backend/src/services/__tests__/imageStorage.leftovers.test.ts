@@ -1,6 +1,6 @@
 /**
- * Leftovers around the covers folder: a crash mid-write leaves `.part` files that are swept once, the first time the
- * folder is written to after start, and `storeAsJpeg` is the one write path for a stored picture. Real files in a temp
+ * Leftovers around the covers folder: a crash mid-write leaves `.part` files, and a deleted cover leaves its smaller
+ * copies; both are swept once, the first time the folder is written to after start, and `storeAsJpeg` is the one write path for a stored picture. Real files in a temp
  * folder.
  */
 
@@ -99,6 +99,22 @@ describe("the sweep of orphan .part files", () => {
         await storeAsJpeg(path.join(albums, "new.jpg"), await picture("jpeg"));
 
         expect(fs.readdirSync(albums).sort()).toEqual(["keep.jpg", "live.jpg.3.ghi.part", "new.jpg", "x.part.jpg"]);
+    });
+
+    it("also removes smaller copies (_w<width>.jpg) whose cover is gone, the first time the folder is written to", async () => {
+        plant(path.join(albums, "gone_w300.jpg"), 60 * 24);
+        plant(path.join(albums, "gone_w64.jpg"), 1);
+        plant(path.join(albums, "kept.jpg"), 60 * 24);
+        plant(path.join(albums, "kept_w300.jpg"), 60 * 24);
+        // Names that only look alike are not copies.
+        plant(path.join(albums, "other_wide.jpg"), 60 * 24);
+        plant(path.join(albums, "other_w300.png"), 60 * 24);
+        plant(path.join(albums, "odd_w.jpg"), 60 * 24);
+        const { storeAsJpeg } = freshStorage();
+
+        await storeAsJpeg(path.join(albums, "new.jpg"), await picture("jpeg"));
+
+        expect(fs.readdirSync(albums).sort()).toEqual(["kept.jpg", "kept_w300.jpg", "new.jpg", "odd_w.jpg", "other_w300.png", "other_wide.jpg"]);
     });
 
     it("sweeps a folder once per start: a leftover appearing later waits for the next start", async () => {

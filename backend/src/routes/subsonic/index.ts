@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { createRateLimiter, isSubsonicCoverPath, subsonicCoverLimiter } from "../../middleware/rateLimiter";
+import { subsonicCoverLimiter, subsonicLimiter } from "../../middleware/rateLimiter";
 import { subsonicAuth } from "../../middleware/subsonicAuth";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { scanQueue } from "../../workers/queues";
@@ -48,10 +48,8 @@ export const subsonicRouter = Router();
 
 // Subsonic auth queries the database on every request. 1500 a minute per IP
 // leaves room for clients such as Symfonium that sync one album per request.
-// Cover requests are counted by their own runaway limit instead, so a page of covers does not use this one up.
-const subsonicLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 1500, skip: (req) => isSubsonicCoverPath(req.path) });
+// It counts every request before sign-in; a signed-in cover request is counted by the cover limit instead (after sign-in).
 subsonicRouter.use(subsonicLimiter);
-subsonicRouter.use(subsonicCoverLimiter);
 
 // Normalize paths: append .view suffix if missing for client compatibility.
 // Some clients (e.g. Musa) send /rest/ping instead of /rest/ping.view.
@@ -79,6 +77,7 @@ subsonicRouter.all("/tokenInfo.view", wrap(async (req: Request, res: Response) =
 
 // All routes require Subsonic auth (applied after rate limit)
 subsonicRouter.use(subsonicAuth);
+subsonicRouter.use(subsonicCoverLimiter);
 
 // ===================== SYSTEM =====================
 
