@@ -625,7 +625,8 @@ describe("AcoustID paused", () => {
         // The engine has claimed the question twice already.
         await putStage(TRACK_ID, "recording", "working", { attempt: 2, seedError: false, source: "musicbrainz" });
 
-        const result = await enrichSingleTrack(TRACK_ID);
+        // The queue job names the claim it answers: attempt 2, never redelivered.
+        const result = await enrichSingleTrack(TRACK_ID, `${TRACK_ID}-2-r0`);
 
         expect(result).toBe("deferred");
         expect(mockIdentifyTrackByAcoustid).not.toHaveBeenCalled();
