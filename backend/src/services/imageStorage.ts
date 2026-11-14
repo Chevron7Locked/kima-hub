@@ -10,6 +10,15 @@ import { config, USER_AGENT } from "../config";
 const ARTIST_IMAGES_DIR = "artists";
 const ALBUM_IMAGES_DIR = "albums";
 
+/** The largest picture stored: a download or a local file over it is skipped, so one cannot fill memory or disk. */
+export const MAX_PICTURE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * What a stored cover is served with. A stored cover keeps the same address when it changes (`native:albums/<id>.jpg`),
+ * so clients ask again each time (answered 304 while unchanged) rather than holding a copy for good.
+ */
+export const STORED_COVER_CACHE_CONTROL = "public, no-cache";
+
 /** The folder stored covers live in, beside the transcode cache. */
 export function coversBasePath(): string {
     return path.join(config.music.transcodeCachePath, "../covers");
@@ -136,7 +145,53 @@ export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<bool
     const picture = await asJpeg(bytes);
     if (!picture) return false;
     await writeAtomically(filePath, picture);
+    await dropResizedCopies(filePath);
     return true;
+}
+
+/**
+ * Removes the smaller copies (`<name>_w<width>.jpg`) of the cover stored at `filePath`, and no other file: they were
+ * made from the cover's earlier bytes. A failure only leaves them, and `coverFileForWidth` makes a new copy whenever the
+ * one on disk is older than its cover.
+ */
+async function dropResizedCopies(filePath: string): Promise<void> {
+    const { dir, name } = path.parse(filePath);
+    try {
+        for (const file of await fs.promises.readdir(dir)) {
+            if (file.startsWith(`${name}_w`) && /^\d+\.jpg$/.test(file.slice(name.length + 2))) {
+                await fs.promises.rm(path.join(dir, file), { force: true });
+            }
+        }
+    } catch (err) {
+        logger.warn(`[ImageStorage] Could not remove the smaller copies of ${filePath}: ${(err as Error).message}`);
+    }
+}
+
+/**
+ * The body as bytes, or null when it is over `MAX_PICTURE_BYTES`: judged by its Content-Length first, then by the bytes
+ * counted as they arrive (a length may be missing or false), and the download is cancelled at that point.
+ */
+async function readCapped(response: Response): Promise<Buffer | null> {
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_PICTURE_BYTES) {
+        await response.body?.cancel().catch(() => undefined);
+        return null;
+    }
+    if (!response.body) return Buffer.alloc(0);
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_PICTURE_BYTES) {
+            await reader.cancel().catch(() => undefined);
+            return null;
+        }
+        chunks.push(value);
+    }
+    return Buffer.concat(chunks);
 }
 
 /**
@@ -193,13 +248,17 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        const buffer = await response.arrayBuffer();
+        const buffer = await readCapped(response);
+        if (!buffer) {
+            logger.warn(`[ImageStorage] The ${type} image for ${id} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; skipped`);
+            return null;
+        }
         if (buffer.byteLength < 1000) {
             logger.debug(`[ImageStorage] Image too small (${buffer.byteLength} bytes), likely placeholder`);
             return null;
         }
 
-        if (!(await storeAsJpeg(filePath, Buffer.from(buffer)))) {
+        if (!(await storeAsJpeg(filePath, buffer))) {
             logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
             return null;
         }
@@ -256,6 +315,10 @@ async function checkLocalArtistImage(
         try {
             const lstat = await fs.promises.lstat(filePath);
             if (lstat.isSymbolicLink()) continue;
+            if (lstat.isFile() && lstat.size > MAX_PICTURE_BYTES) {
+                logger.warn(`[ImageStorage] Local artist image ${filePath} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; skipped`);
+                continue;
+            }
             if (lstat.isFile() && lstat.size > 1000) {
                 const dirPath = ensureCoversDir(ARTIST_IMAGES_DIR);
                 const stored = `${artistId}.jpg`;
@@ -341,16 +404,24 @@ export function getResizedImagePath(nativePath: string, width: number): string |
 /**
  * The file to serve for a stored cover at a width: a smaller copy, written beside it once, when the cover is wider;
  * the cover itself when it is no wider (a copy would only duplicate it) or a copy's path would leave the covers folder.
+ * A copy older than its cover was made from earlier bytes and is made again.
  */
 export async function coverFileForWidth(coverPath: string, relativePath: string, width: number): Promise<string> {
     const resizedPath = getResizedImagePath(`native:${relativePath}`, width);
     if (!resizedPath) return coverPath;
-    if (await fs.promises.access(resizedPath).then(() => true, () => false)) return resizedPath;
+    const cover = await fs.promises.stat(coverPath);
+    const copy = await fs.promises.stat(resizedPath).catch(() => null);
+    if (copy && copy.mtimeMs >= cover.mtimeMs) return resizedPath;
     const original = await fs.promises.readFile(coverPath);
     const resized = await resizeImageBuffer(original, width);
     if (resized === original) return coverPath;
-    // Written atomically, so a request arriving mid-write (or after a crash) never finds, and caches for a year, a
-    // half-written copy.
+    // Written atomically, so a request arriving mid-write (or after a crash) never finds a half-written copy.
     await writeAtomically(resizedPath, resized);
+    // A cover stored anew while its old bytes were being resized has had its copies cleared already: this one is stale.
+    const now = await fs.promises.stat(coverPath).catch(() => null);
+    if (!now || now.mtimeMs !== cover.mtimeMs || now.size !== cover.size) {
+        await fs.promises.rm(resizedPath, { force: true });
+        return coverPath;
+    }
     return resizedPath;
 }

@@ -13,17 +13,24 @@ import {
   resizeImageBuffer,
   coverFileForWidth,
   resolveInCoversDir,
+  STORED_COVER_CACHE_CONTROL,
 } from "../../services/imageStorage";
 import crypto from "crypto";
 import fs from "fs";
 
-/** Every cover answer's headers: readable from any page (with credentials for a named origin), cached for good. */
-function coverHeaders(origin: string | undefined): Record<string, string> {
+/** A picture at another address never changes there, so it is kept for good. */
+const FIXED_PICTURE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/**
+ * Every cover answer's headers: readable from any page (with credentials for a named origin). A picture fetched from
+ * another address is cached for good; a stored cover is not (see `STORED_COVER_CACHE_CONTROL`).
+ */
+function coverHeaders(origin: string | undefined, cacheControl = FIXED_PICTURE_CACHE_CONTROL): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": origin || "*",
     ...(origin ? { "Access-Control-Allow-Credentials": "true" } : {}),
     "Cross-Origin-Resource-Policy": "cross-origin",
-    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cache-Control": cacheControl,
   };
 }
 
@@ -34,7 +41,7 @@ async function serveNativeImage(
   req: Request,
   res: Response,
 ) {
-  const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin) };
+  const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin, STORED_COVER_CACHE_CONTROL) };
 
   const width = size ? parseInt(size, 10) : 0;
 

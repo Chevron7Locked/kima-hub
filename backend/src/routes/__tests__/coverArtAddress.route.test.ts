@@ -112,8 +112,28 @@ describe("a stored cover", () => {
             "content-type": "image/jpeg",
             "access-control-allow-origin": "*",
             "cross-origin-resource-policy": "cross-origin",
-            "cache-control": "public, max-age=31536000, immutable",
+            "cache-control": "public, no-cache",
+            etag: expect.any(String),
+            "last-modified": expect.any(String),
         });
+    });
+
+    it("is revalidated, so a changed cover is sent again and an unchanged one is not", async () => {
+        const file = path.join(COVERS, `${P}_revalidate.jpg`);
+        fs.writeFileSync(file, JPEG);
+        const url = `/library/cover-art?url=${encodeURIComponent(`native:${P}_revalidate.jpg`)}`;
+
+        const first = await request(app).get(url);
+        expect(first.headers["cache-control"]).not.toContain("immutable");
+
+        const unchanged = await request(app).get(url).set("If-None-Match", first.headers.etag);
+        expect(unchanged.status).toBe(304);
+
+        const changed = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xd9]);
+        fs.writeFileSync(file, changed);
+        const after = await request(app).get(url).set("If-None-Match", first.headers.etag);
+        expect(after.status).toBe(200);
+        expect(Buffer.from(after.body)).toEqual(changed);
     });
 
     it.each(["by query", "by path"])("outside the covers folder is refused %s", async (how) => {

@@ -257,6 +257,26 @@ describe('GET /share/:token/cover-art/:coverArtId', () => {
         expect(res.status).toBe(200);
     });
 
+    it('asks the client to revalidate a stored cover, so a changed cover is sent again and an unchanged one is not', async () => {
+        const id = `native:albums/${TAG}-revalidate.jpg`;
+        const full = path.join(coversBasePath(), 'albums', `${TAG}-revalidate.jpg`);
+        putFile(full);
+        await setCover(id);
+
+        const first = await request(app).get(coverUrl(id));
+        expect(first.status).toBe(200);
+        expect(first.headers['cache-control']).toBe('public, no-cache');
+        expect(first.headers['cache-control']).not.toContain('immutable');
+
+        const again = await request(app).get(coverUrl(id)).set('If-None-Match', first.headers.etag);
+        expect(again.status).toBe(304);
+
+        fs.writeFileSync(full, 'a changed cover');
+        const changed = await request(app).get(coverUrl(id)).set('If-None-Match', first.headers.etag);
+        expect(changed.status).toBe(200);
+        expect(Buffer.from(changed.body).toString()).toBe('a changed cover');
+    });
+
     it('refuses a cover id that climbs out of the covers folder, though a file is there', async () => {
         // The file exists and the share's album holds the id, so only the path guard can be the reason for the 404.
         const outside = path.join(coversBasePath(), '..', `${TAG}-outside-50%off.jpg`);

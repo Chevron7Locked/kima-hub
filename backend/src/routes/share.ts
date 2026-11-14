@@ -8,7 +8,7 @@ import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
-import { getLocalImagePath, getResizedImagePath } from "../services/imageStorage";
+import { getLocalImagePath, getResizedImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
 import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
 
@@ -165,7 +165,7 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
                 try {
                     await fs.promises.access(resizedPath, fs.constants.R_OK);
                     res.setHeader("Content-Type", "image/jpeg");
-                    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+                    res.setHeader("Cache-Control", STORED_COVER_CACHE_CONTROL);
                     return res.sendFile(resizedPath);
                 } catch {
                     // No resized copy yet: serve the original below.
@@ -174,7 +174,7 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
         }
 
         res.setHeader("Content-Type", "image/jpeg");
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Cache-Control", STORED_COVER_CACHE_CONTROL);
         return res.sendFile(localPath);
     } catch (error: any) {
         logger.error(`[Share] Cover art error: ${error.message}`);

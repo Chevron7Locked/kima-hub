@@ -36,6 +36,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 
 jest.setTimeout(30_000);
 
+const P = `repair${process.pid}`;
 const covers = path.join(ROOT, "covers");
 const audiobooks = path.join(ROOT, "music", "cover-cache", "audiobooks");
 
@@ -71,6 +72,7 @@ afterAll(async () => {
     }
     invalidateSystemSettingsCache();
     fs.rmSync(ROOT, { recursive: true, force: true });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
     await closeEngineConnections();
 });
 
@@ -266,5 +268,167 @@ describe("repairCoverFormatsOnce", () => {
     it("copes with folders that do not exist", async () => {
         expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, stopped: false });
         expect(await marker()).not.toBeNull();
+    });
+});
+
+describe("an old artist picture saved as .png or .webp", () => {
+    const artists = path.join(covers, "artists");
+    const artist = (name: string, heroUrl: string | null) =>
+        prisma.artist.create({ data: { id: `${P}_${name}`, name: `Repair ${name}`, identityKey: `${P}_${name}_ik`, heroUrl } });
+    const hero = async (name: string) => (await prisma.artist.findUniqueOrThrow({ where: { id: `${P}_${name}` } })).heroUrl;
+
+    afterEach(() => prisma.artist.deleteMany({ where: { id: { startsWith: P } } }));
+
+    it.each(["png", "webp"] as const)("is converted to <id>.jpg, its artist moved over to it, and the old file removed (%s)", async (format) => {
+        await artist("a", `native:artists/${P}_a.${format}`);
+        put(path.join(artists, `${P}_a.${format}`), await picture(format));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 1, failed: 0 });
+        expect(await formatOf(path.join(artists, `${P}_a.jpg`))).toBe("jpeg");
+        expect(await hero("a")).toBe(`native:artists/${P}_a.jpg`);
+        expect(fs.readdirSync(artists)).toEqual([`${P}_a.jpg`]);
+        expect(await marker()).not.toBeNull();
+    });
+
+    it("moves every row that pointed at it, and no other artist", async () => {
+        await artist("b", `native:artists/${P}_b.png`);
+        await artist("other", `native:artists/${P}_other.jpg`);
+        await artist("remote", "https://img.example/x.jpg");
+        put(path.join(artists, `${P}_b.png`), await picture("png"));
+
+        await repairCoverFormatsOnce({});
+
+        expect(await hero("b")).toBe(`native:artists/${P}_b.jpg`);
+        expect(await hero("other")).toBe(`native:artists/${P}_other.jpg`);
+        expect(await hero("remote")).toBe("https://img.example/x.jpg");
+    });
+
+    it("replaces an older .jpg of the artist, since the row showed the .png; and drops its smaller copies", async () => {
+        await artist("c", `native:artists/${P}_c.png`);
+        const olderJpeg = await picture("jpeg");
+        put(path.join(artists, `${P}_c.png`), await picture("png"));
+        put(path.join(artists, `${P}_c.jpg`), olderJpeg);
+        put(path.join(artists, `${P}_c_w300.jpg`), await picture("jpeg"));
+
+        await repairCoverFormatsOnce({});
+
+        expect(fs.readdirSync(artists)).toEqual([`${P}_c.jpg`]);
+        expect(await formatOf(path.join(artists, `${P}_c.jpg`))).toBe("jpeg");
+        expect(fs.readFileSync(path.join(artists, `${P}_c.jpg`)).equals(olderJpeg)).toBe(false);
+        expect(await hero("c")).toBe(`native:artists/${P}_c.jpg`);
+    });
+
+    it("is removed when no row points at it and the artist's .jpg stands; the .jpg is left as it is", async () => {
+        const jpeg = await picture("jpeg");
+        put(path.join(artists, `${P}_d.png`), await picture("png"));
+        put(path.join(artists, `${P}_d.jpg`), jpeg);
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 0, failed: 0 });
+        expect(fs.readdirSync(artists)).toEqual([`${P}_d.jpg`]);
+        expect(fs.readFileSync(path.join(artists, `${P}_d.jpg`)).equals(jpeg)).toBe(true);
+    });
+
+    it("is left alone when no row points at it and there is no .jpg", async () => {
+        put(path.join(artists, `${P}_e.png`), await picture("png"));
+
+        await repairCoverFormatsOnce({});
+
+        expect(fs.readdirSync(artists)).toEqual([`${P}_e.png`]);
+    });
+
+    it("is left, with its row, when it is no picture, and logged", async () => {
+        await artist("f", `native:artists/${P}_f.png`);
+        put(path.join(artists, `${P}_f.png`), Buffer.alloc(2000, 7));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 0, notPictures: 1 });
+        expect(fs.readdirSync(artists)).toEqual([`${P}_f.png`]);
+        expect(await hero("f")).toBe(`native:artists/${P}_f.png`);
+        expect((logger.warn as jest.Mock).mock.calls.some((c) => String(c[0]).includes(`${P}_f.png`))).toBe(true);
+    });
+
+    it("is skipped when it is over the 20 MB cap, unread, and logged", async () => {
+        await artist("g", `native:artists/${P}_g.png`);
+        const huge = path.join(artists, `${P}_g.png`);
+        put(huge, Buffer.alloc(0));
+        fs.truncateSync(huge, 20 * 1024 * 1024 + 1);
+        const read = jest.spyOn(fs.promises, "readFile");
+
+        await repairCoverFormatsOnce({});
+
+        expect(read.mock.calls.some((c) => String(c[0]).endsWith(`${P}_g.png`))).toBe(false);
+        expect(await hero("g")).toBe(`native:artists/${P}_g.png`);
+        expect(fs.existsSync(huge)).toBe(true);
+        expect((logger.warn as jest.Mock).mock.calls.some((c) => String(c[0]).includes(`${P}_g.png`))).toBe(true);
+    });
+
+    it("is not followed through a symbolic link", async () => {
+        await artist("h", `native:artists/${P}_h.png`);
+        put(path.join(ROOT, "elsewhere", "pic.png"), await picture("png"));
+        fs.mkdirSync(artists, { recursive: true });
+        fs.symlinkSync(path.join(ROOT, "elsewhere", "pic.png"), path.join(artists, `${P}_h.png`));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 0, failed: 0 });
+        expect(fs.existsSync(path.join(artists, `${P}_h.jpg`))).toBe(false);
+        expect(await hero("h")).toBe(`native:artists/${P}_h.png`);
+    });
+
+    it("leaves the row and the old file when the write fails, and tries again on the next start", async () => {
+        await artist("i", `native:artists/${P}_i.png`);
+        put(path.join(artists, `${P}_i.png`), await picture("png"));
+        jest.spyOn(fs.promises, "rename").mockRejectedValueOnce(new Error("read-only"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 0, failed: 1 });
+        expect(fs.readdirSync(artists)).toEqual([`${P}_i.png`]);
+        expect(await hero("i")).toBe(`native:artists/${P}_i.png`);
+        expect(await marker()).toBeNull();
+
+        jest.restoreAllMocks();
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ artistPicturesConverted: 1, failed: 0 });
+        expect(await hero("i")).toBe(`native:artists/${P}_i.jpg`);
+        expect(await marker()).not.toBeNull();
+    });
+
+    it("finishes a conversion that stopped after the row moved, the next start removing the old file", async () => {
+        await artist("j", `native:artists/${P}_j.jpg`);
+        put(path.join(artists, `${P}_j.png`), await picture("png"));
+        put(path.join(artists, `${P}_j.jpg`), await picture("jpeg"));
+
+        await repairCoverFormatsOnce({});
+
+        expect(fs.readdirSync(artists)).toEqual([`${P}_j.jpg`]);
+    });
+
+    it("does not stop the pass for other covers, which are still converted", async () => {
+        await artist("k", `native:artists/${P}_k.png`);
+        put(path.join(artists, `${P}_k.png`), await picture("png"));
+        put(path.join(covers, "albums", "x.jpg"), await picture("png"));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 1, converted: 1, failed: 0 });
+    });
+
+    it("stops between files at a shutdown, without marking the pass done", async () => {
+        for (const n of ["l1", "l2", "l3"]) {
+            await artist(n, `native:artists/${P}_${n}.png`);
+            put(path.join(artists, `${P}_${n}.png`), await picture("png"));
+        }
+        let asked = 0;
+
+        const result = await repairCoverFormatsOnce({ shouldStop: () => ++asked > 1 });
+
+        expect(result).toMatchObject({ stopped: true });
+        expect(result!.artistPicturesConverted).toBeLessThan(3);
+        expect(await marker()).toBeNull();
     });
 });

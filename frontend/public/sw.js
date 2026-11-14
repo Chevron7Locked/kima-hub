@@ -61,14 +61,23 @@ async function trimCache(cacheName, maxEntries) {
 }
 
 /**
+ * A cover stored on the server (its address names a stored file, `native:...`) can change under the same address, so it
+ * is shown from the cache at once and checked with the server meanwhile. A cover from another site's address never
+ * changes under its address and stays cache-first.
+ */
+function isStoredCover(url) {
+  return /^\/api\/library\/cover-art/.test(url.pathname) && (url.searchParams.get('url') || '').startsWith('native:');
+}
+
+/**
  * Process the image request queue
  */
 function processImageQueue() {
   while (activeImageRequests < MAX_CONCURRENT_IMAGE_REQUESTS && imageRequestQueue.length > 0) {
-    const { request, cacheKey, resolve, reject } = imageRequestQueue.shift();
+    const { request, cacheKey, revalidate, resolve, reject } = imageRequestQueue.shift();
     activeImageRequests++;
 
-    fetchAndCacheImage(request, cacheKey)
+    (revalidate ? revalidateImage(request, cacheKey) : fetchAndCacheImage(request, cacheKey))
       .then(resolve)
       .catch(reject)
       .finally(() => {
@@ -101,11 +110,31 @@ async function fetchAndCacheImage(request, cacheKey) {
 }
 
 /**
+ * Ask the server whether a cached cover changed, and keep the new one when it did. The browser's own HTTP cache is not
+ * trusted here (`no-cache` makes it check with the server, and covers saved before the server asked for that check may
+ * sit in it as "never changes"). A failed check or a non-200 answer leaves the cached cover as it is.
+ */
+async function revalidateImage(request, cacheKey) {
+  try {
+    const cache = await caches.open(IMAGE_CACHE_NAME);
+    const networkResponse = await fetch(request, { cache: 'no-cache' });
+    if (networkResponse.status !== 200) return;
+
+    const cached = await cache.match(cacheKey);
+    const etag = networkResponse.headers.get('etag');
+    if (cached && etag && cached.headers.get('etag') === etag) return;
+    await cache.put(cacheKey, networkResponse);
+  } catch {
+    // Offline: the cached cover stands.
+  }
+}
+
+/**
  * Queue an image request with throttling
  */
-function queueImageRequest(request, cacheKey) {
+function queueImageRequest(request, cacheKey, revalidate = false) {
   return new Promise((resolve, reject) => {
-    imageRequestQueue.push({ request, cacheKey, resolve, reject });
+    imageRequestQueue.push({ request, cacheKey, revalidate, resolve, reject });
     processImageQueue();
   });
 }
@@ -174,6 +203,8 @@ self.addEventListener('fetch', (event) => {
         // Try cache first (token-independent key)
         const cachedResponse = await cache.match(cacheKey);
         if (cachedResponse) {
+          // A stored cover may have changed: show this one, check with the server meanwhile.
+          if (isStoredCover(url)) event.waitUntil(queueImageRequest(request, cacheKey, true));
           return cachedResponse;
         }
 

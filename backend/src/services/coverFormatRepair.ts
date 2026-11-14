@@ -1,8 +1,11 @@
 /**
- * The one-time repair of stored covers saved before every stored picture was written as a JPEG (ticket 104): a `.jpg`
- * could hold PNG or WebP bytes, and was served as `image/jpeg`. The pass walks every covers folder once, converts those
- * files in place through `replaceWithJpeg` (atomic, so a reader never meets half a file; and dropped when the file was
- * written anew since it was read, so the older bytes never overwrite a newer write), and records the done marker.
+ * The one-time repair of stored covers saved before every stored picture was written as a JPEG (tickets 104 and 108): a
+ * `.jpg` could hold PNG or WebP bytes, and was served as `image/jpeg`; and a local artist picture was once copied as
+ * `<id>.png` or `<id>.webp`, with the artist's `heroUrl` pointing at that name. The pass converts the old-named artist
+ * pictures first (each to `<id>.jpg` through `storeAsJpeg`, the artist rows moved over to it, then the old file removed),
+ * then walks every covers folder once and converts the `.jpg` files in place through `replaceWithJpeg` (atomic, so a
+ * reader never meets half a file; and dropped when the file was written anew since it was read, so the older bytes never
+ * overwrite a newer write), and records the done marker.
  *
  * A file that is no picture is left alone and logged: it is not this pass's to delete. A file that could not be written
  * keeps the marker unset, so the next start tries again. A stop (shutdown) ends the pass between files and also keeps
@@ -13,15 +16,18 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
-import { audiobookCoversPath, coversBasePath, replaceWithJpeg } from "./imageStorage";
+import { prisma } from "../utils/db";
+import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
 
 export interface CoverRepairResult {
     /** Files that held another format and are JPEGs now. */
     converted: number;
+    /** Artist pictures saved as `.png` or `.webp` that are `<id>.jpg` now, their artists moved over to it. */
+    artistPicturesConverted: number;
     /** Files written anew after the pass read them: the newer write stands (it is a JPEG already). */
     superseded: number;
-    /** Files named `.jpg` that are no picture, left as they were. */
+    /** Files that are no picture (a `.jpg`, or an old `.png` or `.webp` artist picture), left as they were. */
     notPictures: number;
     /** Files that could not be read or written. */
     failed: number;
@@ -47,6 +53,41 @@ async function isJpeg(file: string): Promise<boolean> {
     }
 }
 
+/** The old-named artist pictures: `<id>.png` and `<id>.webp` in the artists folder. */
+const OLD_ARTIST_PICTURE = /^(.+)\.(png|webp)$/;
+
+/**
+ * Converts one old-named artist picture to `<id>.jpg` and moves the artists pointing at it. A picture no artist points at
+ * is removed when the `.jpg` stands in its place, and left otherwise. One over the size cap, a symbolic link, or no
+ * picture is left, with its artists. `result` takes the counts.
+ */
+async function convertOldArtistPicture(dir: string, name: string, id: string, result: CoverRepairResult): Promise<void> {
+    const file = path.join(dir, name);
+    const jpeg = path.join(dir, `${id}.jpg`);
+    const was = `native:artists/${name}`;
+    // lstat, not stat: a symbolic link is not ours to read through or remove.
+    const onDisk = await fs.promises.lstat(file);
+    if (!onDisk.isFile()) return;
+
+    if ((await prisma.artist.count({ where: { heroUrl: was } })) === 0) {
+        if (await fs.promises.access(jpeg).then(() => true, () => false)) await fs.promises.rm(file, { force: true });
+        return;
+    }
+    if (onDisk.size > MAX_PICTURE_BYTES) {
+        logger.warn(`[COVER-REPAIR] ${file} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; left as it is`);
+        return;
+    }
+    if (!(await storeAsJpeg(jpeg, await fs.promises.readFile(file)))) {
+        result.notPictures++;
+        logger.warn(`[COVER-REPAIR] ${file} is no picture; left as it is`);
+        return;
+    }
+    await prisma.artist.updateMany({ where: { heroUrl: was }, data: { heroUrl: `native:artists/${id}.jpg` } });
+    await fs.promises.rm(file, { force: true });
+    result.artistPicturesConverted++;
+    logger.debug(`[COVER-REPAIR] Converted ${file} to ${jpeg}`);
+}
+
 /**
  * Runs the pass unless it has run. Answers null when it did not run (already done, or no settings row yet), else what it
  * did. One file's trouble is counted, not thrown; a failure of the marker save throws, and the caller logs it.
@@ -56,7 +97,31 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
     // No settings row yet is a new install: it has stored no covers in the old way.
     if (!settings || settings.coverFormatsRepairedAt) return null;
 
-    const result: CoverRepairResult = { converted: 0, superseded: 0, notPictures: 0, failed: 0, stopped: false };
+    const result: CoverRepairResult = {
+        converted: 0,
+        artistPicturesConverted: 0,
+        superseded: 0,
+        notPictures: 0,
+        failed: 0,
+        stopped: false,
+    };
+
+    // First, so the `.jpg` walk below meets the converted pictures as the JPEGs they are.
+    const artistsDir = path.join(coversBasePath(), "artists");
+    for (const name of await fs.promises.readdir(artistsDir).catch(() => [] as string[])) {
+        const old = OLD_ARTIST_PICTURE.exec(name);
+        if (!old) continue;
+        if (shouldStop?.()) {
+            result.stopped = true;
+            return result;
+        }
+        try {
+            await convertOldArtistPicture(artistsDir, name, old[1], result);
+        } catch (err) {
+            result.failed++;
+            logger.warn(`[COVER-REPAIR] Could not repair ${path.join(artistsDir, name)}: ${(err as Error).message}`);
+        }
+    }
 
     for (const dir of coverFolders()) {
         let names: string[];
