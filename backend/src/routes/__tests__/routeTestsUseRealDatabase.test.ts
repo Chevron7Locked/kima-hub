@@ -17,6 +17,8 @@ const SRC = path.resolve(__dirname, "../..");
 const EXEMPT = new Set([
     // Another open ticket (the enrichment queue's stage records) is rewriting this file.
     "workers/__tests__/enrichmentQueueBackoff.test.ts",
+    // Ticket 84 converts this one with the scheduler's stop, after the job modules move out.
+    "workers/__tests__/unifiedEnrichment.runState.test.ts",
 ]);
 
 const CODE_FILE = /\.[cm]?[jt]sx?$/;
