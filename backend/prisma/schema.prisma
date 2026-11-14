@@ -745,9 +745,6 @@ model Track {
   // deleted, so its plays, likes and stage answers survive a NAS hiccup; it is
   // shown as missing and not offered to streaming or enrichment.
   missingSince      DateTime?
-  scanStatus        String             @default("pending")
-  scanError         String?
-  scanStartedAt     DateTime?
   discNumber        Int?
   discSubtitle      String?
   likedBy           LikedTrack[]
@@ -763,7 +760,6 @@ model Track {
   trackStages       TrackStage[]
 
   @@index([analysisStatus])
-  @@index([scanStatus])
   @@index([vibeAnalysisStatus])
   @@index([analysisStatus, vibeAnalysisStatus])
   @@index([isrc])
