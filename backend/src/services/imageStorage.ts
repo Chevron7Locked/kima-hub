@@ -67,7 +67,7 @@ export async function downloadAndStoreImage(
         });
 
         if (!response.ok) {
-            logger.debug(`[ImageStorage] Failed to download:${response.status}`);
+            logger.debug(`[ImageStorage] Failed to download: ${response.status}`);
             return null;
         }
 

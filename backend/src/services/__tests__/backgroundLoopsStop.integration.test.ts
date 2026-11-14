@@ -215,6 +215,8 @@ describe("backfillAllImages", () => {
         await backfillAllImages({ shouldStop: () => stop });
 
         expect(abortedBy).toBe("signal");
+        // A download the stop cut short is not a failure the status page should show.
+        expect(getImageBackfillProgress()).toMatchObject({ failed: 0, processed: 0 });
     });
 
     describe("on a library bigger than a page", () => {

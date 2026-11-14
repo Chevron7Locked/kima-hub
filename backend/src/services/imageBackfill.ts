@@ -202,10 +202,13 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
                             backfillProgress.success++;
                             logger.debug(`[ImageBackfill] Downloaded ${noun} for ${row.label}`);
                         } else {
+                            // A download a stop cut short is neither done nor failed: the next start takes it again.
+                            if (signal.aborted) return;
                             backfillProgress.failed++;
                             logger.debug(`[ImageBackfill] Failed to download ${noun} for ${row.label}`);
                         }
                     } catch (error: any) {
+                        if (signal.aborted) return;
                         backfillProgress.failed++;
                         logger.debug(`[ImageBackfill] Error processing ${row.label}: ${error.message}`);
                     }
