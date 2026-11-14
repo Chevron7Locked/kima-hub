@@ -124,6 +124,15 @@ describe("the cover ids", () => {
 
         expect(coverOf(await get("/getPlayQueue.view"), song(found.album))).toEqual([`${found.album}_${V.found}`]);
     });
+
+    it("store an album's own cover in a saved play queue, as the album lists show it, and the web player reads it", async () => {
+        await get("/savePlayQueue.view", { id: song(found.own), current: song(found.own), position: "0" });
+
+        expect(coverOf(await get("/getPlayQueue.view"), song(found.own))).toEqual([`${found.own}_${V.own}`]);
+        const state = await prisma.playbackState.findFirst({ where: { userId: USER } });
+        const stored = (state?.queue as Array<{ album?: { coverArt?: string } }>)[0];
+        expect(stored.album?.coverArt).toBe(`native:albums/${found.own}.jpg?v=${V.own}`);
+    });
 });
 
 describe("a cover id's parts", () => {

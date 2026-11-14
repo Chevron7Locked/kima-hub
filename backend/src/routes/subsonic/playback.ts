@@ -18,11 +18,10 @@ import {
     coverCacheControl,
     coverFileForSize,
     coverWidthOf,
-    fetchPicture,
     parseStoredCover,
-    resizeImageBuffer,
     resolveInCoversDir,
 } from "../../services/imageStorage";
+import { externalCoverPicture } from "../../services/externalCoverCache";
 import { sendStoredFile } from "../../utils/sendStoredFile";
 import { recordPlay } from "../../services/playRecording";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -288,18 +287,17 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
     }
 
     // A cover at an outside address is fetched and served as Kima's own (no redirect: an app may not reach that host, and
-    // `size` applies to it as to a stored cover). Its id does not change with the address, so it is cached for a day.
+    // `size` applies to it as to a stored cover). Its id does not change with the address, so it is cached for a day, and
+    // Kima keeps the picture a few hours (per address and width) so a page of covers is not a page of fetches.
     if (coverUrl.startsWith("http://") || coverUrl.startsWith("https://")) {
-        const picture = await fetchPicture(coverUrl);
+        const picture = await externalCoverPicture(coverUrl, coverWidthOf(one(req, "size")));
         if (!picture) return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art not found");
-        const width = coverWidthOf(one(req, "size"));
-        const scaled = width ? await resizeImageBuffer(picture.bytes, width) : picture.bytes;
         res.set({
-            "Content-Type": scaled === picture.bytes ? picture.contentType : "image/jpeg",
+            "Content-Type": picture.contentType,
             "Cache-Control": "public, max-age=86400",
             "Access-Control-Allow-Origin": "*",
         });
-        return res.send(scaled);
+        return res.send(picture.bytes);
     }
 
     // Native paths use "native:" prefix; resolve against the covers cache directory

@@ -89,6 +89,7 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
                     id: true,
                     title: true,
                     coverUrl: true,
+                    userCoverUrl: true,
                     artist: { select: { id: true, name: true, displayName: true } },
                 },
             },
@@ -114,7 +115,7 @@ async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
                 ? {
                       id: t.album.id,
                       title: t.album.title,
-                      coverArt: t.album.coverUrl,
+                      coverArt: t.album.userCoverUrl || t.album.coverUrl,
                   }
                 : null,
         }));

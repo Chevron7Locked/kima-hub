@@ -28,6 +28,7 @@ import { playbackRouter } from "../playback";
 import { prisma } from "../../../utils/db";
 import { fetchChecked } from "../../../utils/ssrf";
 import { MAX_PICTURE_BYTES } from "../../../services/imageStorage";
+import { clearExternalCoverCache } from "../../../services/externalCoverCache";
 import { expectLog } from "../../../__tests__/helpers/expectedLogs";
 
 const P = "zz-sub-cover";
@@ -230,7 +231,42 @@ describe("getCoverArt for a cover at an outside address", () => {
         (fetchChecked as jest.Mock).mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "image/jpeg" }, ...init }));
     const notFound = (res: request.Response) => expect(res.body["subsonic-response"]).toMatchObject({ status: "failed", error: { code: 70 } });
 
-    beforeEach(() => setAlbumCover(OUTSIDE));
+    beforeEach(async () => {
+        clearExternalCoverCache();
+        await setAlbumCover(OUTSIDE);
+    });
+
+    it("fetches the picture once for the same address and size, however many apps and pages ask", async () => {
+        reply(new Uint8Array(original));
+
+        const first = await request(app).get(`/rest/getCoverArt.view?id=${P}-al&size=300`);
+        const second = await request(app).get(`/rest/getCoverArt.view?id=${P}-al&size=300`);
+
+        expect(second.status).toBe(200);
+        expect(bytesOf(second).equals(bytesOf(first))).toBe(true);
+        expect(await widthOf(bytesOf(second))).toBe(300);
+        expect(fetchChecked).toHaveBeenCalledTimes(1);
+    });
+
+    it("fetches again for another size, since that is another picture", async () => {
+        (fetchChecked as jest.Mock).mockImplementation(async () => new Response(new Uint8Array(original), { status: 200, headers: { "content-type": "image/jpeg" } }));
+
+        await request(app).get(`/rest/getCoverArt.view?id=${P}-al&size=300`);
+        await request(app).get(`/rest/getCoverArt.view?id=${P}-al&size=100`);
+
+        expect(fetchChecked).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not keep a failure", async () => {
+        expectLog("warn");
+        (fetchChecked as jest.Mock).mockRejectedValueOnce(new Error("refused"));
+        reply(new Uint8Array(original));
+
+        notFound(await request(app).get(`/rest/getCoverArt.view?id=${P}-al&f=json`));
+        const retry = await request(app).get(`/rest/getCoverArt.view?id=${P}-al&f=json`);
+
+        expect(retry.status).toBe(200);
+    });
 
     it("serves the picture itself instead of redirecting", async () => {
         reply(new Uint8Array(original));

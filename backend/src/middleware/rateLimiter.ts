@@ -90,3 +90,17 @@ export const imageLimiter = createRateLimiter({
     message: "Too many image requests, please slow down.",
 });
 
+/** Whether a Subsonic path (as the router sees it, under /rest) is the cover route, with or without `.view`. */
+export function isSubsonicCoverPath(path: string): boolean {
+    return /^\/getcoverart(\.view)?\/?$/i.test(path);
+}
+
+// Subsonic covers: the same runaway limit as the web cover route, counted apart from the rest of Subsonic so a page of
+// covers does not use up the 1,500 a minute that every other call shares.
+export const subsonicCoverLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 3000,
+    message: "Too many image requests, please slow down.",
+    skip: (req) => !isSubsonicCoverPath(req.path),
+});
+
