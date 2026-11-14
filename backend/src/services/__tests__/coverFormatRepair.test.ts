@@ -249,6 +249,20 @@ describe("repairCoverFormatsOnce", () => {
         expect(fs.readFileSync(file).equals(sameSize)).toBe(true);
     });
 
+    it("does not bring back a file deleted after it was read", async () => {
+        const file = path.join(covers, "albums", "p.jpg");
+        put(file, await picture("png"));
+        const realRead = fs.promises.readFile;
+        jest.spyOn(fs.promises, "readFile").mockImplementationOnce(async (...args: Parameters<typeof realRead>) => {
+            const read = await realRead(...args);
+            fs.rmSync(file);
+            return read;
+        });
+
+        expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, superseded: 1, failed: 0 });
+        expect(fs.readdirSync(path.join(covers, "albums"))).toEqual([]);
+    });
+
     it("copes with folders that do not exist", async () => {
         expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, stopped: false });
         expect(await marker()).not.toBeNull();

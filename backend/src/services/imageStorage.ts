@@ -104,17 +104,18 @@ export interface FileVersion {
 /**
  * Written under a temporary name and renamed into place, so a crash or a failed write never leaves half a file under
  * the final name, and a reader never finds one. The folder's orphan temporary files are swept before its first write.
- * With `unchangedFrom`, the file is replaced only if it still looks as it did then, else nothing changes and the answer
+ * With `readAs`, the file is replaced only if it still looks as it did then, else nothing changes and the answer
  * is false: a pass holding old bytes must not overwrite a newer write.
  */
-async function writeAtomically(filePath: string, bytes: Buffer, unchangedFrom?: FileVersion): Promise<boolean> {
+async function writeAtomically(filePath: string, bytes: Buffer, readAs?: FileVersion): Promise<boolean> {
     await sweepOrphanParts(path.dirname(filePath));
     const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
     try {
         await fs.promises.writeFile(partial, bytes);
-        if (unchangedFrom) {
-            const now = await fs.promises.stat(filePath);
-            if (now.mtimeMs !== unchangedFrom.mtimeMs || now.size !== unchangedFrom.size) {
+        if (readAs) {
+            // A file deleted meanwhile counts as changed too: the pass does not bring it back.
+            const now = await fs.promises.stat(filePath).catch(() => null);
+            if (!now || now.mtimeMs !== readAs.mtimeMs || now.size !== readAs.size) {
                 await fs.promises.rm(partial, { force: true });
                 return false;
             }
@@ -344,7 +345,7 @@ export function getResizedImagePath(nativePath: string, width: number): string |
 export async function coverFileForWidth(coverPath: string, relativePath: string, width: number): Promise<string> {
     const resizedPath = getResizedImagePath(`native:${relativePath}`, width);
     if (!resizedPath) return coverPath;
-    if (fs.existsSync(resizedPath)) return resizedPath;
+    if (await fs.promises.access(resizedPath).then(() => true, () => false)) return resizedPath;
     const original = await fs.promises.readFile(coverPath);
     const resized = await resizeImageBuffer(original, width);
     if (resized === original) return coverPath;
