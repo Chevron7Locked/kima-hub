@@ -128,6 +128,24 @@ describe("a stored cover (native address)", () => {
     });
 });
 
+describe("an audiobook cover", () => {
+    const BOOK = "http://kima.test/api/audiobooks/book-1/cover?token=abc";
+    const BOOK_KEY = "http://kima.test/api/audiobooks/book-1/cover";
+
+    it("is shown from the cache at once and checked with the server meanwhile, and the changed cover is kept", async () => {
+        sw.fetchMock.mockResolvedValueOnce(photo("one", '"v1"'));
+        await sw.request(BOOK);
+        sw.fetchMock.mockResolvedValueOnce(photo("two", '"v2"'));
+
+        const shown = await sw.request(BOOK);
+
+        expect(await shown!.text()).toBe("one");
+        expect(sw.fetchMock).toHaveBeenCalledTimes(2);
+        expect(sw.fetchMock.mock.calls[1][1]).toMatchObject({ cache: "no-cache" });
+        expect(await sw.store("kima-images-v3").get(BOOK_KEY)!.text()).toBe("two");
+    });
+});
+
 describe("a cover from another site's address", () => {
     it("stays cache-first: shown from the cache with no request to the server", async () => {
         sw.fetchMock.mockResolvedValueOnce(photo("remote", '"r1"'));

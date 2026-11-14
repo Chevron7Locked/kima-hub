@@ -7,6 +7,7 @@
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 import shareRoutes from '../../routes/share';
@@ -275,6 +276,71 @@ describe('GET /share/:token/cover-art/:coverArtId', () => {
         const changed = await request(app).get(coverUrl(id)).set('If-None-Match', first.headers.etag);
         expect(changed.status).toBe(200);
         expect(Buffer.from(changed.body).toString()).toBe('a changed cover');
+    });
+
+    describe('at a size', () => {
+        const noisy = async (width: number, height: number) => {
+            const noise = Buffer.alloc(width * height * 3);
+            for (let i = 0; i < noise.length; i++) noise[i] = (i * 7919) % 251;
+            return sharp(noise, { raw: { width, height, channels: 3 } }).jpeg().toBuffer();
+        };
+        const widthOf = async (res: request.Response) => (await sharp(Buffer.from(res.body)).metadata()).width;
+        const sized = async (name: string) => {
+            const id = `native:albums/${TAG}-${name}.jpg`;
+            const full = path.join(coversBasePath(), 'albums', `${TAG}-${name}.jpg`);
+            fs.mkdirSync(path.dirname(full), { recursive: true });
+            fs.writeFileSync(full, await noisy(600, 400));
+            made.push(full, full.replace(/\.jpg$/, '_w300.jpg'));
+            await setCover(id);
+            return { id, full, copy: full.replace(/\.jpg$/, '_w300.jpg') };
+        };
+
+        it('scales a wider cover to the size asked for', async () => {
+            const { id } = await sized('scale');
+
+            const res = await request(app).get(`${coverUrl(id)}?size=300`);
+
+            expect(res.status).toBe(200);
+            expect(await widthOf(res)).toBe(300);
+        });
+
+        it('makes the smaller copy again when it is older than its cover', async () => {
+            const { id, copy } = await sized('stale');
+            fs.writeFileSync(copy, await sharp({ create: { width: 300, height: 200, channels: 3, background: 'red' } }).jpeg().toBuffer());
+            const past = new Date(Date.now() - 3_600_000);
+            fs.utimesSync(copy, past, past);
+
+            const res = await request(app).get(`${coverUrl(id)}?size=300`);
+
+            expect((await sharp(Buffer.from(res.body)).stats()).dominant).not.toEqual({ r: 255, g: 0, b: 0 });
+            expect(fs.statSync(copy).mtimeMs).toBeGreaterThan(past.getTime());
+        });
+
+        it('serves a smaller copy that is as new as its cover as it is', async () => {
+            const { id, copy } = await sized('fresh');
+            await request(app).get(`${coverUrl(id)}?size=300`);
+            const before = fs.statSync(copy).mtimeMs;
+
+            const res = await request(app).get(`${coverUrl(id)}?size=300`);
+
+            expect(res.status).toBe(200);
+            expect(fs.statSync(copy).mtimeMs).toBe(before);
+            expect(res.headers['cache-control']).toBe('public, no-cache');
+        });
+    });
+
+    it('answers 404 when the cover file is gone between the check and the send', async () => {
+        const id = `native:albums/${TAG}-vanished.jpg`;
+        await setCover(id);
+        const vanished = path.join(coversBasePath(), 'albums', `${TAG}-vanished.jpg`);
+        const real = fs.existsSync;
+        const spy = jest.spyOn(fs, 'existsSync').mockImplementation((p) => (String(p) === vanished ? true : real(p)));
+
+        const res = await request(app).get(coverUrl(id));
+        spy.mockRestore();
+
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: 'Cover art not found' });
     });
 
     it('refuses a cover id that climbs out of the covers folder, though a file is there', async () => {

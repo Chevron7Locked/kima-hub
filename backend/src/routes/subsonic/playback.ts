@@ -14,7 +14,8 @@ import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
 import { resolveWithinMusicRoot } from "../library/trackPath";
-import { resolveInCoversDir } from "../../services/imageStorage";
+import { coverFileForWidth, resolveInCoversDir } from "../../services/imageStorage";
+import { sendStoredFile } from "../../utils/sendStoredFile";
 import { recordPlay } from "../../services/playRecording";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { getLiveState, publicUserId, reportLive } from "../../services/liveListening";
@@ -298,12 +299,22 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
             return subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art file not found");
         }
 
-        const ext = path.extname(resolvedPath).toLowerCase();
+        // `size` is the width to scale to (Subsonic spec), within the limits the web cover route holds to; without
+        // one, or outside them, the stored file is sent whole. A scaled copy is always a JPEG.
+        const size = parseInt(one(req, "size") ?? "", 10);
+        let file = resolvedPath;
+        if (size >= 16 && size <= 2048) {
+            try {
+                file = await coverFileForWidth(resolvedPath, nativePath, size);
+            } catch (err) {
+                logger.warn(`[Subsonic] Could not scale ${nativePath}, sending it whole: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+
+        const ext = path.extname(file).toLowerCase();
         const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        return res.sendFile(resolvedPath);
+        const headers = { "Content-Type": contentType, "Cache-Control": "public, max-age=86400", "Access-Control-Allow-Origin": "*" };
+        return sendStoredFile(res, file, { headers }, () => void subsonicError(req, res, SubsonicError.NOT_FOUND, "Cover art file not found"));
     }
 
     // Unknown URL format — redirect as a last resort

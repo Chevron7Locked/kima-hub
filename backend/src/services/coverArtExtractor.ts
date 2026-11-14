@@ -2,7 +2,7 @@ import * as fs from "fs";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import { parseFile } from "music-metadata";
-import { storeAsJpeg } from "./imageStorage";
+import { MAX_PICTURE_BYTES, storeAsJpeg } from "./imageStorage";
 
 export class CoverArtExtractor {
     private coverCachePath: string;
@@ -39,6 +39,11 @@ export class CoverArtExtractor {
             // Get embedded picture
             const picture = metadata.common.picture?.[0];
             if (!picture) {
+                return null;
+            }
+
+            if (picture.data.byteLength > MAX_PICTURE_BYTES) {
+                logger.warn(`[COVER-ART] Embedded picture in ${path.basename(audioFilePath)} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; skipped`);
                 return null;
             }
 

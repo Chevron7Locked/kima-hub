@@ -15,6 +15,7 @@ import {
   resolveInCoversDir,
   STORED_COVER_CACHE_CONTROL,
 } from "../../services/imageStorage";
+import { sendStoredFile } from "../../utils/sendStoredFile";
 import crypto from "crypto";
 import fs from "fs";
 
@@ -43,20 +44,25 @@ async function serveNativeImage(
 ) {
   const headers = { "Content-Type": "image/jpeg", ...coverHeaders(req.headers.origin, STORED_COVER_CACHE_CONTROL) };
 
+  // A stored file that cannot be sent (deleted since the caller looked) is a 404, not Express's default error page.
+  const send = (file: string) =>
+    sendStoredFile(res, file, { headers }, () => void res.status(404).json({ error: "Cover art not found" }));
+
   const width = size ? parseInt(size, 10) : 0;
 
   if (!width || width < 16 || width > 2048) {
-    return res.sendFile(coverCachePath, { headers });
+    return send(coverCachePath);
   }
 
+  let file = coverCachePath;
   try {
-    return res.sendFile(await coverFileForWidth(coverCachePath, nativePath, width), { headers });
+    file = await coverFileForWidth(coverCachePath, nativePath, width);
   } catch (err) {
     logger.warn(
       `[COVER-ART] Resize failed for ${nativePath}, serving original: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return res.sendFile(coverCachePath, { headers });
   }
+  return send(file);
 }
 
 /** The only Audiobookshelf address this route asks for: a book's cover (what the audiobook sync stores). */

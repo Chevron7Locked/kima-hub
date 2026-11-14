@@ -170,6 +170,19 @@ describe("a stored cover", () => {
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/own.jpg");
     });
 
+    // The file is there when the route looks and gone when it sends (a sweep or a replaced volume between the two).
+    it.each(["", "&size=300"])("deleted between the check and the send is the route's own 404%s", async (size) => {
+        const vanished = path.join(COVERS, `${P}_vanished.jpg`);
+        const real = fs.existsSync;
+        jest.spyOn(fs, "existsSync").mockImplementation((p) => (String(p) === vanished ? true : real(p)));
+
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(`native:${P}_vanished.jpg`)}${size}`);
+        jest.restoreAllMocks();
+
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: "Cover art not found" });
+    });
+
     it("whose file is gone and found nowhere is a 404", async () => {
         expectLog("warn");
         const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent("native:nothing-here.jpg")}`);

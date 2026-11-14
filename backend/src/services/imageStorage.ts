@@ -171,7 +171,7 @@ async function dropResizedCopies(filePath: string): Promise<void> {
  * The body as bytes, or null when it is over `MAX_PICTURE_BYTES`: judged by its Content-Length first, then by the bytes
  * counted as they arrive (a length may be missing or false), and the download is cancelled at that point.
  */
-async function readCapped(response: Response): Promise<Buffer | null> {
+export async function readCapped(response: Response): Promise<Buffer | null> {
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > MAX_PICTURE_BYTES) {
         await response.body?.cancel().catch(() => undefined);

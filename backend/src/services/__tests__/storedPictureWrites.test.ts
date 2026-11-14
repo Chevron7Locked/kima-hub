@@ -43,6 +43,27 @@ async function formatOf(file: string): Promise<string | undefined> {
     const sharp = (await import("sharp")).default;
     return (await sharp(file).metadata()).format;
 }
+const CAP = 20 * 1024 * 1024;
+/** A body of `total` bytes sent in 1 MB chunks, noting how much was asked for and whether the reader gave up. */
+function streamOf(total: number) {
+    const state = { sent: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+            const size = Math.min(1024 * 1024, total - state.sent);
+            if (size <= 0) return controller.close();
+            state.sent += size;
+            controller.enqueue(new Uint8Array(size));
+        },
+        cancel() {
+            state.cancelled = true;
+        },
+    });
+    return { state, body };
+}
+/** A picture that reads fine but is over the cap: trailing bytes after the end of the image are ignored by the decoder. */
+async function oversized(): Promise<Buffer> {
+    return Buffer.concat([await picture("jpeg"), Buffer.alloc(CAP)]);
+}
 const answer = (body: Buffer) => jest.spyOn(global, "fetch").mockResolvedValue(new Response(new Uint8Array(body), { status: 200 }));
 
 afterEach(() => {
@@ -79,6 +100,27 @@ describe("an audiobook cover downloaded to the cover cache", () => {
         answer(Buffer.from("<html>login</html>"));
 
         expect(await service.downloadCover("book3", "http://abs/api/items/book3/cover")).toBeNull();
+        expect(fs.readdirSync(audiobooks)).toEqual([]);
+    });
+
+    it("is refused over the 20 MB cap by its Content-Length, without reading the body", async () => {
+        const { state, body } = streamOf(CAP + 1);
+        jest.spyOn(global, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "content-length": String(CAP + 1) } }));
+
+        expect(await service.downloadCover("big1", "http://abs/api/items/big1/cover")).toBeNull();
+
+        expect(state.sent).toBeLessThan(CAP / 2);
+        expect(fs.readdirSync(audiobooks)).toEqual([]);
+    });
+
+    it("is aborted once the streamed bytes pass the cap, when no length was sent", async () => {
+        const { state, body } = streamOf(CAP * 3);
+        jest.spyOn(global, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+
+        expect(await service.downloadCover("big2", "http://abs/api/items/big2/cover")).toBeNull();
+
+        expect(state.cancelled).toBe(true);
+        expect(state.sent).toBeLessThanOrEqual(CAP + 2 * 1024 * 1024);
         expect(fs.readdirSync(audiobooks)).toEqual([]);
     });
 
@@ -122,5 +164,18 @@ describe("the scanner's embedded cover art", () => {
         embedded(null);
 
         expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb3")).toBeNull();
+    });
+
+    it("is skipped, and finds no cover, when the embedded picture is over the 20 MB cap", async () => {
+        embedded(await oversized());
+
+        expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb4")).toBeNull();
+        expect(fs.readdirSync(covers)).toEqual([]);
+    });
+
+    it("still stores an embedded picture just under the cap's reach, a normal one", async () => {
+        embedded(await picture("jpeg"));
+
+        expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb5")).toBe("alb5.jpg");
     });
 });

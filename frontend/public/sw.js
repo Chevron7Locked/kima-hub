@@ -61,11 +61,12 @@ async function trimCache(cacheName, maxEntries) {
 }
 
 /**
- * A cover stored on the server (its address names a stored file, `native:...`) can change under the same address, so it
- * is shown from the cache at once and checked with the server meanwhile. A cover from another site's address never
- * changes under its address and stays cache-first.
+ * A cover stored on the server (its address names a stored file, `native:...`, or it is an audiobook's cover) can change
+ * under the same address, so it is shown from the cache at once and checked with the server meanwhile. A cover from
+ * another site's address never changes under its address and stays cache-first.
  */
 function isStoredCover(url) {
+  if (/^\/api\/audiobooks\/[^/]+\/cover/.test(url.pathname)) return true;
   return /^\/api\/library\/cover-art/.test(url.pathname) && (url.searchParams.get('url') || '').startsWith('native:');
 }
 

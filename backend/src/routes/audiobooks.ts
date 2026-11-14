@@ -10,6 +10,8 @@ import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
 import { artistSortName } from "../services/artistIdentity";
 import { upstreamHeader } from "../utils/upstreamHeaders";
+import { STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { sendStoredFile } from "../utils/sendStoredFile";
 import { runAsRequestWork } from "../utils/stopCheck";
 import type { Audiobook, AudiobookProgress } from "@prisma/client";
 
@@ -401,13 +403,14 @@ router.get("/:id/cover", async (req, res) => {
             : null;
         if (resolvedCover && fs.existsSync(resolvedCover)) {
             const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
-            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            // The cover keeps its address when it changes, so clients ask again each time (see `STORED_COVER_CACHE_CONTROL`).
+            res.setHeader("Cache-Control", STORED_COVER_CACHE_CONTROL);
             if (origin) {
                 res.setHeader("Access-Control-Allow-Origin", origin);
                 res.setHeader("Access-Control-Allow-Credentials", "true");
             }
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-            return res.sendFile(resolvedCover);
+            return sendStoredFile(res, resolvedCover, {}, () => void res.status(404).json({ error: "Cover not found" }));
         }
 
         // Fallback: proxy from Audiobookshelf if coverUrl is available

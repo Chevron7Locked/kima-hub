@@ -8,7 +8,8 @@ import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
-import { getLocalImagePath, getResizedImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { coverFileForWidth, getLocalImagePath, STORED_COVER_CACHE_CONTROL } from "../services/imageStorage";
+import { sendStoredFile } from "../utils/sendStoredFile";
 import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
 
@@ -158,24 +159,23 @@ router.get("/:token/cover-art/:coverArtId", shareResolveLimiter, async (req: Req
             return res.status(404).json({ error: "Cover art not found" });
         }
 
+        // The same width limits and stored-copy rules as the library cover route: a copy older than its cover is made again.
+        let file = localPath;
         const width = size ? parseInt(size, 10) : 0;
         if (width >= 16 && width <= 2048) {
-            const resizedPath = getResizedImagePath(coverArtId, width);
-            if (resizedPath) {
-                try {
-                    await fs.promises.access(resizedPath, fs.constants.R_OK);
-                    res.setHeader("Content-Type", "image/jpeg");
-                    res.setHeader("Cache-Control", STORED_COVER_CACHE_CONTROL);
-                    return res.sendFile(resizedPath);
-                } catch {
-                    // No resized copy yet: serve the original below.
-                }
+            try {
+                file = await coverFileForWidth(localPath, coverArtId.slice("native:".length), width);
+            } catch (err: any) {
+                logger.warn(`[Share] Resize failed for ${coverArtId}, serving original: ${err.message}`);
             }
         }
 
-        res.setHeader("Content-Type", "image/jpeg");
-        res.setHeader("Cache-Control", STORED_COVER_CACHE_CONTROL);
-        return res.sendFile(localPath);
+        return sendStoredFile(
+            res,
+            file,
+            { headers: { "Content-Type": "image/jpeg", "Cache-Control": STORED_COVER_CACHE_CONTROL } },
+            () => void res.status(404).json({ error: "Cover art not found" }),
+        );
     } catch (error: any) {
         logger.error(`[Share] Cover art error: ${error.message}`);
         res.status(500).json({ error: "Failed to serve cover art" });

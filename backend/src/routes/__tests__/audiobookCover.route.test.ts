@@ -136,6 +136,39 @@ describe("GET /audiobooks/:id/cover", () => {
         fs.rmSync(inside);
     });
 
+    it("asks the client to revalidate a stored cover, so a changed cover is sent again and an unchanged one is not", async () => {
+        const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
+        fs.mkdirSync(path.dirname(inside), { recursive: true });
+        fs.writeFileSync(inside, "a cover");
+
+        const first = await request(app).get(`/${BOOK}/cover`);
+        expect(first.headers["cache-control"]).toBe("public, no-cache");
+        expect(first.headers["cache-control"]).not.toContain("immutable");
+
+        const again = await request(app).get(`/${BOOK}/cover`).set("If-None-Match", first.headers.etag);
+        expect(again.status).toBe(304);
+
+        fs.writeFileSync(inside, "a changed cover");
+        const changed = await request(app).get(`/${BOOK}/cover`).set("If-None-Match", first.headers.etag);
+        expect(changed.status).toBe(200);
+        expect(changed.body.toString()).toBe("a changed cover");
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+        fs.rmSync(inside);
+    });
+
+    it("answers the route's own 404 when the cover file is gone between the check and the send", async () => {
+        const vanished = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
+        const real = fs.existsSync;
+        const spy = jest.spyOn(fs, "existsSync").mockImplementation((p) => (String(p) === vanished ? true : real(p)));
+
+        const res = await request(app).get(`/${BOOK}/cover`);
+        spy.mockRestore();
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: "Cover not found" });
+    });
+
     it("refuses an id that reaches another folder inside the music root", async () => {
         const id = encodeURIComponent(path.join("..", "..", "Artist", "Album", "cover"));
         const res = await request(app).get(`/${id}/cover`);

@@ -6,7 +6,7 @@ import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
 import type { StopCheck } from "../utils/stopCheck";
-import { audiobookCoversPath, storeAsJpeg } from "./imageStorage";
+import { audiobookCoversPath, MAX_PICTURE_BYTES, readCapped, storeAsJpeg } from "./imageStorage";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -448,11 +448,15 @@ class AudiobookCacheService {
                 );
             }
 
-            const buffer = await response.arrayBuffer();
+            const buffer = await readCapped(response);
+            if (!buffer) {
+                logger.warn(`Cover for ${audiobookId} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; not cached`);
+                return null;
+            }
             const fileName = `${audiobookId}.jpg`;
             const filePath = path.join(this.coverCacheDir, fileName);
 
-            if (!(await storeAsJpeg(filePath, Buffer.from(buffer)))) {
+            if (!(await storeAsJpeg(filePath, buffer))) {
                 logger.warn(`Cover for ${audiobookId} is not a readable picture; not cached`);
                 return null;
             }
