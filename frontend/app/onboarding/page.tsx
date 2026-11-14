@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BookOpen, Music, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { passwordProblem } from "@/lib/passwordRule";
 import { api } from "@/lib/api";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useAuth } from "@/lib/auth-context";
@@ -28,8 +29,8 @@ export default function OnboardingPage() {
     const [initialLoading, setInitialLoading] = useState(true);
     const [error, setError] = useState("");
     const showPasswordMismatch = error === "Passwords don't match";
-    const showPasswordTooShort =
-        error === "Password must be at least 6 characters";
+    // Set by this form's own check of the password, so the field is marked without reading a message.
+    const [passwordRefused, setPasswordRefused] = useState(false);
 
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
@@ -64,14 +65,17 @@ export default function OnboardingPage() {
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
+        setPasswordRefused(false);
 
         if (password !== confirmPassword) {
             setError("Passwords don't match");
             return;
         }
 
-        if (password.length < 6) {
-            setError("Password must be at least 6 characters");
+        const problem = passwordProblem(password);
+        if (problem) {
+            setPasswordRefused(true);
+            setError(problem);
             return;
         }
 
@@ -327,7 +331,7 @@ export default function OnboardingPage() {
                                                     )
                                                 }
                                                 className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
-                                                    showPasswordTooShort ?
+                                                    passwordRefused ?
                                                     "border-danger/50"
                                                     : "border-white/10"
                                                 }`}
