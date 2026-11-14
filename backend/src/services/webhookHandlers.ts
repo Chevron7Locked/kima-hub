@@ -58,9 +58,19 @@ export async function dispatchWebhookEvent(
 /** The events being processed. The route answers before its event is, so it does not await them. */
 const processing = new Set<Promise<void>>();
 
-/** Resolves when every event being processed has ended and recorded its outcome, for tests. */
-export async function whenWebhooksIdle(): Promise<void> {
-    while (processing.size > 0) await Promise.allSettled([...processing]);
+/**
+ * Resolves when every event being processed has ended and recorded its outcome, or after `timeoutMs` when one is
+ * given. For tests, and for shutdown, which must not be held by an event that never finishes: that event is left
+ * unprocessed in the store, and the reconciliation job replays it on the next start.
+ */
+export async function whenWebhooksIdle(timeoutMs?: number): Promise<void> {
+    const idle = (async () => {
+        while (processing.size > 0) await Promise.allSettled([...processing]);
+    })();
+    if (timeoutMs === undefined) return idle;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([idle, new Promise<void>((resolve) => (timer = setTimeout(resolve, timeoutMs)))]);
+    clearTimeout(timer);
 }
 
 /** Dispatch a stored event and record the outcome on it; never throws. */
@@ -91,8 +101,13 @@ async function processEvent(
             logger.error(`[WEBHOOK] Could not record the failure of ${id}:`, markError.message);
         }
     } finally {
-        webhookEventsTotal.inc({ event_type: eventType, status });
-        webhookProcessingDuration.observe({ event_type: eventType }, (Date.now() - startTime) / 1000);
+        // The outcome is recorded; a metrics call that throws must not turn this into a rejection.
+        try {
+            webhookEventsTotal.inc({ event_type: eventType, status });
+            webhookProcessingDuration.observe({ event_type: eventType }, (Date.now() - startTime) / 1000);
+        } catch (metricsError: any) {
+            logger.warn(`[WEBHOOK] Could not record metrics for ${id}:`, metricsError.message);
+        }
     }
 }
 

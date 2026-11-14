@@ -476,10 +476,13 @@ async function gracefulShutdown(signal: string) {
     logger.debug(`\nReceived ${signal}. Starting graceful shutdown...`);
 
     try {
-        // Let the batch and import checks a settled download job started finish while the queues and the
-        // database are still open. One waiting on Lidarr for a minute is not held for: wait only a moment.
+        // Let the batch and import checks a settled download job started, and the webhook events being
+        // processed, finish while the queues and the database are still open. One waiting on Lidarr for a
+        // minute is not held for: both wait together for the same moment. A webhook event left unfinished is
+        // replayed by the reconciliation job on the next start.
         const { whenIdle } = await import("./services/downloads/jobs");
-        await whenIdle(3000);
+        const { whenWebhooksIdle } = await import("./services/webhookHandlers");
+        await Promise.all([whenIdle(3000), whenWebhooksIdle(3000)]);
 
         // Shutdown workers (intervals, crons, queues)
         const { shutdownWorkers } = await import("./workers");
