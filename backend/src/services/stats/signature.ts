@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
-import { withListens, type Period } from "./listens";
+import type { FoldedListens } from "./listens";
 import { spellingsOf } from "./playable";
 import { safeZone } from "./listening";
 
@@ -37,16 +37,16 @@ export interface Signature {
 }
 
 
+/** The signature section, read from listens the caller has already folded (see `withListens`). */
 export async function signature(
-    userId: string,
+    { fold, db }: FoldedListens,
     timezone = "UTC",
-    period: Period = "all",
 ): Promise<Signature> {
     const tz = await safeZone(timezone);
 
-    // The listens are folded once for the six figures that read them; the shelf figures read no plays.
+    // The shelf figures read no plays, so they run on the pool, not on the fold's connection.
     const [[conc, habit, era, keys, played, hourly], owned] = await Promise.all([
-        withListens(userId, period, (fold, db) => Promise.all([
+        Promise.all([
         db.$queryRaw<Array<{ for_half: number; for_eighty: number; distinct: number }>>(Prisma.sql`
             ${fold},
             c AS (SELECT "trackId", count(*)::int n FROM p GROUP BY 1),
@@ -101,7 +101,7 @@ export async function signature(
             SELECT EXTRACT(HOUR FROM "playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS hour,
                    count(*)::int AS plays, avg(energy)::float8 AS energy
             FROM p WHERE energy IS NOT NULL GROUP BY 1 ORDER BY 1`),
-        ])),
+        ]),
         prisma.$queryRaw<Array<{ energy: number; valence: number; bpm: number; inst: number }>>`
             SELECT avg(t.energy)::float8 AS energy, avg(t.valence)::float8 AS valence,
                    avg(t.bpm)::float8 AS bpm, avg(t.instrumentalness)::float8 AS inst

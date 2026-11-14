@@ -149,24 +149,31 @@ export function listenRows(
               ${window(period)})`;
 }
 
+/** The plays of one listener and period, folded into listens once, as a request reads them. */
+export interface FoldedListens {
+    /** A `listenRows`-shaped prefix over the folded table: it ends in `p`, and extra CTEs follow with a leading comma. */
+    fold: Prisma.Sql;
+    /** The connection the folded table is on, so every query that reads `fold` must run through it. */
+    db: Prisma.TransactionClient;
+}
+
 /**
  * Fold the plays once and read the listens as often as `work` likes. A page that shows several figures from the
  * same listens would otherwise run the whole recursive fold once per figure, all at the same time, each holding a
- * connection. The fold lands in a temporary table that lives until the transaction ends; `fold` is a
- * `listenRows`-shaped prefix over it (ends in `p`, extra CTEs follow with a leading comma) and `db` is the
- * connection the table is on, so every query of `work` must run through it.
+ * connection. The fold lands in a temporary table that lives until the transaction ends. One request folds once: a
+ * request with several sections calls this once and hands the result to each.
  */
 export async function withListens<T>(
     userId: string,
     period: Period,
-    work: (fold: Prisma.Sql, db: Prisma.TransactionClient) => Promise<T>,
+    work: (listens: FoldedListens) => Promise<T>,
 ): Promise<T> {
     return prisma.$transaction(
         async (db) => {
             await db.$executeRaw(
                 Prisma.sql`CREATE TEMP TABLE folded_listens ON COMMIT DROP AS ${listenRows(userId, period)} SELECT * FROM p`,
             );
-            return work(Prisma.sql`WITH p AS (SELECT * FROM folded_listens)`, db);
+            return work({ fold: Prisma.sql`WITH p AS (SELECT * FROM folded_listens)`, db });
         },
         // The fold of a long history takes seconds, and the default five would cut it off.
         { timeout: 120_000, maxWait: 30_000 },

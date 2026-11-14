@@ -3,11 +3,13 @@
  * section, each over all time and over the last 30 days. The figures are worked out by hand from the seed, so the way
  * the sections read the listens can change under them.
  *
- * Each section folds the plays into listens once, however many figures it shows (the fold is the costly part of the
- * page: it is a recursive walk over every play, and it was run once per figure).
+ * A request folds the plays into listens once, however many sections and figures it shows (the fold is the costly
+ * part of the page: it is a recursive walk over every play, and it was run once per figure). The route's own count is
+ * in routes/__tests__/statsOverview.route.test.ts; here each section is handed one fold, as the route does.
  */
 import { prisma } from "../../../utils/db";
-import { listeningStats } from "../listening";
+import { hourDetail, listeningStats, regionDetail } from "../listening";
+import { withListens, type Period } from "../listens";
 import { signature } from "../signature";
 
 jest.setTimeout(60_000);
@@ -88,6 +90,12 @@ afterAll(async () => {
     await cleanup();
 });
 
+/** The two sections as the stats route reads them: one fold, handed to each. */
+const listening = (user: string, tz: string, period: Period = "all") =>
+    withListens(user, period, (l) => listeningStats(l, tz));
+const signatureOf = (user: string, tz: string, period: Period = "all") =>
+    withListens(user, period, (l) => signature(l, tz));
+
 /**
  * How many times the plays were folded into listens: the fold is the one statement with a recursive walk, on the
  * client or inside a transaction. Counted at the database client, so it holds however the sections are built.
@@ -118,7 +126,7 @@ afterEach(() => jest.restoreAllMocks());
 
 describe("listening section", () => {
     it("counts the listens of all time", async () => {
-        const L = await listeningStats(A, "UTC");
+        const L = await listening(A, "UTC");
         expect(L.plays).toBe(10);
         expect(L.estimatedSeconds).toBe(2000);
         expect(L.distinctTracks).toBe(3);
@@ -133,7 +141,7 @@ describe("listening section", () => {
     });
 
     it("counts the listens that began in the last 30 days", async () => {
-        const L = await listeningStats(A, "UTC", "30d");
+        const L = await listening(A, "UTC", "30d");
         expect(L.plays).toBe(8);
         expect(L.distinctTracks).toBe(3);
         expect(L.distinctArtists).toBe(2);
@@ -142,21 +150,21 @@ describe("listening section", () => {
     });
 
     it("counts nothing for a listener with no plays", async () => {
-        const L = await listeningStats(`${P}nobody`, "UTC");
+        const L = await listening(`${P}nobody`, "UTC");
         expect(L.plays).toBe(0);
         expect(L.topTracks).toEqual([]);
         expect(L.firstPlay).toBeNull();
     });
 
     it("folds the plays into listens once, however many figures it shows", async () => {
-        await listeningStats(A, "UTC");
+        await listening(A, "UTC");
         expect(folds).toBe(1);
     });
 });
 
 describe("signature section", () => {
     it("reads concentration, key and era from the listens of all time", async () => {
-        const S = await signature(A, "UTC");
+        const S = await signatureOf(A, "UTC");
         expect(S.concentration).toEqual({ forHalf: 2, forEighty: 2, distinct: 3 });
         expect(S.key?.minorPct).toBe(40);
         expect(S.key?.top[0]).toEqual({ key: "C major", plays: 6 });
@@ -166,14 +174,66 @@ describe("signature section", () => {
     });
 
     it("reads the last 30 days", async () => {
-        const S = await signature(A, "UTC", "30d");
+        const S = await signatureOf(A, "UTC", "30d");
         expect(S.concentration).toEqual({ forHalf: 1, forEighty: 2, distinct: 3 });
         expect(S.key?.top[0]).toEqual({ key: "A minor", plays: 4 });
         expect(S.era?.buckets.map((b) => [b.label, b.plays])).toEqual([["2000 to 2014", 7], ["before 2000", 1]]);
     });
 
     it("folds the plays into listens once, however many figures it shows", async () => {
-        await signature(A, "UTC");
+        await signatureOf(A, "UTC");
+        expect(folds).toBe(1);
+    });
+});
+
+/** The cell of the week grid one single listen falls in: the s1 play two days ago, alone on its weekday. */
+const cell = () => {
+    const at = ago(2 * DAY);
+    return { dow: at.getUTCDay(), hour: at.getUTCHours() };
+};
+
+describe("hour detail", () => {
+    it("lists the listens of one cell of the week", async () => {
+        const { dow, hour } = cell();
+        const H = await hourDetail(A, dow, hour, "UTC");
+        expect(H.listens).toBe(1);
+        expect(H.tracks).toEqual([{ title: "s1", artist: "Overview x", listens: 1 }]);
+        expect(H.artists).toEqual([{ name: "Overview x", listens: 1 }]);
+        expect(H.lastAt).not.toBeNull();
+    });
+
+    it("answers for the same window the grid was drawn from", async () => {
+        const { dow, hour } = cell();
+        expect((await hourDetail(A, dow, hour, "UTC", "30d")).listens).toBe(1);
+    });
+
+    it("folds the plays into listens once, however many figures it shows", async () => {
+        const { dow, hour } = cell();
+        await hourDetail(A, dow, hour, "UTC");
+        expect(folds).toBe(1);
+    });
+});
+
+describe("region detail", () => {
+    it("lists the listens around one point of the taste plot", async () => {
+        const R = await regionDetail(A, 13, 13);
+        expect(R.listens).toBe(10);
+        expect(R.tracks.map((t) => [t.title, t.listens])).toEqual([["s1", 4], ["s2", 4], ["s3", 2]]);
+        expect(R.energy).toBeCloseTo(0.5, 6);
+        expect(R.valence).toBeCloseTo(0.5, 6);
+        expect(R.bpm).toBeCloseTo(120, 6);
+    });
+
+    it("answers for the window, and says nothing of an empty corner", async () => {
+        expect((await regionDetail(A, 13, 13, 1, "30d")).listens).toBe(8);
+        const empty = await regionDetail(A, 1, 1);
+        expect(empty.listens).toBe(0);
+        expect(empty.tracks).toEqual([]);
+        expect(empty.energy).toBeNull();
+    });
+
+    it("folds the plays into listens once, however many figures it shows", async () => {
+        await regionDetail(A, 13, 13);
         expect(folds).toBe(1);
     });
 });

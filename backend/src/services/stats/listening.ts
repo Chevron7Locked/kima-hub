@@ -7,7 +7,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { listenRows, withListens, type Period } from "./listens";
+import { listenRows, withListens, type FoldedListens, type Period } from "./listens";
 
 /** No single play counts for more than ten minutes. See the note above. */
 export const PLAY_CREDIT_CAP_SECONDS = 600;
@@ -61,15 +61,15 @@ export async function safeZone(tz: string | undefined): Promise<string> {
     return (await postgresZones).has(tz) ? tz : "UTC";
 }
 
+/** The listening section, read from listens the caller has already folded (see `withListens`). */
 export async function listeningStats(
-    userId: string,
+    { fold, db }: FoldedListens,
     timezone?: string,
-    period: Period = "all",
 ): Promise<ListeningStats> {
     const tz = await safeZone(timezone);
 
     const [totals, sources, clockRows, shapeRows, driftRows, artistRows, trackRows] =
-        await withListens(userId, period, (fold, db) => Promise.all([
+        await Promise.all([
             db.$queryRaw<
                 Array<{
                     plays: number;
@@ -146,7 +146,7 @@ export async function listeningStats(
             JOIN "Album"  al ON al.id = p."albumId"
             JOIN "Artist" ar ON ar.id = al."artistId"
             GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 8`),
-        ]));
+        ]);
 
     const t = totals[0];
 
@@ -213,9 +213,9 @@ export async function hourDetail(
     const tz = await safeZone(timezone);
     const local = Prisma.sql`p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz}`;
 
-    const [tracks, artists, total] = await Promise.all([
-        prisma.$queryRaw<Array<{ title: string; artist: string; n: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+    const [tracks, artists, total] = await withListens(userId, period, ({ fold, db }) => Promise.all([
+        db.$queryRaw<Array<{ title: string; artist: string; n: number }>>(Prisma.sql`
+            ${fold}
             SELECT coalesce(t."displayTitle", t.title) AS title,
                    coalesce(ar."displayName", ar.name) AS artist,
                    count(*)::int AS n
@@ -227,8 +227,8 @@ export async function hourDetail(
               AND EXTRACT(HOUR FROM ${local})::int = ${hour}
             GROUP BY 1, 2 ORDER BY n DESC, 1 LIMIT 6`),
 
-        prisma.$queryRaw<Array<{ name: string; n: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+        db.$queryRaw<Array<{ name: string; n: number }>>(Prisma.sql`
+            ${fold}
             SELECT coalesce(ar."displayName", ar.name) AS name, count(*)::int AS n
             FROM p
             JOIN "Album"  al ON al.id = p."albumId"
@@ -237,13 +237,13 @@ export async function hourDetail(
               AND EXTRACT(HOUR FROM ${local})::int = ${hour}
             GROUP BY 1 ORDER BY n DESC, 1 LIMIT 4`),
 
-        prisma.$queryRaw<Array<{ n: number; last_at: Date | null }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+        db.$queryRaw<Array<{ n: number; last_at: Date | null }>>(Prisma.sql`
+            ${fold}
             SELECT count(*)::int AS n, max(p."playedAt") AS last_at
             FROM p
             WHERE EXTRACT(DOW  FROM ${local})::int = ${weekday}
               AND EXTRACT(HOUR FROM ${local})::int = ${hour}`),
-    ]);
+    ]));
 
     return {
         weekday,
@@ -279,9 +279,9 @@ export async function regionDetail(
     const bucket = (v: string) =>
         Prisma.sql`LEAST(${SHAPE_BUCKETS}::int, GREATEST(1, width_bucket(${Prisma.raw(v)}, 0, 1, ${SHAPE_BUCKETS}::int)))`;
 
-    const [tracks, summary] = await Promise.all([
-        prisma.$queryRaw<Array<{ title: string; artist: string; n: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+    const [tracks, summary] = await withListens(userId, period, ({ fold, db }) => Promise.all([
+        db.$queryRaw<Array<{ title: string; artist: string; n: number }>>(Prisma.sql`
+            ${fold}
             SELECT coalesce(t."displayTitle", t.title) AS title,
                    coalesce(ar."displayName", ar.name) AS artist,
                    count(*)::int AS n
@@ -294,15 +294,15 @@ export async function regionDetail(
               AND abs(${bucket("p.energy")}  - ${y}) <= ${radius}
             GROUP BY 1, 2 ORDER BY n DESC, 1 LIMIT 5`),
 
-        prisma.$queryRaw<Array<{ n: number; energy: number; valence: number; bpm: number }>>(Prisma.sql`
-            ${listenRows(userId, period)}
+        db.$queryRaw<Array<{ n: number; energy: number; valence: number; bpm: number }>>(Prisma.sql`
+            ${fold}
             SELECT count(*)::int AS n, avg(p.energy)::float8 AS energy,
                    avg(p.valence)::float8 AS valence, avg(p.bpm)::float8 AS bpm
             FROM p
             WHERE p.valence IS NOT NULL AND p.energy IS NOT NULL
               AND abs(${bucket("p.valence")} - ${x}) <= ${radius}
               AND abs(${bucket("p.energy")}  - ${y}) <= ${radius}`),
-    ]);
+    ]));
 
     return {
         x, y,

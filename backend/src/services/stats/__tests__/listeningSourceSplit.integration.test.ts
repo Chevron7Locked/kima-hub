@@ -4,6 +4,7 @@
  */
 import { prisma } from "../../../utils/db";
 import { listeningStats } from "../listening";
+import { withListens } from "../listens";
 
 jest.setTimeout(60_000);
 
@@ -59,6 +60,6 @@ afterAll(async () => {
 });
 
 it("counts a play of a Discover song as discover, not as library", async () => {
-    const stats = await listeningStats(USER, "UTC", "all");
+    const stats = await withListens(USER, "all", (l) => listeningStats(l, "UTC"));
     expect(stats.bySource).toEqual({ LIBRARY: 2, SUBSONIC: 1, DISCOVER: 1 });
 });

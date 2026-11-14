@@ -12,7 +12,7 @@ import { hourDetail, listeningStats, regionDetail, trackPlayCount } from "../ser
 import { shelfStats } from "../services/stats/shelf";
 import { signature } from "../services/stats/signature";
 import { playableSlice, type Slice } from "../services/stats/playable";
-import { asPeriod } from "../services/stats/listens";
+import { asPeriod, withListens } from "../services/stats/listens";
 import { spokenStats } from "../services/stats/spoken";
 import { systemStats } from "../services/stats/system";
 import {
@@ -39,11 +39,13 @@ router.get("/", async (req, res) => {
 
         // Shelf, spoken and system are all-time: they are not made of plays, and a
         // window would give true but useless numbers. The page labels them so.
-        const [listening, shelf, spoken, sig, system] = await Promise.all([
-            listeningStats(userId, tz, period),
+        // The two sections made of plays read one fold of them: the page folds once.
+        const [[listening, sig], shelf, spoken, system] = await Promise.all([
+            withListens(userId, period, async (listens) =>
+                Promise.all([listeningStats(listens, tz), signature(listens, tz ?? "UTC")]),
+            ),
             shelfStats(userId),
             spokenStats(userId),
-            signature(userId, tz ?? "UTC", period),
             isAdmin ? systemStats(config.version) : Promise.resolve(undefined),
         ]);
 

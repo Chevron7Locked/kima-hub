@@ -65,6 +65,7 @@ import { currentMoodSnapshot, refreshMoodSnapshot } from "../../services/moodBuc
 import { playableSlice, type Slice } from "../../services/stats/playable";
 import { shelfStats } from "../../services/stats/shelf";
 import { signature } from "../../services/stats/signature";
+import { withListens } from "../../services/stats/listens";
 import libraryTracksRouter from "../../routes/library/tracks";
 import libraryArtistsRouter, { resolveSimilarArtists } from "../../routes/library/artists";
 import libraryAlbumsRouter from "../../routes/library/albums";
@@ -880,7 +881,7 @@ it("measures the shelf's sound in the stats page's signature from playable songs
     // The three unplayable songs turned all the way up, so counted they would pull the shelf's averages up.
     await prisma.track.updateMany({ where: { id: { in: UNPLAYABLE } }, data: { energy: 1, valence: 1, bpm: 300, instrumentalness: 1 } });
     try {
-        const owned = Object.fromEntries((await signature(USER)).ownedVsPlayed.map((r) => [r.label, r.owned]));
+        const owned = Object.fromEntries((await withListens(USER, "all", (l) => signature(l))).ownedVsPlayed.map((r) => [r.label, r.owned]));
         const shelf = await prisma.track.aggregate({
             where: { ...PLAYABLE_SONG, energy: { not: null } },
             _avg: { energy: true, valence: true, bpm: true, instrumentalness: true },

@@ -13,9 +13,16 @@ import { auditFalseStarts } from "../src/services/playHistoryRepair";
 import { listeningStats, trackPlayCount, PLAY_CREDIT_CAP_SECONDS } from "../src/services/stats/listening";
 import { shelfStats } from "../src/services/stats/shelf";
 import { signature } from "../src/services/stats/signature";
+import { withListens, type Period } from "../src/services/stats/listens";
 import { spokenStats } from "../src/services/stats/spoken";
 
 const TZ = process.env.VERIFY_TZ || "Europe/London";
+
+/** The two sections as the stats route reads them: one fold of the plays, handed to the section. */
+const listening = (userId: string, tz: string, period: Period = "all") =>
+    withListens(userId, period, (l) => listeningStats(l, tz));
+const signatureOf = (userId: string, tz: string, period: Period = "all") =>
+    withListens(userId, period, (l) => signature(l, tz));
 
 let pass = 0;
 let fail = 0;
@@ -52,7 +59,7 @@ function round(n: number) { return Number.isInteger(n) ? n : Number(n.toFixed(6)
 interface Raw { id: string; trackId: string; playedAt: Date; source: string; duration: number;
                 energy: number | null; valence: number | null; bpm: number | null;
                 albumId: string; artistId: string; trackNo: number | null;
-                key: string | null; keyScale: string | null; year: number | null; }
+                key: string | null; keyScale: string | null; year: number | null; location: string; }
 
 function collapse(rows: Raw[]): Raw[] {
     const byTrack = new Map<string, Raw[]>();
@@ -101,7 +108,7 @@ async function main() {
     const raw = await prisma.$queryRaw<Raw[]>`
         SELECT p.id, p."trackId", p."playedAt", p.source::text AS source,
                t.duration, t.energy, t.valence, t.bpm, t."albumId", t."trackNo",
-               t.key, t."keyScale", al."artistId",
+               t.key, t."keyScale", al."artistId", al.location::text AS location,
                coalesce(al."displayYear", al.year) AS year
         FROM "Play" p
         JOIN "Track" t  ON t.id  = p."trackId"
@@ -113,7 +120,7 @@ async function main() {
 
     /* ── listening ─────────────────────────────────────────────────────── */
     console.log("listening");
-    const L = await listeningStats(user.id, TZ);
+    const L = await listening(user.id, TZ);
 
     check("plays", L.plays, listens.length);
     check("estimatedSeconds", L.estimatedSeconds,
@@ -138,7 +145,8 @@ async function main() {
 
     check("bySource sums to plays", Object.values(L.bySource).reduce((a, b) => a + b, 0), L.plays);
     const src: Record<string, number> = {};
-    for (const r of listens) src[r.source] = (src[r.source] ?? 0) + 1;
+    // A play of a song still in Discover is its own source, whichever client played it (the album's location says so).
+    for (const r of listens) { const k = r.location === "DISCOVER" ? "DISCOVER" : r.source; src[k] = (src[k] ?? 0) + 1; }
     // A record has no meaningful key order (the query's GROUP BY returns sources in whatever order its plan likes).
     const bySorted = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
     check("bySource breakdown", bySorted(L.bySource), bySorted(src));
@@ -176,7 +184,7 @@ async function main() {
 
     /* ── signature ─────────────────────────────────────────────────────── */
     console.log("\nsignature");
-    const G = await signature(user.id, TZ);
+    const G = await signatureOf(user.id, TZ);
 
     if (G.concentration) {
         // Pareto by sorting, not by a running window sum.
@@ -284,7 +292,7 @@ async function main() {
         listens.filter((r) => r.playedAt.getTime() >= now - days * 86400_000).length;
 
     for (const [period, days] of [["30d", 30], ["12mo", 365]] as const) {
-        const W = await listeningStats(user.id, TZ, period);
+        const W = await listening(user.id, TZ, period);
         // Recomputed by collapsing the WHOLE history first and only then
         // keeping the listens that began in range — the same order of
         // operations the SQL claims to use.
@@ -298,12 +306,12 @@ async function main() {
             `${W.plays} in window vs ${L.plays} all time`);
     }
 
-    const w30 = await listeningStats(user.id, TZ, "30d");
-    const w12 = await listeningStats(user.id, TZ, "12mo");
+    const w30 = await listening(user.id, TZ, "30d");
+    const w12 = await listening(user.id, TZ, "12mo");
     check("30d <= 12mo <= all", w30.plays <= w12.plays && w12.plays <= L.plays, true,
         `${w30.plays} / ${w12.plays} / ${L.plays}`);
 
-    const s30 = await signature(user.id, TZ, "30d");
+    const s30 = await signatureOf(user.id, TZ, "30d");
     check("windowed signature stays internally consistent",
         s30.concentration === null ||
         (s30.concentration.forHalf <= s30.concentration.forEighty &&
