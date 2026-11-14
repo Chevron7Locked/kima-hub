@@ -55,7 +55,7 @@ function meaning(field: string, stored: unknown): unknown {
 /**
  * The one way system settings are saved: writes the supplied fields (a credential given blank is cleared, except one
  * the server cannot read, which stays), drops the settings cache, then tells each subscriber which of its fields
- * changed. Answers the fields whose value changed.
+ * changed, without waiting for any of them to finish. Answers the fields whose value changed.
  */
 export async function saveSystemSettings(changes: SystemSettingsChanges): Promise<SystemSettingsField[]> {
     const before = await prisma.systemSettings.findUnique({ where: { id: "default" } });
@@ -70,6 +70,6 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
     const changed = (Object.keys(changes) as SystemSettingsField[]).filter(
         (field) => changes[field] !== undefined && meaning(field, before?.[field]) !== meaning(field, after[field]),
     );
-    await tellSettingsSubscribers(changed);
+    tellSettingsSubscribers(changed);
     return changed;
 }

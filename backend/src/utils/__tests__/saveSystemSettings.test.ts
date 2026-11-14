@@ -6,6 +6,7 @@
 import { prisma } from "../db";
 import { encrypt } from "../encryption";
 import { getSystemSettings, invalidateSystemSettingsCache, onSystemSettingsChange, saveSystemSettings } from "../systemSettings";
+import { logger } from "../logger";
 import { redisClient } from "../redis";
 import { closeClient } from "../closeRedisClient";
 import { queues } from "../../workers/queues";
@@ -137,16 +138,17 @@ describe("onSystemSettingsChange", () => {
     });
 
     it("runs a subscriber after the save is readable", async () => {
-        let seen: unknown;
-        unsubscribe.push(
-            onSystemSettingsChange(["transcodeCacheMaxGb"], async () => {
-                seen = (await getSystemSettings())?.transcodeCacheMaxGb;
-            }),
-        );
+        const seen = new Promise<unknown>((resolve) => {
+            unsubscribe.push(
+                onSystemSettingsChange(["transcodeCacheMaxGb"], async () => {
+                    resolve((await getSystemSettings())?.transcodeCacheMaxGb);
+                }),
+            );
+        });
 
         await saveSystemSettings({ transcodeCacheMaxGb: 14 });
 
-        expect(seen).toBe(14);
+        await expect(seen).resolves.toBe(14);
     });
 
     it("lets a subscriber that throws neither fail the save nor silence the others", async () => {
@@ -157,6 +159,38 @@ describe("onSystemSettingsChange", () => {
         await expect(saveSystemSettings({ fanartEnabled: true })).resolves.toEqual(["fanartEnabled"]);
 
         expect(other).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not wait for a subscriber that never finishes", async () => {
+        const never = jest.fn(() => new Promise<void>(() => {}));
+        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], never));
+        const other = listen(["fanartEnabled"]);
+        const held = Symbol("held");
+
+        const outcome = await Promise.race([
+            saveSystemSettings({ fanartEnabled: true }),
+            new Promise<symbol>((resolve) => setTimeout(() => resolve(held), 500)),
+        ]);
+
+        expect(outcome).toEqual(["fanartEnabled"]);
+        expect(never).toHaveBeenCalledTimes(1);
+        expect(other).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs a subscriber that fails after the save has returned, and the save is unharmed", async () => {
+        let fail!: (error: Error) => void;
+        unsubscribe.push(onSystemSettingsChange(["fanartEnabled"], () => new Promise<void>((_, reject) => { fail = reject; })));
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => logger);
+
+        try {
+            await expect(saveSystemSettings({ fanartEnabled: true })).resolves.toEqual(["fanartEnabled"]);
+            fail(new Error("late failure"));
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining("fanartEnabled"), expect.objectContaining({ message: "late failure" }));
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     it("stops telling a subscriber that signed off", async () => {

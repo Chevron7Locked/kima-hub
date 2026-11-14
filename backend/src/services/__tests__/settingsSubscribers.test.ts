@@ -130,6 +130,19 @@ describe("Soulseek", () => {
         expect(reconnect).not.toHaveBeenCalled();
     });
 
+    it("a save does not wait for the reconnect to finish", async () => {
+        reconnect.mockReturnValueOnce(new Promise<void>(() => {}));
+        const held = Symbol("held");
+
+        const outcome = await Promise.race([
+            saveSystemSettings({ soulseekPassword: "secret" }),
+            new Promise<symbol>((resolve) => setTimeout(() => resolve(held), 500)),
+        ]);
+
+        expect(outcome).toEqual(["soulseekPassword"]);
+        expect(reconnect).toHaveBeenCalledTimes(1);
+    });
+
     it("a failed reconnect does not fail the save", async () => {
         reconnect.mockRejectedValueOnce(new Error("soulseek is down"));
 

@@ -20,8 +20,8 @@ const subscribers = new Set<Subscriber>();
 
 /**
  * Be told, in this process, when a save changes any of `fields`; the listener gets the ones that changed. A value
- * sent back as it was is no change. Returns the way to sign off. A listener that throws is logged and does not
- * fail the save or the other listeners.
+ * sent back as it was is no change. Returns the way to sign off. The save does not wait for a listener; one that
+ * throws or rejects is logged and does not fail the save or the other listeners.
  */
 export function onSystemSettingsChange<F extends SystemSettingsField>(
     fields: readonly F[],
@@ -34,17 +34,20 @@ export function onSystemSettingsChange<F extends SystemSettingsField>(
     };
 }
 
-/** Tell each subscriber which of its own fields are among `changed`; a subscriber with none hears nothing. */
-export async function tellSettingsSubscribers(changed: SystemSettingsField[]): Promise<void> {
-    await Promise.all(
-        [...subscribers].map(async ({ fields, listener }) => {
-            const heard = changed.filter((field) => fields.has(field));
-            if (heard.length === 0) return;
-            try {
-                await listener(heard);
-            } catch (error) {
-                logger.warn(`[SETTINGS] A listener failed after the save (${heard.join(", ")}):`, error);
-            }
-        }),
-    );
+/**
+ * Tell each subscriber which of its own fields are among `changed`; a subscriber with none hears nothing. Each
+ * listener is started at once and left to finish on its own: the save never waits on one (Soulseek's reconnect can
+ * take a while), and a listener that throws or rejects is logged without touching the others.
+ */
+export function tellSettingsSubscribers(changed: SystemSettingsField[]): void {
+    for (const { fields, listener } of [...subscribers]) {
+        const heard = changed.filter((field) => fields.has(field));
+        if (heard.length === 0) continue;
+        const failed = (error: unknown) => logger.warn(`[SETTINGS] A listener failed after the save (${heard.join(", ")}):`, error);
+        try {
+            Promise.resolve(listener(heard)).catch(failed);
+        } catch (error) {
+            failed(error);
+        }
+    }
 }
