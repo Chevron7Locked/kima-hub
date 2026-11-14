@@ -22,7 +22,7 @@ import { parseLimit } from "./library/paging";
 import { config } from "../config";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
-import { PLAYABLE_DISCOVER_SONG } from "../utils/playableSong";
+import { PLAYABLE_DISCOVER_SONG, PLAYABLE_SONG } from "../utils/playableSong";
 
 const router = Router();
 
@@ -303,8 +303,11 @@ async function unavailableStillMissing(
     return { missing, turnedUp };
 }
 
-/** The playable-song rule's file test without its album-location part, for the stand-in song of a Discover album. */
-const { album: _albumLocation, ...standInSongFileTest } = PLAYABLE_DISCOVER_SONG;
+/**
+ * The playable-song rule for a suggestion's songs: a liked suggestion's album is in the library now, any other's is
+ * still a Discover album.
+ */
+const suggestionSongRule = (status: string) => (status === "LIKED" ? PLAYABLE_SONG : PLAYABLE_DISCOVER_SONG);
 
 type SuggestionRow = Awaited<ReturnType<typeof prisma.discoveryAlbum.findMany>>[number];
 
@@ -373,6 +376,7 @@ router.get("/current", async (req, res) => {
         const tracks = [];
 
         for (const discoveryAlbum of discoveryAlbums) {
+            const listedBefore = tracks.length;
             if (discoveryAlbum.tracks && discoveryAlbum.tracks.length > 0) {
                 const trackIds = discoveryAlbum.tracks
                     .map((dt) => dt.trackId)
@@ -380,7 +384,7 @@ router.get("/current", async (req, res) => {
 
                 if (trackIds.length > 0) {
                     const libraryTracks = await prisma.track.findMany({
-                        where: { id: { in: trackIds } },
+                        where: { AND: [suggestionSongRule(discoveryAlbum.status), { id: { in: trackIds } }] },
                         include: { album: { include: { artist: true } } },
                     });
 
@@ -400,10 +404,7 @@ router.get("/current", async (req, res) => {
             }
 
             // Fallback: No DiscoveryTrack records or no valid trackIds, find ONE track from library
-            if (
-                tracks.filter((t) => t.album === discoveryAlbum.albumTitle)
-                    .length === 0
-            ) {
+            if (tracks.length === listedBefore) {
                 const album = await prisma.album.findFirst({
                     where: {
                         title: discoveryAlbum.albumTitle,
@@ -414,9 +415,8 @@ router.get("/current", async (req, res) => {
                     },
                     include: {
                         artist: true,
-                        // The first song in track order whose file is there and was read. The album is already
-                        // pinned above, so only the rule's file test applies, not its album-location part.
-                        tracks: { where: standInSongFileTest, take: 1, orderBy: { trackNo: "asc" } },
+                        // The first song in track order that is playable.
+                        tracks: { where: suggestionSongRule(discoveryAlbum.status), take: 1, orderBy: { trackNo: "asc" } },
                     },
                 });
 

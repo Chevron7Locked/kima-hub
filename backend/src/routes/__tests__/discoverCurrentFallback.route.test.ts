@@ -377,6 +377,30 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         expect(res.body.tracks[0]).toMatchObject({ available: false, isPending: true });
     });
 
+    it("does not list a recorded song whose file is missing, and stands in the next song of the album", async () => {
+        const song = await suggestWithSongs("rec", [{ trackNo: 1, missing: true }, { trackNo: 2 }]);
+        const recorded = await prisma.track.findFirstOrThrow({ where: { title: song(1) } });
+        const suggestion = await prisma.discoveryAlbum.findFirstOrThrow({ where: { rgMbid: `${MARK}-rg-rec` } });
+        await prisma.discoveryTrack.create({
+            data: { discoveryAlbumId: suggestion.id, trackId: recorded.id, fileName: "1.flac", filePath: recorded.filePath },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song(2)]);
+    });
+
+    it("gives each suggestion its own song when two albums share a title", async () => {
+        const first = await suggestWithSongs("twin-a", [{ trackNo: 1 }]);
+        const second = await suggestWithSongs("twin-b", [{ trackNo: 1 }]);
+        await prisma.album.updateMany({ where: { title: { startsWith: `${MARK} twin-` } }, data: { title: `${MARK} twin LP` } });
+        await prisma.discoveryAlbum.updateMany({ where: { rgMbid: { startsWith: `${MARK}-rg-twin-` } }, data: { albumTitle: `${MARK} twin LP` } });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([first(1), second(1)]);
+    });
+
     it("applies the same pick to a liked suggestion, whose album is in the library now", async () => {
         const song = await suggestWithSongs("liked", [{ trackNo: 1, missing: true }, { trackNo: 2 }], "LIKED");
 
