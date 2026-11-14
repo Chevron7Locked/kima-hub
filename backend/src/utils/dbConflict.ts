@@ -14,7 +14,7 @@ interface PrismaLikeError {
     message?: unknown;
 }
 
-function reports(err: unknown, sqlState: string, message: RegExp): boolean {
+function matchesConflict(err: unknown, sqlState: string, message: RegExp): boolean {
     const e = err as PrismaLikeError | null;
     if (!e || typeof e !== "object") return false;
     return (
@@ -27,12 +27,12 @@ function reports(err: unknown, sqlState: string, message: RegExp): boolean {
 
 /** Postgres picked this transaction as a deadlock victim (40P01). */
 export function isDeadlock(err: unknown): boolean {
-    return reports(err, "40P01", /deadlock detected/i);
+    return matchesConflict(err, "40P01", /deadlock detected/i);
 }
 
 /** Postgres refused this transaction because rows it used changed under it (40001). */
 export function isSerializationFailure(err: unknown): boolean {
-    return reports(err, "40001", /could not serialize access/i);
+    return matchesConflict(err, "40001", /could not serialize access/i);
 }
 
 /** Either: another transaction's work ended this one, nothing was written, and running it again is safe. */

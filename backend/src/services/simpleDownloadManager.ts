@@ -110,7 +110,7 @@ class SimpleDownloadManager {
                     lastError = error;
                     const delay = Math.pow(2, attempt) * 100; // 200ms, 400ms, 800ms
                     logger.debug(
-                        `${logPrefix} Serialization conflict, retry ${attempt}/${maxRetries} after ${delay}ms`
+                        `${logPrefix} Transaction conflict, retry ${attempt}/${maxRetries} after ${delay}ms`
                     );
                     await new Promise((resolve) => setTimeout(resolve, delay));
                     continue;
