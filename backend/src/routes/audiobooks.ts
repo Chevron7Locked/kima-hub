@@ -121,16 +121,18 @@ router.get(
                 take: 10,
             });
 
-            // Transform the cover URLs to use the audiobook__ prefix for the proxy
-            const transformed = recentProgress.map((progress: any) => {
-                const coverUrl =
-                    progress.coverUrl && !progress.coverUrl.startsWith("http")
-                        ? `audiobook__${progress.coverUrl}`
-                        : progress.coverUrl;
-
+            // The cover is the book's own address, the one every other audiobook list sends; a book gone from the
+            // library has none.
+            const books = await prisma.audiobook.findMany({
+                where: { id: { in: recentProgress.map((p) => p.audiobookshelfId) } },
+                select: { id: true, localCoverPath: true, coverUrl: true, coverVersion: true },
+            });
+            const bookById = new Map(books.map((b) => [b.id, b]));
+            const transformed = recentProgress.map((progress) => {
+                const book = bookById.get(progress.audiobookshelfId);
                 return {
                     ...progress,
-                    coverUrl,
+                    coverUrl: book ? audiobookCoverAddress(book) : null,
                 };
             });
 
@@ -380,7 +382,8 @@ async function proxyAudiobookshelfCover(req: Request, res: Response, id: string,
         }
         const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
         res.setHeader("Content-Type", picture.contentType);
-        res.setHeader("Cache-Control", "public, max-age=86400"); // 24 hours for proxied
+        // Kept only briefly: Audiobookshelf may hand back a picture other than the one the address names.
+        res.setHeader("Cache-Control", "public, max-age=300");
         if (origin) {
             res.setHeader("Access-Control-Allow-Origin", origin);
             res.setHeader("Access-Control-Allow-Credentials", "true");

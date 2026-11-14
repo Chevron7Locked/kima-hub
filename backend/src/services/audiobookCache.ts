@@ -337,11 +337,12 @@ class AudiobookCacheService {
               })
             : null;
 
-        let localCoverPath: string | null = null;
+        // A download that failed leaves the stored cover and its version as they were.
+        let downloaded: { path: string; version: string } | null = null;
         if (coverUrl) {
             const fullCoverUrl = await this.getFullCoverUrl(coverUrl);
             if (fullCoverUrl) {
-                localCoverPath = await this.downloadCover(
+                downloaded = await this.downloadCover(
                     book.id,
                     fullCoverUrl
                 );
@@ -366,7 +367,8 @@ class AudiobookCacheService {
             language,
             genres: resolvedGenres,
             tags,
-            localCoverPath: localCoverPath || undefined,
+            localCoverPath: downloaded?.path,
+            coverVersion: downloaded?.version,
             coverUrl,
             audioUrl: book.id,
             libraryId,
@@ -413,12 +415,13 @@ class AudiobookCacheService {
 
     /**
      * Download a cover image and save it locally
-     * Returns null if cover caching is not available (permissions issue)
+     * Returns where it was saved and the version of the picture saved (the version clients' addresses carry), or null if
+     * cover caching is not available (permissions issue) or the cover could not be saved
      */
     private async downloadCover(
         audiobookId: string,
         coverUrl: string
-    ): Promise<string | null> {
+    ): Promise<{ path: string; version: string } | null> {
         // Skip cover download if cache directory is not available
         if (!this.coverCacheAvailable) {
             return null;
@@ -456,12 +459,13 @@ class AudiobookCacheService {
             const fileName = `${audiobookId}.jpg`;
             const filePath = path.join(this.coverCacheDir, fileName);
 
-            if (!(await storeAsJpeg(filePath, buffer))) {
+            const version = await storeAsJpeg(filePath, buffer);
+            if (!version) {
                 logger.warn(`Cover for ${audiobookId} is not a readable picture; not cached`);
                 return null;
             }
 
-            return filePath;
+            return { path: filePath, version };
         } catch (error: any) {
             logger.error(
                 `Failed to download cover for ${audiobookId}:`,

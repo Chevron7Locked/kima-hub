@@ -116,6 +116,58 @@ describe("a picture's address", () => {
     });
 });
 
+describe("an outside picture at a width", () => {
+    const wide = async (format: "png" | "jpeg", width: number) => {
+        const sharp = (await import("sharp")).default;
+        const img = sharp({ create: { width, height: width, channels: 3, background: "#369" } });
+        return format === "png" ? img.png().toBuffer() : img.jpeg().toBuffer();
+    };
+    const get = (size: string) => request(app).get(`/library/cover-art?url=${encodeURIComponent("https://covers.example.org/w.png")}&size=${size}`);
+
+    it("is labelled image/jpeg when it was resized, whatever type it came as", async () => {
+        const png = await wide("png", 600);
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(png), { status: 200, headers: { "content-type": "image/png" } }));
+        const res = await get("200");
+        expect(res.headers["content-type"]).toBe("image/jpeg");
+        const meta = await (await import("sharp")).default(Buffer.from(res.body)).metadata();
+        expect(meta.format).toBe("jpeg");
+        expect(meta.width).toBe(200);
+    });
+
+    it("keeps its own type when it is no wider than asked, and so was not resized", async () => {
+        const png = await wide("png", 100);
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(png), { status: 200, headers: { "content-type": "image/png" } }));
+        const res = await get("400");
+        expect(res.headers["content-type"]).toBe("image/png");
+        expect(Buffer.from(res.body)).toEqual(png);
+    });
+
+    it.each(["0", "8", "15", "2049", "99999", "abc", "-300"])("of %s is not a width: the picture is sent whole", async (size) => {
+        const png = await wide("png", 600);
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(png), { status: 200, headers: { "content-type": "image/png" } }));
+        const res = await get(size);
+        expect(res.headers["content-type"]).toBe("image/png");
+        expect(Buffer.from(res.body)).toEqual(png);
+    });
+
+    it("that is no width is cached as the whole picture, one entry however many odd sizes are asked", async () => {
+        const redis = (await import("../../utils/redis")).redisClient as unknown as { setex: jest.Mock };
+        redis.setex.mockClear();
+        for (const size of ["5", "7", "9000", "abc", ""]) {
+            mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(await wide("png", 100)), { status: 200, headers: { "content-type": "image/png" } }));
+            await get(size);
+        }
+        expect(new Set(redis.setex.mock.calls.map((c) => c[0])).size).toBe(1);
+    });
+
+    it("of exactly 16 and 2048 is a width", async () => {
+        const png = await wide("png", 3000);
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(png), { status: 200, headers: { "content-type": "image/png" } }));
+        const small = await get("16");
+        expect((await (await import("sharp")).default(Buffer.from(small.body)).metadata()).width).toBe(16);
+    });
+});
+
 describe("a stored cover", () => {
     it.each([
         ["by query", `/library/cover-art?url=${encodeURIComponent(`native:${P}_stored.jpg`)}`],
@@ -228,6 +280,23 @@ describe("a stored cover", () => {
 
         expect(res.status).toBe(200);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}_gone` } })).coverUrl).toBe("https://covers.example.org/found.jpg");
+    });
+
+    // The copy found instead is somebody else's picture and the album now points at it: it must not be kept for a year under
+    // the stored cover's address (a versioned address means "this picture for good").
+    it.each([
+        ["with a version", `native:${P}_gone.jpg?v=abc123def0`],
+        ["without one", `native:${P}_gone.jpg`],
+    ])("whose file is gone, answered from the copy found, is kept only briefly, %s", async (_what, address) => {
+        expectLog("warn");
+        await prisma.album.update({ where: { id: `${P}_gone` }, data: { coverUrl: address } });
+        mockFindAlbumArtwork.mockResolvedValue({ url: "https://covers.example.org/found.jpg", source: "deezer" });
+        mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array(JPEG), { status: 200, headers: { "content-type": "image/jpeg" } }));
+
+        const res = await request(app).get(`/library/cover-art?url=${encodeURIComponent(address)}`);
+
+        expect(res.status).toBe(200);
+        expect(res.headers["cache-control"]).toBe("public, max-age=300");
     });
 
     it("whose file is gone is not written onto an album that does not use it", async () => {

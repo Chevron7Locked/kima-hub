@@ -152,12 +152,11 @@ describe("an audiobook in progress", () => {
         express()
             .use((req: any, _res, next) => { req.user = { id: LISTENER, role: "user" }; next(); })
             .use("/library", tracksRouter);
-    const SYNCED = new Date(1_700_000_000_000);
 
     beforeAll(async () => {
         await prisma.user.create({ data: { id: LISTENER, username: LISTENER, passwordHash: "x" } });
         await prisma.audiobook.create({
-            data: { id: BOOK, title: "Book", audioUrl: "https://abs.invalid/b", coverUrl: "items/b/cover", lastSyncedAt: SYNCED },
+            data: { id: BOOK, title: "Book", audioUrl: "https://abs.invalid/b", coverUrl: "items/b/cover", coverVersion: "9f8e7d6c5b" },
         });
         for (const id of [BOOK, GONE]) {
             await prisma.audiobookProgress.create({
@@ -180,7 +179,7 @@ describe("an audiobook in progress", () => {
 
     it("shows the book's cover by its versioned address", async () => {
         const card = (await cards()).find((c) => c.id === BOOK);
-        expect(card?.coverArt).toBe(`/audiobooks/${BOOK}/cover/${SYNCED.getTime().toString(36)}`);
+        expect(card?.coverArt).toBe(`/audiobooks/${BOOK}/cover/9f8e7d6c5b`);
     });
 
     it("keeps the stored cover value for a book that has left the library", async () => {

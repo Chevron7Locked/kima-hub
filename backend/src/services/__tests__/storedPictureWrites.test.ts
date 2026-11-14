@@ -83,8 +83,9 @@ describe("an audiobook cover downloaded to the cover cache", () => {
 
         const saved = await service.downloadCover("book1", "http://abs/api/items/book1/cover");
 
-        expect(saved).toBe(path.join(audiobooks, "book1.jpg"));
-        expect(await formatOf(saved)).toBe("jpeg");
+        expect(saved.path).toBe(path.join(audiobooks, "book1.jpg"));
+        expect(await formatOf(saved.path)).toBe("jpeg");
+        expect(saved.version).toMatch(/^[0-9a-f]{10}$/);
     });
 
     it("keeps a jpeg as it came", async () => {
@@ -93,7 +94,7 @@ describe("an audiobook cover downloaded to the cover cache", () => {
 
         const saved = await service.downloadCover("book2", "http://abs/api/items/book2/cover");
 
-        expect(fs.readFileSync(saved).equals(jpeg)).toBe(true);
+        expect(fs.readFileSync(saved.path).equals(jpeg)).toBe(true);
     });
 
     it("saves nothing when the bytes are no picture", async () => {
@@ -149,15 +150,16 @@ describe("the scanner's embedded cover art", () => {
 
         const name = await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb1");
 
-        expect(name).toBe("alb1.jpg");
-        expect(await formatOf(path.join(covers, "alb1.jpg"))).toBe("jpeg");
+        // Filed where every album cover is, so the value stored for it is `native:albums/<id>.jpg`.
+        expect(name).toBe("albums/alb1.jpg");
+        expect(await formatOf(path.join(covers, "albums", "alb1.jpg"))).toBe("jpeg");
     });
 
     it("saves nothing, and finds no cover, when the embedded bytes are no picture", async () => {
         embedded(Buffer.alloc(500, 3));
 
         expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb2")).toBeNull();
-        expect(fs.readdirSync(covers)).toEqual([]);
+        expect(fs.readdirSync(path.join(covers, "albums"))).toEqual([]);
     });
 
     it("finds no cover when the file embeds none", async () => {
@@ -170,12 +172,22 @@ describe("the scanner's embedded cover art", () => {
         embedded(await oversized());
 
         expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb4")).toBeNull();
-        expect(fs.readdirSync(covers)).toEqual([]);
+        expect(fs.readdirSync(path.join(covers, "albums"))).toEqual([]);
     });
 
     it("still stores an embedded picture just under the cap's reach, a normal one", async () => {
         embedded(await picture("jpeg"));
 
-        expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb5")).toBe("alb5.jpg");
+        expect(await new CoverArtExtractor(covers).extractCoverArt("/music/a.flac", "alb5")).toBe("albums/alb5.jpg");
+    });
+
+    it("finds the cover already stored under the albums folder and does not read the file again", async () => {
+        embedded(await picture("jpeg"));
+        const extractor = new CoverArtExtractor(covers);
+        await extractor.extractCoverArt("/music/a.flac", "alb6");
+        (parseFile as jest.Mock).mockClear();
+
+        expect(await extractor.extractCoverArt("/music/a.flac", "alb6")).toBe("albums/alb6.jpg");
+        expect(parseFile).not.toHaveBeenCalled();
     });
 });

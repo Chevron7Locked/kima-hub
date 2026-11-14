@@ -128,6 +128,8 @@ model Audiobook {
   genres         String[]
   tags           String[]
   localCoverPath String?
+  /// A short digest of the cached cover's bytes, taken when it was stored (services/imageStorage.ts); the version in the cover's address. Null while the book has no cached cover.
+  coverVersion   String?
   coverUrl       String?
   audioUrl       String
   libraryId      String?
@@ -666,6 +668,8 @@ model SystemSettings {
   identityKeysCheckedAt       DateTime? @default(now())
   /// When the one-time pass that converted stored covers holding another picture format under a .jpg name ran (services/coverFormatRepair.ts); null until it has.
   coverFormatsRepairedAt      DateTime? @default(now())
+  /// When the one-time pass that gave every stored cover value a version ran (services/coverVersionBackfill.ts); null until it has.
+  coverVersionsAddedAt        DateTime? @default(now())
   /// When the library a client lists last changed (a scan added, changed or removed songs; a person edited a shown name). Never goes backwards (services/libraryChanged.ts).
   libraryChangedAt            DateTime? @default(now())
   /// Country whose Apple podcast charts the podcasts page shows (ISO 3166 alpha-2, lowercase).

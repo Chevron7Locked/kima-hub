@@ -12,6 +12,7 @@ import { upstreamFailure, upstreamStatusFailure } from "../../utils/upstream";
 import {
   resizeImageBuffer,
   coverFileForSize,
+  coverWidthOf,
   resolveInCoversDir,
   coverCacheControl,
   parseStoredCover,
@@ -24,6 +25,12 @@ import path from "path";
 
 /** A picture at another address never changes there, so it is kept for good. */
 const FIXED_PICTURE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/**
+ * A copy found instead of a stored cover whose file is gone: the album now points at it, but the stored cover's address
+ * (a versioned one reads "this picture for good") must not keep it for a year, since the file may come back.
+ */
+const FALLBACK_CACHE_CONTROL = "public, max-age=300";
 
 /**
  * Every cover answer's headers: readable from any page (with credentials for a named origin). A picture fetched from
@@ -225,18 +232,22 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       return serveAudiobookCover(address.replace("audiobook__", ""), req, res);
     }
     let coverUrl = address;
+    let cacheControl = FIXED_PICTURE_CACHE_CONTROL;
     if (address.startsWith("native:")) {
       const found = await serveStoredCover(address, size, req, res);
       if (!found) return;
       coverUrl = found;
+      cacheControl = FALLBACK_CACHE_CONTROL;
     } else if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
       // A path id is a picture's address or nothing; a query url is fetched and checked by the address guard.
       return res.status(400).json({ error: "Invalid cover ID format" });
     }
 
+    // The width as stored covers read it, so sizes that are no width share the one entry for the whole picture.
+    const width = coverWidthOf(size);
     const cacheKey = `cover-art:${crypto
       .createHash("md5")
-      .update(`${coverUrl}-${size || "original"}`)
+      .update(`${coverUrl}-${width ?? "original"}`)
       .digest("hex")}`;
 
     try {
@@ -264,7 +275,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         if (cachedData.contentType) {
           res.setHeader("Content-Type", cachedData.contentType);
         }
-        res.set({ ...coverHeaders(req.headers.origin), ETag: cachedData.etag });
+        res.set({ ...coverHeaders(req.headers.origin, cacheControl), ETag: cachedData.etag });
         return res.send(imageBuffer);
       } else {
         logger.debug(
@@ -314,14 +325,14 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       return res.status(404).json({ error: "Cover art not found" });
     }
     let imageBuffer = picture.bytes;
-
-    const requestedWidth = size ? parseInt(size as string, 10) : 0;
-    if (requestedWidth > 0) {
-      imageBuffer = await resizeImageBuffer(imageBuffer, requestedWidth);
+    // A resized copy is a JPEG; a picture sent as it came keeps the type its host named.
+    let contentType = picture.contentType;
+    if (width) {
+      imageBuffer = await resizeImageBuffer(imageBuffer, width);
+      if (imageBuffer !== picture.bytes) contentType = "image/jpeg";
     }
 
     const etag = crypto.createHash("md5").update(imageBuffer).digest("hex");
-    const contentType = picture.contentType;
 
     try {
       await redisClient.setex(
@@ -344,7 +355,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     if (contentType) {
       res.setHeader("Content-Type", contentType);
     }
-    res.set({ ...coverHeaders(req.headers.origin), ETag: etag });
+    res.set({ ...coverHeaders(req.headers.origin, cacheControl), ETag: etag });
 
     res.send(imageBuffer);
   } catch (error) {

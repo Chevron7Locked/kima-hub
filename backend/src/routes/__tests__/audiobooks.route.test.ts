@@ -313,6 +313,60 @@ describe("GET /audiobooks/:id", () => {
     });
 });
 
+// ── GET /continue-listening ───────────────────────────────────────────────────
+
+describe("GET /audiobooks/continue-listening", () => {
+    const app = createApp();
+    const BOOK = `${P}cl_book`;
+    const GONE = `${P}cl_gone`;
+    const PLAIN = `${P}cl_plain`;
+    let createdUser = false;
+
+    beforeAll(async () => {
+        createdUser = !(await prisma.user.findUnique({ where: { id: "user-1" } }));
+        await prisma.user.upsert({ where: { id: "user-1" }, create: { id: "user-1", username: `${P}cl_user`, passwordHash: "x" }, update: {} });
+        await prisma.audiobook.createMany({
+            data: [
+                row(BOOK, { coverUrl: "items/cl/cover", coverVersion: "c0ffee1234" }),
+                row(PLAIN, { coverUrl: "items/plain/cover" }),
+            ],
+        });
+        for (const id of [BOOK, GONE, PLAIN]) {
+            await prisma.audiobookProgress.create({
+                data: { userId: "user-1", audiobookshelfId: id, title: id, coverUrl: "items/cl/cover", currentTime: 60, duration: 600 },
+            });
+        }
+    });
+    afterAll(async () => {
+        await prisma.audiobookProgress.deleteMany({ where: { audiobookshelfId: { startsWith: `${P}cl_` } } });
+        await prisma.audiobook.deleteMany({ where: { id: { startsWith: `${P}cl_` } } });
+        if (createdUser) await prisma.user.deleteMany({ where: { id: "user-1" } });
+    });
+    beforeEach(() => {
+        (getSystemSettings as jest.Mock).mockResolvedValue(enabledSettings);
+    });
+
+    const cards = async () => {
+        const res = await request(app).get("/audiobooks/continue-listening");
+        expect(res.status).toBe(200);
+        return res.body as { audiobookshelfId: string; coverUrl: string | null }[];
+    };
+
+    it("shows a book's cover by the versioned address every other audiobook list uses", async () => {
+        expect((await cards()).find((c) => c.audiobookshelfId === BOOK)?.coverUrl).toBe(`/audiobooks/${BOOK}/cover/c0ffee1234`);
+    });
+
+    it("shows a book whose version is not known yet by the address without one", async () => {
+        expect((await cards()).find((c) => c.audiobookshelfId === PLAIN)?.coverUrl).toBe(`/audiobooks/${PLAIN}/cover`);
+    });
+
+    it("sends no audiobook__ value, whether the book is still in the library or not", async () => {
+        const all = await cards();
+        expect(all.map((c) => c.coverUrl).filter((u) => u?.startsWith("audiobook__"))).toEqual([]);
+        expect(all.find((c) => c.audiobookshelfId === GONE)?.coverUrl).toBeNull();
+    });
+});
+
 // ── POST /sync ──────────────────────────────────────────────────────────────────
 
 describe("POST /audiobooks/sync", () => {

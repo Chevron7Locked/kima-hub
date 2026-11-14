@@ -148,26 +148,24 @@ describe("a stored cover handed back by the writers carries its version", () => 
 });
 
 describe("an audiobook's cover address", () => {
-    const synced = new Date(1_700_000_000_000);
-
-    it("carries the time of its last sync as the version, as the sync stores the cover each time", () => {
-        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "/music/cover.jpg", coverUrl: null, lastSyncedAt: synced })).toBe(
-            `/audiobooks/bk1/cover/${synced.getTime().toString(36)}`,
+    it("carries the version of the picture, which is taken when the cover is stored", () => {
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "/music/cover.jpg", coverUrl: null, coverVersion: "ab12cd34ef" })).toBe(
+            "/audiobooks/bk1/cover/ab12cd34ef",
         );
     });
 
-    it("is there when only Audiobookshelf holds the cover", () => {
-        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: "items/bk1/cover", lastSyncedAt: synced })).toMatch(/^\/audiobooks\/bk1\/cover\/[0-9a-z]+$/);
+    it("is there, without a version, when only Audiobookshelf holds the cover or the version is not known yet", () => {
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: "items/bk1/cover", coverVersion: null })).toBe("/audiobooks/bk1/cover");
     });
 
     it("is null when the book has no cover", () => {
-        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: null, lastSyncedAt: synced })).toBeNull();
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: null, coverUrl: null, coverVersion: null })).toBeNull();
     });
 
-    it("changes when a sync stores the cover again", () => {
-        const later = new Date(synced.getTime() + 1000);
-        const a = audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, lastSyncedAt: synced });
-        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, lastSyncedAt: later })).not.toBe(a);
+    it("does not change when the book is synced again with the same picture, and does when the picture changes", () => {
+        const a = audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, coverVersion: "aaaaaaaaaa" });
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, coverVersion: "aaaaaaaaaa" })).toBe(a);
+        expect(audiobookCoverAddress({ id: "bk1", localCoverPath: "p", coverUrl: null, coverVersion: "bbbbbbbbbb" })).not.toBe(a);
     });
 });
 

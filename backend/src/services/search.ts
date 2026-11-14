@@ -65,18 +65,18 @@ const EPISODE_FIELDS = {
 } as const;
 const AUDIOBOOK_FIELDS = {
     id: true, title: true, author: true, narrator: true, series: true, description: true, coverUrl: true, duration: true,
-    localCoverPath: true, lastSyncedAt: true,
+    localCoverPath: true, coverVersion: true,
 } as const;
 
 /** What a search row reads to name an audiobook's cover; the result shows the address, not these. */
-type AudiobookCoverColumns = { localCoverPath: string | null; lastSyncedAt: Date };
+type AudiobookCoverColumns = { localCoverPath: string | null; coverVersion: string | null };
 
 /** An audiobook row as search shows it: the cover as its versioned address, without the columns the address is made from. */
 function audiobookResult<T extends { id: string; coverUrl: string | null } & AudiobookCoverColumns>(
     row: T,
-): Omit<T, "localCoverPath" | "lastSyncedAt"> {
-    const { localCoverPath, lastSyncedAt, ...rest } = row;
-    return { ...rest, coverUrl: audiobookCoverAddress({ id: row.id, localCoverPath, coverUrl: row.coverUrl, lastSyncedAt }) };
+): Omit<T, "localCoverPath" | "coverVersion"> {
+    const { localCoverPath, coverVersion, ...rest } = row;
+    return { ...rest, coverUrl: audiobookCoverAddress({ id: row.id, localCoverPath, coverUrl: row.coverUrl, coverVersion }) };
 }
 const PODCAST_FIELDS = { id: true, title: true, author: true, description: true, imageUrl: true, episodeCount: true } as const;
 
@@ -617,7 +617,7 @@ export class SearchService {
               description,
               "coverUrl",
               "localCoverPath",
-              "lastSyncedAt",
+              "coverVersion",
               duration,
               ts_rank("searchVector", to_tsquery('english', ${tsquery})) AS rank
             FROM "Audiobook"

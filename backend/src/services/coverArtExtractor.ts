@@ -4,21 +4,22 @@ import * as path from "path";
 import { parseFile } from "music-metadata";
 import { MAX_PICTURE_BYTES, storeAsJpeg } from "./imageStorage";
 
+/** Where an album's cover is stored under the covers folder, as every album cover is: `albums/<id>.jpg`. */
+const ALBUMS_FOLDER = "albums";
+
 export class CoverArtExtractor {
     private coverCachePath: string;
 
     constructor(coverCachePath: string) {
         this.coverCachePath = coverCachePath;
 
-        // Ensure cache directory exists
-        if (!fs.existsSync(this.coverCachePath)) {
-            fs.mkdirSync(this.coverCachePath, { recursive: true });
-        }
+        // Ensure the folder album covers are stored in exists
+        fs.mkdirSync(path.join(this.coverCachePath, ALBUMS_FOLDER), { recursive: true });
     }
 
     /**
      * Extract cover art from audio file and save to cache
-     * Returns relative path to cached cover art, or null if none found
+     * Returns the path of the cached cover art under the covers folder (`albums/<id>.jpg`), or null if none found
      */
     async extractCoverArt(
         audioFilePath: string,
@@ -26,8 +27,8 @@ export class CoverArtExtractor {
     ): Promise<string | null> {
         try {
             // Check if already cached
-            const cacheFileName = `${albumId}.jpg`;
-            const cachePath = path.join(this.coverCachePath, cacheFileName);
+            const cacheFileName = `${ALBUMS_FOLDER}/${albumId}.jpg`;
+            const cachePath = path.join(this.coverCachePath, ALBUMS_FOLDER, `${albumId}.jpg`);
 
             if (fs.existsSync(cachePath)) {
                 return cacheFileName;

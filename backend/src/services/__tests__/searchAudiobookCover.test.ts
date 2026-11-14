@@ -9,8 +9,8 @@ import { searchService } from "../search";
 import { audiobookCoverAddress } from "../imageStorage";
 
 const P = "zzsearchcover";
-const WITH = { id: `${P}-with`, title: `${P} lantern`, coverUrl: "items/with/cover", lastSyncedAt: new Date("2026-11-01T10:00:00Z") };
-const WITHOUT = { id: `${P}-without`, title: `${P} lantern bare`, coverUrl: null, lastSyncedAt: new Date("2026-11-01T10:00:00Z") };
+const WITH = { id: `${P}-with`, title: `${P} lantern`, coverUrl: "items/with/cover", coverVersion: "0a1b2c3d4e" };
+const WITHOUT = { id: `${P}-without`, title: `${P} lantern bare`, coverUrl: null, coverVersion: null };
 
 beforeAll(async () => {
     for (const b of [WITH, WITHOUT]) await prisma.audiobook.create({ data: { ...b, audioUrl: `${P}-${b.id}` } });
@@ -21,13 +21,13 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-const address = audiobookCoverAddress({ id: WITH.id, localCoverPath: null, coverUrl: WITH.coverUrl, lastSyncedAt: WITH.lastSyncedAt });
+const address = audiobookCoverAddress({ id: WITH.id, localCoverPath: null, coverUrl: WITH.coverUrl, coverVersion: WITH.coverVersion });
 
 describe("an audiobook search result's cover", () => {
     it("carries the version, from the full-text search", async () => {
         const found = await searchService.searchAudiobooksFTS({ query: `${P} lantern` });
 
-        expect(address).toMatch(/^\/audiobooks\/zzsearchcover-with\/cover\/[0-9a-z]+$/);
+        expect(address).toMatch(/^\/audiobooks\/zzsearchcover-with\/cover\/0a1b2c3d4e$/);
         expect(found.find((b) => b.id === WITH.id)?.coverUrl).toBe(address);
         expect(found.find((b) => b.id === WITHOUT.id)?.coverUrl).toBeNull();
     });

@@ -207,6 +207,16 @@ describe("GET /audiobooks/:id/cover", () => {
             expect(String(spy.mock.calls[0][0])).toBe("http://abs.test:13378/api/items/li_9/cover");
         });
 
+        it.each([["with a version", `/${BOOK}/cover/lq3k9x`], ["without one", `/${BOOK}/cover`]])(
+            "is kept only briefly, never for good, %s: it may not be the picture the address names",
+            async (_what, url) => {
+                absFetch(new Response(new Uint8Array([1, 2]), { headers: { "content-type": "image/png" } }));
+                const res = await request(app).get(url);
+                expect(res.status).toBe(200);
+                expect(res.headers["cache-control"]).toBe("public, max-age=300");
+            },
+        );
+
         it("is a 404 when what comes back is over the size cap", async () => {
             expectLog("warn");
             absFetch(new Response(new Uint8Array([1]), { headers: { "content-type": "image/png", "content-length": String(20 * 1024 * 1024 + 1) } }));

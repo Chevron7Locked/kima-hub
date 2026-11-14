@@ -114,7 +114,7 @@ router.get("/recently-listened", async (req, res) => {
     // A book still in the library is shown by its versioned cover address, so a changed cover is a new address.
     const bookRows = await prisma.audiobook.findMany({
       where: { id: { in: inProgressAudiobooks.map((ab) => ab.audiobookshelfId) } },
-      select: { id: true, localCoverPath: true, coverUrl: true, lastSyncedAt: true },
+      select: { id: true, localCoverPath: true, coverUrl: true, coverVersion: true },
     });
     const bookById = new Map(bookRows.map((b) => [b.id, b]));
 

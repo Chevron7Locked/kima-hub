@@ -93,14 +93,15 @@ describe("the scanner finding a cover for an album", () => {
         const folder = fs.mkdtempSync(path.join(os.tmpdir(), "kima-scancover-"));
         try {
             const bytes = Buffer.from("a picture");
-            fs.writeFileSync(path.join(folder, "alb-1.jpg"), bytes);
+            fs.mkdirSync(path.join(folder, "albums"));
+            fs.writeFileSync(path.join(folder, "albums", "alb-1.jpg"), bytes);
             scanner.coverCachePath = folder;
-            extractCoverArt.mockResolvedValue("alb-1.jpg");
+            extractCoverArt.mockResolvedValue("albums/alb-1.jpg");
 
             await ensure();
 
             const version = createHash("sha1").update(bytes).digest("hex").slice(0, 10);
-            expect(await storedCover()).toBe(`native:alb-1.jpg?v=${version}`);
+            expect(await storedCover()).toBe(`native:albums/alb-1.jpg?v=${version}`);
         } finally {
             fs.rmSync(folder, { recursive: true, force: true });
         }

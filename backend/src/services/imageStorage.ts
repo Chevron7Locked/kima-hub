@@ -55,11 +55,13 @@ export function parseStoredCover(value: string | null | undefined): { relativePa
 }
 
 /**
- * The address clients load an audiobook's cover from, or null when the book has none. Its version is the time of the
- * book's last sync, the one place its cover is stored anew, so the address changes when the cover can have.
+ * The address clients load an audiobook's cover from, or null when the book has none. Its version is the digest of the
+ * picture, taken when the sync stores the cover, so the address changes when the picture does and not when the book is
+ * synced again. A book with no stored version yet (its cover is only at Audiobookshelf) has an address without one.
  */
-export function audiobookCoverAddress(book: { id: string; localCoverPath: string | null; coverUrl: string | null; lastSyncedAt: Date }): string | null {
-    return book.localCoverPath || book.coverUrl ? `/audiobooks/${book.id}/cover/${book.lastSyncedAt.getTime().toString(36)}` : null;
+export function audiobookCoverAddress(book: { id: string; localCoverPath: string | null; coverUrl: string | null; coverVersion: string | null }): string | null {
+    if (!book.localCoverPath && !book.coverUrl) return null;
+    return book.coverVersion ? `/audiobooks/${book.id}/cover/${book.coverVersion}` : `/audiobooks/${book.id}/cover`;
 }
 
 /** The folder stored covers live in, beside the transcode cache. */
