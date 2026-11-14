@@ -293,7 +293,9 @@ class DataCacheService {
      * Warm up Redis cache from database
      * Called on server startup
      */
-    async warmupCache(): Promise<void> {
+    /** `shouldStop` is asked before each read: once it says yes the warmup ends quietly (the cache fills as it is used). */
+    async warmupCache({ shouldStop = () => false }: { shouldStop?: () => boolean } = {}): Promise<void> {
+        if (shouldStop()) return;
         logger.debug("[DataCache] Warming up Redis cache from database...");
 
         try {
@@ -313,6 +315,8 @@ class DataCacheService {
 
             await this.setRedisCacheBatch(artistEntries);
             logger.debug(`[DataCache] Cached ${artistEntries.length} artist images`);
+
+            if (shouldStop()) return;
 
             // Warm up album covers
             const albums = await prisma.album.findMany({

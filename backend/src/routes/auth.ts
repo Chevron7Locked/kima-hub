@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
-import { changePassword, createAccount } from "../services/users/accounts";
+import { changePassword, createAccount, deleteAccount, LastAdminError } from "../services/users/accounts";
 import {
     generateToken,
     generateRefreshToken,
@@ -504,35 +504,12 @@ router.post("/stream-ticket", async (req, res) => {
 // DELETE /auth/account - Delete the current user's own account
 router.delete("/account", async (req, res) => {
     try {
-        await prisma.$transaction(
-            async (tx) => {
-                // Last-admin guard INSIDE the txn so count-then-delete is atomic under
-                // Serializable isolation: two concurrent admin deletions can't both see
-                // count>1 and leave the instance with zero admins (a bricked instance).
-                if (req.user!.role === "admin") {
-                    const adminCount = await tx.user.count({
-                        where: { role: "admin" },
-                    });
-                    if (adminCount <= 1) {
-                        throw new Error("LAST_ADMIN_GUARD");
-                    }
-                }
-
-                // Every User relation cascades on delete.
-                await tx.user.delete({ where: { id: req.user!.id } });
-            },
-            { isolationLevel: "Serializable" }
-        );
-
-        // Drop the cached user row so the deleted account's tokens stop working now.
-        // After the commit, so it runs only once the delete is real.
-        invalidateUserCache(req.user!.id);
-
+        await deleteAccount(req.user!.id);
         return res.json({ deleted: true });
-    } catch (error: any) {
-        if (error?.message === "LAST_ADMIN_GUARD") {
+    } catch (error) {
+        if (error instanceof LastAdminError) {
             return res.status(409).json({
-                error: "Cannot delete the only administrator account",
+                error: error.message,
             });
         }
         // Serializable conflict from a concurrent admin change — safe to retry.

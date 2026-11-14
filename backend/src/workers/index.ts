@@ -270,7 +270,7 @@ export async function shutdownWorkers(): Promise<void> {
     await stopUnifiedEnrichmentWorker();
 
     // The enrichment state service's two Redis connections are not closed here: it is shared with code outside the
-    // workers, so the server's close steps (index.ts) close it, once, after the workers.
+    // workers, so the server's close steps (closeSteps.ts) close it, once, after the workers.
 
     stopMoodSnapshotWorker();
 

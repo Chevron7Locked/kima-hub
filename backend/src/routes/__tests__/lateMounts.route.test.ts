@@ -129,6 +129,15 @@ describe("the playback state's large body", () => {
         expect(saved?.playbackType).toBe("track");
     });
 
+    it("saves a large queue for a signed-in person on a path in another case, as Express routes it", async () => {
+        const signedIn = { Authorization: as(MEMBER, "user") };
+        const body = JSON.stringify({ playbackType: "track", queue: [{ id: "t1", title: "one" }], junk: threeMegabytes });
+
+        expect(await postStatus("/API/playback-state", body, signedIn)).toBe(200);
+        // A stranger on it still reads nothing.
+        expect(await postStatus("/API/playback-state", body)).toBe(401);
+    });
+
     it("refuses more than 5 MB, and gives every other route 1 MB", async () => {
         const signedIn = { Authorization: as(MEMBER, "user") };
         const body = (bytes: number) => JSON.stringify({ playbackType: "track", junk: "x".repeat(bytes) });

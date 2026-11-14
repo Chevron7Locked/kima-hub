@@ -1,6 +1,6 @@
 // Every path takes 1 MB, except the playback state, which the global parser leaves unread: its mount reads up to 5 MB
 // after the access check (routes/__tests__/lateMounts.route.test.ts covers that against the real server). The skip goes
-// by whole path segment, so a path that only starts like the playback state's is still read, at 1 MB.
+// by whole path segment, in any case (Express matches routes without regard to case), so a path that only starts like the playback state's is still read, at 1 MB.
 
 import express from "express";
 import request from "supertest";
@@ -13,7 +13,15 @@ app.post("*", (req, res) => void res.json({ read: req.body !== undefined && Obje
 const twoMegabytes = { queue: "x".repeat(2 * 1024 * 1024) };
 
 describe("the global JSON body parser", () => {
-    it.each(["/api/playback-state", "/api/playback-state/", "/api/playback-state/sync"])(
+    it.each([
+        "/api/playback-state",
+        "/api/playback-state/",
+        "/api/playback-state/sync",
+        // Express routes ignore case, so these reach the playback state's mount, which reads them at 5 MB.
+        "/API/playback-state",
+        "/api/Playback-State/sync",
+        "/Api/PLAYBACK-STATE/",
+    ])(
         "leaves %s unread, for its mount",
         async (path) => {
             // A small body: an answer that does not read a large one can reset the connection.
@@ -23,7 +31,13 @@ describe("the global JSON body parser", () => {
         },
     );
 
-    it.each(["/api/playback-stateX", "/api/playback-state-old", "/api/playback-statement/x", "/api/plays"])(
+    it.each([
+        "/api/playback-stateX",
+        "/api/playback-state-old",
+        "/api/playback-statement/x",
+        "/API/playback-stateX",
+        "/api/plays",
+    ])(
         "refuses 2 MB on %s",
         async (path) => {
             const res = await request(app).post(path).send(twoMegabytes);

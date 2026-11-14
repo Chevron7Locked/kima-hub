@@ -13,7 +13,8 @@ import { logger } from "../../../utils/logger";
 import * as settingsDefaults from "../../../utils/userSettingsDefaults";
 import { clearUserCache, generateToken, signedInUser } from "../../../middleware/auth";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
-import { changePassword, createAccount, resetAdminPassword, signUp } from "../accounts";
+import { changePassword, createAccount, deleteAccount, LastAdminError, resetAdminPassword, signUp } from "../accounts";
+import { isTransactionConflict } from "../../../utils/dbConflict";
 
 jest.setTimeout(60_000);
 
@@ -288,5 +289,69 @@ describe("resetAdminPassword (the startup reset)", () => {
 
         expect(await resetAdminPassword("rescue-pass")).toBe("no-admin");
         expect(logger.warn).toHaveBeenCalled();
+    });
+});
+
+describe("deleteAccount", () => {
+    it("deletes the account with its settings, and drops the cached user so its token stops working at once", async () => {
+        const made = await plain("alice");
+        if (!made.ok) throw new Error("setup");
+        const token = generateToken({ id: made.user.id, username: "alice", role: "user", tokenVersion: made.user.tokenVersion });
+        const passesAuth = async () =>
+            (await signedInUser({ headers: { authorization: `Bearer ${token}` }, query: {}, path: "/x" } as any)) !== null;
+        expect(await passesAuth()).toBe(true); // and now cached
+
+        await deleteAccount(made.user.id);
+
+        expect(await prisma.user.findUnique({ where: { id: made.user.id } })).toBeNull();
+        expect(await prisma.userSettings.findUnique({ where: { userId: made.user.id } })).toBeNull();
+        expect(await passesAuth()).toBe(false);
+    });
+
+    it("refuses to delete the only admin with a LastAdminError, and keeps the account", async () => {
+        const boss = await seedUser("boss", { role: "admin" });
+        await seedUser("alice");
+
+        const refused = await deleteAccount(boss.id).catch((error) => error);
+
+        expect(refused).toBeInstanceOf(LastAdminError);
+        expect(await prisma.user.findUnique({ where: { id: boss.id } })).not.toBeNull();
+    });
+
+    it("is not told by its message: an error that only says so is no LastAdminError", () => {
+        expect(new Error("LAST_ADMIN_GUARD")).not.toBeInstanceOf(LastAdminError);
+    });
+
+    it("deletes an admin while another admin remains", async () => {
+        const first = await seedUser("boss", { role: "admin" });
+        await seedUser("second", { role: "admin" });
+
+        await deleteAccount(first.id);
+
+        expect(await prisma.user.count({ where: { role: "admin" } })).toBe(1);
+    });
+
+    it("deletes a plain user without asking about admins", async () => {
+        const alice = await seedUser("alice");
+        await deleteAccount(alice.id);
+        expect(await prisma.user.count()).toBe(0);
+    });
+
+    it("leaves one admin when two admins delete themselves together", async () => {
+        const a = await seedUser("boss-a", { role: "admin" });
+        const b = await seedUser("boss-b", { role: "admin" });
+
+        const outcomes = await Promise.allSettled([deleteAccount(a.id), deleteAccount(b.id)]);
+
+        expect(await prisma.user.count({ where: { role: "admin" } })).toBeGreaterThanOrEqual(1);
+        for (const outcome of outcomes) {
+            if (outcome.status === "rejected") {
+                expect(outcome.reason instanceof LastAdminError || isTransactionConflict(outcome.reason)).toBe(true);
+            }
+        }
+    });
+
+    it("answers nothing for an account that is already gone", async () => {
+        await expect(deleteAccount("nobody")).resolves.toBeUndefined();
     });
 });

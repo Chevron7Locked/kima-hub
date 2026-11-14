@@ -79,24 +79,88 @@ describe("createShutdown", () => {
         expect(logged).toHaveBeenCalled();
     });
 
-    it("exits 1 when a close step throws, without running the steps after it", async () => {
+    it("runs every close step when one throws, and exits 1", async () => {
         const order: string[] = [];
         const logged = expectLog("error");
         const { steps, exits } = plan(order, {
             close: [
                 () => void order.push("workers"),
                 async () => {
-                    throw new Error("redis would not quit");
+                    throw new Error("enrichment state would not disconnect");
                 },
+                async () => void order.push("redis"),
                 () => void order.push("database"),
             ],
         });
 
         await createShutdown(steps)("SIGTERM");
 
-        expect(order).not.toContain("database");
+        expect(order).toEqual(["close the server", "stop reconciliation", "drain", "workers", "redis", "database"]);
         expect(exits).toEqual([1]);
-        expect(logged).toHaveBeenCalled();
+        expect(logged.mock.calls.flat().join(" ")).toContain("enrichment state would not disconnect");
+    });
+
+    it("exits 1 when several close steps throw, and still reaches the last", async () => {
+        const order: string[] = [];
+        expectLog("error");
+        const fail = (message: string) => () => {
+            throw new Error(message);
+        };
+        const { steps, exits } = plan(order, {
+            close: [fail("first"), fail("second"), () => void order.push("database")],
+        });
+
+        await createShutdown(steps)("SIGTERM");
+
+        expect(order).toContain("database");
+        expect(exits).toEqual([1]);
+    });
+
+    it("exits 1 when a crash arrives after a stop signal began a shutdown that would have exited 0", async () => {
+        const order: string[] = [];
+        let release!: () => void;
+        const slow = new Promise<void>((resolve) => (release = resolve));
+        const { steps, exits } = plan(order, { drain: () => slow });
+        const shutdown = createShutdown(steps);
+
+        const done = shutdown("SIGTERM");
+        await shutdown("uncaughtException", { failed: true });
+        expect(exits).toEqual([]);
+
+        release();
+        await done;
+        expect(order).toEqual(["close the server", "stop reconciliation", "workers", "redis", "database"]);
+        expect(exits).toEqual([1]);
+    });
+
+    it("still exits 0 when the later call is no failure", async () => {
+        const order: string[] = [];
+        let release!: () => void;
+        const slow = new Promise<void>((resolve) => (release = resolve));
+        const { steps, exits } = plan(order, { drain: () => slow });
+        const shutdown = createShutdown(steps);
+
+        const done = shutdown("SIGTERM");
+        await shutdown("SIGINT");
+        release();
+        await done;
+
+        expect(exits).toEqual([0]);
+    });
+
+    it("still closes the resources when the drain throws, and exits 1", async () => {
+        const order: string[] = [];
+        expectLog("error");
+        const { steps, exits } = plan(order, {
+            drain: async () => {
+                throw new Error("drain broke");
+            },
+        });
+
+        await createShutdown(steps)("SIGTERM");
+
+        expect(order).toEqual(["close the server", "stop reconciliation", "workers", "redis", "database"]);
+        expect(exits).toEqual([1]);
     });
 
     it("exits 1 at the deadline when a step never finishes, and says which signal started it", async () => {

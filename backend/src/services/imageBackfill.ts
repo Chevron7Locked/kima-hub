@@ -93,12 +93,13 @@ const BACKFILLS: Record<
     },
 };
 
-async function backfillImages(kind: BackfillKind): Promise<void> {
+async function backfillImages(kind: BackfillKind, shouldStop: () => boolean): Promise<void> {
     if (backfillProgress.inProgress) {
         logger.warn("[ImageBackfill] Backfill already in progress");
         return;
     }
 
+    if (shouldStop()) return;
     const { noun, cacheKey, cacheTtlSeconds } = BACKFILLS[kind];
     logger.info(`[ImageBackfill] Starting ${kind} ${noun} backfill...`);
 
@@ -132,6 +133,10 @@ async function backfillImages(kind: BackfillKind): Promise<void> {
         );
 
         for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            if (shouldStop()) {
+                logger.info(`[ImageBackfill] ${kind} ${noun} backfill stopped for shutdown: ${backfillProgress.processed}/${rows.length} done`);
+                return;
+            }
             const batch = rows.slice(i, i + BATCH_SIZE);
 
             await Promise.all(
@@ -211,9 +216,12 @@ async function backfillImages(kind: BackfillKind): Promise<void> {
 }
 
 /**
- * Backfill all images (artists and albums)
+ * Backfill all images (artists and albums). `shouldStop` is asked before each batch of downloads and before each
+ * kind: once it says yes the backfill ends quietly, leaving the rest for the next start.
  */
-export async function backfillAllImages(): Promise<void> {
-    await backfillImages("artist");
-    await backfillImages("album");
+export async function backfillAllImages(
+    { shouldStop = () => false }: { shouldStop?: () => boolean } = {}
+): Promise<void> {
+    await backfillImages("artist", shouldStop);
+    await backfillImages("album", shouldStop);
 }

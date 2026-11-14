@@ -54,7 +54,11 @@ class AudiobookCacheService {
     /**
      * Sync all audiobooks from Audiobookshelf to our database
      */
-    async syncAll(): Promise<SyncResult> {
+    /**
+     * `shouldStop` is asked before each book: once it says yes the sync ends quietly with what it did, and prunes
+     * nothing, since the list was not gone through.
+     */
+    async syncAll({ shouldStop = () => false }: { shouldStop?: () => boolean } = {}): Promise<SyncResult> {
         const result: SyncResult = {
             synced: 0,
             failed: 0,
@@ -77,6 +81,10 @@ class AudiobookCacheService {
             );
 
             for (const book of audiobooks) {
+                if (shouldStop()) {
+                    logger.info("[AUDIOBOOK] Sync stopped for shutdown");
+                    return result;
+                }
                 try {
                     const synced = await this.syncAudiobook(book);
                     if (synced) {

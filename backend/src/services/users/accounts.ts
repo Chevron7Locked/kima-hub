@@ -11,7 +11,9 @@ import { invalidateUserCache } from "../../middleware/auth";
  * repeats them. Checking a password at sign-in is not here: that belongs to each sign-in surface and its guess limit.
  *
  * Every answer is a value, never a thrown "taken" or "too short": a caller maps the reasons to its own status codes.
- * Anything else that goes wrong (the database is down) throws.
+ * The one thrown refusal is `LastAdminError`, from deleting an account: the refusal is decided inside the transaction
+ * that would have deleted it, and the throw is what rolls that back. Anything else that goes wrong (the database is
+ * down, a transaction conflict) throws as it came.
  */
 
 /** A password is at least this many characters. The only place the rule lives. */
@@ -154,6 +156,37 @@ export async function changePassword(input: { userId: string; currentPassword: s
     const user = await setPassword(input.userId, input.newPassword, stored.passwordHash);
     // Nothing matched: the password changed, or the account went, since it was read.
     return user ? { ok: true, user } : { ok: false, reason: "wrong-password" };
+}
+
+/** The only admin cannot be deleted: the instance would have no one to administer it. */
+export class LastAdminError extends Error {
+    constructor() {
+        super("Cannot delete the only administrator account");
+        this.name = "LastAdminError";
+    }
+}
+
+/**
+ * Deletes an account; every row that belongs to it goes with it. An admin is refused (`LastAdminError`) when it is the
+ * only one: the count and the delete run in one Serializable transaction, so two admins deleting themselves together
+ * cannot both see another admin and leave none (the loser throws a transaction conflict, which is safe to retry). The
+ * cached user is dropped after the commit, so the account's tokens stop working now. An account already gone is
+ * nothing to delete.
+ */
+export async function deleteAccount(userId: string): Promise<void> {
+    await prisma.$transaction(
+        async (tx) => {
+            const account = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
+            if (!account) return;
+            if (account.role === "admin" && (await tx.user.count({ where: { role: "admin" } })) <= 1) {
+                throw new LastAdminError();
+            }
+            // Every User relation cascades on delete.
+            await tx.user.delete({ where: { id: userId } });
+        },
+        { isolationLevel: "Serializable" },
+    );
+    invalidateUserCache(userId);
 }
 
 /**

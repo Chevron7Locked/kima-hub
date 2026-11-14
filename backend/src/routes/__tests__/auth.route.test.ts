@@ -11,6 +11,7 @@ import bcrypt from 'bcrypt';
 import authRoutes from '../../routes/auth';
 import { generateToken, generateRefreshToken, clearUserCache } from '../../middleware/auth';
 import { prisma } from '../../utils/db';
+import * as accounts from '../../services/users/accounts';
 import { mountAsServer } from "./helpers/serverMount";
 
 const TEST_SECRET = process.env.JWT_SECRET!;
@@ -279,6 +280,28 @@ describe('DELETE /auth/account', () => {
             expect(await prisma.user.findUnique({ where: { id: VICTIM } })).not.toBeNull();
         } finally {
             transaction.mockRestore();
+        }
+    });
+
+    it('answers 409 and keeps the only admin when the account module refuses with a LastAdminError', async () => {
+        // The other admins of this database go first, so ADMIN is the only one: the real guard decides.
+        const others = await prisma.user.findMany({ where: { role: 'admin', id: { not: ADMIN } }, select: { id: true } });
+        await prisma.user.deleteMany({ where: { id: { in: others.map((o) => o.id) } } });
+
+        const res = await request(app).delete('/auth/account').set('Authorization', `Bearer ${tokenFor(ADMIN, 'admin')}`);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toMatch(/only administrator/i);
+        expect(await prisma.user.findUnique({ where: { id: ADMIN } })).not.toBeNull();
+    });
+
+    it('goes by the error class, not its words: a plain error that says LAST_ADMIN_GUARD is a server error', async () => {
+        const spy = jest.spyOn(accounts, 'deleteAccount').mockRejectedValueOnce(new Error('LAST_ADMIN_GUARD'));
+        try {
+            const res = await request(app).delete('/auth/account').set('Authorization', `Bearer ${tokenFor(VICTIM)}`);
+            expect(res.status).toBe(500);
+        } finally {
+            spy.mockRestore();
         }
     });
 

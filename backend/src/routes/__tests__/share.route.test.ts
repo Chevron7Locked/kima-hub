@@ -150,6 +150,37 @@ describe('POST /share -- create share link', () => {
             transaction.mockRestore();
         }
     });
+
+    it('answers 409 "please retry", not a server error, when both runs lost a transaction conflict, and makes no link', async () => {
+        const conflict = Object.assign(new Error('could not serialize access'), { code: 'P2034' });
+        const transaction = jest.spyOn(prisma, '$transaction').mockRejectedValue(conflict as never);
+        try {
+            const res = await request(app)
+                .post('/share')
+                .set('Authorization', `Bearer ${userToken(OWNER)}`)
+                .send({ entityType: 'track', entityId: trackId });
+            expect(res.status).toBe(409);
+            expect(res.body.error).toMatch(/retry/i);
+            expect(transaction).toHaveBeenCalledTimes(2);
+            expect(await sharesBy(OWNER)).toHaveLength(0);
+        } finally {
+            transaction.mockRestore();
+        }
+    });
+
+    it('still answers 500 for a failure that is no conflict', async () => {
+        const transaction = jest.spyOn(prisma, '$transaction').mockRejectedValue(new Error('connection lost') as never);
+        try {
+            const res = await request(app)
+                .post('/share')
+                .set('Authorization', `Bearer ${userToken(OWNER)}`)
+                .send({ entityType: 'track', entityId: trackId });
+            expect(res.status).toBe(500);
+            expect(transaction).toHaveBeenCalledTimes(1);
+        } finally {
+            transaction.mockRestore();
+        }
+    });
 });
 
 describe('DELETE /share/:token -- revoke share link', () => {

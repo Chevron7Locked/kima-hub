@@ -1,5 +1,5 @@
 // shutdownWorkers stops the workers and crons and closes their queues. The enrichment state service is shared with
-// code outside the workers, so its connections close once, in the server's own close steps (index.ts), not here too.
+// code outside the workers, so its connections close once, in the server's own close steps (closeSteps.ts), not here too.
 // Everything the workers module starts is replaced, so the test only asks what shutdown does.
 
 const mockDisconnect = jest.fn(async () => {});
@@ -32,8 +32,12 @@ jest.mock("../processors/refileProcessor", () => ({ processRefile: jest.fn() }))
 jest.mock("../processors/discoverProcessor", () => ({ processDiscoverWeekly: jest.fn() }));
 jest.mock("../processors/importProcessor", () => ({ processImportJob: jest.fn() }));
 jest.mock("../scanRequest", () => ({ requestScan: jest.fn() }));
-jest.mock("../../utils/db", () => ({ prisma: {} }));
-jest.mock("../../utils/redis", () => ({ redisClient: {} }));
+const mockDbDisconnect = jest.fn(async () => {});
+const mockRedisQuit = jest.fn(async () => {});
+const mockSoulseekDisconnect = jest.fn();
+jest.mock("../../utils/db", () => ({ prisma: { $disconnect: mockDbDisconnect } }));
+jest.mock("../../services/soulseek", () => ({ soulseekService: { disconnect: mockSoulseekDisconnect } }));
+jest.mock("../../utils/redis", () => ({ redisClient: { quit: mockRedisQuit } }));
 jest.mock("../../services/stages/stageRecords", () => ({ SCAN_AGAIN_KEY: "scan-again" }));
 jest.mock("../../services/spotifyImport", () => ({ spotifyImportService: {} }));
 jest.mock("../unifiedEnrichment", () => ({
@@ -56,6 +60,7 @@ jest.mock("../../services/mixes/radioRow", () => ({ warmRadioCovers: jest.fn() }
 jest.mock("../../services/enrichmentState", () => ({ enrichmentStateService: { disconnect: mockDisconnect } }));
 
 import { shutdownWorkers } from "../index";
+import { closeSteps } from "../../closeSteps";
 
 describe("shutdownWorkers", () => {
     it("stops every worker and cron and closes the queues", async () => {
@@ -72,6 +77,17 @@ describe("shutdownWorkers", () => {
         await shutdownWorkers();
 
         expect(mockDisconnect).not.toHaveBeenCalled();
+    });
+
+    it("is closed once by the server's own close list: workers, Soulseek, the enrichment state service, Redis, the database", async () => {
+        for (const close of closeSteps) await close();
+
+        expect(mockDisconnect).toHaveBeenCalledTimes(1);
+        expect(mockSoulseekDisconnect).toHaveBeenCalledTimes(1);
+        expect(mockRedisQuit).toHaveBeenCalledTimes(1);
+        expect(mockDbDisconnect).toHaveBeenCalledTimes(1);
+        // the three workers and three queues of shutdownWorkers
+        expect(mockClose).toHaveBeenCalledTimes(6);
     });
 
     it("schedules nothing afterwards, even for a cycle that was still running when it cleared the timers", async () => {

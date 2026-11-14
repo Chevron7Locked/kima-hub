@@ -75,13 +75,19 @@ export function isBackfillInProgress(): boolean {
   return isBackfillRunning;
 }
 
+/** `shouldStop` is asked before each batch: once it says yes the pass ends quietly with what it counted, and no extra pass starts. */
+interface BackfillOptions {
+  shouldStop?: () => boolean;
+}
+
 /**
  * Recounts every artist in small batches with pauses, so it is safe on a running server. Asked for while a recount
  * runs, it returns at once and the running one goes over the artists once more when it finishes: any number of asks
  * cost one more pass, and the answer (processed, errors) of the running call covers every pass.
  */
 export async function backfillAllArtistCounts(
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number, total: number) => void,
+  { shouldStop = () => false }: BackfillOptions = {}
 ): Promise<{ processed: number; errors: number }> {
   if (isBackfillRunning) {
     recountAsked = true;
@@ -95,10 +101,11 @@ export async function backfillAllArtistCounts(
 
   try {
     do {
+      if (shouldStop()) break;
       // Cleared as the pass starts, so an ask made during it earns one more pass.
       recountAsked = false;
       pass += 1;
-      const counted = await recountEveryArtist(pass, onProgress);
+      const counted = await recountEveryArtist(pass, onProgress, shouldStop);
       answer.processed += counted.processed;
       answer.errors += counted.errors;
     } while (recountAsked);
@@ -111,7 +118,8 @@ export async function backfillAllArtistCounts(
 
 async function recountEveryArtist(
   pass: number,
-  onProgress?: (processed: number, total: number) => void
+  onProgress: ((processed: number, total: number) => void) | undefined,
+  shouldStop: () => boolean
 ): Promise<{ processed: number; errors: number }> {
   backfillProgress = { pass, processed: 0, total: 0, errors: 0 };
 
@@ -122,6 +130,10 @@ async function recountEveryArtist(
   logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
 
   while (true) {
+    if (shouldStop()) {
+      logger.info(`[ArtistCounts] Backfill stopped for shutdown: ${backfillProgress.processed}/${total} counted`);
+      return { processed: backfillProgress.processed, errors: backfillProgress.errors };
+    }
     // Fetch batch of artists using cursor pagination
     const artists = await prisma.artist.findMany({
       take: BATCH_SIZE,

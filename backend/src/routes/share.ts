@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { createShareLink, ShareError } from "../services/shareService";
+import { isTransactionConflict } from "../utils/dbConflict";
 import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover } from "../services/publicShare";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
@@ -89,6 +90,10 @@ router.post("/", async (req: Request, res: Response) => {
                 : error.code === "FORBIDDEN" ? 403
                 : 429;
             return res.status(status).json({ error: error.message });
+        }
+        // Both runs lost to another transaction: nothing was written, and asking again is safe.
+        if (isTransactionConflict(error)) {
+            return res.status(409).json({ error: "Concurrent share change, please retry" });
         }
         logger.error(`[Share] Failed to create share link: ${error.message}`);
         res.status(500).json({ error: "Failed to create share link" });
