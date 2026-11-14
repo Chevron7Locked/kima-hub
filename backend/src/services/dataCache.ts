@@ -291,9 +291,9 @@ class DataCacheService {
 
     /**
      * Warm up Redis cache from database
-     * Called on server startup
+     * Called on server startup. `shouldStop` is asked before each read: once it says yes the warmup ends quietly (the
+     * cache fills as it is used).
      */
-    /** `shouldStop` is asked before each read: once it says yes the warmup ends quietly (the cache fills as it is used). */
     async warmupCache({ shouldStop = () => false }: { shouldStop?: () => boolean } = {}): Promise<void> {
         if (shouldStop()) return;
         logger.debug("[DataCache] Warming up Redis cache from database...");

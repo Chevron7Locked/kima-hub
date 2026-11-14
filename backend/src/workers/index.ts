@@ -269,7 +269,7 @@ export async function shutdownWorkers(): Promise<void> {
     // Stop unified enrichment worker (async — closes BullMQ workers and queues)
     await stopUnifiedEnrichmentWorker();
 
-    // The enrichment state service's two Redis connections are not closed here: it is shared with code outside the
+    // `enrichmentStateService`'s two Redis connections are not closed here: it is shared with code outside the
     // workers, so the server's close steps (closeSteps.ts) close it, once, after the workers.
 
     stopMoodSnapshotWorker();

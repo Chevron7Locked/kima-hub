@@ -1,4 +1,4 @@
-// shutdownWorkers stops the workers and crons and closes their queues. The enrichment state service is shared with
+// shutdownWorkers stops the workers and crons and closes their queues. `enrichmentStateService` is shared with
 // code outside the workers, so its connections close once, in the server's own close steps (closeSteps.ts), not here too.
 // Everything the workers module starts is replaced, so the test only asks what shutdown does.
 
@@ -71,7 +71,7 @@ describe("shutdownWorkers", () => {
         expect(mockClose).toHaveBeenCalledTimes(6);
     });
 
-    it("leaves the enrichment state service to the server's close steps, which close it once", async () => {
+    it("leaves enrichmentStateService to the server's close steps, which close it once", async () => {
         mockDisconnect.mockClear();
 
         await shutdownWorkers();
@@ -79,7 +79,7 @@ describe("shutdownWorkers", () => {
         expect(mockDisconnect).not.toHaveBeenCalled();
     });
 
-    it("is closed once by the server's own close list: workers, Soulseek, the enrichment state service, Redis, the database", async () => {
+    it("is closed once by the server's own close list: workers, Soulseek, enrichmentStateService, Redis, the database", async () => {
         for (const close of closeSteps) await close();
 
         expect(mockDisconnect).toHaveBeenCalledTimes(1);

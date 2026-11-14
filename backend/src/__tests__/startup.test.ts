@@ -93,7 +93,7 @@ describe("runStartSteps", () => {
 
 describe("backgroundStartSteps", () => {
     // The catch-up work reads and writes the database for a long while, so each task is handed a way to ask whether a
-    // shutdown has begun, and stops between its batches once it has. Each service is replaced: only what the steps
+    // shutdown has begun, and stops between its batches once it has. Each module is replaced: only what the steps
     // hand them is asked here.
     const mockSettings = jest.fn(async () => ({ audiobookshelfEnabled: true, audiobookshelfUrl: "http://abs" }));
     const mockAudiobookCount = jest.fn(async () => 0);

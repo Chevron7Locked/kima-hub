@@ -52,9 +52,8 @@ class AudiobookCacheService {
     }
 
     /**
-     * Sync all audiobooks from Audiobookshelf to our database
-     */
-    /**
+     * Sync all audiobooks from Audiobookshelf to our database.
+     *
      * `shouldStop` is asked before each book: once it says yes the sync ends quietly with what it did, and prunes
      * nothing, since the list was not gone through.
      */

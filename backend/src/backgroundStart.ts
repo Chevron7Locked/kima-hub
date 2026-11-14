@@ -10,8 +10,6 @@ import { logger } from "./utils/logger";
 import type { StartStep } from "./startup";
 
 export function backgroundStartSteps(shutdownHasBegun: () => boolean): StartStep[] {
-    const shouldStop = shutdownHasBegun;
-
     async function syncAudiobooksIfEmpty() {
         // Auto-sync audiobooks on startup if cache is empty
         // This prevents "disappeared" audiobooks after container rebuilds
@@ -23,7 +21,7 @@ export function backgroundStartSteps(shutdownHasBegun: () => boolean): StartStep
                 if (cachedCount === 0) {
                     logger.debug("[STARTUP] Audiobook cache is empty - auto-syncing from Audiobookshelf...");
                     const { audiobookCacheService } = await import("./services/audiobookCache");
-                    const result = await audiobookCacheService.syncAll({ shouldStop });
+                    const result = await audiobookCacheService.syncAll({ shouldStop: shutdownHasBegun });
                     logger.debug(`[STARTUP] Audiobook auto-sync complete: ${result.synced} audiobooks cached`);
                 } else {
                     logger.debug(`[STARTUP] Audiobook cache has ${cachedCount} entries - skipping auto-sync`);
@@ -53,7 +51,7 @@ export function backgroundStartSteps(shutdownHasBegun: () => boolean): StartStep
             const needsBackfill = await isBackfillNeeded();
             if (needsBackfill) {
                 logger.info("[STARTUP] Artist counts need backfilling, starting in background...");
-                const result = await backfillAllArtistCounts(undefined, { shouldStop });
+                const result = await backfillAllArtistCounts(undefined, { shouldStop: shutdownHasBegun });
                 logger.info(`[STARTUP] Artist counts backfill complete: ${result.processed} processed, ${result.errors} errors`);
             } else {
                 logger.debug("[STARTUP] Artist counts already populated");
@@ -70,7 +68,7 @@ export function backgroundStartSteps(shutdownHasBegun: () => boolean): StartStep
             const status = await isImageBackfillNeeded();
             if (status.needed) {
                 logger.info(`[STARTUP] Image backfill needed: ${status.artistsWithExternalUrls} artists, ${status.albumsWithExternalUrls} albums with external URLs`);
-                await backfillAllImages({ shouldStop });
+                await backfillAllImages({ shouldStop: shutdownHasBegun });
                 logger.info("[STARTUP] Image backfill complete");
             } else {
                 logger.debug("[STARTUP] All images already stored locally");
