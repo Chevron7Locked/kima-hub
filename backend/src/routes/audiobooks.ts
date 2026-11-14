@@ -10,7 +10,7 @@ import { config } from "../config";
 import { resolveWithinMusicRoot } from "./library/trackPath";
 import { artistSortName } from "../services/artistIdentity";
 import { upstreamHeader } from "../utils/upstreamHeaders";
-import { audiobookCoverAddress, coverCacheControl, readPicture } from "../services/imageStorage";
+import { audiobookCoverAddress, coverCacheControl, readPicture, versionOfFile } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
 import { runAsRequestWork } from "../utils/stopCheck";
 import type { Audiobook, AudiobookProgress } from "@prisma/client";
@@ -412,7 +412,7 @@ router.get("/:id/cover/:version([A-Za-z0-9_-]+)?", async (req, res) => {
 
         const audiobook = await prisma.audiobook.findUnique({
             where: { id },
-            select: { localCoverPath: true, coverUrl: true },
+            select: { localCoverPath: true, coverUrl: true, coverVersion: true },
         });
 
         let coverPath = audiobook?.localCoverPath;
@@ -426,11 +426,12 @@ router.get("/:id/cover/:version([A-Za-z0-9_-]+)?", async (req, res) => {
             );
             if (fallbackPath && fs.existsSync(fallbackPath)) {
                 coverPath = fallbackPath;
-                // Update database with the correct path
+                // Update database with the correct path, and the version the addresses sent from now on carry
+                const coverVersion = await versionOfFile(fallbackPath);
                 await prisma.audiobook
                     .update({
                         where: { id },
-                        data: { localCoverPath: fallbackPath },
+                        data: { localCoverPath: fallbackPath, coverVersion },
                     })
                     .catch(() => {}); // Ignore errors if audiobook doesn't exist
             }
@@ -445,7 +446,9 @@ router.get("/:id/cover/:version([A-Za-z0-9_-]+)?", async (req, res) => {
             const origin = resolveCorsOrigin(req.headers.origin, "http://localhost:3030");
             // Headers go through the send, so a file that is gone is answered by the fallback without them.
             const headers: Record<string, string> = {
-                "Cache-Control": coverCacheControl(version ?? null),
+                // Kept for good only for the picture the version names: a version the book has moved on from is not
+                // that picture any more.
+                "Cache-Control": coverCacheControl(version && version === audiobook?.coverVersion ? version : null),
                 "Cross-Origin-Resource-Policy": "cross-origin",
             };
             if (origin) {

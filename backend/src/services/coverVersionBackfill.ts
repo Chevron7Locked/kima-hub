@@ -1,5 +1,5 @@
 /**
- * The one-time pass that gives every stored cover value a version (ticket 111), so that afterwards no stored value is
+ * The one-time pass that gives every stored cover value a version, so that afterwards no stored value is
  * unversioned and every address clients are sent can be kept for good. A value names its file (`native:albums/<id>.jpg`);
  * the pass reads the file once per value and stores `native:albums/<id>.jpg?v=<version>` in every column that held it:
  * album covers, a person's album cover, artist pictures. Audiobooks get the version of their cached cover on their own
@@ -93,7 +93,11 @@ export async function rewriteCoverValues(relativePath: string, version: string, 
 
 /** Every distinct stored address, in any column, that has no version yet. */
 async function unversionedValues(): Promise<string[]> {
-    const where = (column: string) => ({ [column]: { startsWith: "native:" }, NOT: { [column]: { contains: "?v=" } } });
+    // Unversioned, or a root-folder cover (no folder in its name) that is to be filed under albums/ whether versioned or not.
+    const where = (column: string) => ({
+        [column]: { startsWith: "native:" },
+        OR: [{ NOT: { [column]: { contains: "?v=" } } }, { NOT: { [column]: { contains: "/" } } }],
+    });
     const found = new Set<string>();
     const add = (values: (string | null)[]) => values.forEach((v) => v && found.add(v));
     add((await prisma.album.findMany({ where: where("coverUrl"), distinct: ["coverUrl"], select: { coverUrl: true } })).map((r) => r.coverUrl));
@@ -156,12 +160,17 @@ export async function backfillCoverVersionsOnce({ shouldStop }: StopCheck): Prom
             let relativePath = cover.relativePath;
             // The scanner's old covers sat in the covers folder itself.
             if (!relativePath.includes("/") && relativePath.endsWith(".jpg")) {
-                const filed = await fileUnderAlbums(relativePath, file);
-                relativePath = filed.relativePath;
-                if (filed.moved) result.moved++;
+                relativePath = (await fileUnderAlbums(relativePath, file)).relativePath;
             }
-            await replaceValue(value, storedCoverValue(relativePath, version));
+            try {
+                await replaceValue(value, storedCoverValue(relativePath, version));
+            } catch (err) {
+                // The value still names the old place: the file goes back, so it points at a file.
+                if (relativePath !== cover.relativePath) await fs.promises.rename(path.join(coversBasePath(), relativePath), file);
+                throw err;
+            }
             result.versioned++;
+            if (relativePath !== cover.relativePath) result.moved++;
         } catch (err) {
             result.failed++;
             logger.warn(`[COVER-VERSIONS] Could not version ${value}: ${(err as Error).message}`);

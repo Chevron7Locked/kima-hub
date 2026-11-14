@@ -48,6 +48,7 @@ jest.mock("../../config", () => ({
 
 import express from "express";
 import request from "supertest";
+import { versionOfFile } from "../../services/imageStorage";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -133,8 +134,11 @@ describe("GET /audiobooks/:id/cover", () => {
 
         expect(res.status).toBe(200);
         expect(res.body.toString()).toBe("a cover inside the covers folder");
-        expect((await prisma.audiobook.findUnique({ where: { id: BOOK } }))?.localCoverPath).toBe(inside);
-        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+        const recorded = await prisma.audiobook.findUnique({ where: { id: BOOK } });
+        expect(recorded?.localCoverPath).toBe(inside);
+        // The version is recorded with the path, so the addresses sent from now on carry it.
+        expect(recorded?.coverVersion).toBe(await versionOfFile(inside));
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null, coverVersion: null } });
         fs.rmSync(inside);
     });
 
@@ -162,13 +166,28 @@ describe("GET /audiobooks/:id/cover", () => {
         const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
         fs.mkdirSync(path.dirname(inside), { recursive: true });
         fs.writeFileSync(inside, "a versioned cover");
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: inside, coverVersion: "lq3k9x" } });
 
         const res = await request(app).get(`/${BOOK}/cover/lq3k9x`);
 
         expect(res.status).toBe(200);
         expect(res.body.toString()).toBe("a versioned cover");
         expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
-        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null } });
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null, coverVersion: null } });
+        fs.rmSync(inside);
+    });
+
+    it("with a version that is no longer the book's is not kept for good, since the picture has changed since", async () => {
+        const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
+        fs.mkdirSync(path.dirname(inside), { recursive: true });
+        fs.writeFileSync(inside, "the newer cover");
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: inside, coverVersion: "newer00001" } });
+
+        const res = await request(app).get(`/${BOOK}/cover/older00001`);
+
+        expect(res.status).toBe(200);
+        expect(res.headers["cache-control"]).toBe("public, no-cache");
+        await prisma.audiobook.update({ where: { id: BOOK }, data: { localCoverPath: null, coverVersion: null } });
         fs.rmSync(inside);
     });
 

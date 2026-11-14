@@ -146,6 +146,35 @@ describe("backfillCoverVersionsOnce", () => {
         expect(fs.existsSync(path.join(covers, `${P}_old.jpg`))).toBe(false);
     });
 
+    it("files a root-folder cover the format repair or a scan already gave a version, as it does an unversioned one", async () => {
+        const version = await put(path.join(covers, `${P}_vroot.jpg`));
+        const a = await album({ coverUrl: `native:${P}_vroot.jpg?v=${version}`, userCoverUrl: `native:${P}_vroot.jpg?v=${version}` });
+
+        const result = await backfillCoverVersionsOnce({});
+
+        expect(result).toMatchObject({ moved: 1 });
+        const row = await albumRow(a.id);
+        expect(row.coverUrl).toBe(`native:albums/${P}_vroot.jpg?v=${version}`);
+        expect(row.userCoverUrl).toBe(`native:albums/${P}_vroot.jpg?v=${version}`);
+        expect(fs.existsSync(path.join(covers, `${P}_vroot.jpg`))).toBe(false);
+        expect(fs.existsSync(path.join(covers, "albums", `${P}_vroot.jpg`))).toBe(true);
+    });
+
+    it("puts a root-folder cover back where it was when its values cannot be rewritten, so they still point at a file", async () => {
+        const version = await put(path.join(covers, `${P}_back.jpg`));
+        const a = await album({ coverUrl: `native:${P}_back.jpg` });
+        const failing = jest.spyOn(prisma.album, "updateMany").mockRejectedValueOnce(new Error("database away"));
+
+        const result = await backfillCoverVersionsOnce({});
+        failing.mockRestore();
+
+        expect(result).toMatchObject({ failed: 1, moved: 0 });
+        expect((await albumRow(a.id)).coverUrl).toBe(`native:${P}_back.jpg`);
+        expect(await versionOfFile(path.join(covers, `${P}_back.jpg`))).toBe(version);
+        expect(fs.existsSync(path.join(covers, "albums", `${P}_back.jpg`))).toBe(false);
+        expect(await marker()).toBeNull();
+    });
+
     it("leaves a root-folder value where it is when albums/ already holds a cover of that name, and only versions it", async () => {
         const version = await put(path.join(covers, `${P}_dup.jpg`));
         const there = await put(path.join(covers, "albums", `${P}_dup.jpg`));
