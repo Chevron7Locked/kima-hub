@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { playableSongSql } from "../../utils/playableSong";
+import { artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
-import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, mapAlbum } from "./mappers";
+import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 
@@ -107,6 +108,28 @@ async function playableAlbumsInOrder(ids: string[]): Promise<AlbumHit[]> {
     return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
+type ArtistHit = {
+    id: string;
+    name: string;
+    displayName: string | null;
+    heroUrl: string | null;
+    albumCount: number;
+};
+
+/** The artists among `ids` that have a playable song, in the order given, each with its playable albums counted. */
+async function playableArtistsInOrder(ids: string[]): Promise<ArtistHit[]> {
+    if (ids.length === 0) return [];
+    const rows = await prisma.$queryRaw<ArtistHit[]>`
+        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", COUNT(al.id)::int AS "albumCount"
+        FROM "Artist" ar
+        JOIN "Album" al ON al."artistId" = ar.id
+        WHERE ar.id = ANY(${ids}::text[])
+          AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND ${PLAYABLE_SQL})
+        GROUP BY ar.id`;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
 // ===================== SEARCH =====================
 
 searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async (req, res) => {
@@ -132,24 +155,25 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
     const trimmed = query.trim();
     const enumerateLibrary = !trimmed || trimmed === "\"\"";
 
-    let artists: { id: string; name: string }[];
+    let artistIds: string[];
     let albumIds: string[];
     let tracks: SongRow[];
 
     if (enumerateLibrary) {
-        [artists, albumIds, tracks] = await Promise.all([
+        [artistIds, albumIds, tracks] = await Promise.all([
             artistCount > 0
-                ? prisma.$queryRaw<{ id: string; name: string }[]>`
-                      SELECT ar.id, ar.name FROM "Artist" ar
-                      WHERE ar."libraryAlbumCount" > 0
-                      ORDER BY LOWER(ar.name) ASC, ar.id ASC
+                ? prisma.$queryRaw<{ id: string }[]>`
+                      SELECT ar.id FROM "Artist" ar
+                      WHERE ${artistHasPlayableSongSql("ar")}
+                      ORDER BY LOWER(COALESCE(NULLIF(ar."displayName", ''), ar.name)) ASC, ar.id ASC
                       LIMIT ${artistCount} OFFSET ${artistOffset}`
+                      .then((rows) => rows.map((r) => r.id))
                 : Promise.resolve([]),
             albumCount > 0
                 ? prisma.$queryRaw<{ id: string }[]>`
                       SELECT al.id FROM "Album" al
                       WHERE EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = al.id AND ${PLAYABLE_SQL})
-                      ORDER BY LOWER(al.title) ASC, al.id ASC
+                      ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC
                       LIMIT ${albumCount} OFFSET ${albumOffset}`
                       .then((rows) => rows.map((r) => r.id))
                 : Promise.resolve([]),
@@ -162,11 +186,11 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
                 : Promise.resolve([]),
         ]);
     } else {
-        [artists, albumIds, tracks] = await Promise.all([
+        [artistIds, albumIds, tracks] = await Promise.all([
             artistCount > 0
                 ? searchService
                       .searchArtists({ query, limit: artistCount, offset: artistOffset })
-                      .then((rows) => rows.map((a) => ({ id: a.id, name: a.name })))
+                      .then((rows) => rows.map((a) => a.id))
                 : Promise.resolve([]),
             albumCount > 0
                 ? searchService
@@ -181,22 +205,21 @@ searchRouter.all(["/search3.view", "/search2.view", "/search.view"], wrap(async 
         ]);
     }
 
-    // Only library albums with a song that plays, each counted and timed by those songs.
-    const albums = await playableAlbumsInOrder(albumIds);
+    // Only library artists and albums with a song that plays, each counted (and the albums timed) by those songs.
+    const [artists, albums] = await Promise.all([playableArtistsInOrder(artistIds), playableAlbumsInOrder(albumIds)]);
 
     const result: Record<string, unknown> = {};
 
     if (artists.length > 0) {
-        result.artist = artists.map((a) => ({
-            "@_id": a.id,
-            "@_name": a.name,
-            "@_coverArt": `ar-${a.id}`,
-        }));
+        result.artist = artists.map(mapArtist);
     }
 
     if (albums.length > 0) {
+        // search3 answers AlbumID3. search2 answers the albums as Child entries, as the spec's searchResult2 does;
+        // the deprecated search keeps the ID3 shape it has always had.
+        const mapAlbumHit = responseKey === "searchResult2" ? mapAlbumChild : mapAlbum;
         result.album = albums.map((al) =>
-            mapAlbum(
+            mapAlbumHit(
                 {
                     ...al,
                     genre: firstArtistGenre(al.artistGenres, al.artistUserGenres),

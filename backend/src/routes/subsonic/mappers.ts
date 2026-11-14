@@ -64,6 +64,27 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
     };
 }
 
+/**
+ * An album as a Child entry: a folder (`isDir`) under its artist, as getMusicDirectory and search2 list it. The
+ * ID3 shape is mapAlbum.
+ */
+export function mapAlbumChild(album: AlbumRow, artistName: string) {
+    const title = album.displayTitle || album.title;
+    return {
+        "@_id": album.id,
+        "@_parent": album.artistId,
+        "@_isDir": true,
+        "@_title": title,
+        "@_album": title,
+        "@_artist": artistName,
+        "@_artistId": album.artistId,
+        "@_coverArt": album.id,
+        "@_year": album.year || undefined,
+        "@_genre": album.genre || undefined,
+        "@_created": album.createdAt.toISOString(),
+    };
+}
+
 export function mapSong(
     track: TrackRow,
     album: { id: string; title: string; displayTitle: string | null; year: number | null },

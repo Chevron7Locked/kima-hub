@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
+import { mapArtist, mapAlbum, mapAlbumChild, mapSong, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -157,16 +157,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                 "@_name": artistName,
                 ...(artist.albums.length > 0
                     ? {
-                          child: artist.albums.map((album) => ({
-                              "@_id": album.id,
-                              "@_parent": artist.id,
-                              "@_isDir": true,
-                              "@_title": album.displayTitle || album.title,
-                              "@_album": album.displayTitle || album.title,
-                              "@_artist": artistName,
-                              "@_artistId": artist.id,
-                              "@_coverArt": album.id,
-                          })),
+                          child: artist.albums.map((album) => mapAlbumChild(album, artistName)),
                       }
                     : {}),
             },

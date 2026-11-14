@@ -3,7 +3,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
-import { PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
+import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
 import { searchRows } from "./textMatch";
 
@@ -179,6 +179,14 @@ export interface SearchResults {
     episodes: EpisodeSearchResult[];
 }
 
+/** Rows read by id come back in the order of `found`. */
+async function inOrder<T extends { id: string }>(found: { id: string }[], load: (ids: string[]) => Promise<T[]>): Promise<T[]> {
+    const ids = found.map((r) => r.id);
+    if (ids.length === 0) return [];
+    const byId = new Map((await load(ids)).map((row) => [row.id, row]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
 export class SearchService {
     /**
      * Full-text search first; the LIKE search when the query has no searchable words, when full-text search fails,
@@ -229,27 +237,26 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<ArtistSearchResult[]> {
+        // Both pages are read by id, in the order of the name shown (Prisma cannot order by an edited name or the file's).
+        const load = (ids: string[]) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS });
         const results = await searchRows(
             query,
             limit,
             offset,
-            ({ skip, take }) =>
-                prisma.artist.findMany({
-                    where: {
-                        name: { contains: query, mode: "insensitive" },
-                        albums: { some: PLAYABLE_ALBUM_WHERE },
-                    },
-                    select: ARTIST_FIELDS,
-                    take,
-                    skip,
-                    orderBy: [{ name: "asc" }, { id: "asc" }],
-                }),
+            async ({ skip, take }) => inOrder(
+                await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT a.id FROM "Artist" a
+                     WHERE strpos(lower(a.name), ${query.toLowerCase()}) > 0
+                       AND ${artistHasPlayableSongSql("a")}
+                     ORDER BY LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
+                load,
+            ),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT a.id FROM "Artist" a
                  WHERE a.name ~ ${pattern}
                    AND ${artistHasPlayableSongSql("a")}
-                 ORDER BY a.name ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
-            (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: ARTIST_FIELDS }),
+                 ORDER BY LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC LIMIT ${take} OFFSET ${skip}`,
+            load,
         );
 
         return results.map((r) => ({ ...r, rank: 0 }));
@@ -275,7 +282,7 @@ export class SearchService {
             FROM "Artist" a
             WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
               AND ${artistHasPlayableSongSql("a")}
-            ORDER BY rank DESC, a.name ASC
+            ORDER BY rank DESC, LOWER(COALESCE(NULLIF(a."displayName", ''), a.name)) ASC, a.id ASC
             LIMIT ${limit}
             OFFSET ${offset}
           `;
@@ -291,29 +298,26 @@ export class SearchService {
         limit = 20,
         offset = 0,
     }: SearchOptions): Promise<AlbumSearchResult[]> {
+        // Both pages are read by id, in the order of the title shown (Prisma cannot order by an edited title or the file's).
+        const load = (ids: string[]) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS });
+        const wanted = query.toLowerCase();
         const results = await searchRows(
             query,
             limit,
             offset,
-            ({ skip, take }) =>
-                prisma.album.findMany({
-                    where: {
-                        ...PLAYABLE_ALBUM_WHERE,
-                        OR: [
-                            { title: { contains: query, mode: "insensitive" } },
-                            { artist: { name: { contains: query, mode: "insensitive" } } },
-                        ],
-                    },
-                    select: ALBUM_FIELDS,
-                    take,
-                    skip,
-                    orderBy: [{ title: "asc" }, { id: "asc" }],
-                }),
+            async ({ skip, take }) => inOrder(
+                await prisma.$queryRaw<{ id: string }[]>`
+                    SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
+                     WHERE ${albumHasPlayableSongSql("al")}
+                       AND (strpos(lower(al.title), ${wanted}) > 0 OR strpos(lower(ar.name), ${wanted}) > 0)
+                     ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
+                load,
+            ),
             (pattern, { skip, take }) => prisma.$queryRaw<{ id: string }[]>`
                 SELECT al.id FROM "Album" al JOIN "Artist" ar ON ar.id = al."artistId"
                  WHERE ${albumHasPlayableSongSql("al")} AND (al.title ~ ${pattern} OR ar.name ~ ${pattern})
-                 ORDER BY al.title ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
-            (ids) => prisma.album.findMany({ where: { id: { in: ids } }, select: ALBUM_FIELDS }),
+                 ORDER BY LOWER(COALESCE(NULLIF(al."displayTitle", ''), al.title)) ASC, al.id ASC LIMIT ${take} OFFSET ${skip}`,
+            load,
         );
 
         return results.map((r) => ({
@@ -337,12 +341,13 @@ export class SearchService {
             "Album",
             async (tsquery) => {
                 const results = await prisma.$queryRaw<AlbumSearchResult[]>`
-            SELECT * FROM (
-              SELECT DISTINCT ON (id) id, title, "artistId", "artistName", year, "coverUrl", rank
+            SELECT id, title, "artistId", "artistName", year, "coverUrl", rank FROM (
+              SELECT DISTINCT ON (id) id, title, "displayTitle", "artistId", "artistName", year, "coverUrl", rank
               FROM (
                 SELECT
                   a.id,
                   a.title,
+                  a."displayTitle",
                   a."artistId",
                   ar.name as "artistName",
                   a.year,
@@ -358,6 +363,7 @@ export class SearchService {
                 SELECT
                   a.id,
                   a.title,
+                  a."displayTitle",
                   a."artistId",
                   ar.name as "artistName",
                   a.year,
@@ -370,7 +376,7 @@ export class SearchService {
               ) combined
               ORDER BY id, rank DESC
             ) deduped
-            ORDER BY rank DESC, title ASC
+            ORDER BY rank DESC, LOWER(COALESCE(NULLIF("displayTitle", ''), title)) ASC, id ASC
             LIMIT ${limit}
             OFFSET ${offset}
           `;
