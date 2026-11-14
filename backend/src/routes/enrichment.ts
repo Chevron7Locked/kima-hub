@@ -269,12 +269,12 @@ router.get("/failures", async (req, res) => {
     const { entityType, includeSkipped, includeResolved, limit, offset } =
       req.query;
 
-    if (entityType !== undefined && !isFailureType(entityType)) {
+    if (entityType && !isFailureType(entityType)) {
       return res.status(400).json({ error: "Unknown failure type" });
     }
 
     const options: GetFailuresOptions = {};
-    if (entityType) options.entityType = entityType;
+    if (isFailureType(entityType)) options.entityType = entityType;
     if (includeSkipped === "true") options.includeSkipped = true;
     if (includeResolved === "true") options.includeResolved = true;
     if (limit) options.limit = parseLimit(limit, 100);

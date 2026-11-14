@@ -8,7 +8,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { STAGE_RETRY_CAP } from "../workers/stageRetry";
 import * as stageRecords from "./stages/stageRecords";
-import type { StageName } from "./stages/stageRecords";
+import { STAGE_ORDER, type StageName } from "./stages/stageRecords";
 
 type StageFailureType = "track" | "audio" | "vibe" | "scan";
 /** Each song stage's failure type, as the settings screen names it. */
@@ -18,21 +18,22 @@ const ENTITY_TYPE_BY_STAGE: Record<StageName, StageFailureType> = {
     embedding: "vibe",
     fingerprint: "scan",
 };
-const STAGES_BY_ENTITY_TYPE: Record<StageFailureType, StageName[]> = {
-    track: ["recording"],
-    audio: ["analysis"],
-    vibe: ["embedding"],
-    scan: ["fingerprint"],
-};
-const STAGE_NAMES = Object.keys(ENTITY_TYPE_BY_STAGE) as StageName[];
+/** The inverse of the map above; the record type makes the compiler name any failure type left out of the start value. */
+const STAGES_BY_ENTITY_TYPE = STAGE_ORDER.reduce<Record<StageFailureType, StageName[]>>(
+    (acc, stage) => {
+        acc[ENTITY_TYPE_BY_STAGE[stage]].push(stage);
+        return acc;
+    },
+    { track: [], audio: [], vibe: [], scan: [] },
+);
 
 /** The failure type of a stored stage name, or undefined for a name Kima has no stage by. */
 function failureTypeOfStage(stage: string): StageFailureType | undefined {
     return Object.hasOwn(ENTITY_TYPE_BY_STAGE, stage) ? ENTITY_TYPE_BY_STAGE[stage as StageName] : undefined;
 }
 
-/** True for the failure types that are a song's stage records. */
-function isTrackStageEntityType(entityType: string | undefined): entityType is StageFailureType {
+/** True for the failure types that are a song's stage records (the song types). */
+function isStageFailureType(entityType: string | undefined): entityType is StageFailureType {
     return entityType !== undefined && Object.hasOwn(STAGES_BY_ENTITY_TYPE, entityType);
 }
 
@@ -45,15 +46,15 @@ export type FailureType = StageFailureType | LedgerType;
 
 /** True for a value that names a failure type; the route answers 400 for anything else. */
 export function isFailureType(value: unknown): value is FailureType {
-    return typeof value === "string" && (isTrackStageEntityType(value) || LEDGER_TYPES.some((t) => t === value));
+    return typeof value === "string" && (isStageFailureType(value) || LEDGER_TYPES.some((t) => t === value));
 }
 
 /** The stages and ledger types a failure type covers; no type covers them all. */
-function failureScope(entityType: string | undefined): { stages: StageName[]; ledgerTypes: LedgerType[] } {
-    if (entityType === undefined) return { stages: STAGE_NAMES, ledgerTypes: [...LEDGER_TYPES] };
+function failureScope(entityType: string | undefined): { stages: readonly StageName[]; ledgerTypes: LedgerType[] } {
+    if (entityType === undefined) return { stages: STAGE_ORDER, ledgerTypes: [...LEDGER_TYPES] };
     const ledgerType = LEDGER_TYPES.find((t) => t === entityType);
     return {
-        stages: isTrackStageEntityType(entityType) ? STAGES_BY_ENTITY_TYPE[entityType] : [],
+        stages: isStageFailureType(entityType) ? STAGES_BY_ENTITY_TYPE[entityType] : [],
         ledgerTypes: ledgerType ? [ledgerType] : [],
     };
 }
@@ -124,9 +125,9 @@ const NOT_FILE_MISSING = { OR: [{ failureClass: null }, { failureClass: { not: "
 const LIBRARY_SONG_STAGE = { track: { album: { location: "LIBRARY" as const } } };
 
 /** The TrackStage `where` for the failure list: open failures only. */
-function stageFailureWhere(stages: StageName[], includeSkipped: boolean): Prisma.TrackStageWhereInput {
+function stageFailureWhere(stages: readonly StageName[], includeSkipped: boolean): Prisma.TrackStageWhereInput {
     return {
-        stage: { in: stages },
+        stage: { in: [...stages] },
         // Blocked rows are the parked ones; only list them when asked for.
         status: includeSkipped ? { in: ["failed", "blocked"] } : "failed",
         ...NOT_FILE_MISSING,
@@ -331,7 +332,7 @@ class EnrichmentFailureService {
     /** One failure by id: a stage record's id, else a ledger row's. */
     async getFailure(id: string): Promise<EnrichmentFailure | null> {
         const stage = await prisma.trackStage.findFirst({
-            where: { id, stage: { in: STAGE_NAMES } },
+            where: { id, stage: { in: [...STAGE_ORDER] } },
             include: { track: { select: { title: true } } },
         });
         if (stage) {
@@ -450,13 +451,13 @@ class EnrichmentFailureService {
 
         const [artists, tracks, podcasts] = await Promise.all([
             found(idsOf((t) => t === "artist"), (ids) => prisma.artist.findMany({ where: { id: { in: ids } }, select: { id: true } })),
-            found(idsOf(isTrackStageEntityType), (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true } })),
+            found(idsOf(isStageFailureType), (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: { id: true } })),
             found(idsOf((t) => t === "podcast"), (ids) => prisma.podcast.findMany({ where: { id: { in: ids } }, select: { id: true } })),
         ]);
 
         return (failure) => {
             if (failure.entityType === "artist") return artists.has(failure.entityId);
-            if (isTrackStageEntityType(failure.entityType)) return tracks.has(failure.entityId);
+            if (isStageFailureType(failure.entityType)) return tracks.has(failure.entityId);
             if (failure.entityType === "podcast") return podcasts.has(failure.entityId);
             return true;
         };

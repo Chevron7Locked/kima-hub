@@ -173,6 +173,11 @@ describe("GET /enrichment/failures reads track stages from TrackStage", () => {
         expect(repeated.status).toBe(400);
     });
 
+    it("an empty type means no filter, as it did before", async () => {
+        const res = await request(app).get("/api/enrichment/failures?entityType=");
+        expect(res.status).toBe(200);
+    });
+
     it("accepts every song type and ledger type", async () => {
         for (const entityType of ["track", "audio", "vibe", "scan", "artist", "podcast"]) {
             const res = await request(app).get("/api/enrichment/failures").query({ entityType });
