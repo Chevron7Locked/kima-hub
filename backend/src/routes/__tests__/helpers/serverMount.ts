@@ -59,6 +59,6 @@ export function mountAsServer<T extends { use: (...args: any[]) => unknown }>(
     if (!declared) throw new Error(`No access is declared for ${serverPath}`);
     if (options.standIn) standInFor(options.standIn);
     else fillSignInChecks();
-    mountRoute(app as unknown as Express, { path: prefix, router, access: declared.access });
+    mountRoute(app as unknown as Express, { path: prefix, router, access: declared.access, largeJsonBody: declared.largeJsonBody });
     return app;
 }

@@ -22,6 +22,7 @@
 import { Router, type Express, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import { requireAdmin, requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { ACCESS_PASSED, apiLimiter, isUncountedPath } from "../middleware/rateLimiter";
+import { largeJsonBody } from "../middleware/jsonBody";
 import { logger } from "../utils/logger";
 
 export type AccessFamily = "public" | "signed-in" | "admin" | "internal" | "webhook" | "share-token" | "subsonic";
@@ -45,6 +46,11 @@ export interface Mount {
     access?: Access;
     /** The per-address runaway limit, in front of the access check. */
     runawayLimit?: boolean;
+    /**
+     * The mount reads JSON bodies up to 5 MB, after its access check (the server's parser, which skips this mount's
+     * path, reads 1 MB for everything else). Only a mount that checks access here can have it.
+     */
+    largeJsonBody?: boolean;
 }
 
 function signedInCheck(urlToken: boolean): RequestHandler {
@@ -269,8 +275,12 @@ export function mountRoute(app: Express, mount: Mount): void {
     const handlers: RequestHandler[] = [];
     if (mount.runawayLimit) handlers.push(settleUncounted(mount.access), apiLimiter);
     // A mount of one family that the router checks itself needs nothing in front of it.
-    if (mount.access.family === "signed-in" || mount.access.family === "admin" || mount.access.routes) {
-        handlers.push(accessCheck(mount.access));
+    const checksAccess =
+        mount.access.family === "signed-in" || mount.access.family === "admin" || Boolean(mount.access.routes);
+    if (checksAccess) handlers.push(accessCheck(mount.access));
+    if (mount.largeJsonBody) {
+        if (!checksAccess) throw new Error(`${mount.path} reads a large body, so it must check access in front of it`);
+        handlers.push(largeJsonBody);
     }
     app.use(mount.path, ...handlers, mount.router);
 }

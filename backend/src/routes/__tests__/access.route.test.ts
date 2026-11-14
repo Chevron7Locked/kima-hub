@@ -8,7 +8,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { listRoutes, mountRoute, parseRouteKey, type AccessFamily, type Mount, type RouteListing } from "../access";
-import { apiMounts, mountApi, queueBoardMount, QUEUE_BOARD_PATH } from "../mounts";
+import { apiMounts, mountApi, mountQueueBoardSlot, QUEUE_BOARD_PATH } from "../mounts";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAccess } from "../mountAccess";
 import { createBullBoard } from "@bull-board/api";
@@ -330,7 +330,7 @@ describe("the declared families are enforced in front of the routers", () => {
         serverAdapter.setBasePath(QUEUE_BOARD_PATH);
         createBullBoard({ queues: [], serverAdapter });
         const app = express();
-        mountRoute(app, queueBoardMount(serverAdapter.getRouter()));
+        mountQueueBoardSlot(app)(serverAdapter.getRouter());
 
         const path = `${QUEUE_BOARD_PATH}/api/queues`;
         expect((await request(app).get(path)).status).toBe(401);

@@ -63,11 +63,21 @@ function mount(path: string, router: RequestHandler): Mount {
 export const QUEUE_BOARD_PATH = "/api/admin/queues";
 
 /**
- * The queue dashboard at its path with the access `mountAccess` declares for it. It is mounted by the server once the
- * workers have started, so it is not in `apiMounts`; its router belongs to Bull Board and its routes cannot be listed.
+ * The queue dashboard's place, at its path with the access `mountAccess` declares for it. Bull Board is built once the
+ * workers have started, which is after the server is listening, but its errors must still reach the error handler,
+ * which has to be mounted last. So the place is taken now, before the handler, and the dashboard's router is put in
+ * it later: the returned function sets it. Until then the place answers like a path with no route (after the access
+ * check). The dashboard is not in `apiMounts`: its router belongs to Bull Board and its routes cannot be listed.
  */
-export function queueBoardMount(router: RequestHandler): Mount {
-    return mount(QUEUE_BOARD_PATH, router);
+export function mountQueueBoardSlot(app: Express): (router: RequestHandler) => void {
+    let board: RequestHandler | undefined;
+    mountRoute(
+        app,
+        mount(QUEUE_BOARD_PATH, (req, res, next) => (board ? board(req, res, next) : next())),
+    );
+    return (router) => {
+        board = router;
+    };
 }
 
 /** Every mount, in the order they answer. */

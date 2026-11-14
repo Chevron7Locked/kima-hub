@@ -8,8 +8,7 @@ import { redisClient, waitForRedisReady } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
 
-import { mountApi, queueBoardMount, QUEUE_BOARD_PATH } from "./routes/mounts";
-import { mountRoute } from "./routes/access";
+import { mountApi, mountQueueBoardSlot, QUEUE_BOARD_PATH } from "./routes/mounts";
 import { dataCacheService } from "./services/dataCache";
 import { enrichmentStateService } from "./services/enrichmentState";
 import {
@@ -23,6 +22,7 @@ import { resetAdminPassword } from "./services/users/accounts";
 import { trustOneProxyHop } from "./middleware/rateLimiter";
 import { jsonBodyParser } from "./middleware/jsonBody";
 import { createShutdown } from "./shutdown";
+import { runStartSteps, type StartStep } from "./startup";
 const app = express();
 
 // Middleware
@@ -164,7 +164,11 @@ async function healthHandler(_req: express.Request, res: express.Response) {
 // Routes - All API routes prefixed with /api for clear separation from frontend
 mountApi(app, { health: healthHandler, publicVibe: Boolean(config.publicVibe) });
 
-// Error handler
+// The queue dashboard takes its place here, though Bull Board is built later (once the workers have started), so the
+// error handler below is still the last thing mounted and the dashboard's errors reach it.
+const setQueueBoard = mountQueueBoardSlot(app);
+
+// Error handler: last
 app.use(errorHandler);
 
 // Health check functions
@@ -214,7 +218,15 @@ async function checkPasswordReset() {
     await resetAdminPassword(resetPassword);
 }
 
-async function runStartupTasks() {
+// The catch-up work after startup. Each task logs its own failure, so one that fails does not stop the next.
+const backgroundStartSteps: StartStep[] = [
+    { name: "audiobook auto-sync", run: syncAudiobooksIfEmpty },
+    { name: "sorting albums filed as Discover", run: sortAlbumsFiledAsDiscover },
+    { name: "artist counts backfill", run: backfillArtistCounts },
+    { name: "image backfill", run: backfillImages },
+];
+
+async function syncAudiobooksIfEmpty() {
     // Auto-sync audiobooks on startup if cache is empty
     // This prevents "disappeared" audiobooks after container rebuilds
     try {
@@ -234,7 +246,9 @@ async function runStartupTasks() {
     } catch (err) {
         logger.error("[STARTUP] Audiobook auto-sync failed:", err);
     }
+}
 
+async function sortAlbumsFiledAsDiscover() {
     // Once: albums the old scanner filed as Discover by guesswork go to the library unless Discover's records say
     // otherwise. Before the artist counts, which then count the albums where they now are.
     try {
@@ -243,7 +257,9 @@ async function runStartupTasks() {
     } catch (err) {
         logger.error("[STARTUP] Sorting the albums filed as Discover failed:", err);
     }
+}
 
+async function backfillArtistCounts() {
     // Auto-backfill artist counts if needed
     try {
         const { isBackfillNeeded, backfillAllArtistCounts } = await import("./services/artistCountsService");
@@ -258,7 +274,9 @@ async function runStartupTasks() {
     } catch (err) {
         logger.error("[STARTUP] Artist counts backfill failed:", err);
     }
+}
 
+async function backfillImages() {
     // Auto-backfill images if needed (download external URLs locally)
     try {
         const { isImageBackfillNeeded, backfillAllImages } = await import("./services/imageBackfill");
@@ -283,169 +301,212 @@ async function main() {
     // Check for admin password reset
     await checkPasswordReset();
 
-    const server = app.listen(config.port, "0.0.0.0", async () => {
-    httpServer = server;
-    logger.debug(
-        `Kima API running on port ${config.port} (accessible on all network interfaces)`
-    );
-    server.keepAliveTimeout = 65_000;  // > common LB idle of 60s
-    server.headersTimeout = 70_000;    // must exceed keepAliveTimeout
-    // No server.timeout: a paused audio stream is idle and would be cut. Dead
-    // peers are reaped by TCP keepalive instead, which a live paused stream answers.
-    server.timeout = 0;
-    server.on("connection", (socket) => {
-        socket.setKeepAlive(true, config.socketKeepAliveDelayMs);
-    });
-
-    // Enable slow query monitoring in development
-    if (config.nodeEnv === "development") {
-        const { enableSlowQueryMonitoring } = await import(
-            "./utils/queryMonitor"
+    const server = app.listen(config.port, "0.0.0.0", () => {
+        httpServer = server;
+        logger.debug(
+            `Kima API running on port ${config.port} (accessible on all network interfaces)`
         );
-        enableSlowQueryMonitoring();
-    }
+        server.keepAliveTimeout = 65_000;  // > common LB idle of 60s
+        server.headersTimeout = 70_000;    // must exceed keepAliveTimeout
+        // No server.timeout: a paused audio stream is idle and would be cut. Dead
+        // peers are reaped by TCP keepalive instead, which a live paused stream answers.
+        server.timeout = 0;
+        server.on("connection", (socket) => {
+            socket.setKeepAlive(true, config.socketKeepAliveDelayMs);
+        });
 
-    // Initialize music configuration (reads from SystemSettings)
-    const { initializeMusicConfig } = await import("./config");
-    await initializeMusicConfig();
-
-    // Rewrite the GPU toggle file from the DB so the two cannot disagree after a restart.
-    const { initGpuRuntimeProjection } = await import("./services/gpuRuntime");
-    await initGpuRuntimeProjection();
-
-    // Verify that an audio embedding can actually be stored, and say so in the
-    // log either way: the database, Redis and workers can all look healthy
-    // while embeddings silently fail to write.
-    await reportEmbeddingWritePathAtStartup();
-
-    // Build the public library export now, so its first request finds one.
-    if (config.publicVibe) {
-        const { latestLibraryExport } = await import("./services/publicLibraryExport");
-        latestLibraryExport();
-    }
-
-    // AcoustID fingerprinting is on only when fpcalc runs (fpcalcService warns when it does not).
-    {
-        const { fpcalcService } = await import("./services/fpcalc");
-        if (await fpcalcService.isAvailable()) {
-            logger.info("[AcoustID] fpcalc found — fingerprint identification ENABLED");
-        } else if (process.env.ACOUSTID_DISABLED === "true") {
-            logger.info("[AcoustID] fingerprint identification turned off by ACOUSTID_DISABLED");
-        }
-    }
-
-    // Artist and album keys the July 2026 upgrade computed on a SQL_ASCII database (names outside English letters) are
-    // corrected before any worker can scan and look those rows up by name.
-    try {
-        const { repairIdentityKeys } = await import("./services/identityKeyRepair");
-        await repairIdentityKeys();
-    } catch (err) {
-        logger.error("[STARTUP] Correcting artist and album keys failed:", err);
-    }
-
-    // Initialize BullMQ workers
-    await import("./workers");
-
-    // Set up Bull Board dashboard
-    const { createBullBoard } = await import("@bull-board/api");
-    const { BullMQAdapter } = await import("@bull-board/api/bullMQAdapter");
-    const { ExpressAdapter } = await import("@bull-board/express");
-    const { scanQueue, discoverQueue, importQueue } = await import(
-        "./workers/queues"
-    );
-    const { artistQueue, trackQueue, vibeQueue, podcastQueue } = await import(
-        "./workers/enrichmentQueues"
-    );
-
-    const serverAdapter = new ExpressAdapter();
-    serverAdapter.setBasePath(QUEUE_BOARD_PATH);
-
-    createBullBoard({
-        queues: [
-            new BullMQAdapter(scanQueue),
-            new BullMQAdapter(discoverQueue),
-            new BullMQAdapter(importQueue),
-            new BullMQAdapter(artistQueue),
-            new BullMQAdapter(trackQueue),
-            new BullMQAdapter(vibeQueue),
-            new BullMQAdapter(podcastQueue),
-        ],
-        serverAdapter,
+        // A stop signal can arrive while these run, so each is started only while no shutdown has begun.
+        runStartSteps(listeningStartSteps, () => gracefulShutdown.hasBegun()).catch((err) =>
+            logger.error("[STARTUP] Start steps failed:", err)
+        );
     });
-
-    mountRoute(app, queueBoardMount(serverAdapter.getRouter()));
-    logger.debug(
-        "Bull Board dashboard available at /api/admin/queues (admin-only)"
-    );
-
-    // No automatic sync on startup: library scanning is triggered manually via POST /library/scan.
-
-    // Enrichment worker enabled for OWNED content only
-    // - Background enrichment: Genres, MBIDs, similar artists for owned albums/artists
-    // - On-demand fetching: Artist images, bios when browsing (cached in Redis 7 days)
-    logger.debug(
-        "Background enrichment enabled for owned content (genres, MBIDs, etc.)"
-    );
-
-    // Warm up Redis cache from database on startup
-    // This populates Redis with existing artist images and album covers
-    // so first page loads are instant instead of waiting for cache population
-    dataCacheService.warmupCache().catch((err) => {
-        logger.error("Cache warmup failed:", err);
-    });
-
-    const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
-    webhookReconciliation.start();
-    lidarrHealthMonitor.start();
-
-    // Webhook event cleanup - runs daily to remove old processed events
-    const { webhookEventStore } = await import("./services/webhookEventStore");
-    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
-    // Run cleanup on startup (async, don't block)
-    webhookEventStore.cleanupOldEvents(30).catch((err) => {
-        logger.error("Webhook event cleanup failed:", err);
-    });
-
-    // Schedule daily webhook event cleanup
-    webhookCleanupInterval = setInterval(() => {
-        webhookEventStore.cleanupOldEvents(30).catch((err) => {
-            logger.error("Scheduled webhook event cleanup failed:", err);
-        });
-    }, TWENTY_FOUR_HOURS);
-    logger.debug("Webhook event cleanup scheduled (daily, 30-day expiry)");
-
-    // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
-    const { cleanupExpiredCache, measureCachedEpisodeLengths } = await import("./services/podcastDownload");
-
-    // Run cleanup on startup (async, don't block), then measure what stays cached.
-    cleanupExpiredCache()
-        .catch((err) => {
-            logger.error("Podcast cache cleanup failed:", err);
-        })
-        .then(() => measureCachedEpisodeLengths())
-        .catch((err) => {
-            logger.error("Measuring cached podcast episode lengths failed:", err);
-        });
-    import("./services/podcastCatalog")
-        .then(({ assignMissingCategories }) => assignMissingCategories())
-        .catch((err) => {
-            logger.error("Filling podcast categories failed:", err);
-        });
-
-    // Schedule daily cleanup (every 24 hours)
-    podcastCleanupInterval = setInterval(() => {
-        cleanupExpiredCache().catch((err) => {
-            logger.error("Scheduled podcast cache cleanup failed:", err);
-        });
-    }, TWENTY_FOUR_HOURS);
-    logger.debug("Podcast cache cleanup scheduled (daily, 30-day expiry)");
-
-    runStartupTasks().catch((err) =>
-        logger.error("[STARTUP] Background tasks failed:", err)
-    );
-});
 }
+
+/** What the server starts once it is listening, in order (see ./startup). */
+const listeningStartSteps: StartStep[] = [
+    {
+        name: "slow query monitoring",
+        run: async () => {
+            // Enable slow query monitoring in development
+            if (config.nodeEnv === "development") {
+                const { enableSlowQueryMonitoring } = await import("./utils/queryMonitor");
+                enableSlowQueryMonitoring();
+            }
+        },
+    },
+    {
+        name: "music configuration",
+        run: async () => {
+            // Initialize music configuration (reads from SystemSettings)
+            const { initializeMusicConfig } = await import("./config");
+            await initializeMusicConfig();
+        },
+    },
+    {
+        name: "GPU runtime projection",
+        run: async () => {
+            // Rewrite the GPU toggle file from the DB so the two cannot disagree after a restart.
+            const { initGpuRuntimeProjection } = await import("./services/gpuRuntime");
+            await initGpuRuntimeProjection();
+        },
+    },
+    {
+        name: "embedding write path check",
+        // Verify that an audio embedding can actually be stored, and say so in the
+        // log either way: the database, Redis and workers can all look healthy
+        // while embeddings silently fail to write.
+        run: () => reportEmbeddingWritePathAtStartup(),
+    },
+    {
+        name: "public library export",
+        run: async () => {
+            // Build the public library export now, so its first request finds one.
+            if (config.publicVibe) {
+                const { latestLibraryExport } = await import("./services/publicLibraryExport");
+                latestLibraryExport();
+            }
+        },
+    },
+    {
+        name: "fpcalc check",
+        run: async () => {
+            // AcoustID fingerprinting is on only when fpcalc runs (fpcalcService warns when it does not).
+            const { fpcalcService } = await import("./services/fpcalc");
+            if (await fpcalcService.isAvailable()) {
+                logger.info("[AcoustID] fpcalc found — fingerprint identification ENABLED");
+            } else if (process.env.ACOUSTID_DISABLED === "true") {
+                logger.info("[AcoustID] fingerprint identification turned off by ACOUSTID_DISABLED");
+            }
+        },
+    },
+    {
+        name: "identity key repair",
+        run: async () => {
+            // Artist and album keys the July 2026 upgrade computed on a SQL_ASCII database (names outside English letters) are
+            // corrected before any worker can scan and look those rows up by name.
+            try {
+                const { repairIdentityKeys } = await import("./services/identityKeyRepair");
+                await repairIdentityKeys();
+            } catch (err) {
+                logger.error("[STARTUP] Correcting artist and album keys failed:", err);
+            }
+        },
+    },
+    {
+        name: "workers",
+        // Initialize BullMQ workers
+        run: async () => void (await import("./workers")),
+    },
+    {
+        name: "queue dashboard",
+        run: async () => {
+            // Set up Bull Board dashboard
+            const { createBullBoard } = await import("@bull-board/api");
+            const { BullMQAdapter } = await import("@bull-board/api/bullMQAdapter");
+            const { ExpressAdapter } = await import("@bull-board/express");
+            const { scanQueue, discoverQueue, importQueue } = await import("./workers/queues");
+            const { artistQueue, trackQueue, vibeQueue, podcastQueue } = await import("./workers/enrichmentQueues");
+
+            const serverAdapter = new ExpressAdapter();
+            serverAdapter.setBasePath(QUEUE_BOARD_PATH);
+
+            createBullBoard({
+                queues: [
+                    new BullMQAdapter(scanQueue),
+                    new BullMQAdapter(discoverQueue),
+                    new BullMQAdapter(importQueue),
+                    new BullMQAdapter(artistQueue),
+                    new BullMQAdapter(trackQueue),
+                    new BullMQAdapter(vibeQueue),
+                    new BullMQAdapter(podcastQueue),
+                ],
+                serverAdapter,
+            });
+
+            setQueueBoard(serverAdapter.getRouter());
+            logger.debug("Bull Board dashboard available at /api/admin/queues (admin-only)");
+        },
+    },
+    {
+        name: "cache warmup",
+        run: () => {
+            // No automatic sync on startup: library scanning is triggered manually via POST /library/scan.
+
+            // Enrichment worker enabled for OWNED content only
+            // - Background enrichment: Genres, MBIDs, similar artists for owned albums/artists
+            // - On-demand fetching: Artist images, bios when browsing (cached in Redis 7 days)
+            logger.debug("Background enrichment enabled for owned content (genres, MBIDs, etc.)");
+
+            // Warm up Redis cache from database on startup
+            // This populates Redis with existing artist images and album covers
+            // so first page loads are instant instead of waiting for cache population
+            dataCacheService.warmupCache().catch((err) => {
+                logger.error("Cache warmup failed:", err);
+            });
+        },
+    },
+    {
+        name: "webhook reconciliation and Lidarr health",
+        run: async () => {
+            const { webhookReconciliation } = await import("./jobs/webhookReconciliation");
+            webhookReconciliation.start();
+            lidarrHealthMonitor.start();
+        },
+    },
+    {
+        name: "webhook event cleanup",
+        run: async () => {
+            // Webhook event cleanup - runs daily to remove old processed events
+            const { webhookEventStore } = await import("./services/webhookEventStore");
+
+            // Run cleanup on startup (async, don't block)
+            webhookEventStore.cleanupOldEvents(30).catch((err) => {
+                logger.error("Webhook event cleanup failed:", err);
+            });
+
+            // Schedule daily webhook event cleanup
+            webhookCleanupInterval = setInterval(() => {
+                webhookEventStore.cleanupOldEvents(30).catch((err) => {
+                    logger.error("Scheduled webhook event cleanup failed:", err);
+                });
+            }, TWENTY_FOUR_HOURS);
+            logger.debug("Webhook event cleanup scheduled (daily, 30-day expiry)");
+        },
+    },
+    {
+        name: "podcast cache cleanup",
+        run: async () => {
+            // Podcast cache cleanup - runs daily to remove cached episodes older than 30 days
+            const { cleanupExpiredCache, measureCachedEpisodeLengths } = await import("./services/podcastDownload");
+
+            // Run cleanup on startup (async, don't block), then measure what stays cached.
+            cleanupExpiredCache()
+                .catch((err) => {
+                    logger.error("Podcast cache cleanup failed:", err);
+                })
+                .then(() => measureCachedEpisodeLengths())
+                .catch((err) => {
+                    logger.error("Measuring cached podcast episode lengths failed:", err);
+                });
+            import("./services/podcastCatalog")
+                .then(({ assignMissingCategories }) => assignMissingCategories())
+                .catch((err) => {
+                    logger.error("Filling podcast categories failed:", err);
+                });
+
+            // Schedule daily cleanup (every 24 hours)
+            podcastCleanupInterval = setInterval(() => {
+                cleanupExpiredCache().catch((err) => {
+                    logger.error("Scheduled podcast cache cleanup failed:", err);
+                });
+            }, TWENTY_FOUR_HOURS);
+            logger.debug("Podcast cache cleanup scheduled (daily, 30-day expiry)");
+        },
+    },
+    ...backgroundStartSteps,
+];
+
+const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
 main().catch((err) => {
     logger.error("Server failed to start:", err);
@@ -509,6 +570,7 @@ const gracefulShutdown = createShutdown({
             const { soulseekService } = await import("./services/soulseek");
             soulseekService.disconnect();
         },
+        // The one place the enrichment state service closes (shutdownWorkers leaves it alone).
         async () => {
             logger.debug("Disconnecting enrichment state service...");
             await enrichmentStateService.disconnect();
@@ -555,6 +617,7 @@ process.on("uncaughtException", (error) => {
 // Runs every 5 minutes to prevent idle connection drops
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;
 healthCheckInterval = setInterval(async () => {
+    if (gracefulShutdown.hasBegun()) return;
     try {
         // Ping PostgreSQL
         await prisma.$queryRaw`SELECT 1`;
@@ -564,6 +627,9 @@ healthCheckInterval = setInterval(async () => {
             await redisClient.ping();
         }
     } catch (error) {
+        // A check that failed because the connections were closing is no stale connection: reconnecting would reopen
+        // the database after the shutdown closed it.
+        if (gracefulShutdown.hasBegun()) return;
         logger.error("Health check failed - connections may be stale:", {
             error: error instanceof Error ? error.message : String(error),
         });

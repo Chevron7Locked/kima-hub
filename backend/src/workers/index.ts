@@ -41,7 +41,6 @@ import { runDataIntegrityCheck } from "./dataIntegrity";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { sweepFailedDownloads } from "../services/lidarrFailures";
 import { queueCleaner } from "../jobs/queueCleaner";
-import { enrichmentStateService } from "../services/enrichmentState";
 import { warmRadioCovers } from "../services/mixes/radioRow";
 
 // One pending timer per self-rescheduling cycle, so handles never pile up; shutdown clears them.
@@ -267,13 +266,8 @@ export async function shutdownWorkers(): Promise<void> {
     // Stop unified enrichment worker (async — closes BullMQ workers and queues)
     await stopUnifiedEnrichmentWorker();
 
-    // Disconnect enrichment state service Redis connections (2 connections)
-    try {
-        await enrichmentStateService.disconnect();
-        logger.debug("Enrichment state service disconnected");
-    } catch (err) {
-        logger.error("Failed to disconnect enrichment state service:", err);
-    }
+    // The enrichment state service's two Redis connections are not closed here: it is shared with code outside the
+    // workers, so the server's close steps (index.ts) close it, once, after the workers.
 
     stopMoodSnapshotWorker();
 

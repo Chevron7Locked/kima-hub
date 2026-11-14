@@ -12,6 +12,8 @@ export interface MountAccess {
     access: Access;
     /** The per-address runaway limit, in front of the access check. */
     runawayLimit?: boolean;
+    /** Reads JSON bodies up to 5 MB, after the access check (see ./access). */
+    largeJsonBody?: boolean;
 }
 
 const publicAccess: Access = { family: "public" };
@@ -102,8 +104,9 @@ export const mountAccess: Record<string, MountAccess> = {
         access: { family: "admin", routes: { "GET /public-config": "signed-in" } },
         runawayLimit: true,
     },
-    // No runaway limit: playback state syncs often.
-    "/api/playback-state": { access: signedIn },
+    // No runaway limit: playback state syncs often. It saves the whole queue, so it reads a body of up to 5 MB, once
+    // the access check has passed.
+    "/api/playback-state": { access: signedIn, largeJsonBody: true },
     "/api/playlists": { access: signedInByUrlToken, runawayLimit: true },
     "/api/search": { access: signedIn, runawayLimit: true },
     "/api/recommendations": { access: signedInByUrlToken, runawayLimit: true },
@@ -188,8 +191,8 @@ export const mountAccess: Record<string, MountAccess> = {
     "/rest": { access: { family: "subsonic" } },
     "/health": { access: publicAccess },
     "/api/health": { access: publicAccess },
-    // The queue dashboard (Bull Board) is mounted when the workers start (routes/mounts `queueBoardMount`), so its path is
-    // declared here with the rest.
+    // The queue dashboard (Bull Board) takes its place here (routes/mounts `mountQueueBoardSlot`), and its router is put
+    // in the place once the workers have started, so its path is declared here with the rest.
     "/api/admin/queues": { access: { family: "admin" } },
     // The runaway limit comes first, so a looping client is held before the sign-in check.
     "/api/metrics": { access: { family: "admin" }, runawayLimit: true },

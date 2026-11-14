@@ -10,6 +10,9 @@
  * A timer, started with the shutdown and not holding the process open, ends it with exit code 1 when any step hangs.
  * A shutdown started by a crash (`failed`) exits 1 even when it completes, so a restart policy sees the crash.
  * A second signal while shutting down is ignored: the deadline is what ends a shutdown that stalls.
+ *
+ * `hasBegun()` answers whether a shutdown has started, so code that starts work (the startup steps, a cron) can skip
+ * its start once the resources are going away.
  */
 
 import { logger } from "./utils/logger";
@@ -23,7 +26,13 @@ export interface ShutdownPlan {
     exit: (code: number) => void;
 }
 
-export function createShutdown(plan: ShutdownPlan): (signal: string, opts?: { failed?: boolean }) => Promise<void> {
+export interface Shutdown {
+    (signal: string, opts?: { failed?: boolean }): Promise<void>;
+    /** True from the moment a shutdown starts. */
+    hasBegun(): boolean;
+}
+
+export function createShutdown(plan: ShutdownPlan): Shutdown {
     let started = false;
     let exited = false;
 
@@ -33,7 +42,7 @@ export function createShutdown(plan: ShutdownPlan): (signal: string, opts?: { fa
         plan.exit(code);
     };
 
-    return async (signal, opts = {}) => {
+    const shutdown = async (signal: string, opts: { failed?: boolean } = {}) => {
         if (started) {
             logger.debug("Shutdown already in progress...");
             return;
@@ -66,4 +75,5 @@ export function createShutdown(plan: ShutdownPlan): (signal: string, opts?: { fa
             exit(1);
         }
     };
+    return Object.assign(shutdown, { hasBegun: () => started });
 }
