@@ -343,12 +343,12 @@ export const SONG_CHUNK_MAX = 10_000;
 
 /**
  * Every playable song, in id order, of the artists whose `normalizedName` holds `word` as a whole word, anywhere in the
- * name: the pool for a source credit stored under a compound name ("artist a feat. b", "artist/other", "artist, other",
+ * name, and of the artists `shownIds` names (those whose shown name holds it; ShownArtists.holding): the pool for a source credit stored under a compound name ("artist a feat. b", "artist/other", "artist, other",
  * "(artist)", "x/artist"). A word ends at any character that is not a letter or a digit, and at the ends of the name. A
  * whole word, not a substring, so a common word ("the") finds the artists that have it and not every name with those
  * letters inside. `normalizedName` keeps punctuation, so the match is a regular expression built from the escaped word.
  * One query joins the match to the playable songs and returns their ids, so the number of artists never reaches a
- * query's bind-parameter limit; the songs are then loaded in chunks of `chunkSize` ids (SONG_CHUNK_MAX; a test passes a
+ * query's bind-parameter limit (the shown ids travel as one array); the songs are then loaded in chunks of `chunkSize` ids (SONG_CHUNK_MAX; a test passes a
  * small one), in id order. "Letter" follows
  * the database's character classes: where they know only ASCII (a C locale, SQL_ASCII), every accented or non-Latin
  * letter counts as a boundary, so such names are offered more often, never less; the matcher narrows the pool afterwards.
@@ -356,6 +356,7 @@ export const SONG_CHUNK_MAX = 10_000;
 export async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
   word: string,
   include: I,
+  shownIds: string[],
   chunkSize: number = SONG_CHUNK_MAX,
 ): Promise<Prisma.TrackGetPayload<{ include: I }>[]> {
   const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -364,7 +365,7 @@ export async function songsOfArtistsHoldingWord<I extends Prisma.TrackInclude>(
     SELECT t.id FROM "Track" t
     JOIN "Album" al ON al.id = t."albumId"
     JOIN "Artist" ar ON ar.id = al."artistId"
-    WHERE ar."normalizedName" ~ ${pattern} AND ${playableSongSql("t", "al")}
+    WHERE (ar."normalizedName" ~ ${pattern} OR ar.id = ANY(${shownIds}::text[])) AND ${playableSongSql("t", "al")}
     ORDER BY t.id`;
   const songs: Prisma.TrackGetPayload<{ include: I }>[] = [];
   for (let from = 0; from < ids.length; from += chunkSize) {
@@ -406,6 +407,18 @@ class ShownArtists {
   /** Ids of the artists whose shown name is, or begins with the word, one of `words` (normalized). */
   startingWith(words: string[]): string[] {
     return this.shown.filter((a) => words.some((w) => a.name === w || a.name.startsWith(`${w} `))).map((a) => a.id);
+  }
+
+  /** Ids of the artists whose shown name holds `word` (normalized) as a whole word, the way the stored-name match reads it. */
+  holding(word: string): string[] {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const whole = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "u");
+    return this.shown.filter((a) => whole.test(a.name)).map((a) => a.id);
+  }
+
+  /** Ids of the artists whose shown name begins with `prefix` (normalized). */
+  beginningWith(prefix: string): string[] {
+    return this.shown.filter((a) => a.name.startsWith(prefix)).map((a) => a.id);
   }
 }
 
@@ -488,7 +501,8 @@ class SpotifyImportService {
     const dbNormalizedArtist = normalizeArtistName(spotifyTrack.artist);
 
     const exactArtistNames = [normalizedPrimaryArtist, dbNormalizedArtist];
-    const shownAsArtist = (shownArtists ?? (await ShownArtists.load())).as(exactArtistNames);
+    const shown = shownArtists ?? (await ShownArtists.load());
+    const shownAsArtist = shown.as(exactArtistNames);
     const artistRows = await prisma.track.findMany({
       where: {
         AND: [
@@ -513,18 +527,18 @@ class SpotifyImportService {
       const firstWord = normalizedPrimaryArtist.split(" ")[0];
       if (firstWord.length >= MIN_WORD_LENGTH) {
         add(
-          (await songsOfArtistsHoldingWord(firstWord, withAlbum.include)).flatMap(toMatchCandidates),
+          (await songsOfArtistsHoldingWord(firstWord, withAlbum.include, shown.holding(firstWord))).flatMap(toMatchCandidates),
         );
       }
       // Shorter than sweep 1's minimum, the prefix starts too many artists to read ("" starts every one).
       if (candidates.size === 0 && normalizedPrimaryArtist.length >= MIN_WORD_LENGTH) {
+        const prefix = normalizedPrimaryArtist.substring(0, Math.min(5, normalizedPrimaryArtist.length));
+        const shownWithPrefix = shown.beginningWith(prefix);
         add(
           (
             await prisma.track.findMany({
               ...SONGS_OF_ARTISTS({
-                normalizedName: {
-                  startsWith: normalizedPrimaryArtist.substring(0, Math.min(5, normalizedPrimaryArtist.length)),
-                },
+                OR: [{ normalizedName: { startsWith: prefix } }, ...(shownWithPrefix.length > 0 ? [{ id: { in: shownWithPrefix } }] : [])],
               }),
               ...withAlbum,
             })
@@ -534,7 +548,7 @@ class SpotifyImportService {
       const creditFirstWord = dbNormalizedArtist.split(" ")[0];
       if (candidates.size === 0 && primaryArtist !== spotifyTrack.artist && creditFirstWord.length > 0) {
         add(
-          (await songsOfArtistsHoldingWord(creditFirstWord, withAlbum.include)).flatMap(toMatchCandidates),
+          (await songsOfArtistsHoldingWord(creditFirstWord, withAlbum.include, shown.holding(creditFirstWord))).flatMap(toMatchCandidates),
         );
       }
     }
@@ -2640,6 +2654,7 @@ class SpotifyImportService {
     const musicRoot = config.music.musicPath;
     const matchedTrackIds: string[] = [];
     const unmatchedEntries: M3UEntry[] = [];
+    const shownArtists = await ShownArtists.load();
 
     for (const entry of entries) {
       let track: { id: string } | null = null;
@@ -2713,9 +2728,11 @@ class SpotifyImportService {
         const dbArtist = normalizeArtistName(entry.artist);
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= MIN_WORD_LENGTH) {
-          const candidates = await songsOfArtistsHoldingWord(firstWord, {
-            album: { include: { artist: { select: { name: true } } } },
-          });
+          const candidates = await songsOfArtistsHoldingWord(
+            firstWord,
+            { album: { include: { artist: { select: { name: true, displayName: true } } } } },
+            shownArtists.holding(firstWord),
+          );
 
           let bestMatch: { id: string } | null = null;
           let bestScore = 0;
@@ -2725,9 +2742,11 @@ class SpotifyImportService {
               nameWords(entry.title),
               nameWords(candidate.title),
             );
-            const artistScore = fuzz.token_set_ratio(
-              nameWords(entry.artist),
-              nameWords(candidate.album.artist.name),
+            // The name a person edited the artist to counts as well as the stored one.
+            const artistScore = Math.max(
+              ...[candidate.album.artist.name, candidate.album.artist.displayName].flatMap((name) =>
+                name ? [fuzz.token_set_ratio(nameWords(entry.artist), nameWords(name))] : [],
+              ),
             );
             const combined = titleScore * 0.6 + artistScore * 0.4;
 

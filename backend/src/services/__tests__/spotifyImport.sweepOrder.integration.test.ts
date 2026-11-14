@@ -53,10 +53,13 @@ async function seed(key: string, artistName: string, titleOf: (n: number) => str
     }
 }
 
-/** An artist named `artistName` with one song, `title`, in file `filePath`. Returns the song's id. */
-async function seedOne(key: string, artistName: string, title: string, filePath = `/${P}/${key}.flac`) {
+/**
+ * An artist named `artistName` with one song, `title`, in file `filePath`; `displayName` is the name a person edited it
+ * to. Returns the song's id.
+ */
+async function seedOne(key: string, artistName: string, title: string, filePath = `/${P}/${key}.flac`, displayName?: string) {
     const artist = await prisma.artist.create({
-        data: { name: artistName, normalizedName: artistName.toLowerCase(), identityKey: `${P}-${key}-artist` },
+        data: { name: artistName, normalizedName: artistName.toLowerCase(), identityKey: `${P}-${key}-artist`, displayName },
     });
     const album = await prisma.album.create({
         data: { rgMbid: `${P}-${key}-rg`, identityKey: `${P}-${key}-album`, primaryType: "Album", title: `${P} ${key} album`, artistId: artist.id, location: "LIBRARY" },
@@ -256,7 +259,7 @@ describe("a word held by more artists than a query can carry ids for", () => {
     it("loads the songs in chunks of at most the chunk size, in id order across chunks", async () => {
         const load = jest.spyOn(prisma.track, "findMany");
         try {
-            const songs = await songsOfArtistsHoldingWord("qzwide", {}, 7);
+            const songs = await songsOfArtistsHoldingWord("qzwide", {}, [], 7);
             const asked = load.mock.calls.map(([args]) => (args?.where?.id as { in: string[] }).in);
             expect(asked.length).toBe(Math.ceil(SONGS / 7));
             expect(Math.max(...asked.map((ids) => ids.length))).toBe(7);
@@ -274,6 +277,34 @@ describe("a credit whose first word is short still reaches the matcher through t
         // (sweep 2 finds nothing); only the full credit's first word, "dj", reaches this artist.
         const id = await seedOne("c-dj", "the dj qzsw", title);
         expect(await previewMatch("DJ Qzsw feat. Someone", title)).toBe(id);
+    });
+});
+
+describe("an artist whose shown name holds the word, and whose stored name does not, reaches the matcher", () => {
+    // The source artist is never the shown name exactly (the exact-name pass would find that), so each song is
+    // found only by the sweep under test.
+    it("through the first-word sweep", async () => {
+        const title = `${P} shown first`;
+        const id = await seedOne("sh-1", "zzstored one", title, undefined, "Qzone Band");
+        expect(await previewMatch("Qzone", title)).toBe(id);
+    });
+
+    it("through the five-letter prefix sweep", async () => {
+        const title = `${P} shown prefix`;
+        const id = await seedOne("sh-2", "zzstored two", title, undefined, "Qztwooo");
+        expect(await previewMatch("Qztwoo", title)).toBe(id);
+    });
+
+    it("through the credit sweep", async () => {
+        const title = `${P} shown credit`;
+        const id = await seedOne("sh-3", "zzstored three", title, undefined, "The DJ Qzthree");
+        expect(await previewMatch("DJ Qzthree feat. Someone", title)).toBe(id);
+    });
+
+    it("through the M3U fuzzy tier", async () => {
+        const title = `${P} shown m3u`;
+        const id = await seedOne("sh-4", "zzstored four", title, undefined, "Qzfour Alpha Band");
+        expect(await m3uMatch("Qzfour Alpha", title)).toBe(id);
     });
 });
 
