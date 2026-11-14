@@ -7,7 +7,8 @@
 import { Prisma } from "@prisma/client";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
-import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
+import { BUILD_TIMEOUT_MS } from "../matching/state";
+import { isTransactionConflict } from "../../utils/dbConflict";
 import {
     MIN_MIX_TRACKS,
     RECIPE_LINE,
@@ -118,7 +119,7 @@ export async function writeMoodTags(): Promise<number> {
     } catch (error) {
         // Another transaction held tracks this one needed (a deadlock): nothing was written, and the next pass
         // rewrites the tags from the data as it is then.
-        if (isWriteConflict(error)) {
+        if (isTransactionConflict(error)) {
             logger.info("[Moods] Tracks changed while the tags were written; the next pass writes them");
             return 0;
         }

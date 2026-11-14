@@ -38,6 +38,7 @@ import * as path from "path";
 import type { Prisma } from "@prisma/client";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
+import { isDeadlock } from "../../utils/dbConflict";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../../workers/stageRetry";
@@ -118,12 +119,6 @@ const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retr
 const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 
 // ── Deadlocks ────────────────────────────────────────────────────────────
-
-/** Postgres picked this transaction as a deadlock victim (SQLSTATE 40P01, through Prisma's raw-query or transaction error). */
-function isDeadlock(err: unknown): boolean {
-    const e = err as { code?: string; meta?: { code?: string }; message?: string } | null;
-    return e?.meta?.code === "40P01" || e?.code === "40P01" || e?.code === "P2034" || /deadlock detected/i.test(e?.message ?? "");
-}
 
 /**
  * Runs a move's own transaction, and once more when Postgres picked it as a deadlock victim: the other transaction

@@ -6,6 +6,7 @@
  */
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
+import { isTransactionConflict } from "../../utils/dbConflict";
 import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
@@ -202,20 +203,12 @@ export async function buildMatching(): Promise<{ feelUpdated: number; rebuilt: b
     } catch (error) {
         // A re-run or map write changed the state row while this build waited for it: what it read is out of date,
         // so nothing is written and the next pass builds from the new data.
-        if (isWriteConflict(error)) {
+        if (isTransactionConflict(error)) {
             logger.info("[Matching] State changed while the build waited; the next pass rebuilds it");
             return { feelUpdated: 0, rebuilt: false };
         }
         throw error;
     }
-}
-
-/** Postgres refused the transaction because of another one (serialization 40001, deadlock 40P01), as Prisma reports it. */
-export function isWriteConflict(error: unknown): boolean {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
-    if (error.code === "P2034") return true;
-    const pgCode = (error.meta as { code?: string } | undefined)?.code;
-    return error.code === "P2010" && (pgCode === "40001" || pgCode === "40P01");
 }
 
 function build(): Promise<{ feelUpdated: number; rebuilt: boolean }> {

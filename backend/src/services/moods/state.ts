@@ -10,7 +10,8 @@ import { logger } from "../../utils/logger";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
 import { formatEmbedding } from "../../utils/embedding";
-import { BUILD_TIMEOUT_MS, isWriteConflict } from "../matching/state";
+import { BUILD_TIMEOUT_MS } from "../matching/state";
+import { isTransactionConflict } from "../../utils/dbConflict";
 import { MOODS, MOOD_HEADS, type Mood } from "./heads";
 import { SCORED_SONGS_RULE } from "./scoredSongs";
 import { changeSignal, hashInputs } from "./inputsHash";
@@ -215,7 +216,7 @@ export async function buildMoods(): Promise<{ scored: number; stateChanged: bool
     } catch (error) {
         // A re-run changed the scores or the state while this build waited: what it read is out of date, so nothing is
         // written and the next pass builds from the new data.
-        if (isWriteConflict(error)) {
+        if (isTransactionConflict(error)) {
             logger.info("[Moods] Scores changed while the build waited; the next pass rebuilds them");
             return { scored: 0, stateChanged: false };
         }

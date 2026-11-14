@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
-import { isWriteConflict } from "../../matching/state";
+import { isTransactionConflict } from "../../../utils/dbConflict";
 import { MOODS, MOOD_HEADS, type Mood } from "../heads";
 import { parseRecipes, recipeRankingSql } from "../../mixes/recipes";
 import { buildMoods, loadMoodState } from "../state";
@@ -229,7 +229,7 @@ describe("a deadlock while the tags are written", () => {
         expect(await tagsOf(library(10))).toEqual(TAGS_BEFORE);
     });
 
-    it("is reported by Prisma for a raw statement in a shape isWriteConflict recognises", async () => {
+    it("is reported by Prisma for a raw statement in a shape the conflict check recognises", async () => {
         // Two transactions each hold one track and then ask for the other's.
         let refused: Promise<unknown> | undefined;
         await prisma.$transaction(
@@ -253,7 +253,7 @@ describe("a deadlock while the tags are written", () => {
         const error = await refused;
         expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
         expect(error).toMatchObject({ code: "P2010", meta: { code: "40P01" } });
-        expect(isWriteConflict(error)).toBe(true);
+        expect(isTransactionConflict(error)).toBe(true);
     });
 });
 

@@ -4,6 +4,7 @@
  */
 
 import { logger } from "../utils/logger";
+import { isTransactionConflict } from "../utils/dbConflict";
 import { prisma } from "../utils/db";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { lidarrService, AcquisitionError, AcquisitionErrorType, albumComplete, downloadProgress, type ReconciliationSnapshot } from "./lidarr";
@@ -105,12 +106,7 @@ class SimpleDownloadManager {
                     timeout: 10000,
                 });
             } catch (error: any) {
-                const isSerializationError =
-                    error.code === "P2034" ||
-                    error.message?.includes("could not serialize") ||
-                    error.message?.includes("deadlock");
-
-                if (isSerializationError && attempt < maxRetries) {
+                if (isTransactionConflict(error) && attempt < maxRetries) {
                     lastError = error;
                     const delay = Math.pow(2, attempt) * 100; // 200ms, 400ms, 800ms
                     logger.debug(
