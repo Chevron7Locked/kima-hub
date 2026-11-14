@@ -77,12 +77,12 @@ router.get("/for-you", async (req, res) => {
         const ranked = perSeed
             .flat()
             .sort((x, y) => y.weight - x.weight || (x.toArtistId < y.toArtistId ? -1 : x.toArtistId > y.toArtistId ? 1 : 0));
-        const artistsToCheck = Array.from(
+        const recommended = Array.from(
             new Map(ranked.map((row) => [row.toArtistId, row.toArtist])).values()
         ).slice(0, limitNum);
 
         // Get album counts for recommended artists (from enriched discography)
-        const recommendedArtistIds = artistsToCheck.map((a) => a.id);
+        const recommendedArtistIds = recommended.map((a) => a.id);
         const albumCounts = await prisma.album.groupBy({
             by: ["artistId"],
             where: { artistId: { in: recommendedArtistIds } },
@@ -93,7 +93,7 @@ router.get("/for-you", async (req, res) => {
         );
 
         // Pictures come from what is stored (the artist row, then the Redis cache), never a lookup during a page load.
-        const cacheKeys = artistsToCheck
+        const cacheKeys = recommended
             .filter(a => !a.heroUrl)
             .map(a => `hero:${a.id}`);
 
@@ -108,7 +108,7 @@ router.get("/for-you", async (req, res) => {
 
         const cachedImageMap = new Map<string, string>();
         let cacheIndex = 0;
-        for (const artist of artistsToCheck) {
+        for (const artist of recommended) {
             if (!artist.heroUrl) {
                 const cached = cachedImages[cacheIndex];
                 if (cached && cached !== "NOT_FOUND") {
@@ -118,7 +118,7 @@ router.get("/for-you", async (req, res) => {
             }
         }
 
-        const artistsWithMetadata = artistsToCheck.map((artist) => {
+        const artistsWithMetadata = recommended.map((artist) => {
             const coverArt = artist.heroUrl || cachedImageMap.get(artist.id) || null;
 
             return {

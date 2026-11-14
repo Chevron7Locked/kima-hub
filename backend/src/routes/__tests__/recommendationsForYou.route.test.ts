@@ -96,12 +96,15 @@ beforeAll(async () => {
         await prisma.similarArtist.create({ data: { fromArtistId: id("art_q"), toArtistId: free, weight: 1 } });
     }
     // A listener with two seed artists, b1 played more. b1 has a light similar artist, b2 a heavy one and one both share
-    // (heavier from b2). Each seed also lists the other and itself, at the highest weight of all.
+    // (heavier from b2), and a tied pair. Each seed also lists the other and itself, at the highest weight of all.
     await seedArtist("b1");
     await seedArtist("b2");
     await similarTo("b1", "b_light", 1);
     await similarTo("b2", "b_heavy", 5);
     await similarTo("b2", "b_shared", 3);
+    // Equal weight from different seeds: the lower id comes first, whichever seed listed it.
+    await similarTo("b1", "b_tie_z", 0.5);
+    await similarTo("b2", "b_tie_a", 0.5);
     await prisma.similarArtist.create({ data: { fromArtistId: id("art_b1"), toArtistId: id("b_shared"), weight: 1 } });
     for (const [from, to] of [["b1", "b2"], ["b2", "b1"], ["b1", "b1"], ["b2", "b2"]]) {
         await prisma.similarArtist.create({ data: { fromArtistId: id(`art_${from}`), toArtistId: id(`art_${to}`), weight: 9 } });
@@ -205,7 +208,7 @@ describe("a listener with more than one seed artist", () => {
     it("ranks all the seeds' candidates together by weight, so a heavier artist of the second seed beats a lighter one of the first", async () => {
         expect(await forYou("?limit=1")).toEqual([id("b_heavy")]);
         // The artist both seeds list comes once, at its heaviest.
-        expect(await forYou("?limit=10")).toEqual([id("b_heavy"), id("b_shared"), id("b_light")]);
+        expect(await forYou("?limit=10")).toEqual([id("b_heavy"), id("b_shared"), id("b_light"), id("b_tie_a"), id("b_tie_z")]);
     });
 
     it("never recommends a seed artist back, not even to itself", async () => {
