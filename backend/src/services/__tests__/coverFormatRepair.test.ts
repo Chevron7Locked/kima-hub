@@ -433,3 +433,58 @@ describe("an old artist picture saved as .png or .webp", () => {
         expect(await marker()).toBeNull();
     });
 });
+
+describe("the version of a cover the pass converts", () => {
+    const STALE = "aaaaaaaaaa";
+    const albumIds = [`${P}_alb1`, `${P}_alb2`];
+
+    async function seed() {
+        await prisma.artist.create({ data: { id: `${P}_vart`, name: `Repair vart`, identityKey: `${P}_vart_ik`, heroUrl: `native:artists/${P}_vart.jpg?v=${STALE}` } });
+        await prisma.album.create({
+            data: {
+                id: albumIds[0], rgMbid: `${P}-rg1`, artistId: `${P}_vart`, title: "One", identityKey: `${P}-one`, primaryType: "Album",
+                coverUrl: `native:albums/${albumIds[0]}.jpg?v=${STALE}`, userCoverUrl: `native:albums/${albumIds[0]}.jpg`,
+            },
+        });
+        await prisma.album.create({
+            data: { id: albumIds[1], rgMbid: `${P}-rg2`, artistId: `${P}_vart`, title: "Two", identityKey: `${P}-two`, primaryType: "Album", coverUrl: `native:albums/${albumIds[1]}.jpg?v=${STALE}` },
+        });
+    }
+    afterEach(async () => {
+        await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
+        await prisma.audiobook.deleteMany({ where: { id: { startsWith: P } } });
+    });
+
+    it("is new on every value that points at a file it converted, whether it carried a version or not, and on no other", async () => {
+        await seed();
+        put(path.join(covers, "artists", `${P}_vart.jpg`), await picture("png"));
+        put(path.join(covers, "albums", `${albumIds[0]}.jpg`), await picture("webp"));
+        put(path.join(covers, "albums", `${albumIds[1]}.jpg`), await picture("jpeg"));
+
+        await repairCoverFormatsOnce({});
+
+        const v = (rel: string) => versionOfFile(path.join(covers, rel));
+        const artist = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}_vart` } });
+        expect(artist.heroUrl).toBe(`native:artists/${P}_vart.jpg?v=${await v(`artists/${P}_vart.jpg`)}`);
+        const one = await prisma.album.findUniqueOrThrow({ where: { id: albumIds[0] } });
+        const converted = await v(`albums/${albumIds[0]}.jpg`);
+        expect(converted).not.toBe(STALE);
+        expect(one.coverUrl).toBe(`native:albums/${albumIds[0]}.jpg?v=${converted}`);
+        expect(one.userCoverUrl).toBe(`native:albums/${albumIds[0]}.jpg?v=${converted}`);
+        // A file that was already a JPEG was not converted: its value is as it was.
+        const two = await prisma.album.findUniqueOrThrow({ where: { id: albumIds[1] } });
+        expect(two.coverUrl).toBe(`native:albums/${albumIds[1]}.jpg?v=${STALE}`);
+    });
+
+    it("is new on an audiobook whose cached cover it converts", async () => {
+        const file = path.join(audiobooks, `${P}_book.jpg`);
+        put(file, await picture("png"));
+        await prisma.audiobook.create({ data: { id: `${P}_book`, title: "B", audioUrl: "x", localCoverPath: file, coverVersion: STALE } });
+
+        await repairCoverFormatsOnce({});
+
+        const book = await prisma.audiobook.findUniqueOrThrow({ where: { id: `${P}_book` } });
+        expect(book.coverVersion).toBe(await versionOfFile(file));
+        expect(book.coverVersion).not.toBe(STALE);
+    });
+});

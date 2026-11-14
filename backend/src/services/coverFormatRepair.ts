@@ -5,7 +5,8 @@
  * pictures first (each to `<id>.jpg` through `storeAsJpeg`, the artist rows moved over to it, then the old file removed),
  * then walks every covers folder once and converts the `.jpg` files in place through `replaceWithJpeg` (atomic, so a
  * reader never meets half a file; and dropped when the file was written anew since it was read, so the older bytes never
- * overwrite a newer write), and records the done marker.
+ * overwrite a newer write), gives every stored value that names a converted file a new version (the address clients keep
+ * for good must change with the picture), and records the done marker.
  *
  * A file that is no picture is left alone and logged: it is not this pass's to delete. A file that could not be written
  * keeps the marker unset, so the next start tries again. A stop (shutdown) ends the pass between files and also keeps
@@ -17,7 +18,8 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
-import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue } from "./imageStorage";
+import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue, versionOfFile } from "./imageStorage";
+import { rewriteCoverValues } from "./coverVersionBackfill";
 import type { StopCheck } from "../utils/stopCheck";
 
 export interface CoverRepairResult {
@@ -90,6 +92,20 @@ async function convertOldArtistPicture(dir: string, name: string, id: string, re
 }
 
 /**
+ * The bytes of `file` changed, so the version of every value that names it does too: an address clients kept for good
+ * must not keep showing the old picture. A file whose version cannot be read leaves its values as they were.
+ */
+async function versionConvertedCover(dir: string, file: string): Promise<void> {
+    const version = await versionOfFile(file);
+    if (!version) return;
+    if (dir === audiobookCoversPath()) {
+        await prisma.audiobook.updateMany({ where: { localCoverPath: file }, data: { coverVersion: version } });
+        return;
+    }
+    await rewriteCoverValues(path.relative(coversBasePath(), file).split(path.sep).join("/"), version);
+}
+
+/**
  * Runs the pass unless it has run. Answers null when it did not run (already done, or no settings row yet), else what it
  * did. One file's trouble is counted, not thrown; a failure of the marker save throws, and the caller logs it.
  */
@@ -146,6 +162,7 @@ export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise
                 const outcome = await replaceWithJpeg(file, bytes, { mtimeMs: read.mtimeMs, size: read.size });
                 if (outcome === "replaced") {
                     result.converted++;
+                    await versionConvertedCover(dir, file);
                     logger.debug(`[COVER-REPAIR] Converted ${file} to a JPEG`);
                 } else if (outcome === "changed") {
                     result.superseded++;

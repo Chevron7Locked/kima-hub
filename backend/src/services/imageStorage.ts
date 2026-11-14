@@ -200,7 +200,7 @@ export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<stri
  * made from the cover's earlier bytes. A failure only leaves them, and `coverFileForWidth` makes a new copy whenever the
  * one on disk is older than its cover.
  */
-async function dropResizedCopies(filePath: string): Promise<void> {
+export async function dropResizedCopies(filePath: string): Promise<void> {
     const { dir, name } = path.parse(filePath);
     try {
         for (const file of await fs.promises.readdir(dir)) {

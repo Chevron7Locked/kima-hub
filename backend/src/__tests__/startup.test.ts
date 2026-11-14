@@ -108,11 +108,13 @@ describe("createBackgroundStart", () => {
     const mockImagesBackfill = jest.fn(async (_options?: { shouldStop?: () => boolean }) => {});
     const mockWarmup = jest.fn(async (_options?: { shouldStop?: () => boolean }) => {});
     const mockCoverRepair = jest.fn(async (_options?: { shouldStop?: () => boolean }) => null);
+    const mockCoverVersions = jest.fn(async (_options?: { shouldStop?: () => boolean }) => null);
 
     beforeEach(() => {
         jest.resetModules();
         jest.doMock("../utils/systemSettings", () => ({ getSystemSettings: mockSettings }));
         jest.doMock("../services/coverFormatRepair", () => ({ repairCoverFormatsOnce: mockCoverRepair }));
+        jest.doMock("../services/coverVersionBackfill", () => ({ backfillCoverVersionsOnce: mockCoverVersions }));
         jest.doMock("../services/audiobookCache", () => ({ audiobookCacheService: { syncAll: mockSyncAll } }));
         jest.doMock("../services/discovery/sortDiscoverAlbums", () => ({ sortDiscoverAlbums: mockSortDiscover }));
         jest.doMock("../services/artistCountsService", () => ({
@@ -139,7 +141,7 @@ describe("createBackgroundStart", () => {
     const run = async (all: Awaited<ReturnType<typeof steps>>, name: string) =>
         all.find((step) => step.name === name)!.run();
 
-    it("hands the audiobook sync, the artist counts, the image backfill and the cover format repair a stop check that follows the shutdown", async () => {
+    it("hands the audiobook sync, the artist counts, the image backfill, the cover format repair and the cover version backfill a stop check that follows the shutdown", async () => {
         let begun = false;
         const all = await steps(() => begun);
 
@@ -147,12 +149,14 @@ describe("createBackgroundStart", () => {
         await run(all, "artist counts backfill");
         await run(all, "image backfill");
         await run(all, "cover format repair");
+        await run(all, "cover version backfill");
 
         const checks = [
             mockSyncAll.mock.calls[0][0]?.shouldStop,
             mockCountsBackfill.mock.calls[0][1]?.shouldStop,
             mockImagesBackfill.mock.calls[0][0]?.shouldStop,
             mockCoverRepair.mock.calls[0][0]?.shouldStop,
+            mockCoverVersions.mock.calls[0][0]?.shouldStop,
         ];
         for (const check of checks) {
             expect(check).toBeInstanceOf(Function);
@@ -162,7 +166,7 @@ describe("createBackgroundStart", () => {
         for (const check of checks) expect(check!()).toBe(true);
     });
 
-    it("runs the same tasks, in the same order, with the cover format repair last", async () => {
+    it("runs the same tasks, in the same order, with the cover version backfill last", async () => {
         const all = await steps(() => false);
         expect(all.map((step) => step.name)).toEqual([
             "audiobook auto-sync",
@@ -170,7 +174,15 @@ describe("createBackgroundStart", () => {
             "artist counts backfill",
             "image backfill",
             "cover format repair",
+            "cover version backfill",
         ]);
+    });
+
+    it("logs a cover version backfill that fails and does not throw, so the start steps go on", async () => {
+        mockCoverVersions.mockRejectedValueOnce(new Error("disk gone"));
+        const all = await steps(() => false);
+
+        await expect(run(all, "cover version backfill")).resolves.toBeUndefined();
     });
 
     it("logs a repair that fails and does not throw, so the start steps go on", async () => {
@@ -219,6 +231,7 @@ describe("createBackgroundStart: the shutdown waits for the catch-up work", () =
         }));
         jest.doMock("../services/dataCache", () => ({ dataCacheService: { warmupCache: mockWarmup } }));
         jest.doMock("../services/coverFormatRepair", () => ({ repairCoverFormatsOnce: jest.fn(async () => null) }));
+        jest.doMock("../services/coverVersionBackfill", () => ({ backfillCoverVersionsOnce: jest.fn(async () => null) }));
     });
 
     async function start() {

@@ -128,12 +128,32 @@ export function createBackgroundStart(shutdownHasBegun: () => boolean): Backgrou
         }
     }
 
+    async function backfillCoverVersions() {
+        // Once: covers stored before addresses carried a version get one, and the scanner's old root-folder covers are
+        // filed under albums/. After it no stored value is unversioned.
+        try {
+            const { backfillCoverVersionsOnce } = await import("./services/coverVersionBackfill");
+            const result = await backfillCoverVersionsOnce({ shouldStop: shutdownHasBegun });
+            if (result && (result.versioned > 0 || result.audiobooks > 0 || result.failed > 0)) {
+                logger.info(
+                    `[STARTUP] Cover versions: ${result.versioned} stored covers versioned (${result.moved} filed under albums), ` +
+                        `${result.audiobooks} audiobooks, ${result.missing} left (file missing), ${result.failed} failed` +
+                        `${result.stopped ? " (stopped at shutdown)" : ""}`,
+                );
+            }
+        } catch (err) {
+            logger.error("[STARTUP] Cover version backfill failed:", err);
+        }
+    }
+
     const steps: StartStep[] = [
         { name: "audiobook auto-sync", run: () => track(syncAudiobooksIfEmpty()) },
         { name: "sorting albums filed as Discover", run: () => track(sortAlbumsFiledAsDiscover()) },
         { name: "artist counts backfill", run: () => track(backfillArtistCounts()) },
         { name: "image backfill", run: () => track(backfillImages()) },
         { name: "cover format repair", run: () => track(repairCoverFormats()) },
+        // After the repair: a file the repair converts is versioned by it, and this versions what is left.
+        { name: "cover version backfill", run: () => track(backfillCoverVersions()) },
     ];
 
     async function whenEnded() {
