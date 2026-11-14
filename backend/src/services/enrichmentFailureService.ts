@@ -8,8 +8,8 @@ import { prisma } from "../utils/db";
 import { STAGE_RETRY_CAP } from "../workers/stageRetry";
 import * as stageRecords from "./stages/stageRecords";
 
-/** Each song stage's failure type, as the settings screen names it. */
 type StageFailureType = "track" | "audio" | "vibe" | "scan";
+/** Each song stage's failure type, as the settings screen names it. */
 const ENTITY_TYPE_BY_STAGE: Record<string, StageFailureType> = {
     recording: "track",
     analysis: "audio",
@@ -113,7 +113,7 @@ function stageFailureWhere(stages: string[], includeSkipped: boolean): any {
 
 interface EnrichmentFailure {
     id: string;
-    entityType: "artist" | "track" | "audio" | "vibe" | "podcast" | "scan";
+    entityType: StageFailureType | LedgerType;
     entityId: string;
     entityName: string | null;
     errorMessage: string | null;
