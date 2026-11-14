@@ -175,6 +175,31 @@ describe("a stop between cycles", () => {
     });
 });
 
+describe("a start that lands while a stop is being settled", () => {
+    it("is not undone by the settling", async () => {
+        control("stop");
+
+        // The operator's start arrives while the scheduler is writing the idle state for the stop.
+        let restarted = false;
+        state.updateState.mockImplementation(async (update: { status?: string; currentPhase?: string | null }) => {
+            if (!restarted && update.status === "idle") {
+                restarted = true;
+                await startEnrichmentNow();
+            }
+            return {};
+        });
+        await triggerEnrichmentNow();
+        expect(restarted).toBe(true);
+        const afterRestart = cyclesRun();
+        expect(afterRestart).toBeGreaterThan(0);
+
+        // The restart holds: the timer carries on.
+        state.updateState.mockImplementation(async () => ({}));
+        await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+        expect(cyclesRun()).toBeGreaterThan(afterRestart);
+    });
+});
+
 describe("a pause", () => {
     it("holds until a resume, then the timer carries on", async () => {
         control("pause");

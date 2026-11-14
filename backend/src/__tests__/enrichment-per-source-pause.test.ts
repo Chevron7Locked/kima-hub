@@ -178,7 +178,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         await putStage(id("a"), "recording", "working", { attempt: 1, source: "acoustid" });
 
         const err = Object.assign(new Error("HTTP 429 Too Many Requests"), { response: { status: 429 } });
-        await stageRecords.fail(id("a"), "recording", "musicbrainz", err);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", err, {}, `${id("a")}-1-r0`);
 
         // The dispatch checks the stored source's pause, so it must be the paused one.
         expect((await getRecord(id("a"), "recording")).source).toBe("musicbrainz");
@@ -190,7 +190,7 @@ describe("a rate limit pauses only that source and is not a failure", () => {
         const err = Object.assign(new Error("HTTP 429 Too Many Requests"), {
             response: { status: 429 },
         });
-        await stageRecords.fail(id("a"), "recording", "musicbrainz", err);
+        await stageRecords.fail(id("a"), "recording", "musicbrainz", err, {}, `${id("a")}-1-r0`);
 
         const rec = await getRecord(id("a"), "recording");
         // Not counted as a failure: the attempt stays where it was and the

@@ -78,7 +78,6 @@ export async function startAudioCompletionSubscriber(): Promise<void> {
             );
             return;
         }
-        if (event.status !== "complete") return;
 
         await stageRecords.answer(
             event.trackId,

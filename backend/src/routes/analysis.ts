@@ -53,8 +53,15 @@ async function dispatchWorkerCount(
     return { online, delivered };
 }
 
-/** The analyzers' report body: the internal secret checked (403 without it) and the track named (400 without one). */
-async function analyzerReport(req: Request, res: Response): Promise<{ trackId: string; jobId?: string } | null> {
+/**
+ * The analyzers' report body: the internal secret checked (403 without it), the track named (400 without one) and the
+ * claim named (a report that names none is answered and ignored, so the caller stops on null as for the others).
+ */
+async function analyzerReport(
+    req: Request,
+    res: Response,
+    stage: "embedding",
+): Promise<{ trackId: string; jobId?: string } | null> {
     if (!(await isInternalSecret(req.headers["x-internal-secret"]))) {
         res.status(403).json({ error: "Forbidden" });
         return null;
@@ -64,7 +71,12 @@ async function analyzerReport(req: Request, res: Response): Promise<{ trackId: s
         res.status(400).json({ error: "trackId is required" });
         return null;
     }
-    return { trackId, jobId: typeof jobId === "string" ? jobId : undefined };
+    const claim = typeof jobId === "string" ? jobId : undefined;
+    if (!stageRecords.reportNamesClaim(trackId, stage, claim)) {
+        res.json({ message: "Report names no claim; ignored" });
+        return null;
+    }
+    return { trackId, jobId: claim };
 }
 
 const router = Router();
@@ -202,12 +214,8 @@ workerSlider("/clap-workers", {
  */
 router.post("/vibe/failure", async (req, res) => {
     try {
-        const report = await analyzerReport(req, res);
+        const report = await analyzerReport(req, res, "embedding");
         if (!report) return;
-        if (!stageRecords.reportNamesClaim(report.trackId, "embedding", report.jobId)) {
-            res.json({ message: "Report names no claim; ignored" });
-            return;
-        }
         const { trackName, errorMessage, errorCode } = req.body;
 
         // The stage record is the only record of this failure: the failures API
@@ -312,12 +320,8 @@ router.post("/vibe/start", async (req, res) => {
  */
 router.post("/vibe/success", async (req, res) => {
     try {
-        const report = await analyzerReport(req, res);
+        const report = await analyzerReport(req, res, "embedding");
         if (!report) return;
-        if (!stageRecords.reportNamesClaim(report.trackId, "embedding", report.jobId)) {
-            res.json({ message: "Report names no claim; ignored" });
-            return;
-        }
 
         // The embedding stage record is the failure record, so answering it here also
         // clears it from the failures list.

@@ -125,7 +125,8 @@ describe("a rate-limited answer parks the question at its own deadline", () => {
             evidence: { status: 429, source: "mocked" },
         });
 
-        const outcome = await enrichSingleTrack(trackId);
+        // The queue job names the claim it answers: attempt 2, never redelivered.
+        const outcome = await enrichSingleTrack(trackId, `${trackId}-2-r0`);
 
         const stage = await stageRow(trackId);
         // Parked, not failed: the same attempt it was dispatched with, due
@@ -159,7 +160,7 @@ describe("an honest no-match", () => {
             evidence: { fingerprint: "TAGFP", reason: "nothing matched" },
         });
 
-        const outcome = await enrichSingleTrack(trackId);
+        const outcome = await enrichSingleTrack(trackId, `${trackId}-1-r0`);
 
         expect(outcome).toBe("no_match");
 

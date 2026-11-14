@@ -58,8 +58,8 @@ export interface RunState {
     takeWake(): void;
 
     // One cycle at a time in this process.
-    /** Claims the in-flight slot; false when a cycle already holds it. */
-    beginCycle(): boolean;
+    /** The cycle took the lock and starts: the in-flight slot is held until `endCycle`. */
+    beginCycle(): void;
     endCycle(): void;
 
     // Questions the cycle asks.
@@ -129,9 +129,7 @@ export function createRunState(): RunState {
         },
 
         beginCycle() {
-            if (inFlight) return false;
             inFlight = true;
-            return true;
         },
         endCycle() {
             inFlight = false;

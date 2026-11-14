@@ -106,7 +106,7 @@ describe("increasing waits for temporary errors", () => {
 
     it("first failure parks the record until now + wait(1), second until now + wait(2)", async () => {
         const trackId = id("temp");
-        await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
+        await seedTrack(trackId, { recording: { status: "pending", attempt: 0 } });
 
         await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("connection reset by peer"));
         const first = await getRecord(trackId, "recording");
@@ -153,7 +153,7 @@ describe("no retry past the cap", () => {
 
     it("attempts 1 to 3 stay retryable; the fourth failure closes the record", async () => {
         const trackId = id("cap");
-        await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
+        await seedTrack(trackId, { recording: { status: "pending", attempt: 0 } });
 
         for (let attempt = 1; attempt <= 3; attempt++) {
             await stageRecords.fail(trackId, "recording", "musicbrainz", new Error("socket hang up"));
@@ -200,7 +200,7 @@ describe("a question with an answer is never re-offered", () => {
 
     it("answer writes done with its evidence and source", async () => {
         const trackId = id("success");
-        await seedTrack(trackId, { recording: { status: "working", attempt: 0 } });
+        await seedTrack(trackId, { recording: { status: "pending", attempt: 0 } });
 
         await stageRecords.answer(trackId, "recording", "file_tag", {
             recordingMbid: "mb-123",
@@ -272,7 +272,8 @@ describe("a closed record always carries its start stamp", () => {
             claimTime,
         );
 
-        await stageRecords.answer(trackId, "recording", "acoustid", { recordingMbid: "mb-2" });
+        // The answer names the claim it settles: attempt 1, never redelivered.
+        await stageRecords.answer(trackId, "recording", "acoustid", { recordingMbid: "mb-2" }, `${trackId}-1-r0`);
 
         const rec = await getRecord(trackId, "recording");
         expect(new Date(rec.startedAt).getTime()).toBe(claimTime.getTime());

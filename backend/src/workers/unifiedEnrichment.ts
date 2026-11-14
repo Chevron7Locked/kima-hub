@@ -1042,8 +1042,9 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         // No stop-cleanup reset: stopping does not edit answers. The record
         // owns the attempt, and flipping `processing` rows back to `pending`
         // here would re-ask questions the stage records have already answered.
-        await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
+        // Settled before the write: a start that lands during it is then not undone.
         run.settleStop();
+        await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
         return emptyResult;
     }
 
@@ -1080,8 +1081,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
             // reasoning as the stopping branch above: no reset of
             // `processing` rows, because the stage record owns the attempt and
             // rewriting the column would contradict it.
-            await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
             run.settleStop();
+            await enrichmentStateService.updateState({ status: "idle", currentPhase: null });
             return emptyResult;
         }
     }
@@ -1117,8 +1118,8 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         logger.warn("[Enrichment] Hang detected — enrichment has been running > 15 min with no activity");
     }
 
-    // The flag above covers this process; the lock covers others, so two processes
-    // never offer the same records.
+    // The in-flight check above declines quickly; the lock is what keeps two cycles, in this process or
+    // another, from offering the same records.
     if (!(await distributedLock.acquire(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS))) {
         return { ...emptyResult, declined: "already-running" };
     }
@@ -1751,11 +1752,12 @@ async function replaceRecordingIsrc(trackId: string, isrc: string | null): Promi
 async function shouldHaltCycle(): Promise<boolean> {
     const mode = run.mode();
     if (mode === "stopping" || mode === "stopped") {
+        // Settled before the write: a start that lands during it is then not undone.
+        run.settleStop();
         await enrichmentStateService.updateState({
             status: "idle",
             currentPhase: null,
         });
-        run.settleStop();
         return true;
     }
     return run.haltRequested();

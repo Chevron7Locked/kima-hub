@@ -66,7 +66,7 @@ describe("run state", () => {
     describe("stop during a run", () => {
         it("a stop that arrives mid-cycle leaves the worker stopped once the cycle sees it", () => {
             const run = inMode("running");
-            expect(run.beginCycle()).toBe(true);
+            run.beginCycle();
 
             run.stop();
             expect(run.cycleInFlight()).toBe(true);
@@ -164,12 +164,13 @@ describe("run state", () => {
     });
 
     describe("one cycle at a time", () => {
-        it("refuses a second begin until the first ends", () => {
+        it("holds the in-flight slot from begin to end", () => {
             const run = inMode("running");
-            expect(run.beginCycle()).toBe(true);
-            expect(run.beginCycle()).toBe(false);
+            expect(run.cycleInFlight()).toBe(false);
+            run.beginCycle();
+            expect(run.cycleInFlight()).toBe(true);
             run.endCycle();
-            expect(run.beginCycle()).toBe(true);
+            expect(run.cycleInFlight()).toBe(false);
         });
     });
 
