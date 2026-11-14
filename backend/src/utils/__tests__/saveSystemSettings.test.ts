@@ -1,5 +1,5 @@
 /**
- * The one save of system settings: it writes, drops the cache, and calls each listener with the fields of its own that
+ * The one save of system settings: it writes, drops the cache, and calls each listener with its own fields that
  * changed, never the others and never a value that was sent back unchanged (the settings page sends every field on
  * every save). Real database and cipher.
  */

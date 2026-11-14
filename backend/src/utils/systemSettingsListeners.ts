@@ -14,7 +14,7 @@ export type SystemSettingsField = keyof SystemSettingsChanges;
 interface Listener {
     name: string;
     fields: ReadonlySet<SystemSettingsField>;
-    run: (changed: SystemSettingsField[]) => void | Promise<void>;
+    listener: (changed: SystemSettingsField[]) => void | Promise<void>;
 }
 
 const listeners = new Set<Listener>();
@@ -30,10 +30,10 @@ export function onSystemSettingsChange<F extends SystemSettingsField>(
     fields: readonly F[],
     listener: (changed: F[]) => void | Promise<void>,
 ): () => void {
-    const added: Listener = { name, fields: new Set(fields), run: listener as Listener["run"] };
-    listeners.add(added);
+    const entry: Listener = { name, fields: new Set(fields), listener: listener as Listener["listener"] };
+    listeners.add(entry);
     return () => {
-        listeners.delete(added);
+        listeners.delete(entry);
     };
 }
 
@@ -43,12 +43,12 @@ export function onSystemSettingsChange<F extends SystemSettingsField>(
  * while), and a listener that throws or rejects is logged without touching the others.
  */
 export function callSettingsListeners(changed: SystemSettingsField[]): void {
-    for (const { name, fields, run } of [...listeners]) {
+    for (const { name, fields, listener } of [...listeners]) {
         const heard = changed.filter((field) => fields.has(field));
         if (heard.length === 0) continue;
         const failed = (error: unknown) => logger.warn(`[SETTINGS] The "${name}" listener failed after the save (${heard.join(", ")}):`, error);
         try {
-            Promise.resolve(run(heard)).catch(failed);
+            Promise.resolve(listener(heard)).catch(failed);
         } catch (error) {
             failed(error);
         }

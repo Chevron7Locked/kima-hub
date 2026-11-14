@@ -44,7 +44,7 @@ export async function getSystemSettings() {
     }
 
     cachedSettings = resolved;
-    cacheExpiry = now + CACHE_TTL_MS;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
     return { ...resolved };
 }
 
@@ -60,7 +60,7 @@ function meaning(field: string, stored: unknown): unknown {
 
 /**
  * The one way system settings are saved: writes the supplied fields (a credential given blank is cleared, except one
- * the server cannot read, which stays), drops the settings cache, then calls each listener with the fields of its own that
+ * the server cannot read, which stays), drops the settings cache, then calls each listener with its own fields that
  * changed, without waiting for any of them to finish. Answers the fields whose value changed. The row is read and
  * written under its lock, so two saves at the same time each see the other's result and a change is reported once.
  */
