@@ -33,6 +33,7 @@ import { findAlbumArtwork, findArtistArtwork } from "../../services/artwork";
 import { redisClient } from "../../utils/redis";
 import { downloadAndStoreImage, findLocalArtistImage, isNativePath, nativeFileExists } from "../../services/imageStorage";
 import { failureCause } from "../../utils/outcome";
+import { withShutdownSignal } from "../../utils/stopCheck";
 import { resolveArtistMbidFromDiscography } from "../../services/artistCorrection";
 import { enrichmentFailureService } from "../../services/enrichmentFailureService";
 import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQueues";
@@ -273,7 +274,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         let localHeroUrl: string | null = null;
         if (heroUrl && !isNativePath(heroUrl)) {
             logger.debug(`${logPrefix} Downloading image locally...`);
-            localHeroUrl = await downloadAndStoreImage(heroUrl, artist.id, "artist");
+            localHeroUrl = await withShutdownSignal((signal) =>
+                downloadAndStoreImage(heroUrl, artist.id, "artist", signal),
+            );
             if (localHeroUrl) {
                 logger.debug(`${logPrefix} Image saved locally: ${localHeroUrl}`);
             } else {

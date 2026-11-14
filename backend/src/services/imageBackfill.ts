@@ -136,36 +136,26 @@ function countExternal(kind: BackfillKind): Promise<number> {
         : prisma.album.count({ where: { coverUrl: { not: null, startsWith: "http" } } });
 }
 
-async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: AbortSignal): Promise<void> {
+/**
+ * One kind's pass, adding to the run's one progress object. Answers whether it went through every row: false when a
+ * stop ended it first.
+ */
+async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: AbortSignal): Promise<boolean> {
     const shouldStop = stop.shouldStop ?? (() => false);
-    if (shouldStop()) return;
+    if (shouldStop()) return false;
     const { noun, cacheKey, cacheTtlSeconds } = BACKFILLS[kind];
     logger.info(`[ImageBackfill] Starting ${kind} ${noun} backfill...`);
-
-    const total = await countExternal(kind);
-    backfillProgress = {
-        total,
-        processed: 0,
-        success: 0,
-        failed: 0,
-        skipped: 0,
-    };
-
-    logger.info(`[ImageBackfill] Found ${total} ${kind}s with external URLs`);
-
-    const stoppedNote = () =>
-        logger.info(`[ImageBackfill] ${kind} ${noun} backfill stopped for shutdown: ${backfillProgress.processed}/${total} done`);
 
     let after: string | null = null;
     for (;;) {
         // Between pages, as between batches: a stop leaves the rest for the next start.
-        if (shouldStop()) return stoppedNote();
+        if (shouldStop()) return false;
         const rows = await readPage(kind, after);
         if (rows.length === 0) break;
         after = rows[rows.length - 1].id;
 
         for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-            if (shouldStop()) return stoppedNote();
+            if (shouldStop()) return false;
             const batch = rows.slice(i, i + BATCH_SIZE);
 
             await Promise.all(
@@ -226,15 +216,15 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
         if (rows.length < PAGE_SIZE) break;
     }
 
-    logger.info(
-        `[ImageBackfill] ${kind} ${noun} backfill complete: ${backfillProgress.success} success, ${backfillProgress.failed} failed, ${backfillProgress.skipped} skipped`
-    );
+    // A download the stop cut short was not done, though no row is left to read.
+    return !signal.aborted;
 }
 
 /**
- * Backfill all images (artists and albums), one run at a time: a call made while one runs does nothing. `shouldStop`
- * is asked before each page, each batch of downloads and each kind, and cuts the pause between batches short: once it
- * says yes the backfill ends quietly, leaving the rest for the next start.
+ * Backfill all images (artists and albums), one run at a time: a call made while one runs does nothing. The run keeps
+ * one progress object, reset when it starts and covering both kinds. `shouldStop` is asked before each page, each batch
+ * of downloads and each kind, and cuts the pause between batches short: once it says yes the backfill ends with a
+ * "stopped" line carrying its counts, leaving the rest for the next start.
  */
 export async function backfillAllImages(stop: StopCheck = {}): Promise<void> {
     if (running) {
@@ -245,8 +235,18 @@ export async function backfillAllImages(stop: StopCheck = {}): Promise<void> {
     // The signal ends a download under way as soon as the stop comes, rather than after its own 30 s.
     const { signal, release } = stopSignal(stop);
     try {
-        await backfillImages("artist", stop, signal);
-        await backfillImages("album", stop, signal);
+        const [artists, albums] = await Promise.all([countExternal("artist"), countExternal("album")]);
+        backfillProgress = { total: artists + albums, processed: 0, success: 0, failed: 0, skipped: 0 };
+        logger.info(`[ImageBackfill] Found ${artists} artists and ${albums} albums with external URLs`);
+
+        const finished = (await backfillImages("artist", stop, signal)) && (await backfillImages("album", stop, signal));
+
+        const { processed, total, success, failed, skipped } = backfillProgress;
+        logger.info(
+            finished
+                ? `[ImageBackfill] Image backfill complete: ${success} success, ${failed} failed, ${skipped} skipped`
+                : `[ImageBackfill] Image backfill stopped for shutdown: ${processed}/${total} done, ${success} success, ${failed} failed, ${skipped} skipped`
+        );
     } finally {
         release();
         running = false;

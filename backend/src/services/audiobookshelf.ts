@@ -107,33 +107,55 @@ class AudiobookshelfService {
     }
 
     /**
-     * Get all audiobooks from a specific library
+     * Get the audiobooks of a specific library, and how many it says it holds (absent when it does not say).
      */
-    async getLibraryItems(libraryId: string) {
+    async getLibraryItems(libraryId: string): Promise<{ items: any[]; total?: number }> {
         await this.ensureInitialized();
         const response = await this.client!.get(
             `/api/libraries/${libraryId}/items`
         );
-        return response.data.results || [];
+        const total = response.data.total;
+        return {
+            items: response.data.results || [],
+            total: typeof total === "number" ? total : undefined,
+        };
     }
 
     /**
-     * Get all audiobooks from all libraries
+     * Get all audiobooks from all libraries, and whether the listing is complete. It is not when a book library failed
+     * to answer or answered fewer items than it says it holds: the books it lists are still good, but a book missing
+     * from it may still exist, so only a complete listing may be used to remove books. Fails when no book library could
+     * be read at all.
      */
-    async getAllAudiobooks() {
+    async getAllAudiobooks(): Promise<{ books: any[]; complete: boolean }> {
         await this.ensureInitialized();
         const libraries = await this.getLibraries();
 
-        const allBooks: any[] = [];
+        const books: any[] = [];
+        let complete = true;
+        let failure: unknown = null;
+        let read = 0;
         for (const library of libraries) {
-            if (library.mediaType === "book") {
-                // Only get audiobook libraries
-                const items = await this.getLibraryItems(library.id);
-                allBooks.push(...items);
+            if (library.mediaType !== "book") continue; // Only get audiobook libraries
+            try {
+                const { items, total } = await this.getLibraryItems(library.id);
+                books.push(...items);
+                read++;
+                if (total !== undefined && items.length < total) {
+                    complete = false;
+                    logger.warn(
+                        `[ABS] Library ${library.id} answered ${items.length} of ${total} items; the listing is partial`,
+                    );
+                }
+            } catch (error: any) {
+                complete = false;
+                failure = error;
+                logger.warn(`[ABS] Library ${library.id} could not be listed: ${error?.message}`);
             }
         }
+        if (failure && read === 0) throw failure;
 
-        return allBooks;
+        return { books, complete };
     }
 
     /**

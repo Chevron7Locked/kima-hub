@@ -377,7 +377,7 @@ describe("audiobookCacheService.syncAll", () => {
     const books = [{ id: `${P}-b1` }, { id: `${P}-b2` }, { id: `${P}-b3` }];
 
     it("stops between books and does not prune on a list it did not finish", async () => {
-        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue({ books, complete: true } as never);
         const syncOne = jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
         const prune = jest.spyOn(prisma.audiobook, "deleteMany");
         let stop = false;
@@ -396,7 +396,7 @@ describe("audiobookCacheService.syncAll", () => {
     it("does not prune when a book failed to sync: the list was not gone through", async () => {
         expectLog("error");
         expectLog("warn");
-        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue({ books, complete: true } as never);
         const syncOne = jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
         syncOne.mockRejectedValueOnce(new Error("cover download failed") as never);
         const prune = jest.spyOn(prisma.audiobook, "deleteMany");
@@ -410,7 +410,7 @@ describe("audiobookCacheService.syncAll", () => {
 
     it("syncs and prunes as before when never told to stop", async () => {
         await prisma.audiobook.create({ data: { id: `${P}-stale`, title: "Stale", sortName: "stale", audioUrl: `${P}-stale` } });
-        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+        jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue({ books, complete: true } as never);
         const syncOne = jest.spyOn(audiobookCacheService as never, "syncAudiobook" as never).mockResolvedValue(true as never);
         const prune = jest.spyOn(prisma.audiobook, "deleteMany");
 
@@ -432,7 +432,7 @@ describe("audiobookCacheService.syncAll", () => {
         });
 
         it("claims the run before its first await: a second call in the same tick waits for the run and gets its result", async () => {
-            const fetchBooks = jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue(books as never);
+            const fetchBooks = jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockResolvedValue({ books, complete: true } as never);
 
             const first = audiobookCacheService.syncAll();
             const second = audiobookCacheService.syncAll();
@@ -446,7 +446,7 @@ describe("audiobookCacheService.syncAll", () => {
         it("does not answer the second caller until the run has ended", async () => {
             let release!: () => void;
             jest.spyOn(audiobookshelfService, "getAllAudiobooks").mockImplementation(
-                () => new Promise((resolve) => (release = () => resolve(books as never))),
+                () => new Promise((resolve) => (release = () => resolve({ books, complete: true } as never))),
             );
 
             void audiobookCacheService.syncAll();
@@ -464,7 +464,7 @@ describe("audiobookCacheService.syncAll", () => {
             expectLog("error");
             const fetchBooks = jest.spyOn(audiobookshelfService, "getAllAudiobooks");
             fetchBooks.mockRejectedValueOnce(new Error("abs down"));
-            fetchBooks.mockResolvedValue(books as never);
+            fetchBooks.mockResolvedValue({ books, complete: true } as never);
 
             await expect(audiobookCacheService.syncAll()).rejects.toThrow("abs down");
             const result = await audiobookCacheService.syncAll();

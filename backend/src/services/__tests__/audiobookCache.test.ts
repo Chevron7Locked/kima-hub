@@ -20,6 +20,11 @@ import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
 import { prisma } from "../../utils/db";
 
+/** What Audiobookshelf's listing answers: the books, and whether every one of them was read. */
+function listed(books: unknown[], complete = true) {
+    (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue({ books, complete });
+}
+
 const P = "zz-audiobookCache-";
 
 // The prune pass deletes every row not in the stub's list, so a file starts and ends with no audiobooks.
@@ -48,16 +53,14 @@ function minimalBook(id: string, title: string) {
 
 describe("syncAll -- sortName kept in sync with title", () => {
     it("sets sortName, article-stripped, when the book is first stored and when its title changes", async () => {
-        const stub = audiobookshelfService.getAllAudiobooks as jest.Mock;
-
-        stub.mockResolvedValue([minimalBook(`${P}book-1`, "The Great Book")]);
+        listed([minimalBook(`${P}book-1`, "The Great Book")]);
         await audiobookCacheService.syncAll();
         expect(await prisma.audiobook.findUnique({ where: { id: `${P}book-1` } })).toMatchObject({
             title: "The Great Book",
             sortName: "great book",
         });
 
-        stub.mockResolvedValue([minimalBook(`${P}book-1`, "A Better Title")]);
+        listed([minimalBook(`${P}book-1`, "A Better Title")]);
         await audiobookCacheService.syncAll();
         expect(await prisma.audiobook.findUnique({ where: { id: `${P}book-1` } })).toMatchObject({
             title: "A Better Title",
@@ -66,7 +69,7 @@ describe("syncAll -- sortName kept in sync with title", () => {
     });
 
     it("leaves a title with no leading article unchanged", async () => {
-        (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
+        listed([
             minimalBook(`${P}book-2`, "Dune"),
         ]);
 

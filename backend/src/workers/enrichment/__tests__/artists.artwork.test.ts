@@ -63,6 +63,7 @@ jest.mock("../../../services/imageStorage", () => ({
 
 import { enrichSimilarArtist } from "../artists";
 import { prisma } from "../../../utils/db";
+import { useShutdownCheck } from "../../../utils/stopCheck";
 
 const P = "zz-artEnrich-";
 const REAL_MBID = "11111111-2222-3333-4444-555555555555";
@@ -136,6 +137,27 @@ describe("the enrichment worker asks every source", () => {
             await enrichSimilarArtist(await seedArtist("1"));
 
             expect((await stored(`${P}1`)).heroUrl).toBe("native:artists/art-1.jpg");
+        });
+
+        it("hands the image download a signal that aborts when the shutdown begins", async () => {
+            mockFindArtistArtwork.mockResolvedValue({ url: HERO, source: "deezer" });
+            let begun = false;
+            useShutdownCheck(() => begun);
+            let seen: AbortSignal | undefined;
+            mockDownloadAndStoreImage.mockImplementation(async (_url, _id, _type, signal?: AbortSignal) => {
+                seen = signal;
+                begun = true;
+                await new Promise((resolve) => setTimeout(resolve, 300));
+                return null;
+            });
+
+            try {
+                await enrichSimilarArtist(await seedArtist("1"));
+                expect(seen).toBeInstanceOf(AbortSignal);
+                expect(seen!.aborted).toBe(true);
+            } finally {
+                useShutdownCheck(() => false);
+            }
         });
 
         it("does not hand a placeholder MBID to the sources", async () => {

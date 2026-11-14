@@ -33,6 +33,7 @@ jest.mock("../imageStorage", () => ({
 
 import { dataCacheService } from "../dataCache";
 import { prisma } from "../../utils/db";
+import { useShutdownCheck } from "../../utils/stopCheck";
 
 const P = "zz-dataCache-";
 const ALBUM = `${P}alb`;
@@ -185,6 +186,28 @@ describe("dataCache asks every source, not just one", () => {
             mockDownloadAndStoreImage.mockResolvedValue(null);
 
             expect(await dataCacheService.getArtistImage(ARTIST, "Brad Sucks", "9c070e4f-28c1-4b98-b371-d8514c31ba55")).toBe(FOUND);
+        });
+
+        it("hands the image download a signal that aborts when the shutdown begins", async () => {
+            await seedArtist("Brad Sucks", null);
+            mockFindArtistArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+            let begun = false;
+            useShutdownCheck(() => begun);
+            let seen: AbortSignal | undefined;
+            mockDownloadAndStoreImage.mockImplementation(async (_url, _id, _type, signal?: AbortSignal) => {
+                seen = signal;
+                begun = true;
+                await new Promise((resolve) => setTimeout(resolve, 300));
+                return null;
+            });
+
+            try {
+                await dataCacheService.getArtistImage(ARTIST, "Brad Sucks", null);
+                expect(seen).toBeInstanceOf(AbortSignal);
+                expect(seen!.aborted).toBe(true);
+            } finally {
+                useShutdownCheck(() => false);
+            }
         });
 
         it("returns null when no source had an image", async () => {

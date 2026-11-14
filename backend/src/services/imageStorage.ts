@@ -38,7 +38,37 @@ export function resolveInCoversDir(relativePath: string): string | null {
 }
 
 /**
- * Download an image from URL and save locally
+ * The picture as JPEG bytes: a JPEG as it came, anything else converted, null when the bytes are no picture. Every
+ * stored image is a `.jpg` (readers look the file up by that name), so the bytes must be a JPEG, whatever the server's
+ * content type claimed.
+ */
+async function asJpeg(bytes: Buffer): Promise<Buffer | null> {
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return bytes;
+    try {
+        const sharp = (await import("sharp")).default;
+        return await sharp(bytes).jpeg({ quality: 90 }).toBuffer();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Written under a temporary name and renamed into place, so a crash or a failed write never leaves half a file under
+ * the final name, and a reader never finds one.
+ */
+async function writeAtomically(filePath: string, bytes: Buffer): Promise<void> {
+    const partial = `${filePath}.${process.pid}.${Date.now()}.part`;
+    try {
+        await fs.promises.writeFile(partial, bytes);
+        await fs.promises.rename(partial, filePath);
+    } catch (err) {
+        await fs.promises.rm(partial, { force: true });
+        throw err;
+    }
+}
+
+/**
+ * Download an image from URL and save locally, as a JPEG
  * Returns the native path (e.g., "native:artists/artistId.jpg") or null on failure
  */
 export async function downloadAndStoreImage(
@@ -83,7 +113,13 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        await fs.promises.writeFile(filePath, Buffer.from(buffer));
+        const picture = await asJpeg(Buffer.from(buffer));
+        if (!picture) {
+            logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
+            return null;
+        }
+
+        await writeAtomically(filePath, picture);
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
         return `native:${subdir}/${filename}`;

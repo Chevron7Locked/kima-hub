@@ -19,6 +19,12 @@ jest.mock("../audiobookshelf", () => ({
 import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
+
+/** What Audiobookshelf's listing answers: the books, and whether every one of them was read. */
+function listed(books: unknown[], complete = true) {
+    (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue({ books, complete });
+}
 
 const P = "zz-audiobookPrune-";
 
@@ -57,7 +63,7 @@ describe("syncAll -- prune pass", () => {
         await seed("old-1");
         await seed("old-2");
         await seed("old-3");
-        (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
+        listed([
             minimalBook("live-1", "Book One"),
         ]);
 
@@ -80,7 +86,7 @@ describe("syncAll -- prune pass", () => {
         it("deletes the books ABS no longer lists in batches, never with one list of every id", async () => {
             await seedMany();
             await seed("keep-me");
-            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            listed([minimalBook("keep-me", "Keeper")]);
             jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
             const prune = jest.spyOn(prisma.audiobook, "deleteMany");
 
@@ -98,7 +104,7 @@ describe("syncAll -- prune pass", () => {
 
         it("reads the stored ids a page at a time, by id", async () => {
             await seedMany();
-            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            listed([minimalBook("keep-me", "Keeper")]);
             jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
             const find = jest.spyOn(prisma.audiobook, "findMany");
 
@@ -111,7 +117,7 @@ describe("syncAll -- prune pass", () => {
         it("keeps the books ABS still lists, wherever they fall among the pages", async () => {
             await seedMany();
             const live = [0, 499, 500, 501, 1099].map((i) => `bulk-${String(i).padStart(4, "0")}`);
-            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue(live.map((id) => minimalBook(id, id)));
+            listed(live.map((id) => minimalBook(id, id)));
             jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
 
             const result = await audiobookCacheService.syncAll();
@@ -122,7 +128,7 @@ describe("syncAll -- prune pass", () => {
 
         it("stops between pages when told to stop: what was deleted stays deleted, the rest is left for the next sync", async () => {
             await seedMany();
-            (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([minimalBook("keep-me", "Keeper")]);
+            listed([minimalBook("keep-me", "Keeper")]);
             jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
             const prune = jest.spyOn(prisma.audiobook, "deleteMany");
 
@@ -136,7 +142,7 @@ describe("syncAll -- prune pass", () => {
 
     it("refuses to prune when ABS returns an empty list (failed fetch must not wipe the library)", async () => {
         await seed("kept-1");
-        (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([]);
+        listed([]);
 
         const result = await audiobookCacheService.syncAll();
 
@@ -144,10 +150,23 @@ describe("syncAll -- prune pass", () => {
         expect(result.pruned).toBe(0);
     });
 
+    it("prunes nothing, and warns, when the listing was only partly read", async () => {
+        await seed("kept-1");
+        await seed("kept-2");
+        listed([minimalBook("live-1", "Book One")], false);
+
+        const result = await audiobookCacheService.syncAll();
+
+        // The books that were listed still sync; the ones missing from a partial listing may still exist.
+        expect(await ids()).toEqual([`${P}kept-1`, `${P}kept-2`, `${P}live-1`]);
+        expect(result.pruned).toBe(0);
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("skipping prune"));
+    });
+
     it("deletes an isMissing book instead of skipping it", async () => {
         await seed("gone-1", "Vanished");
         const missing = { ...minimalBook("gone-1", "Vanished"), isMissing: true };
-        (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
+        listed([
             minimalBook("live-1", "Book One"),
             missing,
         ]);
@@ -158,7 +177,7 @@ describe("syncAll -- prune pass", () => {
     });
 
     it("parses bracketed years: '(2008)' -> 2008, not null", async () => {
-        (audiobookshelfService.getAllAudiobooks as jest.Mock).mockResolvedValue([
+        listed([
             {
                 ...minimalBook("y1", "Saturn's Children"),
                 media: {

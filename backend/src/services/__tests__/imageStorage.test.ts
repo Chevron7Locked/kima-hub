@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -49,11 +50,88 @@ describe("downloadAndStoreImage and a stop", () => {
     });
 
     it("still downloads with no signal", async () => {
-        fetchMock.mockResolvedValue(
-            new Response(new Uint8Array(2000), { status: 200, headers: { "content-type": "image/jpeg" } }),
-        );
+        fetchMock.mockResolvedValue(imageResponse(await picture("jpeg"), "image/jpeg"));
 
         expect(await downloadAndStoreImage("https://example.com/a.jpg", "a3", "artist")).toBe("native:artists/a3.jpg");
+    });
+});
+
+async function picture(format: "jpeg" | "png" | "webp"): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    // Noise, so the encoded picture is well over the 1000-byte placeholder limit.
+    const noise = randomBytes(100 * 100 * 3);
+    return sharp(noise, { raw: { width: 100, height: 100, channels: 3 } })[format]().toBuffer();
+}
+
+function imageResponse(body: Buffer, contentType: string): Response {
+    return new Response(new Uint8Array(body), { status: 200, headers: { "content-type": contentType } });
+}
+
+describe("downloadAndStoreImage writes", () => {
+    const fetchMock = fetchChecked as jest.Mock;
+    const albums = `/tmp/kima-test-cache-${process.pid}/covers/albums`;
+    afterEach(() => {
+        jest.restoreAllMocks();
+        fetchMock.mockReset();
+        fs.rmSync(`/tmp/kima-test-cache-${process.pid}`, { recursive: true, force: true });
+    });
+
+    it("keeps a jpeg as it came", async () => {
+        const jpeg = await picture("jpeg");
+        fetchMock.mockResolvedValue(imageResponse(jpeg, "image/jpeg"));
+
+        expect(await downloadAndStoreImage("https://example.com/c", "w1", "album")).toBe("native:albums/w1.jpg");
+        expect(fs.readFileSync(path.join(albums, "w1.jpg")).equals(jpeg)).toBe(true);
+    });
+
+    it("turns a png into a jpeg, so the .jpg the readers look for holds a jpeg", async () => {
+        fetchMock.mockResolvedValue(imageResponse(await picture("png"), "image/png"));
+
+        expect(await downloadAndStoreImage("https://example.com/c", "w2", "album")).toBe("native:albums/w2.jpg");
+        const sharp = (await import("sharp")).default;
+        expect((await sharp(path.join(albums, "w2.jpg")).metadata()).format).toBe("jpeg");
+    });
+
+    it("stores nothing when the bytes are not a picture, whatever the content type says", async () => {
+        fetchMock.mockResolvedValue(imageResponse(Buffer.alloc(2000, 7), "image/png"));
+
+        expect(await downloadAndStoreImage("https://example.com/c", "w3", "album")).toBeNull();
+        expect(fs.existsSync(path.join(albums, "w3.jpg"))).toBe(false);
+    });
+
+    it("leaves no file, whole or partial, when the write fails midway", async () => {
+        fetchMock.mockResolvedValue(imageResponse(await picture("jpeg"), "image/jpeg"));
+        const realWrite = fs.promises.writeFile;
+        jest.spyOn(fs.promises, "writeFile").mockImplementationOnce(async (file, data) => {
+            await realWrite(file, (data as Buffer).subarray(0, 100));
+            throw new Error("disk full");
+        });
+
+        expect(await downloadAndStoreImage("https://example.com/c", "w4", "album")).toBeNull();
+        expect(fs.readdirSync(albums)).toEqual([]);
+    });
+
+    it("never shows a half-written file under the final name, and leaves the earlier file whole when the swap fails", async () => {
+        const first = await picture("jpeg");
+        fetchMock.mockResolvedValue(imageResponse(first, "image/jpeg"));
+        await downloadAndStoreImage("https://example.com/c", "w5", "album");
+
+        const sharp = (await import("sharp")).default;
+        const second = await sharp(await picture("png")).jpeg({ quality: 30 }).toBuffer();
+        fetchMock.mockResolvedValue(imageResponse(second, "image/jpeg"));
+        const seenDuringWrite: string[][] = [];
+        const realWrite = fs.promises.writeFile;
+        jest.spyOn(fs.promises, "writeFile").mockImplementationOnce(async (file, data) => {
+            await realWrite(file, data as Buffer);
+            seenDuringWrite.push([String(file)]);
+        });
+        jest.spyOn(fs.promises, "rename").mockRejectedValueOnce(new Error("swap failed"));
+
+        expect(await downloadAndStoreImage("https://example.com/c", "w5", "album")).toBeNull();
+        // The write went to a temporary name, not the final one, and the earlier cover is untouched.
+        expect(seenDuringWrite[0][0]).not.toBe(path.join(albums, "w5.jpg"));
+        expect(fs.readFileSync(path.join(albums, "w5.jpg")).equals(first)).toBe(true);
+        expect(fs.readdirSync(albums)).toEqual(["w5.jpg"]);
     });
 });
 

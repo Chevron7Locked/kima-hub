@@ -3,7 +3,15 @@
  * the work here is held open by the test.
  */
 
-import { runAsRequestWork, shutdownStop, sleepUnlessStopped, stopSignal, useShutdownCheck, whenRequestWorkEnded } from "../stopCheck";
+import {
+    runAsRequestWork,
+    shutdownStop,
+    sleepUnlessStopped,
+    stopSignal,
+    useShutdownCheck,
+    whenRequestWorkEnded,
+    withShutdownSignal,
+} from "../stopCheck";
 
 const held = () => {
     let release!: () => void;
@@ -71,6 +79,40 @@ describe("stopSignal", () => {
         shouldStop.mockClear();
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(shouldStop).not.toHaveBeenCalled();
+    });
+});
+
+describe("withShutdownSignal", () => {
+    it("hands the work a signal that aborts once the shutdown begins, and answers what the work answers", async () => {
+        let begun = false;
+        useShutdownCheck(() => begun);
+        let handed!: AbortSignal;
+
+        const answer = await withShutdownSignal(async (signal) => {
+            handed = signal;
+            expect(signal.aborted).toBe(false);
+            begun = true;
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            return "answer";
+        });
+
+        expect(answer).toBe("answer");
+        expect(handed.aborted).toBe(true);
+    });
+
+    it("stops watching the shutdown when the work ends, even by failing", async () => {
+        const check = jest.fn(() => false);
+        useShutdownCheck(check);
+
+        await expect(
+            withShutdownSignal(async () => {
+                throw new Error("boom");
+            }),
+        ).rejects.toThrow("boom");
+        check.mockClear();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        expect(check).not.toHaveBeenCalled();
     });
 });
 

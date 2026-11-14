@@ -64,7 +64,7 @@ class AudiobookCacheService {
      *
      * `shouldStop` is asked before each book and each page of the prune: once it says yes the sync ends quietly with
      * what it did. A stop before the prune prunes nothing, since the list was not gone through; a stop between pages
-     * leaves the rest of the stale books for the next sync. A run where a book failed prunes nothing either.
+     * leaves the rest of the stale books for the next sync. A run where a book failed, or where the listing came back partial, prunes nothing either.
      */
     syncAll(stop: StopCheck = {}): Promise<SyncResult> {
         if (this.currentSync) {
@@ -94,7 +94,7 @@ class AudiobookCacheService {
             await this.ensureCoverCacheDir();
 
             // Fetch all audiobooks from Audiobookshelf
-            const audiobooks = await audiobookshelfService.getAllAudiobooks();
+            const { books: audiobooks, complete } = await audiobookshelfService.getAllAudiobooks();
 
             logger.debug(
                 `[AUDIOBOOK] Found ${audiobooks.length} audiobooks in Audiobookshelf`
@@ -131,10 +131,15 @@ class AudiobookCacheService {
             );
             result.errors.forEach((err) => logger.debug(`[AUDIOBOOK] ${err}`));
 
-            // Prune books missing from the ABS list, but never on an empty list (that means the fetch failed, and
-            // pruning would wipe the library) and never after a run where a book failed to sync: a failed book may
-            // still be in Audiobookshelf, and the list was not gone through.
-            if (result.failed > 0) {
+            // Prune books missing from the ABS list, but never on a listing that came back partial or empty (a failed
+            // fetch, and pruning would wipe books Audiobookshelf still has) and never after a run where a book failed
+            // to sync: a failed book may still be in Audiobookshelf, and the list was not gone through.
+            if (!complete) {
+                logger.warn(
+                    "[AUDIOBOOK] The Audiobookshelf listing was partial; skipping prune " +
+                    "(books missing from it may still exist)"
+                );
+            } else if (result.failed > 0) {
                 logger.warn(
                     `[AUDIOBOOK] ${result.failed} audiobooks failed to sync; skipping prune ` +
                     "(they may still be in Audiobookshelf)"

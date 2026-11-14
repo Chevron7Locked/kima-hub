@@ -85,3 +85,17 @@ export function runAsRequestWork<T>(run: (stop: StopCheck) => Promise<T>): Promi
 export async function whenRequestWorkEnded(): Promise<void> {
     while (requestWork.size > 0) await Promise.allSettled([...requestWork]);
 }
+
+/**
+ * Runs work that is not given a stop check by its caller (a download inside an enrichment step or a cache fill) with a
+ * signal that aborts once the server's shutdown has begun, so the work ends within a moment instead of running out its
+ * own timeout. The watching ends with the work, whether it answers or fails.
+ */
+export async function withShutdownSignal<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const { signal, release } = stopSignal(shutdownStop());
+    try {
+        return await run(signal);
+    } finally {
+        release();
+    }
+}

@@ -152,3 +152,53 @@ describe("streamAudiobook timeout", () => {
         ).rejects.toThrow("timeout");
     });
 });
+
+// ── The listing the prune relies on ───────────────────────────────────────────
+
+describe("getAllAudiobooks", () => {
+    const book = (id: string) => ({ id });
+    function listingOf(libraries: Array<{ id: string; mediaType: string }>, items: Record<string, unknown>) {
+        const get = jest.fn(async (url: string) => {
+            if (url === "/api/libraries") return { data: { libraries } };
+            const answer = items[url.split("/")[3]];
+            if (answer instanceof Error) throw answer;
+            return { data: answer };
+        });
+        (audiobookshelfService as any).client = { get };
+    }
+
+    it("is complete when every book library answered with all of its items", async () => {
+        listingOf([{ id: "l1", mediaType: "book" }, { id: "m1", mediaType: "music" }], {
+            l1: { results: [book("a"), book("b")], total: 2 },
+        });
+
+        expect(await audiobookshelfService.getAllAudiobooks()).toEqual({ books: [book("a"), book("b")], complete: true });
+    });
+
+    it("is complete when the library does not say its total", async () => {
+        listingOf([{ id: "l1", mediaType: "book" }], { l1: { results: [book("a")] } });
+
+        expect((await audiobookshelfService.getAllAudiobooks()).complete).toBe(true);
+    });
+
+    it("is incomplete when a library answered fewer items than its total", async () => {
+        listingOf([{ id: "l1", mediaType: "book" }], { l1: { results: [book("a")], total: 3 } });
+
+        expect(await audiobookshelfService.getAllAudiobooks()).toEqual({ books: [book("a")], complete: false });
+    });
+
+    it("keeps the books of the libraries that answered, and is incomplete, when another library failed", async () => {
+        listingOf([{ id: "l1", mediaType: "book" }, { id: "l2", mediaType: "book" }], {
+            l1: { results: [book("a")], total: 1 },
+            l2: new Error("503"),
+        });
+
+        expect(await audiobookshelfService.getAllAudiobooks()).toEqual({ books: [book("a")], complete: false });
+    });
+
+    it("fails when no book library could be read at all", async () => {
+        listingOf([{ id: "l1", mediaType: "book" }], { l1: new Error("503") });
+
+        await expect(audiobookshelfService.getAllAudiobooks()).rejects.toThrow("503");
+    });
+});

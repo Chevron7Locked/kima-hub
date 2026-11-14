@@ -6,7 +6,7 @@ import { redisClient } from "../utils/redis";
 import { findAlbumArtwork, findArtistArtwork } from "./artwork";
 import { isMbid } from "./artistIdentity";
 import { downloadAndStoreImage } from "./imageStorage";
-import type { StopCheck } from "../utils/stopCheck";
+import { withShutdownSignal, type StopCheck } from "../utils/stopCheck";
 
 // Cache TTLs
 const ARTIST_IMAGE_TTL = 7 * 24 * 60 * 60; // 7 days
@@ -220,7 +220,9 @@ class DataCacheService {
 
         // Download and store locally
         logger.debug(`[DataCache] Got image from ${source} for ${artistName}, downloading...`);
-        const localPath = await downloadAndStoreImage(externalUrl, artistId, "artist");
+        const localPath = await withShutdownSignal((signal) =>
+            downloadAndStoreImage(externalUrl, artistId, "artist", signal),
+        );
 
         if (localPath) {
             logger.debug(`[DataCache] Stored image locally for ${artistName}: ${localPath}`);
