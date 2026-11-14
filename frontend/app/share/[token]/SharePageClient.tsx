@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { formatTime, formatDuration } from "@/lib/format";
 import { cascadeStyle } from "@/lib/motion";
+import { shareCoverPath } from "@/lib/sharePreviewImage";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 
@@ -157,7 +158,7 @@ export default function SharePageClient() {
     const coverArtId = data ? getCoverUrl(data) : null;
 
     function buildCoverArtUrl(id: string): string {
-        return `/api/share/${token}/cover-art/${encodeURIComponent(id)}?size=500`;
+        return shareCoverPath(token, id);
     }
 
     const coverArtUrl = coverArtId ? buildCoverArtUrl(coverArtId) : null;

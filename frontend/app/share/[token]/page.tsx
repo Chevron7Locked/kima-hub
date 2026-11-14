@@ -11,7 +11,7 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const { token } = await params;
     try {
-        const res = await fetch(`${backendUrl}/api/share/${token}`, {
+        const res = await fetch(`${backendUrl}/api/share/${encodeURIComponent(token)}`, {
             next: { revalidate: 0 },
         });
         if (!res.ok) return { title: "shared music - kima" };

@@ -19,11 +19,16 @@ function origin(headers: Headers): string | null {
     return `${proto === "https" ? "https" : "http"}://${host}`;
 }
 
+/** The share's cover route for one cover (a relative address; the page uses it as is). */
+export function shareCoverPath(token: string, coverId: string): string {
+    return `/api/share/${encodeURIComponent(token)}/cover-art/${encodeURIComponent(coverId)}?size=500`;
+}
+
 export function sharePreviewImage(token: string, entity: ShareEntityCover | undefined, headers: Headers): string | null {
     const cover = entity?.coverUrl || entity?.album?.coverUrl || entity?.items?.[0]?.track?.album?.coverUrl;
     // The cover route serves stored covers only, as the share page itself does.
     if (!cover || !cover.startsWith("native:")) return null;
     const base = origin(headers);
     if (!base) return null;
-    return `${base}/api/share/${encodeURIComponent(token)}/cover-art/${encodeURIComponent(cover)}?size=500`;
+    return `${base}${shareCoverPath(token, cover)}`;
 }
