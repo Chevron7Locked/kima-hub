@@ -26,7 +26,7 @@ import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import * as jobMoves from "./downloads/jobs";
 import { sourcePauseController } from "./sourcePauseController";
-import { artistNamed, isArtistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
+import { artistIdentityKey, artistNamed, isArtistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
 import { containsSql, containsText, hasNonAscii } from "./textMatch";
 import { rankAfter, rankForPosition } from "../utils/lexoRank";
@@ -391,13 +391,22 @@ const SONGS_OF_ARTISTS = (artist: Prisma.ArtistWhereInput) =>
  * `toMatchCandidates`), and these ids find the songs to offer.
  */
 class ShownArtists {
-  private constructor(private readonly shown: { id: string; name: string }[]) {}
+  private constructor(private readonly shown: { id: string; name: string; displayName: string; identityKey: string }[]) {}
 
   static async load(): Promise<ShownArtists> {
     const edited = await prisma.artist.findMany({ where: { displayName: { not: null } }, select: { id: true, displayName: true } });
     return new ShownArtists(
-      edited.flatMap((a) => (a.displayName ? [{ id: a.id, name: normalizeArtistName(a.displayName) }] : [])),
+      edited.flatMap((a) =>
+        a.displayName
+          ? [{ id: a.id, name: normalizeArtistName(a.displayName), displayName: a.displayName, identityKey: artistIdentityKey(a.displayName) }]
+          : [],
+      ),
     );
+  }
+
+  /** Ids of the artists whose shown name is the one `name` names, by the rule `artistNamed` selects the stored name with. */
+  named(name: string): string[] {
+    return this.shown.filter((a) => isArtistNamed({ name: a.displayName, identityKey: a.identityKey }, name)).map((a) => a.id);
   }
 
   /** Ids of the artists shown as one of `names` (normalized). */
@@ -426,6 +435,22 @@ class ShownArtists {
     return this.shown.filter((a) => a.name.startsWith(prefix)).map((a) => a.id);
   }
 }
+
+/** Whether `shownName`, an artist's edited name, is the artist `name` names: the rule `isArtistNamed` applies to the stored name. */
+const isShownAs = (shownName: string, name: string): boolean =>
+  isArtistNamed({ name: shownName, identityKey: artistIdentityKey(shownName) }, name);
+
+/** Whether `artist` is the artist `name` names, by its stored name or its edited one. */
+const isByArtistNamed = (artist: { name: string; identityKey: string; displayName: string | null }, name: string): boolean =>
+  isArtistNamed(artist, name) || (!!artist.displayName && isShownAs(artist.displayName, name));
+
+/** Whether a song is titled `title`, by its stored title or its edited one. */
+const isTitled = (song: { title: string; displayTitle: string | null }, title: string): boolean =>
+  sameName(song.title, title) || (!!song.displayTitle && sameName(song.displayTitle, title));
+
+/** The best fuzzy score of `text` against the names given (a stored name and its edited one; a missing one counts for nothing), 0 when there is none. */
+const bestTokenSetScore = (text: string, names: (string | null)[]): number =>
+  Math.max(0, ...names.flatMap((name) => (name ? [fuzz.token_set_ratio(nameWords(text), nameWords(name))] : [])));
 
 /** The most title-only candidates one lookup reads. */
 const TITLE_CANDIDATES_MAX = 500;
@@ -2649,7 +2674,8 @@ class SpotifyImportService {
 
   /**
    * Import an M3U playlist, matching entries by file path, then filename, then
-   * exact EXTINF artist and title, then fuzzy metadata (token_set_ratio >= 80).
+   * exact EXTINF artist and title, then fuzzy metadata (token_set_ratio >= 80). The metadata tiers read the name a
+   * person edited an artist or song to as well as the stored one.
    */
   async importFromM3U(
     userId: string,
@@ -2700,32 +2726,45 @@ class SpotifyImportService {
         if (basename.length >= MIN_WORD_LENGTH) {
           const sameFile = await prisma.track.findMany({
             where: { AND: [PLAYABLE_SONG, { filePath: { endsWith: `/${basename}${path.extname(entry.filePath)}` } }] },
-            select: { id: true, title: true, album: { select: { artist: { select: { name: true, identityKey: true } } } } },
+            select: {
+              id: true,
+              title: true,
+              displayTitle: true,
+              album: { select: { artist: { select: { name: true, identityKey: true, displayName: true } } } },
+            },
             orderBy: { id: "asc" },
           });
           // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title,
-          // the file's artist or title must agree, each compared as tier 3 compares it (either one is enough here,
-          // where tier 3 needs both). A bare entry has nothing to disagree with.
+          // the file's artist or title must agree, each compared as tier 3 compares it, by the stored or the edited
+          // name (either one is enough here, where tier 3 needs both). A bare entry has nothing to disagree with.
           const named = !!(entry.artist || entry.title);
           track =
             sameFile.find(
               (t) =>
                 !named ||
-                (!!entry.title && sameName(t.title, entry.title)) ||
-                (!!entry.artist && isArtistNamed(t.album.artist, entry.artist)),
+                (!!entry.title && isTitled(t, entry.title)) ||
+                (!!entry.artist && isByArtistNamed(t.album.artist, entry.artist)),
             ) ?? null;
         }
       }
 
       // Tier 3: Exact metadata match (artist + title from EXTINF)
       if (!track && entry.artist && entry.title) {
-        // The artist by its stored identity key, the title by nameKey: both fold case and accents in TypeScript.
+        // The artist by its stored identity key, or by id when its edited name is the one named; the title by nameKey,
+        // stored or edited: both fold case and accents in TypeScript.
+        const entryTitle = entry.title;
+        const shownAs = shownArtists.named(entry.artist);
         const ofArtist = await prisma.track.findMany({
-          where: { AND: [PLAYABLE_SONG, { album: { artist: artistNamed(entry.artist) } }] },
-          select: { id: true, title: true },
+          where: {
+            AND: [
+              PLAYABLE_SONG,
+              { album: { artist: { OR: [artistNamed(entry.artist), ...(shownAs.length > 0 ? [{ id: { in: shownAs } }] : [])] } } },
+            ],
+          },
+          select: { id: true, title: true, displayTitle: true },
           orderBy: { id: "asc" },
         });
-        track = ofArtist.find((t) => sameName(t.title, entry.title)) ?? null;
+        track = ofArtist.find((t) => isTitled(t, entryTitle)) ?? null;
       }
 
       // Tier 4: Fuzzy metadata match (fuzzball >= 80 threshold)
@@ -2743,16 +2782,9 @@ class SpotifyImportService {
           let bestScore = 0;
 
           for (const candidate of candidates) {
-            const titleScore = fuzz.token_set_ratio(
-              nameWords(entry.title),
-              nameWords(candidate.title),
-            );
-            // The name a person edited the artist to counts as well as the stored one.
-            const artistScore = Math.max(
-              ...[candidate.album.artist.name, candidate.album.artist.displayName].flatMap((name) =>
-                name ? [fuzz.token_set_ratio(nameWords(entry.artist), nameWords(name))] : [],
-              ),
-            );
+            // The title or artist name a person edited counts as well as the stored one.
+            const titleScore = bestTokenSetScore(entry.title, [candidate.title, candidate.displayTitle]);
+            const artistScore = bestTokenSetScore(entry.artist, [candidate.album.artist.name, candidate.album.artist.displayName]);
             const combined = titleScore * 0.6 + artistScore * 0.4;
 
             if (combined > bestScore && combined >= 80) {
