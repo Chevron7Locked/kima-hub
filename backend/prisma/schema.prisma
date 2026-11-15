@@ -464,7 +464,6 @@ model PlaylistPendingTrack {
   missingFromDisk  Boolean  @default(false)
   playlist         Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
 
-  @@unique([playlistId, spotifyArtist, spotifyTitle])
   @@unique([playlistId, rank])
   @@index([playlistId, rank])
   @@index([albumMbid])

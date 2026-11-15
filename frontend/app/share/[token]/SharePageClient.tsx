@@ -520,7 +520,7 @@ function SharePage({ token }: { token: string }) {
 
                                 return (
                                     <button
-                                        key={track.id}
+                                        key={`${index}:${track.id}`}
                                         onClick={() => playTrack(index)}
                                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
                                             "animate-rise [animation-delay:calc(var(--i)*var(--stagger))]"

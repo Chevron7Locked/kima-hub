@@ -2174,7 +2174,6 @@ class SpotifyImportService {
           sort: track.originalIndex,
           rank: rankForPosition(track.originalIndex),
         })),
-        skipDuplicates: true,
       });
 
       // Auto-retry: attempt per-track Soulseek download for unmatched tracks
@@ -2261,7 +2260,12 @@ class SpotifyImportService {
 
     let downloadedCount = 0;
 
+    // A song listed twice is fetched once; each waiting entry still joins the playlist when the scan finds it.
+    const fetched = new Set<string>();
     for (const track of pendingTracks) {
+      const key = `${normalizeArtistName(track.artist)}|${track.title.toLowerCase()}`;
+      if (fetched.has(key)) continue;
+      fetched.add(key);
       try {
         const searchResult = await soulseekService.searchTrack(
           track.artist,
@@ -2372,6 +2376,8 @@ class SpotifyImportService {
 
     // Match pending tracks in-memory
     const newPlaylistItems: { playlistId: string; trackId: string; sort: number; rank: string }[] = [];
+    // The waiting entries these copies answer, so a later scan does not add each of them a second time.
+    const answered: Array<{ artist: string; title: string }> = [];
     for (const pendingTrack of job.pendingTracks) {
       const candidates = candidatesByArtist.get(normalizeArtistName(pendingTrack.artist)) || [];
 
@@ -2391,6 +2397,7 @@ class SpotifyImportService {
           // rank is assigned below, once the count is known
           rank: "",
         });
+        answered.push({ artist: pendingTrack.artist, title: pendingTrack.title });
         added++;
       }
     }
@@ -2407,6 +2414,14 @@ class SpotifyImportService {
       await prisma.playlistItem.createMany({
         data: newPlaylistItems.map((item, i) => ({ ...item, rank: ranks[i] })),
       });
+      for (const entry of answered) {
+        const waiting = await prisma.playlistPendingTrack.findFirst({
+          where: { playlistId: job.createdPlaylistId, spotifyArtist: entry.artist, spotifyTitle: entry.title },
+          orderBy: { rank: "asc" },
+          select: { id: true },
+        });
+        if (waiting) await prisma.playlistPendingTrack.deleteMany({ where: { id: waiting.id } });
+      }
       announcePlaylistChange(job.userId, job.createdPlaylistId);
     }
 
