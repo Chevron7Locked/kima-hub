@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { entriesOf, playableQueue } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, playableQueue } from "../services/savedQueue";
 
 const router = express.Router();
 
@@ -78,47 +78,14 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ error: "playbackType must be track, audiobook or podcast" });
         }
 
-        let safeQueue: any[] | null = null;
-        if (Array.isArray(queue) && queue.length > 0) {
-            safeQueue = queue
-                .slice(0, await queueLimit())
-                .filter((item: any) => item && item.id)
-                .map((item: any) => ({
-                    id: String(item.id),
-                    title: String(item.title || "Unknown").substring(0, 500),
-                    // The title as edited in Kima, so every device shows the edit.
-                    displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : null,
-                    duration: Number(item.duration) || 0,
-                    artist: item.artist ? {
-                        id: String(item.artist.id || ""),
-                        name: String(item.artist.name || "Unknown").substring(0, 200),
-                    } : null,
-                    album: item.album ? {
-                        id: String(item.album.id || ""),
-                        title: String(item.album.title || "Unknown").substring(0, 500),
-                        coverArt: item.album.coverArt ? String(item.album.coverArt).substring(0, 1000) : null,
-                    } : null,
-                }));
-
-            if (safeQueue.length === 0) {
-                safeQueue = null;
-            }
-        }
-
         // A request without a `queue` is a partial update — a shuffle toggle, or a
         // track change within the queue the client already has. It must NOT clear
         // the stored queue: only an explicit array replaces it. Same for the fields
         // below; an omitted field is left alone rather than reset to its default.
         const queueProvided = Array.isArray(queue);
-
-        // The index points into a queue: the one sent, or for a save without one the queue already stored. It is never
-        // stored past that queue's last song (0 when there is none).
-        const queueLength = queueProvided
-            ? (safeQueue?.length ?? 0)
-            : typeof currentIndex === "number"
-              ? entriesOf((await prisma.playbackState.findUnique({ where: { userId }, select: { queue: true } }))?.queue).length
-              : 0;
-        const safeCurrentIndex = Math.min(Math.max(0, Math.floor(Number(currentIndex) || 0)), Math.max(queueLength - 1, 0));
+        const accepted = queueProvided ? acceptQueue(queue, currentIndex, await queueLimit()) : null;
+        const safeQueue = accepted?.queue ?? null;
+        const indexOnly = !queueProvided && typeof currentIndex === "number";
 
         // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
         // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
@@ -127,39 +94,46 @@ router.post("/", async (req, res) => {
                 ? queueSource
                 : null;
 
-        const queueUpdate = queueProvided
-            ? {
-                  queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-                  queueSource: safeQueueSource,
-                  currentIndex: safeCurrentIndex,
-              }
-            : typeof currentIndex === "number"
-              ? { currentIndex: safeCurrentIndex }
-              : {};
+        const write = (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number) => {
+            const queueUpdate = queueProvided
+                ? {
+                      queue: safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue),
+                      queueSource: safeQueueSource,
+                      currentIndex: safeCurrentIndex,
+                  }
+                : indexOnly
+                  ? { currentIndex: safeCurrentIndex }
+                  : {};
+            return db.playbackState.upsert({
+                where: { userId },
+                update: {
+                    playbackType,
+                    // Omitted fields are left alone: native clients send partial updates.
+                    ...(trackId !== undefined ? { trackId: trackId || null } : {}),
+                    ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
+                    ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
+                    ...queueUpdate,
+                    ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
+                },
+                create: {
+                    userId,
+                    playbackType,
+                    trackId: trackId || null,
+                    audiobookId: audiobookId || null,
+                    podcastId: podcastId || null,
+                    queue: safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue),
+                    queueSource: safeQueueSource,
+                    currentIndex: safeCurrentIndex,
+                    isShuffle: isShuffle || false,
+                },
+            });
+        };
 
-        const playbackState = await prisma.playbackState.upsert({
-            where: { userId },
-            update: {
-                playbackType,
-                // Omitted fields are left alone: native clients send partial updates.
-                ...(trackId !== undefined ? { trackId: trackId || null } : {}),
-                ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
-                ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
-                ...queueUpdate,
-                ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
-            },
-            create: {
-                userId,
-                playbackType,
-                trackId: trackId || null,
-                audiobookId: audiobookId || null,
-                podcastId: podcastId || null,
-                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-                queueSource: safeQueueSource,
-                currentIndex: safeCurrentIndex,
-                isShuffle: isShuffle || false,
-            },
-        });
+        // The index points into a queue: the one sent, or for a save without one the queue as it stands, which stays
+        // locked until this save is written (see `indexIntoStoredQueue`).
+        const playbackState = indexOnly
+            ? await prisma.$transaction(async (tx) => write(tx, await indexIntoStoredQueue(tx, userId, currentIndex, trackId)))
+            : await write(prisma, accepted?.currentIndex ?? 0);
 
         res.json(playbackState);
     } catch (error) {

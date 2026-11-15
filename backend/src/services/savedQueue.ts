@@ -8,6 +8,10 @@
  *   song, is left out). The stored queue itself is left as it is, so a song whose file comes back returns to it.
  *   When the current song is left out, the next playable one becomes current (else the last one before it), from its
  *   start.
+ * - The index kept with the queue and the entries stay in one coordinate system: the stored one. A client counts what it
+ *   was shown, so a save carries the index into the stored queue (`acceptQueue` for a queue sent whole,
+ *   `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored past the
+ *   stored queue's last entry.
  */
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
@@ -80,6 +84,85 @@ export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionCli
                   }
                 : null,
         }));
+}
+
+/** A whole, non-negative index from whatever a client sent. */
+function wholeIndex(raw: unknown): number {
+    return Math.max(0, Math.floor(Number(raw) || 0));
+}
+
+const clip = (value: unknown, max: number, fallback: string) => String(value || fallback).substring(0, max);
+
+/**
+ * A queue as a client sends it, made into what is stored: entries without an id are dropped, then the queue is cut to
+ * `limit`, and the index (counted over the entries as sent) is carried over to where its song now sits. An index whose
+ * own entry was dropped points at the next entry kept; one past the end points at the last. No entries at all stores
+ * no queue and index 0.
+ */
+export function acceptQueue(raw: readonly unknown[], rawIndex: unknown, limit: number): { queue: QueueEntry[] | null; currentIndex: number } {
+    const index = wholeIndex(rawIndex);
+    const withId = (item: unknown): item is Record<string, any> => Boolean(item && typeof item === "object" && (item as { id?: unknown }).id);
+    const droppedBefore = raw.slice(0, index).filter((item) => !withId(item)).length;
+    const queue = raw
+        .filter(withId)
+        .slice(0, limit)
+        .map((item): QueueEntry => ({
+            id: String(item.id),
+            title: clip(item.title, 500, "Unknown"),
+            // The title as edited in Kima, so every device shows the edit.
+            displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : null,
+            duration: Number(item.duration) || 0,
+            artist: item.artist ? { id: String(item.artist.id || ""), name: clip(item.artist.name, 200, "Unknown") } : null,
+            album: item.album
+                ? {
+                      id: String(item.album.id || ""),
+                      title: clip(item.album.title, 500, "Unknown"),
+                      coverArt: item.album.coverArt ? String(item.album.coverArt).substring(0, 1000) : null,
+                  }
+                : null,
+        }));
+    if (queue.length === 0) return { queue: null, currentIndex: 0 };
+    return { queue, currentIndex: Math.min(Math.max(index - droppedBefore, 0), queue.length - 1) };
+}
+
+/**
+ * Where in the stored queue a save that sends no queue puts the current song. The client counts what it was shown,
+ * which leaves out the songs that are not playable, so its index is mapped onto the stored queue. When it names the
+ * song, the song decides: the stored index that holds it (the client's own count, shown or stored, when that is
+ * where the song is, else the nearest place it sits). A song the stored queue does not hold, or none named, leaves the
+ * mapped index.
+ */
+export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: unknown, trackId: unknown, playable: ReadonlySet<string>): number {
+    if (stored.length === 0) return 0;
+    const asked = wholeIndex(clientIndex);
+    const shownAt = stored.flatMap((item, i) => (playable.has(item.id) ? [i] : []));
+    const counted = Math.min(asked, stored.length - 1);
+    const mapped = shownAt.length === 0 ? counted : shownAt[Math.min(asked, shownAt.length - 1)];
+    if (typeof trackId !== "string" || trackId === "") return mapped;
+    for (const at of [mapped, counted]) if (stored[at].id === trackId) return at;
+    const holding = stored.flatMap((item, i) => (item.id === trackId ? [i] : []));
+    if (holding.length === 0) return mapped;
+    return holding.reduce((best, i) => (Math.abs(i - mapped) < Math.abs(best - mapped) ? i : best));
+}
+
+/**
+ * The index to store for a save that sends no queue, worked out against the queue as it stands. The state row is
+ * locked first, so a queue being written at the same moment finishes first and the index points into that queue, and
+ * the caller's write, in the same transaction, lands before any other. Stores 0 for a person with no stored queue.
+ */
+export async function indexIntoStoredQueue(
+    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "playbackState" | "track">,
+    userId: string,
+    clientIndex: unknown,
+    trackId: unknown,
+): Promise<number> {
+    await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+    const stored = entriesOf((await tx.playbackState.findUnique({ where: { userId }, select: { queue: true } }))?.queue);
+    if (stored.length === 0) return 0;
+    const playable = new Set(
+        (await tx.track.findMany({ where: { id: { in: stored.map((item) => item.id) }, ...PLAYABLE_SONG }, select: { id: true } })).map((t) => t.id),
+    );
+    return pointIntoStored(stored, clientIndex, trackId, playable);
 }
 
 /** The saved queue as a client is shown it. */

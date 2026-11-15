@@ -17,6 +17,7 @@ import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
 import { mountAsServer } from "./helpers/serverMount";
+import { untilLockWait } from "../../__tests__/helpers/lockWait";
 
 const PREFIX = "playback-state-save-test";
 
@@ -24,11 +25,33 @@ const app = express();
 app.use(express.json());
 mountAsServer(app, "/api/playback-state", playbackStateRouter, "/api/playback-state");
 
+const S = "pbsave";
+
 async function cleanup() {
     await prisma.user.deleteMany({ where: { username: { startsWith: PREFIX } } });
+    await prisma.track.deleteMany({ where: { id: { startsWith: S } } });
+    await prisma.album.deleteMany({ where: { id: { startsWith: S } } });
+    await prisma.artist.deleteMany({ where: { id: { startsWith: S } } });
 }
 
-beforeAll(cleanup);
+/** Library songs (and one whose file is gone), so a saved queue points at songs the server really knows. */
+async function seedSongs() {
+    await prisma.artist.create({ data: { id: `${S}art`, name: "Save Artist", identityKey: `${S}-a` } });
+    await prisma.album.create({ data: { id: `${S}alb`, artistId: `${S}art`, rgMbid: `${S}-rg`, identityKey: `${S}-ak`, title: "Save Album", primaryType: "Album" } });
+    for (const [id, missing] of [["s1", false], ["s2", false], ["s3", false], ["s4", false], ["gone", true]] as const) {
+        await prisma.track.create({
+            data: {
+                id: `${S}${id}`, albumId: `${S}alb`, title: id, trackNo: 1, duration: 100, filePath: `/tmp/${S}${id}.flac`,
+                fileModified: new Date(), fileSize: 1, missingSince: missing ? new Date() : null,
+            },
+        });
+    }
+}
+
+beforeAll(async () => {
+    await cleanup();
+    await seedSongs();
+});
 afterAll(async () => {
     await cleanup();
     await prisma.$disconnect();
@@ -124,10 +147,77 @@ describe("POST /api/playback-state: where the queue came from", () => {
 });
 
 describe("POST /api/playback-state: where the player is in the queue", () => {
-    const queue = [{ id: "t1", title: "one", duration: 100 }, { id: "t2", title: "two", duration: 100 }, { id: "t3", title: "three", duration: 100 }];
+    const song = (n: string) => ({ id: `${S}${n}`, title: n, duration: 100 });
+    const queue = [song("s1"), song("s2"), song("s3")];
     const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
     const storedIndex = async (userId: string) => (await prisma.playbackState.findUnique({ where: { userId } }))?.currentIndex;
+    const storedIds = async (userId: string) =>
+        ((await prisma.playbackState.findUnique({ where: { userId } }))?.queue as Array<{ id: string }> | null)?.map((e) => e.id);
     const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+    // The stored queue holds a song whose file is gone, which a client is never shown: its index counts what it was shown.
+    const withGone = [song("s1"), song("gone"), song("s2"), song("s3")];
+
+    it("counts the index by the song named, not by the queue's shape, when a save sends no queue", async () => {
+        const user = await newUser("idx-id");
+        await save(user.id, { playbackType: "track", queue: withGone }).expect(200);
+        // The client was shown s1, s2, s3 and is on s3: its index is 2, the stored queue's is 3.
+        await save(user.id, { playbackType: "track", trackId: `${S}s3`, currentIndex: 2 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(3);
+    });
+
+    it("takes the named song's place whichever way the client counted", async () => {
+        const user = await newUser("idx-either");
+        await save(user.id, { playbackType: "track", queue: withGone }).expect(200);
+        // Counted over the stored queue (an app that keeps it whole).
+        await save(user.id, { playbackType: "track", trackId: `${S}s3`, currentIndex: 3 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(3);
+        // Counted by neither: the song named wins.
+        await save(user.id, { playbackType: "track", trackId: `${S}s2`, currentIndex: 0 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
+    });
+
+    it("with a song that sits twice in the queue, keeps the one nearest where the client says it is", async () => {
+        const user = await newUser("idx-twice");
+        await save(user.id, { playbackType: "track", queue: [song("s1"), song("s2"), song("s1"), song("s3")] }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, currentIndex: 2 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, currentIndex: 0 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(0);
+    });
+
+    it("maps a shown index through the stored queue when the save names no song, or one that is not in it", async () => {
+        const user = await newUser("idx-map");
+        await save(user.id, { playbackType: "track", queue: withGone }).expect(200);
+        await save(user.id, { playbackType: "track", currentIndex: 2 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(3);
+        await save(user.id, { playbackType: "track", trackId: `${S}s4`, currentIndex: 1 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
+    });
+
+    it("counts the index after the entries without an id are dropped, for a save that sends the queue", async () => {
+        const user = await newUser("idx-dropped");
+        await save(user.id, { playbackType: "track", queue: [{ title: "no id" }, song("s1"), null, song("s2"), song("s3")], currentIndex: 3 }).expect(200);
+        expect(await storedIds(user.id)).toEqual([`${S}s1`, `${S}s2`, `${S}s3`]);
+        // The client's index 3 was s2 (counting the entries as it sent them).
+        expect(await storedIndex(user.id)).toBe(1);
+    });
+
+    it("waits for a queue being written and points into that one, so the index never outruns the queue", async () => {
+        const user = await newUser("idx-lock");
+        await save(user.id, { playbackType: "track", queue }).expect(200);
+
+        let partial!: Promise<unknown>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${user.id} FOR UPDATE`;
+            partial = save(user.id, { playbackType: "track", currentIndex: 2 }).then((r) => r);
+            await untilLockWait(`"PlaybackState"`);
+            await tx.playbackState.update({ where: { userId: user.id }, data: { queue: [song("s1")] } });
+        });
+        await partial;
+
+        expect(await storedIds(user.id)).toEqual([`${S}s1`]);
+        expect(await storedIndex(user.id)).toBe(0);
+    });
 
     it("stores an index past the end of the saved queue as its last song when the save sends no queue", async () => {
         const user = await newUser("idx-past");
