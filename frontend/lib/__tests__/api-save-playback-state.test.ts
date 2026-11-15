@@ -69,6 +69,28 @@ it("throws a refused save with its status and the state the server holds", async
     expect(logged).not.toHaveBeenCalled();
 });
 
+it("clears the stored state, naming the time it saw when it has one and nothing when it does not", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({ success: true, cleared: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.clearPlaybackState({ expectedUpdatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/playback-state?expectedUpdatedAt=2026-01-01T00%3A00%3A00.000Z");
+    expect(sentWith(fetchMock).method).toBe("DELETE");
+    fetchMock.mockClear();
+    await api.clearPlaybackState();
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/playback-state$/);
+});
+
+it("throws a refused clear (409) with the state the server holds, and does not log it as a failure", async () => {
+    const held = { trackId: "z", updatedAt: "2026-01-01T00:00:05.000Z" };
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: false, status: 409, statusText: "Conflict", json: async () => ({ error: "changed", state: held }) }),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(api.clearPlaybackState({ expectedUpdatedAt: "x" })).rejects.toMatchObject({ status: 409, data: { state: held } });
+    expect(logged).not.toHaveBeenCalled();
+});
+
 it("does not log a 404 to a save, and still logs any other failure", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const answer = (status: number) =>

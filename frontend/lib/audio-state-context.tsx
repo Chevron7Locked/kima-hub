@@ -617,7 +617,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         };
 
         // The server remembers an item that is gone: forget it and clear what the restore put on screen.
-        const dropIfGone = (err: unknown) => {
+        // `readAt` is the time of the state that was read: only that state is cleared, so one another device saved
+        // since stays, and the next check takes it up.
+        const dropIfGone = (err: unknown, readAt?: string) => {
             if (!isGone(err)) {
                 restoreFailedRef.current = true;
                 // What the server holds was not applied here, so the next check applies it instead of finding it already seen.
@@ -625,7 +627,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 return;
             }
             serverKnownRef.current = null;
-            api.clearPlaybackState().catch(() => {});
+            api.clearPlaybackState(readAt ? { expectedUpdatedAt: readAt } : {}).catch(() => {});
             clearRestoredPlayback();
         };
 
@@ -648,7 +650,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentAudiobook(null);
                             setCurrentPodcast(null);
                         })
-                        .catch(dropIfGone);
+                        .catch((err) => dropIfGone(err, serverState.updatedAt ? String(serverState.updatedAt) : undefined));
                 } else if (
                     serverState.playbackType === "audiobook" &&
                     serverState.audiobookId
@@ -660,7 +662,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentTrack(null);
                             setCurrentPodcast(null);
                         })
-                        .catch(dropIfGone);
+                        .catch((err) => dropIfGone(err, serverState.updatedAt ? String(serverState.updatedAt) : undefined));
                 } else if (
                     serverState.playbackType === "podcast" &&
                     serverState.podcastId
@@ -677,7 +679,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 setCurrentAudiobook(null);
                             }
                         })
-                        .catch(dropIfGone);
+                        .catch((err) => dropIfGone(err, serverState.updatedAt ? String(serverState.updatedAt) : undefined));
                 }
 
                 // A late restore must not overwrite a queue built since page load.
@@ -988,7 +990,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     }
                 } else {
                     serverKnownRef.current = null;
-                    await api.clearPlaybackState().catch(() => {});
+                    // Cleared only while the server still holds the state just read: a device that saved since keeps its
+                    // state, and the check made at once takes it up.
+                    await api.clearPlaybackState({ expectedUpdatedAt: String(held.updatedAt) }).catch((err: unknown) => {
+                        if (hasStatus(err, 409)) nowOwed = true;
+                    });
                 }
             };
 

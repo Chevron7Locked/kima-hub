@@ -232,6 +232,31 @@ router.delete("/", async (req, res) => {
     try {
         const userId = req.user!.id;
 
+        // A clear may name the time of the state it saw (`?expectedUpdatedAt=`, as a read answered it): it then clears
+        // only while that is still the stored time, so a state another device saved since is not wiped by a decision
+        // made on the older one. Omitted, it clears whatever is stored, as every client has until now (the iOS app sends
+        // none). A DELETE carries no body that every proxy forwards, so the time travels in the address.
+        const named = req.query.expectedUpdatedAt;
+        if (named !== undefined) {
+            const expectedAt = typeof named === "string" ? new Date(named) : null;
+            if (!expectedAt || Number.isNaN(expectedAt.getTime())) {
+                return refuseRequest(req, res, "expectedUpdatedAt: a date required");
+            }
+            // The check and the delete run under the lock every save takes, so a save in flight is either before both
+            // or after both.
+            const { count, current } = await prisma.$transaction(async (tx) => {
+                await lockPlaybackState(tx, userId);
+                const { count } = await tx.playbackState.deleteMany({ where: { userId, updatedAt: expectedAt } });
+                return { count, current: count === 0 ? await tx.playbackState.findUnique({ where: { userId } }) : null };
+            }, { timeout: SAVE_TIMEOUT_MS });
+            // A state that is there and is not the one seen: shown as a save shows it, so the client takes it up.
+            if (current) {
+                return res.status(409).json({ error: "Playback state changed since it was read", state: await shownState(current) });
+            }
+            // Cleared, or already gone: what the client wanted gone is gone.
+            return res.json({ success: true, cleared: count });
+        }
+
         // deleteMany, so clearing state that is already gone succeeds; clients call
         // this to recover from state pointing at something deleted.
         const removed = await prisma.playbackState.deleteMany({

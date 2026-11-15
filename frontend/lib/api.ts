@@ -1583,10 +1583,21 @@ class ApiClient {
         });
     }
 
-    async clearPlaybackState() {
-        return this.request<void>("/playback-state", {
-            method: "DELETE",
-        });
+    /**
+     * Clears the saved state. With `expectedUpdatedAt` (the `updatedAt` of the state the caller saw) the server clears
+     * it only while that is still its time, else answers 409 (status 409, `data.state` the state it holds), so a state
+     * another device saved since is never wiped. Without it, whatever is stored is cleared.
+     */
+    async clearPlaybackState(options: { expectedUpdatedAt?: string } = {}) {
+        const named = options.expectedUpdatedAt;
+        return this.request<void>(
+            named === undefined ? "/playback-state" : `/playback-state?expectedUpdatedAt=${encodeURIComponent(named)}`,
+            {
+                method: "DELETE",
+                // The player handles a refused conditional clear (409) itself.
+                expectedStatuses: [409],
+            },
+        );
     }
 
     // Search

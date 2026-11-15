@@ -91,7 +91,12 @@ vi.mock("@/lib/api", () => {
                 server.savesInFlight--;
             }
         },
-        clearPlaybackState: async () => {
+        clearPlaybackState: async (options?: { expectedUpdatedAt?: string }) => {
+            // A clear naming the time it saw clears only while that is still the server's time.
+            const expected = options?.expectedUpdatedAt;
+            if (expected !== undefined && server.state && server.state.updatedAt !== expected) {
+                throw Object.assign(new Error("changed"), { status: 409, data: { state: server.state } });
+            }
             server.clears++;
             server.state = null;
             return {};
@@ -410,6 +415,31 @@ describe("a stored podcast that is gone", () => {
     });
 });
 
+describe("a restore of a song the server no longer has", () => {
+    it("clears the state it read, and leaves one another device saved while the song was asked for", async () => {
+        server.trackGone = true;
+        server.trackDelay = 400;
+        const newer = {
+            playbackType: "track", trackId: "e", audiobookId: null, podcastId: null, queue: [t("e"), t("f")], currentIndex: 0,
+            isShuffle: false, updatedAt: new Date(Date.now() + 9000).toISOString(),
+        };
+        await open();
+        await wait(50);
+        server.state = newer;
+        await wait(800);
+        expect(server.clears).toBe(0);
+        expect(server.state).toBe(newer);
+    });
+
+    it("clears the state when it is still the one read", async () => {
+        server.trackGone = true;
+        await open();
+        await wait(300);
+        expect(server.clears).toBe(1);
+        expect(server.state).toBeNull();
+    });
+});
+
 describe("an audiobook taken out of the player", () => {
     it("tells the server, and playing it again saves again", async () => {
         server.state = { playbackType: "audiobook", audiobookId: "book", queue: null, currentIndex: 0, isShuffle: false, updatedAt: new Date(Date.now() - 60_000).toISOString() };
@@ -643,6 +673,37 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(server.saves).toEqual([]);
         await pollNow(tick());
         expect(server.clears).toBe(1);
+    });
+
+    it("is not cleared over a state another device saved between the read and the clear, and that state is taken up", async () => {
+        const tick = capturePoll();
+        server.trackFails = true;
+        await open();
+        await wait(1500);
+        expect(probe.state.currentTrack).toBeNull();
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        // The poll's own read answers at once; the one made before clearing is answered with the state it saw, and
+        // its answer is held on its way.
+        let letGo: () => void = () => undefined;
+        server.readGate = new Promise<void>((resolve) => { letGo = resolve; });
+        server.readsToPass = 1;
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        // Another device saves meanwhile; the clear then finds it is not the state that was read.
+        const newer = fromOtherDevice({ trackId: "e", queue: [t("e"), t("f")], updatedAt: new Date(Date.now() + 9000).toISOString() });
+        server.state = newer;
+        server.trackFails = false;
+        server.readGate = null;
+        await act(async () => letGo());
+        await act(async () => polling);
+        await wait(50);
+        expect(server.clears).toBe(0);
+        expect(server.state).toBe(newer);
+        // The newer state is taken up by the check made at once.
+        expect(probe.state.currentTrack?.id).toBe("e");
     });
 
     it("is left alone when another device saved a newer state while it was being asked for", async () => {
