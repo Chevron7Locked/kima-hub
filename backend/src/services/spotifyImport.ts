@@ -265,7 +265,10 @@ export async function getImportJob(importJobId: string): Promise<ImportJob | nul
   try {
     const cached = await redisClient.get(IMPORT_JOB_KEY(importJobId));
     if (cached) {
-      return JSON.parse(cached);
+      const job: ImportJob = JSON.parse(cached);
+      // A job that made its playlist has its counts changed by the playlist's own writes (a dismissal, a scan placing
+      // a song), which go to the database alone: the database is its truth, the cache only serves a job still running.
+      if (!job.createdPlaylistId) return job;
     }
   } catch (error) {
     logger.warn(

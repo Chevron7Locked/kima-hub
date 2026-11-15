@@ -1,7 +1,8 @@
 /**
  * Dismissing a waiting import entry (DELETE /playlists/:id/pending/:trackId) takes the playlist lock like every other
- * write to the playlist, so a scan that is placing the same song cannot add it back after the person said no. Real
- * database, real router and Redis; auth via JWT.
+ * write to the playlist, so a scan that is placing the same song cannot add it back after the person said no. The
+ * import the playlist came from loses that listing too: its total and its saved listing both shrink, whatever the
+ * cached copy of the job held. Real database, real router and Redis; auth via JWT.
  */
 
 import express from "express";
@@ -11,6 +12,7 @@ import playlistsRoutes from "../playlists";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { lockPlaylist, placeFoundSongs } from "../../services/playlistService";
+import { getImportJob } from "../../services/spotifyImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "./helpers/serverMount";
 
@@ -121,5 +123,35 @@ describe("DELETE /playlists/:id/pending/:trackId", () => {
     it("answers not found once the entry has been answered or dismissed", async () => {
         expect((await dismiss(waitingIds[0])).status).toBe(200);
         expect((await dismiss(waitingIds[0])).status).toBe(404);
+    });
+
+    it("takes the listing off the import: the total drops by one and the saved listing loses that entry", async () => {
+        const res = await dismiss(waitingIds[1]);
+        expect(res.status).toBe(200);
+        const job = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } });
+        expect(job.tracksTotal).toBe(2);
+        expect((job.pendingTracks as ReturnType<typeof listing>[]).map((l) => l.title)).toEqual(["one", "three"]);
+    });
+
+    it("shows the new counts to a reader of the job even when a copy of the job was cached before", async () => {
+        expect((await getImportJob(JOB))!.tracksTotal).toBe(3); // caches the job
+        await dismiss(waitingIds[0]);
+        const job = (await getImportJob(JOB))!;
+        expect(job.tracksTotal).toBe(2);
+        expect(job.pendingTracks.map((l) => l.title)).toEqual(["two", "three"]);
+    });
+
+    it("drops only one copy of a listing the import held twice", async () => {
+        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { tracksTotal: 4, pendingTracks: [LISTINGS[0], LISTINGS[0], LISTINGS[1], LISTINGS[2]] } });
+        await dismiss(waitingIds[0]);
+        const job = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } });
+        expect(job.tracksTotal).toBe(3);
+        expect((job.pendingTracks as ReturnType<typeof listing>[]).map((l) => l.title)).toEqual(["one", "two", "three"]);
+    });
+
+    it("dismisses on a playlist no import made, touching no job", async () => {
+        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { createdPlaylistId: null } });
+        expect((await dismiss(waitingIds[0])).status).toBe(200);
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } })).tracksTotal).toBe(3);
     });
 });

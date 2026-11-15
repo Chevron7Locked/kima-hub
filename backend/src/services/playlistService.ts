@@ -4,6 +4,7 @@
  * cannot collide.
  */
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { rankAfter, rankBetween, rankForPosition, rankSequence, ranksBetween } from "../utils/lexoRank";
@@ -217,9 +218,43 @@ export async function addTracks(
 }
 
 /**
+ * The import that made a playlist keeps the counts a person reads (listings in all, songs matched). They change in the
+ * same transaction, under the same playlist lock, as the waiting entries they count, and by increment, so two writers
+ * finishing together cannot undo each other. A playlist no import made has no job to change.
+ */
+async function settleImportCounts(
+    tx: Pick<typeof prisma, "spotifyImportJob">,
+    playlistId: string,
+    change: { dismissed: { spotifyArtist: string; spotifyTitle: string; spotifyAlbum: string } }
+): Promise<void> {
+    const job = await tx.spotifyImportJob.findFirst({
+        where: { createdPlaylistId: playlistId },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, tracksTotal: true, pendingTracks: true },
+    });
+    if (!job) return;
+
+    const data: Prisma.SpotifyImportJobUpdateInput = {};
+    const gone = change.dismissed;
+    // The saved listing is the import's own list of what it was asked for: the dismissed entry leaves it, one copy of a
+    // listing the source held twice at a time, preferring one the import never matched on its own.
+    const saved = Array.isArray(job.pendingTracks) ? [...(job.pendingTracks as Array<Record<string, unknown>>)] : [];
+    const same = (l: Record<string, unknown>) =>
+        l.artist === gone.spotifyArtist && l.title === gone.spotifyTitle && l.album === gone.spotifyAlbum;
+    const at = saved.findIndex((l) => same(l) && !l.preMatchedTrackId);
+    const index = at >= 0 ? at : saved.findIndex(same);
+    if (index >= 0) {
+        saved.splice(index, 1);
+        data.pendingTracks = saved as Prisma.InputJsonValue;
+    }
+    if (job.tracksTotal > 0) data.tracksTotal = { decrement: 1 };
+    if (Object.keys(data).length > 0) await tx.spotifyImportJob.update({ where: { id: job.id }, data });
+}
+
+/**
  * A person dismisses a waiting entry: they will not wait for that song. It is the one way a person removes an entry,
  * and it takes the playlist lock like every other write, so a scan placing the same song cannot add it back after the
- * entry is gone. Returns false when there is no such entry on the playlist (already answered or dismissed).
+ * entry is gone. The import it came from stops counting that listing. Returns false when there is no such entry on the playlist (already answered or dismissed).
  */
 export async function dismissWaitingEntry(playlistId: string, pendingId: string): Promise<boolean> {
     return prisma.$transaction(async (tx) => {
@@ -227,6 +262,7 @@ export async function dismissWaitingEntry(playlistId: string, pendingId: string)
         const entry = await tx.playlistPendingTrack.findFirst({ where: { id: pendingId, playlistId } });
         if (!entry) return false;
         await tx.playlistPendingTrack.delete({ where: { id: entry.id } });
+        await settleImportCounts(tx, playlistId, { dismissed: entry });
         return true;
     });
 }
