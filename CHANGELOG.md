@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Starting a new queue, or moving to another song, from the web player or the iOS app resets a Subsonic app's resume point to the start of the song, instead of keeping the place from the old one.
 - Clearing an album or song title in the metadata editor removes your edit and shows the original title again.
 - The web metadata editor saves only what you changed, so editing a title no longer locks in the album's cover, genres and year.
 - A metadata edit with a malformed field gets a plain error instead of a server error.
