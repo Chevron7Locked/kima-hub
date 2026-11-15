@@ -229,7 +229,8 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string)
     const end = res.end.bind(res) as (...args: unknown[]) => Response;
     res.end = ((...args: unknown[]) => {
         if (streamStarted(res)) return end(...args);
-        void undoWithinReason(undo, shareId).finally(() => end(...args));
+        // The response ends whatever the take-back does, so a rejection of it must not become an unhandled one.
+        void undoWithinReason(undo, shareId).catch(() => undefined).finally(() => end(...args));
         return res;
     }) as Response["end"];
     res.once("close", () => {

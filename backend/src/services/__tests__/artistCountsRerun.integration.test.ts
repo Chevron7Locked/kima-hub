@@ -23,6 +23,8 @@ beforeAll(async () => {
     await addAlbum(0);
 });
 
+afterEach(() => jest.restoreAllMocks());
+
 afterAll(async () => {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });

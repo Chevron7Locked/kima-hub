@@ -20,9 +20,9 @@ export function crossedProgressMark(before: number, after: number): boolean {
   return Math.floor(after / PROGRESS_EVERY) > Math.floor(before / PROGRESS_EVERY);
 }
 
-/** How far a recount is, as a percent: artists attempted (counted or failed) of the total read at the start, never past 100 (artists can arrive mid-run). */
+/** How far a recount is, as a percent: artists attempted (counted or failed) of the total read at the start, never past 100 (artists can arrive mid-run); nothing to recount reads as done. */
 function percentAttempted(attempted: number, total: number): number {
-  return total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
+  return total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 100;
 }
 
 interface ArtistCounts {
@@ -190,7 +190,7 @@ async function recountEveryArtist(
 
     if (crossedProgressMark(attemptedAtLastBatch, attempted)) {
       const percent = total > 0 ? ` (${percentAttempted(attempted, total)}%)` : "";
-      logger.info(`[ArtistCounts] Progress: ${attempted}/${total}${percent}, ${backfillProgress.errors} failed`);
+      logger.info(`[ArtistCounts] Progress: ${attempted}/${total}${percent}${backfillProgress.errors > 0 ? `, ${backfillProgress.errors} failed` : ""}`);
     }
     attemptedAtLastBatch = attempted;
 

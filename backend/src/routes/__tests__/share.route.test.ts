@@ -707,26 +707,30 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             const { token, id } = await own({ maxPlays: 1 });
             const logged = expectLog('warn');
             const realExecute: any = prisma.$executeRaw.bind(prisma);
-            let release!: (rows: number) => void;
-            const held = new Promise<number>((resolve) => (release = resolve));
-            let calls = 0;
-            // The first statement is the count; the second is the take-back, which stalls.
+            let release!: () => void;
+            const held = new Promise<void>((resolve) => (release = resolve));
+            // The take-back (the statement that lowers the count) stalls until released, then runs; counting the play does not.
             const execute = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
-                calls++ === 0 ? realExecute(...args) : held) as never);
+                String((args[0] as TemplateStringsArray)?.join?.(' ')).includes('GREATEST') ? held.then(() => realExecute(...args)) : realExecute(...args)) as never);
             try {
+                const started = Date.now();
                 const res = await get(token, songs.playable, { 'If-None-Match': '*' });
                 expect(res.status).toBe(304);
+                // It waited for the take-back a few seconds, not until the stall ended (the case's own limit is 15 s).
+                expect(Date.now() - started).toBeLessThan(8_000);
                 expect(logged).toHaveBeenCalledWith(expect.stringContaining('Giving back a play'));
                 // The window is still held while the take-back has not finished.
                 expect(await redisClient.keys(`*${id}*`)).not.toEqual([]);
 
-                release(1);
+                release();
                 await settleShareBackgroundWork();
                 expect(await redisClient.keys(`*${id}*`)).toEqual([]);
             } finally {
-                release(1);
+                release();
                 execute.mockRestore();
             }
+            // The take-back did happen: the play counted at the start was given back.
+            expect(await playsOf(token)).toBe(0);
         }, 15_000);
 
         it('does not count a play for a file with nothing in it', async () => {
