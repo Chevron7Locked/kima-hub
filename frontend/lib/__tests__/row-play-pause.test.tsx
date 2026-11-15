@@ -63,6 +63,7 @@ import { TrackList as AlbumTrackList } from "@/features/album/components/TrackLi
 import { PopularTracks } from "@/features/artist/components/PopularTracks";
 import { TrackList as DiscoverTrackList } from "@/features/discover/components/TrackList";
 import MixPage from "@/app/mix/[id]/page";
+import { LibraryTracksList } from "@/features/search/components/LibraryTracksList";
 
 const dom = mountHost();
 
@@ -266,4 +267,28 @@ describe("the Discover playlist's song list", () => {
         },
         () => onPlayTrack.mock.calls.length,
     );
+});
+
+describe("the search page's library songs", () => {
+    const song = (id: string) => ({ id, title: id, duration: 100, album: { id: "al", title: "Album", coverUrl: null, artist: { id: "ar", name: "Artist" } } });
+    const mount = () => act(() => dom.root.render(<LibraryTracksList tracks={[song("a"), song("b")] as never} />));
+    const first = (place: number) => dom.host.querySelectorAll<HTMLButtonElement>(".group > button")[place];
+
+    it("pauses the current song while it sounds, resumes it when paused, and starts the list from another row", async () => {
+        audio.currentTrack = { id: "b" };
+        audio.isPlaying = true;
+        mount();
+        await act(async () => first(1).click());
+        expect(audio.pause).toHaveBeenCalledTimes(1);
+        expect(audio.playTracks).not.toHaveBeenCalled();
+
+        audio.isPlaying = false;
+        mount();
+        await act(async () => first(1).click());
+        expect(audio.resumeWithGesture).toHaveBeenCalledTimes(1);
+        expect(audio.playTracks).not.toHaveBeenCalled();
+
+        await act(async () => first(0).click());
+        expect(audio.playTracks).toHaveBeenCalledTimes(1);
+    });
 });

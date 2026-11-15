@@ -3,8 +3,8 @@
 import { Play, Pause, Music } from "lucide-react";
 import Link from "next/link";
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { usePlayRow } from "@/hooks/usePlayRow";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
@@ -20,8 +20,8 @@ interface LibraryTracksListProps {
 
 export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
-    const { playTracks, pause, resumeWithGesture } = useAudioControls();
+    const { isPlaying, playRow } = usePlayRow();
+    const { playTracks } = useAudioControls();
 
     if (!tracks || tracks.length === 0) {
         return null;
@@ -44,15 +44,7 @@ export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
             },
         }));
 
-        if (currentTrack?.id === track.id) {
-            if (isPlaying) {
-                pause();
-            } else {
-                resumeWithGesture();
-            }
-        } else {
-            playTracks(formattedTracks, index);
-        }
+        playRow(currentTrack?.id === track.id, () => playTracks(formattedTracks, index));
     };
 
     return (
