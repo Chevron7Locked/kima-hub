@@ -14,7 +14,8 @@ jest.mock("../notificationService", () => ({
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService, getImportJob } from "../spotifyImport";
+import { spotifyImportService, getImportJob, announceImportCounts } from "../spotifyImport";
+import { eventBus } from "../eventBus";
 import { dismissWaitingEntry, placeFoundSongs } from "../playlistService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -153,6 +154,70 @@ describe("songs a scan or a refresh places", () => {
             data: { playlistId: playlist.id, spotifyArtist: "A", spotifyTitle: "T", spotifyAlbum: "x", sort: 0, rank: "a" },
         });
         await expect(placeFoundSongs(playlist.id, [{ trackId: kept, pendingId: entry.id }])).resolves.toHaveLength(1);
+    });
+});
+
+describe("an import whose row was made before its listing was known", () => {
+    it("keeps the listing it saves, so a dismissal can take its entry off it", async () => {
+        await prisma.spotifyImportJob.create({
+            data: { id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", albumsTotal: 0, tracksTotal: 3, pendingTracks: [] },
+        });
+        const entries = [matched(), waiting(1), waiting(2)];
+        const playlistId = await importOf(entries);
+        const saved = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } });
+        expect((saved.pendingTracks as Array<{ title: string }>).map((l) => l.title)).toEqual(entries.map((e) => e.title));
+
+        const [first] = await waitingIds(playlistId);
+        await dismissWaitingEntry(playlistId, first);
+        const after = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } });
+        expect((after.pendingTracks as Array<{ title: string }>).map((l) => l.title)).toEqual([entries[0].title, entries[2].title]);
+        expect(after.tracksTotal).toBe(2);
+    });
+});
+
+describe("the person's open import page", () => {
+    /** The import:progress events the person's connected clients get while `run` runs. */
+    async function progressDuring(run: () => Promise<unknown>) {
+        const seen: Array<Record<string, unknown>> = [];
+        const unsubscribe = eventBus.subscribe(USER, {
+            send: (event) => {
+                if (event.type === "import:progress") seen.push(event.payload);
+                return true;
+            },
+        });
+        try {
+            await run();
+        } finally {
+            unsubscribe();
+        }
+        return seen;
+    }
+
+    it("is told the new counts when a scan places songs", async () => {
+        const playlistId = await importOf([matched(), waiting(1), waiting(2)]);
+        await libraryGains(1);
+        const seen = await progressDuring(() => spotifyImportService.reconcilePendingTracks(playlistId));
+        expect(seen.at(-1)).toMatchObject({ jobId: JOB, tracksMatched: 2, tracksTotal: 3 });
+    });
+
+    it("is told nothing when a scan places nothing", async () => {
+        const playlistId = await importOf([matched(), waiting(1)]);
+        expect(await progressDuring(() => spotifyImportService.reconcilePendingTracks(playlistId))).toEqual([]);
+    });
+
+    it("is told the new counts when a waiting song is dismissed", async () => {
+        const playlistId = await importOf([matched(), waiting(1), waiting(2)]);
+        const [first] = await waitingIds(playlistId);
+        const seen = await progressDuring(async () => {
+            await dismissWaitingEntry(playlistId, first);
+            await announceImportCounts(playlistId);
+        });
+        expect(seen.at(-1)).toMatchObject({ jobId: JOB, tracksMatched: 1, tracksTotal: 2 });
+    });
+
+    it("is told nothing for a playlist no import made", async () => {
+        const playlist = await prisma.playlist.create({ data: { userId: USER, name: `${P} mine` } });
+        expect(await progressDuring(() => announceImportCounts(playlist.id))).toEqual([]);
     });
 });
 

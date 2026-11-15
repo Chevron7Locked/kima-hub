@@ -184,6 +184,8 @@ async function saveImportJob(job: ImportJob): Promise<void> {
       tracksDownloadable: job.tracksDownloadable,
       createdPlaylistId: job.createdPlaylistId,
       error: job.error,
+      // A job row made before its listing was known keeps the listing it later saves, not an empty one.
+      pendingTracks: job.pendingTracks as any,
       updatedAt: new Date(),
     },
   });
@@ -220,6 +222,24 @@ function announceImportProgress(job: ImportJob): void {
       error: job.error,
     },
   });
+}
+
+/**
+ * Tell the person's open import page the counts of the import that made `playlistId`, as the database holds them now.
+ * A write to a playlist's waiting entries (a dismissal, a scan placing songs) changes those counts without saving the
+ * job, so it calls this after it commits. A playlist no import made has nothing to announce.
+ */
+export async function announceImportCounts(playlistId: string): Promise<void> {
+  try {
+    const row = await prisma.spotifyImportJob.findFirst({
+      where: { createdPlaylistId: playlistId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (row) announceImportProgress(toImportJob(row));
+  } catch (error) {
+    // The write it follows is committed: a missed announcement is logged, not raised.
+    logger.warn(`Could not announce import counts for playlist ${playlistId}:`, error);
+  }
 }
 
 /**
@@ -2610,6 +2630,7 @@ class SpotifyImportService {
       const { playlist } = pendingTracks[0];
       try {
         announcePlaylistChange(playlist.userId, playlist.id);
+        await announceImportCounts(playlist.id);
         await notificationService.create({
           userId: playlist.userId,
           type: "playlist_ready",

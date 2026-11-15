@@ -13,6 +13,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { lockPlaylist, placeFoundSongs } from "../../services/playlistService";
 import { getImportJob } from "../../services/spotifyImport";
+import { eventBus } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "./helpers/serverMount";
 
@@ -147,6 +148,22 @@ describe("DELETE /playlists/:id/pending/:trackId", () => {
         const job = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } });
         expect(job.tracksTotal).toBe(3);
         expect((job.pendingTracks as ReturnType<typeof listing>[]).map((l) => l.title)).toEqual(["one", "two", "three"]);
+    });
+
+    it("tells the person's open import page the new counts", async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const unsubscribe = eventBus.subscribe(owner, {
+            send: (event) => {
+                if (event.type === "import:progress") seen.push(event.payload);
+                return true;
+            },
+        });
+        try {
+            expect((await dismiss(waitingIds[2])).status).toBe(200);
+        } finally {
+            unsubscribe();
+        }
+        expect(seen.at(-1)).toMatchObject({ jobId: JOB, tracksTotal: 2, createdPlaylistId: playlistId });
     });
 
     it("dismisses on a playlist no import made, touching no job", async () => {

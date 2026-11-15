@@ -11,6 +11,7 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
+import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
     downloadSources,
@@ -512,6 +513,7 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
         }
 
         announcePlaylistChange(req.user!.id, req.params.id);
+        await announceImportCounts(req.params.id);
         res.json({ message: "Pending track removed" });
     } catch (error: any) {
         logger.error("Delete pending track error:", error);
