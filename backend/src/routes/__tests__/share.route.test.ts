@@ -9,6 +9,8 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
 import fs from 'fs';
+import http from 'http';
+import type { AddressInfo } from 'net';
 import path from 'path';
 import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
@@ -722,6 +724,44 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
             expect(await redisClient.ttl(key)).toBeGreaterThan(25);
             expect(await playsOf(token)).toBe(1);
+        });
+
+        it('a response still open keeps its play going: a listener paused past the window who then seeks is not a new play', async () => {
+            const full = path.join(config.music.musicPath, DIR, 'long.flac');
+            fs.writeFileSync(full, Buffer.alloc(24 * 1024 * 1024));
+            const long = await prisma.track.create({ data: { albumId, title: 'long', duration: 100, trackNo: 10, filePath: `${DIR}/long.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
+            const { token, id } = await own({ maxPlays: 1 }, long.id);
+
+            // Only the timer a response keeps while it is open is captured, so the test runs it by hand.
+            const ticks: Array<() => void> = [];
+            const realSetInterval = global.setInterval;
+            const spy = jest.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+                if (typeof ms === 'number' && ms < 30_000) {
+                    ticks.push(fn);
+                    return realSetInterval(() => undefined, 60_000);
+                }
+                return realSetInterval(fn, ms);
+            }) as typeof setInterval);
+            const server = http.createServer(app).listen(0);
+            let reply: http.IncomingMessage | undefined;
+            try {
+                const { port } = server.address() as AddressInfo;
+                reply = await new Promise<http.IncomingMessage>((resolve, reject) =>
+                    http.get({ port, path: `/share/${token}/stream/${long.id}` }, resolve).on('error', reject));
+                reply.pause();
+                const [key] = await redisClient.keys(`*${id}*`);
+                await redisClient.expire(key, 3);
+
+                ticks.forEach(tick => tick());
+                await new Promise(resolve => setTimeout(resolve, 150));
+
+                expect(await redisClient.ttl(key)).toBeGreaterThan(25);
+            } finally {
+                spy.mockRestore();
+                reply?.destroy();
+                server.closeAllConnections();
+                server.close();
+            }
         });
 
         it('a request that is not a follow-up does not leave a window behind when it is refused', async () => {

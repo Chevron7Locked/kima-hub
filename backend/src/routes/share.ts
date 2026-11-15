@@ -106,13 +106,26 @@ async function loadUsableShareLink(token: string, res: Response) {
  * play going however long the song is, and it ends 30 s after the last of them. With Redis down no play is known: each
  * request counts.
  */
-async function continuePlay(key: string): Promise<boolean> {
+async function renewPlayIfCounted(key: string): Promise<boolean> {
     try {
         return (await redisClient.expire(key, PLAY_WINDOW_SECONDS)) === 1;
     } catch (error) {
         logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
         return false;
     }
+}
+
+/**
+ * A listener who pauses holds one response open and may seek later, past the window. While a response of the play is
+ * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play.
+ */
+function keepWindowWhileOpen(res: Response, key: string): void {
+    const timer = setInterval(() => void renewPlayIfCounted(key), PLAY_WINDOW_SECONDS * 1000 / 3);
+    timer.unref();
+    res.once("close", () => {
+        clearInterval(timer);
+        void renewPlayIfCounted(key);
+    });
 }
 
 /** Takes the window for this play. False when a request of the same play took it first; true too when Redis is down. */
@@ -306,7 +319,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // A listener's follow-up requests (a seek, the next range) belong to a play already counted: they are not a new
         // play, and the limit, which that play may just have reached, does not apply to them. Expiry still does.
-        const followUp = await continuePlay(playKey);
+        const followUp = await renewPlayIfCounted(playKey);
         if (!followUp && outOfPlays(shareLink)) {
             return sendEnded(res, "play-limit");
         }
@@ -357,12 +370,17 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // The first request of a play takes the window and counts it. A request that finds the window taken belongs to
         // that play: two requests arriving together are one play.
+        let ownsPlay = followUp;
         if (!followUp && (await claimPlayWindow(playKey))) {
             if (!(await countPlay(shareLink.id))) {
                 await releasePlayWindow(playKey);
                 return sendEnded(res, "play-limit");
             }
             keepPlayOnlyIfStreamStarts(res, shareLink.id, playKey);
+            ownsPlay = true;
+        }
+        if (ownsPlay) {
+            keepWindowWhileOpen(res, playKey);
         }
 
         const mimeType = getMimeType(track.filePath);
