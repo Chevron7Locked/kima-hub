@@ -5,7 +5,7 @@
  * not a pass; half a length has no 30-second floor.
  */
 
-import { ListenSource } from "@prisma/client";
+import { ListenSource, type Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { listenBrainzService } from "./listenBrainz";
@@ -142,6 +142,29 @@ export async function lockPlayHistory(
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId}))`;
     } else {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId}))`;
+    }
+}
+
+/**
+ * Takes the shared play-history lock of everyone who has played one of these songs, for a caller about to move or
+ * change those plays. Listeners are read, locked, and read again, until no new one has appeared: a play recorded while
+ * the locks were being taken belongs to a listener the first read could not know of. No cycle can form, because a
+ * repair holds one listener's lock at a time and a shared lock never waits on another shared one.
+ */
+export async function lockPlayHistoryOfListeners(tx: Prisma.TransactionClient, trackIds: string[]): Promise<void> {
+    const locked = new Set<string>();
+    for (;;) {
+        const listeners = await tx.play.findMany({
+            where: { trackId: { in: trackIds }, userId: { notIn: [...locked] } },
+            select: { userId: true },
+            distinct: ["userId"],
+            orderBy: { userId: "asc" },
+        });
+        if (listeners.length === 0) return;
+        for (const { userId } of listeners) {
+            await lockPlayHistory(tx, userId);
+            locked.add(userId);
+        }
     }
 }
 

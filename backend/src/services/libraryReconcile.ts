@@ -10,7 +10,7 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { announcePlaylistsChanged, playlistsHoldingTracks, type HeldPlaylist } from "./playlistEvents";
-import { lockPlayHistory, PLAY_HISTORY_REPAIR_MAX_MS } from "./playRecording";
+import { lockPlayHistoryOfListeners, PLAY_HISTORY_REPAIR_MAX_MS } from "./playRecording";
 
 interface ReconcileResult {
     /**
@@ -145,18 +145,8 @@ async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: str
         if (pairs.at(-1)?.gone !== row.gone) pairs.push({ gone: row.gone, kept: row.kept });
     }
     // Plays move under the shared play-history lock of each listener they belong to, so a repair of that history (which
-    // reads, judges and deletes under the exclusive one) never sees it change in the middle. The locks are taken up
-    // front in one sorted order, before any play row is touched, as the repair and a recording both take theirs
-    // before touching rows: no two holders can then wait on each other.
-    if (pairs.length > 0) {
-        const listeners = await tx.play.findMany({
-            where: { trackId: { in: pairs.map((p) => p.gone) } },
-            select: { userId: true },
-            distinct: ["userId"],
-            orderBy: { userId: "asc" },
-        });
-        for (const { userId } of listeners) await lockPlayHistory(tx, userId);
-    }
+    // reads, judges and deletes under the exclusive one) never sees it change in the middle.
+    if (pairs.length > 0) await lockPlayHistoryOfListeners(tx, pairs.map((p) => p.gone));
     for (const { gone, kept } of pairs) {
         await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
         await tx.$executeRaw`
