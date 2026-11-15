@@ -433,6 +433,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         lastServerSyncRef.current = at;
         setLastServerSync(at);
     }, []);
+    // A job's guard (the time it names) ends with the job: once it landed or was refused, what stays owed is the plain
+    // save, which a later send does not hold to a time that is no longer the server's.
+    const endGuard = useCallback((done: PlaybackSave) => {
+        const s = saveRef.current;
+        const owed = s.latest;
+        const guard = done.state.expectedUpdatedAt;
+        if (guard === undefined || !owed || owed.run !== done.run || owed.state.expectedUpdatedAt !== guard) return;
+        const plain: PlaybackSave = { ...owed, state: { ...owed.state } };
+        delete plain.state.expectedUpdatedAt;
+        delete plain.force;
+        s.latest = plain;
+    }, []);
     // Sends one save and says how it ended.
     const sendSave = useCallback(async (next: PlaybackSave): Promise<SaveOutcome> => {
         const s = saveRef.current;
@@ -448,6 +460,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             serverKnownRef.current = next.key;
             landedSavesRef.current += 1;
             markSynced(new Date(result.updatedAt));
+            endGuard(next);
             if (saveRunRef.current === next.run) {
                 savePendingRef.current = false;
                 s.failures = 0;
@@ -459,6 +472,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             // owed, and whoever sent it takes the other state up. Only a save that named a time can be refused so; any
             // other 409 is a failure like the rest.
             if (next.state.expectedUpdatedAt !== undefined && hasStatus(err, 409)) {
+                endGuard(next);
                 if (saveRunRef.current === next.run) {
                     savePendingRef.current = false;
                     s.failures = 0;
@@ -477,7 +491,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             }
             return "failed";
         }
-    }, [markSynced]);
+    }, [markSynced, endGuard]);
     // A save that is replaced by a newer one before its turn is not sent; whoever asked for it hears how the newer ended.
     const submitSave = useCallback((job: PlaybackSave): Promise<SaveOutcome> => {
         const s = saveRef.current;
@@ -815,14 +829,29 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const flush = () => {
             const s = saveRef.current;
             if (!s.latest) return;
-            const sendAsPageGoes = (job: PlaybackSave) => void submitSave({ ...job, keepalive: true });
+            const sendAsPageGoes = (job: PlaybackSave) => {
+                if (!s.draining) {
+                    void submitSave({ ...job, keepalive: true });
+                    return;
+                }
+                // A save is on its way, and the page may not outlive it: the queue sends only after it answers, so what
+                // waits behind it would be lost. The newest state goes out now beside it, kept alive. It cannot take
+                // its turn after the older one at the server any more than the older one's own retry could, so the worst
+                // case is the state the server would have held without this send. Forced, since the server is not yet
+                // known to hold what the one on its way says (a change that undoes it looks like a repeat). The queued
+                // copy follows in the ordinary way: skipped if this one landed, sent if the older one answered after it.
+                void sendSave({ ...job, keepalive: true, force: true });
+                void submitSave(job);
+            };
             if (cancelWait(s)) {
                 sendAsPageGoes(s.latest);
                 return;
             }
-            // Still owed with no wait running: a save already on its way (the browser cancels it with the page, so it is
-            // sent again, kept alive; if it did finish, the send is a repeat and is skipped), or one that failed.
-            if (savePendingRef.current) sendAsPageGoes(s.latest);
+            // Still owed with no wait running: a save already on its way (the browser may cancel it with the page, so the
+            // newest state is sent again, kept alive; if it did finish, the send is a repeat), or one that failed.
+            // A save on its way counts too, though nothing is flagged as owed: a change back to what the server was
+            // known to hold waits behind it, and is the newest word.
+            if (savePendingRef.current || s.draining) sendAsPageGoes(s.latest);
         };
         const flushIfHidden = () => {
             if (document.hidden) flush();
@@ -833,7 +862,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             window.removeEventListener("pagehide", flush);
             document.removeEventListener("visibilitychange", flushIfHidden);
         };
-    }, [submitSave]);
+    }, [submitSave, sendSave]);
 
     // Poll server for changes from other devices (pauses when tab is hidden)
     useEffect(() => {

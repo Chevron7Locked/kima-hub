@@ -700,6 +700,27 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(server.state).toBe(newer);
     });
 
+    it("is sent no more once the retry that kept its time has landed, not even as the page goes", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        const gone = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.state = gone;
+        server.audiobookGone = true;
+        server.saveFails = true;
+        await pollNow(tick());
+        // The retry names the time first seen, and lands while the server still holds it.
+        server.saveFails = false;
+        await pollNow(tick());
+        expect(server.state).toMatchObject({ playbackType: "track", trackId: "a" });
+        const attempts = server.saveAttempts;
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(attempts);
+    }, 15_000);
+
     it("is not written over a state another device saved between the check and the write, which is taken up at once", async () => {
         const tick = capturePoll();
         await open();
@@ -717,9 +738,13 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(server.state).toMatchObject({ trackId: "e" });
         expect(probe.state.currentTrack?.id).toBe("e");
         expect(server.clears).toBe(0);
-        // Nothing is owed any more: no save of "a" follows.
+        // Nothing is owed any more: no save of "a" follows, not even as the page goes.
         await wait(1500);
         expect(server.saves).toEqual([]);
+        const attempts = server.saveAttempts;
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(attempts);
     });
 
     it("takes up a clear that another device made before the write, as the poll takes up a cleared state", async () => {
@@ -1108,10 +1133,11 @@ describe("a page that is closing or going to the background", () => {
         expect(server.keptAlive).toEqual([false, true]);
     });
 
-    it("sends a change again, kept alive, when the save on its way as the page goes does not finish", async () => {
+    it("sends a change kept alive beside the save on its way as the page goes, and again behind it when neither finishes", async () => {
         await open();
         await wait(1500);
-        // The save already on its way is cancelled with the page (here: it fails), so the flush sends the change itself.
+        // The save already on its way is cancelled with the page (here: it fails), so the flush sends the change itself,
+        // kept alive at once and, should that fail too, in the ordinary way behind the first.
         server.saveFails = true;
         let release: () => void = () => undefined;
         server.saveGate = new Promise<void>((resolve) => { release = resolve; });
@@ -1123,9 +1149,74 @@ describe("a page that is closing or going to the background", () => {
         server.saveGate = null;
         await act(async () => release());
         await wait(100);
-        expect(server.keptAlive).toEqual([false, true]);
+        expect(server.keptAlive).toEqual([false, true, false]);
         expect(server.state).toMatchObject({ isShuffle: true });
     });
+
+    it("sends a newer change as the page goes without waiting for the save on its way, which the page may not outlive", async () => {
+        await open();
+        await wait(1500);
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        // A newer change still waiting out its delay when the page goes.
+        await act(async () => probe.controls.playTracks([t("e") as never, t("f") as never], 0));
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        // Sent at once, kept alive, while the first is still held.
+        expect(server.saveAttempts).toBe(2);
+        expect(server.keptAlive).toEqual([false, true]);
+        server.saveGate = null;
+        await act(async () => release());
+        await wait(100);
+        // The older one reached the server first; the newest is what it ends with.
+        expect(server.saves.map((s) => s.trackId)).toEqual(["c", "e"]);
+        expect(server.state).toMatchObject({ trackId: "e" });
+    }, 15_000);
+
+    it("sends a change that undoes the save on its way as the page goes, though the server is not yet known to hold anything else", async () => {
+        await open();
+        await wait(1500);
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        // Back to what the server held before the save on its way.
+        await act(async () => probe.controls.toggleShuffle());
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(2);
+        server.saveGate = null;
+        await act(async () => release());
+        await wait(100);
+        expect(server.state).toMatchObject({ isShuffle: false });
+    }, 15_000);
+
+    it("sends a change back to what the server held, queued behind the save that undid it, as the page goes", async () => {
+        await open();
+        await wait(1500);
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        // Back to the state the server is known to hold, so nothing is flagged as owed; its wait runs out and it is
+        // queued behind the save on its way, which the page may not outlive.
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(2);
+        expect(server.keptAlive).toEqual([false, true]);
+        server.saveGate = null;
+        await act(async () => release());
+        await wait(100);
+        expect(server.state).toMatchObject({ isShuffle: false });
+    }, 15_000);
 
     it("sends it when the tab becomes hidden, too", async () => {
         await open();
