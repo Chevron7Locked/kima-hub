@@ -13,6 +13,12 @@ import type { StopCheck } from "../utils/stopCheck";
 
 const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
+const PROGRESS_EVERY = 500;
+
+/** Whether counting from `before` to `after` artists passed a multiple of 500: a progress line is due once per mark, however the batches fall. */
+export function crossedProgressMark(before: number, after: number): boolean {
+  return Math.floor(after / PROGRESS_EVERY) > Math.floor(before / PROGRESS_EVERY);
+}
 
 interface ArtistCounts {
   libraryAlbumCount: number;
@@ -136,6 +142,7 @@ async function recountEveryArtist(
   const total = await prisma.artist.count();
   backfillProgress.total = total;
   let cursor: string | undefined;
+  let countedAtLastBatch = 0;
 
   logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
 
@@ -170,17 +177,15 @@ async function recountEveryArtist(
     }
 
     cursor = artists[artists.length - 1].id;
-
     if (onProgress) {
       onProgress(backfillProgress.processed, total);
     }
 
-    // Log progress every 500 artists
-    if (backfillProgress.processed % 500 === 0) {
-      logger.info(
-        `[ArtistCounts] Progress: ${backfillProgress.processed}/${total} (${Math.round((backfillProgress.processed / total) * 100)}%)`
-      );
+    if (crossedProgressMark(countedAtLastBatch, backfillProgress.processed)) {
+      const percent = total > 0 ? ` (${Math.round((backfillProgress.processed / total) * 100)}%)` : "";
+      logger.info(`[ArtistCounts] Progress: ${backfillProgress.processed}/${total}${percent}`);
     }
+    countedAtLastBatch = backfillProgress.processed;
 
     // Small delay to avoid overwhelming the database
     await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));

@@ -12,11 +12,12 @@ import fs from 'fs';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import path from 'path';
-import shareRoutes from '../../routes/share';
+import shareRoutes, { settleShareBackgroundWork } from '../../routes/share';
 import { prisma } from '../../utils/db';
 import { redisClient } from '../../utils/redis';
 import { coversBasePath } from '../../services/imageStorage';
-import { config } from '../../config';
+import os from 'os';
+import { config, useMusicFolder } from '../../config';
 import { mountAsServer } from "./helpers/serverMount";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -44,7 +45,12 @@ const clean = async () => {
     await prisma.artist.deleteMany({ where: { identityKey: TAG } });
 };
 
+// The streaming tests write real files under the music folder, so the test has its own and needs no writable /music.
+const startFolder = config.music.musicPath;
+const musicFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'kima-share-music-'));
+
 beforeAll(async () => {
+    useMusicFolder(musicFolder);
     await clean();
     for (const id of [OWNER, OTHER]) {
         await prisma.user.create({ data: { id, username: id, passwordHash: 'x' } });
@@ -56,7 +62,15 @@ beforeAll(async () => {
     trackId = (await prisma.track.create({ data: { albumId: album.id, title: 'The Track', duration: 100, trackNo: 1, filePath: `/${TAG}/1.flac`, fileModified: new Date(), fileSize: 1 } })).id;
 });
 
-afterAll(clean);
+// What a request leaves running when its response closes (renewing its play's window) ends before the next test, and before
+// Redis is closed at the end of the file.
+afterEach(settleShareBackgroundWork);
+
+afterAll(async () => {
+    useMusicFolder(startFolder);
+    fs.rmSync(musicFolder, { recursive: true, force: true });
+    await clean();
+});
 
 beforeEach(() => prisma.shareLink.deleteMany({ where: { createdBy: { in: [OWNER, OTHER] } } }));
 
@@ -796,6 +810,35 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
             expect(await playsOf(token)).toBe(0);
             expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
+        it("work left running after the response, the renewal as it closes, can be waited for", async () => {
+            const { token } = await own();
+            const realExpire = redisClient.expire.bind(redisClient) as (...args: unknown[]) => Promise<number>;
+            let release!: (renewed: number) => void;
+            let markReached!: () => void;
+            const held = new Promise<number>((resolve) => (release = resolve));
+            const reached = new Promise<void>((resolve) => (markReached = resolve));
+            let calls = 0;
+            // The first call is the request's own check of the window; the one as the response closes is held.
+            const expire = jest.spyOn(redisClient, 'expire').mockImplementation(((...args: unknown[]) =>
+                calls++ === 0 ? realExpire(...args) : (markReached(), held)) as never);
+            try {
+                expect((await get(token, songs.playable)).status).toBe(200);
+                await reached;
+
+                let settled = false;
+                const done = settleShareBackgroundWork().then(() => { settled = true; });
+                await new Promise((resolve) => setImmediate(resolve));
+                expect(settled).toBe(false);
+
+                release(1);
+                await done;
+                expect(settled).toBe(true);
+            } finally {
+                release(1);
+                expire.mockRestore();
+            }
         });
 
         it('counts every request, as a first play, while Redis is down', async () => {

@@ -17,12 +17,11 @@ export async function artistWithTracks(prefix: string, key: string, name: string
     await prisma.album.create({
         data: { id: `${prefix}${key}alb`, artistId: `${prefix}${key}`, rgMbid: `${prefix}-rg-${key}`, primaryType: "Album", title: `${name} Album` },
     });
-    for (const [i, title] of titles.entries()) {
-        await prisma.track.create({
-            data: {
-                id: `${prefix}${key}t${i}`, albumId: `${prefix}${key}alb`, title, trackNo: i + 1, duration: 200,
-                filePath: `/tmp/${prefix}-${key}-${i}.flac`, fileModified: new Date(), fileSize: 1000,
-            },
-        });
-    }
+    // One insert for all the songs: a seed of one `create` per song is a round trip each, and slow on a busy machine.
+    await prisma.track.createMany({
+        data: titles.map((title, i) => ({
+            id: `${prefix}${key}t${i}`, albumId: `${prefix}${key}alb`, title, trackNo: i + 1, duration: 200,
+            filePath: `/tmp/${prefix}-${key}-${i}.flac`, fileModified: new Date(), fileSize: 1000,
+        })),
+    });
 }

@@ -102,6 +102,28 @@ async function loadUsableShareLink(token: string, res: Response) {
 }
 
 /**
+ * Work a request leaves running after its response (renewing a play's window as the response closes, giving back a play
+ * whose stream never started). It is tracked so it can be awaited: a caller that must not leave Redis or the database in use
+ * (a test's teardown, a shutdown) waits on `settleShareBackgroundWork`.
+ */
+const backgroundWork = new Set<Promise<unknown>>();
+
+function track<T>(work: Promise<T>): Promise<T> {
+    const entry = work.then(
+        () => undefined,
+        () => undefined,
+    );
+    backgroundWork.add(entry);
+    void entry.then(() => backgroundWork.delete(entry));
+    return work;
+}
+
+/** Resolves once no background work of a share request is left, including any that began while it waited. */
+export async function settleShareBackgroundWork(): Promise<void> {
+    while (backgroundWork.size > 0) await Promise.all([...backgroundWork]);
+}
+
+/**
  * Whether a play of this song is already counted for the share, and if so renews its window: a listener's requests keep one
  * play going however long the song is, and it ends 30 s after the last of them. With Redis down no play is known: each
  * request counts.
@@ -120,11 +142,11 @@ async function renewPlayIfCounted(key: string): Promise<boolean> {
  * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play.
  */
 function keepWindowWhileOpen(res: Response, key: string): void {
-    const timer = setInterval(() => void renewPlayIfCounted(key), PLAY_WINDOW_SECONDS * 1000 / 3);
+    const timer = setInterval(() => void track(renewPlayIfCounted(key)), PLAY_WINDOW_SECONDS * 1000 / 3);
     timer.unref();
     res.once("close", () => {
         clearInterval(timer);
-        void renewPlayIfCounted(key);
+        void track(renewPlayIfCounted(key));
     });
 }
 
@@ -173,7 +195,7 @@ const streamStarted = (res: Response) =>
 function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string): void {
     let undone: Promise<void> | null = null;
     const undo = () =>
-        (undone ??= (async () => {
+        (undone ??= track((async () => {
             try {
                 await prisma.$executeRaw`
                     UPDATE "share_links" SET "playCount" = GREATEST("playCount" - 1, 0) WHERE "id" = ${shareId}
@@ -182,7 +204,7 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string)
                 logger.error(`[Share] Could not give back a play: ${(error as Error).message}`);
             }
             await releasePlayWindow(key);
-        })());
+        })()));
 
     const end = res.end.bind(res) as (...args: unknown[]) => Response;
     res.end = ((...args: unknown[]) => {
