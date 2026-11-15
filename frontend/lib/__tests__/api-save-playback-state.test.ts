@@ -7,7 +7,10 @@ import { api } from "../api";
 const ok = (body: unknown) =>
     ({ ok: true, status: 200, headers: { entries: () => [] }, json: async () => body }) as unknown as Response;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+});
 
 const sentWith = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls[0][1] as RequestInit;
 
@@ -50,9 +53,23 @@ it("throws a refused save with its status and the state the server holds", async
         "fetch",
         vi.fn().mockResolvedValue({ ok: false, status: 409, statusText: "Conflict", json: async () => ({ error: "changed", state: held }) }),
     );
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await expect(api.savePlaybackState({ playbackType: "track", expectedUpdatedAt: "x" })).rejects.toMatchObject({
         status: 409,
         data: { state: held },
     });
+    // A refusal and a gone item are expected answers to a save, so they are not logged as failures.
+    expect(logged).not.toHaveBeenCalled();
+});
+
+it("does not log a 404 to a save, and still logs any other failure", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const answer = (status: number) =>
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, statusText: "x", json: async () => ({ error: "x" }) }));
+    answer(404);
+    await expect(api.savePlaybackState({ playbackType: "track" })).rejects.toMatchObject({ status: 404 });
+    expect(logged).not.toHaveBeenCalled();
+    answer(500);
+    await expect(api.savePlaybackState({ playbackType: "track" })).rejects.toMatchObject({ status: 500 });
+    expect(logged).toHaveBeenCalled();
 });

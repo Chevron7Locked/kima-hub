@@ -146,7 +146,8 @@ describe("POST /api/playback-state", () => {
 });
 
 describe("POST /api/playback-state: where the queue came from", () => {
-    const queue = [{ id: "t1", title: "one", duration: 100 }, { id: "t2", title: "two", duration: 100 }];
+    // Real songs: the answer shows only the playable ones, as a read does.
+    const queue = [{ id: `${S}s1`, title: "one", duration: 100 }, { id: `${S}s2`, title: "two", duration: 100 }];
     const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
     const storedSource = async (userId: string) =>
         ((await prisma.playbackState.findUnique({ where: { userId } })) as { queueSource?: string | null } | null)?.queueSource;
@@ -404,6 +405,41 @@ describe("POST /api/playback-state: a save that names the time it saw (expectedU
 
         expect(res.status).toBe(409);
         expect((await stored(user.id))!.currentIndex).toBe(0);
+    });
+
+    it("checks the time inside the lock an index-only save takes: a save landing while it waits makes it 409", async () => {
+        const user = await newUser("cond-locked");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+
+        let waiting!: Promise<request.Response>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${user.id} FOR UPDATE`;
+            waiting = save(user.id, { playbackType: "track", trackId: `${S}s2`, currentIndex: 1, expectedUpdatedAt: seen }).then((r) => r);
+            await untilLockWait(`"PlaybackState"`);
+            await tx.playbackState.update({ where: { userId: user.id }, data: { trackId: `${S}s3` } });
+        });
+
+        expect((await waiting).status).toBe(409);
+        const row = (await stored(user.id))!;
+        expect(row.trackId).toBe(`${S}s3`);
+        expect(row.currentIndex).toBe(0);
+    });
+
+    it("answers a save the state as a read of it shows it: the reply equals the GET that follows", async () => {
+        const user = await newUser("cond-shape");
+        // `gone` has no file: a read leaves it out of the queue, so a raw row would differ from the GET.
+        const queue = [song("s1"), { id: `${S}gone`, title: "gone", duration: 100 }, song("s2")];
+
+        const plain = await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue, currentIndex: 2 }).expect(200);
+        const read = await request(app).get("/api/playback-state").set("x-user", user.id).expect(200);
+        expect(plain.body).toEqual(read.body);
+        expect(plain.body.queue.map((q: { id: string }) => q.id)).toEqual([`${S}s1`, `${S}s2`]);
+        expect(plain.body.currentIndex).toBe(1);
+
+        const conditional = await save(user.id, { playbackType: "track", trackId: `${S}s1`, currentIndex: 0, expectedUpdatedAt: read.body.updatedAt }).expect(200);
+        const readAgain = await request(app).get("/api/playback-state").set("x-user", user.id).expect(200);
+        expect(conditional.body).toEqual(readAgain.body);
     });
 
     it("answers 400 for a time that is not a date, and writes nothing", async () => {

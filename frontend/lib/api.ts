@@ -489,12 +489,13 @@ class ApiClient {
     async request<T>(
         endpoint: string,
         options: RequestInit & {
-            silent404?: boolean;
+            /** Statuses the caller expects and handles, so they are not logged as failures (a 404 for a gone item, a 409 for a refused conditional save). */
+            expectedStatuses?: readonly number[];
             _retryCount?: number;
             noTimeout?: boolean; // exempt streaming/blob/arrayBuffer from default timeout
         } = {}
     ): Promise<T> {
-        const { silent404, _retryCount = 0, noTimeout, ...fetchOptions } = options;
+        const { expectedStatuses, _retryCount = 0, noTimeout, ...fetchOptions } = options;
 
         // Default 30s timeout for JSON API calls; streaming/blob/arrayBuffer exempt via noTimeout.
         // Server uses timeout=0 for streams — a client-side cap would kill legitimate long streams.
@@ -552,8 +553,8 @@ class ApiClient {
                 };
             }
 
-            // 401s are handled below (refresh, or a sign-in prompt); 404s can be expected.
-            if (response.status !== 401 && !(silent404 && response.status === 404)) {
+            // 401s are handled below (refresh, or a sign-in prompt); a status the caller named is expected.
+            if (response.status !== 401 && !expectedStatuses?.includes(response.status)) {
                 console.error(`[API] Request failed: ${url}`, {
                     status: response.status,
                     statusText: response.statusText,
@@ -792,7 +793,7 @@ class ApiClient {
     // The artist and album pages fall back from the library to MusicBrainz on a 404, and show "not found" when both
     // miss, so these four never log a 404.
     async getArtist(id: string) {
-        return this.request<ApiData>(`/library/artists/${encodeURIComponent(id)}`, { silent404: true });
+        return this.request<ApiData>(`/library/artists/${encodeURIComponent(id)}`, { expectedStatuses: [404] });
     }
 
     async getAlbums(params?: {
@@ -811,7 +812,7 @@ class ApiClient {
     }
 
     async getAlbum(id: string) {
-        return this.request<ApiData>(`/library/albums/${id}`, { silent404: true });
+        return this.request<ApiData>(`/library/albums/${id}`, { expectedStatuses: [404] });
     }
 
     async getTracks(params?: {
@@ -1068,7 +1069,7 @@ class ApiClient {
             deduplicated?: boolean;
         }>(`/playlists/${playlistId}/pending/${pendingTrackId}/retry`, {
             method: "POST",
-            silent404: true,
+            expectedStatuses: [404],
         });
     }
 
@@ -1333,14 +1334,14 @@ class ApiClient {
     async getArtistDiscovery(nameOrMbid: string) {
         return this.request<ApiData>(
             `/artists/discover/${encodeURIComponent(nameOrMbid)}`,
-            { silent404: true }
+            { expectedStatuses: [404] }
         );
     }
 
     async getAlbumDiscovery(rgMbid: string) {
         return this.request<ApiData>(
             `/artists/album/${encodeURIComponent(rgMbid)}`,
-            { silent404: true }
+            { expectedStatuses: [404] }
         );
     }
 
@@ -1404,7 +1405,7 @@ class ApiClient {
         if (params?.offset) query.set("offset", String(params.offset));
         const suffix = query.size > 0 ? `?${query}` : "";
         return this.request<ApiData>(`/podcasts/${id}${suffix}`, {
-            silent404: true,
+            expectedStatuses: [404],
         });
     }
 
@@ -1559,6 +1560,8 @@ class ApiClient {
             // Kept alive, so a save sent as the page closes is finished by the browser, not cancelled. A kept alive
             // request may carry about 64 KB; a bigger one is refused outright, so it goes without.
             keepalive: new TextEncoder().encode(body).length < KEEPALIVE_LIMIT_BYTES,
+            // The player handles a refused conditional save (409) and a gone item (404) itself.
+            expectedStatuses: [404, 409],
         });
     }
 
@@ -2117,7 +2120,7 @@ class ApiClient {
         try {
             return await this.request<{ success: boolean }>(`/notifications/downloads/${id}/clear`, {
                 method: "POST",
-                silent404: true,
+                expectedStatuses: [404],
             });
         } catch (error) {
             if ((error as ApiError).status === 404) return { success: true };

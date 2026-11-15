@@ -28,6 +28,8 @@ const server = vi.hoisted(() => ({
     beforeSave: null as (() => void) | null,
     /** The saves the server refused for naming a time that was no longer its own. */
     refused: [] as Array<Record<string, unknown>>,
+    /** Answers every save 409, though it named no time (a 409 that is not a refused conditional save). */
+    saveAnswers409: false,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -59,6 +61,7 @@ vi.mock("@/lib/api", () => {
             try {
                 if (server.saveGate) await server.saveGate;
                 if (fails) throw Object.assign(new Error("server error"), { status: 500 });
+                if (server.saveAnswers409) throw Object.assign(new Error("conflict"), { status: 409 });
                 server.beforeSave?.();
                 const { expectedUpdatedAt, ...held } = state;
                 // A save naming the time it saw is written only while that is still the server's time.
@@ -190,6 +193,7 @@ beforeEach(() => {
     server.stateReads = 0;
     server.beforeSave = null;
     server.refused = [];
+    server.saveAnswers409 = false;
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -681,7 +685,7 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(server.saves).toEqual([]);
     });
 
-    it("is not written back when a refusal answers that another device cleared the state", async () => {
+    it("takes up a clear that another device made before the write, as the poll takes up a cleared state", async () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
@@ -694,14 +698,46 @@ describe("another device's audiobook or podcast that the server no longer has", 
         await pollNow(tick());
         expect(server.refused).toHaveLength(1);
         expect(server.saves).toEqual([]);
-        // Nothing is written behind the other device's back; this page's next change saves as usual.
+        // Nothing plays here any more, and nothing is written behind the other device's back.
+        expect(probe.state.currentTrack).toBeNull();
+        expect(pause).toHaveBeenCalled();
         await wait(1500);
         expect(server.saves).toEqual([]);
-        await act(async () => probe.controls.toggleShuffle());
+        expect(server.state).toBeNull();
+        // The next thing played here saves as usual.
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
         await wait(1500);
-        expect(server.saves).toHaveLength(1);
-        expect(server.saves[0]).not.toHaveProperty("expectedUpdatedAt");
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
+        expect(server.saves.at(-1)).not.toHaveProperty("expectedUpdatedAt");
     });
+
+    it("keeps a change made here, when a refusal answers that the state was cleared, and saves it", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        // The replacement is held on its way; a new song is chosen here meanwhile, and the other device clears.
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        server.beforeSave = () => {
+            server.beforeSave = null;
+            server.state = null;
+        };
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        server.saveGate = null;
+        await act(async () => release());
+        await act(async () => polling);
+        await wait(1500);
+        expect(probe.state.currentTrack?.id).toBe("c");
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
+        expect(server.state).toMatchObject({ trackId: "c" });
+    }, 15_000);
 
     it("is not cleared over a change made here while it was being asked for, which saves as usual", async () => {
         const tick = capturePoll();
@@ -790,6 +826,26 @@ describe("a save that failed", () => {
         server.state = { ...fromOtherDevice(), updatedAt: new Date(Date.now() + 60_000).toISOString() };
         await pollNow(tick());
         expect(probe.state.currentTrack?.id).toBe("e");
+    });
+
+    // Only a save that named a time can be refused as a conflict; a 409 to any other is a failure like a 500 is.
+    it("counts a 409 to a save that named no time as a failure, and sends it again", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.saveAnswers409 = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        // Still owed: another device's state does not replace it, and the next check sends it again.
+        server.state = fromOtherDevice();
+        await pollNow(tick());
+        expect(server.saveAttempts).toBe(2);
+        expect(probe.state.currentTrack?.id).toBe("c");
+        server.saveAnswers409 = false;
+        await pollNow(tick());
+        await pollNow(tick());
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
     });
 
     it("keeps the change here while the retries keep failing", async () => {

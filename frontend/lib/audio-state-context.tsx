@@ -188,13 +188,31 @@ function mediaIdOf(
     return track?.id ?? audiobook?.id ?? podcast?.id ?? null;
 }
 
-function isGone(err: unknown): boolean {
-    return (err as { status?: number } | null)?.status === 404;
+/** Whether a failed request was answered with this status. */
+function hasStatus(err: unknown, status: number): boolean {
+    return (err as { status?: number } | null)?.status === status;
 }
 
-/** The server refused a save that named the time it saw, because its state has been saved since. */
-function isConflict(err: unknown): boolean {
-    return (err as { status?: number } | null)?.status === 409;
+function isGone(err: unknown): boolean {
+    return hasStatus(err, 404);
+}
+
+/**
+ * How a save ended. `conflict`: the server refused it because it named the time it saw and its state has been saved
+ * since, so the other state is the newer word and nothing is owed. `failed`: it did not go through (or was dropped for a
+ * newer run's before its turn); a change made here stays owed.
+ */
+type SaveOutcome = "saved" | "conflict" | "failed";
+
+/** A save waiting for the one on its way, with those who asked for a save and wait to hear how it ended. */
+type QueuedSave = { job: PlaybackSave; waiters: Array<(outcome: SaveOutcome) => void> };
+
+/**
+ * The save to send again, if a change made here is still owed: it failed (`failures`), or the tab was just shown
+ * (`now`) and its wait has not run out. The one decision the poll and a page going away share.
+ */
+function owedSave(s: { latest: PlaybackSave | null; draining: boolean; failures: number }, pending: boolean, now: boolean): PlaybackSave | null {
+    return pending && s.latest && !s.draining && (s.failures > 0 || now) ? s.latest : null;
 }
 
 /**
@@ -375,16 +393,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     // that goes through starts the count over. Only the newest run's outcome counts, an older one's does not.
     const saveRef = useRef<{
         latest: PlaybackSave | null;
-        queued: PlaybackSave | null;
+        queued: QueuedSave | null;
         draining: boolean;
-        drained: Promise<void>;
         failures: number;
         checksToSkip: number;
         // The wait before `latest` goes out; cleared when something else sends it first, so it is not tried twice.
         timer: ReturnType<typeof setTimeout> | null;
-        // Set when the server refused a save for naming a time that was no longer its own (409); read by the check that sent it.
-        conflicted: boolean;
-    }>({ latest: null, queued: null, draining: false, drained: Promise.resolve(), failures: 0, checksToSkip: 0, timer: null, conflicted: false });
+    }>({ latest: null, queued: null, draining: false, failures: 0, checksToSkip: 0, timer: null });
     // What the poll needs to know of the page as it is now, since the poll runs on from one render to the next.
     const mediaId = mediaIdOf(currentTrack, currentAudiobook, currentPodcast);
     const liveRef = useRef({ playbackType, mediaId });
@@ -396,58 +411,71 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         lastServerSyncRef.current = at;
         setLastServerSync(at);
     }, []);
-    const submitSave = useCallback((job: PlaybackSave): Promise<void> => {
+    // Sends one save and says how it ended.
+    const sendSave = useCallback(async (next: PlaybackSave): Promise<SaveOutcome> => {
         const s = saveRef.current;
-        s.queued = job;
-        if (!s.draining) {
+        if (next.key === serverKnownRef.current && !next.force) {
+            if (saveRunRef.current === next.run) savePendingRef.current = false;
+            return "saved";
+        }
+        // What the server holds is not this: a newer run that undid an older one on its way finds
+        // it so here, and its change is owed again until this save lands.
+        if (saveRunRef.current === next.run) savePendingRef.current = true;
+        try {
+            const result = await api.savePlaybackState(next.state);
+            serverKnownRef.current = next.key;
+            markSynced(new Date(result.updatedAt));
+            if (saveRunRef.current === next.run) {
+                savePendingRef.current = false;
+                s.failures = 0;
+                s.checksToSkip = 0;
+            }
+            return "saved";
+        } catch (err: unknown) {
+            // Another device saved after the state this one was decided on: its word is the newer, so nothing here is
+            // owed, and whoever sent it takes the other state up. Only a save that named a time can be refused so; any
+            // other 409 is a failure like the rest.
+            if (next.state.expectedUpdatedAt !== undefined && hasStatus(err, 409)) {
+                if (saveRunRef.current === next.run) savePendingRef.current = false;
+                return "conflict";
+            }
+            // The flag stays set: the change is still only here, and another device's state must not
+            // replace it. The poll sends it again, later each time it fails.
+            if (saveRunRef.current === next.run) {
+                s.failures += 1;
+                s.checksToSkip = Math.min(2 ** (s.failures - 1) - 1, MAX_CHECKS_TO_SKIP);
+            }
+            if (err instanceof Error && err.message !== "Not authenticated") {
+                console.error("[AudioState] Failed to save to server:", err);
+            }
+            return "failed";
+        }
+    }, [markSynced]);
+    // A save that is replaced by a newer one before its turn is not sent; whoever asked for it hears how the newer ended.
+    const submitSave = useCallback((job: PlaybackSave): Promise<SaveOutcome> => {
+        const s = saveRef.current;
+        return new Promise<SaveOutcome>((resolve) => {
+            s.queued = { job, waiters: [...(s.queued?.waiters ?? []), resolve] };
+            if (s.draining) return;
             s.draining = true;
-            s.drained = (async () => {
+            void (async () => {
                 try {
                     while (s.queued) {
-                        const next = s.queued;
+                        const { job: next, waiters } = s.queued;
                         s.queued = null;
-                        if (next.key === serverKnownRef.current && !next.force) {
-                            if (saveRunRef.current === next.run) savePendingRef.current = false;
-                            continue;
-                        }
-                        // What the server holds is not this: a newer run that undid an older one on its way finds
-                        // it so here, and its change is owed again until this save lands.
-                        if (saveRunRef.current === next.run) savePendingRef.current = true;
+                        let outcome: SaveOutcome = "failed";
                         try {
-                            const result = await api.savePlaybackState(next.state);
-                            serverKnownRef.current = next.key;
-                            markSynced(new Date(result.updatedAt));
-                            if (saveRunRef.current === next.run) {
-                                savePendingRef.current = false;
-                                s.failures = 0;
-                                s.checksToSkip = 0;
-                            }
-                        } catch (err: unknown) {
-                            // Another device saved after the state this one was decided on: its word is the newer, so
-                            // nothing here is owed, and the check that sent this takes the other state up.
-                            if (isConflict(err)) {
-                                if (saveRunRef.current === next.run) savePendingRef.current = false;
-                                s.conflicted = true;
-                                continue;
-                            }
-                            // The flag stays set: the change is still only here, and another device's state must not
-                            // replace it. The poll sends it again, later each time it fails.
-                            if (saveRunRef.current === next.run) {
-                                s.failures += 1;
-                                s.checksToSkip = Math.min(2 ** (s.failures - 1) - 1, MAX_CHECKS_TO_SKIP);
-                            }
-                            if (err instanceof Error && err.message !== "Not authenticated") {
-                                console.error("[AudioState] Failed to save to server:", err);
-                            }
+                            outcome = await sendSave(next);
+                        } finally {
+                            for (const done of waiters) done(outcome);
                         }
                     }
                 } finally {
                     s.draining = false;
                 }
             })();
-        }
-        return s.drained;
-    }, [markSynced]);
+        });
+    }, [sendSave]);
     useEffect(() => {
         queueRef.current = queue;
     }, [queue]);
@@ -696,6 +724,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         savePendingRef.current = false;
         // This run replaces the older ones: a save of theirs still waiting its turn is not sent.
         saveRef.current.latest = null;
+        saveRef.current.queued?.waiters.forEach((done) => done("failed"));
         saveRef.current.queued = null;
         if (saveRef.current.timer) clearTimeout(saveRef.current.timer);
         saveRef.current.timer = null;
@@ -761,9 +790,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 clearTimeout(s.timer);
                 s.timer = null;
                 void submitSave(s.latest);
-            } else if (savePendingRef.current && s.failures > 0 && !s.draining) {
-                void submitSave(s.latest);
+                return;
             }
+            const owed = owedSave(s, savePendingRef.current, false);
+            if (owed) void submitSave(owed);
         };
         const flushIfHidden = () => {
             if (document.hidden) flush();
@@ -818,14 +848,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             // fails) or, for a tab just shown, when its save is still waiting out its delay. It goes before anything of
             // the server's is looked at, since another device's state may not replace a change that never reached it.
             const owed = saveRef.current;
-            if (savePendingRef.current && owed.latest && !owed.draining && (owed.failures > 0 || now)) {
+            const owedJob = owedSave(owed, savePendingRef.current, now);
+            if (owedJob) {
                 if (now) owed.checksToSkip = 0;
                 if (owed.checksToSkip > 0) owed.checksToSkip -= 1;
                 else {
                     // Sent now, so the wait it still had is over: it is not sent a second time when it ends.
                     if (owed.timer) clearTimeout(owed.timer);
                     owed.timer = null;
-                    await submitSave(owed.latest);
+                    await submitSave(owedJob);
                 }
                 if (!mounted) return;
             }
@@ -837,6 +868,19 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 liveRef.current.playbackType !== here.playbackType || liveRef.current.mediaId !== here.mediaId;
             const playbackType = here.playbackType;
             const currentMediaId = here.mediaId ?? undefined;
+
+            // The state was cleared on another device: nothing plays here any more either. `known` is what the server
+            // holds now, as a playbackKey, or null for no state at all. Playing on would write the cleared state back.
+            const adoptCleared = (known: string | null) => {
+                setCurrentTrack(null);
+                setCurrentAudiobook(null);
+                setCurrentPodcast(null);
+                setPlaybackType(null);
+                setQueue([]);
+                setCurrentIndex(0);
+                controller?.pause();
+                serverKnownRef.current = known;
+            };
 
             // The server remembers an item it no longer has. A change made here, or another device's newer word, is
             // never overwritten for it; what plays here replaces it (saved, never cleared first, since a device that
@@ -861,12 +905,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (saveRunRef.current === mine.run) savePendingRef.current = true;
                     // Written only while the server's state is still the one just read: a device that saved in the
                     // meantime is refused the overwrite, and its state is taken up by the check made next.
-                    saveRef.current.conflicted = false;
-                    await submitSave({ ...mine, force: true, state: { ...mine.state, expectedUpdatedAt: String(held.updatedAt) } });
-                    if (saveRef.current.conflicted) {
-                        saveRef.current.conflicted = false;
-                        nowOwed = true;
-                    }
+                    const outcome = await submitSave({ ...mine, force: true, state: { ...mine.state, expectedUpdatedAt: String(held.updatedAt) } });
+                    if (outcome !== "conflict") return;
+                    // Another device saved, or cleared the state, since it was read. A clear is taken up as the poll
+                    // takes one up, unless a newer change made here is owed (it then saves the state back, as any
+                    // change does); a newer state is taken up by the check made at once.
+                    const now = await api.getPlaybackState().catch(() => undefined);
+                    if (now === null && mounted && !changedHere() && !savePendingRef.current) adoptCleared(null);
+                    else nowOwed = true;
                 } else {
                     serverKnownRef.current = null;
                     await api.clearPlaybackState().catch(() => {});
@@ -901,14 +947,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 // Cleared on another device: the newest word wins here as it does for a song change. Playing on would
                 // write the cleared song straight back.
                 if (!serverMediaId && !serverState.queue?.length && currentMediaId && noSaveOwed) {
-                    setCurrentTrack(null);
-                    setCurrentAudiobook(null);
-                    setCurrentPodcast(null);
-                    setPlaybackType(null);
-                    setQueue([]);
-                    setCurrentIndex(0);
-                    controller?.pause();
-                    serverKnownRef.current = playbackKey(serverState, queueLimitRef.current);
+                    adoptCleared(playbackKey(serverState, queueLimitRef.current));
                     markSynced(serverUpdatedAt);
                     return;
                 }
