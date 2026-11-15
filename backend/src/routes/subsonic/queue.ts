@@ -2,29 +2,12 @@ import { Request, Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, coverArtId } from "./mappers";
-import { PLAYABLE_SONG } from "../../utils/playableSong";
+import { hydrateQueue, playableQueue, type QueueEntry } from "../../services/savedQueue";
 import { one, many } from "../../utils/subsonicParams";
 
 export const queueRouter = Router();
 
-type QueueTrack = {
-    id: string;
-    title?: string;
-    /** The title as edited in Kima; the web player reads it too. */
-    displayTitle?: string | null;
-    duration?: number;
-    artist?: { id?: string; name?: string } | null;
-    album?: { id?: string; title?: string; coverArt?: string | null } | null;
-};
-
-function getQueueFromPlaybackState(queue: unknown): QueueTrack[] {
-    if (!Array.isArray(queue)) return [];
-    return queue
-        .map((item) => (item && typeof item === "object" ? (item as QueueTrack) : null))
-        .filter((item): item is QueueTrack => Boolean(item?.id));
-}
-
-function mapQueueEntry(item: QueueTrack) {
+function mapQueueEntry(item: QueueEntry) {
     return {
         "@_id": item.id,
         "@_title": item.displayTitle || item.title || "Unknown",
@@ -43,89 +26,10 @@ function mapQueueEntry(item: QueueTrack) {
 }
 
 /**
- * The saved queue as a Subsonic client sees it: only its playable songs, the stored queue left as it is (the web
- * player shares it, and a song whose file comes back returns to it). When the current song is left out, the next
- * playable one becomes current (else the last one before it), from its start.
- */
-async function playableQueue(state: { queue: unknown; currentIndex: number; position: number } | null) {
-    const saved = getQueueFromPlaybackState(state?.queue);
-    const playable = new Set(
-        saved.length === 0
-            ? []
-            : (
-                  await prisma.track.findMany({
-                      where: { id: { in: saved.map((item) => item.id) }, ...PLAYABLE_SONG },
-                      select: { id: true },
-                  })
-              ).map((t) => t.id),
-    );
-    const savedIndex = Math.min(Math.max(state?.currentIndex ?? 0, 0), Math.max(saved.length - 1, 0));
-    const shownBefore = saved.slice(0, savedIndex).filter((item) => playable.has(item.id)).length;
-    const queue = saved.filter((item) => playable.has(item.id));
-    const currentKept = saved.length > 0 && playable.has(saved[savedIndex].id);
-    return {
-        queue,
-        currentIndex: queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1),
-        position: currentKept ? (state?.position ?? 0) : 0,
-    };
-}
-
-/**
- * Track ids as the full queue items the web player stores and renders, in the
- * given order; unknown ids are dropped.
- */
-async function hydrateQueue(ids: string[]): Promise<QueueTrack[]> {
-    if (ids.length === 0) return [];
-
-    const tracks = await prisma.track.findMany({
-        where: { id: { in: ids } },
-        select: {
-            id: true,
-            title: true,
-            displayTitle: true,
-            duration: true,
-            album: {
-                select: {
-                    id: true,
-                    title: true,
-                    coverUrl: true,
-                    userCoverUrl: true,
-                    artist: { select: { id: true, name: true, displayName: true } },
-                },
-            },
-        },
-    });
-
-    const byId = new Map(tracks.map((t) => [t.id, t]));
-    return ids
-        .map((id) => byId.get(id))
-        .filter((t): t is NonNullable<typeof t> => t != null)
-        .map((t) => ({
-            id: t.id,
-            title: t.title,
-            displayTitle: t.displayTitle,
-            duration: t.duration ?? undefined,
-            artist: t.album?.artist
-                ? {
-                      id: t.album.artist.id,
-                      name: t.album.artist.displayName || t.album.artist.name,
-                  }
-                : null,
-            album: t.album
-                ? {
-                      id: t.album.id,
-                      title: t.album.title,
-                      coverArt: t.album.userCoverUrl || t.album.coverUrl,
-                  }
-                : null,
-        }));
-}
-
-/**
  * Where the client's current song sits in the queue as stored, which leaves out the ids it did not know. The songs
  * before it that were dropped no longer count, so the stored index still names the client's current song.
  */
-function storedIndex(ids: string[], stored: QueueTrack[], clientIndex: number): number {
+function storedIndex(ids: string[], stored: QueueEntry[], clientIndex: number): number {
     if (stored.length === 0) return 0;
     const known = new Set(stored.map((item) => item.id));
     const before = ids.slice(0, clientIndex).filter((id) => known.has(id)).length;

@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
+import { playableQueue } from "../services/savedQueue";
 
 const router = express.Router();
 
@@ -37,7 +38,23 @@ router.get("/", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        res.json(await prisma.playbackState.findUnique({ where: { userId } }));
+        const state = await prisma.playbackState.findUnique({ where: { userId } });
+        if (!state || !Array.isArray(state.queue)) return res.json(state);
+
+        // Only the queue's playable songs are shown, as to a Subsonic client; what is stored stays as it is. A track the
+        // state named that was the current song, and is left out, gives way to the one now current.
+        const shown = await playableQueue(state);
+        res.json({
+            ...state,
+            queue: shown.queue.length > 0 ? shown.queue : null,
+            queueSource: shown.queue.length > 0 ? state.queueSource : null,
+            currentIndex: shown.currentIndex,
+            position: shown.position,
+            trackId:
+                state.trackId !== null && state.trackId === shown.storedCurrentId
+                    ? (shown.queue[shown.currentIndex]?.id ?? null)
+                    : state.trackId,
+        });
     } catch (error) {
         logger.error("Get playback state error:", error);
         res.status(500).json({ error: "Failed to get playback state" });
