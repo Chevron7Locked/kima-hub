@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Subsonic app that sends a queue position or current index that isn't a whole number now gets an error instead of a wrong save.
+- A Subsonic queue with a repeated song keeps the playback position only when the current place is the right copy.
+- A queue save can no longer store a song the library scan is removing, including a person's very first save.
+- Web queue saves wait for a library scan that is removing a song, and apply the queue length limit as it stands at that moment.
+- A saved playback quality Kima doesn't know plays the original instead of failing.
 - A podcast chart request with an empty category is refused instead of showing the first category's chart.
 - The m3u import form says in plain words when a file is too large, isn't a playlist file, isn't text, or has too many songs.
 - Badly formed requests the server refuses all answer "Invalid request", and the reason goes to the server log instead of the reply.
