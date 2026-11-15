@@ -34,6 +34,7 @@ import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { repairCoverFormatsOnce } from "../coverFormatRepair";
 import { versionOfFile } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.setTimeout(30_000);
 
@@ -599,5 +600,56 @@ describe("a JPEG whose stored version is not the file's", () => {
         expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 0, reversioned: 1, failed: 0 });
         expect((await album("e")).coverUrl).toBe(`native:albums/${P}_e_al.jpg?v=${await version(file)}`);
         expect(await marker()).not.toBeNull();
+    });
+});
+
+/**
+ * What the repair stores (an artist moved to its `<id>.jpg`, a new version on a converted cover) is the address a client is
+ * handed, so a listed artist or album showing it moves the library marker once for the pass.
+ */
+describe("the repair and the library marker", () => {
+    const artists = path.join(covers, "artists");
+    const withSong = async (albumId: string, location: "LIBRARY" | "DISCOVER" = "LIBRARY") => {
+        await prisma.album.update({ where: { id: albumId }, data: { location } });
+        await prisma.track.create({
+            data: { id: `${albumId}_t`, albumId, title: "T", trackNo: 1, duration: 100, filePath: `/m/${albumId}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+    };
+    const seed = async (name: string, heroUrl: string | null, coverUrl: string | null, userHeroUrl: string | null = null) => {
+        const artist = await prisma.artist.create({
+            data: { id: `${P}_${name}`, name: `Repair ${name}`, identityKey: `${P}_${name}_ik`, heroUrl, userHeroUrl },
+        });
+        const album = await prisma.album.create({
+            data: { id: `${P}_${name}_al`, rgMbid: `${P}-${name}-rg`, artistId: artist.id, title: name, identityKey: `${P}_${name}_ak`, primaryType: "Album", coverUrl },
+        });
+        return { artist, album };
+    };
+    afterEach(() => prisma.artist.deleteMany({ where: { id: { startsWith: P } } }));
+
+    it("moves the marker when an old-named artist picture of a listed artist is converted", async () => {
+        const { album } = await seed("m1", `native:artists/${P}_m1.png`, null);
+        await withSong(album.id);
+        put(path.join(artists, `${P}_m1.png`), await picture("png"));
+        expect(await markerMoves(() => repairCoverFormatsOnce({}))).toBe(true);
+    });
+
+    it("moves the marker when a converted cover of a listed album gets a new version", async () => {
+        const { album } = await seed("m2", null, `native:albums/${P}_m2.jpg?v=0123456789ab`);
+        await withSong(album.id);
+        put(path.join(covers, "albums", `${P}_m2.jpg`), await picture("png"));
+        expect(await markerMoves(() => repairCoverFormatsOnce({}))).toBe(true);
+    });
+
+    it("leaves the marker when the person's own picture shows, or the artist is only on a Discover album", async () => {
+        const own = await seed("m3", `native:artists/${P}_m3.png`, null, "https://pictures.example/mine.jpg");
+        await withSong(own.album.id);
+        put(path.join(artists, `${P}_m3.png`), await picture("png"));
+        expect(await markerMoves(() => repairCoverFormatsOnce({}))).toBe(false);
+
+        await notYetRun();
+        const hidden = await seed("m4", `native:artists/${P}_m4.png`, null);
+        await withSong(hidden.album.id, "DISCOVER");
+        put(path.join(artists, `${P}_m4.png`), await picture("png"));
+        expect(await markerMoves(() => repairCoverFormatsOnce({}))).toBe(false);
     });
 });

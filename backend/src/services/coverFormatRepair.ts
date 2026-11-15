@@ -23,6 +23,7 @@ import { prisma } from "../utils/db";
 import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue, versionOfFile } from "./imageStorage";
 import { rewriteCoverValues, storedVersions } from "./coverVersionBackfill";
 import type { StopCheck } from "../utils/stopCheck";
+import { flushShownPictureChanges, rewritePictureColumn } from "./shownPictureChanges";
 
 export interface CoverRepairResult {
     /** Files that held another format and are JPEGs now. */
@@ -94,7 +95,7 @@ async function convertOldArtistPicture(dir: string, name: string, id: string, re
         logger.warn(`[COVER-REPAIR] ${file} is no picture; left as it is`);
         return;
     }
-    await prisma.artist.updateMany({ where: { heroUrl: was }, data: { heroUrl: storedCoverValue(`artists/${id}.jpg`, version) } });
+    await rewritePictureColumn("artist", "heroUrl", was, storedCoverValue(`artists/${id}.jpg`, version));
     await fs.promises.rm(file, { force: true });
     result.artistPicturesConverted++;
     logger.debug(`[COVER-REPAIR] Converted ${file} to ${jpeg}`);
@@ -157,7 +158,16 @@ async function reversionStaleCover(dir: string, file: string, index: StoredVersi
  * Runs the pass unless it has run. Answers null when it did not run (already done, or no settings row yet), else what it
  * did. One file's trouble is counted, not thrown; a failure of the marker save throws, and the caller logs it.
  */
-export async function repairCoverFormatsOnce({ shouldStop }: StopCheck): Promise<CoverRepairResult | null> {
+export async function repairCoverFormatsOnce(stop: StopCheck): Promise<CoverRepairResult | null> {
+    try {
+        return await repairCoverFormats(stop);
+    } finally {
+        // The new versions and addresses it stored change what clients are handed: one change of the library for the pass.
+        await flushShownPictureChanges();
+    }
+}
+
+async function repairCoverFormats({ shouldStop }: StopCheck): Promise<CoverRepairResult | null> {
     const settings = await getSystemSettings();
     // No settings row yet is a new install: it has stored no covers in the old way.
     if (!settings || settings.coverFormatsRepairedAt) return null;

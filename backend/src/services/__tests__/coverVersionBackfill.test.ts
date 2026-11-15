@@ -31,7 +31,9 @@ jest.mock("../../utils/logger", () => ({
 
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
-import { backfillCoverVersionsOnce } from "../coverVersionBackfill";
+import { backfillCoverVersionsOnce, rewriteCoverValues } from "../coverVersionBackfill";
+import { flushShownPictureChanges } from "../shownPictureChanges";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 import { versionOfFile } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -284,5 +286,56 @@ describe("backfillCoverVersionsOnce", () => {
         const unversioned = await prisma.album.count({ where: { id: { startsWith: P }, coverUrl: { not: { contains: "?v=" } } } });
         expect(unversioned).toBe(0);
         expect(await marker()).not.toBeNull();
+    });
+});
+
+/**
+ * A version stored on a cover value changes the address a client is handed for it (the cover id carries the version), so a
+ * listed artist or album whose shown picture got one moves the library marker, once for the pass.
+ */
+describe("cover versions and the library marker", () => {
+    const withSong = (albumId: string) =>
+        prisma.track.create({
+            data: { id: `${albumId}_t`, albumId, title: "T", trackNo: 1, duration: 100, filePath: `/m/${albumId}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+
+    it("moves the marker when the pass versions the cover of a listed album", async () => {
+        await put(path.join(covers, "albums", `${P}_m.jpg`));
+        const a = await album({ coverUrl: `native:albums/${P}_m.jpg` });
+        await withSong(a.id);
+        expect(await markerMoves(() => backfillCoverVersionsOnce({}))).toBe(true);
+    });
+
+    it("moves the marker when the pass versions the picture of a listed artist", async () => {
+        await put(path.join(covers, "artists", `${P}_mh.jpg`));
+        await prisma.artist.update({ where: { id: artistId }, data: { heroUrl: `native:artists/${P}_mh.jpg` } });
+        const a = await album({});
+        await withSong(a.id);
+        expect(await markerMoves(() => backfillCoverVersionsOnce({}))).toBe(true);
+    });
+
+    it("leaves the marker when the person's own cover shows, or the album is a Discover one", async () => {
+        await put(path.join(covers, "albums", `${P}_o.jpg`));
+        const own = await album({ coverUrl: `native:albums/${P}_o.jpg`, userCoverUrl: "https://pictures.example/mine.jpg" });
+        await withSong(own.id);
+        expect(await markerMoves(() => backfillCoverVersionsOnce({}))).toBe(false);
+
+        await notYetRun();
+        await put(path.join(covers, "albums", `${P}_d.jpg`));
+        const discover = await album({ coverUrl: `native:albums/${P}_d.jpg` });
+        await prisma.album.update({ where: { id: discover.id }, data: { location: "DISCOVER" } });
+        await withSong(discover.id);
+        expect(await markerMoves(() => backfillCoverVersionsOnce({}))).toBe(false);
+    });
+
+    it("moves the marker for a version the format repair stores through rewriteCoverValues", async () => {
+        const a = await album({ coverUrl: `native:albums/${P}_r.jpg?v=0123456789ab` });
+        await withSong(a.id);
+        expect(
+            await markerMoves(async () => {
+                expect(await rewriteCoverValues(`albums/${P}_r.jpg`, "ba9876543210")).toBe(1);
+                await flushShownPictureChanges();
+            }),
+        ).toBe(true);
     });
 });

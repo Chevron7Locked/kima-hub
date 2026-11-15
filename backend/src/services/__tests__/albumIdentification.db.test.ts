@@ -11,6 +11,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { acoustidService } from "../acoustidService";
 import { identifyAlbumsBySound } from "../albumIdentification";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.mock("../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -142,6 +143,17 @@ describe("identifyAlbumsBySound", () => {
         // 13 songs asked in two requests (10 per request).
         expect(mockPost).toHaveBeenCalledTimes(2);
         expect(mockGetAlbumCatalogue).toHaveBeenCalledWith(DANGEROUS_DAYS);
+    });
+
+    it("moves the library marker once when it stores a cover for a listed album, and not when the person's own cover shows", async () => {
+        await seedAlbum();
+        expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(true);
+
+        await cleanup();
+        await clearRedis();
+        await seedAlbum();
+        await prisma.album.update({ where: { id: id("alb") }, data: { userCoverUrl: "https://pictures.example/mine.jpg" } });
+        expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(false);
     });
 
     it("decides an album once", async () => {

@@ -388,3 +388,82 @@ describe("an artist's picture left in the cache", () => {
         expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).displayName).toBe("New");
     });
 });
+
+/**
+ * The genres a client lists for an artist are the ones a person set when they set any, else the enriched ones (getMergedGenres),
+ * in that order: Subsonic's getGenres, its genre filters and the genre on every song, album and artist read them. An
+ * album's own genre list and its year are shown to no Subsonic client, so editing either moves nothing.
+ */
+describe("editing or resetting the genres an artist shows", () => {
+    const withGenres = async (key: string, kind: Kind, genres: string[], userGenres: string[]) => {
+        const s = await seed(key, kind, false);
+        await prisma.artist.update({ where: { id: s.artist }, data: { genres, userGenres } });
+        return s;
+    };
+
+    it("moves the marker when an edit changes the genres shown, in the list or its order", async () => {
+        const s = await withGenres("gn", "playable", ["Rock"], []);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Jazz"] }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Jazz", "Blues"] }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Blues", "Jazz"] }))).toBe(true);
+        // Clearing the person's list brings the enriched one back.
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: null }))).toBe(true);
+    });
+
+    it("leaves the marker when the genres shown stay the same", async () => {
+        const s = await withGenres("gns", "playable", ["Rock", "Pop"], []);
+        // The person's list equals the enriched one that was showing; a repeat; a duplicate that is dropped; a clear of nothing.
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Rock", "Pop"] }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Rock", "Pop"] }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Rock", "Pop", "Rock"] }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: null }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { bio: "text" }))).toBe(false);
+    });
+
+    it("moves the marker for a name and genres sent together", async () => {
+        const s = await withGenres("gnn", "playable", ["Rock"], []);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { name: "New", genres: ["Jazz"] }))).toBe(true);
+    });
+
+    it.each(unlisted)("leaves the marker for an artist that is not listed (%s)", async (kind) => {
+        const s = await withGenres(`gnu${kind}`, kind, ["Rock"], []);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Jazz"] }))).toBe(false);
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).userGenres).toEqual(["Jazz"]);
+    });
+
+    it("moves the marker when a reset takes the person's genres away and the enriched ones differ, and not otherwise", async () => {
+        const s = await withGenres("gnr", "playable", ["Rock"], ["Jazz"]);
+        expect(await markerMoves(() => post(`/enrichment/artists/${s.artist}/reset`))).toBe(true);
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).userGenres).toEqual([]);
+        // Nothing of the person's left to take away.
+        expect(await markerMoves(() => post(`/enrichment/artists/${s.artist}/reset`))).toBe(false);
+
+        const same = await withGenres("gnrs", "playable", ["Rock"], ["Rock"]);
+        expect(await markerMoves(() => post(`/enrichment/artists/${same.artist}/reset`))).toBe(false);
+
+        const hidden = await withGenres("gnru", "discover", ["Rock"], ["Jazz"]);
+        expect(await markerMoves(() => post(`/enrichment/artists/${hidden.artist}/reset`))).toBe(false);
+    });
+
+    it("judges an edit that overlaps another against the genres it replaced", async () => {
+        const s = await withGenres("gno", "playable", ["Rock"], []);
+        const same = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Jazz"] }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { userGenres: ["Jazz"] } }),
+        );
+        expect(same).toEqual({ moved: false, status: 200 });
+        const other = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { genres: ["Blues"] }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { userGenres: ["Soul"] } }),
+        );
+        expect(other).toEqual({ moved: true, status: 200 });
+    });
+
+    it("leaves the marker for an album's own genres and year, which no client shows", async () => {
+        const s = await seed("gna", "playable", false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { genres: ["Jazz"] }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { year: 1999 }))).toBe(false);
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).displayYear).toBeNull();
+    });
+});

@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import { subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { parseStoredCover } from "../../services/imageStorage";
 import { isLosslessCodec } from "../../utils/audioCodec";
+import { isWebAddress } from "../../utils/webAddress";
 
 export type ArtistRow = {
     id: string;
@@ -82,7 +83,7 @@ export function artistPicture(a: { heroUrl?: string | null; userHeroUrl?: string
  */
 export function artistPictureAddress(a: { heroUrl?: string | null; userHeroUrl?: string | null }): string | undefined {
     const picture = artistPicture(a);
-    return picture && /^https?:\/\/[^/\s]/i.test(picture) ? picture : undefined;
+    return picture && isWebAddress(picture) ? picture : undefined;
 }
 
 export function mapArtist(a: ArtistRow) {

@@ -6,6 +6,7 @@ import { redisClient } from "../utils/redis";
 import { findAlbumArtwork, findArtistArtwork } from "./artwork";
 import { isMbid } from "./artistIdentity";
 import { downloadAndStoreImage } from "./imageStorage";
+import { notePictureChange } from "./shownPictureChanges";
 import { withShutdownSignal, type StopCheck } from "../utils/stopCheck";
 
 // Cache TTLs
@@ -239,10 +240,13 @@ class DataCacheService {
      */
     private async updateArtistHeroUrl(artistId: string, heroUrl: string): Promise<void> {
         try {
-            await prisma.artist.update({
+            const row = await prisma.artist.update({
                 where: { id: artistId },
                 data: { heroUrl },
+                select: { userHeroUrl: true },
             });
+            // Only an artist with no picture of its own is looked up (a stored one answers first), so there was none to replace.
+            notePictureChange("artist", artistId, { was: null, now: heroUrl, own: row.userHeroUrl });
         } catch (err) {
             logger.warn("[DataCache] Failed to update artist heroUrl:", err);
         }
@@ -253,10 +257,12 @@ class DataCacheService {
      */
     private async updateAlbumCoverUrl(albumId: string, coverUrl: string): Promise<void> {
         try {
-            await prisma.album.update({
+            const row = await prisma.album.update({
                 where: { id: albumId },
                 data: { coverUrl },
+                select: { userCoverUrl: true },
             });
+            notePictureChange("album", albumId, { was: null, now: coverUrl, own: row.userCoverUrl });
         } catch (err) {
             logger.warn("[DataCache] Failed to update album coverUrl:", err);
         }

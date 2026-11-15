@@ -24,6 +24,7 @@ import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { coversBasePath, dropResizedCopies, parseStoredCover, resolveInCoversDir, storedCoverValue, versionOfFile } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
+import { notePictureChange, rewritePictureColumn, shownPicture, flushShownPictureChanges } from "./shownPictureChanges";
 
 export interface CoverVersionResult {
     /** Stored values (each distinct address once) that carry a version now. */
@@ -80,6 +81,10 @@ export async function rewriteCoverValues(
         const keys = Object.keys(data).length;
         if (keys > 0) {
             await prisma.album.update({ where: { id: album.id }, data });
+            notePictureChange("album", album.id, {
+                was: shownPicture(album.coverUrl, album.userCoverUrl),
+                now: shownPicture(data.coverUrl ?? album.coverUrl, data.userCoverUrl ?? album.userCoverUrl),
+            });
             written += keys;
         }
     }
@@ -95,6 +100,10 @@ export async function rewriteCoverValues(
         const keys = Object.keys(data).length;
         if (keys > 0) {
             await prisma.artist.update({ where: { id: artist.id }, data });
+            notePictureChange("artist", artist.id, {
+                was: shownPicture(artist.heroUrl, artist.userHeroUrl),
+                now: shownPicture(data.heroUrl ?? artist.heroUrl, data.userHeroUrl ?? artist.userHeroUrl),
+            });
             written += keys;
         }
     }
@@ -139,10 +148,7 @@ async function unversionedValues(): Promise<string[]> {
 
 /** Writes `to` wherever `from` stands exactly, in every column. Exact matches only: `from` has no version to match loosely. */
 async function replaceValue(from: string, to: string): Promise<void> {
-    for (const { model, column } of ADDRESS_COLUMNS) {
-        if (model === "album") await prisma.album.updateMany({ where: { [column]: from }, data: { [column]: to } });
-        else await prisma.artist.updateMany({ where: { [column]: from }, data: { [column]: to } });
-    }
+    for (const { model, column } of ADDRESS_COLUMNS) await rewritePictureColumn(model, column, from, to);
 }
 
 /**
@@ -163,7 +169,16 @@ async function fileUnderAlbums(relativePath: string, file: string): Promise<{ re
  * Runs the pass unless it has run. Answers null when it did not run (already done, or no settings row yet), else what it
  * did. One value's trouble is counted, not thrown; a failure of the marker save throws, and the caller logs it.
  */
-export async function backfillCoverVersionsOnce({ shouldStop }: StopCheck): Promise<CoverVersionResult | null> {
+export async function backfillCoverVersionsOnce(stop: StopCheck): Promise<CoverVersionResult | null> {
+    try {
+        return await versionCovers(stop);
+    } finally {
+        // The versions the pass stored change the cover ids clients are handed: one change of the library, however many values.
+        await flushShownPictureChanges();
+    }
+}
+
+async function versionCovers({ shouldStop }: StopCheck): Promise<CoverVersionResult | null> {
     const settings = await getSystemSettings();
     // No settings row yet is a new install: it stores every cover with a version already.
     if (!settings || settings.coverVersionsAddedAt) return null;

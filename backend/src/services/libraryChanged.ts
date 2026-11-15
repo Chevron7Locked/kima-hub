@@ -3,7 +3,8 @@
  * the one it holds and refetches its artists only when it moved, so it moves only for what a client lists: a scan that
  * added, changed, flagged missing, retired or flagged corrupt a library song (workers/processors/scanProcessor.ts), a
  * person or job that deleted or moved library songs, albums or artists (routes/library, the Discover lifecycle, prune,
- * refile, data integrity), and a person's edit of a name shown (routes/enrichment.ts). What a client lists is playable
+ * refile, data integrity), a person's edit of a name, a picture or the genres shown (routes/enrichment.ts), and a found
+ * picture that replaced the one shown (services/shownPictureChanges.ts). What a client lists is playable
  * songs and the albums and artists holding one (utils/playableSong.ts), so a change to anything else leaves it: a
  * Discover item, a song that is missing or corrupt, an empty album. Analysis writes, Discover songs and artist syncs do
  * not move it either, and it never goes backwards. It is stored in the system settings, so every process reads the same one.
@@ -65,3 +66,9 @@ export const albumIsListed = (albumId: string) => holdsPlayableSong({ albumId })
 
 /** Whether a client lists the artist: one of its albums holds a playable song. */
 export const artistIsListed = (artistId: string) => holdsPlayableSong({ album: { artistId } });
+
+/** Whether a client lists any of these artists: one of their albums holds a playable song. One query, for a batch of ids. */
+export const anyArtistIsListed = (artistIds: string[]) => holdsPlayableSong({ album: { artistId: { in: artistIds } } });
+
+/** Whether a client lists any of these albums: it holds a playable song. One query, for a batch of ids. */
+export const anyAlbumIsListed = (albumIds: string[]) => holdsPlayableSong({ albumId: { in: albumIds } });

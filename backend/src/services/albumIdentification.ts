@@ -16,6 +16,7 @@ import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumId
 import { NameIndex } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
+import { flushShownPictureChanges, notePictureChange } from "./shownPictureChanges";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
 import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
@@ -184,6 +185,15 @@ function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): 
  * failure never stops the round; a paused MusicBrainz waits for the next. Returns the ids of the albums given one.
  */
 export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<string[]> {
+    try {
+        return await identifyRound(windowAlbumIds);
+    } finally {
+        // The covers this round found reach Subsonic clients as one change of the library.
+        await flushShownPictureChanges();
+    }
+}
+
+async function identifyRound(windowAlbumIds: string[]): Promise<string[]> {
     if (await sourcePauseController.isPaused("musicbrainz")) return [];
     const started = Date.now();
     const assigned: string[] = [];
@@ -363,7 +373,13 @@ async function identifyAlbum(album: CandidateAlbum): Promise<AlbumOutcome> {
     if (!album.coverUrl) {
         try {
             const found = await findAlbumArtwork({ rgMbid: releaseGroupId, artistName: album.artist, albumTitle: album.title });
-            if (found) await prisma.album.updateMany({ where: { id: album.id, coverUrl: null }, data: { coverUrl: found.url } });
+            if (found) {
+                const stored = await prisma.album.updateMany({ where: { id: album.id, coverUrl: null }, data: { coverUrl: found.url } });
+                if (stored.count > 0) {
+                    const own = await prisma.album.findUnique({ where: { id: album.id }, select: { userCoverUrl: true } });
+                    notePictureChange("album", album.id, { was: null, now: found.url, own: own?.userCoverUrl });
+                }
+            }
         } catch {
             // A cover is optional; the album keeps its id without one.
         }

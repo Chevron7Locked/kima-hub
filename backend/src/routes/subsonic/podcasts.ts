@@ -4,6 +4,7 @@ import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, clamp, parseIntParam } from "./mappers";
 import { one } from "../../utils/subsonicParams";
+import { isWebAddress } from "../../utils/webAddress";
 
 export const podcastRouter = Router();
 
@@ -112,7 +113,7 @@ podcastRouter.all("/getPodcasts.view", wrap(async (req, res) => {
         "@_title": sub.podcast.title,
         "@_description": sub.podcast.description || undefined,
         "@_coverArt": sub.podcast.id,
-        "@_originalImageUrl": sub.podcast.imageUrl || undefined,
+        "@_originalImageUrl": sub.podcast.imageUrl && isWebAddress(sub.podcast.imageUrl) ? sub.podcast.imageUrl : undefined,
         ...(includeEpisodes && sub.podcast.episodes.length > 0
             ? { episode: sub.podcast.episodes.map(mapPodcastEpisode) }
             : {}),

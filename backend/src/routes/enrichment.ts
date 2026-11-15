@@ -31,6 +31,8 @@ import { albumIsListed, artistIsListed, markLibraryChangedIfListed, songIsListed
 import { parseStoredCover, resolveInCoversDir } from "../services/imageStorage";
 import { parseLimit, parseOffset } from "./library/paging";
 import { wholeNumber } from "../utils/wholeNumber";
+import { isWebAddress } from "../utils/webAddress";
+import { getMergedGenres } from "../utils/metadataOverrides";
 
 const router = Router();
 
@@ -66,7 +68,7 @@ function coverAddressOverride(field: string, raw: unknown): string | null {
     if (file === null || path.extname(file) === "") throw badAddress();
     return address;
   }
-  if (!/^https?:\/\/[^/\s]/i.test(address)) throw badAddress();
+  if (!isWebAddress(address)) throw badAddress();
   try {
     new URL(address);
   } catch {
@@ -117,15 +119,19 @@ const TRACK_EDIT_REPLY = {
 } as const;
 
 /**
- * The names (and, for an artist or album, the picture) a row shows, read inside the transaction `tx` with the row held
+ * The names (and, for an artist or album, the picture, and for an artist its genres) a row shows, read inside the transaction `tx` with the row held
  * until it ends. A plain read would let a second edit that overlaps this one pass between the read and the write, and
  * "did what is shown change" would be judged against a value that is already gone. Null when the row does not exist.
  */
 async function lockedArtistShown(tx: Prisma.TransactionClient, id: string) {
-  const rows = await tx.$queryRaw<Array<{ name: string; displayName: string | null; heroUrl: string | null; userHeroUrl: string | null }>>`
-    SELECT "name", "displayName", "heroUrl", "userHeroUrl" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
+  const rows = await tx.$queryRaw<Array<{
+    name: string; displayName: string | null; heroUrl: string | null; userHeroUrl: string | null; genres: unknown; userGenres: unknown;
+  }>>`
+    SELECT "name", "displayName", "heroUrl", "userHeroUrl", "genres", "userGenres" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
   return rows[0] ?? null;
 }
+/** The genres an artist shows, in order, as one comparable text: the person's list when set, else the enriched one. */
+const genresShown = (artist: { genres?: unknown; userGenres?: unknown }): string => JSON.stringify(getMergedGenres(artist));
 async function lockedAlbumShown(tx: Prisma.TransactionClient, id: string) {
   const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null; coverUrl: string | null; userCoverUrl: string | null }>>`
     SELECT "title", "displayTitle", "coverUrl", "userCoverUrl" FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
@@ -545,13 +551,15 @@ router.put("/artists/:id/metadata", async (req, res) => {
       if (newMbid !== null) forgetOwnedIndex();
       await forgetArtistHero(req.params.id);
 
-      // A shown name and a shown picture are what a Subsonic client lists, so an edit that changes either moves the
+      // A shown name, picture and genre list are what a Subsonic client lists, so an edit that changes any of them moves the
       // library's change marker. An edit that sends what is already shown, a new MBID (it changes neither), or an artist
       // no client lists (Discover's, or one whose songs are missing or corrupt) moves nothing.
       if (before && (artist.displayName || artist.name) !== (before.displayName || before.name)) {
         await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name edit");
       } else if (before && (artist.userHeroUrl || artist.heroUrl) !== (before.userHeroUrl || before.heroUrl)) {
         await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture edit");
+      } else if (before && genresShown(artist) !== genresShown(before)) {
+        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's genre edit");
       }
       res.json(artist);
     } catch (error) {
@@ -745,6 +753,7 @@ router.post("/artists/:id/reset", async (req, res) => {
     // Only a shown name or picture that changed back is a change to what a client lists.
     if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name reset");
     else if ((existingArtist.userHeroUrl || existingArtist.heroUrl) !== existingArtist.heroUrl) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture reset");
+    else if (genresShown(existingArtist) !== genresShown({ genres: existingArtist.genres, userGenres: [] })) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's genre reset");
     res.json({
       message: "Artist metadata reset to original values",
       artist,

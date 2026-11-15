@@ -13,6 +13,7 @@ import { logger } from "../../utils/logger";
 import { backfillAllImages, getImageBackfillProgress } from "../imageBackfill";
 import { downloadAndStoreImage } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.setTimeout(30_000);
 
@@ -164,5 +165,48 @@ describe("backfillAllImages closing log line", () => {
         const lines = infoLines(info);
         expect(lines.some((l) => /complete/i.test(l))).toBe(false);
         expect(lines.some((l) => /stopped/i.test(l))).toBe(true);
+    });
+});
+
+/**
+ * A picture stored locally in place of the external one it came from changes the address a client is handed, so the
+ * library marker moves once for the run, when a listed artist or album shows it.
+ */
+describe("backfillAllImages and the library marker", () => {
+    /** One artist with an album and a song, holding external pictures; `location` DISCOVER lists nothing to a client. */
+    async function seedListed(location: "LIBRARY" | "DISCOVER", own: { userHeroUrl?: string; userCoverUrl?: string } = {}) {
+        const id = `${P}-ml`;
+        await prisma.artist.create({
+            data: { id, name: id, normalizedName: id, identityKey: id, heroUrl: "http://example.invalid/a.jpg", userHeroUrl: own.userHeroUrl },
+        });
+        await prisma.album.create({
+            data: {
+                id: `${id}-al`, artistId: id, title: id, identityKey: `${id}-al`, rgMbid: `${id}-al`, primaryType: "Album",
+                coverUrl: "http://example.invalid/c.jpg", userCoverUrl: own.userCoverUrl, location,
+            },
+        });
+        await prisma.track.create({
+            data: { id: `${id}-t`, albumId: `${id}-al`, title: "T", trackNo: 1, duration: 100, filePath: `/m/${id}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+    }
+    beforeEach(async () => {
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await clean();
+    });
+    afterAll(() => prisma.track.deleteMany({ where: { id: { startsWith: P } } }));
+
+    it("moves the marker when a listed artist's picture is stored locally", async () => {
+        await seedListed("LIBRARY");
+        expect(await markerMoves(() => backfillAllImages())).toBe(true);
+    });
+
+    it("leaves the marker when the person's own pictures show instead, or the album is a Discover one", async () => {
+        await seedListed("LIBRARY", { userHeroUrl: "native:artists/mine.jpg", userCoverUrl: "native:albums/mine.jpg" });
+        expect(await markerMoves(() => backfillAllImages())).toBe(false);
+
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await clean();
+        await seedListed("DISCOVER");
+        expect(await markerMoves(() => backfillAllImages())).toBe(false);
     });
 });

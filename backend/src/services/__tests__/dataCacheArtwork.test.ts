@@ -34,6 +34,8 @@ jest.mock("../imageStorage", () => ({
 import { dataCacheService } from "../dataCache";
 import { prisma } from "../../utils/db";
 import { useShutdownCheck } from "../../utils/stopCheck";
+import { markerMoves } from "../../__tests__/helpers/libraryMarker";
+import { flushShownPictureChanges } from "../shownPictureChanges";
 
 const P = "zz-dataCache-";
 const ALBUM = `${P}alb`;
@@ -216,5 +218,69 @@ describe("dataCache asks every source, not just one", () => {
             expect(await dataCacheService.getArtistImage(ARTIST, "Nobody", null)).toBeNull();
             expect(mockDownloadAndStoreImage).not.toHaveBeenCalled();
         });
+    });
+});
+
+/**
+ * A picture the cache finds and stores for a listed artist or album is a change a Subsonic client shows: the library marker
+ * moves (once per window, through services/shownPictureChanges.ts), unless a person's own picture covers it or no client lists it.
+ */
+describe("dataCache found pictures and the library marker", () => {
+    const withSong = (kind: "playable" | "discover") =>
+        prisma.track.create({
+            data: { id: `${P}t`, albumId: ALBUM, title: "song", trackNo: 1, duration: 100, filePath: `${P}/01.flac`, fileModified: new Date(), fileSize: 1 },
+        }).then(() => (kind === "discover" ? prisma.album.update({ where: { id: ALBUM }, data: { location: "DISCOVER" } }) : null));
+
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await wipe();
+        await flushShownPictureChanges();
+        mockFindAlbumArtwork.mockResolvedValue(null);
+        mockFindArtistArtwork.mockResolvedValue(null);
+        mockDownloadAndStoreImage.mockResolvedValue(null);
+    });
+    afterAll(async () => {
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await flushShownPictureChanges();
+    });
+
+    const flushed = (work: () => Promise<unknown>) =>
+        markerMoves(async () => {
+            await work();
+            await flushShownPictureChanges();
+        });
+
+    it("moves the marker when an album cover is found for a listed album", async () => {
+        await seedAlbum("Age Of Aquarius", "Brad Sucks");
+        await withSong("playable");
+        mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+        expect(await flushed(() => dataCacheService.getAlbumCover(ALBUM, REAL_MBID))).toBe(true);
+    });
+
+    it("leaves the marker when the album's own cover shows already, or the album is a discover one", async () => {
+        await seedAlbum("Age Of Aquarius", "Brad Sucks");
+        await withSong("playable");
+        await prisma.album.update({ where: { id: ALBUM }, data: { userCoverUrl: "native:albums/mine.jpg" } });
+        mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
+        // The found cover is stored under the own one, which keeps showing.
+        expect(await flushed(() => dataCacheService.getAlbumCover(ALBUM, REAL_MBID))).toBe(false);
+
+        await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
+        await wipe();
+        await seedAlbum("Age Of Aquarius", "Brad Sucks");
+        await withSong("discover");
+        expect(await flushed(() => dataCacheService.getAlbumCover(ALBUM, REAL_MBID))).toBe(false);
+    });
+
+    it("moves the marker when an artist image is found for a listed artist, and not for a discover one", async () => {
+        await seedAlbum("Age Of Aquarius", "Brad Sucks");
+        await withSong("playable");
+        mockFindArtistArtwork.mockResolvedValue({ url: FOUND, source: "fanart" });
+        expect(await flushed(() => dataCacheService.getArtistImage(`${P}albart`, "Brad Sucks", null))).toBe(true);
+
+        await prisma.artist.update({ where: { id: `${P}albart` }, data: { heroUrl: null } });
+        await prisma.album.update({ where: { id: ALBUM }, data: { location: "DISCOVER" } });
+        expect(await flushed(() => dataCacheService.getArtistImage(`${P}albart`, "Brad Sucks", null))).toBe(false);
     });
 });

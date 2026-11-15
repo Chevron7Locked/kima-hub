@@ -40,6 +40,7 @@ import { enrichmentFailureService } from "../../services/enrichmentFailureServic
 import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQueues";
 import { entityGoneError, isEntityGone } from "../entityGone";
 import { getSystemSettings } from "../../utils/systemSettings";
+import { notePictureChange } from "../../services/shownPictureChanges";
 
 /** One MusicBrainz genre with its vote count. */
 type GenreVote = { name: string; count?: number };
@@ -80,6 +81,7 @@ async function dropMbidOfAnotherArtist(artist: Artist, logPrefix: string): Promi
         }),
     ]);
     forgetOwnedIndex();
+    notePictureChange("artist", artist.id, { was: artist.heroUrl, now: localImage, own: artist.userHeroUrl });
     artist.mbid = null;
     artist.summary = null;
     artist.heroUrl = localImage;
@@ -308,7 +310,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         // But only if the file actually exists on disk
         const currentArtist = await prisma.artist.findUnique({
             where: { id: artist.id },
-            select: { heroUrl: true },
+            select: { heroUrl: true, userHeroUrl: true },
         });
         const finalHeroUrl = (currentArtist?.heroUrl && isNativePath(currentArtist.heroUrl) && nativeFileExists(currentArtist.heroUrl))
             ? currentArtist.heroUrl
@@ -330,6 +332,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                       : { enrichmentStatus: "completed", enrichmentFailures: 0 }),
             },
         });
+        notePictureChange("artist", artist.id, { was: currentArtist?.heroUrl, now: finalHeroUrl, own: currentArtist?.userHeroUrl });
         if (!(similarFetchFailed || wikidataFailed || musicbrainzFailed || musicbrainzWaiting)) {
             // An earlier failure of this artist is answered now; the failures list stops counting it.
             await enrichmentFailureService.resolveByEntity("artist", artist.id);
@@ -440,6 +443,7 @@ async function enrichAlbumCovers(
                 rgMbid: true,
                 title: true,
                 coverUrl: true,
+                userCoverUrl: true,
             },
         });
         const albumsWithoutCovers = allAlbums.filter(
@@ -482,6 +486,7 @@ async function enrichAlbumCovers(
                                 where: { id: album.id },
                                 data: { coverUrl },
                             });
+                            notePictureChange("album", album.id, { was: album.coverUrl, now: coverUrl, own: album.userCoverUrl });
 
                             // Cache in Redis
                             try {

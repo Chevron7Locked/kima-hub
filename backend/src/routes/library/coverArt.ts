@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { imageLimiter } from "../../middleware/rateLimiter";
 import { USER_AGENT } from "../../config";
 import { findAlbumArtwork } from "../../services/artwork";
+import { notePictureChange } from "../../services/shownPictureChanges";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../utils/ssrf";
@@ -155,13 +156,16 @@ async function serveStoredCover(address: string, size: string | undefined, req: 
       });
       if (found) {
         // Remembered only on the album whose cover this path is, whatever version its address carries.
-        await prisma.album.updateMany({
+        const stored = await prisma.album.updateMany({
           where: {
             id: albumId,
             OR: [{ coverUrl: `native:${nativePath}` }, { coverUrl: { startsWith: `native:${nativePath}?v=` } }],
           },
           data: { coverUrl: found.url },
         });
+        if (stored.count > 0) {
+          notePictureChange("album", albumId, { was: album.coverUrl, now: found.url, own: album.userCoverUrl });
+        }
         return found.url;
       }
     }

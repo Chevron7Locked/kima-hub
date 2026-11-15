@@ -64,6 +64,9 @@ jest.mock("../../../services/imageStorage", () => ({
 import { enrichSimilarArtist } from "../artists";
 import { prisma } from "../../../utils/db";
 import { useShutdownCheck } from "../../../utils/stopCheck";
+import { markerMoves } from "../../../__tests__/helpers/libraryMarker";
+import * as systemSettings from "../../../utils/systemSettings";
+import { flushShownPictureChanges } from "../../../services/shownPictureChanges";
 
 const P = "zz-artEnrich-";
 const REAL_MBID = "11111111-2222-3333-4444-555555555555";
@@ -344,5 +347,100 @@ describe("an artist row holding another artist's MusicBrainz id", () => {
         expect(row.enrichmentStatus).toBe("completed");
         expect(row.enrichmentFailures).toBe(0);
         expect(mockResolveByEntity).toHaveBeenCalledWith("artist", artist.id);
+    });
+});
+
+/**
+ * A picture the worker finds or replaces for a listed artist or album is a change a Subsonic client shows: the library marker
+ * moves once (services/shownPictureChanges.ts), and only when what is shown really changed. Real database, real marker.
+ */
+describe("the enrichment worker's found pictures and the library marker", () => {
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        await wipe();
+        await flushShownPictureChanges();
+        mockFindArtistArtwork.mockResolvedValue(null);
+        mockFindAlbumArtwork.mockResolvedValue(null);
+        mockDownloadAndStoreImage.mockResolvedValue(null);
+        mockFindLocalArtistImage.mockResolvedValue(null);
+        mockSearchArtist.mockResolvedValue(answeredWith([]));
+        mockGetArtist.mockResolvedValue(answeredWith({ name: "Perturbator", "sort-name": "Perturbator", aliases: [] }));
+        // A stored native picture is on disk, as it is for a real library.
+        jest.requireMock("../../../services/imageStorage").nativeFileExists.mockReturnValue(true);
+    });
+    afterAll(async () => {
+        jest.requireMock("../../../services/imageStorage").nativeFileExists.mockReturnValue(false);
+        await flushShownPictureChanges();
+    });
+
+    /** The artist with one album (cover `coverUrl`) and one song on it; `location` DISCOVER makes it a Discover album no client lists. */
+    async function arrange(coverUrl: string | null, location: "LIBRARY" | "DISCOVER" = "LIBRARY", artistData: { heroUrl?: string; userHeroUrl?: string } = {}) {
+        const artist = await seedArtist("1", artistData);
+        const album = await seedAlbum(artist.id, "1", "Dangerous Days", coverUrl);
+        await prisma.album.update({ where: { id: album.id }, data: { location } });
+        await prisma.track.create({
+            data: { id: `${P}t1`, albumId: album.id, title: "T", trackNo: 1, duration: 100, filePath: `/m/${P}t1.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        return artist;
+    }
+    const enrichAndFlush = (artist: Awaited<ReturnType<typeof seedArtist>>) =>
+        markerMoves(async () => {
+            await enrichSimilarArtist(artist);
+            await flushShownPictureChanges();
+        });
+
+    it("moves the marker when an artist image is found", async () => {
+        mockFindArtistArtwork.mockResolvedValue({ url: HERO, source: "fanart" });
+        mockDownloadAndStoreImage.mockResolvedValue("native:artists/art-1.jpg");
+        expect(await enrichAndFlush(await arrange("https://x/y.jpg"))).toBe(true);
+    });
+
+    it("moves the marker once when an artist image and several album covers are found", async () => {
+        mockFindArtistArtwork.mockResolvedValue({ url: HERO, source: "fanart" });
+        mockDownloadAndStoreImage.mockResolvedValue("native:artists/art-1.jpg");
+        mockFindAlbumArtwork.mockResolvedValue({ url: COVER, source: "deezer" });
+        const artist = await arrange(null);
+        const saved = jest.spyOn(systemSettings, "saveSystemSettings");
+        saved.mockClear();
+        await enrichSimilarArtist(artist);
+        await flushShownPictureChanges();
+        const markers = saved.mock.calls.filter((c) => "libraryChangedAt" in (c[0] as object));
+        saved.mockRestore();
+        expect(markers).toHaveLength(1);
+    });
+
+    it("moves the marker when an album cover is found", async () => {
+        mockFindAlbumArtwork.mockResolvedValue({ url: COVER, source: "deezer" });
+        expect(await enrichAndFlush(await arrange(null))).toBe(true);
+    });
+
+    it("leaves the marker when nothing was found", async () => {
+        expect(await enrichAndFlush(await arrange("https://x/y.jpg"))).toBe(false);
+    });
+
+    it("leaves the marker when the artist's own picture shows either way", async () => {
+        mockFindArtistArtwork.mockResolvedValue({ url: HERO, source: "fanart" });
+        mockDownloadAndStoreImage.mockResolvedValue("native:artists/art-1.jpg");
+        expect(await enrichAndFlush(await arrange("https://x/y.jpg", "LIBRARY", { userHeroUrl: "native:artists/mine.jpg" }))).toBe(false);
+    });
+
+    it("leaves the marker for a Discover album, which no client lists", async () => {
+        mockFindArtistArtwork.mockResolvedValue({ url: HERO, source: "fanart" });
+        mockDownloadAndStoreImage.mockResolvedValue("native:artists/art-1.jpg");
+        mockFindAlbumArtwork.mockResolvedValue({ url: COVER, source: "deezer" });
+        expect(await enrichAndFlush(await arrange(null, "DISCOVER"))).toBe(false);
+    });
+
+    it("moves the marker when dropping another artist's id puts a different local picture in", async () => {
+        mockGetArtist.mockResolvedValue(answeredWith({ name: "Sam Cooke", "sort-name": "Cooke, Sam", aliases: [] }));
+        mockFindLocalArtistImage.mockResolvedValue("native:artists/folder.jpg");
+        expect(await enrichAndFlush(await arrange("https://x/y.jpg", "LIBRARY", { heroUrl: "https://old/hero.jpg" }))).toBe(true);
+        expect((await stored(`${P}1`)).heroUrl).toBe("native:artists/folder.jpg");
+    });
+
+    it("leaves the marker when dropping another artist's id keeps the same picture", async () => {
+        mockGetArtist.mockResolvedValue(answeredWith({ name: "Sam Cooke", "sort-name": "Cooke, Sam", aliases: [] }));
+        mockFindLocalArtistImage.mockResolvedValue("native:artists/folder.jpg");
+        expect(await enrichAndFlush(await arrange("https://x/y.jpg", "LIBRARY", { heroUrl: "native:artists/folder.jpg" }))).toBe(false);
     });
 });

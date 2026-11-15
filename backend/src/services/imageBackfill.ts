@@ -9,6 +9,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { downloadAndStoreImage, isNativePath } from "./imageStorage";
 import { redisClient } from "../utils/redis";
+import { flushShownPictureChanges, notePictureChange } from "./shownPictureChanges";
 import { sleepUnlessStopped, stopSignal, type StopCheck } from "../utils/stopCheck";
 
 const PAGE_SIZE = 500;
@@ -171,15 +172,19 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
 
                         if (localPath) {
                             if (kind === "artist") {
-                                await prisma.artist.update({
+                                const stored = await prisma.artist.update({
                                     where: { id: row.id },
                                     data: { heroUrl: localPath },
+                                    select: { userHeroUrl: true },
                                 });
+                                notePictureChange("artist", row.id, { was: row.url, now: localPath, own: stored.userHeroUrl });
                             } else {
-                                await prisma.album.update({
+                                const stored = await prisma.album.update({
                                     where: { id: row.id },
                                     data: { coverUrl: localPath },
+                                    select: { userCoverUrl: true },
                                 });
+                                notePictureChange("album", row.id, { was: row.url, now: localPath, own: stored.userCoverUrl });
                             }
 
                             // Update Redis cache
@@ -252,5 +257,7 @@ export async function backfillAllImages(stop: StopCheck = {}): Promise<void> {
     } finally {
         release();
         running = false;
+        // The pictures this run moved to local copies reach Subsonic clients as one change of the library.
+        await flushShownPictureChanges();
     }
 }
