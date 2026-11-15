@@ -1,5 +1,6 @@
 import path from "path";
 import { Router, Response } from "express";
+import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { refuseRequest, safeError } from "../utils/errors";
 import { prisma } from "../utils/db";
@@ -114,6 +115,27 @@ const ALBUM_EDIT_REPLY = {
 const TRACK_EDIT_REPLY = {
   album: { select: { id: true, title: true, artist: { select: { id: true, name: true } } } },
 } as const;
+
+/**
+ * The names a row shows, read inside the transaction `tx` with the row held until it ends. A plain read would let a second
+ * edit that overlaps this one pass between the read and the write, and "did the shown name change" would be judged
+ * against a name that is already gone. Null when the row does not exist.
+ */
+async function lockedArtistNames(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{ name: string; displayName: string | null }>>`
+    SELECT "name", "displayName" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
+  return rows[0] ?? null;
+}
+async function lockedAlbumTitles(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null }>>`
+    SELECT "title", "displayTitle" FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
+  return rows[0] ?? null;
+}
+async function lockedTrackTitles(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null }>>`
+    SELECT "title", "displayTitle" FROM "Track" WHERE "id" = ${id} FOR UPDATE`;
+  return rows[0] ?? null;
+}
 
 /** The artist page caches its hero image; an edit or reset of the artist drops it. */
 async function forgetArtistHero(artistId: string): Promise<void> {
@@ -501,31 +523,24 @@ router.put("/artists/:id/metadata", async (req, res) => {
       }
       const newMbid = mbidInput("mbid", mbid);
 
-      // The name shown before the edit, to tell afterwards whether the edit changed it.
-      const before = await prisma.artist.findUnique({
-        where: { id: req.params.id },
-        select: { name: true, displayName: true },
-      });
-
-      // sortName follows displayName. Clearing the override files the artist under
-      // its canonical name.
-      if (newName !== undefined) {
-        updateData.sortName = artistSortName(newName ?? before?.name ?? "");
-      }
-
       // Set override flag
       if (hasOverrides) {
         updateData.hasUserOverrides = true;
       }
 
-      // A new id and the rest of the edit are stored together or not at all.
-      const artist = await prisma.$transaction(async (tx) => {
+      // A new id and the rest of the edit are stored together or not at all. The name shown before the edit is read in
+      // the same transaction, with the row held, so an edit that overlaps another is judged against the name it replaced.
+      const { artist, before } = await prisma.$transaction(async (tx) => {
+        const before = await lockedArtistNames(tx, req.params.id);
+        // sortName follows displayName. Clearing the override files the artist under its canonical name.
+        const sortName = newName !== undefined ? { sortName: artistSortName(newName ?? before?.name ?? "") } : {};
         if (newMbid !== null) await moveArtistMbid(tx, req.params.id, newMbid);
-        return tx.artist.update({
+        const artist = await tx.artist.update({
           where: { id: req.params.id },
-          data: updateData,
+          data: { ...updateData, ...sortName },
           include: ARTIST_EDIT_REPLY,
         });
+        return { artist, before };
       });
       if (newMbid !== null) forgetOwnedIndex();
       await forgetArtistHero(req.params.id);
@@ -587,33 +602,25 @@ router.put("/albums/:id/metadata", async (req, res) => {
       }
       const newRgMbid = mbidInput("rgMbid", rgMbid);
 
-      // The title shown before the edit, to tell afterwards whether the edit changed it.
-      const before = await prisma.album.findUnique({
-        where: { id: req.params.id },
-        select: { title: true, displayTitle: true },
-      });
-
-      // sortName follows displayTitle, like the artist override. artistSortName is
-      // text-generic, so it serves albums too. Clearing the override files the album
-      // under its canonical title.
-      if (newTitle !== undefined) {
-        updateData.sortName = artistSortName(newTitle ?? before?.title ?? "");
-      }
-
       // Set override flag
       if (hasOverrides) {
         updateData.hasUserOverrides = true;
       }
 
-      // A new id and the rest of the edit are stored together or not at all.
-      const { album, moved } = await prisma.$transaction(async (tx) => {
+      // A new id and the rest of the edit are stored together or not at all. The title shown before the edit is read in
+      // the same transaction, with the row held, so an edit that overlaps another is judged against the title it replaced.
+      const { album, moved, before } = await prisma.$transaction(async (tx) => {
+        const before = await lockedAlbumTitles(tx, req.params.id);
+        // sortName follows displayTitle, like the artist override. artistSortName is text-generic, so it serves albums
+        // too. Clearing the override files the album under its canonical title.
+        const sortName = newTitle !== undefined ? { sortName: artistSortName(newTitle ?? before?.title ?? "") } : {};
         const moved = newRgMbid !== null && (await moveAlbumRgMbid(tx, req.params.id, newRgMbid, { source: "editor" }));
         const album = await tx.album.update({
           where: { id: req.params.id },
-          data: updateData,
+          data: { ...updateData, ...sortName },
           include: ALBUM_EDIT_REPLY,
         });
-        return { album, moved };
+        return { album, moved, before };
       });
       if (moved) forgetOwnedIndex();
 
@@ -668,16 +675,16 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       updateData.hasUserOverrides = true;
     }
 
-    // The title shown before the edit, to tell afterwards whether the edit changed it.
-    const before = await prisma.track.findUnique({
-      where: { id: req.params.id },
-      select: { title: true, displayTitle: true },
-    });
-
-    const track = await prisma.track.update({
-      where: { id: req.params.id },
-      data: updateData,
-      include: TRACK_EDIT_REPLY,
+    // The title shown before the edit is read in the same transaction, with the row held, so an edit that overlaps
+    // another is judged against the title it replaced.
+    const { track, before } = await prisma.$transaction(async (tx) => {
+      const before = await lockedTrackTitles(tx, req.params.id);
+      const track = await tx.track.update({
+        where: { id: req.params.id },
+        data: updateData,
+        include: TRACK_EDIT_REPLY,
+      });
+      return { track, before };
     });
 
     // Only a shown title that changed is a change to what a client lists.
@@ -699,34 +706,36 @@ router.put("/tracks/:id/metadata", async (req, res) => {
  */
 router.post("/artists/:id/reset", async (req, res) => {
   try {
-    // Check if artist exists first
-    const existingArtist = await prisma.artist.findUnique({
-      where: { id: req.params.id },
-      select: { id: true, name: true, displayName: true },
+    // The name shown before the reset is read in the same transaction, with the row held, so a reset that overlaps an
+    // edit is judged against the name it replaced.
+    const done = await prisma.$transaction(async (tx) => {
+      const existingArtist = await lockedArtistNames(tx, req.params.id);
+      if (!existingArtist) return null;
+      const artist = await tx.artist.update({
+        where: { id: req.params.id },
+        data: {
+          displayName: null,
+          userSummary: null,
+          userHeroUrl: null,
+          userGenres: [],
+          hasUserOverrides: false,
+          // A reset clears displayName, so sortName has to file back under
+          // the canonical name too -- same reason the PUT handler recomputes
+          // it on clear.
+          sortName: artistSortName(existingArtist.name),
+        },
+        include: ARTIST_EDIT_REPLY,
+      });
+      return { existingArtist, artist };
     });
 
-    if (!existingArtist) {
+    if (!done) {
       return res.status(404).json({
         error: "Artist not found",
         message: "The artist may have been deleted",
       });
     }
-
-    const artist = await prisma.artist.update({
-      where: { id: req.params.id },
-      data: {
-        displayName: null,
-        userSummary: null,
-        userHeroUrl: null,
-        userGenres: [],
-        hasUserOverrides: false,
-        // A reset clears displayName, so sortName has to file back under
-        // the canonical name too -- same reason the PUT handler recomputes
-        // it on clear.
-        sortName: artistSortName(existingArtist.name),
-      },
-      include: ARTIST_EDIT_REPLY,
-    });
+    const { existingArtist, artist } = done;
     await forgetArtistHero(req.params.id);
 
     // Only a shown name that changed back is a change to what a client lists.
@@ -748,34 +757,36 @@ router.post("/artists/:id/reset", async (req, res) => {
  */
 router.post("/albums/:id/reset", async (req, res) => {
   try {
-    // Check if album exists first
-    const existingAlbum = await prisma.album.findUnique({
-      where: { id: req.params.id },
-      select: { id: true, title: true, displayTitle: true },
+    // The title shown before the reset is read in the same transaction, with the row held, so a reset that overlaps an
+    // edit is judged against the title it replaced.
+    const done = await prisma.$transaction(async (tx) => {
+      const existingAlbum = await lockedAlbumTitles(tx, req.params.id);
+      if (!existingAlbum) return null;
+      const album = await tx.album.update({
+        where: { id: req.params.id },
+        data: {
+          displayTitle: null,
+          displayYear: null,
+          userCoverUrl: null,
+          userGenres: [],
+          hasUserOverrides: false,
+          // A reset clears displayTitle, so sortName has to file back under
+          // the canonical title too -- same reason the PUT handler recomputes
+          // it on clear.
+          sortName: artistSortName(existingAlbum.title),
+        },
+        include: ALBUM_EDIT_REPLY,
+      });
+      return { existingAlbum, album };
     });
 
-    if (!existingAlbum) {
+    if (!done) {
       return res.status(404).json({
         error: "Album not found",
         message: "The album may have been deleted",
       });
     }
-
-    const album = await prisma.album.update({
-      where: { id: req.params.id },
-      data: {
-        displayTitle: null,
-        displayYear: null,
-        userCoverUrl: null,
-        userGenres: [],
-        hasUserOverrides: false,
-        // A reset clears displayTitle, so sortName has to file back under
-        // the canonical title too -- same reason the PUT handler recomputes
-        // it on clear.
-        sortName: artistSortName(existingAlbum.title),
-      },
-      include: ALBUM_EDIT_REPLY,
-    });
+    const { existingAlbum, album } = done;
 
     // Only a shown title that changed back is a change to what a client lists.
     if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title reset");
@@ -796,28 +807,30 @@ router.post("/albums/:id/reset", async (req, res) => {
  */
 router.post("/tracks/:id/reset", async (req, res) => {
   try {
-    // Check if track exists first
-    const existingTrack = await prisma.track.findUnique({
-      where: { id: req.params.id },
-      select: { id: true, title: true, displayTitle: true },
+    // The title shown before the reset is read in the same transaction, with the row held, so a reset that overlaps an
+    // edit is judged against the title it replaced.
+    const done = await prisma.$transaction(async (tx) => {
+      const existingTrack = await lockedTrackTitles(tx, req.params.id);
+      if (!existingTrack) return null;
+      const track = await tx.track.update({
+        where: { id: req.params.id },
+        data: {
+          displayTitle: null,
+          displayTrackNo: null,
+          hasUserOverrides: false,
+        },
+        include: TRACK_EDIT_REPLY,
+      });
+      return { existingTrack, track };
     });
 
-    if (!existingTrack) {
+    if (!done) {
       return res.status(404).json({
         error: "Track not found",
         message: "The track may have been deleted",
       });
     }
-
-    const track = await prisma.track.update({
-      where: { id: req.params.id },
-      data: {
-        displayTitle: null,
-        displayTrackNo: null,
-        hasUserOverrides: false,
-      },
-      include: TRACK_EDIT_REPLY,
-    });
+    const { existingTrack, track } = done;
 
     // Only a shown title that changed back is a change to what a client lists.
     if ((existingTrack.displayTitle || existingTrack.title) !== existingTrack.title) await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title reset");

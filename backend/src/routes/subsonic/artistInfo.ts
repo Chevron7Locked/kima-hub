@@ -2,7 +2,7 @@ import { Router } from "express";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { wrap, parseIntParam, coverArtId } from "./mappers";
+import { wrap, parseIntParam, coverArtId, artistPicture } from "./mappers";
 import { one } from "../../utils/subsonicParams";
 
 export const artistInfoRouter = Router();
@@ -21,6 +21,7 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
             summary: true,
             userSummary: true,
             heroUrl: true,
+            userHeroUrl: true,
             similarArtistsJson: true,
         },
     });
@@ -43,7 +44,7 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
                     { normalizedName: { in: names } },
                 ],
             },
-            select: { id: true, name: true, displayName: true, mbid: true, normalizedName: true, heroUrl: true },
+            select: { id: true, name: true, displayName: true, mbid: true, normalizedName: true, heroUrl: true, userHeroUrl: true },
             take: count * 2,
         });
 
@@ -58,21 +59,22 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
                 resolvedSimilar.push({
                     id: found.id,
                     name: found.displayName || found.name,
-                    coverArt: coverArtId(`ar-${found.id}`, found.heroUrl),
+                    coverArt: coverArtId(`ar-${found.id}`, artistPicture(found)),
                 });
             }
         }
     }
 
+    const picture = artistPicture(artist);
     const infoKey = req.path.includes("getArtistInfo2") ? "artistInfo2" : "artistInfo";
     return subsonicOk(req, res, {
         [infoKey]: {
             biography: artist.userSummary || artist.summary || undefined,
             musicBrainzId: artist.mbid || undefined,
-            "@_coverArt": coverArtId(`ar-${artist.id}`, artist.heroUrl),
-            "@_largeImageUrl": artist.heroUrl || undefined,
-            "@_smallImageUrl": artist.heroUrl || undefined,
-            "@_mediumImageUrl": artist.heroUrl || undefined,
+            "@_coverArt": coverArtId(`ar-${artist.id}`, picture),
+            "@_largeImageUrl": picture || undefined,
+            "@_smallImageUrl": picture || undefined,
+            "@_mediumImageUrl": picture || undefined,
             ...(resolvedSimilar.length > 0 ? {
                 similarArtist: resolvedSimilar.map((s) => ({
                     "@_id": s.id,

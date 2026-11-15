@@ -8,7 +8,7 @@ import { isFileGone } from "../../utils/errors";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
-import { firstArtistGenre, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
+import { artistPicture, firstArtistGenre, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
@@ -265,10 +265,10 @@ playbackRouter.all("/getCoverArt.view", wrap(async (req, res) => {
     if (!coverUrl) {
         const artist = await prisma.artist.findUnique({
             where: { id },
-            select: { heroUrl: true },
+            select: { heroUrl: true, userHeroUrl: true },
         });
         if (artist) {
-            coverUrl = artist.heroUrl;
+            coverUrl = artistPicture(artist);
         }
     }
 

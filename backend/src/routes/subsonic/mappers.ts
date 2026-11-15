@@ -10,6 +10,8 @@ export type ArtistRow = {
     name: string;
     displayName: string | null;
     heroUrl: string | null;
+    /** The picture the person set; it shows in place of `heroUrl`. */
+    userHeroUrl?: string | null;
     albumCount?: number;
 };
 
@@ -49,7 +51,7 @@ const ID_VERSION = /^[0-9a-f]{10}$/;
 /**
  * The `coverArt` id an app loads a cover by: the id, with the stored cover's version after an underscore when it has one
  * (`<id>_<version>`, as Navidrome does), so a changed cover is a new id and an app may keep the old one for good.
- * `stored` is the value the cover is read from: an album's `userCoverUrl || coverUrl`, an artist's `heroUrl`.
+ * `stored` is the value the cover is read from: an album's `userCoverUrl || coverUrl`, an artist's `userHeroUrl || heroUrl`.
  */
 export function coverArtId(id: string, stored: string | null | undefined): string {
     const version = parseStoredCover(stored)?.version;
@@ -69,13 +71,18 @@ function albumCoverArtId(album: { id: string; coverUrl?: string | null; userCove
     return coverArtId(album.id, album.userCoverUrl || album.coverUrl);
 }
 
+/** The picture an artist shows: the person's own when set, else the found one (as an album's cover is). */
+export function artistPicture(a: { heroUrl?: string | null; userHeroUrl?: string | null }): string | null {
+    return a.userHeroUrl || a.heroUrl || null;
+}
+
 export function mapArtist(a: ArtistRow) {
     return {
         "@_id": a.id,
         "@_name": a.displayName || a.name,
         "@_albumCount": a.albumCount ?? 0,
-        "@_coverArt": coverArtId(`ar-${a.id}`, a.heroUrl),
-        "@_artistImageUrl": a.heroUrl || undefined,
+        "@_coverArt": coverArtId(`ar-${a.id}`, artistPicture(a)),
+        "@_artistImageUrl": artistPicture(a) || undefined,
     };
 }
 

@@ -125,6 +125,7 @@ type ArtistHit = {
     name: string;
     displayName: string | null;
     heroUrl: string | null;
+    userHeroUrl: string | null;
     albumCount: number;
 };
 
@@ -132,7 +133,7 @@ type ArtistHit = {
 async function playableArtistsInOrder(ids: string[]): Promise<ArtistHit[]> {
     if (ids.length === 0) return [];
     const rows = await prisma.$queryRaw<ArtistHit[]>`
-        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", COUNT(al.id)::int AS "albumCount"
+        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", ar."userHeroUrl", COUNT(al.id)::int AS "albumCount"
         FROM "Artist" ar
         JOIN "Album" al ON al."artistId" = ar.id
         WHERE ar.id = ANY(${ids}::text[])

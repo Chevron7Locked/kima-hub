@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
+import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, artistPicture, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
 import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -36,9 +36,9 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
     // Artists with a playable album, each counting those albums as search3 does (the cached count ignores playability).
     // Ordered by the same sortName the buckets are keyed on.
     const artists = await prisma.$queryRaw<
-        { id: string; name: string; displayName: string | null; heroUrl: string | null; sortName: string; albumCount: number }[]
+        { id: string; name: string; displayName: string | null; heroUrl: string | null; userHeroUrl: string | null; sortName: string; albumCount: number }[]
     >`
-        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", ar."sortName", COUNT(al.id)::int AS "albumCount"
+        SELECT ar.id, ar.name, ar."displayName", ar."heroUrl", ar."userHeroUrl", ar."sortName", COUNT(al.id)::int AS "albumCount"
         FROM "Artist" ar
         JOIN "Album" al ON al."artistId" = ar.id
         WHERE ${albumHasPlayableSongSql("al")}
@@ -119,7 +119,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         const artists = await prisma.artist.findMany({
             where: { albums: { some: PLAYABLE_ALBUM_WHERE } },
             orderBy: [{ sortName: "asc" }, { id: "asc" }],
-            select: { id: true, name: true, displayName: true, heroUrl: true },
+            select: { id: true, name: true, displayName: true, heroUrl: true, userHeroUrl: true },
         });
 
         return subsonicOk(req, res, {
@@ -136,7 +136,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                                   "@_isDir": true,
                                   "@_title": artistName,
                                   "@_artist": artistName,
-                                  "@_coverArt": coverArtId(`ar-${artist.id}`, artist.heroUrl),
+                                  "@_coverArt": coverArtId(`ar-${artist.id}`, artistPicture(artist)),
                               };
                           }),
                       }

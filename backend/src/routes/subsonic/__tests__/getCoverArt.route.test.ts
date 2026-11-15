@@ -218,6 +218,23 @@ describe("getCoverArt for a versioned id", () => {
         await prisma.artist.update({ where: { id: `${P}-ar` }, data: { heroUrl: null } });
     });
 
+    it("serves the picture the person set for an artist, not the one found", async () => {
+        const found = await sharp(original).resize(200).jpeg().toBuffer();
+        fs.mkdirSync(path.join(COVERS, "artists"), { recursive: true });
+        fs.writeFileSync(path.join(COVERS, "artists", `${P}-ar.jpg`), found);
+        fs.writeFileSync(path.join(COVERS, "artists", `${P}-ar-own.jpg`), original);
+        await prisma.artist.update({
+            where: { id: `${P}-ar` },
+            data: { heroUrl: `native:artists/${P}-ar.jpg?v=${V}`, userHeroUrl: `native:artists/${P}-ar-own.jpg?v=${V}` },
+        });
+
+        const res = await request(app).get(`/rest/getCoverArt.view?id=ar-${P}-ar`);
+
+        expect(res.status).toBe(200);
+        expect(bytesOf(res).equals(original)).toBe(true);
+        await prisma.artist.update({ where: { id: `${P}-ar` }, data: { heroUrl: null, userHeroUrl: null } });
+    });
+
     it("answers not-found for a versioned id of nothing", async () => {
         const res = await request(app).get(`/rest/getCoverArt.view?id=${P}-nothing_${V}&f=json`);
 

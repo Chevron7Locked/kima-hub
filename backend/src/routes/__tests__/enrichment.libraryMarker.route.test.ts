@@ -13,6 +13,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import * as settings from "../../utils/systemSettings";
+import { redisClient } from "../../utils/redis";
 import { mountAsServer } from "./helpers/serverMount";
 
 const P = "elm_";
@@ -186,5 +187,105 @@ describe("a marker that cannot be asked or written", () => {
         const after = await shownName(s);
         const own = _name.includes("artist") ? "artist" : _name.includes("album") ? "album" : "track";
         expect(after[own]).toBe(_name.includes("reset") ? null : "New");
+    });
+});
+
+/**
+ * What happens to the marker, and what the call answers, when `firstGotIn` (another request's edit) is stored after `call`
+ * has begun and before the transaction that stores its own edit. The spy is set inside the work: the marker's own write
+ * is a transaction too.
+ */
+async function overlapped(call: () => request.Test, firstGotIn: () => Promise<unknown>): Promise<{ moved: boolean; status: number }> {
+    let status = 0;
+    const moved = await markerMoves(async () => {
+        const real = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+        let done = false;
+        const spy = jest.spyOn(prisma, "$transaction").mockImplementation((async (...args: unknown[]) => {
+            if (!done) {
+                done = true;
+                await firstGotIn();
+            }
+            return real(...args);
+        }) as never);
+        try {
+            status = (await call()).status;
+        } finally {
+            spy.mockRestore();
+        }
+    });
+    return { moved, status };
+}
+
+describe("two edits of the same name that overlap", () => {
+    // The first request stored the name the second one sends. The second replaces it with itself, so what a client lists
+    // did not change by it: it is judged against the name it replaced, not the one it found when it began.
+    it("leave the marker alone for the one that replaces a name with itself (edit)", async () => {
+        const s = await seed("ov", "playable", false);
+        const artist = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { name: "New" }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { displayName: "New" } }),
+        );
+        const album = await overlapped(
+            () => put(`/enrichment/albums/${s.album}/metadata`, { title: "New" }),
+            () => prisma.album.update({ where: { id: s.album }, data: { displayTitle: "New" } }),
+        );
+        const track = await overlapped(
+            () => put(`/enrichment/tracks/${s.track}/metadata`, { title: "New" }),
+            () => prisma.track.update({ where: { id: s.track }, data: { displayTitle: "New" } }),
+        );
+        expect([artist, album, track]).toEqual(Array(3).fill({ moved: false, status: 200 }));
+    });
+
+    it("leave the marker alone for the one that resets a name another reset already cleared", async () => {
+        const s = await seed("ovr", "playable");
+        const artist = await overlapped(
+            () => post(`/enrichment/artists/${s.artist}/reset`),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { displayName: null } }),
+        );
+        const album = await overlapped(
+            () => post(`/enrichment/albums/${s.album}/reset`),
+            () => prisma.album.update({ where: { id: s.album }, data: { displayTitle: null } }),
+        );
+        const track = await overlapped(
+            () => post(`/enrichment/tracks/${s.track}/reset`),
+            () => prisma.track.update({ where: { id: s.track }, data: { displayTitle: null } }),
+        );
+        expect([artist, album, track]).toEqual(Array(3).fill({ moved: false, status: 200 }));
+    });
+
+    it("still move the marker for the one that changes the name the first stored", async () => {
+        const s = await seed("ovm", "playable", false);
+        const artist = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { name: "Second" }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { displayName: "First" } }),
+        );
+        const track = await overlapped(
+            () => put(`/enrichment/tracks/${s.track}/metadata`, { title: "Second" }),
+            () => prisma.track.update({ where: { id: s.track }, data: { displayTitle: "First" } }),
+        );
+        expect([artist, track]).toEqual(Array(2).fill({ moved: true, status: 200 }));
+    });
+
+    it("answer 404 for an edit or reset of a song that was deleted in between", async () => {
+        const s = await seed("ovd", "playable");
+        const gone = () => prisma.track.deleteMany({ where: { id: s.track } });
+        expect(await overlapped(() => put(`/enrichment/tracks/${s.track}/metadata`, { title: "New" }), gone)).toEqual({ moved: false, status: 404 });
+
+        const t = await seed("ovd2", "playable");
+        const goneToo = () => prisma.track.deleteMany({ where: { id: t.track } });
+        expect(await overlapped(() => post(`/enrichment/tracks/${t.track}/reset`), goneToo)).toEqual({ moved: false, status: 404 });
+    });
+});
+
+describe("an artist's picture left in the cache", () => {
+    it("is forgotten without failing a saved edit when the cache cannot be reached", async () => {
+        const s = await seed("hero", "playable", false);
+        const logged = expectLog("warn");
+        jest.spyOn(redisClient, "del").mockRejectedValue(new Error("redis went away"));
+
+        await put(`/enrichment/artists/${s.artist}/metadata`, { name: "New" }).expect(200);
+
+        expect(logged).toHaveBeenCalled();
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).displayName).toBe("New");
     });
 });

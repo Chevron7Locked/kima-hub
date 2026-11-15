@@ -15,12 +15,17 @@ import { playlistRouter } from "../playlists";
 import { queueRouter } from "../queue";
 import { artistInfoRouter } from "../artistInfo";
 import { splitCoverArtId, coverArtId } from "../mappers";
+import { normalizeArtistName } from "../../../services/artistIdentity";
 
 const P = "zz-coverids";
 const USER = `${P}-user`;
 const ARTIST = `${P}-ar`;
+/** An artist whose picture the person set: it shows in place of the one found. */
+const OWN_ARTIST = `${P}-ar-own`;
+const OWN_ARTIST_NAME = `${P} Own Picture`;
+const OWN_ALBUM = `${P}-al-ar-own`;
 const found = { album: `${P}-al-found`, own: `${P}-al-own`, legacy: `${P}-al-legacy` };
-const V = { artist: "a1a1a1a1a1", found: "b2b2b2b2b2", foundOld: "d4d4d4d4d4", own: "c3c3c3c3c3" };
+const V = { artist: "a1a1a1a1a1", found: "b2b2b2b2b2", foundOld: "d4d4d4d4d4", own: "c3c3c3c3c3", ownArtist: "e5e5e5e5e5" };
 const song = (album: string) => `${album}-t`;
 
 const app = express();
@@ -50,7 +55,22 @@ const coverOf = (body: unknown, id: string) => [...new Set(nodes(body, id).map((
 beforeAll(async () => {
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
     await prisma.artist.create({
-        data: { id: ARTIST, name: P, normalizedName: P, identityKey: `${P}-ik`, libraryAlbumCount: 3, heroUrl: `native:artists/${ARTIST}.jpg?v=${V.artist}` },
+        data: {
+            id: ARTIST, name: P, normalizedName: P, identityKey: `${P}-ik`, libraryAlbumCount: 3, heroUrl: `native:artists/${ARTIST}.jpg?v=${V.artist}`,
+            similarArtistsJson: [{ name: OWN_ARTIST_NAME, match: 0.9 }],
+        },
+    });
+    await prisma.artist.create({
+        data: {
+            id: OWN_ARTIST, name: OWN_ARTIST_NAME, normalizedName: normalizeArtistName(OWN_ARTIST_NAME), identityKey: `${P}-ik-own`, libraryAlbumCount: 1,
+            heroUrl: `native:artists/${OWN_ARTIST}.jpg?v=${V.artist}`, userHeroUrl: `native:artists/${OWN_ARTIST}-mine.jpg?v=${V.ownArtist}`,
+        },
+    });
+    await prisma.album.create({
+        data: { id: OWN_ALBUM, rgMbid: `${OWN_ALBUM}-rg`, artistId: OWN_ARTIST, identityKey: OWN_ALBUM, title: `${P} ${OWN_ALBUM}`, primaryType: "Album", location: "LIBRARY" },
+    });
+    await prisma.track.create({
+        data: { id: song(OWN_ALBUM), albumId: OWN_ALBUM, title: `${P} song ${OWN_ALBUM}`, trackNo: 1, duration: 100, mime: "FLAC", filePath: `/${P}/${OWN_ALBUM}.flac`, fileModified: new Date(), fileSize: 1 },
     });
     const albums: Array<[string, Record<string, string>]> = [
         [found.album, { coverUrl: `native:albums/${found.album}.jpg?v=${V.found}` }],
@@ -75,7 +95,7 @@ afterAll(async () => {
     await prisma.likedTrack.deleteMany({ where: { userId: USER } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
-    await prisma.artist.deleteMany({ where: { id: ARTIST } });
+    await prisma.artist.deleteMany({ where: { id: { in: [ARTIST, OWN_ARTIST] } } });
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.$disconnect();
 });
@@ -132,6 +152,46 @@ describe("the cover ids", () => {
         const state = await prisma.playbackState.findFirst({ where: { userId: USER } });
         const stored = (state?.queue as Array<{ album?: { coverArt?: string } }>)[0];
         expect(stored.album?.coverArt).toBe(`native:albums/${found.own}.jpg?v=${V.own}`);
+    });
+});
+
+describe("an artist's picture the person set", () => {
+    const own = `ar-${OWN_ARTIST}_${V.ownArtist}`;
+
+    it("is the one every artist list and the artist's own page name, in place of the one found", async () => {
+        expect(coverOf(await get("/getArtists.view"), OWN_ARTIST)).toEqual([own]);
+        expect(coverOf(await get("/getArtist.view", { id: OWN_ARTIST }), OWN_ARTIST)).toEqual([own]);
+        expect(coverOf(await get("/getMusicDirectory.view", { id: "1" }), OWN_ARTIST)).toEqual([own]);
+        expect(coverOf(await get("/search3.view", { query: P }), OWN_ARTIST)).toEqual([own]);
+    });
+
+    it("is the one the artist info and a similar-artist entry name", async () => {
+        expect((await get("/getArtistInfo2.view", { id: OWN_ARTIST })).artistInfo2.coverArt).toBe(own);
+        const similar = (await get("/getArtistInfo2.view", { id: ARTIST })).artistInfo2.similarArtist;
+        expect(similar).toEqual([expect.objectContaining({ id: OWN_ARTIST, coverArt: own })]);
+    });
+
+    it("is the picture address the lists and the artist info give, when it is an outside address", async () => {
+        const address = "https://own.example/mine.jpg";
+        await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: address } });
+        try {
+            const artistInfo = (await get("/getArtistInfo2.view", { id: OWN_ARTIST })).artistInfo2;
+            expect(artistInfo.largeImageUrl).toBe(address);
+            expect(artistInfo.mediumImageUrl).toBe(address);
+            expect(artistInfo.smallImageUrl).toBe(address);
+            expect(nodes(await get("/getArtist.view", { id: OWN_ARTIST }), OWN_ARTIST)[0].artistImageUrl).toBe(address);
+        } finally {
+            await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: `native:artists/${OWN_ARTIST}-mine.jpg?v=${V.ownArtist}` } });
+        }
+    });
+
+    it("falls back to the one found when the person clears it", async () => {
+        await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: null } });
+        try {
+            expect(coverOf(await get("/getArtists.view"), OWN_ARTIST)).toEqual([`ar-${OWN_ARTIST}_${V.artist}`]);
+        } finally {
+            await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: `native:artists/${OWN_ARTIST}-mine.jpg?v=${V.ownArtist}` } });
+        }
     });
 });
 
