@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { usePlaylistsQuery } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
+import { usePlaylistCreate } from "@/lib/playlist-create";
 import { queryKeys } from "@/hooks/useQueries";
 import { useAudioControls } from "@/lib/audio-context";
 import {
@@ -145,6 +146,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
     const queryClient = useQueryClient();
     const [name, setName] = useState("");
     const [isPublic, setIsPublic] = useState(false);
+    const { create: createPlaylist } = usePlaylistCreate();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -161,7 +163,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
         setIsSubmitting(true);
         setError(null);
         try {
-            const result = await api.createPlaylist(trimmed, isPublic);
+            const result = await createPlaylist(trimmed, isPublic);
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
             onClose();
             if (result?.id) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { api, type ApiError } from "@/lib/api";
 import { X, Plus, Music2 } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
 import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 import { announcePlaylistEvent } from "@/lib/playlist-events";
-import { newRequestKey } from "@/lib/request-key";
+import { usePlaylistCreate } from "@/lib/playlist-create";
 
 interface PlaylistSelectorProps {
     isOpen: boolean;
@@ -96,10 +96,8 @@ export function PlaylistSelector({
     const tally = useRef<AddOutcome>({ added: 0, rejected: 0 });
     // The id of the playlist this dialog made for these songs and could not finish adding to: a retry adds to it, whatever the form says now.
     const createdId = useRef<string | null>(null);
-    // The key a create goes out with. A retry of a create whose answer was lost sends the same key, so the server returns
-    // the playlist the first try made. Fresh for each set of songs and each time the dialog opens, and for each name and
-    // visibility: the server refuses a key that comes again with other parameters, so it is kept with what it was made for.
-    const createKey = useRef<{ key: string; name: string; isPublic: boolean } | null>(null);
+    // A create goes out with a key (see usePlaylistCreate), fresh for each set of songs and each time the dialog opens.
+    const { create: createWithKey, forget: forgetCreateKey } = usePlaylistCreate();
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     // Reset dialog state when `isOpen` flips. Done during render (the
@@ -169,17 +167,17 @@ export function PlaylistSelector({
     const songsKey = trackIds.join(",");
     // Set when the songs changed while an add or create was in flight: the change waits for it to settle.
     const songsChanged = useRef(false);
-    const startAfresh = () => {
+    const startAfresh = useCallback(() => {
         createdId.current = null;
-        createKey.current = null;
+        forgetCreateKey();
         songsChanged.current = false;
-    };
-    useEffect(startAfresh, [isOpen]);
+    }, [forgetCreateKey]);
+    useEffect(startAfresh, [isOpen, startAfresh]);
     useEffect(() => {
         // A reset now would drop the key of a create in flight, and its retry could make a second playlist.
         if (adding.current || creating.current) songsChanged.current = true;
         else startAfresh();
-    }, [songsKey]);
+    }, [songsKey, startAfresh]);
     /**
      * An add or create has settled. If the songs changed meanwhile, a request that went through is over and the next one
      * starts afresh; one that failed keeps its key and playlist, so the retry is the same request and makes no second playlist.
@@ -206,13 +204,7 @@ export function PlaylistSelector({
             if (pending) {
                 playlist = { id: pending };
             } else {
-                const held = createKey.current;
-                const sending =
-                    held && held.name === name && held.isPublic === isPublic
-                        ? held
-                        : { key: newRequestKey(), name, isPublic };
-                createKey.current = sending;
-                playlist = await api.createPlaylist(name, isPublic, sending.key);
+                playlist = await createWithKey(name, isPublic);
                 announcePlaylistEvent("playlist-created", playlist);
                 if (session.current !== mine) return;
             }

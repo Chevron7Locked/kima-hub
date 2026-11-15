@@ -23,6 +23,7 @@ import {
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { notify } from "@/lib/notify";
+import { usePlaylistCreate } from "@/lib/playlist-create";
 import { useFeatures } from "@/lib/features-context";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -109,6 +110,7 @@ export function Sidebar() {
     const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [isCreating, setIsCreating] = useState(false);
+    const { create: createPlaylist } = usePlaylistCreate();
     const [filter, setFilter] = useState("");
     const collapsed = useSyncExternalStore(subscribeCollapsed, readCollapsed, () => false);
     const createButtonRef = useRef<HTMLButtonElement>(null);
@@ -220,7 +222,7 @@ export function Sidebar() {
         if (!name || isCreating) return;
         try {
             setIsCreating(true);
-            const result = await api.createPlaylist(name);
+            const result = await createPlaylist(name);
             await queryClient.invalidateQueries({
                 queryKey: queryKeys.playlists(),
             });
