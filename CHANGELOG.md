@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Saving your place in a book or podcast episode no longer wipes your music queue.
+- A saved current song or episode that Kima no longer has is stored as none.
+- A Subsonic queue save with an empty current song, or with songs but no current index, starts from the first song.
+- Clearing playback from an app now waits its turn behind a save in progress.
+- An album year outside 1000–9999 or a track number outside 1–9999 is refused with a plain error instead of failing on the server.
 - A blank hour in the stats hour view, or an empty genre in the podcast genre list, is refused instead of being read as 0.
 - Discover settings, an album's year and a track's number no longer accept values with trailing text or fractions.
 - A fault while pausing, resuming or stopping enrichment is reported as a server error, not as a bad request.
