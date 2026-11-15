@@ -208,7 +208,7 @@ const TrackRow = memo(
                             <button
                                 onClick={handleAddToQueue}
                                 className="p-1.5 rounded-lg hover:bg-white/10 transition-all text-[var(--text-secondary)] hover:text-white"
-                                aria-label="Add to queue"
+                                aria-label="add to queue"
                                 title="add to queue"
                             >
                                 <ListPlus className="w-4 h-4" />
@@ -216,7 +216,7 @@ const TrackRow = memo(
                             <button
                                 onClick={handleAddToPlaylist}
                                 className="p-1.5 rounded-lg hover:bg-white/10 transition-all text-[var(--text-secondary)] hover:text-white"
-                                aria-label="Add to playlist"
+                                aria-label="add to playlist"
                                 title="add to playlist"
                             >
                                 <Plus className="w-4 h-4" />
@@ -228,7 +228,7 @@ const TrackRow = memo(
                             onClick={handlePreview}
                             className="p-1.5 rounded-lg bg-[var(--bg-hover)] hover:bg-white/10 transition-colors text-white"
                             aria-label={
-                                isPreviewPlaying ? "Pause preview" : "Play preview"
+                                isPreviewPlaying ? "pause preview" : "play preview"
                             }
                         >
                             {isPreviewPlaying ? (

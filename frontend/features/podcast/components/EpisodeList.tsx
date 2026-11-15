@@ -83,7 +83,7 @@ function EpisodeRow({
                 <button
                     type="button"
                     onClick={() => onPlayPause(episode)}
-                    aria-label={`${isCurrentEpisode && isPlaying ? "Pause" : "Play"} ${episode.title}`}
+                    aria-label={`${isCurrentEpisode && isPlaying ? "pause" : "play"} ${episode.title}`}
                     className="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden bg-[var(--color-type-podcast)]/20 border border-white/10 focus-visible:outline-2 focus-visible:outline-brand"
                 >
                     {cover ? (
@@ -145,7 +145,7 @@ function EpisodeRow({
                             onClick={() => onMarkComplete(episode.id, episode.duration)}
                             className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-2 rounded-lg hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-all touch-reveal"
                             title="mark as complete"
-                            aria-label={`Mark ${episode.title} as complete`}
+                            aria-label={`mark ${episode.title} as complete`}
                         >
                             <CheckCircle className="w-4 h-4" />
                         </button>
@@ -154,7 +154,7 @@ function EpisodeRow({
                         <button
                             type="button"
                             onClick={() => setExpanded((e) => !e)}
-                            aria-label={expanded ? "Hide description" : "Show description"}
+                            aria-label={expanded ? "hide description" : "show description"}
                             className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-white/10 transition-colors"
                         >
                             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -252,7 +252,7 @@ export function EpisodeList({
             <div
                 className="flex flex-wrap gap-1.5 px-3 pb-3"
                 role="tablist"
-                aria-label="Filter episodes"
+                aria-label="filter episodes"
                 onKeyDown={(e) => tabListKeyDown(e, EPISODE_FILTERS.map(([key]) => key), filter, setFilter)}
             >
                 {EPISODE_FILTERS.map(([key, label]) => (
