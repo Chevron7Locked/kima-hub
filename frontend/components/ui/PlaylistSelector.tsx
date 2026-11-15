@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { api, type ApiError } from "@/lib/api";
-import { X, Plus, Music2, Check } from "lucide-react";
+import { X, Plus, Music2 } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
 import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
@@ -11,14 +11,10 @@ import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 interface PlaylistSelectorProps {
     isOpen: boolean;
     onClose: () => void;
-    /** Single mode: the songs to add to the playlist that is picked. The selector asks before it adds a repeat. */
+    /** The songs to add to the playlist that is picked. The selector asks before it adds a repeat. */
     trackIds?: string[];
     /** Called once the songs are added (not when the person skips). */
     onAdded?: () => void;
-    onSelectPlaylists?: (playlistIds: string[]) => Promise<void>;
-    mode?: "single" | "multi";
-    isLoading?: boolean;
-    loadingMessage?: string;
 }
 
 /** An entry of a playlist as the playlist page's request returns it. */
@@ -80,17 +76,12 @@ export function PlaylistSelector({
     onClose,
     trackIds = [],
     onAdded,
-    onSelectPlaylists,
-    mode = "single",
-    isLoading: isSaving,
-    loadingMessage,
 }: PlaylistSelectorProps) {
     const [playlists, setPlaylists] = useState<Array<{ id: string; name: string; trackCount?: number }>>([]);
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [isPublic, setIsPublic] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [selected, setSelected] = useState<Set<string>>(new Set());
     const [error, setError] = useState<string | null>(null);
     const [isConfirming, setIsConfirming] = useState(false);
     // Set while the person is being asked about songs the chosen playlist already holds.
@@ -103,8 +94,6 @@ export function PlaylistSelector({
     const created = useRef<{ id: string; name: string; isPublic: boolean } | null>(null);
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
-    const isMulti = mode === "multi";
-
     // Reset dialog state when `isOpen` flips. Done during render (the
     // React-endorsed prop-change pattern) rather than in an effect body,
     // where a synchronous setState is a lint error.
@@ -112,7 +101,8 @@ export function PlaylistSelector({
     if (isOpen !== prevOpen) {
         setPrevOpen(isOpen);
         if (isOpen) {
-            setSelected(new Set());
+            setNewPlaylistName("");
+            setIsPublic(false);
             setError(null);
             setQuestion(null);
             setOutcome(null);
@@ -132,7 +122,13 @@ export function PlaylistSelector({
     };
     const dialogRef = useRef<HTMLDivElement>(null);
     const adding = useRef(false);
-    useDialog(dialogRef, isOpen, onClose);
+    const creating = useRef(false);
+    // Nothing closes the dialog while an add or create is in flight: its late result would still call onAdded and onClose.
+    const requestClose = () => {
+        if (adding.current || creating.current) return;
+        onClose();
+    };
+    useDialog(dialogRef, isOpen, requestClose);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -150,6 +146,9 @@ export function PlaylistSelector({
 
     const handleCreatePlaylist = async () => {
         const name = newPlaylistName.trim();
+        // The create button's own rule, for Enter in the name box too: one create at a time, never nameless.
+        if (!name || creating.current || adding.current) return;
+        creating.current = true;
         try {
             setIsCreating(true);
             setError(null);
@@ -161,25 +160,21 @@ export function PlaylistSelector({
                 window.dispatchEvent(new CustomEvent("playlist-created", { detail: playlist }));
             }
 
-            if (isMulti) {
-                setSelected((prev) => new Set(prev).add(playlist.id));
-                await loadPlaylists();
+            if (trackIds.length === 0) {
+                onClose();
             } else {
-                // A new playlist holds nothing yet, so there is nothing to ask.
-                if (trackIds.length === 0) {
-                    onClose();
-                } else {
-                    created.current = { id: playlist.id, name, isPublic };
-                    const done = await whileAdding(() => {
-                        tally.current = { added: 0, rejected: 0 };
-                        return addSongs(playlist.id, trackIds, false);
-                    });
-                    if (!done) {
-                        await loadPlaylists();
-                        return;
-                    }
-                    created.current = null;
+                created.current = { id: playlist.id, name, isPublic };
+                // The playlist was empty before this dialog, so a repeat the server names is one a failed try of this
+                // dialog added: it is skipped without asking.
+                const done = await whileAdding(() => {
+                    tally.current = { added: 0, rejected: 0 };
+                    return addSongs(playlist.id, trackIds, false, true);
+                });
+                if (!done) {
+                    await loadPlaylists();
+                    return;
                 }
+                created.current = null;
             }
 
             setNewPlaylistName("");
@@ -188,28 +183,22 @@ export function PlaylistSelector({
             console.error("Failed to create playlist:", error);
             setError("couldn't create that playlist — try again.");
         } finally {
+            creating.current = false;
             setIsCreating(false);
         }
     };
 
     const handleSelectPlaylist = async (playlistId: string) => {
-        if (isMulti) {
-            setSelected((prev) => {
-                const next = new Set(prev);
-                if (next.has(playlistId)) {
-                    next.delete(playlistId);
-                } else {
-                    next.add(playlistId);
-                }
-                return next;
-            });
-            return;
-        }
-
+        if (creating.current) return;
         if (trackIds.length === 0) return;
 
         await whileAdding(async () => {
             tally.current = { added: 0, rejected: 0 };
+            if (created.current?.id === playlistId) {
+                // The playlist this dialog made: what it holds came from a failed try of this dialog.
+                await addSongs(playlistId, trackIds, false, true);
+                return;
+            }
             const held = await heldSongs(playlistId);
             const repeated = trackIds.filter((id) => held.has(id));
             if (repeated.length > 0) {
@@ -254,8 +243,10 @@ export function PlaylistSelector({
     /**
      * Adds the songs. Without `allowRepeats` the server skips songs the playlist holds and names them: the read
      * before the add can be stale or have failed, so those are put to the person now, and the dialog stays open.
+     * With `ownPlaylist` (a playlist this dialog made) a named repeat was put there by this dialog's own earlier try:
+     * it counts as added and is not asked about.
      */
-    const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean) => {
+    const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean, ownPlaylist = false) => {
         let result: { added: number; duplicateIds?: string[]; rejected: string[] };
         try {
             result = await addToPlaylist(
@@ -274,7 +265,9 @@ export function PlaylistSelector({
         tally.current.added += result.added;
         tally.current.rejected += result.rejected.length;
         const skipped = result.duplicateIds ?? [];
-        if (!allowRepeats && skipped.length > 0) {
+        if (ownPlaylist) {
+            tally.current.added += skipped.length;
+        } else if (!allowRepeats && skipped.length > 0) {
             setQuestion({ playlistId, trackIds: skipped, repeated: skipped });
             return;
         }
@@ -310,33 +303,12 @@ export function PlaylistSelector({
         });
     };
 
-    const handleConfirm = async () => {
-        if (selected.size === 0 || !onSelectPlaylists) return;
-
-        try {
-            setIsConfirming(true);
-            setError(null);
-            await onSelectPlaylists(Array.from(selected));
-            for (const playlistId of selected) {
-                window.dispatchEvent(
-                    new CustomEvent("playlist-updated", { detail: { playlistId } })
-                );
-            }
-            onClose();
-        } catch (error) {
-            console.error("Failed to add to playlists:", error);
-            setError("couldn't add to those playlists — try again.");
-        } finally {
-            setIsConfirming(false);
-        }
-    };
-
     if (!isOpen) return null;
 
     return (
         <div
             className="fixed inset-0 bg-black/80 flex items-center justify-center z-(--z-modal) p-4 transition-opacity duration-200"
-            onClick={onClose}
+            onClick={requestClose}
         >
             <div
                 ref={dialogRef}
@@ -351,20 +323,13 @@ export function PlaylistSelector({
                         add to playlist
                     </h2>
                     <button
-                        onClick={onClose}
+                        onClick={requestClose}
                         aria-label="close"
                         className="p-2 hover:bg-white/10 rounded-full transition-colors"
                     >
                         <X className="w-5 h-5 text-[var(--text-secondary)]" />
                     </button>
                 </div>
-
-                {isSaving && (
-                    <div className="px-6 py-3 flex items-center gap-3 bg-black/30 border-b border-white/10 text-sm text-[var(--text-primary)]">
-                        <GradientSpinner size="sm" />
-                        <span>{loadingMessage || "adding..."}</span>
-                    </div>
-                )}
 
                 {error && (
                     <div
@@ -405,41 +370,19 @@ export function PlaylistSelector({
                         </div>
                     ) : (
                         playlists.map((playlist, i) => {
-                            const isSelected = selected.has(playlist.id);
                             return (
                                 <button
                                     key={playlist.id}
                                     onClick={() => handleSelectPlaylist(playlist.id)}
-                                    className={`w-full text-left px-4 py-4 rounded-lg transition-all border group ${
+                                    className={`w-full text-left px-4 py-4 rounded-lg transition-all border group bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10 ${
                                         i < 8 ? `animate-rise [animation-delay:calc(var(--i)*45ms)]` : ""
-                                    } ${
-                                        isMulti && isSelected
-                                            ? "bg-[var(--color-brand)]/10 border-[var(--color-brand)]/30"
-                                            : "bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10"
                                     }`}
-                                    disabled={isSaving || isConfirming}
+                                    disabled={isConfirming || isCreating}
                                     style={{ "--i": i } as CSSProperties}
                                 >
                                     <div className="flex items-center justify-between">
-                                        {isMulti && (
-                                            <div
-                                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mr-3 shrink-0 transition-all ${
-                                                    isSelected
-                                                        ? "bg-brand border-[var(--color-brand)]"
-                                                        : "border-gray-500 group-hover:border-gray-300"
-                                                }`}
-                                            >
-                                                {isSelected && (
-                                                    <Check className="w-3.5 h-3.5 text-black" strokeWidth={3} />
-                                                )}
-                                            </div>
-                                        )}
                                         <div className="flex-1 min-w-0">
-                                            <p className={`font-semibold truncate transition-colors ${
-                                                isMulti && isSelected
-                                                    ? "text-brand"
-                                                    : "text-white group-hover:text-brand"
-                                            }`}>
+                                            <p className="font-semibold truncate text-white transition-colors group-hover:text-brand">
                                                 {playlist.name}
                                             </p>
                                             <p className="text-xs text-[var(--text-secondary)] mt-1">
@@ -449,35 +392,13 @@ export function PlaylistSelector({
                                                     : "tracks"}
                                             </p>
                                         </div>
-                                        {!isMulti && (
-                                            <Plus className="w-5 h-5 text-[var(--text-secondary)] group-hover:text-brand transition-colors ml-2 shrink-0" />
-                                        )}
+                                        <Plus className="w-5 h-5 text-[var(--text-secondary)] group-hover:text-brand transition-colors ml-2 shrink-0" />
                                     </div>
                                 </button>
                             );
                         })
                     )}
                 </div>
-
-                {isMulti && playlists.length > 0 && (
-                    <div className="px-4 py-3 border-t border-white/10">
-                        <Button
-                            variant="primary"
-                            size="lg"
-                            onClick={handleConfirm}
-                            disabled={selected.size === 0 || isConfirming}
-                            className="w-full"
-                        >
-                            {isConfirming ? (
-                                <GradientSpinner size="sm" />
-                            ) : selected.size > 0 ? (
-                                `add to ${selected.size} playlist${selected.size > 1 ? "s" : ""}`
-                            ) : (
-                                "select playlists"
-                            )}
-                        </Button>
-                    </div>
-                )}
 
                 <div className="p-6 border-t border-white/10 bg-[var(--bg-primary)]/50">
                     <p className="text-sm text-[var(--text-secondary)] mb-3 font-medium">
@@ -497,11 +418,7 @@ export function PlaylistSelector({
                         <Button
                             variant="primary"
                             onClick={handleCreatePlaylist}
-                            disabled={
-                                !newPlaylistName.trim() ||
-                                isCreating ||
-                                isSaving
-                            }
+                            disabled={!newPlaylistName.trim() || isCreating || isConfirming}
                         >
                             <Plus className="w-5 h-5" />
                             <span className="hidden sm:inline">create</span>
