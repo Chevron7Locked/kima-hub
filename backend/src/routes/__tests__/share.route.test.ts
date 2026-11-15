@@ -711,6 +711,25 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect(await playsOf(token)).toBe(1);
         });
 
+        it('does not count a play whose listener left while the count was being taken', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            const count = prisma.$executeRaw.bind(prisma);
+            const slow = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: Parameters<typeof count>) =>
+                new Promise((resolve) => setTimeout(resolve, 150)).then(() => count(...args))) as typeof prisma.$executeRaw);
+            try {
+                const asking = request(app).get(`/share/${token}/stream/${songs.playable}`);
+                asking.end(() => undefined);
+                await new Promise((resolve) => setTimeout(resolve, 40));
+                asking.abort();
+                await new Promise((resolve) => setTimeout(resolve, 700));
+            } finally {
+                slow.mockRestore();
+            }
+
+            expect(await playsOf(token)).toBe(0);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
         it('counts every request, as a first play, while Redis is down', async () => {
             const { token } = await own();
             const exists = jest.spyOn(redisClient, 'exists').mockRejectedValue(new Error('down'));

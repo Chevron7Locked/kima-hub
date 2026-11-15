@@ -21,7 +21,7 @@ const router = Router();
 router.use((_req: Request, res: Response, next) => {
     const json = res.json.bind(res);
     res.json = (body?: unknown) => {
-        if (res.statusCode >= 400) res.setHeader("Cache-Control", "no-store");
+        if (res.statusCode >= 400 && !res.headersSent) res.setHeader("Cache-Control", "no-store");
         return json(body);
     };
     next();
@@ -140,11 +140,12 @@ async function countPlay(shareId: string): Promise<boolean> {
 }
 
 /**
- * Whether the audio stream began. The streaming module sets 200 or 206 with the file's headers (`Accept-Ranges`) just before
- * it pipes; every other end (304, 404, 416, 500, a listener who left first) leaves another status or no such header.
+ * Whether the audio stream began: bytes went out. The streaming module sets 200 or 206 with the file's headers
+ * (`Accept-Ranges`) just before it pipes, and the headers leave with the first chunk; every other end (304, 404, 416, 500,
+ * a listener who left first) has another status, no such header, or nothing sent.
  */
 const streamStarted = (res: Response) =>
-    (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined;
+    (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined && res.headersSent;
 
 /**
  * Keeps a counted play only if the stream starts. A play whose response ends without one (304, 404, 416, 500, or a listener
@@ -174,6 +175,8 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string)
     res.once("close", () => {
         if (!streamStarted(res)) void undo();
     });
+    // A listener who left while the play was being counted has already closed: the listener above would never run.
+    if (res.destroyed && !streamStarted(res)) void undo();
 }
 
 /**
