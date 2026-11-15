@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Mood mixes remember what they gave you separately for each mood, so saving a mix for one mood no longer makes another mood forget.
+- Two mood mix requests at the same moment no longer give the same songs.
+- Subsonic apps now see each song's real bitrate. Existing files fill it in on the next scan.
+- Choosing the best copy of a song, and deciding whether to stream the original or transcode, now use the bitrate read at scan time.
+- Subsonic queue saves respect the queue length limit set by the admin.
+- Subsonic `savePlayQueue` answers an error when the current song or index sent is invalid.
+- A queue saved from the web shows Kima as the app that saved it.
+- A saved queue shows each song's current title and details, not the details from when it was saved.
+- A very large position in a Subsonic queue save no longer fails.
+- A queue save no longer keeps a song that a library sweep has just removed.
 - A playback change you make just as you close or hide the tab is still saved, even when an earlier save was already on its way.
 - When a save that replaces your playback fails and is tried again, it still won't overwrite a newer state saved from another device.
 - If another device clears your playback, going back to the same song on this device saves it again.
