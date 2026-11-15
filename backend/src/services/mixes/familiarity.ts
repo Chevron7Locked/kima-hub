@@ -10,6 +10,7 @@ import { playableSongSql } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { distributedLock, type LockLease } from "../../utils/distributedLock";
+import { LockLostError } from "../../utils/lockErrors";
 import { matchingContext, topScores } from "../matching/rank";
 import { playRowsSql } from "../stats/listens";
 import { FAMILIAR_KEY_PREFIX } from "./cacheKeys";
@@ -157,8 +158,14 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
         }
         let boost: FamiliarBoost | null = null;
         try {
-            boost = await closestToSeeds(seeds);
+            boost = await closestToSeeds(seeds, lock.state === "mine" ? lock.lease.signal : undefined);
         } catch (error) {
+            // Another process may now be scanning for these seeds. Nothing is kept, not even "no boost", so the next
+            // caller scans or takes that process's result.
+            if (error instanceof LockLostError) {
+                logger.warn(`[Mixes] familiarity scan lock lost for ${userId}: the scan stopped before it finished`);
+                return null;
+            }
             // writeKept then keeps "no boost" for FAMILIAR_EMPTY_CACHE_SECONDS (or answers with a boost another caller
             // kept for these seeds meanwhile), so the next mix does not scan again at once.
             logger.debug(`[Mixes] familiarity scan failed: ${error instanceof Error ? error.message : error}`);
@@ -199,9 +206,11 @@ export function familiarBoost(userId: string, now = new Date()): Promise<Familia
  * The seeds themselves take the full boost; the closest songs that are not seeds take it by rank, so the budget (a share
  * of the library) goes to songs the listener has not played.
  */
-async function closestToSeeds(seeds: SeedRow[]): Promise<FamiliarBoost | null> {
+async function closestToSeeds(seeds: SeedRow[], signal?: AbortSignal): Promise<FamiliarBoost | null> {
     const ctx = await matchingContext(seeds.map((s) => s.id));
     if (!ctx) return null;
+    // The lock is the scan's claim; past a lost one the next step is another scanner's to take.
+    signal?.throwIfAborted();
     const withData = seeds.filter((s) => ctx.tracks.has(s.id));
     if (withData.length === 0) return null;
     const total = withData.reduce((sum, s) => sum + s.plays, 0);
