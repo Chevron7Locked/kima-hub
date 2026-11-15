@@ -84,7 +84,7 @@ export interface ScanResult {
 /** What filing a song reads of its tags: kept between the vote step and filing, so nothing else (the quality report, the other native tags) is held. */
 export interface SlimMetadata {
     common: IAudioMetadata["common"];
-    format: { duration?: number; codec?: string };
+    format: { duration?: number; codec?: string; bitrate?: number };
     /** Only the lyrics tags. */
     native: Record<string, ITag[]>;
 }
@@ -95,7 +95,7 @@ export function slimMetadata(metadata: IAudioMetadata): SlimMetadata {
         const lyrics = tags.filter((tag) => tag.id === "LYRICS");
         if (lyrics.length > 0) native[format] = lyrics;
     }
-    return { common: metadata.common, format: { duration: metadata.format.duration, codec: metadata.format.codec }, native };
+    return { common: metadata.common, format: { duration: metadata.format.duration, codec: metadata.format.codec, bitrate: metadata.format.bitrate }, native };
 }
 
 export class MusicScannerService {
@@ -670,6 +670,9 @@ export class MusicScannerService {
         const discSubtitle = sanitizeTagString(discSubtitleInput) || null;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
+        // The headers give bits a second; Kima keeps kbps. None when the file reports none, never a guess.
+        const reportedBitrate = metadata.format.bitrate;
+        const bitrate = reportedBitrate && Number.isFinite(reportedBitrate) && reportedBitrate >= 500 ? Math.round(reportedBitrate / 1000) : null;
         // A tag that is not an ISRC (e.g. "PMEDIA") is dropped, never stored or sent.
         const isrc = normalizeIsrc(metadata.common.isrc?.[0]?.split(/[;,]/)[0]);
 
@@ -778,6 +781,7 @@ export class MusicScannerService {
                 discSubtitle,
                 duration,
                 mime,
+                bitrate,
                 filePath: relativePath,
                 fileModified: stats.mtime,
                 fileSize: stats.size,
@@ -792,6 +796,7 @@ export class MusicScannerService {
                 discSubtitle,
                 duration,
                 mime,
+                bitrate,
                 fileModified: stats.mtime,
                 fileSize: stats.size,
                 corrupt: false,

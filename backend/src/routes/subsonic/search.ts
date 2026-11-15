@@ -16,7 +16,7 @@ export const searchRouter = Router();
 
 /** What every song list here reads: the song, its album and its artist. */
 const SONG_COLUMNS = Prisma.sql`
-    t.id, t.title, t."displayTitle", t."trackNo", t."discNumber", t.duration, t.mime, t."fileSize",
+    t.id, t.title, t."displayTitle", t."trackNo", t."discNumber", t.duration, t.mime, t.bitrate, t."fileSize",
     al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
     al."coverUrl" AS "albumCoverUrl", al."userCoverUrl" AS "albumUserCoverUrl",
     ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
@@ -33,6 +33,7 @@ type SongRow = {
     discNumber: number | null;
     duration: number | null;
     mime: string | null;
+    bitrate: number | null;
     fileSize: number | null;
     albumId: string;
     albumTitle: string;
@@ -58,6 +59,7 @@ function songOf(row: SongRow) {
             duration: row.duration,
             filePath: null,
             mime: row.mime,
+            bitrate: row.bitrate,
             fileSize: row.fileSize,
         },
         {

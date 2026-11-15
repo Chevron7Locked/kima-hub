@@ -38,6 +38,8 @@ export type TrackRow = {
     duration: number | null;
     filePath: string | null;
     mime: string | null;
+    /** The file's own bitrate in kbps as the scan read it; null until the file is next read. */
+    bitrate: number | null;
     fileSize: number | null;
 };
 
@@ -129,7 +131,7 @@ export function mapSong(
         "@_isDir": false,
         "@_coverArt": albumCoverArtId(album),
         "@_duration": track.duration ? Math.round(track.duration) : 0,
-        "@_bitRate": estimateBitrateFromMime(track.mime),
+        "@_bitRate": track.bitrate ?? estimateBitrateFromMime(track.mime),
         "@_track": track.trackNo || undefined,
         "@_discNumber": track.discNumber ?? undefined,
         "@_year": album.year || undefined,

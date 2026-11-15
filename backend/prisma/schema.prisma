@@ -692,6 +692,8 @@ model Track {
   trackNo                     Int
   duration                    Int
   mime                        String?
+  // The file's own bitrate in kbps, as the scan read it; null until the file is next read, or when it reports none.
+  bitrate                     Int?
   searchVector                Unsupported("tsvector")?
   filePath                    String                   @unique
   fileModified                DateTime

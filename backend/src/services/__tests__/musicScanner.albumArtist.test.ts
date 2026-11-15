@@ -270,7 +270,7 @@ describe("one album, one artist", () => {
         const slim = slimMetadata(full as never);
         expect(slim).toEqual({
             common: full.common,
-            format: { duration: 200, codec: "flac" },
+            format: { duration: 200, codec: "flac", bitrate: 900 },
             native: { vorbis: [{ id: "LYRICS", value: "words" }] },
         });
         expect("quality" in slim).toBe(false);
