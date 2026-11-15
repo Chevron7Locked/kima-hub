@@ -459,18 +459,19 @@ export interface PlayableQueue {
     currentIndex: number;
     position: number;
     /**
-     * The current song of the shown queue when the state names a track. With no queue shown, the track named while it
-     * is playable. None when the state names none.
+     * For a track state that names a track: the current song of the shown queue, or with no queue shown the track named
+     * while it is playable. None when it names none. A podcast or audiobook state: the track as stored.
      */
     trackId: string | null;
 }
 
 export async function playableQueue(
-    state: { queue: unknown; currentIndex: number; position: number; trackId?: string | null } | null,
+    state: { playbackType: string; queue: unknown; currentIndex: number; position: number; trackId?: string | null } | null,
 ): Promise<PlayableQueue> {
     const saved = entriesOf(state?.queue);
     const named = state?.trackId ?? null;
-    const asked = [...saved.map((item) => item.id), ...(named !== null ? [named] : [])];
+    const shownTrack = state?.playbackType === "track" && named !== null;
+    const asked = [...saved.map((item) => item.id), ...(shownTrack ? [named] : [])];
     const now = new Map(
         asked.length === 0
             ? []
@@ -481,11 +482,12 @@ export async function playableQueue(
     // Each song is shown as it is now (an edited title, a renamed artist, a new cover), not as it was when saved.
     const queue = saved.flatMap((item) => now.get(item.id) ?? []);
     const { index: currentIndex } = shownPlace(saved.map((item) => item.id), state?.currentIndex ?? 0, (id) => now.has(id));
-    // A state that names a track is shown the current song of the queue as shown (a stand-in when the stored one is
-    // hidden), whatever the stored name says. With no queue shown, the name stays only while that song is playable.
-    // No name stays none. `shownPlace` gives an index into the shown queue whenever it holds a song.
-    let trackId: string | null = null;
-    if (named !== null) trackId = queue.length > 0 ? queue[currentIndex].id : now.has(named) ? named : null;
+    // A track state that names a track is shown the current song of the queue as shown (a stand-in when the stored one
+    // is hidden), whatever the stored name says. With no queue shown, the name stays only while that song is playable.
+    // No name stays none. A podcast or audiobook state is not music playback: it keeps the music queue underneath and
+    // returns the track as stored. `shownPlace` gives an index into the shown queue whenever it holds a song.
+    let trackId: string | null = named;
+    if (shownTrack) trackId = queue.length > 0 ? queue[currentIndex].id : now.has(named) ? named : null;
     return {
         queue,
         currentIndex,
@@ -497,7 +499,7 @@ export async function playableQueue(
 
 /**
  * A playback state row as a client is shown it, whether it asked for it or has just saved it: only the queue's playable
- * songs, the index into those, and, for a state that names a track, the shown queue's current song as the track. What
+ * songs, the index into those, and, for a track state that names a track, the shown queue's current song as the track. What
  * is stored stays as it is. No row stays no row.
  */
 export async function shownState(state: PlaybackStateRow | null) {

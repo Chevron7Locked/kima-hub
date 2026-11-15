@@ -166,6 +166,33 @@ describe("GET /api/playback-state", () => {
         expect((await get()).body.trackId).toBe(`${P}ok2`);
     });
 
+    // Books and podcasts keep the music queue underneath: the queue is shown, the track they carry is not music playback.
+    it.each(["podcast", "audiobook"])("a %s state returns the track as stored, over a music queue it keeps underneath", async (playbackType) => {
+        await prisma.playbackState.create({
+            data: { userId: USER, playbackType, trackId: `${P}ok3`, queue: [entry(`${P}ok1`), entry(`${P}ok2`)], currentIndex: 1 },
+        });
+        const res = await get();
+        expect(res.body.trackId).toBe(`${P}ok3`);
+        expect(ids(res.body)).toEqual([`${P}ok1`, `${P}ok2`]);
+        expect(res.body.currentIndex).toBe(1);
+    });
+
+    it.each(["podcast", "audiobook"])("a %s state that names no track names none, over a music queue it keeps underneath", async (playbackType) => {
+        await prisma.playbackState.create({
+            data: { userId: USER, playbackType, trackId: null, queue: [entry(`${P}ok1`), entry(`${P}ok2`)], currentIndex: 1 },
+        });
+        expect((await get()).body.trackId).toBeNull();
+    });
+
+    it.each(["podcast", "audiobook"])("a %s state returns the track as stored even when that song is not playable", async (playbackType) => {
+        await prisma.playbackState.create({
+            data: { userId: USER, playbackType, trackId: `${P}disc`, queue: [entry(`${P}ok1`), entry(`${P}ok2`)], currentIndex: 0 },
+        });
+        const res = await get();
+        expect(res.body.trackId).toBe(`${P}disc`);
+        expect(ids(res.body)).toEqual([`${P}ok1`, `${P}ok2`]);
+    });
+
     it("a state with no queue naming a playable song keeps it", async () => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", trackId: `${P}ok3` } });
         expect((await get()).body.trackId).toBe(`${P}ok3`);
