@@ -1,5 +1,5 @@
 /**
- * A person's edit or reset of a shown name moves the library-changed marker only when a client lists the edited item
+ * A person's edit or reset of a shown name, or of a picture that shows in its place, moves the library-changed marker only when a client lists the edited item
  * (Subsonic's `lastModified`): a song with a playable file on a library album, and an album or artist holding one.
  * An edit of a Discover item or of one whose songs are missing or corrupt leaves it, and so does a reset that changes
  * no name a client shows. Real router, real admin token, real database and the real marker.
@@ -274,6 +274,105 @@ describe("two edits of the same name that overlap", () => {
         const t = await seed("ovd2", "playable");
         const goneToo = () => prisma.track.deleteMany({ where: { id: t.track } });
         expect(await overlapped(() => post(`/enrichment/tracks/${t.track}/reset`), goneToo)).toEqual({ moved: false, status: 404 });
+    });
+});
+
+const pic = (name: string) => `https://pictures.example/${name}.jpg`;
+
+describe("setting, clearing or resetting a picture", () => {
+    it("moves the marker when a picture the person sets changes what a client shows", async () => {
+        const s = await seed("pic", "playable", false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("a1") }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: pic("b1") }))).toBe(true);
+        // Another picture in place of the first.
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("a2") }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: pic("b2") }))).toBe(true);
+    });
+
+    it("moves the marker when clearing a picture brings the found one back", async () => {
+        const s = await seed("picclr", "playable", false);
+        await prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("mine"), heroUrl: pic("found") } });
+        await prisma.album.update({ where: { id: s.album }, data: { userCoverUrl: pic("mine"), coverUrl: pic("found") } });
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: null }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: null }))).toBe(true);
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).userHeroUrl).toBeNull();
+    });
+
+    it("leaves the marker when the picture shown does not change", async () => {
+        const s = await seed("piceq", "playable", false);
+        await prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("mine"), heroUrl: pic("found") } });
+        await prisma.album.update({ where: { id: s.album }, data: { userCoverUrl: pic("mine"), coverUrl: pic("found") } });
+        // The same picture sent again.
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("mine") }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: pic("mine") }))).toBe(false);
+
+        // Nothing to clear, and a picture set to the address of the one found.
+        const plain = await seed("picnone", "playable", false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${plain.artist}/metadata`, { heroUrl: null }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${plain.album}/metadata`, { coverUrl: null }))).toBe(false);
+        await prisma.artist.update({ where: { id: plain.artist }, data: { heroUrl: pic("same") } });
+        await prisma.album.update({ where: { id: plain.album }, data: { coverUrl: pic("same") } });
+        expect(await markerMoves(() => put(`/enrichment/artists/${plain.artist}/metadata`, { heroUrl: pic("same") }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${plain.album}/metadata`, { coverUrl: pic("same") }))).toBe(false);
+    });
+
+    it("moves the marker once for a name and a picture sent together, and for a picture alone when the name sent is the one shown", async () => {
+        const s = await seed("picboth", "playable", false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { name: "New", heroUrl: pic("a") }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { title: "New", coverUrl: pic("b") }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { name: "New", heroUrl: pic("a2") }))).toBe(true);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { title: "New", coverUrl: pic("b2") }))).toBe(true);
+    });
+
+    it.each(unlisted)("leaves the marker when the item is not listed (%s)", async (kind) => {
+        const s = await seed(`picu${kind}`, kind, false);
+        expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("a") }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: pic("b") }))).toBe(false);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).userCoverUrl).toBe(pic("b"));
+    });
+
+    it("moves the marker when a reset takes a picture the person set away, and not when it shows the same", async () => {
+        const s = await seed("picrst", "playable", false);
+        await prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("mine"), heroUrl: pic("found") } });
+        await prisma.album.update({ where: { id: s.album }, data: { userCoverUrl: pic("mine"), coverUrl: pic("found") } });
+        expect(await markerMoves(() => post(`/enrichment/artists/${s.artist}/reset`))).toBe(true);
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(true);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).userCoverUrl).toBeNull();
+        // Reset again: nothing is set, so nothing shown changes.
+        expect(await markerMoves(() => post(`/enrichment/artists/${s.artist}/reset`))).toBe(false);
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
+
+        const same = await seed("picrsts", "playable", false);
+        await prisma.artist.update({ where: { id: same.artist }, data: { userHeroUrl: pic("same"), heroUrl: pic("same") } });
+        await prisma.album.update({ where: { id: same.album }, data: { userCoverUrl: pic("same"), coverUrl: pic("same") } });
+        expect(await markerMoves(() => post(`/enrichment/artists/${same.artist}/reset`))).toBe(false);
+        expect(await markerMoves(() => post(`/enrichment/albums/${same.album}/reset`))).toBe(false);
+    });
+
+    it.each(unlisted)("leaves the marker when a reset takes a picture from an item that is not listed (%s)", async (kind) => {
+        const s = await seed(`picru${kind}`, kind, false);
+        await prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("mine") } });
+        await prisma.album.update({ where: { id: s.album }, data: { userCoverUrl: pic("mine") } });
+        expect(await markerMoves(() => post(`/enrichment/artists/${s.artist}/reset`))).toBe(false);
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
+    });
+
+    it("judges an edit that overlaps another against the picture it replaced", async () => {
+        const s = await seed("picov", "playable", false);
+        const artist = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("new") }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("new") } }),
+        );
+        const album = await overlapped(
+            () => put(`/enrichment/albums/${s.album}/metadata`, { coverUrl: pic("new") }),
+            () => prisma.album.update({ where: { id: s.album }, data: { userCoverUrl: pic("new") } }),
+        );
+        expect([artist, album]).toEqual(Array(2).fill({ moved: false, status: 200 }));
+        const other = await overlapped(
+            () => put(`/enrichment/artists/${s.artist}/metadata`, { heroUrl: pic("second") }),
+            () => prisma.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("first") } }),
+        );
+        expect(other).toEqual({ moved: true, status: 200 });
     });
 });
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { wrap, parseIntParam, coverArtId, artistPicture } from "./mappers";
+import { wrap, parseIntParam, coverArtId, artistPicture, artistPictureAddress } from "./mappers";
 import { one } from "../../utils/subsonicParams";
 
 export const artistInfoRouter = Router();
@@ -66,15 +66,16 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
     }
 
     const picture = artistPicture(artist);
+    const imageAddress = artistPictureAddress(artist);
     const infoKey = req.path.includes("getArtistInfo2") ? "artistInfo2" : "artistInfo";
     return subsonicOk(req, res, {
         [infoKey]: {
             biography: artist.userSummary || artist.summary || undefined,
             musicBrainzId: artist.mbid || undefined,
             "@_coverArt": coverArtId(`ar-${artist.id}`, picture),
-            "@_largeImageUrl": picture || undefined,
-            "@_smallImageUrl": picture || undefined,
-            "@_mediumImageUrl": picture || undefined,
+            "@_largeImageUrl": imageAddress,
+            "@_smallImageUrl": imageAddress,
+            "@_mediumImageUrl": imageAddress,
             ...(resolvedSimilar.length > 0 ? {
                 similarArtist: resolvedSimilar.map((s) => ({
                     "@_id": s.id,

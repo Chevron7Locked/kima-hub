@@ -185,6 +185,37 @@ describe("an artist's picture the person set", () => {
         }
     });
 
+    it("gives no image address for a picture Kima stores itself, which no app can load, and still names it as the cover", async () => {
+        const artistInfo = (await get("/getArtistInfo2.view", { id: OWN_ARTIST })).artistInfo2;
+        expect(artistInfo.coverArt).toBe(own);
+        for (const field of ["largeImageUrl", "mediumImageUrl", "smallImageUrl"]) expect(artistInfo).not.toHaveProperty(field);
+        for (const body of [await get("/getArtist.view", { id: OWN_ARTIST }), await get("/getArtists.view"), await get("/search3.view", { query: P })]) {
+            expect(nodes(body, OWN_ARTIST)[0]).not.toHaveProperty("artistImageUrl");
+        }
+    });
+
+    it.each(["http://own.example/mine.jpg", "HTTPS://own.example/mine.jpg"])("gives the image address when it is a web address (%s)", async (address) => {
+        await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: address } });
+        try {
+            const artistInfo = (await get("/getArtistInfo2.view", { id: OWN_ARTIST })).artistInfo2;
+            expect([artistInfo.largeImageUrl, artistInfo.mediumImageUrl, artistInfo.smallImageUrl]).toEqual([address, address, address]);
+            expect(nodes(await get("/getArtists.view"), OWN_ARTIST)[0].artistImageUrl).toBe(address);
+        } finally {
+            await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: `native:artists/${OWN_ARTIST}-mine.jpg?v=${V.ownArtist}` } });
+        }
+    });
+
+    it.each(["file:///etc/passwd", "javascript:alert(1)", "/relative/path.jpg", "  "])("gives no image address for a stored value that is not a web address (%s)", async (stored) => {
+        await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: stored } });
+        try {
+            const artistInfo = (await get("/getArtistInfo2.view", { id: OWN_ARTIST })).artistInfo2;
+            for (const field of ["largeImageUrl", "mediumImageUrl", "smallImageUrl"]) expect(artistInfo).not.toHaveProperty(field);
+            expect(nodes(await get("/getArtist.view", { id: OWN_ARTIST }), OWN_ARTIST)[0]).not.toHaveProperty("artistImageUrl");
+        } finally {
+            await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: `native:artists/${OWN_ARTIST}-mine.jpg?v=${V.ownArtist}` } });
+        }
+    });
+
     it("falls back to the one found when the person clears it", async () => {
         await prisma.artist.update({ where: { id: OWN_ARTIST }, data: { userHeroUrl: null } });
         try {

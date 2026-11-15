@@ -76,13 +76,22 @@ export function artistPicture(a: { heroUrl?: string | null; userHeroUrl?: string
     return a.userHeroUrl || a.heroUrl || null;
 }
 
+/**
+ * The address an app can load for the picture an artist shows: the picture only when it is an http or https address, else
+ * nothing. A picture Kima stores itself is a `native:` value, served through `coverArt`, and no client can fetch it as an address.
+ */
+export function artistPictureAddress(a: { heroUrl?: string | null; userHeroUrl?: string | null }): string | undefined {
+    const picture = artistPicture(a);
+    return picture && /^https?:\/\/[^/\s]/i.test(picture) ? picture : undefined;
+}
+
 export function mapArtist(a: ArtistRow) {
     return {
         "@_id": a.id,
         "@_name": a.displayName || a.name,
         "@_albumCount": a.albumCount ?? 0,
         "@_coverArt": coverArtId(`ar-${a.id}`, artistPicture(a)),
-        "@_artistImageUrl": artistPicture(a) || undefined,
+        "@_artistImageUrl": artistPictureAddress(a),
     };
 }
 

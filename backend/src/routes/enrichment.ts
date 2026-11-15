@@ -117,18 +117,18 @@ const TRACK_EDIT_REPLY = {
 } as const;
 
 /**
- * The names a row shows, read inside the transaction `tx` with the row held until it ends. A plain read would let a second
- * edit that overlaps this one pass between the read and the write, and "did the shown name change" would be judged
- * against a name that is already gone. Null when the row does not exist.
+ * The names (and, for an artist or album, the picture) a row shows, read inside the transaction `tx` with the row held
+ * until it ends. A plain read would let a second edit that overlaps this one pass between the read and the write, and
+ * "did what is shown change" would be judged against a value that is already gone. Null when the row does not exist.
  */
-async function lockedArtistNames(tx: Prisma.TransactionClient, id: string) {
-  const rows = await tx.$queryRaw<Array<{ name: string; displayName: string | null }>>`
-    SELECT "name", "displayName" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
+async function lockedArtistShown(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{ name: string; displayName: string | null; heroUrl: string | null; userHeroUrl: string | null }>>`
+    SELECT "name", "displayName", "heroUrl", "userHeroUrl" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
   return rows[0] ?? null;
 }
-async function lockedAlbumTitles(tx: Prisma.TransactionClient, id: string) {
-  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null }>>`
-    SELECT "title", "displayTitle" FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
+async function lockedAlbumShown(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null; coverUrl: string | null; userCoverUrl: string | null }>>`
+    SELECT "title", "displayTitle", "coverUrl", "userCoverUrl" FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
   return rows[0] ?? null;
 }
 async function lockedTrackTitles(tx: Prisma.TransactionClient, id: string) {
@@ -531,7 +531,7 @@ router.put("/artists/:id/metadata", async (req, res) => {
       // A new id and the rest of the edit are stored together or not at all. The name shown before the edit is read in
       // the same transaction, with the row held, so an edit that overlaps another is judged against the name it replaced.
       const { artist, before } = await prisma.$transaction(async (tx) => {
-        const before = await lockedArtistNames(tx, req.params.id);
+        const before = await lockedArtistShown(tx, req.params.id);
         // sortName follows displayName. Clearing the override files the artist under its canonical name.
         const sortName = newName !== undefined ? { sortName: artistSortName(newName ?? before?.name ?? "") } : {};
         if (newMbid !== null) await moveArtistMbid(tx, req.params.id, newMbid);
@@ -545,11 +545,13 @@ router.put("/artists/:id/metadata", async (req, res) => {
       if (newMbid !== null) forgetOwnedIndex();
       await forgetArtistHero(req.params.id);
 
-      // A shown name is what a Subsonic client lists, so an edit that changes it moves the library's change marker. An
-      // edit that sends the name already shown, a new MBID (it renames nothing), or an artist no client lists (Discover's,
-      // or one whose songs are missing or corrupt) moves nothing.
+      // A shown name and a shown picture are what a Subsonic client lists, so an edit that changes either moves the
+      // library's change marker. An edit that sends what is already shown, a new MBID (it changes neither), or an artist
+      // no client lists (Discover's, or one whose songs are missing or corrupt) moves nothing.
       if (before && (artist.displayName || artist.name) !== (before.displayName || before.name)) {
         await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name edit");
+      } else if (before && (artist.userHeroUrl || artist.heroUrl) !== (before.userHeroUrl || before.heroUrl)) {
+        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture edit");
       }
       res.json(artist);
     } catch (error) {
@@ -610,7 +612,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
       // A new id and the rest of the edit are stored together or not at all. The title shown before the edit is read in
       // the same transaction, with the row held, so an edit that overlaps another is judged against the title it replaced.
       const { album, moved, before } = await prisma.$transaction(async (tx) => {
-        const before = await lockedAlbumTitles(tx, req.params.id);
+        const before = await lockedAlbumShown(tx, req.params.id);
         // sortName follows displayTitle, like the artist override. artistSortName is text-generic, so it serves albums
         // too. Clearing the override files the album under its canonical title.
         const sortName = newTitle !== undefined ? { sortName: artistSortName(newTitle ?? before?.title ?? "") } : {};
@@ -624,9 +626,11 @@ router.put("/albums/:id/metadata", async (req, res) => {
       });
       if (moved) forgetOwnedIndex();
 
-      // Only a shown title that changed is a change to what a client lists.
+      // Only a shown title or cover that changed is a change to what a client lists.
       if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title)) {
         await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title edit");
+      } else if (before && (album.userCoverUrl || album.coverUrl) !== (before.userCoverUrl || before.coverUrl)) {
+        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover edit");
       }
       res.json(album);
     } catch (error) {
@@ -709,7 +713,7 @@ router.post("/artists/:id/reset", async (req, res) => {
     // The name shown before the reset is read in the same transaction, with the row held, so a reset that overlaps an
     // edit is judged against the name it replaced.
     const done = await prisma.$transaction(async (tx) => {
-      const existingArtist = await lockedArtistNames(tx, req.params.id);
+      const existingArtist = await lockedArtistShown(tx, req.params.id);
       if (!existingArtist) return null;
       const artist = await tx.artist.update({
         where: { id: req.params.id },
@@ -738,8 +742,9 @@ router.post("/artists/:id/reset", async (req, res) => {
     const { existingArtist, artist } = done;
     await forgetArtistHero(req.params.id);
 
-    // Only a shown name that changed back is a change to what a client lists.
+    // Only a shown name or picture that changed back is a change to what a client lists.
     if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name reset");
+    else if ((existingArtist.userHeroUrl || existingArtist.heroUrl) !== existingArtist.heroUrl) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture reset");
     res.json({
       message: "Artist metadata reset to original values",
       artist,
@@ -760,7 +765,7 @@ router.post("/albums/:id/reset", async (req, res) => {
     // The title shown before the reset is read in the same transaction, with the row held, so a reset that overlaps an
     // edit is judged against the title it replaced.
     const done = await prisma.$transaction(async (tx) => {
-      const existingAlbum = await lockedAlbumTitles(tx, req.params.id);
+      const existingAlbum = await lockedAlbumShown(tx, req.params.id);
       if (!existingAlbum) return null;
       const album = await tx.album.update({
         where: { id: req.params.id },
@@ -788,8 +793,9 @@ router.post("/albums/:id/reset", async (req, res) => {
     }
     const { existingAlbum, album } = done;
 
-    // Only a shown title that changed back is a change to what a client lists.
+    // Only a shown title or cover that changed back is a change to what a client lists.
     if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title reset");
+    else if ((existingAlbum.userCoverUrl || existingAlbum.coverUrl) !== existingAlbum.coverUrl) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover reset");
     res.json({
       message: "Album metadata reset to original values",
       album,
