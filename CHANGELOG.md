@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clearing an album or song title in the metadata editor removes your edit and shows the original title again.
+- The web metadata editor saves only what you changed, so editing a title no longer locks in the album's cover, genres and year.
+- A metadata edit with a malformed field gets a plain error instead of a server error.
+- Changing an album's MusicBrainz id and the rest of the edit are saved together or not at all.
 - A saved queue from the web player or an iOS app always names the queue's current song as the current song, even when the app sent a different song or none.
 - A Subsonic app that sends an empty current-song index when saving the queue gets the queue stored from its first song, the same as sending no index.
 - A Subsonic queue save that names a current song but sends no songs clears the queue instead of failing.
