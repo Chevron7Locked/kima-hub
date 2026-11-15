@@ -715,6 +715,41 @@ describe("reconcileDeletedTracks", () => {
                 expect((await prisma.playbackState.findUnique({ where: { userId: `${P}user` } }))!.trackId).toBe(`${P}qbcopy`);
             });
 
+            it("a copy that is corrupt is no copy: the entry goes, and the track the state names follows the queue", async () => {
+                await prisma.track.update({ where: { id: `${P}qbcopy` }, data: { corrupt: true } });
+                await seedQueue(`${P}user`, q("a", "b", "c"), 1);
+                await sweep();
+                const saved = await savedQueue(`${P}user`);
+                expect(saved.ids).toEqual([`${P}qa`, `${P}qc`]);
+                expect(saved.row.trackId).toBe(`${P}qc`);
+            });
+
+            it("a corrupt copy beside a playable one: the playable one is the copy", async () => {
+                await prisma.track.update({ where: { id: `${P}qbcopy` }, data: { corrupt: true } });
+                await prisma.track.create({
+                    data: { id: `${P}qbcopy2`, albumId: `${P}alb`, title: `${P}qb title`, trackNo: 1, duration: 200,
+                        filePath: `/tmp/${P}qbcopy2.flac`, fileModified: new Date(), fileSize: 1 },
+                });
+                await seedQueue(`${P}user`, q("a", "b"), 1);
+                await sweep();
+                expect((await savedQueue(`${P}user`)).ids).toEqual([`${P}qa`, `${P}qbcopy2`]);
+            });
+
+            it("a copy on a Discover album is no copy: Discover songs reach no library queue", async () => {
+                await prisma.album.create({
+                    data: { id: `${P}qdisc`, artistId: `${P}art`, rgMbid: `${P}-qdrg`, identityKey: `${P}-qdak`, title: "Recon Discover", primaryType: "Album", location: "DISCOVER" },
+                });
+                for (const [id, gone] of [["qdgone", true], ["qdcopy", false]] as const) {
+                    await prisma.track.create({
+                        data: { id: `${P}${id}`, albumId: `${P}qdisc`, title: "disc song", trackNo: 1, duration: 200, filePath: `/tmp/${P}${id}.flac`,
+                            fileModified: new Date(), fileSize: 1, ...(gone ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
+                    });
+                }
+                await seedQueue(`${P}user`, [`${P}qa`, `${P}qdgone`], 0);
+                await sweep();
+                expect((await savedQueue(`${P}user`)).ids).toEqual([`${P}qa`]);
+            });
+
             it("a state naming a song with no copy and holding no queue names nothing", async () => {
                 await prisma.playbackState.create({ data: { userId: `${P}user`, playbackType: "track", trackId: `${P}qd` } });
                 await sweep();

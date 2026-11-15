@@ -22,6 +22,7 @@ import { logger } from "../utils/logger";
 import { retryOnConflict } from "../utils/dbConflict";
 import { announcePlaylistsChanged, playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { songsWithBusyPlayHistory } from "./playRecording";
+import { playableSongSql } from "../utils/playableSong";
 import { entriesOf, hydrateQueue, type QueueEntry } from "./savedQueue";
 
 interface ReconcileResult {
@@ -269,8 +270,9 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
 }
 
 /**
- * For each retiring track, the live track that is the same song on the same album (same disc and track number,
- * same title ignoring case).
+ * For each retiring track, the playable song that is the same song on the same album (same disc and track number,
+ * same title ignoring case). A copy that is corrupt, or on a Discover album, is no copy: a queue or playlist is never
+ * pointed at a song a person could not play.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
@@ -281,8 +283,9 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
             ON k."albumId" = g."albumId"
            AND k."trackNo" = g."trackNo"
            AND k."discNumber" IS NOT DISTINCT FROM g."discNumber"
-           AND k."missingSince" IS NULL
            AND k.id <> g.id
+          JOIN "Album" ka ON ka.id = k."albumId"
+           AND ${playableSongSql("k", "ka")}
          WHERE g.id = ANY(${ids}::text[])
          ORDER BY g.id, k.id
     `;

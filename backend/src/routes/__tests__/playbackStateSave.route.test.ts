@@ -123,6 +123,50 @@ describe("POST /api/playback-state: where the queue came from", () => {
     });
 });
 
+describe("POST /api/playback-state: where the player is in the queue", () => {
+    const queue = [{ id: "t1", title: "one", duration: 100 }, { id: "t2", title: "two", duration: 100 }, { id: "t3", title: "three", duration: 100 }];
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const storedIndex = async (userId: string) => (await prisma.playbackState.findUnique({ where: { userId } }))?.currentIndex;
+    const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+
+    it("stores an index past the end of the saved queue as its last song when the save sends no queue", async () => {
+        const user = await newUser("idx-past");
+        await save(user.id, { playbackType: "track", queue }).expect(200);
+        const res = await save(user.id, { playbackType: "track", currentIndex: 40 }).expect(200);
+        expect(res.body.currentIndex).toBe(2);
+        expect(await storedIndex(user.id)).toBe(2);
+    });
+
+    it("keeps an index inside the saved queue, and clamps a negative or fractional one", async () => {
+        const user = await newUser("idx-in");
+        await save(user.id, { playbackType: "track", queue }).expect(200);
+        await save(user.id, { playbackType: "track", currentIndex: 1 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(1);
+        await save(user.id, { playbackType: "track", currentIndex: -5 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(0);
+        await save(user.id, { playbackType: "track", currentIndex: 1.7 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(1);
+    });
+
+    it("stores 0 when there is no saved queue to point into, for a first save as for a later one", async () => {
+        const first = await newUser("idx-first");
+        await save(first.id, { playbackType: "track", currentIndex: 7 }).expect(200);
+        expect(await storedIndex(first.id)).toBe(0);
+
+        const emptied = await newUser("idx-empty");
+        await save(emptied.id, { playbackType: "track", queue }).expect(200);
+        await save(emptied.id, { playbackType: "track", queue: [] }).expect(200);
+        await save(emptied.id, { playbackType: "track", currentIndex: 3 }).expect(200);
+        expect(await storedIndex(emptied.id)).toBe(0);
+    });
+
+    it("clamps an index sent with a queue to that queue, as before", async () => {
+        const user = await newUser("idx-with");
+        await save(user.id, { playbackType: "track", queue, currentIndex: 9 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
+    });
+});
+
 describe("GET /api/playback-state/limit", () => {
     it("answers a newly saved limit at once, not one the server read earlier", async () => {
         const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });

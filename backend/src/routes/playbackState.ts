@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { playableQueue } from "../services/savedQueue";
+import { entriesOf, playableQueue } from "../services/savedQueue";
 
 const router = express.Router();
 
@@ -111,12 +111,14 @@ router.post("/", async (req, res) => {
         // below; an omitted field is left alone rather than reset to its default.
         const queueProvided = Array.isArray(queue);
 
-        const safeCurrentIndex = queueProvided
-            ? Math.min(
-                  Math.max(0, currentIndex || 0),
-                  safeQueue?.length ? safeQueue.length - 1 : 0
-              )
-            : Math.max(0, currentIndex || 0);
+        // The index points into a queue: the one sent, or for a save without one the queue already stored. It is never
+        // stored past that queue's last song (0 when there is none).
+        const queueLength = queueProvided
+            ? (safeQueue?.length ?? 0)
+            : typeof currentIndex === "number"
+              ? entriesOf((await prisma.playbackState.findUnique({ where: { userId }, select: { queue: true } }))?.queue).length
+              : 0;
+        const safeCurrentIndex = Math.min(Math.max(0, Math.floor(Number(currentIndex) || 0)), Math.max(queueLength - 1, 0));
 
         // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
         // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
