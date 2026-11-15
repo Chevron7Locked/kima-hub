@@ -17,6 +17,7 @@ import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEve
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
 import { NameIndex, RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
+import { forgetOwnedIndex } from "./ownedIndexVersion";
 
 /** A suggestion row's names and artist id, for comparing with a record's. */
 interface NamedRow {
@@ -514,6 +515,7 @@ async function returnToLibrary(albumId: string): Promise<boolean> {
     });
     // The album is back either way; a recount that fails is caught up by the next scan's.
     if (album) {
+        forgetOwnedIndex();
         await updateArtistCounts(album.artistId).catch((error) =>
             logger.warn("[DiscoverClear] Artist counts not updated after returning an album to the library:", error),
         );

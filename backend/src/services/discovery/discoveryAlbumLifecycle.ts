@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger';
 import { updateArtistCounts } from '../artistCountsService';
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { markLibraryChangedQuietly } from '../libraryChanged';
+import { forgetOwnedIndex } from './ownedIndexVersion';
 import {
     clearOrphanedDiscoverAlbums,
     clearSuggestion,
@@ -156,6 +157,7 @@ export async function takeIntoLibrary(album: { id: string; artistId: string; rgM
             update: {},
         }),
     ]);
+    forgetOwnedIndex();
     await updateArtistCounts(album.artistId);
     // A client now lists the album.
     await markLibraryChangedQuietly('liked album joined the library');
@@ -213,6 +215,7 @@ export async function returnToDiscover(
         return updated.count > 0;
     });
     if (moved) {
+        forgetOwnedIndex();
         await updateArtistCounts(album.artistId);
         // A client no longer lists the album.
         await markLibraryChangedQuietly('unliked album went back to Discover');

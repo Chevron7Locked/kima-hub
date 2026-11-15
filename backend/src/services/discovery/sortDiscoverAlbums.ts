@@ -18,6 +18,7 @@ import {
 import { nameKey } from "../nameFold";
 import { markLibraryChangedQuietly } from "../libraryChanged";
 import { albumsPlayedAtLeast } from "../stats/listens";
+import { forgetOwnedIndex } from "./ownedIndexVersion";
 
 /** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
 const KEEP_PLAYS = 3;
@@ -141,6 +142,7 @@ export async function sortDiscoverAlbums(): Promise<DiscoverSortResult | null> {
             await tx.ownedAlbum.deleteMany({ where: { artistId: album.artistId, rgMbid: album.rgMbid } });
         }
     });
+    forgetOwnedIndex();
     // Albums that crossed in either direction change what a client lists. Before the done marker: if the save fails,
     // the next start sorts again and the library marker has already moved.
     if (toLibrary.length + toDiscover.length > 0) await markLibraryChangedQuietly("Discover sort moved albums");

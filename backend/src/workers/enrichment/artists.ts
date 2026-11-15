@@ -29,6 +29,7 @@ import { findSimilarArtists } from "../../services/artistSimilarity";
 import { STAGE_RETRY_CAP } from "../stageRetry";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { isMbid, normalizeArtistName } from "../../services/artistIdentity";
+import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 import { findAlbumArtwork, findArtistArtwork } from "../../services/artwork";
 import { redisClient } from "../../utils/redis";
 import { downloadAndStoreImage, findLocalArtistImage, isNativePath, nativeFileExists } from "../../services/imageStorage";
@@ -78,6 +79,7 @@ async function dropMbidOfAnotherArtist(artist: Artist, logPrefix: string): Promi
             data: { mbid: null, summary: null, genres: Prisma.DbNull, similarArtistsJson: Prisma.DbNull, heroUrl: localImage },
         }),
     ]);
+    forgetOwnedIndex();
     artist.mbid = null;
     artist.summary = null;
     artist.heroUrl = localImage;
@@ -140,6 +142,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
                         where: { id: artist.id },
                         data: { mbid: realMbid },
                     });
+                    forgetOwnedIndex();
                     artist.mbid = realMbid;
                 } catch (mbidError) {
                     if ((mbidError as { code?: string }).code === "P2002") {

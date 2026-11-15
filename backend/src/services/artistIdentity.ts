@@ -7,6 +7,7 @@
 
 import { Prisma } from "@prisma/client";
 import { canonicalizeVariousArtists } from "../utils/artistNormalization";
+import { forgetOwnedIndex } from "./discovery/ownedIndexVersion";
 import {
     PG_LEADING_ARTICLE,
     pgCollapseSpace,
@@ -175,10 +176,12 @@ export async function resolveArtist(
         // which case the row we have is still the right one to return.
         if (mbid && !existing.mbid) {
             try {
-                return await db.artist.update({
+                const backfilled = await db.artist.update({
                     where: { id: existing.id },
                     data: { mbid },
                 });
+                forgetOwnedIndex();
+                return backfilled;
             } catch (error: any) {
                 if (error?.code !== "P2002") throw error;
             }

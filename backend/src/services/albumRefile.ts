@@ -22,6 +22,7 @@ import type { StopCheck } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
 import { JointCreditFiler, type JointFiling } from "./jointCredit";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
+import { forgetOwnedIndex } from "./discovery/ownedIndexVersion";
 
 export interface RefileResult {
     /** The re-file ended early because the server is shutting down: some albums are still misfiled. */
@@ -80,7 +81,16 @@ const isPlaceholder = (rgMbid: string) => rgMbid.startsWith("temp-");
  * re-file ends with what it did (the album under way is finished, every move is its own transaction) and answers
  * `stopped`. It then prunes and recounts nothing; a later re-file does both, and finds the rest still misfiled.
  */
-export async function refileLibrary(musicPath: string, { shouldStop = () => false }: StopCheck = {}): Promise<RefileResult> {
+export async function refileLibrary(musicPath: string, stop: StopCheck = {}): Promise<RefileResult> {
+    try {
+        return await refileLibraryRun(musicPath, stop);
+    } finally {
+        // Moves and merges change which artist holds an album, and an artist's id, so a snapshot read before is stale.
+        forgetOwnedIndex();
+    }
+}
+
+async function refileLibraryRun(musicPath: string, { shouldStop = () => false }: StopCheck = {}): Promise<RefileResult> {
     const result: RefileResult = {
         stopped: false, songsRead: 0, songsUnreadable: 0, albumsMoved: 0, albumsMerged: 0, keptEdited: 0, artistsRenamed: 0,
         albumsFailed: 0, artistsRemoved: 0,

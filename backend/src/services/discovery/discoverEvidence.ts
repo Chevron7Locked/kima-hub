@@ -8,6 +8,7 @@ import { parseCredit } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
 import { nameKey } from "../nameFold";
 import { markLibraryChangedQuietly } from "../libraryChanged";
+import { forgetOwnedIndex } from "./ownedIndexVersion";
 
 /** What the records say about one album (by id, or by artist and title). */
 interface Mark {
@@ -238,6 +239,7 @@ export async function relocateDiscoverAlbums(options: { dryRun: boolean }): Prom
         if (!options.dryRun) movedArtists.add(album.artistId);
         moved.push({ artist: album.artist.name, title: album.title });
     }
+    if (movedArtists.size > 0) forgetOwnedIndex();
     // The artist's library and Discover counts, which listings filter on, follow the albums.
     for (const artistId of movedArtists) await updateArtistCounts(artistId);
     // Library albums left the library: a client no longer lists them.

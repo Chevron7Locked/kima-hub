@@ -6,6 +6,7 @@ import { eventBus } from "../../services/eventBus";
 import { notificationService } from "../../services/notificationService";
 import { coversBasePath } from "../../services/imageStorage";
 import { markLibraryChanged } from "../../services/libraryChanged";
+import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 
 export interface ScanJobData {
     /** Absent for scans nobody asked for. */
@@ -88,6 +89,8 @@ export async function processScan(
         const result = await scanner.scanLibrary(scanPath);
 
         await job.updateProgress(100);
+        // The scan filed albums and artists the owned-album snapshot has not read.
+        forgetOwnedIndex();
 
         // What a Subsonic client lists changed when the scan added, changed, flagged or retired a song on a library
         // album; a scan that only touched Discover's songs leaves it. A marker that cannot be written is logged and does
@@ -234,6 +237,7 @@ export async function processScan(
         return result;
     } catch (error) {
         logger.error(`[ScanJob ${job.id}] Scan failed:`, error);
+        forgetOwnedIndex();
         // A scan that fails part-way has filed songs the next scan will skip, and its counts are lost with the throw,
         // so the scanner's own record decides: the marker moves when it changed a library song before failing (a client
         // re-lists once, never misses a change), and stays when it failed before filing anything or only filed Discover's.

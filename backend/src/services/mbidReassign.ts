@@ -6,6 +6,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { forgetOwnedIndex } from "./discovery/ownedIndexVersion";
 
 /**
  * Thrown when a unique MBID collision is detected.
@@ -60,7 +61,9 @@ export async function reassignAlbumRgMbid(
     newRgMbid: string,
     opts: { source?: RgMbidSource | null; expectedOld?: string } = {}
 ): Promise<boolean> {
-    return prisma.$transaction((tx) => moveAlbumRgMbid(tx, albumId, newRgMbid, opts));
+    const moved = await prisma.$transaction((tx) => moveAlbumRgMbid(tx, albumId, newRgMbid, opts));
+    if (moved) forgetOwnedIndex();
+    return moved;
 }
 
 export async function moveAlbumRgMbid(
@@ -208,4 +211,5 @@ export async function reassignArtistMbid(
         }
         throw err;
     });
+    forgetOwnedIndex();
 }

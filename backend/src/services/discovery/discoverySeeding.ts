@@ -8,6 +8,7 @@ import { normalizeForMatching, stringSimilarity } from '../../utils/normalizatio
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { hasRealArtistId, sameArtist } from './discoverEvidence';
 import { playCounts } from '../stats/listens';
+import { ownedIndexVersion } from './ownedIndexVersion';
 
 export interface SeedArtist {
     name: string;
@@ -31,8 +32,9 @@ export class DiscoverySeeding {
     private readonly MIN_PLAYS_THRESHOLD = 5;
     private readonly RECENT_PLAYS_LIMIT = 50;
     private readonly OWNED_INDEX_TTL_MS = 5 * 60 * 1000; // one discovery run's worth of candidate checks
-    private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number }) | null = null;
-    private ownedIndexLoad: Promise<OwnedAlbumIndex> | null = null;
+    /** The snapshot, with when and under which `ownedIndexVersion` it was read. */
+    private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number; version: number }) | null = null;
+    private ownedIndexLoad: { version: number; promise: Promise<OwnedAlbumIndex> } | null = null;
 
     /** Seed artists from the user's last four weeks of plays, a play in the last two weeks counting double; the library's most engaged artists when there are too few plays. */
     async getSeedArtists(userId: string, seedCount?: number): Promise<SeedArtist[]> {
@@ -113,24 +115,38 @@ export class DiscoverySeeding {
         return rows.map((r) => ({ name: r.name, mbid: r.mbid }));
     }
 
-    /** The owned-album snapshot, cached for OWNED_INDEX_TTL_MS. */
+    /** The owned-album snapshot, cached for OWNED_INDEX_TTL_MS or until `forgetOwnedIndex`. */
     async getOwnedAlbumIndex(): Promise<OwnedAlbumIndex> {
         const now = Date.now();
-        if (this.ownedIndexCache && now - this.ownedIndexCache.builtAt < this.OWNED_INDEX_TTL_MS) {
+        // A snapshot read under an older version predates a write that called `forgetOwnedIndex`, and so does a load
+        // still reading under one; neither is used for a read that starts now.
+        const version = ownedIndexVersion();
+        if (this.ownedIndexCache && this.ownedIndexCache.version === version && now - this.ownedIndexCache.builtAt < this.OWNED_INDEX_TTL_MS) {
             return this.ownedIndexCache;
         }
         // Single-flight: concurrent candidate checks on a cold/expired cache share
         // one DB load instead of each firing the full-table album/ownedAlbum scan.
-        if (!this.ownedIndexLoad) {
-            this.ownedIndexLoad = this.buildOwnedAlbumIndex().finally(() => {
-                this.ownedIndexLoad = null;
-            });
+        if (!this.ownedIndexLoad || this.ownedIndexLoad.version !== version) {
+            const load = {
+                version,
+                promise: this.buildOwnedAlbumIndex()
+                    .then((index) => {
+                        // Kept unless a newer load already stored a snapshot.
+                        if (!this.ownedIndexCache || this.ownedIndexCache.version <= version) {
+                            this.ownedIndexCache = { ...index, builtAt: now, version };
+                        }
+                        return index;
+                    })
+                    .finally(() => {
+                        if (this.ownedIndexLoad === load) this.ownedIndexLoad = null;
+                    }),
+            };
+            this.ownedIndexLoad = load;
         }
-        return this.ownedIndexLoad;
+        return this.ownedIndexLoad.promise;
     }
 
     private async buildOwnedAlbumIndex(): Promise<OwnedAlbumIndex> {
-        const now = Date.now();
         const [albumRows, ownedAlbumRows] = await Promise.all([
             prisma.album.findMany({
                 select: { rgMbid: true, title: true, location: true, artist: { select: { name: true, mbid: true } } },
@@ -162,8 +178,7 @@ export class DiscoverySeeding {
             rgMbid: a.rgMbid,
         }));
 
-        this.ownedIndexCache = {
-            builtAt: now,
+        return {
             albums,
             ownedAlbumArtists: ownedAlbumRows.map((o) => ({
                 artistName: o.artist.name,
@@ -172,7 +187,6 @@ export class DiscoverySeeding {
             })),
             albumTitleByRgMbid: albumTitles,
         };
-        return this.ownedIndexCache;
     }
 
     /**
