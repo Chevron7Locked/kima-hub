@@ -9,7 +9,7 @@ import { ListenSource, Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { listenBrainzService } from "./listenBrainz";
-import { hasPlayBetween } from "./stats/listens";
+import { hasPlayBetween, listenersOf } from "./stats/listens";
 
 /** A track at or below this length can never be scrobbled. Last.fm's floor. */
 export const MIN_TRACK_DURATION_SECONDS = 30;
@@ -157,12 +157,7 @@ export async function lockPlayHistory(
  */
 export async function songsWithBusyPlayHistory(tx: Prisma.TransactionClient, trackIds: string[]): Promise<Set<string>> {
     if (trackIds.length === 0) return new Set();
-    const pairs = await tx.play.findMany({
-        where: { trackId: { in: trackIds } },
-        select: { trackId: true, userId: true },
-        distinct: ["trackId", "userId"],
-        orderBy: [{ userId: "asc" }, { trackId: "asc" }],
-    });
+    const pairs = await listenersOf(tx, trackIds);
     const busyListeners = new Set<string>();
     const seen = new Set<string>();
     for (const { userId } of pairs) {

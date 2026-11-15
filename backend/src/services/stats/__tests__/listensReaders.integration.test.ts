@@ -11,6 +11,7 @@ import {
     albumsPlayedAtLeast,
     countPlaysBefore,
     hasPlayBetween,
+    listenersOf,
     playCounts,
     playHistoryPages,
     playRowsSql,
@@ -227,6 +228,28 @@ describe("a play between two moments", () => {
     it("reads through a transaction", async () => {
         const found = await prisma.$transaction((tx) => around(tx, ago(2 * DAY - 1000), 5000));
         expect(found).toBe(true);
+    });
+});
+
+describe("who played these songs", () => {
+    it("is each listener once per song, by listener and then song, whatever the number of plays", async () => {
+        expect(await listenersOf(prisma, [id("q1"), id("p1"), id("p2")])).toEqual([
+            { userId: A, trackId: id("p1") },
+            { userId: A, trackId: id("p2") },
+            { userId: A, trackId: id("q1") },
+            { userId: B, trackId: id("p1") },
+            { userId: B, trackId: id("q1") },
+        ]);
+    });
+
+    it("leaves out songs nobody played, and answers nothing for no songs", async () => {
+        expect(await listenersOf(prisma, [id("p3")])).toEqual([]);
+        expect(await listenersOf(prisma, [])).toEqual([]);
+    });
+
+    it("reads through a transaction, and takes a list longer than a statement's bind parameters", async () => {
+        const many = [id("r1"), ...Array.from({ length: 40_000 }, (_, i) => `${P}nosuch${i}`)];
+        expect(await prisma.$transaction((tx) => listenersOf(tx, many))).toEqual([{ userId: A, trackId: id("r1") }]);
     });
 });
 

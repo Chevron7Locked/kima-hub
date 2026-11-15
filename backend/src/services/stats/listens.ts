@@ -9,7 +9,7 @@
  * Two meanings are kept apart, each as its first readers had it:
  * - played: raw Play rows, repeats and skips included (`playRowsSql`,
  *   `neverPlayedSql`, `playedMoreThanSql`, `playCounts`, `mostPlayedTrackIds`,
- *   `recentPlayArtists`, `playHistoryPages`, `countPlaysBefore`, `hasPlayBetween`);
+ *   `recentPlayArtists`, `playHistoryPages`, `countPlaysBefore`, `hasPlayBetween`, `listenersOf`);
  * - listened: the folded listens (`listenRows`, `listenedMoreThanSql`,
  *   `withListens`, `recentListenArtists`).
  * Two readers keep to the rows the listen rule recorded (`heard`: the mixes' night
@@ -371,6 +371,23 @@ export async function hasPlayBetween(
         select: { id: true },
     });
     return found !== null;
+}
+
+/**
+ * Who has played each of these songs: one entry per listener and song with a Play row, ordered by listener and then
+ * song. Anyone's plays, as the question is about the songs, not one listener. Reads through `db`, so a transaction
+ * holding the songs' rows sees its own. The ids go in as one array parameter, so a list of any length is one statement
+ * (a statement takes at most 32767 bind parameters).
+ */
+export async function listenersOf(
+    db: Prisma.TransactionClient,
+    trackIds: string[],
+): Promise<Array<{ trackId: string; userId: string }>> {
+    if (trackIds.length === 0) return [];
+    return db.$queryRaw<Array<{ trackId: string; userId: string }>>`
+        SELECT DISTINCT "trackId", "userId" FROM "Play"
+         WHERE "trackId" = ANY(${trackIds}::text[])
+         ORDER BY "userId", "trackId"`;
 }
 
 /**
