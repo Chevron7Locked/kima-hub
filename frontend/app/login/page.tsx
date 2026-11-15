@@ -8,6 +8,7 @@ import { AuthShell } from "@/components/layout/AuthShell";
 import { Button } from "@/components/ui/Button";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { KimaMark } from "@/components/ui/KimaMark";
+import { RECOVERY_CODE_LENGTH, recoveryCodeInput } from "@/lib/second-factor";
 
 const LOGIN_ERROR_MESSAGES: Record<string, string> = {
     "session_expired": "Your session has expired. Please sign in again.",
@@ -229,15 +230,9 @@ export default function LoginPage() {
                                         value={twoFactorToken}
                                         onChange={(e) => {
                                             if (useRecoveryCode) {
-                                                // Recovery code: 8 hex characters
+                                                // Recovery code: 16 hex characters (8 on older lists), pasted with spaces or dashes
                                                 setTwoFactorToken(
-                                                    e.target.value
-                                                        .replace(
-                                                            /[^A-Fa-f0-9]/g,
-                                                            ""
-                                                        )
-                                                        .slice(0, 8)
-                                                        .toUpperCase()
+                                                    recoveryCodeInput(e.target.value)
                                                 );
                                             } else {
                                                 // TOTP: 6 digits
@@ -250,10 +245,10 @@ export default function LoginPage() {
                                         }}
                                         placeholder={
                                             useRecoveryCode
-                                                ? "ABCD1234"
+                                                ? "ABCD1234EF567890"
                                                 : "000000"
                                         }
-                                        maxLength={useRecoveryCode ? 8 : 6}
+                                        maxLength={useRecoveryCode ? RECOVERY_CODE_LENGTH : 6}
                                         required
                                         autoFocus
                                         autoCapitalize="none"
@@ -262,7 +257,7 @@ export default function LoginPage() {
                                     />
                                     <p className="text-xs text-[var(--text-secondary)] mt-2">
                                         {useRecoveryCode
-                                            ? "Enter your 8-character recovery code"
+                                            ? "Enter your recovery code"
                                             : "Enter the 6-digit code from your authenticator app"}
                                     </p>
                                 </div>

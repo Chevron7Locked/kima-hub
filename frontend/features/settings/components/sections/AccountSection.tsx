@@ -12,17 +12,7 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { copyText } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
-/**
- * What a person types as their second factor: an authenticator code (6 digits) or a recovery code (16 hex characters;
- * lists made before 1.13 hold 8). Spaces and dashes from a paste are dropped.
- */
-function factorInput(value: string): string {
-    return value.replace(/[^0-9a-fA-F]/g, "").toUpperCase().slice(0, 16);
-}
-
-function isFactor(value: string): boolean {
-    return /^\d{6}$/.test(value) || /^([A-F0-9]{8}|[A-F0-9]{16})$/.test(value);
-}
+import { factorInput, isFactor } from "@/lib/second-factor";
 
 export function AccountSection() {
     const { user, deleteAccount } = useAuth();
