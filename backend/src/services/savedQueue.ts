@@ -163,6 +163,22 @@ function placeNearest(stored: readonly QueueEntry[], id: unknown, to: number): n
 /** Whether a save names a song: an id that is text and not empty. */
 export const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
 
+/** Whether a value is a place in a queue: a whole number of 0 or more. */
+export const isQueueIndex = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+/**
+ * Whether a save that replaces the queue changes nothing: the stored queue holds the same songs in the same order and
+ * the state is on the same entry. `plannedIds` are the ids of the queue as it will be stored.
+ */
+export function isSameQueueAndPlace(
+    stored: { queue: unknown; currentIndex: number } | null,
+    planned: { ids: readonly string[]; currentIndex: number },
+): boolean {
+    if (stored === null || stored.currentIndex !== planned.currentIndex) return false;
+    const storedIds = entriesOf(stored.queue).map((item) => item.id);
+    return storedIds.length === planned.ids.length && storedIds.every((id, at) => id === planned.ids[at]);
+}
+
 /** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
 export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
     return typeof clientIndex === "number" || namesSong(trackId);
@@ -191,9 +207,11 @@ async function lockStateRow(tx: Pick<Prisma.TransactionClient, "$queryRaw">, use
  * locked first, so a queue being written at the same moment finishes first and the index points into that queue, and
  * the caller's write, in the same transaction, lands before any other.
  *
- * With an index, a person with no stored queue gets 0. A save that names the song but sends no index finds it in the
- * stored queue (the place nearest the stored index, when it sits twice); a song the stored queue does not hold (an
- * empty queue holds none) leaves the stored index as it is, which is `null` here, and a first save then creates 0.
+ * A save that names a song the stored queue does not hold (an empty queue holds none), with or without an index,
+ * moves nothing: the result is `null`, so the stored index stays, and the caller leaves the stored song alone too, as
+ * the stored song is always the stored queue's current entry. Otherwise, with an index, a person with no stored queue
+ * gets 0; a save that names the song but sends no index finds it in the stored queue (the place nearest the stored
+ * index, when it sits twice).
  */
 export async function indexIntoStoredQueue(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "playbackState" | "track">,
@@ -204,6 +222,7 @@ export async function indexIntoStoredQueue(
     await lockPlaybackState(tx, userId);
     const state = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
     const stored = entriesOf(state?.queue);
+    if (namesSong(trackId) && !stored.some((item) => item.id === trackId)) return null;
     if (typeof clientIndex !== "number") return placeNearest(stored, trackId, state?.currentIndex ?? 0);
     if (stored.length === 0) return 0;
     const playable = new Set(

@@ -259,13 +259,26 @@ describe("POST /api/playback-state: where the player is in the queue", () => {
         expect(await storedIndex(user.id)).toBe(0);
     });
 
-    it("maps a shown index through the stored queue when the save names no song, or one that is not in it", async () => {
+    it("maps a shown index through the stored queue when the save names no song", async () => {
         const user = await newUser("idx-map");
         await save(user.id, { playbackType: "track", queue: withGone }).expect(200);
         await save(user.id, { playbackType: "track", currentIndex: 2 }).expect(200);
         expect(await storedIndex(user.id)).toBe(3);
+    });
+
+    it("leaves the state as it is when the save names a song the stored queue does not hold, whether or not it sends an index", async () => {
+        const user = await newUser("idx-notheld");
+        await save(user.id, { playbackType: "track", queue: withGone, currentIndex: 2 }).expect(200);
+        const before = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+        await prisma.playbackState.update({ where: { userId: user.id }, data: { position: 9000 } });
+
         await save(user.id, { playbackType: "track", trackId: `${S}s4`, currentIndex: 1 }).expect(200);
-        expect(await storedIndex(user.id)).toBe(2);
+        await save(user.id, { playbackType: "track", trackId: `${S}s4` }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}nosuch`, currentIndex: 0 }).expect(200);
+
+        const after = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+        expect([after.trackId, after.currentIndex, after.position]).toEqual([before.trackId, before.currentIndex, 9000]);
+        expect(after.trackId).toBe(`${S}s2`);
     });
 
     describe("a save that names the current song and sends no index", () => {
@@ -300,13 +313,25 @@ describe("POST /api/playback-state: where the player is in the queue", () => {
             expect(await storedIndex(user.id)).toBe(2);
         });
 
-        it("stores 0 for a person with no stored queue", async () => {
+        it("stores index 0 and no song for a person with no stored queue, which holds no song to name", async () => {
             const user = await newUser("named-noqueue");
 
             await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
 
-            expect(await storedIndex(user.id)).toBe(0);
+            const state = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+            expect([state.currentIndex, state.trackId]).toEqual([0, null]);
         });
+    });
+
+    it("stores the entry the index lands on as the current song, whether or not the save names one", async () => {
+        const user = await newUser("idx-song");
+        await save(user.id, { playbackType: "track", queue, currentIndex: 0 }).expect(200);
+        const trackId = async () => (await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).trackId;
+
+        await save(user.id, { playbackType: "track", currentIndex: 2 }).expect(200);
+        expect(await trackId()).toBe(`${S}s3`);
+        await save(user.id, { playbackType: "track", currentIndex: 1, trackId: null }).expect(200);
+        expect(await trackId()).toBe(`${S}s2`);
     });
 
     it("counts the index after the entries without an id are dropped, for a save that sends the queue", async () => {
@@ -342,15 +367,15 @@ describe("POST /api/playback-state: where the player is in the queue", () => {
         expect(await storedIndex(user.id)).toBe(2);
     });
 
-    it("keeps an index inside the saved queue, and clamps a negative or fractional one", async () => {
+    it("keeps an index inside the saved queue, and a whole number sent as a float", async () => {
         const user = await newUser("idx-in");
         await save(user.id, { playbackType: "track", queue }).expect(200);
         await save(user.id, { playbackType: "track", currentIndex: 1 }).expect(200);
         expect(await storedIndex(user.id)).toBe(1);
-        await save(user.id, { playbackType: "track", currentIndex: -5 }).expect(200);
-        expect(await storedIndex(user.id)).toBe(0);
-        await save(user.id, { playbackType: "track", currentIndex: 1.7 }).expect(200);
-        expect(await storedIndex(user.id)).toBe(1);
+        await save(user.id, { playbackType: "track", currentIndex: 2.0 }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
+        await save(user.id, { playbackType: "track", currentIndex: null }).expect(200);
+        expect(await storedIndex(user.id)).toBe(2);
     });
 
     it("stores 0 when there is no saved queue to point into, for a first save as for a later one", async () => {
@@ -498,7 +523,7 @@ describe("POST /api/playback-state: a save that names the time it saw (expectedU
 
     it("leaves a save that names no time as it was: it writes whatever is stored", async () => {
         const user = await newUser("cond-none");
-        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [{ id: `${S}s1` }, { id: `${S}s2` }] }).expect(200);
         await save(user.id, { playbackType: "track", trackId: `${S}s2` }).expect(200);
         expect((await stored(user.id))!.trackId).toBe(`${S}s2`);
     });
@@ -520,10 +545,32 @@ describe("POST /api/playback-state: the position in the current song", () => {
         return user;
     };
 
-    it("starts a queue the save replaces at position 0, the same queue and place included", async () => {
-        const user = await withPosition("pos-queue");
+    it("keeps the position when a save sends the queue and the place the state already holds", async () => {
+        const user = await withPosition("pos-resave");
 
         await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2"), song("s3")], currentIndex: 0 }).expect(200);
+
+        expect(await position(user.id)).toBe(9000);
+    });
+
+    it("keeps the position when the ids Kima does not hold are all that differ from the stored queue", async () => {
+        const user = await withPosition("pos-unknown");
+
+        await save(user.id, { playbackType: "track", queue: [song("s1"), { id: `${S}nosuch`, title: "x" }, song("s2"), song("s3")], currentIndex: 0 }).expect(200);
+
+        expect(await position(user.id)).toBe(9000);
+    });
+
+    it.each([
+        ["one id changed", [{ id: "s1" }, { id: "s2" }, { id: "s4" }], 0],
+        ["the order changed", [{ id: "s2" }, { id: "s1" }, { id: "s3" }], 1],
+        ["a song was added", [{ id: "s1" }, { id: "s2" }, { id: "s3" }, { id: "s4" }], 0],
+        ["a song was taken out", [{ id: "s1" }, { id: "s2" }], 0],
+        ["the entry changed, the list the same", [{ id: "s1" }, { id: "s2" }, { id: "s3" }], 1],
+    ])("resets the position when a save sends a queue where %s", async (name, entries, index) => {
+        const user = await withPosition(`pos-diff-${name.replace(/\W+/g, "")}`);
+
+        await save(user.id, { playbackType: "track", queue: entries.map((e) => song(e.id)), currentIndex: index }).expect(200);
 
         expect(await position(user.id)).toBe(0);
     });
@@ -761,6 +808,39 @@ describe("POST /api/playback-state: the queue limit is read before the transacti
     });
 });
 
+describe("POST /api/playback-state: an index that is no place in a queue", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+
+    // Each row: what the index was sent as, and the reason the log carries.
+    const invalidRequests: Array<[string, unknown]> = [
+        ["a negative number", -1],
+        ["a fraction", 1.5],
+        ["text", "2"],
+        ["a boolean", true],
+        ["an object", {}],
+        ["a list", [1]],
+    ];
+
+    it.each(invalidRequests)("answers 400 for a currentIndex that is %s, logs the reason, and writes nothing", async (_name, value) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-badidx-${_name.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+        const logged = expectLog("warn");
+
+        for (const playbackType of ["track", "audiobook", "podcast"]) {
+            const res = await save(user.id, { playbackType, currentIndex: value, queue: [{ id: `${S}s1` }] });
+            expect([playbackType, res.status, res.body]).toEqual([playbackType, 400, { error: "Invalid request" }]);
+        }
+
+        expect(logged.mock.calls.some((call) => String(call[0]).includes("currentIndex: a whole number of 0 or more required"))).toBe(true);
+        expect(await prisma.playbackState.findUnique({ where: { userId: user.id } })).toBeNull();
+    });
+
+    it.each([["0", 0], ["a large whole number", 40], ["left out", undefined], ["null", null]])("still takes a currentIndex that is %s", async (_name, value) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-goodidx-${_name.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+
+        await save(user.id, { playbackType: "track", currentIndex: value }).expect(200);
+    });
+});
+
 describe("POST /api/playback-state: an id that is no string", () => {
     const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
 
@@ -924,21 +1004,25 @@ describe("POST /api/playback-state: the ids a save names are checked", () => {
         }
     });
 
-    // A song a save names must be one a queue could hold: a library song (a missing one too, it may come back).
+    // A song a save names must be one the stored queue holds, so one a queue could hold: a library song (a missing one
+    // too, it may come back). Any other leaves the stored current song as it is; an empty id names none.
     it.each([
         ["a library song", `${S}s1`, `${S}s1`],
         ["a library song whose file is gone", `${S}gone`, `${S}gone`],
-        ["a Discover song", `${S}d1`, null],
-        ["an id Kima does not know", `${S}nosuch`, null],
+        ["a Discover song", `${S}d1`, `${S}s2`],
+        ["an id Kima does not know", `${S}nosuch`, `${S}s2`],
+        ["a library song the stored queue does not hold", `${S}s4`, `${S}s2`],
         ["an empty id", "", null],
     ])("stores %s as the current song: %s", async (label, trackId, expected) => {
         for (const extra of [{}, { currentIndex: 0 }]) {
             const user = await newUser(`named-${label.replace(/\W+/g, "")}-${Object.keys(extra).length}`);
-            await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [{ id: `${S}s2` }], currentIndex: 0 }).expect(200);
+            await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [{ id: `${S}s2` }, { id: `${S}s1` }, { id: `${S}gone` }], currentIndex: 0 }).expect(200);
 
             await save(user.id, { playbackType: "track", trackId, ...extra }).expect(200);
 
-            expect([label, Object.keys(extra).length, (await stored(user.id))!.trackId]).toEqual([label, Object.keys(extra).length, expected]);
+            // An empty id with no index clears the song; with an index the stored song is the entry the index is on.
+            const want = trackId === "" && "currentIndex" in extra ? `${S}s2` : expected;
+            expect([label, Object.keys(extra).length, (await stored(user.id))!.trackId]).toEqual([label, Object.keys(extra).length, want]);
         }
     });
 
@@ -970,7 +1054,7 @@ describe("POST /api/playback-state: the ids a save names are checked", () => {
 
     it("leaves an id it is not sent alone", async () => {
         const user = await newUser("ids-omitted");
-        await save(user.id, { playbackType: "track", trackId: `${S}s1`, podcastId: `${POD}:${S}ep1` }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [{ id: `${S}s1` }], podcastId: `${POD}:${S}ep1` }).expect(200);
 
         await save(user.id, { playbackType: "track", isShuffle: true }).expect(200);
 
@@ -1013,7 +1097,7 @@ describe("POST /api/playback-state: a time that is not an ISO date", () => {
         async (expectedUpdatedAt) => {
             const logged = expectLog("warn");
             const user = await newUser(`iso-${expectedUpdatedAt.replace(/\W+/g, "") || "empty"}`);
-            await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+            await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [{ id: `${S}s1` }, { id: `${S}s2` }] }).expect(200);
 
             const res = await save(user.id, { playbackType: "track", trackId: `${S}s2`, expectedUpdatedAt });
 
@@ -1025,7 +1109,7 @@ describe("POST /api/playback-state: a time that is not an ISO date", () => {
 
     it("takes the time as the server writes it, and the same instant written with an offset", async () => {
         const user = await newUser("iso-ok");
-        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [{ id: `${S}s1` }, { id: `${S}s2` }] }).expect(200);
 
         const seen = (await stored(user.id))!.updatedAt;
         await save(user.id, { playbackType: "track", trackId: `${S}s2`, expectedUpdatedAt: seen.toISOString().replace("Z", "+00:00") }).expect(200);

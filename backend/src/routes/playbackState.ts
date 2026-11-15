@@ -8,6 +8,9 @@ import {
     indexIntoStoredQueue,
     lockForQueueSave,
     lockPlaybackState,
+    entriesOf,
+    isQueueIndex,
+    isSameQueueAndPlace,
     namesCurrentSong,
     namesEpisode,
     namesSong,
@@ -24,6 +27,9 @@ const router = express.Router();
 
 /** What a refused time is logged as, for a save and a clear alike. */
 const SEEN_TIME_REQUIRED = "expectedUpdatedAt: an ISO date and time required";
+
+/** What a refused index is logged as. */
+const INDEX_REQUIRED = "currentIndex: a whole number of 0 or more required";
 
 // A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
 const MAX_QUEUE_SOURCE_LENGTH = 200;
@@ -76,6 +82,12 @@ router.post("/", async (req, res) => {
             if (!expectedAt) return refuseRequest(req, res, SEEN_TIME_REQUIRED);
         }
 
+        // An index is a place in a queue: a whole number of 0 or more, or left out (null is left out). Anything else is
+        // no place, and is refused before the database is touched rather than clamped to one.
+        if (currentIndex !== undefined && currentIndex !== null && !isQueueIndex(currentIndex)) {
+            return refuseRequest(req, res, INDEX_REQUIRED);
+        }
+
         // An id is text or null: a number or object would be stored as the id of a song that cannot exist.
         for (const [name, value] of [["trackId", trackId], ["audiobookId", audiobookId], ["podcastId", podcastId]] as const) {
             if (value !== undefined && value !== null && typeof value !== "string") {
@@ -104,6 +116,8 @@ router.post("/", async (req, res) => {
             const planned = await planQueue(tx, ids, clientIndex, limit, held);
             return {
                 currentIndex: planned.currentIndex,
+                // The ids of the queue as it will be stored, to tell whether this save changes the queue.
+                plannedIds: planned.queue?.map((item) => item.id) ?? [],
                 // The current song is the stored queue's current entry, whatever `trackId` the save sent or left out: a
                 // named song the plan left out (unknown, on a Discover album) or cut at the limit never stays beside
                 // a queue that does not hold it, so the two never disagree.
@@ -119,32 +133,35 @@ router.post("/", async (req, res) => {
         };
         type Replacement = Awaited<ReturnType<typeof replacementFor>>;
 
-        // `safeCurrentIndex` null: the save names a song the stored queue does not hold, so the stored index stays.
+        // `index` null: the save names a song the stored queue does not hold, so the stored index stays.
         // Returns null when the save named a time and the stored state is no longer the one saved at it (or is gone):
         // nothing was written.
         // `named`: the song and the episode the save names, as they are stored, which is null for an id that names
-        // nothing Kima holds; undefined where the save names none and sends no queue, and the stored one is left alone. A
-        // save that replaces the queue always names its current entry as the song.
-        // `movedPlace`: an index-only save landed on another entry than the stored one.
+        // nothing Kima holds; undefined where the stored one is left alone (the save names none and sends no queue, or
+        // names a song the stored queue does not hold). A save that replaces the queue always names its current entry
+        // as the song.
+        // `startsOver`: the save changes the queue or the entry the state is on, so the position goes back to 0. A
+        // save that leaves the place alone, a queue re-saved as it stands included, leaves the position alone.
         const write = async (
             db: Pick<Prisma.TransactionClient, "playbackState">,
-            replacement: Replacement | null,
-            safeCurrentIndex: number | null,
-            named: { trackId: string | null | undefined; podcastId: string | null | undefined },
-            movedPlace = false,
+            { replacement, index, named, startsOver }: {
+                replacement: Replacement | null;
+                index: number | null;
+                named: { trackId: string | null | undefined; podcastId: string | null | undefined };
+                startsOver: boolean;
+            },
         ): Promise<PlaybackStateRow | null> => {
-            // The position is the place in the current song, which only a Subsonic client sends. A queue this save
-            // replaces starts at 0, and so does a move to another entry, so a position left by an earlier save never
-            // sits beside a song it was not reached in. A save that leaves the place alone leaves the position alone.
+            // The position is the place in the current song, which only a Subsonic client sends: it never stays beside a
+            // song or a queue it was not reached in.
             const queueUpdate = replacement
                 ? {
                       queue: replacement.storedQueue,
                       queueSource: replacement.safeQueueSource,
-                      currentIndex: safeCurrentIndex ?? 0,
-                      position: 0,
+                      currentIndex: index ?? 0,
+                      ...(startsOver ? { position: 0 } : {}),
                   }
-                : indexOnly && safeCurrentIndex !== null
-                  ? { currentIndex: safeCurrentIndex, ...(movedPlace ? { position: 0 } : {}) }
+                : indexOnly && index !== null
+                  ? { currentIndex: index, ...(startsOver ? { position: 0 } : {}) }
                   : {};
             const update = {
                 playbackType,
@@ -174,7 +191,7 @@ router.post("/", async (req, res) => {
                     podcastId: named.podcastId ?? null,
                     queue: replacement?.storedQueue ?? Prisma.DbNull,
                     queueSource: replacement?.safeQueueSource ?? null,
-                    currentIndex: safeCurrentIndex ?? 0,
+                    currentIndex: index ?? 0,
                     position: 0,
                     isShuffle: isShuffle || false,
                     changedBy: CHANGED_BY,
@@ -195,12 +212,25 @@ router.post("/", async (req, res) => {
                 trackId: replacement ? replacement.trackId : trackId === undefined ? undefined : namesSong(trackId) && held.has(trackId) ? trackId : null,
                 podcastId: podcastId === undefined ? undefined : (await namesEpisode(tx, podcastId)) ? (podcastId as string) : null,
             };
-            if (replacement) return write(tx, replacement, replacement.currentIndex, named);
-            if (!indexOnly) return write(tx, null, 0, named);
+            if (replacement) {
+                // The state row is locked by now, so what it holds is what this save replaces.
+                const stored = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
+                const startsOver = !isSameQueueAndPlace(stored, { ids: replacement.plannedIds, currentIndex: replacement.currentIndex });
+                return write(tx, { replacement, index: replacement.currentIndex, named, startsOver });
+            }
+            if (!indexOnly) return write(tx, { replacement: null, index: 0, named, startsOver: false });
             const index = await indexIntoStoredQueue(tx, userId, currentIndex, trackId);
-            // The state row is locked by now, so the index read here is the one the write replaces.
-            const stored = index === null ? null : await tx.playbackState.findUnique({ where: { userId }, select: { currentIndex: true } });
-            return write(tx, null, index, named, stored !== null && stored.currentIndex !== index);
+            // A song the stored queue does not hold changes nothing, the stored song included.
+            if (index === null) return write(tx, { replacement: null, index, named: { ...named, trackId: undefined }, startsOver: false });
+            const stored = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
+            // The stored song is the stored queue's current entry, whatever song the save named beside the index.
+            const entry = entriesOf(stored?.queue)[index];
+            return write(tx, {
+                replacement: null,
+                index,
+                named: entry ? { ...named, trackId: entry.id } : named,
+                startsOver: stored !== null && stored.currentIndex !== index,
+            });
         }, { timeout: SAVE_TIMEOUT_MS });
 
         if (!playbackState) {
