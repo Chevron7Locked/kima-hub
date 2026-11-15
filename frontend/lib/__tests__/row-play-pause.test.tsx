@@ -27,7 +27,7 @@ vi.mock("@/lib/audio-controls-context", () => ({
 }));
 vi.mock("@/lib/api", () => ({ api: { getCoverArtUrl: (id: string) => `/cover/${id}` } }));
 vi.mock("@/hooks/useDoubleTap", () => ({
-    useDoubleTap: () => ({ onTouchEnd: () => {}, onDoubleClick: () => {} }),
+    useDoubleTap: (callback: () => void) => ({ onTouchEnd: () => {}, onDoubleClick: callback }),
     useDoubleTapList: () => () => {},
 }));
 vi.mock("@/components/ui/CachedImage", () => ({ CachedImage: () => null }));
@@ -103,6 +103,29 @@ function behaves(mount: () => void, started: () => number) {
         expect(audio.resumeWithGesture).toHaveBeenCalledTimes(1);
         expect(audio.pause).not.toHaveBeenCalled();
         expect(started()).toBe(0);
+    });
+
+    it("never pauses on a double click of the current song, and resumes it when paused", async () => {
+        audio.currentTrack = { id: "b" };
+        audio.isPlaying = true;
+        mount();
+        await act(async () => rows()[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+        expect(audio.pause).not.toHaveBeenCalled();
+        expect(started()).toBe(0);
+
+        audio.isPlaying = false;
+        mount();
+        await act(async () => rows()[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+        expect(audio.resumeWithGesture).toHaveBeenCalledTimes(1);
+        expect(started()).toBe(0);
+    });
+
+    it("starts the list on a double click of another row", async () => {
+        audio.currentTrack = { id: "b" };
+        audio.isPlaying = true;
+        mount();
+        await act(async () => rows()[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+        expect(started()).toBe(1);
     });
 
     it("starts the list from another row, as before", async () => {

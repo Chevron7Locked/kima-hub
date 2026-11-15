@@ -35,12 +35,12 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
 }) => {
     const { isPlaying: audioPlaying, playRow } = usePlayRow();
     // A song the library has plays or pauses; one it has not toggles its preview.
-    const activate = (track: Track) => {
+    const activate = (track: Track, gesture: "press" | "double" = "press") => {
         if (isUnownedTrack(track)) onPreview(track);
-        else playRow(currentTrackId === track.id, () => onPlayTrack(track));
+        else playRow(currentTrackId === track.id, () => onPlayTrack(track), gesture);
     };
     const onTouchEnd = useDoubleTapList((index) => {
-        if (tracks[index]) activate(tracks[index]);
+        if (tracks[index]) activate(tracks[index], "double");
     });
 
     return (
@@ -68,7 +68,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                             }}
                             className="animate-rise [animation-delay:calc(var(--i)*var(--stagger))]"
                             style={{ "--i": index } as unknown as React.CSSProperties}
-                            onDoubleClick={() => activate(track)}
+                            onDoubleClick={() => activate(track, "double")}
                             onTouchEnd={onTouchEnd}
                             columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(80px,1fr)_80px]"
                             index={index}

@@ -32,7 +32,7 @@ interface TrackRowProps {
     isSounding: boolean;
     isPreviewPlaying: boolean;
     colors: ColorPalette | null;
-    onPlayTrack: (track: Track, index: number) => void;
+    onPlayTrack: (track: Track, index: number, gesture?: "press" | "double") => void;
     onAddToQueue: (track: Track) => void;
     onAddToPlaylist: (trackId: string) => void;
     onPreview: (track: Track) => void;
@@ -87,7 +87,13 @@ const TrackRow = memo(
             else onPlayTrack(track, index);
         }, [isPreviewOnly, track, index, onPlayTrack, onPreview]);
 
-        const doubleTapProps = useDoubleTap(handleRowClick);
+        // A double click or tap plays the song; on the one that is current it never pauses.
+        const handleRowDouble = useCallback(() => {
+            if (isPreviewOnly) onPreview(track);
+            else onPlayTrack(track, index, "double");
+        }, [isPreviewOnly, track, index, onPlayTrack, onPreview]);
+
+        const doubleTapProps = useDoubleTap(handleRowDouble);
 
         return (
             <div
@@ -130,7 +136,7 @@ const TrackRow = memo(
                             className={cn(
                                 "group-hover:hidden text-sm",
                                 isPlaying
-                                    ? "text-brand font-bold animate-pulse"
+                                    ? cn("text-brand font-bold", isSounding && "animate-pulse")
                                     : "text-[var(--text-muted)]"
                             )}
                         >
@@ -304,7 +310,7 @@ export const TrackList = memo(function TrackList({
                                 isPreviewPlaying={isPreviewPlaying}
                                 colors={colors}
                                 // The song that is current pauses or resumes; any other starts the album from it.
-                                onPlayTrack={(t, i) => playRow(isPlaying, () => onPlayTrack(t, i))}
+                                onPlayTrack={(t, i, gesture) => playRow(isPlaying, () => onPlayTrack(t, i), gesture)}
                                 onAddToQueue={onAddToQueue}
                                 onAddToPlaylist={onAddToPlaylist}
                                 onPreview={onPreview}

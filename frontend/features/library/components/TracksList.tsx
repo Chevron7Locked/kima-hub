@@ -29,7 +29,7 @@ interface TrackRowProps {
     index: number;
     isCurrentlyPlaying: boolean;
     isSounding: boolean;
-    onPlayTrack: () => void;
+    onPlayTrack: (gesture?: "press" | "double") => void;
     onAddToQueue: (track: Track) => void;
     onShowAddToPlaylist: (trackId: string) => void;
     onDelete?: (trackId: string, trackTitle: string) => void;
@@ -46,7 +46,7 @@ const TrackRow = memo(
         onShowAddToPlaylist,
         onDelete,
     }: TrackRowProps) {
-        const doubleTapProps = useDoubleTap(onPlayTrack);
+        const doubleTapProps = useDoubleTap(() => onPlayTrack("double"));
         const displayTrackNumber =
             typeof track.trackNumber === "number"
                 ? track.trackNumber
@@ -235,7 +235,7 @@ export function TracksList({
                             isCurrentlyPlaying={isCurrentlyPlaying}
                             isSounding={isCurrentlyPlaying && isPlaying}
                             // The song that is current pauses or resumes; any other starts the list from it.
-                            onPlayTrack={() => playRow(isCurrentlyPlaying, () => onPlay(tracks, index))}
+                            onPlayTrack={(gesture) => playRow(isCurrentlyPlaying, () => onPlay(tracks, index), gesture)}
                             onAddToQueue={onAddToQueue}
                             onShowAddToPlaylist={handleShowAddToPlaylist}
                             onDelete={onDelete}

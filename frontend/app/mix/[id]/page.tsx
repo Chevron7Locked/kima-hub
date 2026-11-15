@@ -105,15 +105,15 @@ export default function MixPage() {
         playTracks(tracks, 0);
     };
 
-    const handlePlayTrack = (index: number) => {
+    const handlePlayTrack = (index: number, gesture: "press" | "double" = "press") => {
         if (!mix?.tracks || mix.tracks.length === 0) return;
         // The song that is current pauses or resumes; any other starts the mix from it.
         playRow(currentTrack?.id === mix.tracks[index]?.id, () =>
-            playTracks(formatTracksForPlayback(mix.tracks), index)
+            playTracks(formatTracksForPlayback(mix.tracks), index), gesture
         );
     };
 
-    const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);
+    const handleRowTouchEnd = useDoubleTapList((index) => handlePlayTrack(index, "double"));
 
     const handleShuffle = () => {
         if (!mix?.tracks) return;
@@ -270,7 +270,7 @@ export default function MixPage() {
                                     <TrackRow
                                         key={track.id}
                                         rowProps={{ "data-track-index": index }}
-                                        onDoubleClick={() => handlePlayTrack(index)}
+                                        onDoubleClick={() => handlePlayTrack(index, "double")}
                                         onTouchEnd={handleRowTouchEnd}
                                         className="px-4"
                                         columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px]"

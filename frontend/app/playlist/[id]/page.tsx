@@ -417,17 +417,17 @@ export default function PlaylistDetailPage() {
         if (queue) playTracks(queue.tracks, 0);
     };
 
-    const handlePlayTrack = (index: number) => {
+    const handlePlayTrack = (index: number, gesture: "press" | "double" = "press") => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
         // On the row that is playing the button pauses or resumes it; on another row it starts the queue there.
         playRow(playlist.items[index]?.id === playingItem, () => {
             const queue = playablePlaylist(playlist.items, index);
             if (queue) playTracks(queue.tracks, queue.start);
-        });
+        }, gesture);
     };
 
-    const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);
+    const handleRowTouchEnd = useDoubleTapList((index) => handlePlayTrack(index, "double"));
 
     const handleAddToQueue = (track: Track) => addToQueue(playlistTrackToAudio(track));
 
@@ -655,7 +655,7 @@ export default function PlaylistDetailPage() {
                     e.preventDefault();
                     handleDrop(playlistItem.id);
                 }}
-                onDoubleClick={() => handlePlayTrack(trackIndex)}
+                onDoubleClick={() => handlePlayTrack(trackIndex, "double")}
                 onTouchEnd={handleRowTouchEnd}
                 className={cn(
                     "grid grid-cols-[40px_minmax(0,1fr)_96px]",
