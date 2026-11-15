@@ -42,6 +42,7 @@ import { getEffectiveYear } from "../../utils/dateFilters";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { popularSongs } from "../../services/popularSongs";
 import { artistIsListed, markLibraryChangedQuietly } from "../../services/libraryChanged";
+import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 
 /**
  * The artist list's order for `sortBy`; anything unknown sorts by name. Names sort on `sortName` (article-stripped,
@@ -811,6 +812,8 @@ router.delete("/artists/:id", async (req, res) => {
       where: { id: artist.id },
     });
     announcePlaylistsChanged(playlists);
+    // Its albums went with it, and Discover's owned-album snapshot read them.
+    forgetOwnedIndex();
     // An artist holding a playable song gone is a change to what a client lists; one with only Discover, missing or corrupt songs was never listed.
     if (wasListed) await markLibraryChangedQuietly("artist deleted");
 

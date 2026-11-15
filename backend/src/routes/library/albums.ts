@@ -8,6 +8,7 @@ import { safeError } from "../../utils/errors";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
 import { albumIsListed, markLibraryChangedQuietly } from "../../services/libraryChanged";
+import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
@@ -238,6 +239,8 @@ router.delete("/albums/:id", async (req, res) => {
       where: { id: album.id },
     });
     announcePlaylistsChanged(playlists);
+    // Discover's owned-album snapshot reads this album's row: rebuild it now, not when it expires.
+    forgetOwnedIndex();
     // An album holding a playable song gone is a change to what a client lists; one with only Discover, missing or corrupt songs was never listed.
     if (wasListed) await markLibraryChangedQuietly("album deleted");
 

@@ -1,5 +1,6 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { forgetOwnedIndex } from "./discovery/ownedIndexVersion";
 
 /**
  * Albums with no songs go, then artists with no albums. It moves no library-changed marker: a client lists an album
@@ -13,6 +14,8 @@ export async function pruneEmptyAlbumsAndArtists(): Promise<{ albums: number; ar
     if (orphanedAlbums.length > 0) {
         logger.debug(`Removing ${orphanedAlbums.length} orphaned albums...`);
         await prisma.album.deleteMany({ where: { id: { in: orphanedAlbums.map((a) => a.id) } } });
+        // Discover's owned-album snapshot read those rows: rebuild it now, not when it expires.
+        forgetOwnedIndex();
     }
 
     const orphanedArtists = await prisma.artist.findMany({

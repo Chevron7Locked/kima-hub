@@ -16,7 +16,7 @@ jest.mock('../../services/deezer', () => ({
 }));
 
 jest.mock('../../services/lidarr', () => ({
-    lidarrService: { getMissingTracksByAlbumMbid: jest.fn().mockResolvedValue([]) },
+    lidarrService: { getMissingTracksByAlbumMbid: jest.fn().mockResolvedValue([]), isAlbumAvailable: jest.fn().mockResolvedValue(false) },
 }));
 
 import express from 'express';
@@ -30,6 +30,7 @@ import { config, useMusicFolder } from '../../config';
 import { prisma } from '../../utils/db';
 import { lidarrService } from '../../services/lidarr';
 import { deezerService } from '../../services/deezer';
+import { discoverySeeding } from '../../services/discovery/discoverySeeding';
 import { expectLog } from '../../__tests__/helpers/expectedLogs';
 import { mountAsServer } from "./helpers/serverMount";
 
@@ -380,5 +381,17 @@ describe('DELETE /albums/:id', () => {
         // The row still goes: a poisoned tag must not make an album undeletable, which is why a refused path
         // is skipped, not thrown.
         expect(await albumExists(album.id)).toBe(false);
+    });
+
+    it("stops Discover counting the album as owned as soon as it is deleted, not when its cached snapshot expires", async () => {
+        const art = await newArtist('delete-owned', `${MARK} Pavement`);
+        const album = await newAlbum('delete-owned', { artistId: art.id, songs: 1, title: `${MARK} Crooked Rain` });
+        // Under a release id no row knows, so only the cached names can answer.
+        const owned = () => discoverySeeding.isAlbumOwned(`${MARK}-unknown-rg`, member, art.name, album.title, null);
+        expect(await owned()).toBe(true);
+
+        expect((await remove(album.id)).status).toBe(200);
+
+        expect(await owned()).toBe(false);
     });
 });
