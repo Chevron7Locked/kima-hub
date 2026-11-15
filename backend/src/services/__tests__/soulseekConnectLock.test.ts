@@ -19,6 +19,7 @@ import { soulseekLogin } from "../soulseekLogin";
 import { EventEmitter } from "events";
 import { resolveSlskClient } from "../../lib/soulseek/client";
 import { LockHeldError, LockLostError, LockUnavailableError } from "../../utils/lockErrors";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 let before: Record<string, unknown> | null;
 let soulseekService: typeof import("../soulseek").soulseekService;
@@ -207,6 +208,25 @@ describe("the login marker", () => {
         service().forceDisconnect();
         expect(clear).toHaveBeenCalledTimes(2);
     });
+
+    describe("when the client cannot be destroyed", () => {
+        const stuck = () => ({ loggedIn: true, destroy: jest.fn(() => { throw new Error("socket is stuck"); }), server: { conn: { destroyed: false, writable: true } } });
+
+        it.each([
+            ["a reset", () => soulseekService.disconnect()],
+            ["a forced disconnect", () => service().forceDisconnect()],
+        ])("%s logs it, then lets go of the client and removes the marker all the same", (_name, drop) => {
+            const clear = jest.spyOn(soulseekLogin, "clear").mockResolvedValue(undefined);
+            const logged = expectLog("warn");
+            service().client = stuck();
+
+            drop();
+
+            expect(logged).toHaveBeenCalledWith(expect.stringContaining("socket is stuck"));
+            expect(service().client).toBeNull();
+            expect(clear).toHaveBeenCalledTimes(1);
+        });
+    });
 });
 
 describe("a login on the Soulseek server", () => {
@@ -285,6 +305,21 @@ describe("a login on the Soulseek server", () => {
 
         only.server.conn.emit("close");
 
+        expect(service().client).toBeNull();
+        expect(clear).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs a client that cannot be destroyed when the connection closes, and drops it all the same", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+        const clear = jest.spyOn(soulseekLogin, "clear").mockResolvedValue(undefined);
+        const logged = expectLog("warn");
+        const only = fakeClient();
+        only.destroy.mockImplementation(() => { throw new Error("socket is stuck"); });
+        await connectWith(only);
+
+        only.server.conn.emit("close");
+
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining("socket is stuck"));
         expect(service().client).toBeNull();
         expect(clear).toHaveBeenCalledTimes(1);
     });

@@ -15,6 +15,7 @@ import { FileAttribute } from "../lib/soulseek/messages/common";
 import { getSystemSettings } from "../utils/systemSettings";
 import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { sessionLog } from "../utils/playlistLogger";
+import { logger } from "../utils/logger";
 import { distributedLock } from "../utils/distributedLock";
 import { LockHeldError, LockLostError } from "../utils/lockErrors";
 import { redisClient } from "../utils/redis";
@@ -428,16 +429,26 @@ class SoulseekService {
             // close says nothing about.
             if (this.client !== connected) return;
             sessionLog("SOULSEEK", "Server connection closed unexpectedly", "WARN");
-            try {
-                connected.destroy();
-            } catch {
-                // ignore cleanup errors
-            }
-            this.client = null;
-            this.connectedAt = null;
-            void soulseekLogin.clear();
+            this.dropClient();
             soulseekConnectionStatus.set(0);
         });
+    }
+
+    /**
+     * The one way this process lets go of its Soulseek client: destroys it, forgets it, and takes the login marker down so
+     * another process may log in. A client that fails to destroy is logged and let go of all the same.
+     */
+    private dropClient(): void {
+        if (this.client) {
+            try {
+                this.client.destroy();
+            } catch (error) {
+                logger.warn(`[Soulseek] Could not destroy the client, letting go of it anyway: ${(error as Error).message}`);
+            }
+        }
+        this.client = null;
+        this.connectedAt = null;
+        void soulseekLogin.clear();
     }
 
     /**
@@ -468,16 +479,7 @@ class SoulseekService {
             clearInterval(this.cooldownCleanupInterval);
             this.cooldownCleanupInterval = null;
         }
-        if (this.client) {
-            try {
-                this.client.destroy();
-            } catch {
-                // ignore cleanup errors
-            }
-        }
-        this.client = null;
-        this.connectedAt = null;
-        void soulseekLogin.clear();
+        this.dropClient();
     }
 
     /**
@@ -2041,16 +2043,7 @@ class SoulseekService {
             clearInterval(this.cooldownCleanupInterval);
             this.cooldownCleanupInterval = null;
         }
-        if (this.client) {
-            try {
-                this.client.destroy();
-            } catch {
-                // ignore cleanup errors
-            }
-        }
-        this.client = null;
-        this.connectedAt = null;
-        void soulseekLogin.clear();
+        this.dropClient();
         this.searchRateLimiter.destroy();
         this.searchRateLimiter = new SlidingWindowRateLimiter(30, 220_000);
         soulseekConnectionStatus.set(0);
