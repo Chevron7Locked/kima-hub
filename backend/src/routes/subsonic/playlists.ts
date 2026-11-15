@@ -40,6 +40,8 @@ playlistRouter.all("/getPlaylists.view", wrap(async (req, res) => {
                 "@_duration": Math.round(pl.items.reduce((sum, i) => sum + (i.track.duration ?? 0), 0)),
                 "@_public": pl.isPublic,
                 "@_owner": pl.user.username,
+                "@_created": pl.createdAt.toISOString(),
+                "@_changed": pl.updatedAt.toISOString(),
             })),
         },
     });
@@ -72,6 +74,8 @@ function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlayl
         "@_duration": Math.round(playlist.items.reduce((sum, i) => sum + (i.track.duration ?? 0), 0)),
         "@_public": playlist.isPublic,
         "@_owner": playlist.user.username,
+        "@_created": playlist.createdAt.toISOString(),
+        "@_changed": playlist.updatedAt.toISOString(),
         ...(entries.length > 0 ? { entry: entries } : {}),
     };
 }

@@ -107,6 +107,32 @@ describe("a playlist's changed time moves with every write to its songs", () => 
     });
 });
 
+describe("the playlist replies carry created and changed, so a client has a time to read", () => {
+    it("getPlaylist and createPlaylist give the playlist's own times, and a song added moves changed", async () => {
+        const id = await oldPlaylist(1);
+        const created = (await prisma.playlist.findUniqueOrThrow({ where: { id } })).createdAt.toISOString();
+        const before = (await call("getPlaylist", { id })).body["subsonic-response"].playlist;
+        expect(before.created).toBe(created);
+        expect(before.changed).toBe(LONG_AGO.toISOString());
+
+        await call("updatePlaylist", { playlistId: id, songIdToAdd: [songs[2]] });
+        const after = (await call("getPlaylist", { id })).body["subsonic-response"].playlist;
+        expect(new Date(after.changed).getTime()).toBeGreaterThan(LONG_AGO.getTime());
+
+        const replaced = (await call("createPlaylist", { playlistId: id, songId: [songs[1]] })).body["subsonic-response"].playlist;
+        expect(replaced.created).toBe(created);
+        expect(new Date(replaced.changed).getTime()).toBeGreaterThanOrEqual(new Date(after.changed).getTime());
+    });
+
+    it("getPlaylists lists them for each playlist", async () => {
+        const id = await oldPlaylist(1);
+        const list = (await call("getPlaylists", {})).body["subsonic-response"].playlists.playlist;
+        const mine = list.find((p: { id: string }) => p.id === id);
+        expect(mine.changed).toBe(LONG_AGO.toISOString());
+        expect(typeof mine.created).toBe("string");
+    });
+});
+
 describe("a call that writes nothing", () => {
     it("leaves the changed time alone when a replace of an empty playlist gives no songs", async () => {
         const id = await oldPlaylist(0);
