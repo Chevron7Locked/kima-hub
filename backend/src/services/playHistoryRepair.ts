@@ -51,7 +51,8 @@ function judge(span: number, gapAfter: number | null, required: number | null): 
  * Reads the whole history. That is why nothing calls it on a page load.
  */
 export async function listensOf(userId: string): Promise<Listen[]> {
-    const plays = await playHistory(userId);
+    // A statistic, so Discover plays are in none of it: not in the report, nor in what the actions collapse or remove.
+    const plays = await playHistory(userId, { libraryOnly: true });
 
     // The gap to the next play of anything, in the order they happened. This is
     // the only thing that can bound a listen from above, so it is measured on

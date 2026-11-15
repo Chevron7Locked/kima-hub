@@ -2,7 +2,7 @@
  * listensOf groups play rows into listens. Every case has an unambiguous answer.
  */
 
-import { listensOf, collapseCandidates } from "../playHistoryRepair";
+import { listensOf, collapseCandidates, auditFalseStarts, collapseDuplicateRows, removeFalseStarts } from "../playHistoryRepair";
 import { prisma } from "../../utils/db";
 
 const P = "zz-playRepair-";
@@ -11,18 +11,18 @@ const USER = `${P}u1`;
 const T0 = new Date("2026-03-01T12:00:00Z").getTime();
 
 /** A play `atSeconds` into the session, of a track `duration` long. */
-function play(id: string, atSeconds: number, duration: number, trackId = "t1", heard = false) {
-    return { id: `${P}${id}`, trackId: `${P}${trackId}`, playedAt: new Date(T0 + atSeconds * 1000), heard, duration };
+function play(id: string, atSeconds: number, duration: number, trackId = "t1", heard = false, album = "alb") {
+    return { id: `${P}${id}`, trackId: `${P}${trackId}`, playedAt: new Date(T0 + atSeconds * 1000), heard, duration, album };
 }
 
 /** Stores the plays, and the songs they are of (a song is as long as its first play says). */
 async function given(rows: ReturnType<typeof play>[]) {
-    const lengths = new Map<string, number>();
-    for (const r of rows) if (!lengths.has(r.trackId)) lengths.set(r.trackId, r.duration);
-    for (const [trackId, duration] of lengths) {
+    const songs = new Map<string, { duration: number; album: string }>();
+    for (const r of rows) if (!songs.has(r.trackId)) songs.set(r.trackId, { duration: r.duration, album: r.album });
+    for (const [trackId, { duration, album }] of songs) {
         await prisma.track.create({
             data: {
-                id: trackId, albumId: `${P}alb`, title: trackId, trackNo: 1, duration,
+                id: trackId, albumId: `${P}${album}`, title: trackId, trackNo: 1, duration,
                 filePath: `/tmp/${trackId}.flac`, fileModified: new Date(), fileSize: 1000,
             },
         });
@@ -49,6 +49,12 @@ beforeEach(async () => {
     await prisma.artist.create({ data: { id: `${P}art`, name: "An Artist", identityKey: `${P}art` } });
     await prisma.album.create({
         data: { id: `${P}alb`, artistId: `${P}art`, title: "An Album", identityKey: `${P}alb`, rgMbid: `${P}alb`, primaryType: "Album" },
+    });
+    await prisma.album.create({
+        data: {
+            id: `${P}disc`, artistId: `${P}art`, title: "A Discover Album", identityKey: `${P}disc`, rgMbid: `${P}disc`,
+            primaryType: "Album", location: "DISCOVER",
+        },
     });
 });
 
@@ -142,5 +148,36 @@ describe("plays recorded under the listen rule", () => {
         await given([play("a", 0, 240, "t1"), play("b", 90, 180, "t2")]);
         const [first] = await listensOf(USER);
         expect(first.verdict).toBe("skipped");
+    });
+});
+
+describe("Discover plays", () => {
+    // A library song skipped after 10 seconds, then a Discover song skipped after 10 seconds, then a heard library song.
+    const history = () => [
+        play("l1", 0, 200, "lib1"),
+        play("l2", 10, 200, "lib2"),
+        play("d1", 100, 200, "disc1", false, "disc"),
+        play("d2", 110, 200, "disc2", false, "disc"),
+        play("l3", 1000, 200, "lib3", true),
+    ];
+
+    it("are in no part of the false-start audit", async () => {
+        await given(history());
+        const audit = await auditFalseStarts(USER);
+        expect(audit.tracks.map((t) => t.trackId)).toEqual([`${P}lib1`]);
+        expect(audit.totalRows).toBe(3);
+        expect(audit.totalListens).toBe(3);
+    });
+
+    it("are never collapsed or removed by the audit's actions", async () => {
+        await given([
+            play("d1", 0, 200, "disc1", false, "disc"),
+            play("d2", 40, 200, "disc1", false, "disc"),
+            play("d3", 80, 200, "disc1", false, "disc"),
+            play("d4", 120, 200, "disc2", false, "disc"),
+        ]);
+        expect(await collapseDuplicateRows(USER)).toEqual({ removed: 0 });
+        expect(await removeFalseStarts(USER, [`${P}disc1`])).toEqual({ removed: 0, tracks: 0 });
+        expect(await prisma.play.count({ where: { userId: USER } })).toBe(4);
     });
 });

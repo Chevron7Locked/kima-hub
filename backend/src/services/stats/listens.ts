@@ -18,8 +18,8 @@
  * Every question is scoped to one listener, except `albumsPlayedAtLeast`, which
  * asks of albums whoever played them. Which songs count is the caller's rule
  * (the playable-song rule, usually), passed in or composed in its own SQL.
- * The stats page is the one reader that leaves out plays of Discover songs (`libraryOnly`, which `withListens` sets):
- * a Discover play is in no statistic. Every other reader keeps its own meaning.
+ * The stats page and the play-history audit are the readers that leave out plays of Discover songs (`libraryOnly`, which
+ * `withListens` and the audit's `playHistory` set): a Discover play is in no statistic. Every other reader keeps its own meaning.
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  */
 
@@ -273,11 +273,13 @@ export async function albumsPlayedAtLeast(
 
 /**
  * Every Play row of this listener's, oldest first (the row id breaks a tie), with the song's title, length and artist: the
- * whole history, for the audit that looks for skips. Nothing calls it on a page load.
+ * whole history, for the audit that looks for skips. Nothing calls it on a page load. `libraryOnly` leaves out the plays of
+ * songs on a Discover album, told by the album's location, as the stats page does: the audit is a statistic, so it
+ * counts and judges library plays only.
  */
-export function playHistory(userId: string) {
+export function playHistory(userId: string, options: { libraryOnly?: true } = {}) {
     return prisma.play.findMany({
-        where: { userId },
+        where: { userId, ...(options.libraryOnly ? { track: { album: { location: "LIBRARY" as const } } } : {}) },
         orderBy: [{ playedAt: "asc" }, { id: "asc" }],
         select: {
             id: true,

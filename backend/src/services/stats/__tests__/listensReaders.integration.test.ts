@@ -165,6 +165,14 @@ describe("play history", () => {
         });
     });
 
+    it("leaves out the plays of Discover songs when asked for library plays only", async () => {
+        const all = await playHistory(A);
+        const library = await playHistory(A, { libraryOnly: true });
+        expect(all.some((r) => r.trackId === id("q1"))).toBe(true); // alb_q is the Discover album
+        expect(library.some((r) => r.trackId === id("q1"))).toBe(false);
+        expect(library).toHaveLength(all.filter((r) => r.trackId !== id("q1")).length);
+    });
+
     it("breaks a tie on the row id", async () => {
         const at = ago(40 * DAY);
         await prisma.play.createMany({ data: [{ id: `${P}tie_b`, userId: B, trackId: id("p3"), playedAt: at }, { id: `${P}tie_a`, userId: B, trackId: id("p3"), playedAt: at }] });
