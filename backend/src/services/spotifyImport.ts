@@ -29,8 +29,8 @@ import { sourcePauseController } from "./sourcePauseController";
 import { artistIdentityKey, artistNamed, isArtistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
 import { containsSql, containsText, hasNonAscii } from "./textMatch";
-import { rankAfter, rankForPosition } from "../utils/lexoRank";
-import { allocateAppendRanks } from "./playlistService";
+import { rankForPosition } from "../utils/lexoRank";
+import { placeFoundSongs, type FoundSong } from "./playlistService";
 import { trackIdentityService } from "./trackIdentity";
 import { failureCause } from "../utils/outcome";
 import { resolveArtistMbid } from "./artistCorrection";
@@ -2367,9 +2367,6 @@ class SpotifyImportService {
     const covered = new Map<string, number>();
     for (const item of existingItems) covered.set(item.trackId, (covered.get(item.trackId) ?? 0) + 1);
 
-    const maxPosition = existingItems.length;
-    let nextPosition = maxPosition;
-
     // Batch-load all candidate tracks matching any pending track's artist
     const uniqueArtists = [
       ...new Set(job.pendingTracks.map((t) => normalizeArtistName(t.artist))),
@@ -2392,10 +2389,14 @@ class SpotifyImportService {
       candidatesByArtist.set(key, existing);
     }
 
-    // Match pending tracks in-memory
-    const newPlaylistItems: { playlistId: string; trackId: string; sort: number; rank: string }[] = [];
-    // The waiting entries these copies answer, so a later scan does not add each of them a second time.
-    const answered: Array<{ artist: string; title: string }> = [];
+    // Match pending tracks in-memory. Each copy the playlist is short of answers one waiting entry (the earliest, by
+    // rank), so it takes that entry's place; with none left waiting it goes to the end.
+    const waitingNow = await prisma.playlistPendingTrack.findMany({
+      where: { playlistId: job.createdPlaylistId },
+      select: { id: true, spotifyArtist: true, spotifyTitle: true },
+      orderBy: { rank: "asc" },
+    });
+    const found: FoundSong[] = [];
     for (const pendingTrack of job.pendingTracks) {
       const candidates = candidatesByArtist.get(normalizeArtistName(pendingTrack.artist)) || [];
 
@@ -2408,40 +2409,15 @@ class SpotifyImportService {
       if (have > 0) {
         covered.set(localTrack.id, have - 1);
       } else {
-        newPlaylistItems.push({
-          playlistId: job.createdPlaylistId,
-          trackId: localTrack.id,
-          sort: nextPosition++,
-          // rank is assigned below, once the count is known
-          rank: "",
-        });
-        answered.push({ artist: pendingTrack.artist, title: pendingTrack.title });
-        added++;
+        const at = waitingNow.findIndex((w) => w.spotifyArtist === pendingTrack.artist && w.spotifyTitle === pendingTrack.title);
+        const [waiting] = at >= 0 ? waitingNow.splice(at, 1) : [];
+        found.push({ trackId: localTrack.id, pendingId: waiting?.id });
       }
     }
 
-    // Ranks come from allocateAppendRanks, not rankForPosition: this appends to a
-    // playlist that may already hold native tracks, and position keys have a
-    // different width ("000" < "C") that would land the batch ahead of them.
-    if (newPlaylistItems.length > 0) {
-      const ranks = await allocateAppendRanks(
-        prisma,
-        job.createdPlaylistId,
-        newPlaylistItems.length,
-      );
-      await prisma.playlistItem.createMany({
-        data: newPlaylistItems.map((item, i) => ({ ...item, rank: ranks[i] })),
-      });
-      for (const entry of answered) {
-        const waiting = await prisma.playlistPendingTrack.findFirst({
-          where: { playlistId: job.createdPlaylistId, spotifyArtist: entry.artist, spotifyTitle: entry.title },
-          orderBy: { rank: "asc" },
-          select: { id: true },
-        });
-        if (waiting) await prisma.playlistPendingTrack.deleteMany({ where: { id: waiting.id } });
-      }
-      announcePlaylistChange(job.userId, job.createdPlaylistId);
-    }
+    const placed = await placeFoundSongs(job.createdPlaylistId, found);
+    added = placed.length;
+    if (added > 0) announcePlaylistChange(job.userId, job.createdPlaylistId);
 
     job.tracksMatched += added;
     job.updatedAt = new Date();
@@ -2608,17 +2584,7 @@ class SpotifyImportService {
     }
 
     for (const [playlistId, pendingTracks] of tracksByPlaylist) {
-      const maxSortResult = await prisma.playlistItem.aggregate({
-        where: { playlistId },
-        _max: { sort: true },
-      });
-      let nextSort = (maxSortResult._max.sort ?? -1) + 1;
-
-      // Chained from the playlist's real last rank across both tables, matching
-      // the key width addTracks emits.
-      let nextRank = (
-        await allocateAppendRanks(prisma, playlistId, 1)
-      )[0];
+      const found: FoundSong[] = [];
 
       for (const pendingTrack of pendingTracks) {
         const dbArtist = normalizeArtistName(pendingTrack.spotifyArtist);
@@ -2663,31 +2629,20 @@ class SpotifyImportService {
 
         // A waiting entry is its own listing: a song the playlist already holds joins as another copy.
         if (localTrack) {
-          await prisma.playlistItem.create({
-            data: {
-              playlistId,
-              trackId: localTrack.id,
-              sort: nextSort++,
-              rank: nextRank,
-            },
-          });
-          nextRank = rankAfter(nextRank);
-
-          matchedPendingTrackIds.push(pendingTrack.id);
-          totalTracksAdded++;
-          playlistsWithAdditions.add(playlistId);
-
+          found.push({ trackId: localTrack.id, pendingId: pendingTrack.id });
           logger.debug(
             `   ✓ Matched: "${pendingTrack.spotifyTitle}" by ${pendingTrack.spotifyArtist}`,
           );
         }
       }
-    }
 
-    if (matchedPendingTrackIds.length > 0) {
-      await prisma.playlistPendingTrack.deleteMany({
-        where: { id: { in: matchedPendingTrackIds } },
-      });
+      // Each found song takes its waiting entry's place; one another scan already placed is not added twice.
+      const placed = await placeFoundSongs(playlistId, found);
+      if (placed.length > 0) {
+        for (const song of placed) if (song.pendingId) matchedPendingTrackIds.push(song.pendingId);
+        totalTracksAdded += placed.length;
+        playlistsWithAdditions.add(playlistId);
+      }
     }
 
     if (playlistsWithAdditions.size > 0) {

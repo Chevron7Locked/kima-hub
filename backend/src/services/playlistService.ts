@@ -88,6 +88,12 @@ async function nextRankAfter(
     return a < b ? a : b;
 }
 
+/** The next `sort` value: rank orders the items, and sort is kept monotonic for readers that still use it. */
+async function nextSort(tx: Pick<typeof prisma, "playlistItem">, playlistId: string): Promise<number> {
+    const { _max } = await tx.playlistItem.aggregate({ where: { playlistId }, _max: { sort: true } });
+    return (_max.sort ?? -1) + 1;
+}
+
 /**
  * `count` ranks that append to a playlist, the only way to allocate them. Spans
  * items and pending tracks, and chains from the true last rank so the new keys
@@ -177,12 +183,7 @@ export async function addTracks(
 
         const ranks = await allocateAppendRanks(tx, playlistId, fresh.length);
 
-        // rank orders the items; sort is kept monotonic for readers that still use it.
-        const maxSort = await tx.playlistItem.aggregate({
-            where: { playlistId },
-            _max: { sort: true },
-        });
-        const firstSort = (maxSort._max.sort ?? -1) + 1;
+        const firstSort = await nextSort(tx, playlistId);
 
         await tx.playlistItem.createMany({
             data: fresh.map((trackId, i) => ({
@@ -204,6 +205,70 @@ export async function addTracks(
             duplicates: alreadyThere.size,
             rejected,
         };
+    });
+}
+
+/** A song the library has found. `pendingId` is the waiting entry it answers, when there is one. */
+export interface FoundSong {
+    trackId: string;
+    pendingId?: string;
+}
+
+/**
+ * Put songs a library scan or refresh has found into a playlist. Items and waiting entries share one rank space, so a
+ * song that answers a waiting entry takes that entry's rank and lands exactly where the page showed it, between the
+ * same neighbours, whatever a person has moved since. A song with no waiting entry is appended. Moving the entry into
+ * the items is one transaction under the playlist lock: a waiting entry another writer already answered is skipped,
+ * so two scans finding the same song add it once. Returns the songs it placed.
+ */
+export async function placeFoundSongs(playlistId: string, found: FoundSong[]): Promise<FoundSong[]> {
+    if (found.length === 0) return [];
+    return prisma.$transaction(async (tx) => {
+        await lockPlaylist(tx, playlistId);
+
+        const waitingIds = found.flatMap((f) => (f.pendingId ? [f.pendingId] : []));
+        const waiting = new Map(
+            (await tx.playlistPendingTrack.findMany({ where: { id: { in: waitingIds }, playlistId } })).map((w) => [w.id, w])
+        );
+        const taken = new Set(
+            (await tx.playlistItem.findMany({
+                where: { playlistId, rank: { in: [...waiting.values()].map((w) => w.rank) } },
+                select: { rank: true },
+            })).map((i) => i.rank)
+        );
+
+        const placed: FoundSong[] = [];
+        const inPlace: { trackId: string; rank: string }[] = [];
+        const toAppend: string[] = [];
+        for (const song of found) {
+            if (!song.pendingId) {
+                toAppend.push(song.trackId);
+                placed.push(song);
+                continue;
+            }
+            const entry = waiting.get(song.pendingId);
+            if (!entry) continue;
+            waiting.delete(song.pendingId);
+            placed.push(song);
+            // A blank or taken rank cannot hold the song's place; it goes to the end rather than break uniqueness.
+            if (!entry.rank || taken.has(entry.rank)) toAppend.push(song.trackId);
+            else inPlace.push({ trackId: song.trackId, rank: entry.rank });
+        }
+
+        // Allocated while the answered entries still hold their ranks, so an appended song cannot land on one.
+        const appendRanks = await allocateAppendRanks(tx, playlistId, toAppend.length);
+        const answered = placed.flatMap((s) => (s.pendingId ? [s.pendingId] : []));
+        if (answered.length > 0) await tx.playlistPendingTrack.deleteMany({ where: { id: { in: answered } } });
+
+        const rows = [...inPlace, ...toAppend.map((trackId, i) => ({ trackId, rank: appendRanks[i] }))];
+        if (rows.length === 0) return placed;
+
+        const firstSort = await nextSort(tx, playlistId);
+        await tx.playlistItem.createMany({
+            data: rows.map((row, i) => ({ playlistId, trackId: row.trackId, rank: row.rank, sort: firstSort + i })),
+        });
+        await tx.playlist.update({ where: { id: playlistId }, data: { updatedAt: new Date() } });
+        return placed;
     });
 }
 

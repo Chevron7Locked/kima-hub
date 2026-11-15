@@ -106,7 +106,7 @@ describe("a Spotify import", () => {
         expect(order).toEqual(["song", "waiting", "song"]);
     });
 
-    it("waits for each listing of a song the library lacks, and a scan later adds one copy per listing", async () => {
+    it("waits for each listing of a song the library lacks, and a scan later adds one copy per listing, each in its place", async () => {
         const lacking = { ...entry(0), artist: "zzghost", title: "zzunheard" };
         const job = jobOf([lacking, entry(1), lacking]);
         await (spotifyImportService as any).buildPlaylist(job);
@@ -123,7 +123,7 @@ describe("a Spotify import", () => {
             data: { title: "zzunheard", albumId: album.id, trackNo: 1, duration: 100, filePath: `${P}/ghost/1.flac`, fileModified: new Date(), fileSize: 1 },
         });
         await spotifyImportService.reconcilePendingTracks(playlistId);
-        expect(await heldBy(playlistId)).toEqual([ids[1], found.id, found.id]);
+        expect(await heldBy(playlistId)).toEqual([found.id, ids[1], found.id]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
     });
 
