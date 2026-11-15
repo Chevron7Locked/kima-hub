@@ -95,20 +95,41 @@ describe("a Subsonic queue save meeting the library sweep", () => {
         expect(state.trackId).toBe(song("b"));
     });
 
+    it("stores a position past a 32-bit integer as the largest the column holds, not an error", async () => {
+        const res = await save("/savePlayQueue.view", { id: [song("a")], current: song("a"), position: "99999999999" });
+        expect(res.status).toBe(200);
+        expect(res.body["subsonic-response"].status).toBe("ok");
+        expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } })).position).toBe(2_147_483_647);
+    });
 });
 
 describe("a Subsonic queue save meeting a web save", () => {
-    it("leaves one whole save: the queue, index and song of the same one", async () => {
-        const webQueue = [song("b"), song("a")];
+    const webQueue = [song("b"), song("a")];
+    const bothSave = () =>
+        Promise.all([
+            save("/savePlayQueue.view", { id: [song("a"), song("b")], current: song("b"), c: "Symfonium" }).then((r) => r),
+            request(webApp)
+                .post("/api/playback-state")
+                .set("x-user", USER)
+                .send({ playbackType: "track", trackId: song("a"), currentIndex: 1, queue: webQueue.map((id) => ({ id, title: id })) })
+                .then((r) => r),
+        ]);
+
+    it("with no saved queue yet, both saves succeed and one of them stands", async () => {
         for (let round = 0; round < 6; round++) {
-            await Promise.all([
-                save("/savePlayQueue.view", { id: [song("a"), song("b")], current: song("b"), c: "Symfonium" }).then((r) => r),
-                request(webApp)
-                    .post("/api/playback-state")
-                    .set("x-user", USER)
-                    .send({ playbackType: "track", trackId: song("a"), currentIndex: 1, queue: webQueue.map((id) => ({ id, title: id })) })
-                    .then((r) => r),
-            ]);
+            await prisma.playbackState.deleteMany({ where: { userId: USER } });
+            const [subsonic, web] = await bothSave();
+            expect([subsonic.status, web.status]).toEqual([200, 200]);
+            expect(subsonic.body["subsonic-response"].status).toBe("ok");
+            expect(await prisma.playbackState.count({ where: { userId: USER } })).toBe(1);
+        }
+    });
+
+    it("leaves one whole save: the queue, index and song of the same one", async () => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song("a"), title: "a" }], currentIndex: 0 } });
+        for (let round = 0; round < 6; round++) {
+            const [subsonic, web] = await bothSave();
+            expect([subsonic.status, web.status]).toEqual([200, 200]);
             const state = await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } });
             const ids = entriesOf(state.queue).map((e) => e.id);
             expect([ids, state.currentIndex, state.trackId]).toEqual(

@@ -319,8 +319,8 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
  * copy for history only: a queue or playlist is never pointed at a file a person could not play, but a fixed file has
  * its history waiting.
  *
- * Best means: playable, then a lossless codec, then the higher bitrate (file size over duration; Track keeps no
- * bitrate, and a song of unknown duration ranks last), then the lower id, so every sweep chooses the same.
+ * Best means: playable, then a lossless codec, then the higher bitrate (file size over duration, not Track.bitrate,
+ * which a row only has once its file was read since that column was added; a song of unknown duration ranks last), then the lower id, so every sweep chooses the same.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.

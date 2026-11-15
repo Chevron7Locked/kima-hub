@@ -40,8 +40,8 @@ export const UNANALYZED = "unanalyzed";
 /**
  * How many served song ids a listener's mood memory keeps: the newest 300. A mix serves 15 songs (MOOD_MIX_LIMIT in
  * routes/mixesValidation.ts), so that is about twenty servings, a month of daily visits; the id array stays a few
- * kilobytes and the mix still has songs to draw on, since the pick only skips remembered ids while at least
- * MIN_MIX_TRACKS fresh ones remain.
+ * kilobytes. A pool smaller than the memory still has songs to draw on: the pick skips the newest remembered ids as far
+ * as MIN_MIX_TRACKS others remain and lets the oldest come back (pickPageTracks).
  */
 export const SERVED_MEMORY = 300;
 

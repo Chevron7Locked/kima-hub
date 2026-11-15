@@ -574,8 +574,9 @@ export async function pickRecipeTracks(
 
 /**
  * A mood page's mix: up to `limit` drawn evenly from the recipe's members in a fresh order, with the mix's artist cap,
- * skipping `exclude` (the songs this listener was already served) while at least MIN_MIX_TRACKS others remain. Null
- * when fewer than MIN_MIX_TRACKS songs are members.
+ * skipping `exclude` (the songs this listener was already served, oldest first) as far as MIN_MIX_TRACKS others remain.
+ * When the memory covers more of the pool than that, the newest servings stay skipped and the oldest come back, so a
+ * small pool still never repeats what it served last. Null when fewer than MIN_MIX_TRACKS songs are members.
  */
 export async function pickPageTracks(
     recipe: Recipe,
@@ -584,9 +585,10 @@ export async function pickPageTracks(
     if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
     const members = await recipeMembers(recipe, userId);
     if (!members || !pagePlays(members.length)) return null;
-    const served = new Set(exclude);
-    const fresh = members.filter((m) => !served.has(m.id));
-    return drawMembers(fresh.length >= MIN_MIX_TRACKS ? fresh : members, crypto.randomUUID(), limit);
+    const memberIds = new Set(members.map((m) => m.id));
+    const newestFirst = [...new Set(exclude)].reverse().filter((id) => memberIds.has(id));
+    const skipped = new Set(newestFirst.slice(0, Math.max(members.length - MIN_MIX_TRACKS, 0)));
+    return drawMembers(members.filter((m) => !skipped.has(m.id)), crypto.randomUUID(), limit);
 }
 
 /** How many songs a mood page draws from: the recipe's members, or 0 when the page has no mix (pickPageTracks). */

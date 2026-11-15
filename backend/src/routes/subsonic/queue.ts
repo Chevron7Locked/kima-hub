@@ -94,7 +94,6 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     await saveQueueOfIds(userId, {
         ids,
         clientIndex: current ? ids.indexOf(current) : 0,
-        currentId: current ?? null,
         position: safePosition,
         changedBy: clientName(req),
     });
@@ -145,7 +144,6 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     await saveQueueOfIds(userId, {
         ids,
         clientIndex: parsedIndex,
-        currentId: ids[parsedIndex] ?? null,
         position: safePosition,
         changedBy: clientName(req),
     });

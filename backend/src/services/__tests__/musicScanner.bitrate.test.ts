@@ -71,23 +71,28 @@ describe("a scan's stored bitrate", () => {
     it("keeps the file's own bitrate in kbps, rounded", async () => {
         put("320.mp3", 320000);
         put("vbr.mp3", 231_456);
-        put("flac.mp3", 987_654);
+        put("lossless.mp3", 987_654);
 
         await new MusicScannerService().scanLibrary(musicDir);
 
         expect(await bitrateOf("320.mp3")).toBe(320);
         expect(await bitrateOf("vbr.mp3")).toBe(231);
-        expect(await bitrateOf("flac.mp3")).toBe(988);
+        expect(await bitrateOf("lossless.mp3")).toBe(988);
     });
 
     it("stores none for a file that reports no bitrate, never a made-up one", async () => {
         put("none.mp3", undefined);
         put("zero.mp3", 0);
+        put("tiny.mp3", 300);
+        put("nan.mp3", NaN);
 
         await new MusicScannerService().scanLibrary(musicDir);
 
         expect(await bitrateOf("none.mp3")).toBeNull();
         expect(await bitrateOf("zero.mp3")).toBeNull();
+        // Under 500 bits a second would round to 0 kbps, which is no bitrate.
+        expect(await bitrateOf("tiny.mp3")).toBeNull();
+        expect(await bitrateOf("nan.mp3")).toBeNull();
     });
 
     it("follows a changed file, and clears it when the changed file reports none", async () => {
@@ -106,5 +111,70 @@ describe("a scan's stored bitrate", () => {
         fs.utimesSync(file, evenLater, evenLater);
         await new MusicScannerService().scanLibrary(musicDir);
         expect(await bitrateOf("changing.mp3")).toBeNull();
+    });
+});
+
+describe("a scan filling the bitrate of songs read before it was kept", () => {
+    const forget = (rel: string) => prisma.track.update({ where: { filePath: path.join("album", rel) }, data: { bitrate: null } });
+    const stageOf = async (rel: string) => {
+        const track = await prisma.track.findUniqueOrThrow({ where: { filePath: path.join("album", rel) } });
+        return { track, stage: await prisma.trackStage.findUnique({ where: { trackId_stage: { trackId: track.id, stage: "analysis" } } }) };
+    };
+
+    it("fills an unchanged song on the next scan, without filing it again or reopening its stages", async () => {
+        put("old.mp3", 192000);
+        await new MusicScannerService().scanLibrary(musicDir);
+        await forget("old.mp3");
+        const before = await stageOf("old.mp3");
+        await prisma.trackStage.upsert({
+            where: { trackId_stage: { trackId: before.track.id, stage: "analysis" } },
+            create: { trackId: before.track.id, stage: "analysis", status: "done" },
+            update: { status: "done" },
+        });
+
+        const result = await new MusicScannerService().scanLibrary(musicDir);
+
+        expect(result.tracksUpdated).toBe(0);
+        expect(await bitrateOf("old.mp3")).toBe(192);
+        const after = await stageOf("old.mp3");
+        expect(after.stage?.status).toBe("done");
+        expect(after.track.fileModified).toEqual(before.track.fileModified);
+    });
+
+    it("fills it too when a song added to its album makes the scan read the album", async () => {
+        put("one.mp3", 160000);
+        await new MusicScannerService().scanLibrary(musicDir);
+        await forget("one.mp3");
+        put("two.mp3", 96000);
+
+        await new MusicScannerService().scanLibrary(musicDir);
+
+        expect(await bitrateOf("one.mp3")).toBe(160);
+        expect(await bitrateOf("two.mp3")).toBe(96);
+    });
+
+    it("leaves a song that reports no bitrate empty, and one that cannot be read as it was", async () => {
+        const quiet = put("quiet.mp3", undefined);
+        put("fine.mp3", 128000);
+        const broken = put("broken.mp3", 128000);
+        await new MusicScannerService().scanLibrary(musicDir);
+        await forget("broken.mp3");
+        (parseFile as jest.Mock).mockImplementation(async (file: string) => {
+            if (file === broken) throw new Error("unreadable");
+            return {
+                common: { title: path.basename(file), artist: ARTIST, albumartist: ARTIST, album: ALBUM, track: { no: 1 }, disk: { no: 1 }, year: 2024 },
+                format: { duration: 180, codec: "MPEG 1 Layer 3", bitrate: reported.get(file) },
+                native: {},
+            };
+        });
+
+        const result = await new MusicScannerService().scanLibrary(musicDir);
+
+        expect(reported.get(quiet)).toBeUndefined();
+        expect(await bitrateOf("quiet.mp3")).toBeNull();
+        expect(await bitrateOf("fine.mp3")).toBe(128);
+        expect(await bitrateOf("broken.mp3")).toBeNull();
+        expect(result.tracksCorrupt).toBe(0);
+        expect((await prisma.track.findUniqueOrThrow({ where: { filePath: path.join("album", "broken.mp3") } })).corrupt).toBe(false);
     });
 });

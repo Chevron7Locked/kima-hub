@@ -98,6 +98,22 @@ export function slimMetadata(metadata: IAudioMetadata): SlimMetadata {
     return { common: metadata.common, format: { duration: metadata.format.duration, codec: metadata.format.codec, bitrate: metadata.format.bitrate }, native };
 }
 
+/**
+ * The bitrate Track keeps from what a file's headers report (bits a second): kbps, rounded. None when the file reports
+ * none, never a guess; under 500 bits a second it would round to 0 kbps, which is no bitrate either.
+ */
+export function storedBitrate(reported: number | undefined): number | null {
+    return reported && Number.isFinite(reported) && reported >= 500 ? Math.round(reported / 1000) : null;
+}
+
+/**
+ * How many songs a scan reads only to fill in a bitrate they have no row value for (files unchanged since before the
+ * column existed). A scan fills this many and the next scan the rest, so a big library is not read in full by one scan.
+ * A file whose headers report no bitrate stays empty and is read again, so a library of such files would keep the first
+ * of them busy; real audio formats all report one.
+ */
+const BITRATE_BACKFILL_PER_SCAN = 5000;
+
 export class MusicScannerService {
     private scanQueue = new PQueue({ concurrency: 10 });
     private progressCallback?: (progress: ScanProgress) => void;
@@ -169,6 +185,7 @@ export class MusicScannerService {
                 filePath: true,
                 fileModified: true,
                 missingSince: true,
+                bitrate: true,
             },
         });
 
@@ -230,6 +247,9 @@ export class MusicScannerService {
 
         // 1. The files to read: new ones, and ones changed since they were read.
         const changed: string[] = [];
+        // Unchanged songs with no stored bitrate (read before the column existed): their bitrate is filled in from the
+        // headers below, without filing them again, so their stage records and analysis stay as they are.
+        const unfilled = new Map<string, string>();
         for (const audioFile of audioFiles) {
             this.scanQueue.add(async () => {
                 try {
@@ -238,7 +258,10 @@ export class MusicScannerService {
                     // An empty file is an unfinished download or a stub.
                     if (stats.size === 0) return finished();
                     const existingTrack = tracksByPath.get(relativePath);
-                    if (existingTrack?.fileModified && existingTrack.fileModified >= stats.mtime) return finished();
+                    if (existingTrack?.fileModified && existingTrack.fileModified >= stats.mtime) {
+                        if (existingTrack.bitrate === null && !existingTrack.missingSince) unfilled.set(audioFile, existingTrack.id);
+                        return finished();
+                    }
                     changed.push(audioFile);
                 } catch (err: any) {
                     await markFailed(audioFile, err).catch((markErr) =>
@@ -262,6 +285,14 @@ export class MusicScannerService {
         // A changed file's tags, read once here and handed to the filing step below.
         const changedSet = new Set(changed);
         const parsed = new Map<string, SlimMetadata>();
+        // The voters' headers are read here anyway, so an unchanged one's missing bitrate is filled from that read.
+        const fillBitrate = async (audioFile: string, reported: number | undefined) => {
+            const id = unfilled.get(audioFile);
+            if (!id) return;
+            unfilled.delete(audioFile);
+            const bitrate = storedBitrate(reported);
+            if (bitrate !== null) await prisma.track.updateMany({ where: { id, bitrate: null }, data: { bitrate } });
+        };
         for (const audioFile of voters) {
             this.scanQueue.add(async () => {
                 try {
@@ -270,6 +301,7 @@ export class MusicScannerService {
                     const metadata = await parseFile(audioFile, { skipCovers: true });
                     credits.set(audioFile, fileCredit(metadata.common, path.relative(musicPath, audioFile)));
                     if (changedSet.has(audioFile)) parsed.set(audioFile, slimMetadata(metadata));
+                    else await fillBitrate(audioFile, metadata.format.bitrate);
                 } catch {
                     // A file whose tags cannot be read has no vote; if it is to be filed, filing it reports the error.
                 }
@@ -321,6 +353,19 @@ export class MusicScannerService {
                     parsed.delete(audioFile);
                     finished();
                     this.progressCallback?.(progress);
+                }
+            });
+        }
+        await this.scanQueue.onIdle();
+
+        // 4. The unchanged songs that still have no bitrate: read their headers only, and write only the bitrate.
+        for (const audioFile of [...unfilled.keys()].sort().slice(0, BITRATE_BACKFILL_PER_SCAN)) {
+            this.scanQueue.add(async () => {
+                try {
+                    await fillBitrate(audioFile, (await parseFile(audioFile, { skipCovers: true })).format.bitrate);
+                } catch (err: any) {
+                    // Unreadable now: left as it is (marking it corrupt is for the scan that finds it changed).
+                    logger.debug(`Could not read the bitrate of ${audioFile}: ${err?.message ?? err}`);
                 }
             });
         }
@@ -670,9 +715,7 @@ export class MusicScannerService {
         const discSubtitle = sanitizeTagString(discSubtitleInput) || null;
         const duration = Math.floor(metadata.format.duration || 0);
         const mime = metadata.format.codec || "audio/mpeg";
-        // The headers give bits a second; Kima keeps kbps. None when the file reports none, never a guess.
-        const reportedBitrate = metadata.format.bitrate;
-        const bitrate = reportedBitrate && Number.isFinite(reportedBitrate) && reportedBitrate >= 500 ? Math.round(reportedBitrate / 1000) : null;
+        const bitrate = storedBitrate(metadata.format.bitrate);
         // A tag that is not an ISRC (e.g. "PMEDIA") is dropped, never stored or sent.
         const isrc = normalizeIsrc(metadata.common.isrc?.[0]?.split(/[;,]/)[0]);
 

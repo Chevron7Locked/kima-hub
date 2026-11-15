@@ -668,6 +668,29 @@ describe("the mix draw", () => {
         expect(await pageMemberCount(CALM)).toBe(0);
     });
 
+    describe("a mood page skipping what the listener was served", () => {
+        const served = (...ns: number[]) => ns.map((n) => id(`m${String(n).padStart(2, "0")}`));
+
+        it("skips every served song when 8 others remain", async () => {
+            await library([...background(100), ...members(20)]);
+            const mix = await pickPageTracks(CALM, { limit: 100, exclude: served(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) });
+            expect(names(mix!)).toEqual(new Set(Array.from({ length: 8 }, (_, i) => `m${String(i + 12).padStart(2, "0")}`)));
+        });
+
+        it("keeps the newest servings out and brings the oldest back when the memory covers the pool", async () => {
+            // 12 members, all remembered, oldest first: only 4 can stay out and still leave 8 to draw.
+            await library([...background(100), ...members(12)]);
+            const mix = await pickPageTracks(CALM, { limit: 100, exclude: served(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) });
+            expect(names(mix!)).toEqual(new Set(Array.from({ length: 8 }, (_, i) => `m${String(i).padStart(2, "0")}`)));
+        });
+
+        it("ignores remembered songs that are no longer members", async () => {
+            await library([...background(100), ...members(12)]);
+            const mix = await pickPageTracks(CALM, { limit: 100, exclude: [id("retired"), ...served(10, 11)] });
+            expect(names(mix!)).toEqual(new Set(Array.from({ length: 10 }, (_, i) => `m${String(i).padStart(2, "0")}`)));
+        });
+    });
+
     it("shows 0 on a mood preset whose page recipe has fewer than 8 members, the count its page plays", async () => {
         // The calm preset's page recipe weighs calm most; every other component is level across these songs.
         const calmPage = RECIPES.get("calm")!;

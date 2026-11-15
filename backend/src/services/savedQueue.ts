@@ -12,8 +12,10 @@
  *   start.
  * - The index kept with the queue and the entries stay in one coordinate system: the stored one. A client counts what it
  *   was shown, so a save carries the index into the stored queue (`acceptQueue` for a queue sent whole,
- *   `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored past the
- *   stored queue's last entry.
+ *   `indexIntoStoredQueue` for one that sends no queue and names the current song, `saveQueueOfIds` for a Subsonic
+ *   app's list of ids), and no index is stored past the stored queue's last entry.
+ * - A save that reads the stored queue or the songs does it under the person's state row lock, in the transaction that
+ *   writes (`lockPlaybackState`), the lock the library sweep takes when it rewrites a queue.
  */
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -34,18 +36,6 @@ export function entriesOf(queue: unknown): QueueEntry[] {
     return queue
         .map((item) => (item && typeof item === "object" ? (item as QueueEntry) : null))
         .filter((item): item is QueueEntry => Boolean(item?.id));
-}
-
-/**
- * Song ids as the full entries a player stores and renders, in the given order; ids Kima does not know are left out.
- * It describes the song as it is now: its edited title, its artist's display name, its album's chosen cover.
- */
-export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionClient, "track"> = prisma): Promise<QueueEntry[]> {
-    if (ids.length === 0) return [];
-
-    const tracks = await db.track.findMany({ where: { id: { in: ids } }, select: DESCRIBED });
-    const byId = new Map(tracks.map((t) => [t.id, describeSong(t)]));
-    return ids.map((id) => byId.get(id)).filter((entry): entry is QueueEntry => entry != null);
 }
 
 /** What a song is read for when an entry is made of it: the one select, so a saved entry and a shown one agree. */
@@ -74,6 +64,18 @@ function describeSong(t: Prisma.TrackGetPayload<{ select: typeof DESCRIBED }>): 
         artist: t.album?.artist ? { id: t.album.artist.id, name: t.album.artist.displayName || t.album.artist.name } : null,
         album: t.album ? { id: t.album.id, title: t.album.title, coverArt: t.album.userCoverUrl || t.album.coverUrl } : null,
     };
+}
+
+/**
+ * Song ids as the full entries a player stores and renders, in the given order; ids Kima does not know are left out.
+ * It describes the song as it is now: its edited title, its artist's display name, its album's chosen cover.
+ */
+export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionClient, "track"> = prisma): Promise<QueueEntry[]> {
+    if (ids.length === 0) return [];
+
+    const tracks = await db.track.findMany({ where: { id: { in: ids } }, select: DESCRIBED });
+    const byId = new Map(tracks.map((t) => [t.id, describeSong(t)]));
+    return ids.map((id) => byId.get(id)).filter((entry): entry is QueueEntry => entry != null);
 }
 
 /** A whole, non-negative index from whatever a client sent. */
@@ -147,6 +149,11 @@ export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolea
     return typeof clientIndex === "number" || namesSong(trackId);
 }
 
+/** Takes the person's state row until the transaction ends, so a save and the library sweep rewriting it go one at a time. */
+async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw">, userId: string): Promise<void> {
+    await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+}
+
 /**
  * The index to store for a save that sends no queue, worked out against the queue as it stands. The state row is
  * locked first, so a queue being written at the same moment finishes first and the index points into that queue, and
@@ -162,7 +169,7 @@ export async function indexIntoStoredQueue(
     clientIndex: unknown,
     trackId: unknown,
 ): Promise<number | null> {
-    await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+    await lockPlaybackState(tx, userId);
     const state = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
     const stored = entriesOf(state?.queue);
     if (typeof clientIndex !== "number") return placeNearest(stored, trackId, state?.currentIndex ?? 0);
@@ -187,19 +194,23 @@ function storedIndexOf(ids: readonly string[], stored: readonly QueueEntry[], cl
     return Math.min(before, stored.length - 1);
 }
 
+const INT32_MAX = 2_147_483_647;
+/** The wait for the row lock counts toward a transaction's time limit (5 s by default), and a long queue takes a while to read. */
+const SAVE_TIMEOUT_MS = 30_000;
+
 /**
- * A queue a Subsonic app saves, as song ids and the one it is on (`clientIndex` counts `ids`; `currentId` is the song
- * it names, when it names one). The state row is locked first and the songs are read, the index worked out and the
- * queue written in the same transaction, so a library sweep retiring a song at the same moment finishes first and the
- * queue never stores what it took out, and a web save meeting this one leaves one whole save. Ids Kima does not know are
- * left out; a current song among them moves the current place to the song now there, from its start.
+ * A queue a Subsonic app saves, as song ids and the place it is on (`clientIndex` counts `ids`). The state row is
+ * locked first and the songs are read, the index worked out and the queue written in the same transaction, so a library
+ * sweep retiring a song at the same moment finishes first and the queue never stores what it took out, and a web save
+ * meeting this one leaves one whole save. Ids Kima does not know are left out; when the current song is among them the
+ * song now in its place is current, from its start. (A person's first save has no row to lock yet.)
  */
 export async function saveQueueOfIds(
     userId: string,
-    save: { ids: string[]; clientIndex: number; currentId: string | null; position: number; changedBy: string },
+    save: { ids: string[]; clientIndex: number; position: number; changedBy: string },
 ): Promise<void> {
     await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+        await lockPlaybackState(tx, userId);
         const queue = await hydrateQueue(save.ids, tx);
         const currentIndex = storedIndexOf(save.ids, queue, save.clientIndex);
         const trackId = queue[currentIndex]?.id ?? null;
@@ -213,11 +224,12 @@ export async function saveQueueOfIds(
             queueSource: null,
             currentIndex,
             isShuffle: false,
-            position: trackId !== null && trackId === save.currentId ? save.position : 0,
+            // The column is a 32-bit integer; a larger number from a client is no position anyone reached.
+            position: trackId !== null && trackId === save.ids[save.clientIndex] ? Math.min(save.position, INT32_MAX) : 0,
             changedBy: save.changedBy,
         };
         await tx.playbackState.upsert({ where: { userId }, update: data, create: { userId, ...data } });
-    });
+    }, { timeout: SAVE_TIMEOUT_MS });
 }
 
 /** The saved queue as a client is shown it. */
