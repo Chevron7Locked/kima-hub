@@ -228,7 +228,8 @@ describe("an unreadable credential", () => {
 
     it("does not wait for the notice: a notice that never finishes does not hold the read", async () => {
         await storeUnreadable("slskdApiKey");
-        const notify = jest.spyOn(notificationService, "notifyAdmins").mockReturnValue(new Promise(() => {}));
+        let finish!: () => void;
+        const notify = jest.spyOn(notificationService, "notifyAdmins").mockReturnValue(new Promise<void>((done) => { finish = done; }));
 
         const outcome = await Promise.race([
             getSystemSettings().then(() => "answered"),
@@ -238,5 +239,7 @@ describe("an unreadable credential", () => {
         expect(outcome).toBe("answered");
         // the notice is still sent, in the background
         await until(() => notify.mock.calls.length > 0);
+        // finished here, so its 10 s deadline does not log after the test is done
+        finish();
     });
 });

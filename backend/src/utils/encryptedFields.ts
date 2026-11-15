@@ -96,16 +96,6 @@ export async function noteUnreadableCredentials<S extends Record<string, unknown
     }
 }
 
-/** `decryptSettings`, then the notices, waited for: for the places that answer a person and not a cache fill. */
-export async function resolveEncryptedSettings<S extends Record<string, unknown>>(
-    settings: S,
-    selfRepairing: (resolved: ResolvedSystemSettings<S>) => EncryptedField[],
-): Promise<ResolvedSystemSettings<S>> {
-    const resolved = decryptSettings(settings);
-    await noteUnreadableCredentials(resolved, selfRepairing);
-    return resolved;
-}
-
 /**
  * Prepare a submitted payload for storage: every supplied `ENCRYPTED_FIELDS`
  * entry encrypted, or null when blank; other entries left as submitted. A blank

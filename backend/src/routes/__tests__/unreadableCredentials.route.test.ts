@@ -25,7 +25,8 @@ const FIELDS = Object.keys(ENCRYPTED_FIELDS) as (keyof typeof ENCRYPTED_FIELDS)[
 type Server = {
     encrypt: typeof encrypt;
     getSystemSettings: typeof getSystemSettings;
-    resolveEncryptedSettings: typeof import("../../utils/encryptedFields").resolveEncryptedSettings;
+    /** A settings read that waits for its notices. */
+    readSettings: (row: Record<string, unknown>) => Promise<unknown>;
     logger: typeof import("../../utils/logger").logger;
 };
 
@@ -35,10 +36,15 @@ function restart(key: string | undefined = process.env.SETTINGS_ENCRYPTION_KEY):
     const restoreEnv = setEnv({ SETTINGS_ENCRYPTION_KEY: key });
     try {
         jest.isolateModules(() => {
+            const fields = require("../../utils/encryptedFields");
             server = {
                 encrypt: require("../../utils/encryption").encrypt,
                 getSystemSettings: require("../../utils/systemSettings").getSystemSettings,
-                resolveEncryptedSettings: require("../../utils/encryptedFields").resolveEncryptedSettings,
+                readSettings: async (row) => {
+                    const resolved = fields.decryptSettings(row);
+                    await fields.noteUnreadableCredentials(resolved, () => []);
+                    return resolved;
+                },
                 logger: require("../../utils/logger").logger,
             };
         });
@@ -207,8 +213,8 @@ describe("the notice to admins", () => {
     it("comes once per field per process, and says what to do without saying anything was cleared", async () => {
         const server = restartExpectingWarnings();
 
-        await server.resolveEncryptedSettings(await row(), () => []);
-        await server.resolveEncryptedSettings(await row(), () => []);
+        await server.readSettings(await row());
+        await server.readSettings(await row());
 
         const sent = await notices();
         expect(sent.map((n) => n.title).sort()).toEqual(Object.values(ENCRYPTED_FIELDS).map((l) => `${l} cannot be read`).sort());
@@ -219,30 +225,30 @@ describe("the notice to admins", () => {
     });
 
     it("comes back after a restart, as one row per field", async () => {
-        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().readSettings(await row());
         await prisma.notification.updateMany({ where: { userId: ADMIN }, data: { cleared: true } });
 
-        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().readSettings(await row());
 
         expect(await notices()).toHaveLength(FIELDS.length);
         expect(await prisma.notification.count({ where: { userId: ADMIN } })).toBe(FIELDS.length);
     });
 
     it("goes away once the right key is back", async () => {
-        await restartExpectingWarnings().resolveEncryptedSettings(await row(), () => []);
+        await restartExpectingWarnings().readSettings(await row());
         expect(await notices()).toHaveLength(FIELDS.length);
 
-        await restart(RIGHT_KEY).resolveEncryptedSettings(await row(), () => []);
+        await restart(RIGHT_KEY).readSettings(await row());
 
         expect(await notices()).toHaveLength(0);
     });
 
     it("goes away when a new value replaces the unreadable one", async () => {
         const server = restartExpectingWarnings();
-        await server.resolveEncryptedSettings(await row(), () => []);
+        await server.readSettings(await row());
 
         await store({ fanartApiKey: encrypt("a fresh key") });
-        await server.resolveEncryptedSettings(await row(), () => []);
+        await server.readSettings(await row());
 
         expect((await notices()).map((n) => n.title)).not.toContain("Fanart.tv API key cannot be read");
         expect(await notices()).toHaveLength(FIELDS.length - 1);

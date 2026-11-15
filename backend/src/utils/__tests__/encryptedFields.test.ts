@@ -7,8 +7,8 @@
 import {
     ENCRYPTED_FIELDS,
     decryptOrNull,
+    decryptSettings,
     encryptSettings,
-    resolveEncryptedSettings,
 } from "../encryptedFields";
 import { encrypt } from "../encryption";
 import { legacyEncrypt, SHA256_KEY } from "./legacyCipherFixtures";
@@ -32,7 +32,7 @@ describe("the encrypted settings map", () => {
         // Untouched keys pass through as submitted.
         expect(stored.musicPath).toBe("/music");
 
-        const resolved = await resolveEncryptedSettings(stored, () => []);
+        const resolved = decryptSettings(stored);
         expect(resolved.fanartApiKey).toBe("fanart-key");
         expect(resolved.slskdApiKey).toBe("slskd-key");
         expect(resolved.acoustidApiKey).toBe("acoustid-key");
@@ -63,22 +63,22 @@ describe("the encrypted settings map", () => {
 });
 
 describe("readable stored values resolve", () => {
-    it("decrypts a correct ciphertext and a legacy AES one", async () => {
+    it("decrypts a correct ciphertext and a legacy AES one", () => {
         const settings = {
             soulseekPassword: encrypt("soulseek-pass"),
             audiobookshelfApiKey: legacyEncrypt("abs-key", SHA256_KEY),
         };
 
-        const resolved = await resolveEncryptedSettings(settings, () => []);
+        const resolved = decryptSettings(settings);
 
         expect(resolved.soulseekPassword).toBe("soulseek-pass");
         expect(resolved.audiobookshelfApiKey).toBe("abs-key");
     });
 
-    it("keeps unset and empty values null", async () => {
+    it("keeps unset and empty values null", () => {
         const settings = { lidarrWebhookSecret: "", slskdApiKey: null };
 
-        const resolved = await resolveEncryptedSettings(settings, () => []);
+        const resolved = decryptSettings(settings);
 
         expect(resolved.lidarrWebhookSecret).toBeNull();
         expect(resolved.slskdApiKey).toBeNull();

@@ -5,7 +5,7 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
-import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { invalidateSystemSettingsCache, saveSystemSettings } from "../../utils/systemSettings";
 import { encrypt } from "../../utils/encryption";
 import { notificationService } from "../../services/notificationService";
 import systemSettingsRoutes from "../systemSettings";
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-    if (savedRow) await prisma.systemSettings.update({ where: { id: "default" }, data: savedRow as any });
+    if (savedRow) await prisma.systemSettings.upsert({ where: { id: "default" }, create: savedRow as any, update: savedRow as any });
     else await prisma.systemSettings.deleteMany({ where: { id: "default" } });
     invalidateSystemSettingsCache();
     await prisma.user.deleteMany({ where: { id: ADMIN } });
@@ -63,7 +63,10 @@ it("answers while the admin notice about an unreadable credential is still being
     });
     invalidateSystemSettingsCache();
     const warned = expectLog("warn");
-    const sending = jest.spyOn(notificationService, "notifyAdmins").mockReturnValue(new Promise(() => {}) as never);
+    const finishers: (() => void)[] = [];
+    const sending = jest
+        .spyOn(notificationService, "notifyAdmins")
+        .mockImplementation(() => new Promise<void>((done) => finishers.push(done)) as never);
 
     const res = await get();
 
@@ -72,6 +75,7 @@ it("answers while the admin notice about an unreadable credential is still being
     for (let i = 0; i < 100 && sending.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
     expect(sending).toHaveBeenCalledTimes(1);
     expect(warned).toHaveBeenCalled();
+    finishers.forEach((done) => done());
     expect(res.body.fanartApiKey).toBeNull();
 });
 
@@ -100,4 +104,35 @@ it("creates the row of a new server with the schema's defaults", async () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("default");
     expect(await prisma.systemSettings.count({ where: { id: "default" } })).toBe(1);
+});
+
+describe("public-config", () => {
+    const config = () => request(app()).get("/system-settings/public-config").set("Authorization", asAdmin());
+
+    it("answers the public address from the shared settings read, and a save shows at once", async () => {
+        await prisma.systemSettings.upsert({
+            where: { id: "default" },
+            create: { id: "default", publicUrl: "https://kima.example" },
+            update: { publicUrl: "https://kima.example" },
+        });
+        invalidateSystemSettingsCache();
+        const read = jest.spyOn(prisma.systemSettings, "findUnique");
+
+        expect((await config()).body.publicUrl).toBe("https://kima.example");
+        expect((await config()).body.publicUrl).toBe("https://kima.example");
+        expect(read).toHaveBeenCalledTimes(1);
+
+        await saveSystemSettings({ publicUrl: "https://other.example" });
+        expect((await config()).body.publicUrl).toBe("https://other.example");
+    });
+
+    it("answers an empty address on a new server with no settings row", async () => {
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+        invalidateSystemSettingsCache();
+
+        const res = await config();
+
+        expect(res.status).toBe(200);
+        expect(res.body.publicUrl).toBe("");
+    });
 });

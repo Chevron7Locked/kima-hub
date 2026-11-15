@@ -2,11 +2,18 @@
  * The admin notice about an unreadable credential is sent once per field per process, but only once it was actually
  * delivered: a notice that failed to send is tried again on the next read. Real cipher, notifications stubbed.
  */
-import { resolveEncryptedSettings } from "../encryptedFields";
+import { decryptSettings, noteUnreadableCredentials } from "../encryptedFields";
 import { notificationService } from "../../services/notificationService";
 
 // 'xc1.' marks the current format, and the rest is no valid ciphertext: stored, but the key cannot read it.
 const unreadable = "xc1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/** A settings read that waits for its notices. */
+async function read<S extends Record<string, unknown>>(settings: S) {
+    const resolved = decryptSettings(settings);
+    await noteUnreadableCredentials(resolved, () => []);
+    return resolved;
+}
 
 afterEach(() => {
     jest.restoreAllMocks();
@@ -18,14 +25,14 @@ it("tries the notice again on the next read when the first one could not be sent
         .mockRejectedValueOnce(new Error("notifications are down"))
         .mockResolvedValue(undefined as never);
 
-    const first = await resolveEncryptedSettings({ slskdApiKey: unreadable }, () => []);
+    const first = await read({ slskdApiKey: unreadable });
     expect(first.slskdApiKey).toBeNull();
     expect(notify).toHaveBeenCalledTimes(1);
 
-    await resolveEncryptedSettings({ slskdApiKey: unreadable }, () => []);
+    await read({ slskdApiKey: unreadable });
     expect(notify).toHaveBeenCalledTimes(2);
 
-    await resolveEncryptedSettings({ slskdApiKey: unreadable }, () => []);
+    await read({ slskdApiKey: unreadable });
     expect(notify).toHaveBeenCalledTimes(2);
 });
 
@@ -45,9 +52,9 @@ it("never lets a notice that is still being sent land after the notice that take
     }) as never);
 
     // one read finds the credential unreadable and is still sending its notice when a later read finds it readable
-    const unreadableRead = resolveEncryptedSettings({ fanartApiKey: unreadable }, () => []);
+    const unreadableRead = read({ fanartApiKey: unreadable });
     while (!order.includes("notice starts")) await new Promise((resolve) => setTimeout(resolve, 5));
-    const readableRead = resolveEncryptedSettings({ fanartApiKey: null }, () => []);
+    const readableRead = read({ fanartApiKey: null });
     await new Promise((resolve) => setTimeout(resolve, 20));
     release();
     await Promise.all([unreadableRead, readableRead]);

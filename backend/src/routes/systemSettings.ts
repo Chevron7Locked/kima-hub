@@ -23,10 +23,7 @@ const router = Router();
 // Any signed-in user: the server's public address, and whether this user may start downloads.
 router.get("/public-config", async (req, res) => {
   try {
-    const settings = await prisma.systemSettings.findUnique({
-      where: { id: "default" },
-      select: { publicUrl: true },
-    });
+    const settings = await getSystemSettings();
     // Members need this to know whether to offer download buttons; the
     // server enforces the same rule regardless of what the UI shows.
     res.json({ publicUrl: settings?.publicUrl || "", canAcquire: await mayAcquire(req.user!) });
