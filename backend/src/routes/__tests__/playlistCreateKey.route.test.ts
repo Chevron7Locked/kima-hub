@@ -134,6 +134,9 @@ describe("POST /playlists with an Idempotency-Key", () => {
         const old = await prisma.playlist.findUniqueOrThrow({ where: { id: first.body.id } });
         expect(old.updatedAt).toEqual(before);
         expect(old.name).toBe(`${MARK} old`);
+        // The kept parameters go with the key.
+        expect(old.idempotencyKey).toBeNull();
+        expect(old.idempotencyParams).toBeNull();
     });
 
     it("does not expose the key in the answer", async () => {

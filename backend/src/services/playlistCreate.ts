@@ -29,7 +29,7 @@ export async function createPlaylist(userId: string, data: NewPlaylist, key?: st
 
     // Forget an expired key without touching the old playlist's own fields (a normal update would bump `updatedAt`).
     const expired = new Date(Date.now() - KEY_LIFETIME_MS);
-    await prisma.$executeRaw`UPDATE "Playlist" SET "idempotencyKey" = NULL WHERE "userId" = ${userId} AND "idempotencyKey" = ${key} AND "createdAt" < ${expired}`;
+    await prisma.$executeRaw`UPDATE "Playlist" SET "idempotencyKey" = NULL, "idempotencyParams" = NULL WHERE "userId" = ${userId} AND "idempotencyKey" = ${key} AND "createdAt" < ${expired}`;
 
     const params = hashOf(data);
     const findByKey = async () => {
