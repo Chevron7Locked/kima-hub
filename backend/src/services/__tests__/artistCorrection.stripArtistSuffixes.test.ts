@@ -3,7 +3,6 @@
  * after a dash is the shared rule (utils/normalization stripEditionNote); a dash inside a name stays.
  */
 jest.mock("../../utils/redis", () => ({ redisClient: { get: jest.fn(), set: jest.fn(), setex: jest.fn() } }));
-jest.mock("../../utils/db", () => ({ prisma: {} }));
 jest.mock("../musicbrainz", () => ({ musicBrainzService: {} }));
 jest.mock("../../utils/logger", () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
