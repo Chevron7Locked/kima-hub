@@ -8,13 +8,15 @@
  *   song. An id Kima does not know is left out.
  * - A Discover song is never stored in a queue ("Discover is only Discover"): a save leaves it out like an unknown id
  *   (`ON_LIBRARY_ALBUM`, which the library sweep also reads a replacing copy with).
- *   A song whose file went missing, or that was read as corrupt, is stored (it may come back) and hidden on read.
+ *   A song whose file went missing, or that was read as corrupt, is stored (it may come back) and hidden on read. A
+ *   client sends back the queue it was shown, which lacks those songs, so a save that replaces the queue keeps the ones
+ *   the stored queue holds, each beside the songs it sat between (`planQueue`).
  * - A client is shown each song as it is now (an edited title, a renamed artist, a new cover), not as the entry was
  *   saved; the stored entries stay as saved.
  * - A client is shown only the playable songs of the stored queue (a song whose file went missing, or a Discover
  *   song, is left out). The stored queue itself is left as it is, so a song whose file comes back returns to it.
- *   When the current song is left out, the next playable one becomes current (else the last one before it), from its
- *   start.
+ *   When the current song is left out, the next playable one becomes current (else the last one before it), and the
+ *   position is the one saved: it is shown whenever a current song is.
  * - The index kept with the queue and the entries stay in one coordinate system: the stored one. A client counts what it
  *   was shown, so a save carries the index into the stored queue (`planQueue` for a queue sent as ids, whole or as
  *   entries, `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored
@@ -114,19 +116,13 @@ export async function queueLimit(): Promise<number> {
     return Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
 }
 
-/** A whole, non-negative index from whatever a client sent. */
-function wholeIndex(raw: unknown): number {
-    return Math.max(0, Math.floor(Number(raw) || 0));
-}
-
 /**
  * The song ids of a queue a web client sends as entries, in order, and the place it is on counted over those ids. Only
  * an entry's id is read: the song's details are Kima's own (`planQueue`). Entries without an id are dropped, and the
- * index (counted over the entries as sent) moves back by the ones dropped before it, so an index whose own entry was
- * dropped points at the next entry kept.
+ * index (counted over the entries as sent, a whole number of 0 or more the caller has checked with `isQueueIndex`)
+ * moves back by the ones dropped before it, so an index whose own entry was dropped points at the next entry kept.
  */
-export function queueIdsOf(raw: readonly unknown[], rawIndex: unknown): { ids: string[]; clientIndex: number } {
-    const index = wholeIndex(rawIndex);
+export function queueIdsOf(raw: readonly unknown[], index: number): { ids: string[]; clientIndex: number } {
     const idOf = (item: unknown): string | null => {
         const id = item && typeof item === "object" ? (item as { id?: unknown }).id : undefined;
         return id ? String(id) : null;
@@ -142,12 +138,11 @@ export function queueIdsOf(raw: readonly unknown[], rawIndex: unknown): { ids: s
  * where the song is, else the nearest place it sits). A song the stored queue does not hold, or none named, leaves the
  * mapped index.
  */
-export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: unknown, trackId: unknown, playable: ReadonlySet<string>): number {
+export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: number, trackId: unknown, playable: ReadonlySet<string>): number {
     if (stored.length === 0) return 0;
-    const asked = wholeIndex(clientIndex);
     const shownAt = stored.flatMap((item, i) => (playable.has(item.id) ? [i] : []));
-    const counted = Math.min(asked, stored.length - 1);
-    const mapped = shownAt.length === 0 ? counted : shownAt[Math.min(asked, shownAt.length - 1)];
+    const counted = Math.min(clientIndex, stored.length - 1);
+    const mapped = shownAt.length === 0 ? counted : shownAt[Math.min(clientIndex, shownAt.length - 1)];
     if (!namesSong(trackId)) return mapped;
     for (const at of [mapped, counted]) if (stored[at].id === trackId) return at;
     return placeNearest(stored, trackId, mapped) ?? mapped;
@@ -165,19 +160,6 @@ export const namesSong = (trackId: unknown): trackId is string => typeof trackId
 
 /** Whether a value is a place in a queue: a whole number of 0 or more. */
 export const isQueueIndex = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-
-/**
- * Whether a save that replaces the queue changes nothing: the stored queue holds the same songs in the same order and
- * the state is on the same entry. `plannedIds` are the ids of the queue as it will be stored.
- */
-export function isSameQueueAndPlace(
-    stored: { queue: unknown; currentIndex: number } | null,
-    planned: { ids: readonly string[]; currentIndex: number },
-): boolean {
-    if (stored === null || stored.currentIndex !== planned.currentIndex) return false;
-    const storedIds = entriesOf(stored.queue).map((item) => item.id);
-    return storedIds.length === planned.ids.length && storedIds.every((id, at) => id === planned.ids[at]);
-}
 
 /** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
 export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
@@ -216,7 +198,7 @@ async function lockStateRow(tx: Pick<Prisma.TransactionClient, "$queryRaw">, use
 export async function indexIntoStoredQueue(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "playbackState" | "track">,
     userId: string,
-    clientIndex: unknown,
+    clientIndex: number | null | undefined,
     trackId: unknown,
 ): Promise<number | null> {
     await lockPlaybackState(tx, userId);
@@ -325,19 +307,102 @@ export async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEp
  * left out, and `clientIndex` (counting `ids`) is carried over to where its place now sits: the places before it that
  * were left out no longer count, and an index whose own place was left out or cut points at the place standing in for
  * it, the last one at most. `placeKept` is whether the place itself is in the stored queue. No song kept stores no
- * queue, index 0. Only the `held` songs `lockForQueueSave` returned are read.
+ * queue, index 0. Of the songs a client sends, only the `held` ones `lockForQueueSave` returned are read. The hidden songs
+ * kept from the stored queue are read unheld (they are the stored row's, which the lock on that row covers): a sweep
+ * retiring one at the same moment strips it from the queue again once this save commits.
+ *
+ * A client is shown only the playable songs, so the ids it sends back lack the hidden songs the person's stored queue
+ * holds: those stay (`hiddenBehind`), and the index, which counts what the client was shown, is carried over to the
+ * stored place of that song. They never push a song the client sent out of the limit. A hidden song that is gone from
+ * the library is not brought back. `sameAsShown` is whether the client is shown the same queue and place as it already
+ * was by the stored state, so a save that only sends back what it was shown changes nothing it can see.
  */
 export async function planQueue(
-    tx: Pick<Prisma.TransactionClient, "track">,
+    tx: Pick<Prisma.TransactionClient, "track" | "playbackState">,
+    userId: string,
     ids: string[],
     clientIndex: number,
     limit: number,
     held: ReadonlySet<string>,
-): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean }> {
+): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean; sameAsShown: boolean }> {
     const known = await hydrateQueue(ids.filter((id) => held.has(id)), tx, ON_LIBRARY_ALBUM);
-    const queue = known.slice(0, limit);
-    const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), queue.length, clientIndex);
-    return { queue: queue.length > 0 ? queue : null, currentIndex: place.index, placeKept: place.placeKept };
+    const sent = known.slice(0, limit);
+    const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), sent.length, clientIndex);
+
+    const state = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
+    const storedIds = entriesOf(state?.queue).map((item) => item.id);
+    const every = [...new Set([...sent.map((item) => item.id), ...storedIds])];
+    const playable = new Set(
+        every.length === 0 ? [] : (await tx.track.findMany({ where: { id: { in: every }, ...PLAYABLE_SONG }, select: { id: true } })).map((t) => t.id),
+    );
+
+    const behind = hiddenBehind(sent.map((item) => item.id), storedIds, playable);
+    const described = new Map(
+        (await hydrateQueue([...new Set([...behind.values()].flat())], tx, ON_LIBRARY_ALBUM)).map((item) => [item.id, item] as const),
+    );
+    let room = limit - sent.length;
+    const queue: QueueEntry[] = [];
+    const sentAt: number[] = [];
+    for (let at = 0; at <= sent.length; at++) {
+        for (const id of behind.get(at) ?? []) {
+            const hidden = described.get(id);
+            if (hidden && room > 0) {
+                queue.push(hidden);
+                room--;
+            }
+        }
+        if (at < sent.length) {
+            sentAt.push(queue.length);
+            queue.push(sent[at]);
+        }
+    }
+    const currentIndex = sent.length > 0 ? sentAt[place.index] : 0;
+
+    const isPlayable = (id: string) => playable.has(id);
+    const before = shownPlace(storedIds, state?.currentIndex ?? 0, isPlayable);
+    const after = shownPlace(queue.map((item) => item.id), currentIndex, isPlayable);
+    const sameAsShown = state !== null && before.index === after.index && before.ids.length === after.ids.length && before.ids.every((id, at) => id === after.ids[at]);
+    return { queue: queue.length > 0 ? queue : null, currentIndex, placeKept: place.placeKept, sameAsShown };
+}
+
+/**
+ * Where the songs a stored queue holds but a client was not shown (the missing and the corrupt: hidden on read, kept in
+ * case they come back) go back in a queue that client sends. Each stays beside the song before it in the stored queue,
+ * or, at the head, in front of the song after it, whichever of those the sent queue still holds; a queue sent with
+ * none of the stored songs is a new queue and takes none of them. A stored song is matched to the sent queue in order
+ * (the first place of its id at or after the last one matched), so a song listed twice is two places. The result is, for
+ * each place in the sent queue (and one past its end), the ids of the stored hidden songs that go in front of it.
+ */
+function hiddenBehind(sent: readonly string[], stored: readonly string[], playable: ReadonlySet<string>): Map<number, string[]> {
+    const behind = new Map<number, string[]>();
+    const put = (at: number, id: string) => behind.set(at, [...(behind.get(at) ?? []), id]);
+    const atHead: string[] = [];
+    const sentSet = new Set(sent);
+    let cursor = 0;
+    let anchored = false;
+    for (const id of stored) {
+        const at = sent.indexOf(id, cursor);
+        if (at >= 0) {
+            if (!anchored) atHead.forEach((hidden) => put(at, hidden));
+            anchored = true;
+            cursor = at + 1;
+        } else if (!playable.has(id) && !sentSet.has(id)) {
+            if (anchored) put(cursor, id);
+            else atHead.push(id);
+        }
+    }
+    return behind;
+}
+
+/**
+ * What a client is shown of a queue: the songs it can play, in order, and the place it is on counted over those. A place
+ * that is not a playable song is stood in for by the next playable one, the last one at most.
+ */
+function shownPlace(ids: readonly string[], index: number, isPlayable: (id: string) => boolean): { ids: string[]; index: number } {
+    const shown = ids.filter(isPlayable);
+    const placeIn = Math.min(Math.max(index, 0), Math.max(ids.length - 1, 0));
+    const before = ids.slice(0, placeIn).filter(isPlayable).length;
+    return { ids: shown, index: shown.length === 0 ? 0 : Math.min(before, shown.length - 1) };
 }
 
 const INT32_MAX = 2_147_483_647;
@@ -350,18 +415,24 @@ export const SAVE_TIMEOUT_MS = 30_000;
  * it retires, and a first save has no row at all), then the songs are read, the index worked out and the queue written
  * in the same transaction, so a library sweep retiring a song at the same moment finishes first and the queue never
  * stores what it took out, and a web save meeting this one leaves one whole save. What is left out, and how the queue is
- * cut and the index carried over, is `planQueue`'s; when the current song is left out, the song now in its place is
- * current, from its start. The position is kept when the current place itself is kept, not when another place holds its
- * song. The queue limit is read before the transaction opens.
+ * cut and the index carried over, and which hidden songs of the stored queue stay (the app was shown the playable ones
+ * only), is `planQueue`'s; when a save sends a current song that is left out, the song now in its place is current, from its
+ * start (a read of the saved state shows the position as saved). The
+ * position is kept when the current place itself is kept, not when another place holds its song. The queue limit is
+ * read before the transaction opens. The index and the position are whole numbers of 0 or more, as the Subsonic reader
+ * has checked them; anything else is a caller's mistake and throws before the database is touched.
  */
 export async function saveQueueOfIds(
     userId: string,
     save: { ids: string[]; clientIndex: number; position: number; changedBy: string },
 ): Promise<void> {
+    if (!isQueueIndex(save.clientIndex) || !isQueueIndex(save.position)) {
+        throw new TypeError("saveQueueOfIds: the index and the position are whole numbers of 0 or more");
+    }
     const limit = await queueLimit();
     await prisma.$transaction(async (tx) => {
         const held = await lockForQueueSave(tx, userId, save.ids, limit);
-        const plan = await planQueue(tx, save.ids, save.clientIndex, limit, held);
+        const plan = await planQueue(tx, userId, save.ids, save.clientIndex, limit, held);
         const data = {
             playbackType: "track",
             trackId: plan.queue?.[plan.currentIndex]?.id ?? null,
@@ -403,19 +474,17 @@ export async function playableQueue(
                   (t) => [t.id, describeSong(t)] as const,
               ),
     );
-    const savedIndex = Math.min(Math.max(state?.currentIndex ?? 0, 0), Math.max(saved.length - 1, 0));
-    const shownBefore = saved.slice(0, savedIndex).filter((item) => now.has(item.id)).length;
     // Each song is shown as it is now (an edited title, a renamed artist, a new cover), not as it was when saved.
     const queue = saved.flatMap((item) => now.get(item.id) ?? []);
-    const currentKept = saved.length > 0 && now.has(saved[savedIndex].id);
-    const currentIndex = queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1);
+    const { index: currentIndex } = shownPlace(saved.map((item) => item.id), state?.currentIndex ?? 0, (id) => now.has(id));
     // A song the state names that is not playable (gone, or on a Discover album) is never handed back: the song now
     // current stands in for it, and there is none when the queue shows nothing.
     const trackId = named === null || now.has(named) ? named : (queue[currentIndex]?.id ?? null);
     return {
         queue,
         currentIndex,
-        position: currentKept ? (state?.position ?? 0) : 0,
+        // As saved whenever a current song is shown, the song standing in for a hidden current one included; none shown, none.
+        position: queue.length > 0 ? (state?.position ?? 0) : 0,
         trackId,
     };
 }

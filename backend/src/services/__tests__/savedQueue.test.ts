@@ -2,7 +2,7 @@
  * What a saved queue reads of a queue a web client sends: only the ids of its entries (the details stored are Kima's
  * own), the entries without an id are dropped, and the index follows its place through that.
  */
-import { queueIdsOf } from "../savedQueue";
+import { queueIdsOf, saveQueueOfIds } from "../savedQueue";
 
 const song = (id: string) => ({ id, title: id });
 
@@ -20,15 +20,25 @@ describe("queueIdsOf", () => {
         expect(queueIdsOf([song("a"), { title: "x" }, song("b")], 1).clientIndex).toBe(1);
     });
 
-    it("reads an index that is no whole number as 0 and a fraction down, below 0 as 0, and leaves one past the end for the plan to clamp", () => {
-        expect(queueIdsOf([song("a")], -4).clientIndex).toBe(0);
-        expect(queueIdsOf([song("a")], "x").clientIndex).toBe(0);
-        expect(queueIdsOf([song("a")], 1.7).clientIndex).toBe(1);
+    it("carries a whole index over as it is, and leaves one past the end for the plan to clamp", () => {
+        expect(queueIdsOf([song("a")], 0).clientIndex).toBe(0);
         expect(queueIdsOf([song("a"), song("b")], 9).clientIndex).toBe(9);
     });
 
     it("gives no ids for no entries", () => {
         expect(queueIdsOf([], 5)).toEqual({ ids: [], clientIndex: 5 });
         expect(queueIdsOf([{ title: "x" }], 0)).toEqual({ ids: [], clientIndex: 0 });
+    });
+});
+
+describe("saveQueueOfIds", () => {
+    it.each([
+        ["a negative index", { clientIndex: -1, position: 0 }],
+        ["a fractional index", { clientIndex: 1.5, position: 0 }],
+        ["an index that is no number", { clientIndex: Number.NaN, position: 0 }],
+        ["a negative position", { clientIndex: 0, position: -1 }],
+        ["a fractional position", { clientIndex: 0, position: 0.5 }],
+    ])("takes only whole places and positions of 0 or more: %s is refused before the database is touched", async (_name, place) => {
+        await expect(saveQueueOfIds("nobody", { ids: [], changedBy: "test", ...place })).rejects.toThrow(TypeError);
     });
 });

@@ -33,7 +33,7 @@ function clientName(req: Request): string {
 
 /** A number a client sent as digits only ("2"), not "2abc", "1.5", "-1" or " 2"; null when it is not one. */
 function wholeNumber(raw: string): number | null {
-    return /^\d+$/.test(raw) ? Number(raw) : null;
+    return /^\d+$/.test(raw) ? Math.min(Number(raw), Number.MAX_SAFE_INTEGER) : null;
 }
 
 /** The position in the current song: 0 when none is sent (or it is blank), null when one is sent that is no whole number of 0 or more. */

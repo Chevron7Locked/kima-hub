@@ -16,6 +16,7 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import * as systemSettings from "../../utils/systemSettings";
 import { invalidateSystemSettingsCache, QUEUE_LENGTH } from "../../utils/systemSettings";
+import { entriesOf } from "../../services/savedQueue";
 import { reconcileDeletedTracks } from "../../services/libraryReconcile";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
@@ -625,6 +626,133 @@ describe("POST /api/playback-state: the position in the current song", () => {
         await save(user.id, { playbackType: "track", trackId: `${S}s2`, currentIndex: 1, expectedUpdatedAt: seen }).expect(200);
 
         expect(await position(user.id)).toBe(0);
+    });
+});
+
+// A song whose file went missing or that was read as corrupt stays in the stored queue and is hidden when it is read
+// (it may come back). The web player is shown the playable songs only, so what it saves back is the shown queue: a
+// save keeps the hidden songs the stored queue holds, at their place beside the songs they sat between.
+describe("POST /api/playback-state: a save of the queue the player was shown", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const song = (n: string) => ({ id: `${S}${n}`, title: n, duration: 100 });
+    const shown = (...ids: string[]) => ids.map(song);
+    const row = (userId: string) => prisma.playbackState.findUniqueOrThrow({ where: { userId } });
+    const storedIds = async (userId: string) => entriesOf((await row(userId)).queue).map((e) => e.id.slice(S.length));
+    // Stored: s1, gone, s2, bad, s3 with the player on s2 (stored place 2, shown place 1), 9 seconds in. The player is
+    // shown s1, s2, s3.
+    const withHidden = async (name: string, ids: string[] = ["s1", "gone", "s2", "bad", "s3"], index = 2) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+        await prisma.playbackState.create({
+            data: { userId: user.id, playbackType: "track", queue: shown(...ids), currentIndex: index, trackId: `${S}${ids[index]}`, position: 9000 },
+        });
+        return user;
+    };
+
+    it("keeps the hidden songs, the place and the position when it sends back the queue it was shown", async () => {
+        const user = await withHidden("hid-resave");
+
+        const res = await save(user.id, { playbackType: "track", queue: shown("s1", "s2", "s3"), currentIndex: 1 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["s1", "gone", "s2", "bad", "s3"]);
+        const after = await row(user.id);
+        expect([after.currentIndex, after.trackId, after.position]).toEqual([2, `${S}s2`, 9000]);
+        expect(res.body.queue.map((q: { id: string }) => q.id)).toEqual([`${S}s1`, `${S}s2`, `${S}s3`]);
+        expect(res.body.currentIndex).toBe(1);
+    });
+
+    it("maps the shown place back onto the stored queue", async () => {
+        const user = await withHidden("hid-index");
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "s2", "s3"), currentIndex: 2 }).expect(200);
+
+        const after = await row(user.id);
+        expect([after.currentIndex, after.trackId, after.position]).toEqual([4, `${S}s3`, 0]);
+    });
+
+    it("keeps a hidden song at the head of the queue before the song it sat in front of", async () => {
+        const user = await withHidden("hid-head", ["gone", "s1", "s2"], 1);
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "s2"), currentIndex: 0 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["gone", "s1", "s2"]);
+        const after = await row(user.id);
+        expect([after.currentIndex, after.position]).toEqual([1, 9000]);
+    });
+
+    it.each([
+        ["a song is taken out", ["s1", "s3"], 1, ["s1", "gone", "bad", "s3"]],
+        ["a song is added at the end", ["s1", "s2", "s3", "s4"], 1, ["s1", "gone", "s2", "bad", "s3", "s4"]],
+        ["a song is added in the middle", ["s1", "s4", "s2", "s3"], 2, ["s1", "gone", "s4", "s2", "bad", "s3"]],
+        ["the songs are reordered", ["s3", "s2", "s1"], 1, ["s3", "s2", "s1", "gone", "bad"]],
+    ])("keeps the hidden songs beside their neighbours when %s", async (name, queue, index, expected) => {
+        const user = await withHidden(`hid-edit-${name.replace(/\W+/g, "")}`);
+
+        await save(user.id, { playbackType: "track", queue: shown(...queue), currentIndex: index }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(expected);
+    });
+
+    it("takes none of the hidden songs into a queue that shares none of their neighbours, or into an empty one", async () => {
+        const user = await withHidden("hid-new");
+
+        await save(user.id, { playbackType: "track", queue: shown("s4"), currentIndex: 0 }).expect(200);
+        expect(await storedIds(user.id)).toEqual(["s4"]);
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "s2"), currentIndex: 0 }).expect(200);
+        expect(await storedIds(user.id)).toEqual(["s1", "s2"]);
+
+        await save(user.id, { playbackType: "track", queue: [], currentIndex: 0 }).expect(200);
+        expect((await row(user.id)).queue).toBeNull();
+    });
+
+    it("does not bring back a hidden song that is gone from Kima, and never one that was never stored", async () => {
+        const user = await withHidden("hid-gone", ["s1", "nosuch", "s2"], 2);
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "s2"), currentIndex: 1 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["s1", "s2"]);
+    });
+
+    it("leaves a hidden song a save sends itself where it was sent, once", async () => {
+        const user = await withHidden("hid-sent");
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "gone", "s2", "s3"), currentIndex: 2 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["s1", "gone", "s2", "bad", "s3"]);
+    });
+
+    it("leaves a hidden song a save sends out of the stored order once, where it was sent", async () => {
+        const user = await withHidden("hid-sent-moved");
+
+        await save(user.id, { playbackType: "track", queue: shown("s3", "gone", "s1"), currentIndex: 0 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["s3", "gone", "s1", "bad"]);
+    });
+
+    it("keeps the position when the player is on the song standing in for a hidden current one", async () => {
+        const user = await withHidden("hid-standin", ["s1", "gone", "s2"], 1);
+
+        await save(user.id, { playbackType: "track", queue: shown("s1", "s2"), currentIndex: 1 }).expect(200);
+
+        expect(await storedIds(user.id)).toEqual(["s1", "gone", "s2"]);
+        expect((await row(user.id)).position).toBe(9000);
+    });
+
+    it("lets the songs it is shown fill the limit before the hidden ones take a place", async () => {
+        const user = await withHidden("hid-limit", ["s1", "gone"], 0);
+        const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
+        try {
+            await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: QUEUE_LENGTH.min }, update: { maxQueueLength: QUEUE_LENGTH.min } });
+            invalidateSystemSettingsCache();
+
+            await save(user.id, { playbackType: "track", queue: Array.from({ length: QUEUE_LENGTH.min }, () => song("s1")), currentIndex: 0 }).expect(200);
+
+            expect(await storedIds(user.id)).toEqual(Array.from({ length: QUEUE_LENGTH.min }, () => "s1"));
+        } finally {
+            if (before) await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before.maxQueueLength } });
+            else await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+            invalidateSystemSettingsCache();
+        }
     });
 });
 

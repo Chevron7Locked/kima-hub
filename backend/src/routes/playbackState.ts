@@ -10,7 +10,6 @@ import {
     lockPlaybackState,
     entriesOf,
     isQueueIndex,
-    isSameQueueAndPlace,
     namesCurrentSong,
     namesEpisode,
     namesSong,
@@ -106,18 +105,18 @@ router.post("/", async (req, res) => {
         const isTrack = playbackType === "track";
         const queueProvided = isTrack && Array.isArray(queue);
         const indexOnly = isTrack && !queueProvided && namesCurrentSong(currentIndex, trackId);
-        const sent = queueProvided ? queueIdsOf(queue, currentIndex) : null;
+        const sent = queueProvided ? queueIdsOf(queue, currentIndex ?? 0) : null;
         // The limit is read here, before the transaction opens: the read may take a connection of its own, and a save
         // holding one must not wait for a second. A save that sends no queue holds at most the one song it names.
         const limit = sent ? await queueLimit() : 1;
 
         // The queue as it will be stored: the songs of the ids sent, as Kima describes them, cut to the limit.
         const replacementFor = async (tx: Prisma.TransactionClient, ids: string[], clientIndex: number, held: ReadonlySet<string>) => {
-            const planned = await planQueue(tx, ids, clientIndex, limit, held);
+            const planned = await planQueue(tx, userId, ids, clientIndex, limit, held);
             return {
                 currentIndex: planned.currentIndex,
-                // The ids of the queue as it will be stored, to tell whether this save changes the queue.
-                plannedIds: planned.queue?.map((item) => item.id) ?? [],
+                // Whether the client is shown the queue and place it already was, which is when its position stays.
+                sameAsShown: planned.sameAsShown,
                 // The current song is the stored queue's current entry, whatever `trackId` the save sent or left out: a
                 // named song the plan left out (unknown, on a Discover album) or cut at the limit never stays beside
                 // a queue that does not hold it, so the two never disagree.
@@ -213,10 +212,7 @@ router.post("/", async (req, res) => {
                 podcastId: podcastId === undefined ? undefined : (await namesEpisode(tx, podcastId)) ? (podcastId as string) : null,
             };
             if (replacement) {
-                // The state row is locked by now, so what it holds is what this save replaces.
-                const stored = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
-                const startsOver = !isSameQueueAndPlace(stored, { ids: replacement.plannedIds, currentIndex: replacement.currentIndex });
-                return write(tx, { replacement, index: replacement.currentIndex, named, startsOver });
+                return write(tx, { replacement, index: replacement.currentIndex, named, startsOver: !replacement.sameAsShown });
             }
             if (!indexOnly) return write(tx, { replacement: null, index: 0, named, startsOver: false });
             const index = await indexIntoStoredQueue(tx, userId, currentIndex, trackId);

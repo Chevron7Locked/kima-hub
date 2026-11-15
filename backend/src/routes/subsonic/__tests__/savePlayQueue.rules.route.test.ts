@@ -87,6 +87,17 @@ describe("a Subsonic queue save and the operator's queue length limit", () => {
         expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([3, song(3), 7000]);
     });
 
+    // Digits too many for a number are still a whole number of 0 or more: the column's largest value is stored.
+    it.each([
+        ["savePlayQueue", "/savePlayQueue.view", { id: [song(0), song(1)], current: song(1) }],
+        ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", { id: [song(0), song(1)], currentIndex: "1" }],
+    ])("%s takes a position of 400 digits as the largest the state holds", async (_name, path, query) => {
+        const reply = await send(path, { ...query, position: "9".repeat(400) });
+
+        expect(reply.status).toBe("ok");
+        expect((await stored())!.position).toBe(2_147_483_647);
+    });
+
     it.each([
         ["savePlayQueue", "/savePlayQueue.view", (current: number) => ({ id: all, current: song(current) })],
         ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", (current: number) => ({ id: all, currentIndex: String(current) })],
@@ -275,6 +286,25 @@ describe("a Subsonic queue save and the songs a queue may hold", () => {
         const state = await stored();
         expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(0), MISSING_SONG, CORRUPT_SONG, song(1)]);
         expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([3, song(1), 7000]);
+    });
+
+    // The app was shown the playable songs only, so what it saves back leaves out the missing and the corrupt song the
+    // stored queue still holds: they stay, at their place beside the songs they sat between.
+    it.each([
+        ["savePlayQueue", "/savePlayQueue.view", { current: song(1) }],
+        ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", { currentIndex: "1" }],
+    ])("%s keeps the missing and the corrupt song the stored queue holds, which the app was not shown", async (_name, path, query) => {
+        const queue = [song(0), MISSING_SONG, song(1), CORRUPT_SONG, song(2)];
+        await prisma.playbackState.create({
+            data: { userId: USER, playbackType: "track", queue: queue.map((id) => ({ id, title: id })), currentIndex: 2, trackId: song(1), position: 7000 },
+        });
+
+        const reply = await send(path, { id: [song(0), song(1), song(2)], ...query, position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue).map((e) => e.id)).toEqual(queue);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([2, song(1), 7000]);
     });
 
     it("starts the song standing in for a Discover song that was the current one, from its start", async () => {
