@@ -10,7 +10,7 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
-import { createPlaylist, MAX_KEY_LENGTH } from "../services/playlistCreate";
+import { createPlaylist, KeyParamsMismatch, MAX_KEY_LENGTH } from "../services/playlistCreate";
 import { namedFields, playlistFields, playlistItemFields } from "../services/playlistFields";
 import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
@@ -174,6 +174,9 @@ router.post("/", async (req, res) => {
             return res
                 .status(400)
                 .json({ error: "Invalid request", details: error.issues });
+        }
+        if (error instanceof KeyParamsMismatch) {
+            return res.status(422).json({ error: "Idempotency-Key was already used with different parameters" });
         }
         logger.error("Create playlist error:", error);
         res.status(500).json({ error: "Failed to create playlist" });

@@ -56,13 +56,39 @@ describe("POST /playlists with an Idempotency-Key", () => {
         expect(await rows(userA)).toHaveLength(1);
     });
 
-    it("returns the first playlist even when the repeat carries another name", async () => {
+    it("refuses a key used again with another name or visibility, and makes no second playlist", async () => {
         const first = await create(userA, `${MARK} one`, "key-0001-aaaa");
-        const again = await create(userA, `${MARK} two`, "key-0001-aaaa", true);
+        const renamed = await create(userA, `${MARK} two`, "key-0001-aaaa");
+        const opened = await create(userA, `${MARK} one`, "key-0001-aaaa", true);
 
-        expect(again.body.id).toBe(first.body.id);
-        expect(again.body.name).toBe(`${MARK} one`);
+        expect(first.status).toBe(200);
+        expect(renamed.status).toBe(422);
+        expect(opened.status).toBe(422);
+        expect(renamed.body.error).toMatch(/idempotency-key/i);
         expect(await rows(userA)).toHaveLength(1);
+        // The same parameters still return the first playlist.
+        expect((await create(userA, `${MARK} one`, "key-0001-aaaa")).body.id).toBe(first.body.id);
+    });
+
+    it("refuses the loser of a race when it carries other parameters", async () => {
+        const [a, b] = await Promise.all([
+            create(userA, `${MARK} race one`, "key-0008-aaaa"),
+            create(userA, `${MARK} race two`, "key-0008-aaaa"),
+        ]);
+
+        expect([a.status, b.status].sort()).toEqual([200, 422]);
+        expect(await rows(userA)).toHaveLength(1);
+    });
+
+    it("returns a playlist made before parameters were kept, whatever the repeat carries", async () => {
+        const made = await prisma.playlist.create({
+            data: { userId: userA, name: `${MARK} legacy`, idempotencyKey: "key-0009-aaaa" },
+        });
+
+        const again = await create(userA, `${MARK} other name`, "key-0009-aaaa");
+
+        expect(again.status).toBe(200);
+        expect(again.body.id).toBe(made.id);
     });
 
     it("makes one playlist when the same key arrives twice at once", async () => {

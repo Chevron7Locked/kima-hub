@@ -428,6 +428,8 @@ model Playlist {
   updatedAt         DateTime               @default(now()) @updatedAt
   spotifyPlaylistId String?
   idempotencyKey    String?
+  /// A hash of the name and visibility a keyed create asked for; null on playlists made before it was kept.
+  idempotencyParams String?
   hiddenByUsers     HiddenPlaylist[]
   user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   items             PlaylistItem[]
