@@ -872,6 +872,7 @@ model User {
   unavailableAlbums      UnavailableAlbum[]
   discoverConfig         UserDiscoverConfig?
   UserMoodMix            UserMoodMix?
+  moodMemory             UserMoodMemory[]
   settings               UserSettings?
   shareLinks             ShareLink[]
   subsonicBookmarks      SubsonicBookmark[]
@@ -898,13 +899,23 @@ model UserMoodMix {
   mood           String
   trackIds       String[]
   coverUrls      String[]
-  servedTrackIds String[]
   generatedAt    DateTime
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   User           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// The songs a listener was served for one mood, oldest first, cut to the most recent few hundred; one row per mood.
+model UserMoodMemory {
+  userId         String
+  mood           String
+  servedTrackIds String[]
+  updatedAt      DateTime @updatedAt
+  User           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, mood])
 }
 
 model UserSettings {

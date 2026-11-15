@@ -369,22 +369,30 @@ class MoodBucketService {
         const generatedAt = new Date();
 
         // The listener's own picks that exist, in their order; otherwise a fresh mix that skips what they were served.
-        let mixTrackIds: string[];
-        let coverUrls: string[];
-        if (trackIds && trackIds.length > 0) {
-            const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
-            if (tracks.length === 0) return null;
-            mixTrackIds = tracks.map((t) => t.id);
-            coverUrls = albumCoverUrls(tracks);
-        } else {
-            const mix = await this.getMoodMix(mood, limit, await this.getRememberedTrackIds(userId, mood));
-            if (!mix) return null;
-            mixTrackIds = mix.trackIds;
-            coverUrls = mix.coverUrls;
-        }
+        // Either way the listener's turn for this mood is held, so a serving at the same time cannot draw the same songs.
+        const result = await this.underMoodLock(userId, mood, async (tx) => {
+            let mixTrackIds: string[];
+            let coverUrls: string[];
+            if (trackIds && trackIds.length > 0) {
+                const tracks = await tracksByIds(trackIds, { album: { select: { coverUrl: true } } });
+                if (tracks.length === 0) return null;
+                mixTrackIds = tracks.map((t) => t.id);
+                coverUrls = albumCoverUrls(tracks);
+            } else {
+                const mix = await this.getMoodMix(mood, limit, await this.getRememberedTrackIds(userId, mood, tx));
+                if (!mix) return null;
+                mixTrackIds = mix.trackIds;
+                coverUrls = mix.coverUrls;
+            }
 
-        const saved = { mood, trackIds: mixTrackIds, coverUrls, servedTrackIds: mixTrackIds, generatedAt };
-        await prisma.userMoodMix.upsert({ where: { userId }, create: { userId, ...saved }, update: saved });
+            // The saved mix is replaced; the songs served for each mood are kept, and this mix joins its mood's.
+            const saved = { mood, trackIds: mixTrackIds, coverUrls, generatedAt };
+            await tx.userMoodMix.upsert({ where: { userId }, create: { userId, ...saved }, update: saved });
+            await this.recordServedTracks(userId, mood, mixTrackIds, tx);
+            return { mixTrackIds, coverUrls };
+        });
+        if (!result) return null;
+        const { mixTrackIds, coverUrls } = result;
         logger.debug(`[MoodBucket] Saved ${mood} mix for user ${userId} (${mixTrackIds.length} tracks)`);
 
         return {
@@ -442,57 +450,93 @@ class MoodBucketService {
     }
 
     /**
-     * Track ids this user was already given for a mood: what the last serving
-     * remembered, plus the saved mix itself. The next getMoodMix for that mood
-     * skips them, so regenerating doesn't replay the same tracks.
+     * Track ids this user was already given for a mood: what that mood's
+     * servings remembered, plus the saved mix itself when it is for that mood.
+     * The next getMoodMix for that mood skips them, so regenerating doesn't
+     * replay the same tracks.
      */
     async getRememberedTrackIds(
         userId: string,
-        mood: MoodType
+        mood: MoodType,
+        db: MemoryDb = prisma
     ): Promise<string[]> {
-        const row = await prisma.userMoodMix.findUnique({
-            where: { userId },
-        });
+        const [memory, mix] = await Promise.all([
+            db.userMoodMemory.findUnique({ where: { userId_mood: { userId, mood } } }),
+            db.userMoodMix.findUnique({ where: { userId } }),
+        ]);
 
-        if (!row || row.mood !== mood) return [];
-
-        return Array.from(new Set([...row.servedTrackIds, ...row.trackIds]));
+        return Array.from(new Set([...(memory?.servedTrackIds ?? []), ...(mix?.mood === mood ? mix.trackIds : [])]));
     }
 
     /**
-     * Add the ids a mix was served with to what this user was already served,
-     * so the next mix skips all of it, not just the last serving. A song served
-     * again moves to the newest place; the memory keeps the SERVED_MEMORY most
-     * recent. One statement, so two servings at once both land. Update-only:
-     * without a saved mix there is nothing to remember against, and creating
-     * one would surface an empty mix on the home page. Keyed on the mood too,
-     * so the memory can't leak across moods.
+     * Add the ids a mix was served with to what this user was already served
+     * for that mood, so the next mix skips all of it, not just the last
+     * serving. A song served again moves to the newest place; the memory keeps
+     * the SERVED_MEMORY most recent. One statement, so two servings at once
+     * both land, the first ever included. Kept apart from the saved mix: a
+     * listener who browses without saving is remembered too, and saving a mix
+     * for another mood forgets nothing.
      */
     async recordServedTracks(
         userId: string,
         mood: MoodType,
-        trackIds: string[]
+        trackIds: string[],
+        db: MemoryDb = prisma
     ): Promise<void> {
         if (trackIds.length === 0) return;
 
-        await prisma.$executeRaw`
-            UPDATE "UserMoodMix" u SET
-                "servedTrackIds" = (
-                    SELECT COALESCE(array_agg(kept.id ORDER BY kept.last), '{}'::text[])
-                    FROM (
-                        SELECT id, last FROM (
-                            SELECT e.id, max(e.pos) AS last
-                            FROM unnest(u."servedTrackIds" || ${trackIds}::text[]) WITH ORDINALITY AS e(id, pos)
-                            GROUP BY e.id
-                        ) d
-                        ORDER BY last DESC
-                        LIMIT ${SERVED_MEMORY}
-                    ) kept
-                ),
-                "updatedAt" = ${nodeClock()}
-            WHERE u."userId" = ${userId} AND u.mood = ${mood}
+        const newest = (all: Prisma.Sql) => Prisma.sql`
+            SELECT COALESCE(array_agg(kept.id ORDER BY kept.last), '{}'::text[])
+            FROM (
+                SELECT id, last FROM (
+                    SELECT e.id, max(e.pos) AS last
+                    FROM unnest(${all}) WITH ORDINALITY AS e(id, pos)
+                    GROUP BY e.id
+                ) d
+                ORDER BY last DESC
+                LIMIT ${SERVED_MEMORY}
+            ) kept`;
+        const at = nodeClock();
+        await db.$executeRaw`
+            INSERT INTO "UserMoodMemory" ("userId", "mood", "servedTrackIds", "updatedAt")
+            VALUES (${userId}, ${mood}, (${newest(Prisma.sql`${trackIds}::text[]`)}), ${at})
+            ON CONFLICT ("userId", "mood") DO UPDATE SET
+                "servedTrackIds" = (${newest(Prisma.sql`"UserMoodMemory"."servedTrackIds" || ${trackIds}::text[]`)}),
+                "updatedAt" = ${at}
         `;
     }
+
+    /**
+     * Draw a mood's mix for a listener and remember it as served, in one step. The listener's servings of that mood
+     * take turns: one that starts while another is drawing waits for it to be remembered, so two requests at once
+     * never draw the same songs. Servings of other moods, and of other listeners, do not wait. Null when the mood
+     * has no mix.
+     */
+    async serveMoodMix(userId: string, mood: MoodType, limit: number = 15): Promise<MoodMix | null> {
+        return this.underMoodLock(userId, mood, async (tx) => {
+            const mix = await this.getMoodMix(mood, limit, await this.getRememberedTrackIds(userId, mood, tx));
+            if (mix) await this.recordServedTracks(userId, mood, mix.trackIds, tx);
+            return mix;
+        });
+    }
+
+    /**
+     * Run `work` in a transaction holding the listener's lock for one mood, so a draw and the record of it cannot
+     * interleave with another's. The lock is the transaction's, released when it ends; the draw itself reads the
+     * library on the shared pool.
+     */
+    private underMoodLock<T>(userId: string, mood: MoodType, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+        return prisma.$transaction(
+            async (tx) => {
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mood-serve:${userId}:${mood}`}, 0))`;
+                return work(tx);
+            },
+            { timeout: 30_000, maxWait: 30_000 }
+        );
+    }
 }
+
+/** The database or a transaction on it: the memory is read and written in either. */
+type MemoryDb = Pick<Prisma.TransactionClient, "userMoodMemory" | "userMoodMix" | "$executeRaw">;
 
 export const moodBucketService = new MoodBucketService();

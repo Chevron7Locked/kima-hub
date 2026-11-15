@@ -105,7 +105,7 @@ beforeEach(async () => {
     // Saved before 1.11, so 1.11's mood-mix question is theirs.
     await prisma.userMoodMix.create({
         data: {
-            userId: USER, mood: "happy", trackIds: [], coverUrls: [], servedTrackIds: [],
+            userId: USER, mood: "happy", trackIds: [], coverUrls: [],
             generatedAt: new Date("2026-09-01T00:00:00Z"), createdAt: new Date("2026-09-01T00:00:00Z"),
         },
     });

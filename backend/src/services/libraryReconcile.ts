@@ -221,8 +221,8 @@ async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: strin
 }
 
 /**
- * A listener's saved mood mix, and the songs it was last served, name songs by id with no foreign key behind them, so a
- * retired song would stay in both for good. A song another copy took the history of is replaced there by that copy, in
+ * A listener's saved mood mix, and the songs served to them for each mood, name songs by id with no foreign key behind
+ * them, so a retired song would stay in both for good. A song another copy took the history of is replaced there by that copy, in
  * its place (the mix reads its songs again, so a copy that cannot play is skipped until it can); one with no copy goes.
  * A copy the list already held is kept once, at its first place (a list that held any retired song is kept once per id
  * throughout; a mix never holds a song twice). A mix that held no retired song is not touched. `movedTo` is the
@@ -231,20 +231,24 @@ async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: strin
 async function updateMoodMixes(tx: Prisma.TransactionClient, retired: string[], movedTo: Map<string, string>): Promise<void> {
     const gone = [...movedTo.keys()];
     const kept = gone.map((id) => movedTo.get(id)!);
-    const followed = (column: "trackIds" | "servedTrackIds") => Prisma.sql`
+    const followed = (table: "UserMoodMix" | "UserMoodMemory", column: "trackIds" | "servedTrackIds") => Prisma.sql`
         SELECT COALESCE(array_agg(id ORDER BY first), '{}'::text[])
           FROM (SELECT id, min(pos) AS first
                   FROM (SELECT COALESCE(m.kept, e.id) AS id, e.pos
-                          FROM unnest(u.${Prisma.raw(`"${column}"`)}) WITH ORDINALITY AS e(id, pos)
+                          FROM unnest(${Prisma.raw(`"${table}"."${column}"`)}) WITH ORDINALITY AS e(id, pos)
                           LEFT JOIN unnest(${gone}::text[], ${kept}::text[]) AS m(gone, kept) ON m.gone = e.id
                          WHERE m.gone IS NOT NULL OR e.id <> ALL(${retired}::text[])) AS placed
                  GROUP BY id) AS once`;
     await tx.$executeRaw`
-        UPDATE "UserMoodMix" u
-           SET "trackIds" = (${followed("trackIds")}),
-               "servedTrackIds" = (${followed("servedTrackIds")}),
+        UPDATE "UserMoodMix"
+           SET "trackIds" = (${followed("UserMoodMix", "trackIds")}),
                "updatedAt" = ${nodeClock()}
-         WHERE u."trackIds" && ${retired}::text[] OR u."servedTrackIds" && ${retired}::text[]`;
+         WHERE "trackIds" && ${retired}::text[]`;
+    await tx.$executeRaw`
+        UPDATE "UserMoodMemory"
+           SET "servedTrackIds" = (${followed("UserMoodMemory", "servedTrackIds")}),
+               "updatedAt" = ${nodeClock()}
+         WHERE "servedTrackIds" && ${retired}::text[]`;
 }
 
 /**

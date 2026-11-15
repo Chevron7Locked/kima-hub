@@ -64,7 +64,7 @@ function makeApp() {
 }
 
 async function servedTrackIds(): Promise<string[]> {
-    const row = await prisma.userMoodMix.findUnique({ where: { userId: USER_ID } });
+    const row = await prisma.userMoodMemory.findUnique({ where: { userId_mood: { userId: USER_ID, mood: "chill" } } });
     return row?.servedTrackIds ?? [];
 }
 
@@ -95,6 +95,7 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
 
     afterAll(async () => {
         await prisma.userMoodMix.deleteMany({ where: { userId: { startsWith: "mmsr_" } } });
+        await prisma.userMoodMemory.deleteMany({ where: { userId: { startsWith: "mmsr_" } } });
         await removeSyntheticLibrary(PREFIX);
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.$disconnect();
@@ -133,6 +134,17 @@ describe("GET /mixes/mood/buckets/:mood remembers what it served (database)", ()
         for (const id of res.body.trackIds) {
             expect(given.has(id)).toBe(false);
         }
+    });
+
+    it("gives two requests at once different mixes", async () => {
+        const [a, b] = await Promise.all([
+            request(app).get("/mixes/mood/buckets/chill"),
+            request(app).get("/mixes/mood/buckets/chill"),
+        ]);
+
+        expect(a.status).toBe(200);
+        expect(b.status).toBe(200);
+        expect(b.body.trackIds.filter((id: string) => a.body.trackIds.includes(id))).toEqual([]);
     });
 
     it("answers 400, and keeps the saved mix, when none of the songs sent can be saved", async () => {

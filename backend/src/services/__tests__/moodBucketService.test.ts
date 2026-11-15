@@ -81,8 +81,8 @@ describe("saveUserMoodMix with explicit trackIds", () => {
             mood: MOOD,
             trackIds: explicitTrackIds,
             coverUrls: expectedCoverUrls,
-            servedTrackIds: explicitTrackIds,
         });
+        expect(await moodBucketService.getRememberedTrackIds(USER_ID, MOOD)).toEqual(explicitTrackIds);
     });
 
     it("saving then reading back returns the persisted trackIds in the same order", async () => {
@@ -234,7 +234,7 @@ describe("getUserMoodMix", () => {
         await prisma.userMoodMix.create({
             data: {
                 userId: USER_ID, mood: MOOD, trackIds: ids(1, 2), coverUrls: [cover(1), cover(2)],
-                servedTrackIds: [], generatedAt: new Date("2025-01-01T00:00:00.000Z"),
+                generatedAt: new Date("2025-01-01T00:00:00.000Z"),
             },
         });
 
@@ -255,7 +255,7 @@ describe("getUserMoodMix", () => {
         await prisma.userMoodMix.create({
             data: {
                 userId: USER_ID, mood: MOOD, trackIds: ids(1, 2), coverUrls: [cover(1), cover(2)],
-                servedTrackIds: [], generatedAt: new Date(),
+                generatedAt: new Date(),
             },
         });
 
@@ -267,7 +267,7 @@ describe("getUserMoodMix", () => {
 
     it("returns null for invalid mood", async () => {
         await prisma.userMoodMix.create({
-            data: { userId: USER_ID, mood: "invalid-mood", trackIds: [], coverUrls: [], servedTrackIds: [], generatedAt: new Date() },
+            data: { userId: USER_ID, mood: "invalid-mood", trackIds: [], coverUrls: [], generatedAt: new Date() },
         });
 
         expect(await moodBucketService.getUserMoodMix(USER_ID)).toBeNull();

@@ -10,7 +10,9 @@ jest.mock("../../utils/redis", () => require("./helpers/memoryRedis").memoryRedi
 import { prisma } from "../../utils/db";
 import { moodBucketService, MoodType } from "../moodBucketService";
 import { buildMoodState } from "../moods/state";
+import { MIN_MIX_TRACKS } from "../mixes/artistCap";
 import { pickRecipeStation } from "../../__tests__/helpers/stationPicks";
+import { untilLockWait } from "../../__tests__/helpers/lockWait";
 import {
     removeSyntheticLibrary,
     seedSyntheticLibrary,
@@ -61,6 +63,7 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
     // The worker DB is shared by every suite in this Jest worker: remove our rows.
     afterAll(async () => {
         await prisma.userMoodMix.deleteMany({ where: { userId: { startsWith: "mmp_user" } } });
+        await prisma.userMoodMemory.deleteMany({ where: { userId: { startsWith: "mmp_user" } } });
         await removeSyntheticLibrary(PREFIX);
         await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
         await prisma.$disconnect();
@@ -84,12 +87,14 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
         for (const id of union) expect(excluded).not.toContain(id);
     });
 
-    it("starts over from every member when exclusions leave too few", async () => {
+    it("brings the oldest served songs back when exclusions leave too few, and keeps the newest skipped", async () => {
         const excluded = [...members.get("chill")!];
         const mix = await moodBucketService.getMoodMix("chill", 15, excluded);
-        // A thin mix would be worse than repeating: the draw falls back to every member rather than returning null.
+        // A thin mix would be worse than repeating: the oldest MIN_MIX_TRACKS come back rather than returning null.
         expect(mix).not.toBeNull();
-        expect(mix!.trackIds).toHaveLength(15);
+        expect(mix!.trackIds.length).toBeGreaterThan(0);
+        expect(mix!.trackIds.length).toBeLessThanOrEqual(MIN_MIX_TRACKS);
+        for (const id of mix!.trackIds) expect(excluded.slice(0, MIN_MIX_TRACKS)).toContain(id);
         // Each album's cover once.
         expect(mix!.coverUrls.length).toBeGreaterThan(0);
         expect(new Set(mix!.coverUrls).size).toBe(mix!.coverUrls.length);
@@ -152,8 +157,83 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
 
         const row = await prisma.userMoodMix.findUnique({ where: { userId } });
         expect(row!.trackIds).toEqual([m(0), m(1), m(2)]);
-        // What the user was given is remembered next to the saved mix itself.
-        expect(row!.servedTrackIds).toEqual([m(0), m(1), m(2)]);
+        // What the user was given is remembered for that mood, next to the saved mix itself.
+        const memory = await prisma.userMoodMemory.findUnique({ where: { userId_mood: { userId, mood: "chill" } } });
+        expect(memory!.servedTrackIds).toEqual([m(0), m(1), m(2)]);
+    });
+
+    it("keeps what each mood served when a mix for a different mood is saved", async () => {
+        const userId = "mmp_user_two_moods";
+        await prisma.user.create({ data: { id: userId, username: "mmp-two", passwordHash: "x" } });
+        const party = (i: number) => [...members.get("party")!][i];
+        await moodBucketService.saveUserMoodMix(userId, "chill", 15, [m(0), m(1)]);
+        await moodBucketService.recordServedTracks(userId, "chill", [m(2)]);
+
+        await moodBucketService.saveUserMoodMix(userId, "party", 15, [party(0)]);
+
+        // The saved mix is the party one now, and chill still remembers everything it gave.
+        expect((await prisma.userMoodMix.findUniqueOrThrow({ where: { userId } })).mood).toBe("party");
+        expect(new Set(await moodBucketService.getRememberedTrackIds(userId, "chill"))).toEqual(new Set([m(0), m(1), m(2)]));
+        expect(new Set(await moodBucketService.getRememberedTrackIds(userId, "party"))).toEqual(new Set([party(0)]));
+    });
+
+    it("serves a mix that skips what the mood remembered and remembers it, in one step", async () => {
+        const userId = "mmp_user_serve_mix";
+        await prisma.user.create({ data: { id: userId, username: "mmp-serve-mix", passwordHash: "x" } });
+
+        const first = await moodBucketService.serveMoodMix(userId, "chill", 15);
+        const second = await moodBucketService.serveMoodMix(userId, "chill", 15);
+
+        expect(first).not.toBeNull();
+        expect(second).not.toBeNull();
+        expect(second!.trackIds.filter((id) => first!.trackIds.includes(id))).toEqual([]);
+        expect(new Set(await moodBucketService.getRememberedTrackIds(userId, "chill"))).toEqual(
+            new Set([...first!.trackIds, ...second!.trackIds]),
+        );
+    });
+
+    it("two servings at once draw different mixes, because the second waits for the first to be remembered", async () => {
+        const userId = "mmp_user_simultaneous";
+        await prisma.user.create({ data: { id: userId, username: "mmp-simul", passwordHash: "x" } });
+
+        const [a, b] = await Promise.all([
+            moodBucketService.serveMoodMix(userId, "chill", 15),
+            moodBucketService.serveMoodMix(userId, "chill", 15),
+        ]);
+
+        expect(a!.trackIds).toHaveLength(15);
+        expect(b!.trackIds).toHaveLength(15);
+        expect(b!.trackIds.filter((id) => a!.trackIds.includes(id))).toEqual([]);
+        expect((await moodBucketService.getRememberedTrackIds(userId, "chill")).length).toBe(30);
+    });
+
+    it("a serving waits while another for the same listener and mood is drawing, and not for another mood", async () => {
+        const userId = "mmp_user_lock";
+        await prisma.user.create({ data: { id: userId, username: "mmp-lock", passwordHash: "x" } });
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const holding = prisma.$transaction(
+            async (tx) => {
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mood-serve:${userId}:chill`}, 0))`;
+                await held;
+            },
+            { timeout: 60_000 },
+        );
+        try {
+            // Another mood is not held up.
+            expect(await moodBucketService.serveMoodMix(userId, "party", 15)).not.toBeNull();
+
+            let done = false;
+            const waiting = moodBucketService.serveMoodMix(userId, "chill", 15).then((mix) => ((done = true), mix));
+            await untilLockWait("pg_advisory_xact_lock");
+            expect(done).toBe(false);
+
+            release();
+            expect((await waiting)!.trackIds).toHaveLength(15);
+        } finally {
+            release();
+            await holding;
+        }
     });
 
     it("remembers what a serving gave the user and skips it on the next mix", async () => {

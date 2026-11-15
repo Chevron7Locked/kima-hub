@@ -1048,14 +1048,20 @@ describe("which copy takes over", () => {
     });
 
     describe("a saved mood mix", () => {
-        const mix = (trackIds: string[], servedTrackIds: string[]) =>
-            prisma.userMoodMix.create({
-                data: { userId: `${P}user`, mood: "happy", trackIds: trackIds.map((i) => `${P}${i}`), servedTrackIds: servedTrackIds.map((i) => `${P}${i}`), coverUrls: [], generatedAt: new Date() },
+        const full = (ids: string[]) => ids.map((i) => `${P}${i}`);
+        const bare = (ids: string[]) => ids.map((i) => i.slice(P.length));
+        const remember = (mood: string, servedTrackIds: string[]) =>
+            prisma.userMoodMemory.create({ data: { userId: `${P}user`, mood, servedTrackIds: full(servedTrackIds) } });
+        const mix = async (trackIds: string[], servedTrackIds: string[]) => {
+            await prisma.userMoodMix.create({
+                data: { userId: `${P}user`, mood: "happy", trackIds: full(trackIds), coverUrls: [], generatedAt: new Date() },
             });
+            await remember("happy", servedTrackIds);
+        };
         const saved = async () => {
             const row = await prisma.userMoodMix.findUniqueOrThrow({ where: { userId: `${P}user` } });
-            const bare = (ids: string[]) => ids.map((i) => i.slice(P.length));
-            return { trackIds: bare(row.trackIds), servedTrackIds: bare(row.servedTrackIds), updatedAt: row.updatedAt };
+            const memory = await prisma.userMoodMemory.findUniqueOrThrow({ where: { userId_mood: { userId: `${P}user`, mood: "happy" } } });
+            return { trackIds: bare(row.trackIds), servedTrackIds: bare(memory.servedTrackIds), updatedAt: row.updatedAt, memoryUpdatedAt: memory.updatedAt };
         };
 
         it("follows a retired song to the copy that took its history, in the same place, in the mix and in the songs it was served", async () => {
@@ -1102,6 +1108,24 @@ describe("which copy takes over", () => {
             const { trackIds, servedTrackIds } = await saved();
             expect(trackIds).toEqual(["x", "y"]);
             expect(servedTrackIds).toEqual(["y"]);
+        });
+
+        it("follows and drops retired songs in the memory of every mood, saved mix or none", async () => {
+            await seedGone();
+            await seedCopy("copy");
+            await remember("sad", ["x", "g", "y"]);
+            await remember("party", ["g", "z"]);
+            await remember("chill", ["x"]);
+            const memory = async (mood: string) =>
+                bare((await prisma.userMoodMemory.findUniqueOrThrow({ where: { userId_mood: { userId: `${P}user`, mood } } })).servedTrackIds);
+            const chillBefore = await prisma.userMoodMemory.findUniqueOrThrow({ where: { userId_mood: { userId: `${P}user`, mood: "chill" } } });
+
+            await sweep();
+
+            expect(await memory("sad")).toEqual(["x", "copy", "y"]);
+            expect(await memory("party")).toEqual(["copy", "z"]);
+            // A mood that held no retired song is not touched.
+            expect((await prisma.userMoodMemory.findUniqueOrThrow({ where: { userId_mood: { userId: `${P}user`, mood: "chill" } } })).updatedAt).toEqual(chillBefore.updatedAt);
         });
 
         it("leaves a mix that held no retired song as it was, untouched", async () => {

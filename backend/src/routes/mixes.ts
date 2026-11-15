@@ -137,16 +137,9 @@ router.get("/mood/buckets/:mood", async (req, res) => {
             });
         }
 
-        // Skip what this user was already served, then remember the ids this
-        // mix actually went out with, so the next one doesn't repeat them.
-        const userId = req.user!.id;
-        const remembered = await moodBucketService.getRememberedTrackIds(userId, mood);
-
-        const mix = await moodBucketService.getMoodMix(
-            mood,
-            MOOD_MIX_LIMIT,
-            remembered
-        );
+        // Skip what this user was already served and remember what this mix goes out with, as one step, so two
+        // requests at once are given different mixes.
+        const mix = await moodBucketService.serveMoodMix(req.user!.id, mood, MOOD_MIX_LIMIT);
 
         if (!mix) {
             return res.status(400).json({
@@ -154,8 +147,6 @@ router.get("/mood/buckets/:mood", async (req, res) => {
                 suggestion: "Wait for more tracks to be analyzed",
             });
         }
-
-        await moodBucketService.recordServedTracks(userId, mood, mix.trackIds);
 
         const orderedTracks = await loadTracksInMixOrder(mix.trackIds);
 

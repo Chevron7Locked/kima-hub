@@ -35,7 +35,7 @@ async function clean() {
 const saveMix = (trackIds: string[], mood = "focus") =>
     prisma.userMoodMix.upsert({
         where: { userId: USER },
-        create: { userId: USER, mood, trackIds, coverUrls: [], servedTrackIds: [], generatedAt: GENERATED_AT },
+        create: { userId: USER, mood, trackIds, coverUrls: [], generatedAt: GENERATED_AT },
         update: { mood, trackIds, generatedAt: GENERATED_AT },
     });
 
