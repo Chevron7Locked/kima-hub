@@ -28,3 +28,29 @@ it("tries the notice again on the next read when the first one could not be sent
     await resolveEncryptedSettings({ slskdApiKey: unreadable }, () => []);
     expect(notify).toHaveBeenCalledTimes(2);
 });
+
+it("never lets a notice that is still being sent land after the notice that takes it away", async () => {
+    const groupKey = "unreadable-credential:fanartApiKey";
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    jest.spyOn(notificationService, "notifyAdmins").mockImplementation((async (n: { groupKey?: string }) => {
+        if (n.groupKey !== groupKey) return;
+        order.push("notice starts");
+        await gate;
+        order.push("notice stored");
+    }) as never);
+    jest.spyOn(notificationService, "resolve").mockImplementation((async (key: string) => {
+        if (key === groupKey) order.push("notice taken away");
+    }) as never);
+
+    // one read finds the credential unreadable and is still sending its notice when a later read finds it readable
+    const unreadableRead = resolveEncryptedSettings({ fanartApiKey: unreadable }, () => []);
+    while (!order.includes("notice starts")) await new Promise((resolve) => setTimeout(resolve, 5));
+    const readableRead = resolveEncryptedSettings({ fanartApiKey: null }, () => []);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await Promise.all([unreadableRead, readableRead]);
+
+    expect(order).toEqual(["notice starts", "notice stored", "notice taken away"]);
+});

@@ -1,6 +1,6 @@
 /**
  * The one list of SystemSettings fields stored encrypted, with decrypt-on-read
- * (`resolveEncryptedSettings`) and encrypt-on-write (`encryptSettings`). A stored
+ * (`decryptSettings`) and encrypt-on-write (`encryptSettings`). A stored
  * value that cannot be decrypted is an unreadable credential: it is kept, and
  * reads as null, so a key restored later brings it back and ciphertext is never
  * handed to an integration as if it were a key.
@@ -136,27 +136,49 @@ export function encryptSettings<S extends Record<string, unknown>>(
 // takes its notice away.
 const lastReadable = new Map<EncryptedField, boolean>();
 
-async function noteReadability(field: EncryptedField, readable: boolean): Promise<void> {
+// One field's notices run one after another, so a notice still being sent cannot land after the one that takes it
+// away. A send that has not finished after this long counts as failed, so a hung store cannot hold the field's line.
+const noticeChains = new Map<EncryptedField, Promise<void>>();
+const NOTICE_TIMEOUT_MS = 10_000;
+
+function noteReadability(field: EncryptedField, readable: boolean): Promise<void> {
+    const run = (noticeChains.get(field) ?? Promise.resolve()).then(() => sendNotice(field, readable));
+    noticeChains.set(field, run);
+    return run;
+}
+
+/** Never rejects. */
+async function sendNotice(field: EncryptedField, readable: boolean): Promise<void> {
     if (lastReadable.get(field) === readable) return;
     lastReadable.set(field, readable);
     const groupKey = `unreadable-credential:${field}`;
+    let timer: NodeJS.Timeout | undefined;
     try {
+        const deadline = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("the notification store did not answer in time")), NOTICE_TIMEOUT_MS);
+            timer.unref();
+        });
         if (readable) {
-            await notificationService.resolve(groupKey);
+            await Promise.race([notificationService.resolve(groupKey), deadline]);
             return;
         }
         logger.warn(`[Settings] ${ENCRYPTED_FIELDS[field]} could not be decrypted; kept, and treated as not set`);
-        await notificationService.notifyAdmins({
-            type: "system",
-            title: `${ENCRYPTED_FIELDS[field]} cannot be read`,
-            message:
-                "The stored value could not be decrypted, so it counts as not set. Restore the server's SETTINGS_ENCRYPTION_KEY, or enter the value again in Settings.",
-            groupKey,
-            renotify: true,
-        });
+        await Promise.race([
+            notificationService.notifyAdmins({
+                type: "system",
+                title: `${ENCRYPTED_FIELDS[field]} cannot be read`,
+                message:
+                    "The stored value could not be decrypted, so it counts as not set. Restore the server's SETTINGS_ENCRYPTION_KEY, or enter the value again in Settings.",
+                groupKey,
+                renotify: true,
+            }),
+            deadline,
+        ]);
     } catch (error) {
         // Not delivered, so not noted: the next read tries again.
-        lastReadable.delete(field);
+        if (lastReadable.get(field) === readable) lastReadable.delete(field);
         logger.warn(`[Settings] Could not update the admin notice about ${field}:`, error);
+    } finally {
+        clearTimeout(timer);
     }
 }

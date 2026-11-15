@@ -1,7 +1,7 @@
 /**
  * At-rest encryption for the SystemSettings fields in ENCRYPTED_FIELDS and the
  * User 2FA secret and recovery codes: XChaCha20-Poly1305 with a random 24-byte
- * nonce. `decrypt` fails closed; resolveEncryptedSettings turns a throw into
+ * nonce. `decrypt` fails closed; decryptSettings turns a throw into
  * null. Old AES-256-CBC values still read until rewritten; 2FA rows never are.
  */
 import crypto from "crypto";
