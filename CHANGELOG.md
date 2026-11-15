@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Turning off two-factor or making new recovery codes while another request is changing the same account now says to try again, and your code is not used up.
 - A playback change made just before you close or hide the tab is saved instead of lost.
 - Picking up where another device left off no longer overwrites that device's newer playback with an older one.
 - A shared song's play is no longer kept open by a request the share refused, a shared play that never sent any audio is not counted against the link, and a database failure while counting a play no longer lets the next request play for free.
