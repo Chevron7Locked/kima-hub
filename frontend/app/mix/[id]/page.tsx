@@ -42,7 +42,7 @@ export default function MixPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
+    const { playTracks, addToQueue } = useAudioControls();
     const { playRow } = usePlayRow();
 
     const { data: mix, isLoading, error, refetch } = useMixQuery(mixId);
@@ -66,10 +66,11 @@ export default function MixPage() {
         return new Set(mix?.tracks?.map((track: MixTrack) => track.id) || []);
     }, [mix?.tracks]);
 
-    const isThisMixPlaying = useMemo(() => {
-        if (!isPlaying || !currentTrack || !mix?.tracks?.length) return false;
+    // What the player has loaded is a song of this mix, sounding or paused.
+    const isThisMixCurrent = useMemo(() => {
+        if (!currentTrack || !mix?.tracks?.length) return false;
         return mixTrackIds.has(currentTrack.id);
-    }, [isPlaying, currentTrack, mixTrackIds, mix?.tracks?.length]);
+    }, [currentTrack, mixTrackIds, mix?.tracks?.length]);
 
     const formatTracksForPlayback = (tracks: MixTrack[]) => {
         return tracks.map((track) => ({
@@ -92,17 +93,8 @@ export default function MixPage() {
     const handlePlayMix = () => {
         if (!mix?.tracks || mix.tracks.length === 0) return;
 
-        if (isThisMixPlaying) {
-            if (isPlaying) {
-                pause();
-            } else {
-                resumeWithGesture();
-            }
-            return;
-        }
-
-        const tracks = formatTracksForPlayback(mix.tracks);
-        playTracks(tracks, 0);
+        // This mix pauses or resumes where it is; otherwise the button starts it.
+        playRow(isThisMixCurrent, () => playTracks(formatTracksForPlayback(mix.tracks), 0));
     };
 
     const handlePlayTrack = (index: number, gesture: "press" | "double" = "press") => {
@@ -224,10 +216,10 @@ export default function MixPage() {
                 <div className="flex items-center gap-4">
                     {mix.tracks && mix.tracks.length > 0 && (
                         <PlayDisc
-                            showPause={isThisMixPlaying && isPlaying}
+                            showPause={isThisMixCurrent && isPlaying}
                             onClick={handlePlayMix}
                             shape="circle"
-                            label={isThisMixPlaying && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
+                            label={isThisMixCurrent && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
                         />
                     )}
 

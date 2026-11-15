@@ -146,7 +146,7 @@ export default function PlaylistDetailPage() {
     const { currentTrack, currentQueueKey } = useAudioState();
     const { format: trackFormat } = useTrackFormat();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
+    const { playTracks, addToQueue } = useAudioControls();
     const { playRow } = usePlayRow();
     const playlistId = params.id as string;
 
@@ -390,7 +390,8 @@ export default function PlaylistDetailPage() {
         [playlist?.items, currentQueueKey, currentTrack?.id],
     );
 
-    const isThisPlaylistPlaying = isPlaying && playingItem !== null;
+    // A song of this playlist is what the player has loaded, sounding or paused.
+    const isThisPlaylistCurrent = playingItem !== null;
 
     const totalDuration = useMemo(() => {
         if (!playlist?.items) return 0;
@@ -404,17 +405,11 @@ export default function PlaylistDetailPage() {
     const handlePlayPlaylist = () => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
-        if (isThisPlaylistPlaying) {
-            if (isPlaying) {
-                pause();
-            } else {
-                resumeWithGesture();
-            }
-            return;
-        }
-
-        const queue = playablePlaylist(playlist.items);
-        if (queue) playTracks(queue.tracks, 0);
+        // This playlist pauses or resumes where it is; otherwise the button starts it.
+        playRow(isThisPlaylistCurrent, () => {
+            const queue = playablePlaylist(playlist.items);
+            if (queue) playTracks(queue.tracks, 0);
+        });
     };
 
     const handlePlayTrack = (index: number, gesture: "press" | "double" = "press") => {
@@ -948,10 +943,10 @@ export default function PlaylistDetailPage() {
                     {playlist.items?.some((item: PlaylistItem) => !item.unavailable) && (
                         <button
                             onClick={handlePlayPlaylist}
-                            aria-label={isThisPlaylistPlaying && isPlaying ? "Pause" : "Play all"}
+                            aria-label={isThisPlaylistCurrent && isPlaying ? "Pause" : "Play all"}
                             className="h-12 w-12 rounded-lg bg-brand hover:bg-brand-hover hover:scale-105 flex items-center justify-center transition-all"
                         >
-                            {isThisPlaylistPlaying && isPlaying ? (
+                            {isThisPlaylistCurrent && isPlaying ? (
                                 <Pause className="w-5 h-5 fill-current text-black" />
                             ) : (
                                 <Play className="w-5 h-5 fill-current text-black ml-0.5" />

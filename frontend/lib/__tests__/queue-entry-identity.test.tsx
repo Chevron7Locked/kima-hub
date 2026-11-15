@@ -310,6 +310,51 @@ describe("the button on a playlist row", () => {
     });
 });
 
+describe("the big play button on a playlist", () => {
+    const status = (value: string) => act(async () => engine.setStatus(value));
+    /** The disc over the list: the only Pause or Play all button outside a row. */
+    const disc = () =>
+        [...container.querySelectorAll<HTMLButtonElement>('button[aria-label="Pause"], button[aria-label="Play all"]')].find(
+            (b) => !b.closest("[data-track-index]"),
+        )!;
+
+    it("pauses the playlist while it sounds, without starting it again", async () => {
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        engine.load.mockClear();
+
+        await act(async () => disc().click());
+
+        expect(engine.pause).toHaveBeenCalledTimes(1);
+        expect(engine.load).not.toHaveBeenCalled();
+    });
+
+    it("resumes a paused playlist from where it stopped, not from its first song", async () => {
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        await status("paused");
+        expect(disc().getAttribute("aria-label")).toBe("Play all");
+        engine.load.mockClear();
+
+        await act(async () => disc().click());
+
+        expect(engine.play).toHaveBeenCalledTimes(1);
+        expect(engine.load).not.toHaveBeenCalled();
+        expect(probe.state.currentIndex).toBe(1);
+    });
+
+    it("starts the playlist from its first song when nothing from it is current", async () => {
+        await mountPage();
+
+        await act(async () => disc().click());
+
+        expect(engine.load).toHaveBeenCalledTimes(1);
+        expect(probe.state.currentIndex).toBe(0);
+    });
+});
+
 const other = (id: string) => ({ ...song(id), artist: { name: "x" } }) as unknown as Track;
 const preloadedUrls = () => engine.setExpectedNext.mock.calls.map((c) => c[0]);
 

@@ -1,6 +1,7 @@
 import { Download, Radio, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { MediaActionBar, MediaActionButton } from "@/components/ui/MediaActionBar";
+import { usePlayRow } from "@/hooks/usePlayRow";
 import type { Album, ArtistSource } from "../types";
 
 interface ArtistActionBarProps {
@@ -14,9 +15,8 @@ interface ArtistActionBarProps {
     /** Absent unless the viewer may delete this library artist: no delete button then. */
     onDelete?: () => void;
     isPendingDownload: boolean;
-    isPlaying: boolean;
+    /** What the player has loaded is a song of this artist, sounding or paused. */
     isPlayingThisArtist: boolean;
-    onPause: () => void;
 }
 
 export function ArtistActionBar({
@@ -28,10 +28,9 @@ export function ArtistActionBar({
     onStartRadio,
     onDelete,
     isPendingDownload,
-    isPlaying,
     isPlayingThisArtist,
-    onPause,
 }: ArtistActionBarProps) {
+    const { isPlaying, playRow } = usePlayRow();
     const availableAlbums = albums.filter(
         (album) => album.availability !== "unavailable"
     );
@@ -42,7 +41,8 @@ export function ArtistActionBar({
     return (
         <MediaActionBar
             showPause={showPause}
-            onPlayPause={showPause ? onPause : onPlayAll}
+            // This artist pauses or resumes where it is; otherwise the button starts it.
+            onPlayPause={() => playRow(isPlayingThisArtist, onPlayAll)}
             onShuffle={onShuffle}
             secondaryShape="square"
         >

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { usePublicConfig } from "@/hooks/useQueries";
 import {
     useAudioState,
-    useAudioPlayback,
     useAudioControls,
 } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -33,8 +32,7 @@ import { PageMessage } from "@/components/ui/PageMessage";
 export default function ArtistPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
-    const { playTracks, playStation, pause } = useAudioControls();
+    const { playTracks, playStation } = useAudioControls();
     const { isPendingByMbid } = useDownloadContext();
 
     const {
@@ -186,12 +184,10 @@ export default function ArtistPage() {
                     onStartRadio={handleStartRadio}
                     onDelete={user?.role === "admin" && source === "library" && ownedAlbums.length > 0 ? () => setConfirmingDelete(true) : undefined}
                     isPendingDownload={isPendingByMbid(artist.mbid || "")}
-                    isPlaying={isPlaying}
                     isPlayingThisArtist={
                         currentTrack?.artist?.id === artist.id ||
                         currentTrack?.artist?.name === artist.name
                     }
-                    onPause={pause}
                 />
             </ArtistHero>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useMemo, useState } from "react";
-import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { useAudioState } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
@@ -34,8 +34,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const { canAcquire } = usePublicConfig();
     // Split hooks avoid re-renders from currentTime updates.
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
-    const { pause } = useAudioControls();
 
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [pendingTrackIds, setPendingTrackIds] = useState<string[]>([]);
@@ -200,9 +198,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""
                     )}
-                    isPlaying={isPlaying}
                     isPlayingThisAlbum={currentTrack?.album?.id === album.id}
-                    onPause={pause}
                 />
             </AlbumHero>
 

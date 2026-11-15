@@ -6,6 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React, { act } from "react";
 
+// The bars read the player to pause or resume; these tests are about the delete button, so it is a stand-in.
+vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: false }) }));
+vi.mock("@/lib/audio-controls-context", () => ({
+    useAudioControls: () => ({ pause: vi.fn(), resumeWithGesture: vi.fn() }),
+}));
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 
 import { ArtistActionBar } from "@/features/artist/components/ArtistActionBar";
@@ -43,9 +48,7 @@ const artistBar = (onDelete?: () => void) => (
         onStartRadio={() => {}}
         onDelete={onDelete}
         isPendingDownload={false}
-        isPlaying={false}
         isPlayingThisArtist={false}
-        onPause={() => {}}
     />
 );
 
@@ -58,9 +61,7 @@ const albumBar = (onDelete?: () => void) => (
         onAddToPlaylist={() => {}}
         onDelete={onDelete}
         isPendingDownload={false}
-        isPlaying={false}
         isPlayingThisAlbum={false}
-        onPause={() => {}}
     />
 );
 

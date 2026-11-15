@@ -185,8 +185,7 @@ export default function DiscoverWeeklyPage() {
                 <DiscoverActionBar
                     playlist={playlist}
                     isPlaylistPlaying={isPlaylistPlaying || false}
-                    isPlaying={isPlaying}
-                    onPlayToggle={isPlaylistPlaying && isPlaying ? handleTogglePlay : handlePlayPlaylist}
+                    onPlayAll={handlePlayPlaylist}
                     isGenerating={isGenerating}
                     onCancelGeneration={handleCancelGeneration}
                 />
