@@ -24,6 +24,8 @@ import { isTransactionConflict } from "../utils/dbConflict";
 
 const router = Router();
 
+const ALREADY_ENABLED = "2FA is already enabled";
+
 const loginSchema = z.object({
     username: z.string().refine((name) => normalizeUsername(name) !== ""),
     password: z.string().min(1),
@@ -65,6 +67,8 @@ router.post("/login", async (req, res) => {
             // the stored value is left as it is.
             const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
             if (secret === null) {
+                // The password was right, so this is not a wrong guess: it must not count toward locking the account.
+                webLoginGuesses.giveBack(guess);
                 return res.status(401).json({ error: "Two-factor sign-in is unavailable for this account" });
             }
 
@@ -347,7 +351,7 @@ router.post("/2fa/setup", async (req, res) => {
         }
 
         if (user.twoFactorEnabled) {
-            return res.status(400).json({ error: "2FA is already enabled" });
+            return res.status(400).json({ error: ALREADY_ENABLED });
         }
 
         // Generate secret
@@ -390,7 +394,7 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
         if (current.twoFactorEnabled) {
-            return res.status(400).json({ error: "2FA is already enabled" });
+            return res.status(400).json({ error: ALREADY_ENABLED });
         }
 
         const step = totpStep(secret, token);
@@ -433,7 +437,7 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
             },
         });
         if (written.count !== 1) {
-            return res.status(400).json({ error: "2FA is already enabled" });
+            return res.status(400).json({ error: ALREADY_ENABLED });
         }
 
         // Return the plain recovery codes to the user (only time they'll see them)

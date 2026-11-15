@@ -156,6 +156,13 @@ describe("a credential the key cannot read", () => {
         expect(warn).toHaveBeenCalledTimes(2);
     });
 
+    it("does not count a refusal after the right password as a wrong guess, so it never locks the account", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+
+        for (let i = 0; i < 25; i++) expect((await login()).status).toBe(401);
+    });
+
     it("refuses a sign-in when 2FA is on but no secret is stored, rather than signing in without a code", async () => {
         await twoFactorOn();
         await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: null } });
