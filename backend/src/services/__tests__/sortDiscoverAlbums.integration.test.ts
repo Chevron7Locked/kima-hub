@@ -304,16 +304,23 @@ describe("the sort itself", () => {
     it("marks itself done through the settings save once its albums are filed, so whoever reads the marker is told", async () => {
         await albums({ gwam: discoverDownload });
         await discoverRecord("gwam", discoverDownload);
-        // A listener's failure is only logged, so what it saw is kept to check below.
-        const seen: string[] = [];
+        // The save does not wait for a listener, so the sort can return before this one has read the album: its answer is
+        // what the test waits for. A listener's failure is only logged, so a failed read rejects here and fails the test.
+        let answer!: (where: string) => void;
+        let fail!: (error: unknown) => void;
+        const sawAlbumAt = new Promise<string>((resolve, reject) => ((answer = resolve), (fail = reject)));
         const heard = jest.fn(async () => {
-            seen.push(await location("gwam"));
+            try {
+                answer(await location("gwam"));
+            } catch (error) {
+                fail(error);
+            }
         });
         const signOff = onSystemSettingsChange("test listener", ["discoverAlbumsSortedAt"], heard);
         try {
             await sortDiscoverAlbums();
+            expect(await sawAlbumAt).toBe("DISCOVER");
             expect(heard).toHaveBeenCalledWith(["discoverAlbumsSortedAt"]);
-            expect(seen).toEqual(["DISCOVER"]);
         } finally {
             signOff();
         }

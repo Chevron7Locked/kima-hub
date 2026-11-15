@@ -17,6 +17,7 @@ import { downloadAndStoreImage } from "../../../services/imageStorage";
 import { useShutdownCheck, whenRequestWorkEnded } from "../../../utils/stopCheck";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
+import { scopeArtists } from "../../__tests__/helpers/scopeArtists";
 
 const P = "zz-backfill-stop";
 const download = downloadAndStoreImage as jest.Mock;
@@ -28,8 +29,10 @@ const app = mountAsServer(
     { standIn: true },
 );
 
+const IDLE_LIMIT_MS = 10_000;
 async function idle() {
-    for (let i = 0; i < 400 && (isBackfillInProgress() || getImageBackfillProgress().inProgress); i++) {
+    const until = Date.now() + IDLE_LIMIT_MS;
+    while ((isBackfillInProgress() || getImageBackfillProgress().inProgress) && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 25));
     }
 }
@@ -40,12 +43,16 @@ beforeAll(async () => {
     });
 });
 
+// Both walks see only this file's artist: unscoped they would cover every artist the other suites of a run have made.
+beforeEach(() => scopeArtists(P));
+
 afterEach(async () => {
     await idle();
     useShutdownCheck(() => false);
     jest.restoreAllMocks();
     download.mockClear();
-});
+    // Longer than idle waits, so a backfill that does not end does not fail as a hook that timed out first.
+}, IDLE_LIMIT_MS + 5_000);
 
 afterAll(async () => {
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
@@ -77,10 +84,13 @@ describe("POST /library/image-backfill/start", () => {
 // the batch under way has ended.
 describe("the shutdown's drain and a backfill an admin started", () => {
     const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+    /** Something held until `release`, and a signal (`reached`) that the code under test has got to it. */
     const held = () => {
         let release!: () => void;
+        let reach!: () => void;
         const done = new Promise<void>((resolve) => (release = resolve));
-        return { done, release };
+        const reached = new Promise<void>((resolve) => (reach = resolve));
+        return { done, release, reach, reached };
     };
     async function drainsOnlyAfter(release: () => void) {
         let drained = false;
@@ -96,12 +106,13 @@ describe("the shutdown's drain and a backfill an admin started", () => {
     it("holds the drain while the image backfill's download is under way", async () => {
         const download_ = held();
         download.mockImplementationOnce(async () => {
+            download_.reach();
             await download_.done;
             return null;
         });
 
         await request(app).post("/library/image-backfill/start").expect(200);
-        for (let i = 0; i < 200 && download.mock.calls.length === 0; i++) await flush();
+        await download_.reached;
         expect(download).toHaveBeenCalledTimes(1);
 
         await drainsOnlyAfter(download_.release);
@@ -110,14 +121,14 @@ describe("the shutdown's drain and a backfill an admin started", () => {
     it("holds the drain while the artist recount's batch is under way", async () => {
         const count = held();
         const realCount = prisma.artist.count.bind(prisma.artist) as (...args: unknown[]) => Promise<number>;
-        const counting = jest.spyOn(prisma.artist, "count").mockImplementationOnce((async (...args: unknown[]) => {
+        jest.spyOn(prisma.artist, "count").mockImplementationOnce((async (...args: unknown[]) => {
+            count.reach();
             await count.done;
             return realCount(...args);
         }) as never);
 
         await request(app).post("/library/artist-counts/backfill").expect(200);
-        for (let i = 0; i < 200 && counting.mock.calls.length === 0; i++) await flush();
-        expect(counting).toHaveBeenCalled();
+        await count.reached;
 
         await drainsOnlyAfter(count.release);
     });

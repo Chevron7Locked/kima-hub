@@ -12,19 +12,30 @@ import { prisma } from "../../../utils/db";
 import { isBackfillInProgress } from "../../../services/artistCountsService";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
+import { onlyArtistsStartingWith } from "../../__tests__/helpers/scopeArtists";
 
 const P = "zz-counts-backfill";
 const app = mountAsServer(express().use(express.json()), "/library", artistsRouter, "/api/library", { standIn: true });
 const ask = () => request(app).post("/library/artist-counts/backfill");
 
 /** Waits for the running recount, and every pass it makes, to end. */
+const IDLE_LIMIT_MS = 10_000;
 async function idle() {
-    for (let i = 0; i < 400 && isBackfillInProgress(); i++) await new Promise((r) => setTimeout(r, 25));
+    const until = Date.now() + IDLE_LIMIT_MS;
+    while (isBackfillInProgress() && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
     expect(isBackfillInProgress()).toBe(false);
 }
 
 /** Adds this file's prefix to an artist query's filter, so the recount sees only this file's artists. */
-const mine = (args: any) => ({ ...args, where: { AND: [args?.where ?? {}, { id: { startsWith: P } }] } });
+const mine = onlyArtistsStartingWith(P);
+
+/**
+ * The recount reads artists in batches and counts each artist with its own queries, so its time is the artist count
+ * times the database's speed: on a loaded machine a hundred artists outlast a test's timeout. The recount's reads are
+ * capped at this many artists and the file seeds one more than that, so a pass still reads two batches (and then an
+ * empty one) but over three artists, not a hundred and five.
+ */
+const BATCH = 2;
 
 const gatesOpen: (() => void)[] = [];
 
@@ -62,7 +73,7 @@ function scopeRecount(hold: number[] = []) {
             gate.arrive();
             await gate.opened;
         }
-        return realFindMany(mine(args));
+        return realFindMany(mine({ ...args, take: Math.min(args?.take ?? BATCH, BATCH) }));
     }) as any);
     return {
         passes: () => passes,
@@ -73,9 +84,9 @@ function scopeRecount(hold: number[] = []) {
 }
 
 beforeAll(async () => {
-    // One more than a batch of 100, so a pass reads two batches.
+    // One more than a batch, so a pass reads two batches.
     await prisma.artist.createMany({
-        data: Array.from({ length: 105 }, (_, i) => ({ id: `${P}-ar-${i}`, name: `${P}-${i}`, normalizedName: `${P}-${i}`, identityKey: `${P}-ik-${i}` })),
+        data: Array.from({ length: BATCH + 1 }, (_, i) => ({ id: `${P}-ar-${i}`, name: `${P}-${i}`, normalizedName: `${P}-${i}`, identityKey: `${P}-ik-${i}` })),
     });
 });
 
@@ -83,7 +94,8 @@ afterEach(async () => {
     for (const open of gatesOpen.splice(0)) open();
     await idle();
     jest.restoreAllMocks();
-});
+    // Longer than idle waits, so a recount that does not end fails as that, not as a hook that timed out first.
+}, IDLE_LIMIT_MS + 5_000);
 
 afterAll(async () => {
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
@@ -126,7 +138,7 @@ it("reports a queued extra pass as its own pass, so progress inside a pass never
 
     recount.release(1);
     await recount.reached(2);
-    expect(await status()).toMatchObject({ isRunning: true, pass: 1, processed: 100 });
+    expect(await status()).toMatchObject({ isRunning: true, pass: 1, processed: BATCH });
 
     // The queued ask is answered as the second pass, which starts from zero under its own number.
     recount.release(2);
