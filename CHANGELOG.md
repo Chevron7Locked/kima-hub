@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A shared song you are still listening to keeps its play when another request of the same play fails, so seeking never counts it twice.
+- Soulseek: a connection that cannot be closed cleanly is logged and dropped, so the next reconnect starts clean.
+- A saved mood mix no longer keeps songs removed from your library; a replaced file's copy takes its place.
+- A player that saves only the song it is on, without a queue position, now lands on that song's place in the saved queue.
+- Subsonic apps see a sensible bitrate for ALAC, WAV, AIFF, WavPack, Monkey's Audio and other lossless files instead of 192 or 256 kbps.
 - The player no longer lets an older save that arrives late overwrite the song or position you just changed, and a save that failed is sent again.
 - A tab you come back to checks your other devices straight away and sends any change it had not saved yet.
 - When another device leaves the player pointing at something deleted, this device replaces it with what it is playing instead of stopping.
