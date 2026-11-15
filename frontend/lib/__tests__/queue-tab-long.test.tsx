@@ -20,7 +20,7 @@ vi.mock("@/lib/audio-state-context", () => ({
 }));
 vi.mock("@/lib/audio-controls-context", () => ({
     useAudioControls: () => ({
-        playTracks: () => {},
+        playQueueIndex: () => {},
         pause: () => {},
         resumeWithGesture: () => {},
         removeFromQueue: () => {},

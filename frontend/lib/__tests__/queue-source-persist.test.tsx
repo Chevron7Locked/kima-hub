@@ -231,6 +231,36 @@ describe("songs added to a queue that came from a page", () => {
     });
 });
 
+describe("jumping to another place in the queue", () => {
+    it("keeps the queue, its shuffle order and the page it came from", async () => {
+        await open();
+        await wait(50);
+        const songs = ["c", "d", "e", "f", "g"].map((id) => t(id) as never);
+        await act(async () => probe.controls.playTracks(songs, 0, { source: "album:al-2" }));
+        await act(async () => probe.controls.toggleShuffle());
+        const queueBefore = probe.state.queue;
+        const orderBefore = [...probe.state.shuffleIndices];
+
+        await act(async () => probe.controls.playQueueIndex(3));
+
+        expect(probe.state.currentTrack?.id).toBe("f");
+        expect(probe.state.currentIndex).toBe(3);
+        expect(probe.state.queue).toBe(queueBefore);
+        expect(probe.state.shuffleIndices).toEqual(orderBefore);
+        expect(probe.state.currentQueueSource).toBe("album:al-2");
+    });
+
+    it("leaves a place that is not in the queue alone", async () => {
+        await open();
+        await wait(50);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0, { source: "album:al-2" }));
+        await act(async () => probe.controls.playQueueIndex(7));
+        await act(async () => probe.controls.playQueueIndex(-1));
+        expect(probe.state.currentTrack?.id).toBe("c");
+        expect(probe.state.currentIndex).toBe(0);
+    });
+});
+
 describe("a queue adopted from another device", () => {
     it("brings that device's page with it", async () => {
         const tick = capturePoll();

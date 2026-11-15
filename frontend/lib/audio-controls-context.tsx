@@ -68,6 +68,8 @@ interface AudioControlsContextType {
 
     // Queue controls
     addToQueue: (track: Track) => void;
+    /** Plays the entry at this place of the queue as it is: same entries, same shuffle order, same source. */
+    playQueueIndex: (index: number) => void;
     removeFromQueue: (index: number) => void;
     clearQueue: () => void;
     setUpcoming: (tracks: Track[], preserveOrder?: boolean) => void;
@@ -732,8 +734,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const track = queueRef.current[index];
             if (!track) return;
             currentIndexRef.current = index;
+            state.setPlaybackType("track");
+            state.setCurrentAudiobook(null);
+            state.setCurrentPodcast(null);
             state.setCurrentIndex(index);
             state.setCurrentTrack(track);
+            state.setRepeatOneCount(0);
             setCurrentTimeRef.current(0);
             controllerRef.current?.load(api.getStreamUrl(track.id), { autoplay: true, expectedDurationS: track.duration });
         },
@@ -1648,6 +1654,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             next,
             previous,
             addToQueue,
+            playQueueIndex,
             removeFromQueue,
             clearQueue,
             setUpcoming,
@@ -1678,6 +1685,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             next,
             previous,
             addToQueue,
+            playQueueIndex,
             removeFromQueue,
             clearQueue,
             setUpcoming,

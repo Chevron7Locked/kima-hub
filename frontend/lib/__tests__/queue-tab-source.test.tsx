@@ -1,21 +1,21 @@
 /**
- * Playing another row of the queue panel replays the same queue, so it keeps the page the queue came from: the album's
- * big play button must still say pause or resume afterwards, not start the album over. The audio contexts are stubbed.
+ * Playing another row of the queue panel jumps within the queue as it is: same entries, same shuffle order, and so the
+ * same page the queue came from (the album's big play button still says pause or resume, it does not start over). The
+ * audio contexts are stubbed.
  */
 import { describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 
-const { queue, playTracks, source } = vi.hoisted(() => ({
+const { queue, playTracks, playQueueIndex } = vi.hoisted(() => ({
     queue: Array.from({ length: 4 }, (_, i) => ({ id: `t${i}`, title: `Track ${i}`, duration: 180 })),
     playTracks: vi.fn(),
-    source: { current: "album:a-1" as string | null },
+    playQueueIndex: vi.fn(),
 }));
 vi.mock("@/lib/audio-state-context", () => ({
     useAudioState: () => ({
         currentTrack: queue[0],
         queue,
         currentIndex: 0,
-        currentQueueSource: source.current,
         activeOperation: { type: "none" },
         setQueue: () => {},
     }),
@@ -23,6 +23,7 @@ vi.mock("@/lib/audio-state-context", () => ({
 vi.mock("@/lib/audio-controls-context", () => ({
     useAudioControls: () => ({
         playTracks,
+        playQueueIndex,
         pause: () => {},
         resumeWithGesture: () => {},
         removeFromQueue: () => {},
@@ -54,17 +55,11 @@ const pressRow = async () => {
 };
 
 describe("playing a row of the queue panel", () => {
-    it("keeps the source the queue came from", async () => {
+    it("jumps to that place in the queue, without replacing the queue", async () => {
         playTracks.mockClear();
-        source.current = "album:a-1";
+        playQueueIndex.mockClear();
         await pressRow();
-        expect(playTracks).toHaveBeenCalledWith(queue, 2, { source: "album:a-1" });
-    });
-
-    it("passes no source for a queue that came from nowhere", async () => {
-        playTracks.mockClear();
-        source.current = null;
-        await pressRow();
-        expect(playTracks).toHaveBeenCalledWith(queue, 2, undefined);
+        expect(playQueueIndex).toHaveBeenCalledWith(2);
+        expect(playTracks).not.toHaveBeenCalled();
     });
 });

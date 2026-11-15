@@ -44,8 +44,8 @@ function QueueCover({ coverArt }: { coverArt?: string | null }) {
 
 /** The queue. `withNowPlaying` false leaves out the playing row, for a panel that shows it above. */
 export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }) {
-    const { currentTrack, queue, currentIndex, activeOperation, setQueue, currentQueueSource } = useAudioState();
-    const { playTracks, pause, resumeWithGesture, removeFromQueue, clearQueue } = useAudioControls();
+    const { currentTrack, queue, currentIndex, activeOperation, setQueue } = useAudioState();
+    const { playQueueIndex, pause, resumeWithGesture, removeFromQueue, clearQueue } = useAudioControls();
     const { isPlaying } = useAudioPlayback();
     const [confirmClear, setConfirmClear] = useState(false);
 
@@ -63,11 +63,6 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
         getScrollElement: () => scrollRef.current,
         getItemKey: (row) => `${queue[queueIndex(row)]?.id}-${queueIndex(row)}`,
     });
-
-    const handlePlayFromIndex = (index: number) => {
-        // The same queue, played from another row: it keeps the page it came from.
-        playTracks(queue, index, currentQueueSource ? { source: currentQueueSource } : undefined);
-    };
 
     const handleTogglePlayback = () => {
         if (isPlaying) {
@@ -173,7 +168,7 @@ export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }
                             >
                                 <button
                                     type="button"
-                                    onClick={() => handlePlayFromIndex(index)}
+                                    onClick={() => playQueueIndex(index)}
                                     aria-label={`play ${shownTitle(track)}`}
                                     className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/60"
                                 >
