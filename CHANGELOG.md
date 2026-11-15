@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clearing an artist's name, picture or bio in the editor removes your edit and shows the artist's own again.
+- An artist edit with a malformed field gets a plain error instead of a server error, and changing an artist's MusicBrainz id is saved together with the rest of the edit or not at all.
+- The album editor shows the album's MusicBrainz id, and saving with nothing changed just closes the editor.
 - Starting a new queue, or moving to another song, from the web player or the iOS app resets a Subsonic app's resume point to the start of the song, instead of keeping the place from the old one.
 - Clearing an album or song title in the metadata editor removes your edit and shows the original title again.
 - The web metadata editor saves only what you changed, so editing a title no longer locks in the album's cover, genres and year.
