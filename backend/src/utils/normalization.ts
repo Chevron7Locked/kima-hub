@@ -10,7 +10,7 @@ export function stripTrackSuffix(str: string): string {
   return (
     normalizeApostrophes(str)
       .replace(
-        /\s*-\s*(\d{4}\s+)?(remaster(ed)?|deluxe|bonus|single|radio edit|remix|acoustic|live|mono|stereo|version|edition|mix)(\s+\d{4})?(\s+(version|edition|mix))?.*$/i,
+        /\s*-\s*(\d{4}\s+)?(remaster(ed)?|deluxe|bonus|single|radio edit|remix|acoustic|live|mono|stereo|version|edition|mix)\b(\s+\d{4})?(\s+(version|edition|mix))?.*$/i,
         "",
       )
       .replace(/\s*-\s*\d{4}\s*$/, "")
