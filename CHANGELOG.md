@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The player no longer lets an older save that arrives late overwrite the song or position you just changed, and a save that failed is sent again.
+- A tab you come back to checks your other devices straight away and sends any change it had not saved yet.
+- When another device leaves the player pointing at something deleted, this device replaces it with what it is playing instead of stopping.
+- When a file is replaced by another copy of the same song, its plays, likes and playlist places move to the best copy in your library. A damaged copy still gets them: the playlist shows it as unavailable until the file is fixed.
+- A queue only moves to a copy that can play, and when there are two copies the better one takes over: playable first, then lossless, then higher bitrate.
+- A saved queue's position stays on the right song when some entries were dropped or can't play.
+- The playlists page's text is lowercase like the rest of the app.
 - A shared song counts one play for each person who plays it, and one person's seeking stays one play.
 - A weekly Discover playlist that failed can be made again without the week ending up with no playlist at all.
 - Soulseek: a dropped connection closing late no longer cuts off the new one, and a failed connection says why it failed.
