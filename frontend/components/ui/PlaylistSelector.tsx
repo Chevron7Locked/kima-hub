@@ -40,7 +40,7 @@ interface AddOutcome {
     rejected: number;
 }
 
-const songs = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
+const songCount = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
 
 /** Asks what to do with songs the playlist already holds: one song or all of them get add again / skip, a mix gets add all / add new ones. */
 function RepeatPrompt({
@@ -170,8 +170,10 @@ export function PlaylistSelector({
                     onClose();
                 } else {
                     created.current = { id: playlist.id, name, isPublic };
-                    tally.current = { added: 0, rejected: 0 };
-                    const done = await whileAdding(() => addSongs(playlist.id, trackIds, false));
+                    const done = await whileAdding(() => {
+                        tally.current = { added: 0, rejected: 0 };
+                        return addSongs(playlist.id, trackIds, false);
+                    });
                     if (!done) {
                         await loadPlaylists();
                         return;
@@ -206,8 +208,8 @@ export function PlaylistSelector({
 
         if (trackIds.length === 0) return;
 
-        tally.current = { added: 0, rejected: 0 };
         await whileAdding(async () => {
+            tally.current = { added: 0, rejected: 0 };
             const held = await heldSongs(playlistId);
             const repeated = trackIds.filter((id) => held.has(id));
             if (repeated.length > 0) {
@@ -254,22 +256,23 @@ export function PlaylistSelector({
      * before the add can be stale or have failed, so those are put to the person now, and the dialog stays open.
      */
     const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean) => {
-        let result: { added: number; duplicateIds?: string[]; rejected?: string[] };
+        let result: { added: number; duplicateIds?: string[]; rejected: string[] };
         try {
             result = await addToPlaylist(
                 allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids },
             );
         } catch (error) {
             // When every song is refused the server answers 404 and names them: that is not a failure to retry.
-            const refused = (error as ApiError).data?.rejected;
-            if ((error as ApiError).status !== 404 || !Array.isArray(refused)) throw error;
+            const failure = error as ApiError;
+            const refused = failure.data?.rejected;
+            if (failure.status !== 404 || !Array.isArray(refused)) throw error;
             result = { added: 0, rejected: refused as string[] };
         }
         window.dispatchEvent(
             new CustomEvent("playlist-updated", { detail: { playlistId } })
         );
-        tally.current.added += result.added ?? 0;
-        tally.current.rejected += result.rejected?.length ?? 0;
+        tally.current.added += result.added;
+        tally.current.rejected += result.rejected.length;
         const skipped = result.duplicateIds ?? [];
         if (!allowRepeats && skipped.length > 0) {
             setQuestion({ playlistId, trackIds: skipped, repeated: skipped });
@@ -375,8 +378,8 @@ export function PlaylistSelector({
                 {outcome ? (
                     <div className="p-6 space-y-4">
                         <p className="text-white">
-                            {outcome.added > 0 && `added ${songs(outcome.added)}. `}
-                            {`${songs(outcome.rejected)} couldn't be added.`}
+                            {outcome.added > 0 && `added ${songCount(outcome.added)}. `}
+                            {`${songCount(outcome.rejected)} couldn't be added.`}
                         </p>
                         <div className="flex justify-end">
                             <Button variant="primary" onClick={onClose}>
