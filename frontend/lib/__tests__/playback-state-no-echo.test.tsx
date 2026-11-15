@@ -1039,6 +1039,25 @@ describe("a page that is closing or going to the background", () => {
         expect(server.keptAlive).toEqual([false, true]);
     });
 
+    it("sends a change again, kept alive, when the save on its way as the page goes does not finish", async () => {
+        await open();
+        await wait(1500);
+        // The save already on its way is cancelled with the page (here: it fails), so the flush sends the change itself.
+        server.saveFails = true;
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        server.saveFails = false;
+        server.saveGate = null;
+        await act(async () => release());
+        await wait(100);
+        expect(server.keptAlive).toEqual([false, true]);
+        expect(server.state).toMatchObject({ isShuffle: true });
+    });
+
     it("sends it when the tab becomes hidden, too", async () => {
         await open();
         await wait(1500);

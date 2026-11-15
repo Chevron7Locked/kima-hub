@@ -214,7 +214,10 @@ type SaveOutcome = "saved" | "conflict" | "failed";
 /** A save waiting for the one on its way, with those who asked for a save and wait to hear how it ended. */
 type QueuedSave = { job: PlaybackSave; waiters: Array<(outcome: SaveOutcome) => void> };
 
-/** Ends the wait before the newest save goes out, so that something else sending it first does not send it twice. Whether one was running. */
+/**
+ * Ends the wait before the newest save goes out, so that something else sending it first does not send it twice.
+ * Says whether a wait was running.
+ */
 function cancelWait(s: { timer: ReturnType<typeof setTimeout> | null }): boolean {
     if (s.timer === null) return false;
     clearTimeout(s.timer);
@@ -224,7 +227,8 @@ function cancelWait(s: { timer: ReturnType<typeof setTimeout> | null }): boolean
 
 /**
  * The save to send again, if a change made here is still owed: it failed (`failures`), or the tab was just shown
- * (`now`) and its wait has not run out. The one decision the poll and a page going away share.
+ * (`now`) and its wait has not run out. Never while a save is on its way: the poll waits for it. (A page going away
+ * does not wait: see the flush.)
  */
 function owedSave(s: { latest: PlaybackSave | null; draining: boolean; failures: number }, pending: boolean, now: boolean): PlaybackSave | null {
     return pending && s.latest && !s.draining && (s.failures > 0 || now) ? s.latest : null;
@@ -807,12 +811,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const flush = () => {
             const s = saveRef.current;
             if (!s.latest) return;
+            const sendAsPageGoes = (job: PlaybackSave) => void submitSave({ ...job, keepalive: true });
             if (cancelWait(s)) {
-                void submitSave({ ...s.latest, keepalive: true });
+                sendAsPageGoes(s.latest);
                 return;
             }
-            const owed = owedSave(s, savePendingRef.current, false);
-            if (owed) void submitSave({ ...owed, keepalive: true });
+            // Still owed with no wait running: a save already on its way (the browser cancels it with the page, so it is
+            // sent again, kept alive; if it did finish, the send is a repeat and is skipped), or one that failed.
+            if (savePendingRef.current) sendAsPageGoes(s.latest);
         };
         const flushIfHidden = () => {
             if (document.hidden) flush();
@@ -912,6 +918,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (settledElsewhere()) return;
                 const held = await api.getPlaybackState().catch(() => undefined);
                 // Cleared, or saved again by another device (a newer time than the one that was polled).
+                // `undefined` is a failed look, which says nothing of what the server holds; `null` is no state.
                 if (held === null && mounted) serverKnownRef.current = null;
                 if (!held || new Date(held.updatedAt) > polledAt || settledElsewhere()) return;
                 if (liveRef.current.mediaId) {
@@ -935,7 +942,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (now === null && mounted && !changedHere() && !savePendingRef.current) adoptCleared(null);
                     else {
                         // The server holds nothing: what this device last saved is no longer there, whatever it was.
-                        if (now === null) serverKnownRef.current = null;
+                        if (now === null && mounted) serverKnownRef.current = null;
                         nowOwed = true;
                     }
                 } else {
