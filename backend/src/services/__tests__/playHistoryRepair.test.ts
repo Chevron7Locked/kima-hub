@@ -152,7 +152,8 @@ describe("plays recorded under the listen rule", () => {
 });
 
 describe("Discover plays", () => {
-    // A library song skipped after 10 seconds, then a Discover song skipped after 10 seconds, then a heard library song.
+    // A library song left after 10 seconds, a second library song, 90 seconds later a Discover song left after 10
+    // seconds, then a heard library song much later.
     const history = () => [
         play("l1", 0, 200, "lib1"),
         play("l2", 10, 200, "lib2"),
@@ -167,6 +168,14 @@ describe("Discover plays", () => {
         expect(audit.tracks.map((t) => t.trackId)).toEqual([`${P}lib1`]);
         expect(audit.totalRows).toBe(3);
         expect(audit.totalListens).toBe(3);
+    });
+
+    it("do not bound a library listen from above: with them out of the sequence, only the next library play does", async () => {
+        await given(history());
+        // lib2's next library play is 990 seconds away, so nothing proves it was left; the Discover play 90 seconds
+        // after it would have.
+        const lib2 = (await listensOf(USER)).find((l) => l.trackId === `${P}lib2`);
+        expect(lib2?.verdict).toBe("unclear");
     });
 
     it("are never collapsed or removed by the audit's actions", async () => {

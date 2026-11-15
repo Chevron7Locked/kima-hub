@@ -142,7 +142,7 @@ interface FalseStartTrack {
 }
 
 export interface FalseStartAudit {
-    /** Rows in the table. Not the number of times anything was listened to. */
+    /** Rows of library plays (Discover plays are left out). Not the number of times anything was listened to. */
     totalRows: number;
     /** What those rows actually represent. */
     totalListens: number;

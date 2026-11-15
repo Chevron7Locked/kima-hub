@@ -20,14 +20,16 @@ interface Counter {
     endsAt: number;
 }
 
-/**
- * One try taken at a subject, kept by the caller to give it back. It remembers which counter it was counted in, so a
- * refund can tell whether that count is still the one being held.
- */
+/** One try taken at a subject, kept by the caller to hand back to the limit that gave it. It shows nothing of the count. */
 export interface GuessTry {
-    readonly subject: string;
-    readonly counter: Counter;
-    refunded: boolean;
+    readonly __guessTry: never;
+}
+
+/** What a limit remembers of a try: which counter it was counted in, so a refund can tell whether that is still the one held. */
+interface TryRecord {
+    subject: string;
+    counter: Counter;
+    given: boolean;
 }
 
 /** Counters held per limit: far above the accounts a Kima server has, small enough to cost little memory. */
@@ -42,6 +44,15 @@ export class GuessLimit {
      * counter whose window restarts is moved to the back. So the front is always the oldest and the first to finish.
      */
     private readonly windows = new Map<string, Counter>();
+
+    /** The tries this limit has handed out. Weak, so a try the caller drops costs nothing. */
+    private readonly taken = new WeakMap<GuessTry, TryRecord>();
+
+    private record(subject: string, counter: Counter): GuessTry {
+        const attempt = Object.freeze({}) as GuessTry;
+        this.taken.set(attempt, { subject, counter, given: false });
+        return attempt;
+    }
 
     constructor(
         private readonly max: number,
@@ -62,13 +73,13 @@ export class GuessLimit {
         if (current && current.endsAt > now) {
             if (current.tries >= this.max) return null;
             current.tries++;
-            return { subject, counter: current, refunded: false };
+            return this.record(subject, current);
         }
         this.windows.delete(subject);
         this.makeRoom(now);
         const counter = { tries: 1, endsAt: now + this.windowMs };
         this.windows.set(subject, counter);
-        return { subject, counter, refunded: false };
+        return this.record(subject, counter);
     }
 
     /** Drops finished counters from the front, then the oldest live ones, until one more subject fits. */
@@ -90,10 +101,11 @@ export class GuessLimit {
      * meanwhile, a refund would lower a newer count that never held this try.
      */
     giveBack(attempt: GuessTry): void {
-        if (attempt.refunded) return;
-        attempt.refunded = true;
-        const held = this.windows.get(attempt.subject);
-        if (held !== attempt.counter || held.endsAt <= Date.now()) return;
+        const record = this.taken.get(attempt);
+        if (!record || record.given) return;
+        record.given = true;
+        const held = this.windows.get(record.subject);
+        if (held !== record.counter || held.endsAt <= Date.now()) return;
         if (held.tries > 0) held.tries--;
     }
 }
