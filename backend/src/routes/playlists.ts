@@ -11,7 +11,7 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
-import { createPlaylist, MAX_KEY_LENGTH } from "../services/playlistCreate";
+import { createPlaylist, MAX_KEY_LENGTH, withoutKey } from "../services/playlistCreate";
 import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
@@ -136,7 +136,7 @@ router.get("/", async (req, res) => {
         });
 
         const playlistsWithCounts = playlists.map((playlist) => ({
-            ...playlist,
+            ...withoutKey(playlist),
             trackCount: playlist._count.items,
             isOwner: playlist.userId === userId,
             isHidden: hiddenPlaylistIds.has(playlist.id),
@@ -269,7 +269,7 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
         const displayMerged = reversed ? [...mergedItems].reverse() : mergedItems;
 
         res.json({
-            ...playlist,
+            ...withoutKey(playlist),
             isOwner: playlist.userId === userId,
             isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: playlist.items.length,
@@ -302,7 +302,7 @@ async function updatePlaylist(req: Request, res: Response) {
         });
 
         announcePlaylistChange(req.user!.id, playlist.id);
-        res.json(playlist);
+        res.json(withoutKey(playlist));
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res

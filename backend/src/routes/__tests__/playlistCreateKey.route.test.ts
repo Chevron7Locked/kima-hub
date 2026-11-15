@@ -118,6 +118,24 @@ describe("POST /playlists with an Idempotency-Key", () => {
         expect((await create(userA, `${MARK} quiet`, "key-0006-aaaa")).body).not.toHaveProperty("idempotencyKey");
     });
 
+    it("does not expose the key in any other answer: the list (also to another person), one playlist, an edit", async () => {
+        const made = await create(userA, `${MARK} shared`, "key-0007-aaaa", true);
+        const id = made.body.id as string;
+
+        const list = await request(app).get("/playlists").set("Authorization", as(userB));
+        const listed = (list.body as Array<{ id: string }>).find((p) => p.id === id);
+        expect(listed).toBeDefined();
+        expect(listed).not.toHaveProperty("idempotencyKey");
+
+        const one = await request(app).get(`/playlists/${id}`).set("Authorization", as(userA));
+        expect(one.status).toBe(200);
+        expect(one.body).not.toHaveProperty("idempotencyKey");
+
+        const edited = await request(app).patch(`/playlists/${id}`).set("Authorization", as(userA)).send({ name: `${MARK} renamed` });
+        expect(edited.status).toBe(200);
+        expect(edited.body).not.toHaveProperty("idempotencyKey");
+    });
+
     it("refuses a key longer than 128 characters", async () => {
         const res = await create(userA, `${MARK} long`, "k".repeat(129));
 

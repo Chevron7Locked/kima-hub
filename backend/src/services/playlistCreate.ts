@@ -8,7 +8,7 @@ export const MAX_KEY_LENGTH = 128;
 type NewPlaylist = { name: string; isPublic: boolean };
 
 /** The row as the API shows it: the key is bookkeeping, not part of the playlist. */
-function shown<T extends { idempotencyKey: string | null }>(row: T): Omit<T, "idempotencyKey"> {
+export function withoutKey<T extends { idempotencyKey: string | null }>(row: T): Omit<T, "idempotencyKey"> {
     const { idempotencyKey: _key, ...playlist } = row;
     return playlist;
 }
@@ -19,23 +19,23 @@ function shown<T extends { idempotencyKey: string | null }>(row: T): Omit<T, "id
  * always makes a new one.
  */
 export async function createPlaylist(userId: string, data: NewPlaylist, key?: string) {
-    if (!key) return shown(await prisma.playlist.create({ data: { userId, ...data } }));
+    if (!key) return withoutKey(await prisma.playlist.create({ data: { userId, ...data } }));
 
     // Forget an expired key without touching the old playlist's own fields (a normal update would bump `updatedAt`).
     const expired = new Date(Date.now() - KEY_LIFETIME_MS);
     await prisma.$executeRaw`UPDATE "Playlist" SET "idempotencyKey" = NULL WHERE "userId" = ${userId} AND "idempotencyKey" = ${key} AND "createdAt" < ${expired}`;
 
-    const made = () => prisma.playlist.findUnique({ where: { userId_idempotencyKey: { userId, idempotencyKey: key } } });
-    const existing = await made();
-    if (existing) return shown(existing);
+    const findByKey = () => prisma.playlist.findUnique({ where: { userId_idempotencyKey: { userId, idempotencyKey: key } } });
+    const existing = await findByKey();
+    if (existing) return withoutKey(existing);
 
     try {
-        return shown(await prisma.playlist.create({ data: { userId, ...data, idempotencyKey: key } }));
+        return withoutKey(await prisma.playlist.create({ data: { userId, ...data, idempotencyKey: key } }));
     } catch (error) {
         // The same key arrived at the same moment and won the insert.
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-            const winner = await made();
-            if (winner) return shown(winner);
+            const winner = await findByKey();
+            if (winner) return withoutKey(winner);
         }
         throw error;
     }
