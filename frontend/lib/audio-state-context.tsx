@@ -429,7 +429,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         liveRef.current = { playbackType, mediaId };
     }, [playbackType, mediaId]);
     // The time the server last answered with, kept in step at once (the effect that mirrors the state lags a render).
+    // It only moves forward: saves sent beside each other can be answered in the other order, and the older answer
+    // must not make the newer state look like another device's.
     const markSynced = useCallback((at: Date) => {
+        if (lastServerSyncRef.current && at <= lastServerSyncRef.current) return;
         lastServerSyncRef.current = at;
         setLastServerSync(at);
     }, []);

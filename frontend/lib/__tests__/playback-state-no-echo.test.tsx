@@ -28,6 +28,8 @@ const server = vi.hoisted(() => ({
     stateReads: 0,
     /** Holds a read (after the first `readsToPass`) until it is let go; it answers what the server held when asked. */
     readGate: null as Promise<void> | null,
+    /** One entry per save that is written: its reply is held until that gate opens (null: answered at once). */
+    replyGates: [] as Array<Promise<void> | null>,
     readsToPass: 0,
     /** Runs as a save reaches the server, before it is written: another device saving in the meantime. */
     beforeSave: null as (() => void) | null,
@@ -82,6 +84,8 @@ vi.mock("@/lib/api", () => {
                 // The server holds what it was last sent, as of its own clock.
                 const updatedAt = new Date(server.now()).toISOString();
                 server.state = { ...held, updatedAt };
+                const replyGate = server.replyGates.shift();
+                if (replyGate) await replyGate;
                 return { updatedAt };
             } finally {
                 server.savesInFlight--;
@@ -203,6 +207,7 @@ beforeEach(() => {
     server.stateReads = 0;
     server.readGate = null;
     server.readsToPass = 0;
+    server.replyGates = [];
     server.beforeSave = null;
     server.refused = [];
     server.saveAnswers409 = false;
@@ -997,6 +1002,38 @@ describe("a read that began before this device's own save landed", () => {
         await act(async () => probe.controls.toggleShuffle());
         await wait(1500);
         expect(server.saveAttempts).toBe(1);
+    }, 15_000);
+});
+
+describe("replies that arrive out of order", () => {
+    it("never move the time this device last saw back, so the state it saved last is not taken for another device's", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        // The server's clock only moves forward, a tick per save.
+        let clock = Date.now() + 1000;
+        server.now = () => (clock += 10);
+        let releaseFirst: () => void = () => undefined;
+        server.replyGates = [new Promise<void>((resolve) => { releaseFirst = resolve; }), null];
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        // The first save is written, its reply held. As the page goes the same state is sent again beside it: written
+        // later, answered at once.
+        expect(server.saves).toHaveLength(1);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saves).toHaveLength(2);
+        const lastWritten = String(server.state?.updatedAt);
+        // The older save's reply comes last.
+        await act(async () => releaseFirst());
+        await wait(50);
+        // A state no newer than the last one written is not another device's: it is not taken up here.
+        server.state = {
+            playbackType: "track", trackId: "e", audiobookId: null, podcastId: null, queue: [t("e"), t("f")], currentIndex: 0,
+            isShuffle: false, updatedAt: lastWritten,
+        };
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("a");
     }, 15_000);
 });
 
