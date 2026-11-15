@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Asking for the same download twice while the first is being set up returns that download** instead of an error.
+- **Long background tasks stop if they lose their lock** (for example when Redis restarts) instead of carrying on beside a second copy; generating Discover Weekly then says it is temporarily unavailable.
+- **Clearing mix caches no longer lets two familiarity scans run at once.**
 - **A playlist's songs no longer carry their file paths or analysis details** to people viewing it; only what is needed to list and play them.
 - **Retrying a new playlist with a different name or visibility makes that playlist** instead of returning the earlier one.
 - **Following playback from another device no longer depends on this device's clock**, and a song you just started here is no longer replaced by another device's older state, even if saving it failed. A podcast episode or audiobook that failed to restore is tried again on the next check.
