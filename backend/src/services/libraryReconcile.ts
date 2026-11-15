@@ -1,7 +1,9 @@
 /**
  * Library reconcile (`delete` mode): retire tracks an earlier scan flagged missing and this
  * scan still cannot find. Every retirement is snapshotted to RemovalLog (with its cache
- * artifacts) before the delete, and a mass disappearance stands the sweep down.
+ * artifacts) before the delete, and a mass disappearance stands the sweep down. A song whose plays would move while a
+ * listener's play history is being repaired is left for the next sweep, never waited for. A retired song also leaves
+ * every saved queue.
  */
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -10,7 +12,7 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { announcePlaylistsChanged, playlistsHoldingTracks, type HeldPlaylist } from "./playlistEvents";
-import { lockPlayHistoryOfListeners, PLAY_HISTORY_REPAIR_MAX_MS } from "./playRecording";
+import { songsWithBusyPlayHistory } from "./playRecording";
 
 interface ReconcileResult {
     /**
@@ -65,7 +67,22 @@ export async function reconcileDeletedTracks(
     });
     if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
 
-    const ids = missing.map((t) => t.id);
+    // Hold every song's row first. A play reported for one of them waits on its row (the foreign key), so from here the
+    // listeners and plays this sweep reads are the song's last: none lands between moving them and deleting the song.
+    await tx.$queryRaw`SELECT id FROM "Track" WHERE id IN (${Prisma.join(missing.map((t) => t.id))}) ORDER BY id FOR UPDATE`;
+
+    // A song whose plays move to another copy waits for no repair of its listeners' history (a scan never blocks behind
+    // a per-user maintenance job): it stays exactly as it is for the next sweep, and the rest carry on.
+    const pairsFound = await findReplacements(tx, missing.map((t) => t.id));
+    const busy = await songsWithBusyPlayHistory(tx, pairsFound.map((p) => p.gone));
+    const retiring = missing.filter((t) => !busy.has(t.id));
+    const pairs = pairsFound.filter((p) => !busy.has(p.gone));
+    if (busy.size > 0) {
+        logger.info(`[RECONCILE] ${busy.size} track(s) left for the next sweep: a listener's play history is being repaired`);
+    }
+    if (retiring.length === 0) return { removed: 0, artifacts: [], playlists: [] };
+
+    const ids = retiring.map((t) => t.id);
 
     const caches = await tx.transcodedFile.findMany({
         where: { trackId: { in: ids } },
@@ -83,10 +100,10 @@ export async function reconcileDeletedTracks(
 
     // A file replaced by another copy of the same song (an album upgraded from mp3 to flac, say) hands its history
     // to the copy before it goes: plays, likes, playlist places, bookmarks and audit choices.
-    const replacedBy = await carryHistoryToReplacements(tx, ids);
+    const replacedBy = await carryHistoryToReplacements(tx, pairs);
 
     await tx.removalLog.createMany({
-        data: missing.map((t) => ({
+        data: retiring.map((t) => ({
             filePath: t.filePath,
             title: t.title,
             artistName: t.album.artist.name,
@@ -109,6 +126,7 @@ export async function reconcileDeletedTracks(
         where: { trackId: { in: ids } },
         data: { trackId: null },
     });
+    await dropFromSavedQueues(tx, ids);
 
     await tx.track.deleteMany({ where: { id: { in: ids } } });
 
@@ -120,12 +138,50 @@ export async function reconcileDeletedTracks(
 }
 
 /**
- * For each retiring track, the live track that is the same song on the same album (same disc and track number,
- * same title ignoring case), and the history moved onto it. A user's like, bookmark or audit choice already on the
- * copy stays as it is, and the retiring row's duplicate goes with it. Every playlist entry moves, a playlist holding
- * the copy as well now holding it twice.
+ * Takes the retired songs out of every saved queue, so no queue holds an entry that fails at play time. The saved
+ * index keeps pointing at the same song; when that song itself was dropped it points at the next one that remains
+ * (the last, when none follows), from its start. A queue left with nothing is emptied with its source, and a queue
+ * that held no retired song is not touched. The queue rows are locked while they are read, so a save by a client
+ * cannot be overwritten with the older queue.
  */
-async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Map<string, string>> {
+async function dropFromSavedQueues(tx: Prisma.TransactionClient, retired: string[]): Promise<void> {
+    const states = await tx.$queryRaw<Array<{ userId: string; queue: unknown; currentIndex: number }>>`
+        SELECT "userId", queue, "currentIndex" FROM "PlaybackState"
+         WHERE queue IS NOT NULL
+           AND EXISTS (
+                 SELECT 1
+                   FROM jsonb_array_elements(CASE WHEN jsonb_typeof(queue) = 'array' THEN queue ELSE '[]'::jsonb END) AS entry
+                  WHERE entry ->> 'id' IN (${Prisma.join(retired)}))
+         ORDER BY "userId"
+           FOR UPDATE`;
+    const gone = new Set(retired);
+    const retiredEntry = (entry: unknown) =>
+        typeof entry === "object" && entry !== null && gone.has(String((entry as { id?: unknown }).id));
+    for (const { userId, queue, currentIndex } of states) {
+        const entries = queue as unknown[];
+        const kept = entries.filter((entry) => !retiredEntry(entry));
+        const saved = Math.min(Math.max(currentIndex, 0), entries.length - 1);
+        const keptBefore = entries.slice(0, saved).filter((entry) => !retiredEntry(entry)).length;
+        const currentDropped = retiredEntry(entries[saved]);
+        await tx.playbackState.update({
+            where: { userId },
+            data:
+                kept.length === 0
+                    ? { queue: Prisma.DbNull, queueSource: null, currentIndex: 0, position: 0 }
+                    : {
+                          queue: kept as Prisma.InputJsonArray,
+                          currentIndex: Math.min(keptBefore, kept.length - 1),
+                          ...(currentDropped ? { position: 0 } : {}),
+                      },
+        });
+    }
+}
+
+/**
+ * For each retiring track, the live track that is the same song on the same album (same disc and track number,
+ * same title ignoring case).
+ */
+async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Array<{ gone: string; kept: string }>> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
     const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; goneTitle: string; keptTitle: string }>>`
         SELECT g.id AS gone, k.id AS kept, g.title AS "goneTitle", k.title AS "keptTitle"
@@ -144,9 +200,17 @@ async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: str
         if (row.goneTitle.toLowerCase() !== row.keptTitle.toLowerCase()) continue;
         if (pairs.at(-1)?.gone !== row.gone) pairs.push({ gone: row.gone, kept: row.kept });
     }
-    // Plays move under the shared play-history lock of each listener they belong to, so a repair of that history (which
-    // reads, judges and deletes under the exclusive one) never sees it change in the middle.
-    if (pairs.length > 0) await lockPlayHistoryOfListeners(tx, pairs.map((p) => p.gone));
+    return pairs;
+}
+
+/**
+ * Moves the history of each replaced song onto its copy. A user's like, bookmark or audit choice already on the
+ * copy stays as it is, and the retiring row's duplicate goes with it. Every playlist entry moves, a playlist holding
+ * the copy as well now holding it twice. The caller holds the shared play-history lock of every listener whose plays
+ * move, so a repair of that history (which reads, judges and deletes under the exclusive one) never sees it change in
+ * the middle.
+ */
+async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: Array<{ gone: string; kept: string }>): Promise<Map<string, string>> {
     for (const { gone, kept } of pairs) {
         await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
         await tx.$executeRaw`
@@ -191,9 +255,7 @@ export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult
     }
     // Retiring hundreds of tracks cascades through plays, stages and embeddings: Prisma's 5 s default would roll
     // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.
-    // A repair of a listener's play history may hold their lock for up to PLAY_HISTORY_REPAIR_MAX_MS, and moving their
-    // plays waits for it, so the sweep is allowed that long on top.
-    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 + PLAY_HISTORY_REPAIR_MAX_MS });
+    const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 });
     await unlinkArtifacts(res.artifacts);
     announcePlaylistsChanged(res.playlists);
     return { ...res, skipped: false };

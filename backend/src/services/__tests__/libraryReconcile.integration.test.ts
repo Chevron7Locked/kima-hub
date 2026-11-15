@@ -5,11 +5,12 @@
  * refs are nulled (never deleted); the audit row snapshots everything; artifact paths
  * are absolute transcode-cache paths — client device paths appear nowhere.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
 import { eventBus, type SSEEvent } from "../eventBus";
-import { lockPlayHistory } from "../playRecording";
+import { lockPlayHistory, recordPlay } from "../playRecording";
 
 const P = "recon";
 const MIN = 60_000;
@@ -286,7 +287,6 @@ describe("reconcileDeletedTracks", () => {
 
     describe("moving plays to the copy of a replaced song", () => {
         const OTHER = `${P}user2`;
-        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
         async function seedReplacedSongPlayedBy(...users: string[]) {
             await prisma.track.create({
@@ -325,21 +325,44 @@ describe("reconcileDeletedTracks", () => {
             await prisma.user.deleteMany({ where: { id: OTHER } });
         });
 
-        it("waits for a repair of that listener's history, then moves the plays: none moves in the middle of it", async () => {
+        async function seedSecondReplacedSong(playedBy: string) {
+            await prisma.track.create({
+                data: { id: `${P}mp3b`, albumId: `${P}alb`, title: "Second", trackNo: 2, duration: 200, filePath: `/tmp/${P}mp3b.mp3`,
+                    fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+            });
+            await prisma.track.create({
+                data: { id: `${P}flacb`, albumId: `${P}alb`, title: "Second", trackNo: 2, duration: 200, filePath: `/tmp/${P}flacb.flac`,
+                    fileModified: new Date(), fileSize: 1 },
+            });
+            await prisma.play.create({ data: { userId: playedBy, trackId: `${P}mp3b`, playedAt: new Date(Date.now() - 3 * MIN) } });
+        }
+
+        it("never waits for a repair of that listener's history: the song stays as it is for the next sweep, the rest retire now", async () => {
             await seedReplacedSongPlayedBy(`${P}user`);
+            await prisma.user.create({ data: { id: OTHER, username: OTHER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+            await seedSecondReplacedSong(OTHER);
             const repair = await repairHolding(`${P}user`);
             const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
             try {
-                let finished = false;
-                const sweep = runReconcile(scanStartedAt()).then((r) => ((finished = true), r));
-                await sleep(500);
+                const started = Date.now();
+                const res = await runReconcile(scanStartedAt());
+                expect(Date.now() - started).toBeLessThan(5_000);
 
-                expect(finished).toBe(false);
+                // The song whose listener is being repaired is untouched: still there, its play still on it.
+                expect(res.removed).toBe(1);
+                expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).not.toBeNull();
                 expect(await prisma.play.count({ where: { trackId: `${P}mp3` } })).toBe(1);
+                expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(0);
+                expect(await prisma.removalLog.count({ where: { filePath: `/tmp/${P}mp3.mp3` } })).toBe(0);
+                // The rest carried on.
+                expect(await prisma.track.findUnique({ where: { id: `${P}mp3b` } })).toBeNull();
+                expect(await prisma.play.count({ where: { trackId: `${P}flacb` } })).toBe(1);
 
                 repair.release();
                 await repair.done;
-                expect((await sweep).removed).toBe(1);
+                const next = await runReconcile(scanStartedAt());
+                expect(next.removed).toBe(1);
+                expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).toBeNull();
                 expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(1);
             } finally {
                 repair.release();
@@ -347,27 +370,18 @@ describe("reconcileDeletedTracks", () => {
             }
         });
 
-        it("does not deadlock when another listener's repair is running while it moves two listeners' plays", async () => {
+        it("leaves a song alone when any one of its listeners is busy: none of its plays moves", async () => {
             await seedReplacedSongPlayedBy(`${P}user`, OTHER);
-            // The sweep locks the first listener, then waits for the second. A repair of the first now queues behind the
-            // sweep's shared lock, and the sweep finishes once the second's repair lets go, so nothing waits in a circle.
             const repair = await repairHolding(OTHER);
             const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
             try {
-                const sweep = runReconcile(scanStartedAt());
-                await sleep(500);
-                const repairOfFirst = prisma.$transaction(async (tx) => {
-                    await lockPlayHistory(tx, `${P}user`, { exclusive: true });
-                    await tx.play.deleteMany({ where: { userId: `${P}user`, id: "never" } });
-                }, { timeout: 30_000 });
-                await sleep(300);
-                repair.release();
-
-                await Promise.all([repair.done, repairOfFirst]);
-                expect((await sweep).removed).toBe(1);
-                expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(2);
+                expect((await runReconcile(scanStartedAt())).removed).toBe(0);
+                expect(await prisma.play.count({ where: { trackId: `${P}mp3` } })).toBe(2);
+                expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(0);
+                expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).not.toBeNull();
             } finally {
                 repair.release();
+                await repair.done;
                 spy.mockRestore();
             }
         });
@@ -384,6 +398,145 @@ describe("reconcileDeletedTracks", () => {
                 await repair.done;
                 spy.mockRestore();
             }
+        });
+    });
+
+    it("a play reported for a retiring song while the sweep is under way is moved or refused, never recorded and lost", async () => {
+        const LATE = `${P}late`;
+        await prisma.user.create({ data: { id: LATE, username: LATE, passwordHash: "x", role: "user", tokenVersion: 0 } });
+        await prisma.track.create({
+            data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.track.create({
+            data: { id: `${P}flac`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
+                fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.play.create({ data: { userId: `${P}user`, trackId: `${P}mp3`, playedAt: new Date(Date.now() - 3 * MIN) } });
+
+        // A listener with no history on the song reports a play (the app was offline, say) after the sweep has moved the
+        // existing plays and just before it deletes the song.
+        let report: ReturnType<typeof recordPlay> | undefined;
+        const midSweep = (tx: Prisma.TransactionClient) => new Proxy(tx, {
+            get(target, key) {
+                const value = (target as any)[key];
+                if (key !== "track") return typeof value === "function" ? value.bind(target) : value;
+                return new Proxy(value, {
+                    get(model, method) {
+                        const fn = model[method];
+                        if (method !== "deleteMany") return typeof fn === "function" ? fn.bind(model) : fn;
+                        return async (...args: unknown[]) => {
+                            report = recordPlay({ userId: LATE, trackId: `${P}mp3`, clientAttestedComplete: true });
+                            await new Promise((resolve) => setTimeout(resolve, 500));
+                            return fn.apply(model, args);
+                        };
+                    },
+                });
+            },
+        }) as Prisma.TransactionClient;
+
+        try {
+            await prisma.$transaction((tx) => reconcileDeletedTracks(midSweep(tx), scanStartedAt()));
+            const outcome = await report!;
+
+            expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).toBeNull();
+            // Told it was recorded means it is in the history, on the copy; otherwise it was refused and nothing was written.
+            expect(await prisma.play.count({ where: { userId: LATE } })).toBe(outcome.recorded ? 1 : 0);
+            expect(await prisma.play.count({ where: { userId: LATE, trackId: `${P}flac` } })).toBe(outcome.recorded ? 1 : 0);
+            expect(await prisma.play.count({ where: { userId: `${P}user`, trackId: `${P}flac` } })).toBe(1);
+        } finally {
+            await prisma.play.deleteMany({ where: { userId: LATE } });
+            await prisma.user.deleteMany({ where: { id: LATE } });
+        }
+    });
+
+    describe("saved queues", () => {
+        const entry = (id: string) => ({ id, title: `${id} title`, displayTitle: null, duration: 200, artist: null, album: null });
+        const OTHER_Q = `${P}user3`;
+
+        async function seedQueue(userId: string, ids: string[], currentIndex: number, extra: { queueSource?: string; position?: number } = {}) {
+            await prisma.playbackState.upsert({
+                where: { userId },
+                create: { userId, playbackType: "track", trackId: ids[currentIndex] ?? null, queue: ids.map(entry), currentIndex, queueSource: extra.queueSource ?? null, position: extra.position ?? 0 },
+                update: { trackId: ids[currentIndex] ?? null, queue: ids.map(entry), currentIndex, queueSource: extra.queueSource ?? null, position: extra.position ?? 0 },
+            });
+        }
+        async function savedQueue(userId: string) {
+            const row = await prisma.playbackState.findUnique({ where: { userId } });
+            return { ids: (row!.queue as Array<{ id: string }> | null)?.map((e) => e.id) ?? null, index: row!.currentIndex, row: row! };
+        }
+
+        beforeEach(async () => {
+            for (const id of ["a", "b", "c", "d", "e"]) await seedTrack(`${P}q${id}`, ["b", "d"].includes(id) ? { missingMinutesAgo: 5 } : {});
+        });
+        afterEach(async () => {
+            await prisma.playbackState.deleteMany({ where: { userId: OTHER_Q } });
+            await prisma.user.deleteMany({ where: { id: OTHER_Q } });
+        });
+
+        const sweep = () => prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+        const q = (...letters: string[]) => letters.map((l) => `${P}q${l}`);
+
+        it("drops retired songs from the queue and keeps the index on the same song", async () => {
+            await seedQueue(`${P}user`, q("a", "b", "c", "d", "e"), 4, { queueSource: "album:x" });
+            await sweep();
+            const saved = await savedQueue(`${P}user`);
+            expect(saved.ids).toEqual(q("a", "c", "e"));
+            expect(saved.index).toBe(2);
+            expect(saved.ids![saved.index]).toBe(`${P}qe`);
+            // Every entry still came from the page that started the queue.
+            expect(saved.row.queueSource).toBe("album:x");
+        });
+
+        it("points at the next remaining song when the current one was dropped", async () => {
+            await seedQueue(`${P}user`, q("a", "b", "c", "d", "e"), 1, { position: 4000 });
+            await sweep();
+            const saved = await savedQueue(`${P}user`);
+            expect(saved.ids).toEqual(q("a", "c", "e"));
+            expect(saved.ids![saved.index]).toBe(`${P}qc`);
+            expect(saved.row.trackId).toBeNull();
+            // The offset into a song that is gone means nothing for the next one.
+            expect(saved.row.position).toBe(0);
+        });
+
+        it("points at the last remaining song when the current one was dropped at the end", async () => {
+            await seedQueue(`${P}user`, q("a", "c", "d"), 2);
+            await sweep();
+            const saved = await savedQueue(`${P}user`);
+            expect(saved.ids).toEqual(q("a", "c"));
+            expect(saved.index).toBe(1);
+        });
+
+        it("empties the queue, its source and its index when every song in it was retired", async () => {
+            await seedQueue(`${P}user`, q("b", "d"), 1, { queueSource: "album:x", position: 500 });
+            await sweep();
+            const saved = await savedQueue(`${P}user`);
+            expect(saved.ids).toBeNull();
+            expect(saved.index).toBe(0);
+            expect(saved.row.queueSource).toBeNull();
+            expect(saved.row.position).toBe(0);
+        });
+
+        it("fixes every user's queue and leaves one with no retired song exactly as it was", async () => {
+            await prisma.user.create({ data: { id: OTHER_Q, username: OTHER_Q, passwordHash: "x", role: "user", tokenVersion: 0 } });
+            await seedQueue(`${P}user`, q("d", "a", "c"), 1);
+            await seedQueue(OTHER_Q, q("a", "c", "e"), 2, { queueSource: "playlist:y", position: 900 });
+            const before = await savedQueue(OTHER_Q);
+            await sweep();
+            expect((await savedQueue(`${P}user`)).ids).toEqual(q("a", "c"));
+            expect((await savedQueue(`${P}user`)).index).toBe(0);
+            const after = await savedQueue(OTHER_Q);
+            expect(after.ids).toEqual(before.ids);
+            expect(after.index).toBe(2);
+            expect(after.row.queueSource).toBe("playlist:y");
+            expect(after.row.position).toBe(900);
+            expect(after.row.updatedAt).toEqual(before.row.updatedAt);
+        });
+
+        it("leaves a queue that is not a list alone", async () => {
+            await prisma.playbackState.create({ data: { userId: `${P}user`, playbackType: "track", queue: { odd: true } } });
+            await expect(sweep()).resolves.toMatchObject({ removed: 2 });
+            expect((await prisma.playbackState.findUnique({ where: { userId: `${P}user` } }))!.queue).toEqual({ odd: true });
         });
     });
 

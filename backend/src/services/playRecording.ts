@@ -5,7 +5,7 @@
  * not a pass; half a length has no 30-second floor.
  */
 
-import { ListenSource, type Prisma } from "@prisma/client";
+import { ListenSource, Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { listenBrainzService } from "./listenBrainz";
@@ -146,25 +146,49 @@ export async function lockPlayHistory(
 }
 
 /**
- * Takes the shared play-history lock of everyone who has played one of these songs, for a caller about to move or
- * change those plays. Listeners are read, locked, and read again, until no new one has appeared: a play recorded while
- * the locks were being taken belongs to a listener the first read could not know of. No cycle can form, because a
- * repair holds one listener's lock at a time and a shared lock never waits on another shared one.
+ * Which of these songs have a listener whose play history is being repaired right now. For a caller about to move or
+ * change those songs' plays that cannot wait for a repair (a library scan never blocks behind a per-user maintenance
+ * job): it tries each listener's shared lock once, never waiting, and the songs it names are to be left as they are
+ * for a later pass. The locks it did get are held to the end of the transaction, so a repair cannot start on those
+ * listeners meanwhile.
+ *
+ * The caller must already hold the songs' rows locked (`FOR UPDATE`): a play recorded for a song waits on its row, so
+ * the listeners read here are all the song will ever have in this transaction.
  */
-export async function lockPlayHistoryOfListeners(tx: Prisma.TransactionClient, trackIds: string[]): Promise<void> {
-    const locked = new Set<string>();
-    for (;;) {
-        const listeners = await tx.play.findMany({
-            where: { trackId: { in: trackIds }, userId: { notIn: [...locked] } },
-            select: { userId: true },
-            distinct: ["userId"],
-            orderBy: { userId: "asc" },
-        });
-        if (listeners.length === 0) return;
-        for (const { userId } of listeners) {
-            await lockPlayHistory(tx, userId);
-            locked.add(userId);
+export async function songsWithBusyPlayHistory(tx: Prisma.TransactionClient, trackIds: string[]): Promise<Set<string>> {
+    if (trackIds.length === 0) return new Set();
+    const pairs = await tx.play.findMany({
+        where: { trackId: { in: trackIds } },
+        select: { trackId: true, userId: true },
+        distinct: ["trackId", "userId"],
+        orderBy: [{ userId: "asc" }, { trackId: "asc" }],
+    });
+    const busyListeners = new Set<string>();
+    const seen = new Set<string>();
+    for (const { userId } of pairs) {
+        if (seen.has(userId)) continue;
+        seen.add(userId);
+        const [{ locked }] = await tx.$queryRaw<Array<{ locked: boolean }>>`
+            SELECT pg_try_advisory_xact_lock_shared(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId})) AS locked`;
+        if (!locked) busyListeners.add(userId);
+    }
+    return new Set(pairs.filter((p) => busyListeners.has(p.userId)).map((p) => p.trackId));
+}
+
+/**
+ * Runs the insert, answering "unknown track" when the song was retired between the lookup and the insert. A library
+ * scan retiring a missing song locks its row, so an insert waiting on that row finds it gone once the scan commits: the
+ * foreign key refuses it. Nothing was written, and the caller is told so, not handed an error.
+ */
+async function recordUnlessRetired<T>(trackId: string, insert: () => Promise<T>): Promise<T | { recorded: false; reason: "unknown-track" }> {
+    try {
+        return await insert();
+    } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+            const stillThere = await prisma.track.findUnique({ where: { id: trackId }, select: { id: true } });
+            if (!stillThere) return { recorded: false, reason: "unknown-track" };
         }
+        throw err;
     }
 }
 
@@ -213,7 +237,7 @@ export async function recordPlay(
 
     // No isolationLevel on purpose: READ COMMITTED is what makes the lock work
     // (see lockPlayDedupe).
-    const outcome = await prisma.$transaction(async (tx) => {
+    const outcome = await recordUnlessRetired(trackId, () => prisma.$transaction(async (tx) => {
         await lockPlayHistory(tx, userId);
         await lockPlayDedupe(tx, userId, trackId);
 
@@ -233,7 +257,7 @@ export async function recordPlay(
             select: { id: true },
         });
         return { recorded: true, playId: play.id } as const;
-    }, { timeout: PLAY_HISTORY_REPAIR_MAX_MS + 30_000, maxWait: 60_000 });
+    }, { timeout: PLAY_HISTORY_REPAIR_MAX_MS + 30_000, maxWait: 60_000 }));
 
     // Past this point the row is committed (or the duplicate call is over), so
     // nothing below may change `outcome` — the mirror is fire-and-forget.
