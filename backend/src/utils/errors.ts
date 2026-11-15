@@ -35,7 +35,7 @@ export function invalidRequest(req: Request, res: Response, error: ZodError): Re
     // on one line, and stops at a fixed length.
     const shown = error.issues
         .slice(0, MAX_LOGGED_ISSUES)
-        .map((issue) => `${issue.path.join(".") || "(body)"}: ${issue.message}`)
+        .map((issue) => `${issue.path.join(".") || "(request)"}: ${issue.message}`)
         .join("; ");
     const more = error.issues.length > MAX_LOGGED_ISSUES ? ` (+${error.issues.length - MAX_LOGGED_ISSUES} more)` : "";
     const line = `${shown}${more}`.replace(/[\r\n\t]+/g, " ");

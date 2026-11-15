@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
+import { invalidRequest } from "../utils/errors";
 import { notificationService } from "../services/notificationService";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
@@ -88,7 +89,7 @@ const CLIENT_ROWS_PER_USER = 50;
 router.post("/", async (req: Request, res: Response) => {
     const parsed = clientNotificationSchema.safeParse(req.body);
     if (!parsed.success) {
-        return res.status(400).json({ error: "Invalid notification" });
+        return invalidRequest(req, res, parsed.error);
     }
     const { type, title, message, href } = parsed.data;
     try {

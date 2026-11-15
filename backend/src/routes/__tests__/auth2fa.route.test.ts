@@ -990,6 +990,54 @@ describe("a transaction that cannot start or finish in time", () => {
         expect(await stored()).toEqual(before);
     });
 
+    describe("when another transaction got there first", () => {
+        const conflict = (kind: "write conflict" | "deadlock") =>
+            kind === "write conflict"
+                ? new Prisma.PrismaClientKnownRequestError("Transaction failed due to a write conflict or a deadlock. Please retry your transaction", { code: "P2034", clientVersion: "test" })
+                : Object.assign(new Error("deadlock detected"), { code: "40P01" });
+        const conflictsAfterTheWork = (kind: "write conflict" | "deadlock") => {
+            const real = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>, options?: unknown) => Promise<unknown>;
+            return jest.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: unknown) => Promise<unknown>, options?: unknown) =>
+                real(async (tx) => {
+                    await fn(tx);
+                    throw conflict(kind);
+                }, options)) as never);
+        };
+
+        it.each([["write conflict"], ["deadlock"]] as const)(
+            "answers 503 try again to a disable that lost to it (%s), and the code stays good",
+            async (kind) => {
+                const [recovery] = await twoFactorOn();
+                const before = await stored();
+                expectLog("warn");
+                const spy = conflictsAfterTheWork(kind);
+
+                const res = await disable(recovery);
+                spy.mockRestore();
+
+                expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+                expect(await stored()).toEqual(before);
+                expect((await disable(recovery)).status).toBe(200);
+            },
+        );
+
+        it.each([["write conflict"], ["deadlock"]] as const)(
+            "answers 503 try again to new recovery codes that lost to it (%s), and keeps the old list",
+            async (kind) => {
+                await twoFactorOn();
+                const before = await stored();
+                expectLog("warn");
+                const spy = conflictsAfterTheWork(kind);
+
+                const res = await newCodes(codeNow());
+                spy.mockRestore();
+
+                expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+                expect(await stored()).toEqual(before);
+            },
+        );
+    });
+
     it("still answers 500 to any other database error", async () => {
         await twoFactorOn();
         expectLog("error");

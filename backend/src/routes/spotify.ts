@@ -4,7 +4,7 @@ import path from "path";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import { logger } from "../utils/logger";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
-import { safeError } from "../utils/errors";
+import { invalidRequest, safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
 import { M3UNothingMatched, decodeM3U, parseM3U } from "../services/m3uParser";
@@ -85,9 +85,9 @@ function quickImportableLink(raw: string): MusicLink | null {
 }
 
 /** A bad body is the request's (400); anything else is the server's. */
-function answerFailure(res: Response, context: string, error: unknown) {
+function answerFailure(req: Request, res: Response, context: string, error: unknown) {
     if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid request body" });
+        return invalidRequest(req, res, error);
     }
     safeError(res, context, error);
 }
@@ -124,7 +124,7 @@ router.post("/preview/start", async (req, res) => {
         const { jobId } = await spotifyImportService.startPreviewJob(link.url, req.user!.id);
         res.json({ jobId });
     } catch (error) {
-        answerFailure(res, "Playlist preview start", error);
+        answerFailure(req, res, "Playlist preview start", error);
     }
 });
 
@@ -166,7 +166,7 @@ router.post("/import/quick", async (req, res) => {
 
         res.json({ jobId });
     } catch (error) {
-        answerFailure(res, "Quick import", error);
+        answerFailure(req, res, "Quick import", error);
     }
 });
 
@@ -215,7 +215,7 @@ router.post("/import", async (req, res) => {
             message: "Import started",
         });
     } catch (error) {
-        answerFailure(res, "Spotify import", error);
+        answerFailure(req, res, "Spotify import", error);
     }
 });
 

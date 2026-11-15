@@ -8,6 +8,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { invalidRequest } from "../utils/errors";
 import { hourDetail, listeningStats, regionDetail, trackPlayCount } from "../services/stats/listening";
 import { shelfStats } from "../services/stats/shelf";
 import { signature } from "../services/stats/signature";
@@ -183,7 +184,7 @@ router.post("/false-starts/remove", async (req, res) => {
         const { trackIds } = trackListSchema.parse(req.body);
         res.json(await removeFalseStarts(req.user!.id, trackIds));
     } catch (error) {
-        if (error instanceof z.ZodError) return res.status(400).json({ error: "Bad request" });
+        if (error instanceof z.ZodError) return invalidRequest(req, res, error);
         logger.error("[Stats] false-start removal failed:", error);
         res.status(500).json({ error: "That didn't finish" });
     }
@@ -195,7 +196,7 @@ router.post("/false-starts/ignore", async (req, res) => {
         const { trackIds } = trackListSchema.parse(req.body);
         res.json(await ignoreTracks(req.user!.id, trackIds));
     } catch (error) {
-        if (error instanceof z.ZodError) return res.status(400).json({ error: "Bad request" });
+        if (error instanceof z.ZodError) return invalidRequest(req, res, error);
         logger.error("[Stats] ignore failed:", error);
         res.status(500).json({ error: "That didn't finish" });
     }
@@ -207,7 +208,7 @@ router.post("/false-starts/restore", async (req, res) => {
         const { trackIds } = trackListSchema.parse(req.body);
         res.json(await unignoreTracks(req.user!.id, trackIds));
     } catch (error) {
-        if (error instanceof z.ZodError) return res.status(400).json({ error: "Bad request" });
+        if (error instanceof z.ZodError) return invalidRequest(req, res, error);
         logger.error("[Stats] restore failed:", error);
         res.status(500).json({ error: "That didn't finish" });
     }

@@ -55,7 +55,7 @@ describe("a bad body", () => {
     ])("is a 400 at %s", async (path, body) => {
         const res = await request(app).post(path).send(body);
         expect(res.status).toBe(400);
-        expect(res.body.error).toBe("Invalid request body");
+        expect(res.body.error).toBe("Invalid request");
     });
 });
 

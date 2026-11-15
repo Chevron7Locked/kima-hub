@@ -467,7 +467,7 @@ router.post("/gpu", async (req, res) => {
     res.json(await setGpuToggles({ soundVectors: enabled, analysis }));
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: "enabled or analysis (boolean) is required" });
+      return invalidRequest(req, res, error);
     }
     safeError(res, "Set GPU toggle", error);
   }

@@ -4,7 +4,7 @@ import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { decrypt, encrypt } from "../../utils/encryption";
 import { logger } from "../../utils/logger";
-import { isDatabaseBusy } from "../../utils/dbConflict";
+import { isDatabaseBusy, isTransactionConflict } from "../../utils/dbConflict";
 
 /** The database, or the transaction a spend and its change share. */
 type Db = Pick<Prisma.TransactionClient, "user">;
@@ -129,8 +129,9 @@ class ChangeNotMade extends Error {}
 
 /**
  * What `spendAndChange` came to: the code was wrong, the code was right but the change landed nothing (so the code is
- * not spent), both happened, or the database could not give the transaction the time or a connection (`busy`: nothing
- * was spent or changed, and the same request can be sent again).
+ * not spent), both happened, or the transaction did not finish (`busy`: the database had no time or connection for it,
+ * or another transaction beat it to the same rows; nothing was spent or changed, and the same request can be sent
+ * again).
  */
 export type SpendAndChange<T> =
     | { outcome: "wrong-code" }
@@ -160,8 +161,9 @@ export async function spendAndChange<T>(
         });
     } catch (error) {
         if (error instanceof ChangeNotMade) return { outcome: "not-changed" };
-        if (isDatabaseBusy(error)) {
-            logger.warn(`[2FA] ${user.id}: the database could not run the code check in time (${error.code})`);
+        if (isDatabaseBusy(error) || isTransactionConflict(error)) {
+            const code = (error as { code?: unknown } | null)?.code;
+            logger.warn(`[2FA] ${user.id}: the code check did not finish (${typeof code === "string" ? code : "conflict"})`);
             return { outcome: "busy" };
         }
         throw error;

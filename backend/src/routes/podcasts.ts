@@ -7,7 +7,7 @@ import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { prisma, Prisma } from "../utils/db";
 import { FeedReadError, rssParserService, type RSSEpisode as FeedEpisode } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
-import { safeError } from "../utils/errors";
+import { invalidRequest, safeError } from "../utils/errors";
 import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
 import axios from "axios";
 import { z } from "zod";
@@ -191,15 +191,18 @@ router.get("/categories", async (_req, res) => {
     }
 });
 
+/** A category id: a whole number. */
+const categoryId = z.number().int();
+
 /**
  * A page of Apple's chart for a category (null: the overall chart). An id that is not a whole number, or a page
  * out of range, is a 400; an id that is not one of Apple's categories a 404, before Apple is asked for its chart.
  */
-async function answerChart(res: Response, category: number | null, query: unknown, label: string) {
+async function answerChart(req: Request, res: Response, category: number | null, query: unknown, label: string) {
     const page = pageParams.safeParse(query);
-    if (!page.success || (category !== null && !Number.isInteger(category))) {
-        return res.status(400).json({ error: "category must be a category id; limit 1-200; offset 0-200" });
-    }
+    if (!page.success) return invalidRequest(req, res, page.error);
+    const id = category === null ? null : categoryId.safeParse(category);
+    if (id && !id.success) return invalidRequest(req, res, id.error);
     try {
         if (category !== null && !(await isCategory(category))) {
             return res.status(404).json({ error: "No such podcast category" });
@@ -214,7 +217,7 @@ async function answerChart(res: Response, category: number | null, query: unknow
 
 /** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
 router.get("/charts", (req, res) =>
-    answerChart(res, req.query.category === undefined ? null : Number(req.query.category), req.query, "Error fetching podcast chart"),
+    answerChart(req, res, req.query.category === undefined ? null : Number(req.query.category), req.query, "Error fetching podcast chart"),
 );
 
 /** GET /podcasts/for-you — rows from the categories of the shows this user follows. */
@@ -290,7 +293,7 @@ router.get("/listening", async (req, res) => {
 });
 
 /** GET /podcasts/discover/top?limit&offset — the overall chart, as /charts (kept for the iOS app, which asks here). */
-router.get("/discover/top", (req, res) => answerChart(res, null, req.query, "Error fetching top podcasts"));
+router.get("/discover/top", (req, res) => answerChart(req, res, null, req.query, "Error fetching top podcasts"));
 
 /**
  * GET /podcasts/discover/genres?genres=a,b — the first ten of each category's chart, keyed by category id. Only
@@ -315,7 +318,7 @@ router.get("/discover/genres", async (req, res) => {
 
 /** GET /podcasts/discover/genre/:genreId?limit&offset — one category's chart, as /charts (kept for the iOS app). */
 router.get("/discover/genre/:genreId", (req, res) =>
-    answerChart(res, Number(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
+    answerChart(req, res, Number(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
 );
 
 // Apple (iTunes) ids are numbers. Anything else (Kima's own podcast id, which the podcast page falls back to) is not
@@ -1100,7 +1103,7 @@ router.post("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
         const { podcastId, episodeId } = req.params;
         const body = progressSchema.safeParse(req.body);
         if (!body.success) {
-            return res.status(400).json({ error: "currentTime (seconds) is required" });
+            return invalidRequest(req, res, body.error);
         }
         const { currentTime, duration, isFinished } = body.data;
         const episode = await prisma.podcastEpisode.findFirst({ where: { id: episodeId, podcastId }, select: { id: true } });
