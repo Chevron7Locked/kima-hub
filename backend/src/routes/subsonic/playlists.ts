@@ -217,6 +217,7 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
     // One transaction: the name, the visibility and the songs change together or not at all.
     const changes = await prisma.$transaction(async (tx) => {
         let count = 0;
+        let songRows = 0;
         if (indexesToRemove.length > 0 || songIdsToAdd.length > 0) await lockPlaylist(tx, playlistId);
 
         if (Object.keys(updateData).length > 0) {
@@ -235,7 +236,9 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
                 .filter((i) => i >= 0 && i < currentItems.length)
                 .map((i) => currentItems[i].id);
             if (idsToDelete.length > 0) {
-                count += (await tx.playlistItem.deleteMany({ where: { id: { in: idsToDelete } } })).count;
+                const removed = (await tx.playlistItem.deleteMany({ where: { id: { in: idsToDelete } } })).count;
+                count += removed;
+                songRows += removed;
             }
         }
 
@@ -254,8 +257,12 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
                 rank: ranks[index],
             }));
 
-            count += (await tx.playlistItem.createMany({ data: rows })).count;
+            const added = (await tx.playlistItem.createMany({ data: rows })).count;
+            count += added;
+            songRows += added;
         }
+        // A write to the songs moves the playlist's changed time with it (a rename or a visibility change already does).
+        if (songRows > 0) await tx.playlist.update({ where: { id: playlistId }, data: { updatedAt: new Date() } });
         return count;
     });
 

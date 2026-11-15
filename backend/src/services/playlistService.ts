@@ -347,10 +347,10 @@ export async function placeFoundSongs(playlistId: string, found: FoundSong[]): P
  * gone, after the nearest earlier old song that is still shown, or first when none is. A hidden song is never an anchor:
  * it moves to the end, and an entry that followed it stays with the shown song before it. Waiting entries keep their
  * order among themselves, so one never passes the one that was ahead of it. Returns whether anything was removed or
- * written.
+ * written; when it was, the playlist's changed time moves in the same transaction.
  */
 export async function replaceItems(
-    tx: Pick<typeof prisma, "playlistItem" | "playlistPendingTrack">,
+    tx: Pick<typeof prisma, "playlist" | "playlistItem" | "playlistPendingTrack">,
     playlistId: string,
     shown: string[],
     hidden: string[] = []
@@ -405,7 +405,10 @@ export async function replaceItems(
     const created = await tx.playlistItem.createMany({
         data: trackIds.map((trackId, index) => ({ playlistId, trackId, sort: index, rank: ranks[index] })),
     });
-    return removed.count > 0 || created.count > 0;
+    const written = removed.count > 0 || created.count > 0;
+    // The playlist's changed time moves in the same transaction, so a client that reads it sees the replace.
+    if (written) await tx.playlist.update({ where: { id: playlistId }, data: { updatedAt: new Date() } });
+    return written;
 }
 
 /**
