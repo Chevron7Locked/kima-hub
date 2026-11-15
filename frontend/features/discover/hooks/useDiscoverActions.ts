@@ -42,11 +42,10 @@ export function useDiscoverActions(
                 if (refreshBatchStatus) {
                     await refreshBatchStatus();
                 }
-            } else if (err.status === 503) {
-                // The server could not take, or lost, its lock before queuing: nothing was queued, so asking again is safe.
-                notify.error("Failed to generate Discover playlist", { message: "try again in a moment" });
             } else {
-                notify.error("Failed to generate Discover playlist", { message: err.message || undefined });
+                // A 503 means the server could not take, or lost, its lock before queuing: nothing was queued, so asking again is safe.
+                const message = err.status === 503 ? "try again in a moment" : err.message || undefined;
+                notify.error("Failed to generate Discover playlist", { message });
             }
         }
     }, [isGenerating, refreshBatchStatus, setPendingGeneration, markGenerationStart]);
