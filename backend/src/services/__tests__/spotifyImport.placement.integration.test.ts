@@ -178,13 +178,37 @@ describe("a refresh that finds a waiting song", () => {
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
     });
 
-    it("appends a copy with no waiting entry without colliding with the one that takes the last place", async () => {
-        const playlistId = await importOf([entry(0), waiting()]);
+    it("fills a waiting listing even when the playlist already holds that song from elsewhere", async () => {
+        const playlistId = await importOf([entry(0), waiting(), entry(1)]);
+        const x = await libraryGains();
+        await prisma.playlistItem.create({ data: { playlistId, trackId: x.id, sort: 9, rank: "zzz" } }); // added by hand
+        await jobFor(playlistId, [waiting()]);
+        const result = await spotifyImportService.refreshJobMatches(JOB);
+        expect(result.added).toBe(1);
+        expect(await held(playlistId)).toEqual([ids[0], x.id, ids[1], x.id]);
+        expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
+    });
+
+    it("does not bring back a waiting entry the person removed", async () => {
+        const playlistId = await importOf([entry(0), waiting(), entry(1)]);
+        await jobFor(playlistId, [waiting()]);
+        const entryRow = await prisma.playlistPendingTrack.findFirstOrThrow({ where: { playlistId } });
+        await prisma.playlistPendingTrack.delete({ where: { id: entryRow.id } }); // DELETE /playlists/:id/pending/:trackId
+        await libraryGains();
+        const result = await spotifyImportService.refreshJobMatches(JOB);
+        expect(result.added).toBe(0);
+        expect(await held(playlistId)).toEqual([ids[0], ids[1]]);
+    });
+
+    it("adds a song only for the waiting entries that are still there", async () => {
+        const playlistId = await importOf([waiting(), entry(0), waiting()]);
         await jobFor(playlistId, [waiting(), waiting()]);
+        const [first] = await prisma.playlistPendingTrack.findMany({ where: { playlistId }, orderBy: { rank: "asc" } });
+        await prisma.playlistPendingTrack.delete({ where: { id: first.id } });
         const x = await libraryGains();
         const result = await spotifyImportService.refreshJobMatches(JOB);
-        expect(result.added).toBe(2);
-        expect(await held(playlistId)).toEqual([ids[0], x.id, x.id]);
+        expect(result.added).toBe(1);
+        expect(await held(playlistId)).toEqual([ids[0], x.id]);
     });
 
     it("puts each copy of a song listed twice in its own place", async () => {

@@ -1,7 +1,7 @@
 /**
  * A playlist an import makes keeps a song the source lists more than once, one item per listing, in the source's
- * order, and what the import counts as matched is listings, not distinct songs. A later refresh or scan adds only the
- * copies the playlist is short of, and a waiting entry that resolves to a song already in the playlist joins as
+ * order, and what the import counts as matched is listings, not distinct songs. A later refresh or scan adds one copy for each
+ * waiting entry, and a waiting entry that resolves to a song already in the playlist joins as
  * another copy. Real database and Redis.
  */
 jest.mock("../deezer", () => ({
@@ -141,8 +141,15 @@ describe("a Spotify import", () => {
             return playlist.id;
         }
 
-        it("adds only the copies the playlist is short of", async () => {
+        it("adds one copy for each waiting entry, whatever the playlist already holds", async () => {
             const playlistId = await jobWith([entry(0), entry(1), entry(0), entry(2), entry(0)], [ids[0], ids[1]]);
+            await prisma.playlistPendingTrack.createMany({
+                data: [
+                    { playlistId, spotifyArtist: `${P} band`, spotifyTitle: SONGS[0], spotifyAlbum: "x", sort: 2, rank: "c" },
+                    { playlistId, spotifyArtist: `${P} band`, spotifyTitle: SONGS[2], spotifyAlbum: "x", sort: 3, rank: "d" },
+                    { playlistId, spotifyArtist: `${P} band`, spotifyTitle: SONGS[0], spotifyAlbum: "x", sort: 4, rank: "e" },
+                ],
+            });
             const result = await spotifyImportService.refreshJobMatches(JOB);
             expect(result.added).toBe(3);
             expect(await heldBy(playlistId)).toEqual([ids[0], ids[1], ids[0], ids[2], ids[0]]);
@@ -162,7 +169,7 @@ describe("a Spotify import", () => {
             expect(await heldBy(playlistId)).toEqual([ids[0], ids[1], ids[0]]);
         });
 
-        it("adds nothing when the playlist already holds every listing", async () => {
+        it("adds nothing when no entry is waiting", async () => {
             const playlistId = await jobWith([entry(0), entry(1), entry(0)], [ids[0], ids[1], ids[0]]);
             expect((await spotifyImportService.refreshJobMatches(JOB)).added).toBe(0);
             expect(await heldBy(playlistId)).toEqual([ids[0], ids[1], ids[0]]);

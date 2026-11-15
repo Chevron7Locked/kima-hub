@@ -2357,20 +2357,14 @@ class SpotifyImportService {
       throw new Error("No playlist created for this job");
     }
 
-    let added = 0;
-
-    const existingItems = await prisma.playlistItem.findMany({
+    // Each waiting entry is its own listing, answered by a song the library now has: a song the playlist already holds
+    // from elsewhere does not cover it, and an entry the person removed is not waiting, so it is not brought back.
+    const waitingNow = await prisma.playlistPendingTrack.findMany({
       where: { playlistId: job.createdPlaylistId },
-      select: { trackId: true },
+      orderBy: { rank: "asc" },
     });
-    // Entries the playlist already covers, per song: a song the source lists twice is covered once it is held twice.
-    const covered = new Map<string, number>();
-    for (const item of existingItems) covered.set(item.trackId, (covered.get(item.trackId) ?? 0) + 1);
 
-    // Batch-load all candidate tracks matching any pending track's artist
-    const uniqueArtists = [
-      ...new Set(job.pendingTracks.map((t) => normalizeArtistName(t.artist))),
-    ];
+    const uniqueArtists = [...new Set(waitingNow.map((w) => normalizeArtistName(w.spotifyArtist)))];
     const allCandidates = uniqueArtists.length > 0
       ? await prisma.track.findMany({
           where: {
@@ -2389,34 +2383,15 @@ class SpotifyImportService {
       candidatesByArtist.set(key, existing);
     }
 
-    // Match pending tracks in-memory. Each copy the playlist is short of answers one waiting entry (the earliest, by
-    // rank), so it takes that entry's place; with none left waiting it goes to the end.
-    const waitingNow = await prisma.playlistPendingTrack.findMany({
-      where: { playlistId: job.createdPlaylistId },
-      select: { id: true, spotifyArtist: true, spotifyTitle: true },
-      orderBy: { rank: "asc" },
-    });
     const found: FoundSong[] = [];
-    for (const pendingTrack of job.pendingTracks) {
-      const candidates = candidatesByArtist.get(normalizeArtistName(pendingTrack.artist)) || [];
-
-      const localTrack = candidates.find(
-        (c) => c.title.toLowerCase() === pendingTrack.title.toLowerCase(),
-      );
-
-      if (!localTrack) continue;
-      const have = covered.get(localTrack.id) ?? 0;
-      if (have > 0) {
-        covered.set(localTrack.id, have - 1);
-      } else {
-        const at = waitingNow.findIndex((w) => w.spotifyArtist === pendingTrack.artist && w.spotifyTitle === pendingTrack.title);
-        const [waiting] = at >= 0 ? waitingNow.splice(at, 1) : [];
-        found.push({ trackId: localTrack.id, pendingId: waiting?.id });
-      }
+    for (const waiting of waitingNow) {
+      const candidates = candidatesByArtist.get(normalizeArtistName(waiting.spotifyArtist)) || [];
+      const localTrack = candidates.find((c) => c.title.toLowerCase() === waiting.spotifyTitle.toLowerCase());
+      if (localTrack) found.push({ trackId: localTrack.id, pendingId: waiting.id });
     }
 
     const placed = await placeFoundSongs(job.createdPlaylistId, found);
-    added = placed.length;
+    const added = placed.length;
     if (added > 0) announcePlaylistChange(job.userId, job.createdPlaylistId);
 
     job.tracksMatched += added;

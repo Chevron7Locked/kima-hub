@@ -31,6 +31,12 @@ beforeAll(async () => {
     await artistWithTrack("acdc", "AC/DC", "Thunderstruck");
     await prisma.user.create({ data: { id: `${P}usr`, username: `${P}-user`, passwordHash: "x" } });
     await prisma.playlist.create({ data: { id: `${P}pl`, userId: `${P}usr`, name: "Imported" } });
+    await prisma.playlistPendingTrack.createMany({
+        data: [
+            { playlistId: `${P}pl`, spotifyArtist: "Simon & Garfunkel", spotifyTitle: "The Boxer", spotifyAlbum: "x", sort: 0, rank: "a" },
+            { playlistId: `${P}pl`, spotifyArtist: "AC/DC", spotifyTitle: "Thunderstruck", spotifyAlbum: "x", sort: 1, rank: "b" },
+        ],
+    });
     await prisma.spotifyImportJob.create({
         data: {
             id: JOB, userId: `${P}usr`, spotifyPlaylistId: "37i9dQZF1DWXRqgorJj26U", playlistName: "Rock Classics",
