@@ -169,6 +169,34 @@ describe("tier 2 matches the longest trailing path, as Navidrome does", () => {
     });
 });
 
+describe("a song stored at the music root (no folder) is found by its file name", () => {
+    beforeAll(() => seedSongs("root", `${P}-root band`, [["a", `${P} root song`, "zzroot song.flac"]]));
+
+    it("matches a path from another machine, in any letter case", async () => {
+        expect(await match(entry("/elsewhere/zzroot song.flac"))).toBe(`${P}-root-a`);
+        expect(await match(entry("C:\\Music\\ZZROOT Song.FLAC"))).toBe(`${P}-root-a`);
+    });
+});
+
+describe("tier 2 tries every reading of the path before skipping an entry", () => {
+    beforeAll(() =>
+        seedSongs("read", `${P}-read band`, [
+            ["a", `${P} read one`, `${P}/read/one/zzread%20song.flac`],
+            ["b", `${P} read two`, `${P}/read/two/zzread%20song.flac`],
+            ["c", `${P} read three`, `${P}/read/three/zzread song.flac`],
+        ]),
+    );
+
+    it("takes the first reading that names exactly one song when an earlier reading names several", async () => {
+        // As typed the name is "zzread%20song.flac" (two songs); decoded it is "zzread song.flac" (one).
+        expect(await match(entry("/x/zzread%20song.flac"))).toBe(`${P}-read-c`);
+    });
+
+    it("skips the entry when no reading names exactly one song", async () => {
+        expect(await match(entry("/x/zzdup song.flac"))).toBeNull();
+    });
+});
+
 describe("tier 4 breaks a tie by the exact artist, then the lowest id", () => {
     const names = { exact: "zzquartz band", wider: "zzquartz band extra" };
     beforeAll(async () => {

@@ -555,7 +555,12 @@ class M3UReads {
   songsNamed(name: string) {
     const folded = foldedForm(name);
     return this.fileName.get(folded, async () => {
-      const named = [...new Set([name, ...unicodeForms(name)].flatMap((n) => [n, ...caseSpellings(n)]))].map((n) => ({ filePath: { endsWith: `/${n}`, mode: "insensitive" as const } }));
+      // A song at the music root has no folder: its whole path is the name.
+      const spellings = [...new Set([name, ...unicodeForms(name)].flatMap((n) => [n, ...caseSpellings(n)]))];
+      const named = spellings.flatMap((n) => [
+        { filePath: { endsWith: `/${n}`, mode: "insensitive" as const } },
+        { filePath: { equals: n, mode: "insensitive" as const } },
+      ]);
       const songs = await prisma.track.findMany({
         where: { AND: [PLAYABLE_SONG, { OR: named }] },
         select: {
@@ -567,7 +572,7 @@ class M3UReads {
         },
         orderBy: { id: "asc" },
       });
-      return songs.filter((song) => foldedForm(song.filePath).endsWith(`/${folded}`));
+      return songs.filter((song) => foldedForm(song.filePath) === folded || foldedForm(song.filePath).endsWith(`/${folded}`));
     });
   }
 }
@@ -2843,27 +2848,28 @@ class SpotifyImportService {
       // file's must agree, each compared as tier 3 compares it, by the stored or the edited name. An entry naming both
       // needs both to agree; one naming a single field needs that one; a bare entry has nothing to disagree with.
       // Of the songs that agree, the one sharing the most trailing folders with the entry's path wins, as Navidrome
-      // picks it (longestSuffixMatches); of equally long hits, the one in exactly the case written wins, and several
-      // still equal (a bare name is a path of one segment) are skipped, since the lowest id would be a guess, and no
-      // later tier guesses for them either.
+      // picks it (longestSuffixMatches); of equally long hits, the one in exactly the case written wins. Every reading
+      // of the file name is tried, the name as typed first: the first to name exactly one song is taken. The entry is
+      // skipped as ambiguous only when some reading names several songs and none names exactly one (the lowest id
+      // would be a guess), and no later tier guesses for it either.
       let ambiguous = false;
       const agrees = (t: { title: string; displayTitle: string | null; album: { artist: { name: string; identityKey: string; displayName: string | null } } }) =>
         (!entry.title || isTitled(t, entry.title)) && (!entry.artist || isByArtistNamed(t.album.artist, entry.artist));
       if (!track) {
+        let namedSeveral = false;
         for (const fileName of libraryFileNames(entry.filePath, readingsOf[at])) {
           if (path.basename(fileName, path.extname(fileName)).length < MIN_WORD_LENGTH) continue;
           const agreeing = (await reads.songsNamed(fileName)).filter(agrees);
           const longest = longestSuffixMatches(agreeing, readingsOf[at]);
-          // Of equally long hits, the one in exactly the case written comes first.
-          const exactCase = longest.filter((t) => t.filePath.endsWith(`/${fileName}`));
+          const exactCase = longest.filter((t) => t.filePath === fileName || t.filePath.endsWith(`/${fileName}`));
           const best = longest.length > 1 && exactCase.length === 1 ? exactCase : longest;
-          if (best.length > 1) {
-            ambiguous = true;
+          if (best.length > 1) namedSeveral = true;
+          else if (best.length === 1) {
+            track = best[0];
             break;
           }
-          track = best[0] ?? null;
-          if (track) break;
         }
+        ambiguous = !track && namedSeveral;
       }
 
       // Tier 3: Exact metadata match (artist + title from EXTINF)
