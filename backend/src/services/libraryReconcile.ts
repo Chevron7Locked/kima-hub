@@ -38,6 +38,12 @@ export function transcodeArtifactPath(cachePath: string): string {
 const MASS_MISSING_ABORT = 0.10;
 const MASS_MISSING_FLOOR = 10;
 
+/** A missing song and the other copy of the same song that takes over its history. */
+interface Replacement {
+    gone: string;
+    kept: string;
+}
+
 export async function reconcileDeletedTracks(
     tx: Prisma.TransactionClient,
     scanStartedAt: Date
@@ -56,7 +62,7 @@ export async function reconcileDeletedTracks(
     // Confirmed gone: flagged by an earlier scan, still absent this one. Files that
     // came back had their flag cleared earlier in this scan; files first missed by
     // this scan carry a stamp newer than scanStartedAt and wait for the next one.
-    const missing = await tx.track.findMany({
+    const flagged = await tx.track.findMany({
         where: { missingSince: { not: null, lt: scanStartedAt } },
         select: {
             id: true,
@@ -65,18 +71,26 @@ export async function reconcileDeletedTracks(
             album: { select: { title: true, artist: { select: { name: true } } } },
         },
     });
-    if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
+    if (flagged.length === 0) return { removed: 0, artifacts: [], playlists: [] };
 
     // Hold every song's row first. A play reported for one of them waits on its row (the foreign key), so from here the
     // listeners and plays this sweep reads are the song's last: none lands between moving them and deleting the song.
-    await tx.$queryRaw`SELECT id FROM "Track" WHERE id IN (${Prisma.join(missing.map((t) => t.id))}) ORDER BY id FOR UPDATE`;
+    // The condition is asked again under the lock: a scan that found a file again while the sweep waited has cleared its
+    // flag, and that song stays.
+    const held = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "Track"
+         WHERE id IN (${Prisma.join(flagged.map((t) => t.id))}) AND "missingSince" IS NOT NULL AND "missingSince" < ${scanStartedAt}
+         ORDER BY id FOR UPDATE`;
+    const heldIds = new Set(held.map((r) => r.id));
+    const missing = flagged.filter((t) => heldIds.has(t.id));
+    if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
 
     // A song whose plays move to another copy waits for no repair of its listeners' history (a scan never blocks behind
     // a per-user maintenance job): it stays exactly as it is for the next sweep, and the rest carry on.
-    const pairsFound = await findReplacements(tx, missing.map((t) => t.id));
-    const busy = await songsWithBusyPlayHistory(tx, pairsFound.map((p) => p.gone));
+    const replacements = await findReplacements(tx, missing.map((t) => t.id));
+    const busy = await songsWithBusyPlayHistory(tx, replacements.map((p) => p.gone));
     const retiring = missing.filter((t) => !busy.has(t.id));
-    const pairs = pairsFound.filter((p) => !busy.has(p.gone));
+    const pairs = replacements.filter((p) => !busy.has(p.gone));
     if (busy.size > 0) {
         logger.info(`[RECONCILE] ${busy.size} track(s) left for the next sweep: a listener's play history is being repaired`);
     }
@@ -160,9 +174,9 @@ async function dropFromSavedQueues(tx: Prisma.TransactionClient, retired: string
     for (const { userId, queue, currentIndex } of states) {
         const entries = queue as unknown[];
         const kept = entries.filter((entry) => !retiredEntry(entry));
-        const saved = Math.min(Math.max(currentIndex, 0), entries.length - 1);
-        const keptBefore = entries.slice(0, saved).filter((entry) => !retiredEntry(entry)).length;
-        const currentDropped = retiredEntry(entries[saved]);
+        const current = Math.min(Math.max(currentIndex, 0), entries.length - 1);
+        const keptBefore = entries.slice(0, current).filter((entry) => !retiredEntry(entry)).length;
+        const currentDropped = retiredEntry(entries[current]);
         await tx.playbackState.update({
             where: { userId },
             data:
@@ -181,7 +195,7 @@ async function dropFromSavedQueues(tx: Prisma.TransactionClient, retired: string
  * For each retiring track, the live track that is the same song on the same album (same disc and track number,
  * same title ignoring case).
  */
-async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Array<{ gone: string; kept: string }>> {
+async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
     const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; goneTitle: string; keptTitle: string }>>`
         SELECT g.id AS gone, k.id AS kept, g.title AS "goneTitle", k.title AS "keptTitle"
@@ -195,7 +209,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
          WHERE g.id IN (${Prisma.join(ids)})
          ORDER BY g.id, k.id
     `;
-    const pairs: Array<{ gone: string; kept: string }> = [];
+    const pairs: Replacement[] = [];
     for (const row of sameSlot) {
         if (row.goneTitle.toLowerCase() !== row.keptTitle.toLowerCase()) continue;
         if (pairs.at(-1)?.gone !== row.gone) pairs.push({ gone: row.gone, kept: row.kept });
@@ -210,7 +224,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
  * move, so a repair of that history (which reads, judges and deletes under the exclusive one) never sees it change in
  * the middle.
  */
-async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: Array<{ gone: string; kept: string }>): Promise<Map<string, string>> {
+async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Map<string, string>> {
     for (const { gone, kept } of pairs) {
         await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
         await tx.$executeRaw`

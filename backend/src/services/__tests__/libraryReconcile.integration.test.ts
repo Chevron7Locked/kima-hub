@@ -401,7 +401,34 @@ describe("reconcileDeletedTracks", () => {
         });
     });
 
-    it("a play reported for a retiring song while the sweep is under way is moved or refused, never recorded and lost", async () => {
+    it("a song a scan found again while the sweep was under way stays", async () => {
+        await seedTrack(`${P}back`, { missingMinutesAgo: 5 });
+        await seedTrack(`${P}still`, { missingMinutesAgo: 5 });
+        // The scan clears the flag (and commits) after the sweep has read its list and before it holds the rows.
+        const foundAgain = (tx: Prisma.TransactionClient) => new Proxy(tx, {
+            get(target, key) {
+                const value = (target as any)[key];
+                if (key !== "track") return typeof value === "function" ? value.bind(target) : value;
+                return new Proxy(value, {
+                    get(model, method) {
+                        const fn = model[method];
+                        if (method !== "findMany") return typeof fn === "function" ? fn.bind(model) : fn;
+                        return async (...args: unknown[]) => {
+                            const rows = await fn.apply(model, args);
+                            await prisma.track.update({ where: { id: `${P}back` }, data: { missingSince: null } });
+                            return rows;
+                        };
+                    },
+                });
+            },
+        }) as Prisma.TransactionClient;
+
+        await prisma.$transaction((tx) => reconcileDeletedTracks(foundAgain(tx), scanStartedAt()));
+        expect(await prisma.track.findUnique({ where: { id: `${P}back` } })).not.toBeNull();
+        expect(await prisma.track.findUnique({ where: { id: `${P}still` } })).toBeNull();
+    });
+
+    it("a play reported for a retiring song while the sweep is under way is refused, never recorded and lost", async () => {
         const LATE = `${P}late`;
         await prisma.user.create({ data: { id: LATE, username: LATE, passwordHash: "x", role: "user", tokenVersion: 0 } });
         await prisma.track.create({
@@ -437,12 +464,15 @@ describe("reconcileDeletedTracks", () => {
 
         try {
             await prisma.$transaction((tx) => reconcileDeletedTracks(midSweep(tx), scanStartedAt()));
+            // The hook fired, so the report really was made mid-sweep.
+            expect(report).toBeDefined();
             const outcome = await report!;
 
             expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).toBeNull();
-            // Told it was recorded means it is in the history, on the copy; otherwise it was refused and nothing was written.
-            expect(await prisma.play.count({ where: { userId: LATE } })).toBe(outcome.recorded ? 1 : 0);
-            expect(await prisma.play.count({ where: { userId: LATE, trackId: `${P}flac` } })).toBe(outcome.recorded ? 1 : 0);
+            // The play waited on the song's row, found the song gone once the sweep committed, and was refused: nothing
+            // was written, and the caller was told so (it was not told "recorded" and then lost to the cascade).
+            expect(outcome).toEqual({ recorded: false, reason: "unknown-track" });
+            expect(await prisma.play.count({ where: { userId: LATE } })).toBe(0);
             expect(await prisma.play.count({ where: { userId: `${P}user`, trackId: `${P}flac` } })).toBe(1);
         } finally {
             await prisma.play.deleteMany({ where: { userId: LATE } });
