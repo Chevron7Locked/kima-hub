@@ -3,6 +3,7 @@
 import { Request, Response } from "express";
 import { subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { parseStoredCover } from "../../services/imageStorage";
+import { isLosslessCodec } from "../../utils/audioCodec";
 
 export type ArtistRow = {
     id: string;
@@ -171,8 +172,9 @@ function normalizeMime(mime: string | null): string | null {
 function estimateBitrateFromMime(mime: string | null): number {
     const m = normalizeMime(mime);
     if (!m) return 192;
-    if (m.includes("flac")) return 900;
-    if (m.includes("wav")) return 1400;
+    if (/wav(?!pack)/i.test(m)) return 1400;
+    // Lossless by the one vocabulary the library sweep prefers a copy by: flac, alac, pcm, wavpack, ape...
+    if (isLosslessCodec(mime)) return 900;
     if (m.includes("aac") || m.includes("mp4")) return 256;
     if (m.includes("opus")) return 128;
     return 192;

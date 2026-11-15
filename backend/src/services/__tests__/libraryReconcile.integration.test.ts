@@ -998,4 +998,72 @@ describe("which copy takes over", () => {
             await expect(probe("FOR UPDATE", `${P}other`)).resolves.toBeUndefined();
         }, { timeout: 30_000 });
     });
+
+    describe("a saved mood mix", () => {
+        const mix = (trackIds: string[], servedTrackIds: string[]) =>
+            prisma.userMoodMix.create({
+                data: { userId: `${P}user`, mood: "happy", trackIds: trackIds.map((i) => `${P}${i}`), servedTrackIds: servedTrackIds.map((i) => `${P}${i}`), coverUrls: [], generatedAt: new Date() },
+            });
+        const saved = async () => {
+            const row = await prisma.userMoodMix.findUniqueOrThrow({ where: { userId: `${P}user` } });
+            const bare = (ids: string[]) => ids.map((i) => i.slice(P.length));
+            return { trackIds: bare(row.trackIds), servedTrackIds: bare(row.servedTrackIds), updatedAt: row.updatedAt };
+        };
+
+        it("follows a retired song to the copy that took its history, in the same place, in the mix and in the songs it was served", async () => {
+            await seedGone();
+            await seedCopy("copy");
+            await seedCopy("other");
+            await mix(["x", "g", "y"], ["g", "x"]);
+
+            await sweep();
+
+            const { trackIds, servedTrackIds } = await saved();
+            expect(trackIds).toEqual(["x", "copy", "y"]);
+            expect(servedTrackIds).toEqual(["copy", "x"]);
+        });
+
+        it("follows a retired song to a corrupt copy too, as its plays do: the mix reads its songs again, so the file is skipped until it is fixed", async () => {
+            await seedGone();
+            await seedCopy("bad", { corrupt: true });
+            await mix(["g"], ["g"]);
+
+            await sweep();
+
+            expect(await saved()).toMatchObject({ trackIds: ["bad"], servedTrackIds: ["bad"] });
+        });
+
+        it("holds a copy once when the mix already held it", async () => {
+            await seedGone();
+            await seedCopy("copy");
+            await mix(["copy", "x", "g"], ["g", "copy"]);
+
+            await sweep();
+
+            const { trackIds, servedTrackIds } = await saved();
+            expect(trackIds).toEqual(["copy", "x"]);
+            expect(servedTrackIds).toEqual(["copy"]);
+        });
+
+        it("drops a retired song that has no copy, and keeps the rest in order", async () => {
+            await seedGone();
+            await mix(["x", "g", "y"], ["y", "g"]);
+
+            await sweep();
+
+            const { trackIds, servedTrackIds } = await saved();
+            expect(trackIds).toEqual(["x", "y"]);
+            expect(servedTrackIds).toEqual(["y"]);
+        });
+
+        it("leaves a mix that held no retired song as it was, untouched", async () => {
+            await seedGone();
+            await mix(["x", "y"], ["y"]);
+            const before = await saved();
+
+            await sweep();
+
+            expect(await saved()).toEqual(before);
+        });
+    });
 });

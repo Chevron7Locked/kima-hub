@@ -6,7 +6,8 @@
  * records or row another job holds at that moment. A retired song hands its history (plays, likes, playlist places,
  * bookmarks) to the best copy of the same song on a library album, a corrupt one included and a Discover one never; it
  * leaves every saved queue, or is replaced there by the best copy a person can play (a queue is never pointed at a file
- * that cannot play).
+ * that cannot play). A saved mood mix (and the songs it was last served) follows the history copy the same way, and
+ * loses a song that has none.
  *
  * Every list of ids goes to the database as one array parameter (`= ANY(${ids}::text[])`): a statement takes at most
  * 32767 bind parameters, and a library that lost a drive can retire more songs than that in one sweep.
@@ -21,6 +22,7 @@ import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { losslessCodecSql } from "../utils/audioCodec";
 import { retryOnDeadlock } from "../utils/dbConflict";
 import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
@@ -151,6 +153,7 @@ export async function reconcileDeletedTracks(
     // history this way, and playback state keeps its queue.
     await tx.$executeRaw`UPDATE "DiscoveryTrack" SET "trackId" = NULL WHERE "trackId" = ANY(${ids}::text[])`;
     await updatePlaybackStates(tx, ids, queueCopy);
+    await updateMoodMixes(tx, ids, replacedBy);
 
     await tx.$executeRaw`DELETE FROM "Track" WHERE id = ANY(${ids}::text[])`;
 
@@ -215,6 +218,31 @@ async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: strin
     await tx.$executeRaw`
         UPDATE "PlaybackState" SET "trackId" = NULL, "changedBy" = NULL, "updatedAt" = ${nodeClock(at)}
          WHERE "trackId" = ANY(${retired}::text[])`;
+}
+
+/**
+ * A listener's saved mood mix, and the songs it was last served, name songs by id with no foreign key behind them, so a
+ * retired song would stay in both for good. A song another copy took the history of is replaced there by that copy, in
+ * its place (the mix reads its songs again, so a copy that cannot play is skipped until it can); one with no copy goes.
+ * A copy the list already held is kept once, at its first place. A mix that held no retired song is not touched.
+ */
+async function updateMoodMixes(tx: Prisma.TransactionClient, retired: string[], movedTo: Map<string, string>): Promise<void> {
+    const gone = [...movedTo.keys()];
+    const kept = gone.map((id) => movedTo.get(id)!);
+    const followed = (column: "trackIds" | "servedTrackIds") => Prisma.sql`
+        SELECT COALESCE(array_agg(id ORDER BY first), '{}'::text[])
+          FROM (SELECT id, min(pos) AS first
+                  FROM (SELECT COALESCE(m.kept, e.id) AS id, e.pos
+                          FROM unnest(u.${Prisma.raw(`"${column}"`)}) WITH ORDINALITY AS e(id, pos)
+                          LEFT JOIN unnest(${gone}::text[], ${kept}::text[]) AS m(gone, kept) ON m.gone = e.id
+                         WHERE m.gone IS NOT NULL OR e.id <> ALL(${retired}::text[])) AS placed
+                 GROUP BY id) AS once`;
+    await tx.$executeRaw`
+        UPDATE "UserMoodMix" u
+           SET "trackIds" = (${followed("trackIds")}),
+               "servedTrackIds" = (${followed("servedTrackIds")}),
+               "updatedAt" = ${nodeClock()}
+         WHERE u."trackIds" && ${retired}::text[] OR u."servedTrackIds" && ${retired}::text[]`;
 }
 
 /**
@@ -307,7 +335,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
            AND k."missingSince" IS NULL
          ORDER BY g.id,
                   (${playableSongSql("k", "ka")}) DESC,
-                  COALESCE(k.mime ~* '(^|[^a-z])(flac|alac|pcm|wavpack|ape|monkey|tta|dsd|lossless|wav|aiff)([^a-z]|$)', false) DESC,
+                  (${losslessCodecSql(Prisma.sql`k.mime`)}) DESC,
                   k."fileSize"::float8 / NULLIF(k.duration, 0) DESC NULLS LAST,
                   k.id
     `;
