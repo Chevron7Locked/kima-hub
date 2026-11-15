@@ -1552,14 +1552,18 @@ class ApiClient {
          * else answers 409 (status 409, `data.state` the state it holds). Omitted, the save writes whatever is stored.
          */
         expectedUpdatedAt?: string;
-    }) {
+    }, options: {
+        /** Set for the save sent as the page goes, so the browser finishes it; an ordinary save is not kept alive. */
+        keepalive?: boolean;
+    } = {}) {
         const body = JSON.stringify(state);
         return this.request<ApiData>("/playback-state", {
             method: "POST",
             body,
-            // Kept alive, so a save sent as the page closes is finished by the browser, not cancelled. A kept alive
-            // request may carry about 64 KB; a bigger one is refused outright, so it goes without.
-            keepalive: new TextEncoder().encode(body).length < KEEPALIVE_LIMIT_BYTES,
+            // Kept alive when asked (the save sent as the page closes), so the browser finishes it, not cancels it. The
+            // browser counts kept alive requests against 64 KB in all, so no ordinary save asks, and a bigger one is
+            // refused outright, so it goes without.
+            keepalive: options.keepalive === true && new TextEncoder().encode(body).length < KEEPALIVE_LIMIT_BYTES,
             // The player handles a refused conditional save (409) and a gone item (404) itself.
             expectedStatuses: [404, 409],
         });

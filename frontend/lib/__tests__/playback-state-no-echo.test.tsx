@@ -13,6 +13,8 @@ const server = vi.hoisted(() => ({
     trackFails: false,
     saveFails: false,
     saveAttempts: 0,
+    /** For each save sent, whether it asked to be kept alive past the page. */
+    keptAlive: [] as boolean[],
     clears: 0,
     audiobookGone: false,
     audiobookDelay: 0,
@@ -52,8 +54,9 @@ vi.mock("@/lib/api", () => {
             if (server.trackGone) throw Object.assign(new Error("gone"), { status: 404 });
             return { id, title: id, duration: 200, artist: { name: "Artist" }, album: { title: "Album" } };
         },
-        savePlaybackState: async (state: Record<string, unknown>) => {
+        savePlaybackState: async (state: Record<string, unknown>, options?: { keepalive?: boolean }) => {
             server.saveAttempts++;
+            server.keptAlive.push(options?.keepalive === true);
             server.savesInFlight++;
             server.mostSavesInFlight = Math.max(server.mostSavesInFlight, server.savesInFlight);
             // Whether the server is failing is settled when the save is sent, not when the gate lets it through.
@@ -182,6 +185,7 @@ beforeEach(() => {
     server.trackDelay = 0;
     server.saveFails = false;
     server.saveAttempts = 0;
+    server.keptAlive = [];
     server.clears = 0;
     server.audiobookGone = false;
     server.audiobookDelay = 0;
@@ -663,6 +667,31 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(server.saves[1]).toMatchObject({ trackId: "a", expectedUpdatedAt: gone.updatedAt });
     });
 
+    it("keeps the time it saw when its save failed, so the retry is refused over a state another device saved since", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        const saved = server.saves.length;
+
+        const gone = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.state = gone;
+        server.audiobookGone = true;
+        server.saveFails = true;
+        await pollNow(tick());
+        expect(server.saveAttempts).toBe(saved + 1);
+
+        // Another device saves while the retry is owed; the retry still names the time it first saw.
+        server.saveFails = false;
+        const newer = { ...fromOtherDevice({ playbackType: "track", trackId: "e" }), updatedAt: new Date(Date.now() + 60_000).toISOString() };
+        server.state = newer;
+        await pollNow(tick());
+        expect(server.refused.at(-1)).toMatchObject({ expectedUpdatedAt: gone.updatedAt });
+        expect(server.saves).toHaveLength(saved);
+        expect(server.state).toBe(newer);
+    });
+
     it("is not written over a state another device saved between the check and the write, which is taken up at once", async () => {
         const tick = capturePoll();
         await open();
@@ -857,6 +886,47 @@ describe("a save that failed", () => {
     });
 });
 
+describe("a state another device cleared", () => {
+    it("is written again when this device comes back to the song it had saved before", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.state).toMatchObject({ trackId: "c" });
+        server.state = null;
+        await pollNow(tick());
+        const saved = server.saves.length;
+        // Another song and back within the wait: only the last is sent, and it is what the server (now empty) lacks.
+        await act(async () => probe.controls.playTracks([t("d") as never, t("e") as never], 0));
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saves).toHaveLength(saved + 1);
+        expect(server.state).toMatchObject({ trackId: "c" });
+    });
+});
+
+describe("the wait after failed saves", () => {
+    it("starts over when a newer change replaces the owed save", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        await pollNow(tick());
+        await pollNow(tick());
+        await pollNow(tick());
+        const failing = server.saveAttempts;
+        // A newer change is sent on its own turn and fails once: its retry is not held back by the older failures.
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(failing + 1);
+        await pollNow(tick());
+        expect(server.saveAttempts).toBe(failing + 2);
+    });
+});
+
 describe("saves that overlap", () => {
     function holdSaves() {
         let release: () => void = () => undefined;
@@ -955,6 +1025,18 @@ describe("a page that is closing or going to the background", () => {
         expect(server.saves[0]).toMatchObject({ trackId: "c" });
         await wait(1500);
         expect(server.saveAttempts).toBe(1);
+    });
+
+    it("asks for the keepalive only for the send made as the page goes, not for a save sent in the ordinary way", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.keptAlive).toEqual([false]);
+        await act(async () => probe.controls.toggleShuffle());
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(100);
+        expect(server.keptAlive).toEqual([false, true]);
     });
 
     it("sends it when the tab becomes hidden, too", async () => {

@@ -177,7 +177,14 @@ const MAX_CHECKS_TO_SKIP = 7;
  * One save of the playback state: the run of the save effect that made it, its playbackKey, and what is sent.
  * `force` sends it even where the server is believed to hold it already (it was found to hold something else).
  */
-type PlaybackSave = { run: number; key: string; state: Parameters<typeof api.savePlaybackState>[0]; force?: true };
+type PlaybackSave = {
+    run: number;
+    key: string;
+    state: Parameters<typeof api.savePlaybackState>[0];
+    force?: true;
+    /** Sent as the page goes, so the browser finishes it (see `savePlaybackState`). */
+    keepalive?: true;
+};
 
 /** The id of what plays, whichever kind it is. */
 function mediaIdOf(
@@ -206,6 +213,14 @@ type SaveOutcome = "saved" | "conflict" | "failed";
 
 /** A save waiting for the one on its way, with those who asked for a save and wait to hear how it ended. */
 type QueuedSave = { job: PlaybackSave; waiters: Array<(outcome: SaveOutcome) => void> };
+
+/** Ends the wait before the newest save goes out, so that something else sending it first does not send it twice. Whether one was running. */
+function cancelWait(s: { timer: ReturnType<typeof setTimeout> | null }): boolean {
+    if (s.timer === null) return false;
+    clearTimeout(s.timer);
+    s.timer = null;
+    return true;
+}
 
 /**
  * The save to send again, if a change made here is still owed: it failed (`failures`), or the tab was just shown
@@ -422,7 +437,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         // it so here, and its change is owed again until this save lands.
         if (saveRunRef.current === next.run) savePendingRef.current = true;
         try {
-            const result = await api.savePlaybackState(next.state);
+            const result = await api.savePlaybackState(next.state, { keepalive: next.keepalive === true });
             serverKnownRef.current = next.key;
             markSynced(new Date(result.updatedAt));
             if (saveRunRef.current === next.run) {
@@ -730,8 +745,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         saveRef.current.latest = null;
         saveRef.current.queued?.waiters.forEach((done) => done("failed"));
         saveRef.current.queued = null;
-        if (saveRef.current.timer) clearTimeout(saveRef.current.timer);
-        saveRef.current.timer = null;
+        cancelWait(saveRef.current);
+        // The wait after failed tries was for the save this run replaces; this one starts over.
+        saveRef.current.failures = 0;
+        saveRef.current.checksToSkip = 0;
         if (!restoreSettled) return;
         const failedRestore = restoreFailedRef.current;
         restoreFailedRef.current = false;
@@ -790,14 +807,12 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const flush = () => {
             const s = saveRef.current;
             if (!s.latest) return;
-            if (s.timer) {
-                clearTimeout(s.timer);
-                s.timer = null;
-                void submitSave(s.latest);
+            if (cancelWait(s)) {
+                void submitSave({ ...s.latest, keepalive: true });
                 return;
             }
             const owed = owedSave(s, savePendingRef.current, false);
-            if (owed) void submitSave(owed);
+            if (owed) void submitSave({ ...owed, keepalive: true });
         };
         const flushIfHidden = () => {
             if (document.hidden) flush();
@@ -858,8 +873,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (owed.checksToSkip > 0) owed.checksToSkip -= 1;
                 else {
                     // Sent now, so the wait it still had is over: it is not sent a second time when it ends.
-                    if (owed.timer) clearTimeout(owed.timer);
-                    owed.timer = null;
+                    cancelWait(owed);
                     await submitSave(owedJob);
                 }
                 if (!mounted) return;
@@ -896,27 +910,34 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     savePendingRef.current ||
                     (lastServerSyncRef.current !== null && lastServerSyncRef.current > polledAt);
                 if (settledElsewhere()) return;
-                const held = await api.getPlaybackState().catch(() => null);
+                const held = await api.getPlaybackState().catch(() => undefined);
                 // Cleared, or saved again by another device (a newer time than the one that was polled).
+                if (held === null && mounted) serverKnownRef.current = null;
                 if (!held || new Date(held.updatedAt) > polledAt || settledElsewhere()) return;
                 if (liveRef.current.mediaId) {
                     // Something plays here: it replaces the gone item. Its save is not made yet only while the page
                     // is still settling, and the save that follows will replace the item.
                     const mine = saveRef.current.latest;
                     if (!mine) return;
-                    if (saveRef.current.timer) clearTimeout(saveRef.current.timer);
-                    saveRef.current.timer = null;
+                    cancelWait(saveRef.current);
                     if (saveRunRef.current === mine.run) savePendingRef.current = true;
                     // Written only while the server's state is still the one just read: a device that saved in the
-                    // meantime is refused the overwrite, and its state is taken up by the check made next.
-                    const outcome = await submitSave({ ...mine, force: true, state: { ...mine.state, expectedUpdatedAt: String(held.updatedAt) } });
+                    // meantime is refused the overwrite, and its state is taken up by the check made next. It is the
+                    // owed save from here on, time included, so a send again after a failure is refused just the same.
+                    const guarded: PlaybackSave = { ...mine, force: true, state: { ...mine.state, expectedUpdatedAt: String(held.updatedAt) } };
+                    saveRef.current.latest = guarded;
+                    const outcome = await submitSave(guarded);
                     if (outcome !== "conflict") return;
                     // Another device saved, or cleared the state, since it was read. A clear is taken up as the poll
                     // takes one up, unless a newer change made here is owed (it then saves the state back, as any
                     // change does); a newer state is taken up by the check made at once.
                     const now = await api.getPlaybackState().catch(() => undefined);
                     if (now === null && mounted && !changedHere() && !savePendingRef.current) adoptCleared(null);
-                    else nowOwed = true;
+                    else {
+                        // The server holds nothing: what this device last saved is no longer there, whatever it was.
+                        if (now === null) serverKnownRef.current = null;
+                        nowOwed = true;
+                    }
                 } else {
                     serverKnownRef.current = null;
                     await api.clearPlaybackState().catch(() => {});
@@ -930,6 +951,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
             try {
                 const serverState = await api.getPlaybackState();
+                // No state at all: whatever this device last saved is gone from the server, so the same state saved
+                // again is not a repeat. A change still owed stays owed.
+                if (serverState === null && mounted) serverKnownRef.current = null;
                 if (!serverState || !mounted || changedHere()) return;
 
                 const serverUpdatedAt = new Date(serverState.updatedAt);

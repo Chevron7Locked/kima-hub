@@ -14,18 +14,25 @@ afterEach(() => {
 
 const sentWith = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls[0][1] as RequestInit;
 
-it("sends a save kept alive", async () => {
+it("sends a save kept alive when asked to, as the page goes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({ updatedAt: "2026-01-01T00:00:00.000Z" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.savePlaybackState({ playbackType: "track", trackId: "a", queue: [], currentIndex: 0 }, { keepalive: true });
+    expect(sentWith(fetchMock).keepalive).toBe(true);
+});
+
+it("sends a save in the ordinary way when not asked to keep it alive", async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok({ updatedAt: "2026-01-01T00:00:00.000Z" }));
     vi.stubGlobal("fetch", fetchMock);
     await api.savePlaybackState({ playbackType: "track", trackId: "a", queue: [], currentIndex: 0 });
-    expect(sentWith(fetchMock).keepalive).toBe(true);
+    expect(sentWith(fetchMock).keepalive).toBeFalsy();
 });
 
 it("sends a save too big to be kept alive without it, rather than have it refused", async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok({ updatedAt: "2026-01-01T00:00:00.000Z" }));
     vi.stubGlobal("fetch", fetchMock);
     const queue = Array.from({ length: 400 }, (_, i) => ({ id: `song-${i}`, title: "x".repeat(200) }));
-    await api.savePlaybackState({ playbackType: "track", trackId: "a", queue, currentIndex: 0 });
+    await api.savePlaybackState({ playbackType: "track", trackId: "a", queue, currentIndex: 0 }, { keepalive: true });
     expect(sentWith(fetchMock).keepalive).toBe(false);
 });
 
@@ -33,7 +40,7 @@ it("counts the size in bytes, not characters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok({ updatedAt: "2026-01-01T00:00:00.000Z" }));
     vi.stubGlobal("fetch", fetchMock);
     const queue = [{ id: "a", title: "ö".repeat(40_000) }];
-    await api.savePlaybackState({ playbackType: "track", trackId: "a", queue, currentIndex: 0 });
+    await api.savePlaybackState({ playbackType: "track", trackId: "a", queue, currentIndex: 0 }, { keepalive: true });
     expect(sentWith(fetchMock).keepalive).toBe(false);
 });
 
