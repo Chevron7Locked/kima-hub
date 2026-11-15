@@ -103,8 +103,8 @@ async function loadUsableShareLink(token: string, res: Response) {
 
 /**
  * Work a request leaves running after its response (renewing a play's window as the response closes, giving back a play
- * whose stream never started). It is tracked so it can be awaited: a caller that must not leave Redis or the database in use
- * (a test's teardown, a shutdown) waits on `settleShareBackgroundWork`.
+ * whose stream never started). It is tracked so it can be awaited: a test's teardown waits on `settleShareBackgroundWork`
+ * so none of it reaches Redis or the database after they are closed. Nothing in the server calls it.
  */
 const backgroundWork = new Set<Promise<unknown>>();
 
