@@ -1,7 +1,8 @@
 /**
- * Two-factor sign-in end to end: turning it on checks a code against the new secret and hands out ten one-time
- * recovery codes; signing in then needs a current code or one recovery code, once; turning it off needs the password
- * and a current code. A code is spent by use (RFC 6238 section 5.2): the same code, or an earlier step's, is refused
+ * Two-factor sign-in end to end: setup keeps a pending secret on the server for ten minutes; turning it on checks a
+ * code against that secret (never one the client sends) and hands out ten one-time recovery codes; signing in then
+ * needs a current code or one recovery code, once; turning it off, or replacing the recovery codes, needs the password
+ * and a current code or a recovery code; an admin can turn it off for someone whose secret cannot be read. A code is spent by use (RFC 6238 section 5.2): the same code, or an earlier step's, is refused
  * a second time, wherever it is sent. Real database, real encryption, real codes from the secret; the clock is fixed
  * and moved a step at a time, so which 30-second step a code belongs to never depends on when the test runs.
  */
@@ -28,13 +29,17 @@ const PASSWORD = "correct horse";
 const app = mountAsServer(express().use(express.json()), "/auth", authRoutes, "/api/auth");
 const bearer = () => `Bearer ${generateToken({ id: USER, username: USER, role: "user", tokenVersion: 0 })}`;
 const login = (token?: string) => request(app).post("/auth/login").send({ username: USER, password: PASSWORD, ...(token ? { token } : {}) });
-const enable = (token: string) => request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ secret, token });
-const disable = (token: string, password = PASSWORD) => request(app).post("/auth/2fa/disable").set("Authorization", bearer()).send({ password, token });
+const enable = (token: unknown, body: object = {}) => request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ token, ...body });
+const disable = (token: unknown, password: unknown = PASSWORD) => request(app).post("/auth/2fa/disable").set("Authorization", bearer()).send({ password, token });
+const newCodes = (token: unknown, password: unknown = PASSWORD) => request(app).post("/auth/2fa/recovery-codes").set("Authorization", bearer()).send({ password, token });
 const setup = () => request(app).post("/auth/2fa/setup").set("Authorization", bearer());
 const secret = speakeasy.generateSecret({ length: 20 }).base32;
 /** Stored text the key cannot open: the right format, but no sealed value under this key. */
 const UNREADABLE = "xc1." + Buffer.alloc(60, 7).toString("base64url");
-const stored = () => prisma.user.findUniqueOrThrow({ where: { id: USER }, select: { twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true, twoFactorLastStep: true } });
+const stored = () => prisma.user.findUniqueOrThrow({
+    where: { id: USER },
+    select: { twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true, twoFactorLastStep: true, twoFactorPendingSecret: true, twoFactorPendingAt: true },
+});
 
 const STEP_MS = 30_000;
 let clock = 1_800_000_000_000;
@@ -42,6 +47,12 @@ let clock = 1_800_000_000_000;
 const codeAt = (offset: number) => speakeasy.totp({ secret, encoding: "base32", time: (clock + offset * STEP_MS) / 1000 });
 const codeNow = () => codeAt(0);
 const nextStep = () => { clock += STEP_MS; };
+const codeFor = (base32: string) => speakeasy.totp({ secret: base32, encoding: "base32", time: clock / 1000 });
+
+/** Puts the account where setup leaves it: `secret` waiting, made now, for the code to be proved. */
+async function setupDone(pending: string = secret): Promise<void> {
+    await prisma.user.update({ where: { id: USER }, data: { twoFactorPendingSecret: encrypt(pending), twoFactorPendingAt: new Date(clock) } });
+}
 
 /** Puts the account in the state turning 2FA on leaves it in, with ten known recovery codes. */
 async function twoFactorOn(): Promise<string[]> {
@@ -66,7 +77,7 @@ beforeEach(async () => {
     clearUserCache();
     await prisma.user.update({
         where: { id: USER },
-        data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0 },
+        data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null },
     });
 });
 
@@ -76,8 +87,92 @@ afterAll(async () => {
     await closeEngineConnections();
 });
 
+describe("setting it up", () => {
+    it("hands out a secret and a QR code, and keeps the secret on the server, sealed, until a code proves it", async () => {
+        const res = await setup().expect(200);
+
+        expect(res.body.secret).toMatch(/^[A-Z2-7]+$/);
+        expect(res.body.qrCode).toMatch(/^data:image\/png/);
+        const kept = await stored();
+        expect(kept.twoFactorEnabled).toBe(false);
+        expect(kept.twoFactorPendingSecret).toEqual(expect.any(String));
+        expect(kept.twoFactorPendingSecret).not.toContain(res.body.secret);
+    });
+
+    it("turns on with a code from that secret, and nothing the client says about the secret changes that", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+        const other = speakeasy.generateSecret({ length: 20 }).base32;
+
+        // A code from a secret the client names is refused, even though the client names it as the secret.
+        await enable(codeFor(other), { secret: other }).expect(400);
+        expect((await stored()).twoFactorEnabled).toBe(false);
+
+        // The server's own secret is the one checked, whatever the client sends beside it.
+        const res = await enable(codeFor(made), { secret: other }).expect(200);
+        expect(res.body.recoveryCodes).toHaveLength(10);
+        nextStep();
+        expect((await login(codeFor(made))).status).toBe(200);
+        nextStep();
+        expect((await login(codeFor(other))).status).toBe(401);
+        expect((await stored()).twoFactorPendingSecret).toBeNull();
+    });
+
+    it("replaces the pending secret when setup is run again", async () => {
+        const first = (await setup().expect(200)).body.secret as string;
+        const second = (await setup().expect(200)).body.secret as string;
+
+        expect(second).not.toBe(first);
+        await enable(codeFor(first)).expect(400);
+        await enable(codeFor(second)).expect(200);
+    });
+
+    it("lets a wrong code be tried again against the same pending secret", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+
+        await enable("000000").expect(400);
+
+        await enable(codeFor(made)).expect(200);
+    });
+
+    it("forgets the pending secret after ten minutes, and says to start setup again", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+        clock += 10 * 60_000 + STEP_MS;
+
+        const res = await enable(codeFor(made));
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/set up again|start setup/i);
+        expect((await stored()).twoFactorEnabled).toBe(false);
+    });
+
+    it("keeps a pending secret still good just inside ten minutes", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+        clock += 9 * 60_000;
+
+        await enable(codeFor(made)).expect(200);
+    });
+
+    it("refuses to turn on when no setup was run, whatever secret the client sends", async () => {
+        const res = await enable(codeNow(), { secret });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/set up again|start setup/i);
+        expect((await stored()).twoFactorEnabled).toBe(false);
+    });
+
+    it("refuses to turn on when the pending secret cannot be read, and setup then makes a new one", async () => {
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorPendingSecret: UNREADABLE, twoFactorPendingAt: new Date(clock) } });
+
+        await enable(codeNow()).expect(400);
+
+        const made = (await setup().expect(200)).body.secret as string;
+        await enable(codeFor(made)).expect(200);
+    });
+});
+
 describe("turning it on", () => {
     it("refuses a wrong code, and a right one hands out ten recovery codes", async () => {
+        await setupDone();
         await enable("000000").expect(400);
 
         const res = await enable(codeNow()).expect(200);
@@ -87,6 +182,7 @@ describe("turning it on", () => {
     });
 
     it("spends the code it was turned on with, so that code cannot then sign in, but the next step's can", async () => {
+        await setupDone();
         const enabling = codeNow();
         await enable(enabling).expect(200);
 
@@ -101,10 +197,9 @@ describe("turning it on while it is on", () => {
         const codes = await twoFactorOn();
         const before = await stored();
         const newSecret = speakeasy.generateSecret({ length: 20 }).base32;
-        const newCode = speakeasy.totp({ secret: newSecret, encoding: "base32", time: clock / 1000 });
 
         expect((await setup()).status).toBe(400);
-        const res = await request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ secret: newSecret, token: newCode });
+        const res = await enable(codeFor(newSecret), { secret: newSecret });
 
         expect(res.status).toBe(400);
         expect(res.body.error).toMatch(/already enabled/i);
@@ -115,12 +210,10 @@ describe("turning it on while it is on", () => {
     });
 
     it("does not let two requests turn it on at once", async () => {
-        const first = speakeasy.generateSecret({ length: 20 }).base32;
-        const second = speakeasy.generateSecret({ length: 20 }).base32;
-        const send = (s: string) => request(app).post("/auth/2fa/enable").set("Authorization", bearer())
-            .send({ secret: s, token: speakeasy.totp({ secret: s, encoding: "base32", time: clock / 1000 }) });
+        await setupDone();
+        const code = codeNow();
 
-        const results = await Promise.all([send(first), send(second)]);
+        const results = await Promise.all([enable(code), enable(code)]);
 
         expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
     });
@@ -130,6 +223,7 @@ describe("turning it on while it is on", () => {
         const spentByDisable = codeNow();
         await disable(spentByDisable).expect(200);
 
+        await setupDone();
         await enable(codeAt(-1)).expect(200);
 
         expect((await login(spentByDisable)).status).toBe(401);
@@ -174,14 +268,48 @@ describe("a credential the key cannot read", () => {
         expect((await stored()).twoFactorEnabled).toBe(true);
     });
 
+    const listWarnings = () => warn.mock.calls.filter((call) => String(call[0]).includes("recovery-code list")).length;
+
     it("refuses a recovery code when the list is unreadable, keeps the list, and still takes a current code", async () => {
         const [code] = await twoFactorOn();
         await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
 
         expect((await login(code)).status).toBe(401);
         expect((await stored()).twoFactorRecoveryCodes).toBe(UNREADABLE);
-        expect(warn).toHaveBeenCalledTimes(1);
         expect((await login(codeNow())).status).toBe(200);
+    });
+
+    it("logs an unreadable recovery list once per sign-in that sends a code, whatever the code looks like", async () => {
+        const [code] = await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
+
+        await login(code);
+        expect(listWarnings()).toBe(1);
+        await login("000000");
+        expect(listWarnings()).toBe(2);
+        await login(codeNow());
+        expect(listWarnings()).toBe(3);
+    });
+
+    it("does not log it when the sign-in only asks for a code, or on the other 2FA routes", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
+
+        await login();
+        await request(app).get("/auth/2fa/status").set("Authorization", bearer());
+        await newCodes("0000000A");
+        await disable("0000000A");
+        await disable(codeNow());
+
+        expect(listWarnings()).toBe(0);
+    });
+
+    it("does not log a readable list", async () => {
+        const [code] = await twoFactorOn();
+
+        await login(code);
+
+        expect(listWarnings()).toBe(0);
     });
 
     it("is not turned off by the disable route, with or without a right code, and is left as it is", async () => {
@@ -266,6 +394,7 @@ describe("signing in with a code", () => {
         const again = codeAt(0);
 
         // Turning it back on with this step's code spends it; the code from before is older still.
+        await setupDone();
         await enable(again).expect(200);
         expect((await login(again)).status).toBe(401);
         expect((await login(code)).status).toBe(401);
@@ -309,6 +438,19 @@ describe("a recovery code", () => {
     });
 });
 
+describe("the clock window", () => {
+    it("takes a code one step either side of now, and refuses two steps either side", async () => {
+        await twoFactorOn();
+
+        expect((await login(codeAt(-2))).status).toBe(401);
+        expect((await login(codeAt(2))).status).toBe(401);
+        expect((await login(codeAt(-1))).status).toBe(200);
+        nextStep();
+        nextStep();
+        expect((await login(codeAt(1))).status).toBe(200);
+    });
+});
+
 describe("turning it off", () => {
     it("needs the password and a current code", async () => {
         await twoFactorOn();
@@ -336,10 +478,169 @@ describe("turning it off", () => {
         const code = codeNow();
 
         await disable(code).expect(200);
+        await setupDone();
         await enable(codeAt(1)).expect(200);
 
         // The account has 2FA again; the code the disable used is older than the step that turned it back on.
         expect((await login(code)).status).toBe(401);
+    });
+});
+
+describe("turning it off with a recovery code", () => {
+    it("works for a person who lost their phone, spends the code, and clears everything stored", async () => {
+        const [code] = await twoFactorOn();
+
+        await disable(code.toLowerCase()).expect(200);
+
+        const after = await stored();
+        expect(after).toMatchObject({ twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorPendingSecret: null });
+        expect((await login().expect(200)).body.token).toEqual(expect.any(String));
+    });
+
+    it("refuses a wrong recovery code and one already used, and leaves it on", async () => {
+        const [code] = await twoFactorOn();
+
+        await disable("DEADBEEF").expect(400);
+        expect((await login(code)).status).toBe(200);
+        await disable(code).expect(400);
+
+        expect((await stored()).twoFactorEnabled).toBe(true);
+    });
+
+    it("still asks the password first", async () => {
+        const [code] = await twoFactorOn();
+
+        await disable(code, "wrong").expect(400);
+
+        expect((await stored()).twoFactorEnabled).toBe(true);
+        expect((await login(code)).status).toBe(200);
+    });
+
+    it("refuses a recovery code when the list cannot be read, and leaves it on", async () => {
+        const [code] = await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+
+        await disable(code).expect(400);
+
+        expect((await stored()).twoFactorEnabled).toBe(true);
+        jest.mocked(logger.warn).mockRestore();
+    });
+});
+
+describe("new recovery codes", () => {
+    it("replace the whole list: ten new codes come back once, the old ones stop working, the new ones work", async () => {
+        const old = await twoFactorOn();
+
+        const res = await newCodes(codeNow()).expect(200);
+
+        const fresh: string[] = res.body.recoveryCodes;
+        expect(fresh).toHaveLength(10);
+        for (const code of fresh) expect(code).toMatch(/^[0-9A-F]{8}$/);
+        expect(fresh.some((code) => old.includes(code))).toBe(false);
+        expect((await login(old[0])).status).toBe(401);
+        expect((await login(fresh[0])).status).toBe(200);
+        expect((await login(fresh[0])).status).toBe(401);
+        expect((await stored()).twoFactorEnabled).toBe(true);
+    });
+
+    it("can be asked for with a recovery code, which is spent", async () => {
+        const [code] = await twoFactorOn();
+
+        const res = await newCodes(code).expect(200);
+
+        expect(res.body.recoveryCodes).toHaveLength(10);
+        expect((await login(code)).status).toBe(401);
+    });
+
+    it("need the password and a right code, and change nothing when either is wrong", async () => {
+        const old = await twoFactorOn();
+        const before = await stored();
+
+        await newCodes(codeNow(), "wrong").expect(400);
+        await newCodes("000000").expect(400);
+        await newCodes("DEADBEEF").expect(400);
+
+        expect(await stored()).toEqual(before);
+        expect((await login(old[0])).status).toBe(200);
+    });
+
+    it("spend the code they are asked with, so it cannot also sign in", async () => {
+        await twoFactorOn();
+        const code = codeNow();
+
+        await newCodes(code).expect(200);
+
+        expect((await login(code)).status).toBe(401);
+    });
+
+    it("are refused while 2FA is off", async () => {
+        const res = await newCodes(codeNow());
+
+        expect(res.status).toBe(400);
+        expect((await stored()).twoFactorRecoveryCodes).toBeNull();
+    });
+
+    it("are refused, and nothing changes, when the secret cannot be read", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+        const before = await stored();
+
+        await newCodes(codeNow()).expect(409);
+
+        expect(await stored()).toEqual(before);
+        jest.mocked(logger.warn).mockRestore();
+    });
+
+    it("replace an unreadable list when the person proves a current code", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+
+        const res = await newCodes(codeNow()).expect(200);
+
+        nextStep();
+        expect((await login(res.body.recoveryCodes[0])).status).toBe(200);
+        jest.mocked(logger.warn).mockRestore();
+    });
+});
+
+describe("bodies that are not what the route wants", () => {
+    const post = (path: string, body: unknown) => request(app).post(path).set("Authorization", bearer()).send(body as object);
+
+    it.each([
+        ["enable, a number for the code", "/auth/2fa/enable", { token: 123456 }],
+        ["enable, an object for the code", "/auth/2fa/enable", { token: { a: 1 } }],
+        ["enable, no code", "/auth/2fa/enable", {}],
+        ["enable, a list for the secret it ignores", "/auth/2fa/enable", { secret: ["x"], token: "123456" }],
+        ["disable, a number for the code", "/auth/2fa/disable", { password: PASSWORD, token: 123456 }],
+        ["disable, an object for the password", "/auth/2fa/disable", { password: { $ne: "" }, token: "123456" }],
+        ["disable, nothing", "/auth/2fa/disable", {}],
+        ["recovery codes, a number for the password", "/auth/2fa/recovery-codes", { password: 5, token: "123456" }],
+        ["recovery codes, a list for the code", "/auth/2fa/recovery-codes", { password: PASSWORD, token: ["1"] }],
+        ["recovery codes, nothing", "/auth/2fa/recovery-codes", {}],
+    ])("answers 400, never 500: %s", async (_name, path, body) => {
+        await twoFactorOn();
+        const before = await stored();
+
+        const res = await post(path, body);
+
+        expect(res.status).toBe(400);
+        expect(await stored()).toEqual(before);
+    });
+
+    it("answers 400 to a setup body that is a list, and makes no pending secret", async () => {
+        const res = await post("/auth/2fa/setup", []);
+
+        expect(res.status).toBe(400);
+        expect((await stored()).twoFactorPendingSecret).toBeNull();
+    });
+
+    it("answers 400 to a body that is not JSON text at all", async () => {
+        const res = await request(app).post("/auth/2fa/disable").set("Authorization", bearer()).set("Content-Type", "application/json").send("{nope");
+
+        expect(res.status).toBe(400);
     });
 });
 
@@ -352,4 +653,58 @@ it("refuses an unknown name and a wrong password alike", async () => {
     const wrong = await request(app).post("/auth/login").send({ username: USER, password: "nope" });
     expect([unknown.status, unknown.body]).toEqual([401, { error: "Invalid credentials" }]);
     expect([wrong.status, wrong.body]).toEqual([401, { error: "Invalid credentials" }]);
+});
+
+describe("an admin turning off someone's 2FA", () => {
+    const ADMIN = "zz-2fa-admin";
+    const adminBearer = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
+    const reset = (id: string, auth = adminBearer()) => request(app).post(`/auth/users/${id}/reset-2fa`).set("Authorization", auth);
+
+    beforeAll(async () => {
+        await prisma.user.deleteMany({ where: { id: ADMIN } });
+        await prisma.user.create({ data: { id: ADMIN, username: ADMIN, passwordHash: await bcrypt.hash(PASSWORD, 10), role: "admin", tokenVersion: 0 } });
+    });
+    afterAll(async () => { await prisma.user.deleteMany({ where: { id: ADMIN } }); });
+
+    it("lets an account whose secret cannot be read sign in again with its password, and clears everything stored", async () => {
+        await twoFactorOn();
+        await setupDone();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE, twoFactorRecoveryCodes: UNREADABLE, twoFactorLastStep: 77 } });
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+        expect((await login()).status).toBe(401);
+
+        await reset(USER).expect(200);
+
+        expect(await stored()).toEqual({
+            twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null,
+        });
+        expect((await login().expect(200)).body.token).toEqual(expect.any(String));
+        jest.mocked(logger.warn).mockRestore();
+    });
+
+    it("also works on an account whose secret reads fine, and the person can set it up again", async () => {
+        await twoFactorOn();
+
+        await reset(USER).expect(200);
+
+        const made = (await setup().expect(200)).body.secret as string;
+        await enable(codeFor(made)).expect(200);
+    });
+
+    it("answers 404 for a person who does not exist", async () => {
+        await reset("zz-2fa-nobody-at-all").expect(404);
+    });
+
+    it("is for admins: a member is refused and the account keeps its 2FA", async () => {
+        await twoFactorOn();
+        const before = await stored();
+
+        await reset(USER, bearer()).expect(403);
+
+        expect(await stored()).toEqual(before);
+    });
+
+    it("is refused to someone who is not signed in", async () => {
+        await request(app).post(`/auth/users/${USER}/reset-2fa`).expect(401);
+    });
 });

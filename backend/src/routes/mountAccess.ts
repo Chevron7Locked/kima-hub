@@ -32,6 +32,7 @@ export const mountAccess: Record<string, MountAccess> = {
                 "GET /users": "admin",
                 "POST /create-user": "admin",
                 "DELETE /users/:id": "admin",
+                "POST /users/:id/reset-2fa": "admin",
             },
         },
     },

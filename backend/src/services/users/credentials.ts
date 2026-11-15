@@ -13,13 +13,13 @@ export const NO_ACCOUNT_PASSWORD_HASH = "$2b$10$invalidhashfortimingsafety.00000
 const TOTP_STEP_SECONDS = 30;
 
 /**
- * The 30-second step a two-factor code belongs to, or null when it fits no step now. Two steps either side are allowed
- * for clock drift. Naming the step lets the caller spend it, so the code cannot be used twice (RFC 6238 section 5.2).
+ * The 30-second step a two-factor code belongs to, or null when it fits no step now. One step either side is allowed
+ * for clock drift (RFC 6238 section 5.2). Naming the step lets the caller spend it, so the code cannot be used twice.
  */
 export function totpStep(secret: string, token: string): number | null {
     // The step is read once, so the one the code is checked against is the one named.
     const now = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
-    const match = speakeasy.totp.verifyDelta({ secret, encoding: "base32", token, window: 2, counter: now });
+    const match = speakeasy.totp.verifyDelta({ secret, encoding: "base32", token, window: 1, counter: now });
     return match ? now + match.delta : null;
 }
 
@@ -53,6 +53,72 @@ export async function spendTotpStep(userId: string, step: number): Promise<boole
     return spent.count === 1;
 }
 
+/** A recovery code is eight hex characters; an authenticator code is six numerals, so the two are never mistaken. */
+const RECOVERY_CODE = /^[A-F0-9]{8}$/i;
+
+/** Whether a code is shaped like a recovery code rather than an authenticator code. */
+export function isRecoveryCodeShaped(token: string): boolean {
+    return RECOVERY_CODE.test(token);
+}
+
+/** How long a secret from setup waits for a code that proves it. */
+export const PENDING_SECRET_LIFETIME_MS = 10 * 60_000;
+
+/**
+ * The secret setup kept for a person, or null when none waits, it is older than ten minutes, or the key cannot read it.
+ * A pending secret holds nothing worth keeping, so an unreadable one is the same as none: setup makes a new one.
+ */
+export function readPendingTwoFactorSecret(stored: string | null, madeAt: Date | null): string | null {
+    if (!stored || !madeAt) return null;
+    if (Date.now() - madeAt.getTime() > PENDING_SECRET_LIFETIME_MS) return null;
+    try {
+        return decrypt(stored);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Logs that a person's recovery-code list cannot be read by the current key (an unreadable credential). A sign-in that
+ * sends a code calls it once, so the cause shows in the log whatever kind of code was sent. Nothing is changed or refused.
+ */
+export function warnIfRecoveryListUnreadable(userId: string, stored: string | null): void {
+    if (!stored) return;
+    try {
+        decrypt(stored);
+    } catch (error) {
+        logger.warn(`[2FA] ${userId} has a recovery-code list the current key cannot read; refusing its codes, it is kept as stored:`, error);
+    }
+}
+
+/**
+ * Spends the second factor a person sent: a recovery code (when it is shaped like one) or an authenticator code for
+ * their secret. True when it was right and is now used up, so it cannot be used again. Sign-in, turning 2FA off and
+ * new recovery codes all take it through here.
+ */
+export async function spendSecondFactor(
+    user: { id: string; recoveryCodes: string | null },
+    secret: string,
+    token: string,
+): Promise<boolean> {
+    if (RECOVERY_CODE.test(token)) return spendRecoveryCode(user.id, user.recoveryCodes, token);
+    const step = totpStep(secret, token);
+    return step !== null && (await spendTotpStep(user.id, step));
+}
+
+/** Ten new recovery codes: the plain codes to show once, and the list to store (hashes, encrypted). */
+export function newRecoveryCodes(): { codes: string[]; stored: string } {
+    const codes: string[] = [];
+    const hashes: string[] = [];
+    for (let i = 0; i < 10; i++) {
+        // Eight hex characters, stored only as a hash.
+        const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+        codes.push(code);
+        hashes.push(crypto.createHash("sha256").update(code).digest("hex"));
+    }
+    return { codes, stored: encrypt(hashes.join(",")) };
+}
+
 /** The most tries to spend a code while other sign-ins keep changing the list: each lost try means another spent one of ten. */
 const MAX_SPEND_TRIES = 10;
 
@@ -69,9 +135,8 @@ export async function spendRecoveryCode(userId: string, encryptedCodes: string |
         let codes: string[];
         try {
             codes = decrypt(current).split(",");
-        } catch (error) {
-            // An unreadable list is kept as it is, and no code is taken from it.
-            logger.warn(`[2FA] ${userId} has a recovery-code list the current key cannot read; refusing, it is kept as stored:`, error);
+        } catch {
+            // An unreadable list is kept as it is, and no code is taken from it. A sign-in logs it (warnIfRecoveryListUnreadable).
             return false;
         }
         const index = codes.indexOf(hash);

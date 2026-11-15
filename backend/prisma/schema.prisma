@@ -844,6 +844,8 @@ model User {
   twoFactorSecret        String?
   twoFactorRecoveryCodes String?
   twoFactorLastStep      Int                      @default(0)
+  twoFactorPendingSecret String?
+  twoFactorPendingAt     DateTime?
   tokenVersion           Int                      @default(0)
   createdAt              DateTime                 @default(now())
   apiKeys                ApiKey[]

@@ -1,13 +1,12 @@
-import { Router } from "express";
+import { Response, Router } from "express";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { NO_ACCOUNT_PASSWORD_HASH, readTwoFactorSecret, spendRecoveryCode, spendTotpStep, totpStep } from "../services/users/credentials";
+import { isRecoveryCodeShaped, newRecoveryCodes, NO_ACCOUNT_PASSWORD_HASH, readPendingTwoFactorSecret, readTwoFactorSecret, spendSecondFactor, totpStep, warnIfRecoveryListUnreadable } from "../services/users/credentials";
 import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
@@ -25,6 +24,20 @@ import { isTransactionConflict } from "../utils/dbConflict";
 const router = Router();
 
 const ALREADY_ENABLED = "2FA is already enabled";
+const SETUP_AGAIN = "Start setup again: there is no 2FA setup waiting, or it timed out";
+const UNREADABLE_SECRET = "2FA is on but its secret cannot be read, so it was left on";
+const UNREADABLE_SECRET_CODES = "2FA is on but its secret cannot be read, so the recovery codes were left as they were";
+
+/** The bodies of the 2FA routes: strings only. Anything else is a 400. A `secret` the client still sends is ignored. */
+const setupBody = z.object({}).optional();
+const enableBody = z.object({ token: z.string().min(1) });
+const proveBody = z.object({ password: z.string().min(1), token: z.string().min(1) });
+
+/** A zod refusal as the 400 the routes answer; null when the error is something else. */
+function invalidBody(err: unknown, res: Response): Response | null {
+    if (!(err instanceof z.ZodError)) return null;
+    return res.status(400).json({ error: "Invalid request", details: err.issues });
+}
 
 const loginSchema = z.object({
     username: z.string().refine((name) => normalizeUsername(name) !== ""),
@@ -80,22 +93,14 @@ router.post("/login", async (req, res) => {
                 });
             }
 
-            // Check if it's a recovery code
-            const isRecoveryCode = /^[A-F0-9]{8}$/i.test(token);
+            // Once per sign-in that sends a code, so an unreadable recovery list shows in the log whatever code was sent.
+            warnIfRecoveryListUnreadable(user.id, user.twoFactorRecoveryCodes);
 
-            if (isRecoveryCode && user.twoFactorRecoveryCodes) {
-                // Spent atomically, so of two sign-ins sending one code, one is refused.
-                if (!(await spendRecoveryCode(user.id, user.twoFactorRecoveryCodes, token))) {
-                    return res
-                        .status(401)
-                        .json({ error: "Invalid recovery code" });
-                }
-            } else {
-                // A code is spent by use: the same one, or an earlier step's, is refused a second time.
-                const step = totpStep(secret, token);
-                if (step === null || !(await spendTotpStep(user.id, step))) {
-                    return res.status(401).json({ error: "Invalid 2FA token" });
-                }
+            // A recovery code is spent atomically, so of two sign-ins sending one, one is refused. An authenticator
+            // code is spent by use: the same one, or an earlier step's, is refused a second time.
+            const spent = await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token);
+            if (!spent) {
+                return res.status(401).json({ error: isRecoveryCodeShaped(token) ? "Invalid recovery code" : "Invalid 2FA token" });
             }
         }
 
@@ -338,9 +343,10 @@ router.delete("/users/:id", async (req, res) => {
     }
 });
 
-// POST /auth/2fa/setup - Generate 2FA secret and QR code
+// POST /auth/2fa/setup - Make a secret and QR code, and keep the secret (sealed) until a code proves it
 router.post("/2fa/setup", async (req, res) => {
     try {
+        setupBody.parse(req.body);
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
             select: { username: true, twoFactorEnabled: true },
@@ -363,38 +369,49 @@ router.post("/2fa/setup", async (req, res) => {
         // Generate QR code
         const qrCodeDataUrl = await QRCode.toDataURL(secret.otpauth_url!);
 
+        // Kept on the server for ten minutes; a new setup replaces it. Enable checks its code against this one, so a
+        // secret the client names never counts. Written only while it is off, so a setup cannot slip in behind an enable.
+        const kept = await prisma.user.updateMany({
+            where: { id: req.user!.id, twoFactorEnabled: false },
+            data: { twoFactorPendingSecret: encrypt(secret.base32), twoFactorPendingAt: new Date(Date.now()) },
+        });
+        if (kept.count !== 1) {
+            return res.status(400).json({ error: ALREADY_ENABLED });
+        }
+
         res.json({
             secret: secret.base32,
             qrCode: qrCodeDataUrl,
         });
     } catch (error) {
+        if (invalidBody(error, res)) return;
         logger.error("2FA setup error:", error);
         res.status(500).json({ error: "Failed to setup 2FA" });
     }
 });
 
-// POST /auth/2fa/enable - Verify token and enable 2FA
+// POST /auth/2fa/enable - Check a code against the secret setup kept, and turn 2FA on
 router.post("/2fa/enable", authLimiter, async (req, res) => {
     try {
-        const { secret, token } = req.body;
-
-        if (!secret || !token) {
-            return res
-                .status(400)
-                .json({ error: "Secret and token are required" });
-        }
+        // A `secret` in the body is read by nobody: older clients still send it.
+        const { token } = enableBody.parse(req.body);
 
         // While it is on, it is turned off first (which needs the password and a current code); a new secret does
         // not replace the one in use.
         const current = await prisma.user.findUnique({
             where: { id: req.user!.id },
-            select: { twoFactorEnabled: true, twoFactorLastStep: true },
+            select: { twoFactorEnabled: true, twoFactorLastStep: true, twoFactorPendingSecret: true, twoFactorPendingAt: true },
         });
         if (!current) {
             return res.status(404).json({ error: "User not found" });
         }
         if (current.twoFactorEnabled) {
             return res.status(400).json({ error: ALREADY_ENABLED });
+        }
+
+        const secret = readPendingTwoFactorSecret(current.twoFactorPendingSecret, current.twoFactorPendingAt);
+        if (secret === null) {
+            return res.status(400).json({ error: SETUP_AGAIN });
         }
 
         const step = totpStep(secret, token);
@@ -404,67 +421,48 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
                 .json({ error: "Invalid token. Please try again." });
         }
 
-        // Generate 10 recovery codes
-        const recoveryCodes: string[] = [];
-        const hashedRecoveryCodes: string[] = [];
+        const recovery = newRecoveryCodes();
 
-        for (let i = 0; i < 10; i++) {
-            // Eight hex characters, stored only as a hash.
-            const code = crypto.randomBytes(4).toString("hex").toUpperCase();
-            recoveryCodes.push(code);
-            hashedRecoveryCodes.push(
-                crypto.createHash("sha256").update(code).digest("hex")
-            );
-        }
-
-        // Encrypt the hashed codes for storage
-        const encryptedRecoveryCodes = encrypt(
-            hashedRecoveryCodes.join(",")
-        );
-
-        // Encrypt and save the secret
-        const encryptedSecret = encrypt(secret);
-        // Written only if it is still off, so two requests cannot both turn it on and the second overwrite the first.
+        // Written only if it is still off and the pending secret is still the one checked, so two requests cannot
+        // both turn it on, and a setup run in between is not overwritten.
         const written = await prisma.user.updateMany({
-            where: { id: req.user!.id, twoFactorEnabled: false },
+            where: { id: req.user!.id, twoFactorEnabled: false, twoFactorPendingSecret: current.twoFactorPendingSecret },
             data: {
                 twoFactorEnabled: true,
-                twoFactorSecret: encryptedSecret,
-                twoFactorRecoveryCodes: encryptedRecoveryCodes,
+                twoFactorSecret: encrypt(secret),
+                twoFactorRecoveryCodes: recovery.stored,
+                twoFactorPendingSecret: null,
+                twoFactorPendingAt: null,
                 // The code that proved the secret is spent, so it cannot also sign in. A step spent before stays
                 // spent: an older code does not move the mark back.
                 twoFactorLastStep: Math.max(step, current.twoFactorLastStep),
             },
         });
         if (written.count !== 1) {
-            return res.status(400).json({ error: ALREADY_ENABLED });
+            const now = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { twoFactorEnabled: true } });
+            return res.status(400).json({ error: now?.twoFactorEnabled ? ALREADY_ENABLED : SETUP_AGAIN });
         }
 
         // Return the plain recovery codes to the user (only time they'll see them)
         res.json({
             message: "2FA enabled successfully",
-            recoveryCodes: recoveryCodes,
+            recoveryCodes: recovery.codes,
         });
     } catch (error) {
+        if (invalidBody(error, res)) return;
         logger.error("2FA enable error:", error);
         res.status(500).json({ error: "Failed to enable 2FA" });
     }
 });
 
-// POST /auth/2fa/disable - Disable 2FA
+// POST /auth/2fa/disable - Disable 2FA with the password and a current authenticator code or a recovery code
 router.post("/2fa/disable", authLimiter, async (req, res) => {
     try {
-        const { password, token } = req.body;
-
-        if (!password || !token) {
-            return res
-                .status(400)
-                .json({ error: "Password and current 2FA token are required" });
-        }
+        const { password, token } = proveBody.parse(req.body);
 
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
-            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true },
+            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true },
         });
 
         if (!user) {
@@ -479,14 +477,15 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
 
         if (user.twoFactorEnabled) {
             // A secret that is missing or unreadable cannot check a code, and is not a reason to skip the check:
-            // it stays on, stored as it is, until the key that reads it is restored.
+            // it stays on, stored as it is, until the key that reads it is restored or an admin resets it.
             const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
             if (secret === null) {
-                return res.status(409).json({ error: "2FA is on but its secret cannot be read, so it was left on" });
+                return res.status(409).json({ error: UNREADABLE_SECRET });
             }
-            // Spent like a sign-in's code: one just used to sign in cannot also turn it off.
-            const step = totpStep(secret, token);
-            if (step === null || !(await spendTotpStep(user.id, step))) {
+            // Spent like a sign-in's code: one just used to sign in cannot also turn it off, and a recovery code is
+            // taken the way a sign-in takes it, so a person who lost their phone can still turn it off.
+            const spent = await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token);
+            if (!spent) {
                 return res.status(400).json({ error: "Invalid 2FA token" });
             }
         }
@@ -498,13 +497,87 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
                 twoFactorEnabled: false,
                 twoFactorSecret: null,
                 twoFactorRecoveryCodes: null,
+                twoFactorPendingSecret: null,
+                twoFactorPendingAt: null,
             },
         });
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {
+        if (invalidBody(error, res)) return;
         logger.error("2FA disable error:", error);
         res.status(500).json({ error: "Failed to disable 2FA" });
+    }
+});
+
+// POST /auth/2fa/recovery-codes - Replace the whole recovery list with ten new codes, shown once. 2FA stays on.
+router.post("/2fa/recovery-codes", authLimiter, async (req, res) => {
+    try {
+        const { password, token } = proveBody.parse(req.body);
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true },
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        if (!(await bcrypt.compare(password, user.passwordHash))) {
+            return res.status(400).json({ error: "Invalid password" });
+        }
+        if (!user.twoFactorEnabled) {
+            return res.status(400).json({ error: "2FA is not enabled" });
+        }
+
+        const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
+        if (secret === null) {
+            return res.status(409).json({ error: UNREADABLE_SECRET_CODES });
+        }
+        if (!(await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token))) {
+            return res.status(400).json({ error: "Invalid 2FA token" });
+        }
+
+        // The old list goes, readable or not: a person who proved a current code gets a list they can use.
+        const recovery = newRecoveryCodes();
+        const written = await prisma.user.updateMany({
+            where: { id: user.id, twoFactorEnabled: true },
+            data: { twoFactorRecoveryCodes: recovery.stored },
+        });
+        if (written.count !== 1) {
+            return res.status(400).json({ error: "2FA is not enabled" });
+        }
+
+        res.json({ recoveryCodes: recovery.codes });
+    } catch (error) {
+        if (invalidBody(error, res)) return;
+        logger.error("2FA recovery codes error:", error);
+        res.status(500).json({ error: "Failed to make new recovery codes" });
+    }
+});
+
+// POST /auth/users/:id/reset-2fa (Admin only) - Turn 2FA off for a person who cannot sign in with it, readable or not
+router.post("/users/:id/reset-2fa", async (req, res) => {
+    try {
+        const reset = await prisma.user.updateMany({
+            where: { id: req.params.id },
+            data: {
+                twoFactorEnabled: false,
+                twoFactorSecret: null,
+                twoFactorRecoveryCodes: null,
+                twoFactorPendingSecret: null,
+                twoFactorPendingAt: null,
+                twoFactorLastStep: 0,
+            },
+        });
+        if (reset.count !== 1) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        invalidateUserCache(req.params.id);
+        res.json({ message: "2FA turned off" });
+    } catch (error) {
+        logger.error("2FA reset error:", error);
+        res.status(500).json({ error: "Failed to reset 2FA" });
     }
 });
 
