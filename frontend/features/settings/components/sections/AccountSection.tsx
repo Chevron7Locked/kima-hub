@@ -12,6 +12,15 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { copyText } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
+/** What a person types as their second factor: an authenticator code (6 digits) or a recovery code (8 hex characters). */
+function factorInput(value: string): string {
+    return value.replace(/[^0-9a-fA-F]/g, "").toUpperCase().slice(0, 8);
+}
+
+function isFactor(value: string): boolean {
+    return /^\d{6}$/.test(value) || /^[A-F0-9]{8}$/.test(value);
+}
+
 export function AccountSection() {
     const { user, deleteAccount } = useAuth();
     const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -51,6 +60,8 @@ export function AccountSection() {
         setup2FA,
         enable2FA,
         disable2FA,
+        regenerateRecoveryCodes,
+        regeneratingCodes,
         cancel2FASetup,
         closeRecoveryCodes,
     } = useTwoFactor();
@@ -61,6 +72,11 @@ export function AccountSection() {
     const [showDisableFlow, setShowDisableFlow] = useState(false);
     const [tfaStatus, setTfaStatus] = useState<StatusType>("idle");
     const [tfaMessage, setTfaMessage] = useState("");
+    const [showNewCodesFlow, setShowNewCodesFlow] = useState(false);
+    const [newCodesPassword, setNewCodesPassword] = useState("");
+    const [newCodesToken, setNewCodesToken] = useState("");
+    const [newCodesStatus, setNewCodesStatus] = useState<StatusType>("idle");
+    const [newCodesMessage, setNewCodesMessage] = useState("");
 
     useEffect(() => {
         load2FAStatus();
@@ -131,6 +147,21 @@ export function AccountSection() {
         } catch (error: unknown) {
             setTfaStatus("error");
             setTfaMessage(error instanceof Error ? error.message : "Failed");
+        }
+    };
+
+    const handleNewCodes = async () => {
+        setNewCodesStatus("loading");
+        try {
+            await regenerateRecoveryCodes(newCodesPassword, newCodesToken);
+            setNewCodesStatus("success");
+            setNewCodesMessage("New codes made. The old ones no longer work");
+            setNewCodesPassword("");
+            setNewCodesToken("");
+            setShowNewCodesFlow(false);
+        } catch (error: unknown) {
+            setNewCodesStatus("error");
+            setNewCodesMessage(error instanceof Error ? error.message : "Failed");
         }
     };
 
@@ -281,7 +312,7 @@ export function AccountSection() {
                 {showDisableFlow && (
                     <div className="py-4 space-y-3 border-t border-b border-white/5">
                         <p className="text-xs tabular-nums text-warning">
-                            Enter your password and current code to disable 2FA.
+                            Enter your password and a current code, or a recovery code, to disable 2FA.
                         </p>
                         <SettingsInput
                             type="password"
@@ -292,15 +323,15 @@ export function AccountSection() {
                         <SettingsInput
                             type="text"
                             value={disableToken}
-                            onChange={(v) => setDisableToken(v.replace(/\D/g, "").slice(0, 6))}
-                            placeholder="6-digit code"
+                            onChange={(v) => setDisableToken(factorInput(v))}
+                            placeholder="6-digit code or recovery code"
                         />
                         <div className="inline-flex items-center gap-3">
                             <Button
                                 variant="danger"
                                 size="sm"
                                 onClick={handleDisable2FA}
-                                disabled={!disablePassword || disableToken.length !== 6}
+                                disabled={!disablePassword || !isFactor(disableToken)}
                             >
                                 Disable 2FA
                             </Button>
@@ -319,6 +350,73 @@ export function AccountSection() {
                         </div>
                     </div>
                 )}
+                {twoFactorEnabled && (
+                    <SettingsRow
+                        label="Recovery codes"
+                        description="Make ten new codes. The old ones stop working"
+                    >
+                        <div className="inline-flex items-center gap-3">
+                            {!showNewCodesFlow && (
+                                <InlineStatus
+                                    status={newCodesStatus}
+                                    message={newCodesMessage}
+                                    onClear={() => setNewCodesStatus("idle")}
+                                />
+                            )}
+                            {!showNewCodesFlow && (
+                                <button
+                                    onClick={() => { setShowNewCodesFlow(true); setNewCodesStatus("idle"); }}
+                                    className="text-xs text-brand hover:text-brand-hover transition-colors"
+                                >
+                                    New codes
+                                </button>
+                            )}
+                        </div>
+                    </SettingsRow>
+                )}
+
+                {twoFactorEnabled && showNewCodesFlow && (
+                    <div className="py-4 space-y-3 border-t border-b border-white/5">
+                        <p className="text-xs tabular-nums text-warning">
+                            Enter your password and a current code, or a recovery code, to make new recovery codes.
+                        </p>
+                        <SettingsInput
+                            type="password"
+                            value={newCodesPassword}
+                            onChange={setNewCodesPassword}
+                            placeholder="Password"
+                        />
+                        <SettingsInput
+                            type="text"
+                            value={newCodesToken}
+                            onChange={(v) => setNewCodesToken(factorInput(v))}
+                            placeholder="6-digit code or recovery code"
+                        />
+                        <div className="inline-flex items-center gap-3">
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={handleNewCodes}
+                                disabled={regeneratingCodes || !newCodesPassword || !isFactor(newCodesToken)}
+                            >
+                                {regeneratingCodes ? "Making..." : "Make new codes"}
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => { setShowNewCodesFlow(false); setNewCodesPassword(""); setNewCodesToken(""); }}
+                            >
+                                Cancel
+                            </Button>
+                            <InlineStatus
+                                status={newCodesStatus}
+                                message={newCodesMessage}
+                                onClear={() => setNewCodesStatus("idle")}
+                            />
+                        </div>
+                    </div>
+                )}
+
                 <SettingsRow
                     label="Delete account"
                     description={deleteError ?? "Deletes your account and everything that is yours here: playlists, plays, likes and settings."}

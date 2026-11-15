@@ -695,6 +695,19 @@ describe("an admin turning off someone's 2FA", () => {
         await reset("zz-2fa-nobody-at-all").expect(404);
     });
 
+    it("shows on the users list which accounts have 2FA on, and nothing of what is stored", async () => {
+        await twoFactorOn();
+        const list = () => request(app).get("/auth/users").set("Authorization", adminBearer()).expect(200);
+        const row = (body: Array<Record<string, unknown>>) => body.find((u) => u.id === USER)!;
+
+        const on = row((await list()).body);
+        expect(on.twoFactorEnabled).toBe(true);
+        expect(Object.keys(on).filter((k) => /secret|recovery|step|pending/i.test(k))).toEqual([]);
+
+        await reset(USER).expect(200);
+        expect(row((await list()).body).twoFactorEnabled).toBe(false);
+    });
+
     it("is for admins: a member is refused and the account keeps its 2FA", async () => {
         await twoFactorOn();
         const before = await stored();

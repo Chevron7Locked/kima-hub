@@ -14,7 +14,15 @@ interface User {
     id: string;
     username: string;
     role: "user" | "admin";
+    twoFactorEnabled?: boolean;
     createdAt: string;
+}
+
+/** The 2FA reset of one person: asked once, then confirmed, then answered, all shown on that person's row. */
+interface ResetState {
+    userId: string;
+    step: "confirm" | "working" | "done" | "failed";
+    message: string;
 }
 
 interface UserManagementSectionProps {
@@ -36,6 +44,7 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
     const [createMessage, setCreateMessage] = useState("");
     const [deleteStatus, setDeleteStatus] = useState<StatusType>("idle");
     const [deleteMessage, setDeleteMessage] = useState("");
+    const [reset, setReset] = useState<ResetState | null>(null);
 
     // A reload after a create or delete keeps the list on screen until the new one arrives.
     const loadUsers = () =>
@@ -92,6 +101,22 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
         setDeleteStatus("idle");
         setDeleteMessage("");
         setConfirmDelete(null);
+    };
+
+    // Two clicks: the first asks, the second turns it off. The answer stays on the row until the next click.
+    const handleResetTwoFactor = async (userId: string) => {
+        if (reset?.userId !== userId || reset.step !== "confirm") {
+            setReset({ userId, step: "confirm", message: "Click again to turn off their 2FA" });
+            return;
+        }
+        setReset({ userId, step: "working", message: "" });
+        try {
+            await api.resetTwoFactor(userId);
+            setReset({ userId, step: "done", message: "2FA turned off" });
+            void loadUsers();
+        } catch (error: unknown) {
+            setReset({ userId, step: "failed", message: error instanceof Error ? error.message : "Failed" });
+        }
     };
 
     const handleDelete = async (userId: string) => {
@@ -209,13 +234,36 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
                                 </div>
 
                                 {currentUser?.id !== user.id && (
-                                    <button
-                                        onClick={() => openDelete(user.id)}
-                                        className="p-2 text-[var(--text-muted)] hover:text-danger-light transition-colors"
-                                        aria-label={`delete ${user.username}`}
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    <div className="flex items-center gap-3">
+                                        {reset?.userId === user.id && reset.step !== "confirm" && (
+                                            <InlineStatus
+                                                status={reset.step === "working" ? "loading" : reset.step === "done" ? "success" : "error"}
+                                                message={reset.message}
+                                                onClear={() => setReset(null)}
+                                            />
+                                        )}
+                                        {user.twoFactorEnabled && (
+                                            <button
+                                                onClick={() => void handleResetTwoFactor(user.id)}
+                                                disabled={reset?.userId === user.id && reset.step === "working"}
+                                                className={`text-xs transition-colors ${
+                                                    reset?.userId === user.id && reset.step === "confirm"
+                                                        ? "text-danger-light hover:brightness-125"
+                                                        : "text-[var(--text-muted)] hover:text-white/70"
+                                                }`}
+                                                aria-label={`reset 2fa for ${user.username}`}
+                                            >
+                                                {reset?.userId === user.id && reset.step === "confirm" ? "Confirm reset" : "Reset 2FA"}
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => openDelete(user.id)}
+                                            className="p-2 text-[var(--text-muted)] hover:text-danger-light transition-colors"
+                                            aria-label={`delete ${user.username}`}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         ))

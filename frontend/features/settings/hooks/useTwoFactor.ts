@@ -13,6 +13,7 @@ export function useTwoFactor() {
     const [disableTwoFactorToken, setDisableTwoFactorToken] = useState("");
     const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
     const [showRecoveryCodes, setShowRecoveryCodes] = useState(false);
+    const [regeneratingCodes, setRegeneratingCodes] = useState(false);
 
     const load2FAStatus = useCallback(async () => {
         try {
@@ -44,10 +45,8 @@ export function useTwoFactor() {
     const enable2FA = async (token: string) => {
         try {
             setLoadingTwoFactor(true);
-            const response = await api.post<{ recoveryCodes: string[] }>("/auth/2fa/enable", {
-                secret: twoFactorSecret,
-                token,
-            });
+            // The server checks the code against the secret it kept at setup, so none is sent back.
+            const response = await api.post<{ recoveryCodes: string[] }>("/auth/2fa/enable", { token });
 
             setRecoveryCodes(response.recoveryCodes);
             setShowRecoveryCodes(true);
@@ -81,6 +80,20 @@ export function useTwoFactor() {
         }
     };
 
+    /** Replaces the recovery codes with ten new ones and shows them; the old ones stop working. */
+    const regenerateRecoveryCodes = async (password: string, token: string) => {
+        try {
+            setRegeneratingCodes(true);
+            setRecoveryCodes(await api.newRecoveryCodes(password, token));
+            setShowRecoveryCodes(true);
+        } catch (error: unknown) {
+            console.error("Failed to make new recovery codes:", error);
+            throw error;
+        } finally {
+            setRegeneratingCodes(false);
+        }
+    };
+
     const cancel2FASetup = () => {
         setSettingUpTwoFactor(false);
         setTwoFactorToken("");
@@ -101,6 +114,7 @@ export function useTwoFactor() {
         twoFactorQR,
         twoFactorToken,
         disablingTwoFactor,
+        regeneratingCodes,
         disableTwoFactorPassword,
         disableTwoFactorToken,
         recoveryCodes,
@@ -112,6 +126,7 @@ export function useTwoFactor() {
         setup2FA,
         enable2FA,
         disable2FA,
+        regenerateRecoveryCodes,
         cancel2FASetup,
         closeRecoveryCodes,
     };

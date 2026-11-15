@@ -258,6 +258,7 @@ router.get("/users", async (_req, res) => {
                 username: true,
                 role: true,
                 onboardingComplete: true,
+                twoFactorEnabled: true,
                 createdAt: true,
             },
             orderBy: { createdAt: "asc" },

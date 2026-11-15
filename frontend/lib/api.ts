@@ -687,6 +687,23 @@ class ApiClient {
         this.clearToken();
     }
 
+    /**
+     * Replaces the signed-in person's recovery codes with ten new ones, returned once; 2FA stays on. Needs the password
+     * and a current authenticator code or an unused recovery code (400 when either is wrong).
+     */
+    async newRecoveryCodes(password: string, token: string): Promise<string[]> {
+        const made = await this.request<{ recoveryCodes: string[] }>("/auth/2fa/recovery-codes", {
+            method: "POST",
+            body: JSON.stringify({ password, token }),
+        });
+        return made.recoveryCodes;
+    }
+
+    /** Admin: turns 2FA off for another person, for one who cannot sign in with it. Clears their secret and recovery codes. */
+    async resetTwoFactor(userId: string): Promise<void> {
+        await this.request<{ message: string }>(`/auth/users/${encodeURIComponent(userId)}/reset-2fa`, { method: "POST" });
+    }
+
     async getCurrentUser() {
         return this.request<{
             id: string;
