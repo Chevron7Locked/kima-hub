@@ -247,16 +247,6 @@ describe("creating a playlist to add to", () => {
         expect(onClose).toHaveBeenCalled();
     });
 
-    it("makes a new playlist when the name was changed after a failed add", async () => {
-        createPlaylist.mockResolvedValueOnce({ id: "new-1", name: "late night" }).mockResolvedValueOnce({ id: "new-2", name: "early" });
-        mutateAsync.mockRejectedValueOnce(new Error("offline"));
-        await render(["a"]);
-        await create("late night");
-        await create("early");
-        expect(createPlaylist).toHaveBeenCalledTimes(2);
-        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-2", trackIds: ["a"] });
-    });
-
     it("reports a failed create as a failed create", async () => {
         createPlaylist.mockRejectedValue(new Error("nope"));
         await render(["a"]);

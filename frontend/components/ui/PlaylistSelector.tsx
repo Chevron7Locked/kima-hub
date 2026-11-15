@@ -81,17 +81,17 @@ export function PlaylistSelector({
     const [newPlaylistName, setNewPlaylistName] = useState("");
     const [isPublic, setIsPublic] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(isOpen);
     const [error, setError] = useState<string | null>(null);
-    const [isConfirming, setIsConfirming] = useState(false);
+    const [isAdding, setIsAdding] = useState(false);
     // Set while the person is being asked about songs the chosen playlist already holds.
     const [question, setQuestion] = useState<RepeatQuestion | null>(null);
     // Set when an add ended with songs the server could not add: the dialog stays and says so.
     const [outcome, setOutcome] = useState<AddOutcome | null>(null);
     // What the add in progress has done so far, across the repeat question's answers.
     const tally = useRef<AddOutcome>({ added: 0, rejected: 0 });
-    // A playlist made for these songs whose add failed: a retry adds to it instead of making another.
-    const created = useRef<{ id: string; name: string; isPublic: boolean } | null>(null);
+    // The id of the playlist this dialog made for these songs and could not finish adding to: a retry adds to it, whatever the form says now.
+    const createdId = useRef<string | null>(null);
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     // Reset dialog state when `isOpen` flips. Done during render (the
@@ -103,6 +103,9 @@ export function PlaylistSelector({
         if (isOpen) {
             setNewPlaylistName("");
             setIsPublic(false);
+            // Last time's list is not shown while this time's loads.
+            setPlaylists([]);
+            setIsLoading(true);
             setError(null);
             setQuestion(null);
             setOutcome(null);
@@ -132,13 +135,16 @@ export function PlaylistSelector({
 
     useEffect(() => {
         if (!isOpen) return;
-        created.current = null;
+        createdId.current = null;
         let cancelled = false;
         api.getPlaylists()
             .then((data) => {
                 if (!cancelled) setPlaylists(Array.isArray(data) ? data : []);
             })
-            .catch((error) => console.error("Failed to load playlists:", error));
+            .catch((error) => console.error("Failed to load playlists:", error))
+            .finally(() => {
+                if (!cancelled) setIsLoading(false);
+            });
         return () => {
             cancelled = true;
         };
@@ -152,18 +158,17 @@ export function PlaylistSelector({
         try {
             setIsCreating(true);
             setError(null);
-            // After a failed add the playlist is already made: the same name and setting adds to it again.
-            const pending = created.current;
-            const reuse = pending && pending.name === name && pending.isPublic === isPublic;
-            const playlist = reuse ? { id: pending.id } : await api.createPlaylist(name, isPublic);
-            if (!reuse) {
+            // After a failed add the playlist is already made: the retry adds to it, one playlist per attempt.
+            const pending = createdId.current;
+            const playlist = pending ? { id: pending } : await api.createPlaylist(name, isPublic);
+            if (!pending) {
                 window.dispatchEvent(new CustomEvent("playlist-created", { detail: playlist }));
             }
 
             if (trackIds.length === 0) {
                 onClose();
             } else {
-                created.current = { id: playlist.id, name, isPublic };
+                createdId.current = playlist.id;
                 // The playlist was empty before this dialog, so a repeat the server names is one a failed try of this
                 // dialog added: it is skipped without asking.
                 const done = await whileAdding(() => {
@@ -171,10 +176,10 @@ export function PlaylistSelector({
                     return addSongs(playlist.id, trackIds, false, true);
                 });
                 if (!done) {
-                    await loadPlaylists();
+                    void loadPlaylists();
                     return;
                 }
-                created.current = null;
+                createdId.current = null;
             }
 
             setNewPlaylistName("");
@@ -194,7 +199,7 @@ export function PlaylistSelector({
 
         await whileAdding(async () => {
             tally.current = { added: 0, rejected: 0 };
-            if (created.current?.id === playlistId) {
+            if (createdId.current === playlistId) {
                 // The playlist this dialog made: what it holds came from a failed try of this dialog.
                 await addSongs(playlistId, trackIds, false, true);
                 return;
@@ -215,7 +220,7 @@ export function PlaylistSelector({
         adding.current = true;
         try {
             setError(null);
-            setIsConfirming(true);
+            setIsAdding(true);
             await work();
             return true;
         } catch (error) {
@@ -224,7 +229,7 @@ export function PlaylistSelector({
             return false;
         } finally {
             adding.current = false;
-            setIsConfirming(false);
+            setIsAdding(false);
         }
     };
 
@@ -256,7 +261,11 @@ export function PlaylistSelector({
             // When every song is refused the server answers 404 and names them: that is not a failure to retry.
             const failure = error as ApiError;
             const refused = failure.data?.rejected;
-            if (failure.status !== 404 || !Array.isArray(refused)) throw error;
+            if (failure.status !== 404 || !Array.isArray(refused)) {
+                // The request may have reached the server before it failed: the page asks it again.
+                window.dispatchEvent(new CustomEvent("playlist-updated", { detail: { playlistId } }));
+                throw error;
+            }
             result = { added: 0, rejected: refused as string[] };
         }
         window.dispatchEvent(
@@ -353,7 +362,7 @@ export function PlaylistSelector({
                         </div>
                     </div>
                 ) : question ? (
-                    <RepeatPrompt question={question} busy={isConfirming} onAnswer={answer} />
+                    <RepeatPrompt question={question} busy={isAdding} onAnswer={answer} />
                 ) : (<>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
                     {isLoading ? (
@@ -377,7 +386,7 @@ export function PlaylistSelector({
                                     className={`w-full text-left px-4 py-4 rounded-lg transition-all border group bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10 ${
                                         i < 8 ? `animate-rise [animation-delay:calc(var(--i)*45ms)]` : ""
                                     }`}
-                                    disabled={isConfirming || isCreating}
+                                    disabled={isAdding || isCreating}
                                     style={{ "--i": i } as CSSProperties}
                                 >
                                     <div className="flex items-center justify-between">
@@ -411,14 +420,18 @@ export function PlaylistSelector({
                             value={newPlaylistName}
                             onChange={(e) => setNewPlaylistName(e.target.value)}
                             onKeyDown={(e) =>
-                                e.key === "Enter" && handleCreatePlaylist()
+                                // Enter that confirms an IME composition is not a submit (Safari reports it as keyCode 229).
+                                e.key === "Enter" &&
+                                !e.nativeEvent.isComposing &&
+                                e.nativeEvent.keyCode !== 229 &&
+                                handleCreatePlaylist()
                             }
                             className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[var(--color-brand)] focus:bg-white/10 transition-all"
                         />
                         <Button
                             variant="primary"
                             onClick={handleCreatePlaylist}
-                            disabled={!newPlaylistName.trim() || isCreating || isConfirming}
+                            disabled={!newPlaylistName.trim() || isCreating || isAdding}
                         >
                             <Plus className="w-5 h-5" />
                             <span className="hidden sm:inline">create</span>

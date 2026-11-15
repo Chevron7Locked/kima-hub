@@ -436,6 +436,8 @@ class ApiClient {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ refreshToken }),
                     credentials: "include",
+                    // A refresh that never answers would hold every request waiting on it.
+                    signal: AbortSignal.timeout(30_000),
                 }
             );
         } catch (error) {

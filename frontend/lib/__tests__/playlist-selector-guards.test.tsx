@@ -158,6 +158,135 @@ describe("closing while an add is in flight", () => {
     });
 });
 
+describe("a name box that is still composing", () => {
+    it("ignores the Enter that confirms an IME composition", async () => {
+        await render(["a"]);
+        await typeName("late night");
+        await act(async () => {
+            nameBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+        });
+        expect(createPlaylist).not.toHaveBeenCalled();
+        // Safari ends a composition with a keydown that is no longer "composing" but carries keyCode 229.
+        await act(async () => {
+            nameBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true }));
+        });
+        expect(createPlaylist).not.toHaveBeenCalled();
+        await act(async () => enter());
+        expect(createPlaylist).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("reopening the dialog", () => {
+    it("shows no playlists from the last time while the list loads", async () => {
+        await render(["a"]);
+        expect(text()).toContain("road trip");
+        await render(["a"], false);
+        getPlaylists.mockReturnValue(new Promise(() => {}));
+        await render(["a"], true);
+        expect(text()).not.toContain("road trip");
+        expect(text()).not.toContain("no playlists yet");
+    });
+
+    it("shows the list again once it has loaded", async () => {
+        await render(["a"]);
+        await render(["a"], false);
+        getPlaylists.mockResolvedValue([{ id: "pl-2", name: "gym", trackCount: 1 }]);
+        await render(["a"], true);
+        expect(text()).toContain("gym");
+        expect(text()).not.toContain("road trip");
+    });
+});
+
+describe("a failed first add to a new playlist", () => {
+    it("tells the page the playlist changed, as a partial add may have reached it", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        const updated = vi.fn();
+        window.addEventListener("playlist-updated", updated);
+        try {
+            await render(["a", "b"]);
+            await typeName("late night");
+            await click("create");
+            expect(updated).toHaveBeenCalledTimes(1);
+            expect((updated.mock.calls[0][0] as CustomEvent).detail).toEqual({ playlistId: "new-1" });
+        } finally {
+            window.removeEventListener("playlist-updated", updated);
+        }
+    });
+
+    it("retries into the same playlist whatever the name box says now", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await typeName("something else");
+        await act(async () => (document.querySelector("input[type=checkbox]") as HTMLInputElement).click());
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(1);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-1", trackIds: ["a"] });
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it("can be closed while the list refreshes after the failure", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        getPlaylists.mockReturnValue(new Promise(() => {}));
+        await typeName("late night");
+        await click("create");
+        expect(document.querySelector('[role="alert"]')).not.toBeNull();
+        await escape();
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("makes a fresh playlist after the dialog is reopened", async () => {
+        createPlaylist
+            .mockResolvedValueOnce({ id: "new-1", name: "late night" })
+            .mockResolvedValueOnce({ id: "new-2", name: "early" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a"], false);
+        await render(["a"], true);
+        await typeName("early");
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-2", trackIds: ["a"] });
+    });
+});
+
+describe("a request that times out", () => {
+    it("shows the error and lets the dialog close again", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        let fail!: (e: Error) => void;
+        mutateAsync.mockReturnValue(new Promise((_r, reject) => (fail = reject)));
+        await render(["a"]);
+        await click("road trip");
+        await escape();
+        expect(onClose).not.toHaveBeenCalled();
+        await act(async () => fail(Object.assign(new Error("timed out"), { name: "TimeoutError" })));
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't add");
+        await escape();
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets the dialog close again after a create times out", async () => {
+        let fail!: (e: Error) => void;
+        createPlaylist.mockReturnValue(new Promise((_r, reject) => (fail = reject)));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await escape();
+        expect(onClose).not.toHaveBeenCalled();
+        await act(async () => fail(Object.assign(new Error("timed out"), { name: "TimeoutError" })));
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't create");
+        await escape();
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe("retrying a create-then-add into the playlist this dialog made", () => {
     it("skips songs the failed first try already put there, without asking", async () => {
         createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
