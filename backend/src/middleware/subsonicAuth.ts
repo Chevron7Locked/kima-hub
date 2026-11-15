@@ -94,7 +94,8 @@ export async function subsonicAuth(
 
             // Subsonic reports failures inside HTTP 200 replies, so this is counted here, not from a status code.
             const guessSubject = passwordGuessSubject(given, user);
-            if (!subsonicGuesses.take(guessSubject)) {
+            const guess = subsonicGuesses.take(guessSubject);
+            if (!guess) {
                 subsonicError(
                     req,
                     res,
@@ -110,7 +111,7 @@ export async function subsonicAuth(
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
-            subsonicGuesses.giveBack(guessSubject);
+            subsonicGuesses.giveBack(guess);
 
             // Subsonic cannot ask for a second factor, so a 2FA account cannot log in
             // with its password here; it must use an API key. The message says so, since

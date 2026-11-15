@@ -49,7 +49,8 @@ router.post("/login", async (req, res) => {
 
         // Counted against the account the typed name reached, or the trimmed name when it reached none.
         const guessSubject = passwordGuessSubject(given, user);
-        if (!webLoginGuesses.take(guessSubject)) {
+        const guess = webLoginGuesses.take(guessSubject);
+        if (!guess) {
             return res.status(429).json({ error: "Too many login attempts, please try again in 15 minutes." });
         }
 
@@ -61,7 +62,7 @@ router.post("/login", async (req, res) => {
         // Check if 2FA is enabled
         if (user.twoFactorEnabled && user.twoFactorSecret) {
             if (!token) {
-                webLoginGuesses.giveBack(guessSubject);
+                webLoginGuesses.giveBack(guess);
                 return res.status(200).json({
                     requires2FA: true,
                     message: "2FA token required",
@@ -104,7 +105,7 @@ router.post("/login", async (req, res) => {
             }
         }
 
-        webLoginGuesses.giveBack(guessSubject);
+        webLoginGuesses.giveBack(guess);
 
         // Generate JWT tokens
         const jwtToken = generateToken({

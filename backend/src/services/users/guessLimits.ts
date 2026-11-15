@@ -20,6 +20,16 @@ interface Counter {
     endsAt: number;
 }
 
+/**
+ * One try taken at a subject, kept by the caller to give it back. It remembers which counter it was counted in, so a
+ * refund can tell whether that count is still the one being held.
+ */
+export interface GuessTry {
+    readonly subject: string;
+    readonly counter: Counter;
+    refunded: boolean;
+}
+
 /** Counters held per limit: far above the accounts a Kima server has, small enough to cost little memory. */
 const MAX_COUNTERS = 10_000;
 
@@ -44,20 +54,21 @@ export class GuessLimit {
         return this.windows.size;
     }
 
-    /** Takes one try at `subject`, or answers false when none are left. */
-    take(rawSubject: string): boolean {
+    /** Takes one try at `subject` and answers it, or answers null when none are left. */
+    take(rawSubject: string): GuessTry | null {
         const subject = fingerprint(rawSubject);
         const now = Date.now();
         const current = this.windows.get(subject);
         if (current && current.endsAt > now) {
-            if (current.tries >= this.max) return false;
+            if (current.tries >= this.max) return null;
             current.tries++;
-            return true;
+            return { subject, counter: current, refunded: false };
         }
         this.windows.delete(subject);
         this.makeRoom(now);
-        this.windows.set(subject, { tries: 1, endsAt: now + this.windowMs });
-        return true;
+        const counter = { tries: 1, endsAt: now + this.windowMs };
+        this.windows.set(subject, counter);
+        return { subject, counter, refunded: false };
     }
 
     /** Drops finished counters from the front, then the oldest live ones, until one more subject fits. */
@@ -73,10 +84,17 @@ export class GuessLimit {
         }
     }
 
-    /** The try turned out right, so it was no wrong guess. */
-    giveBack(subject: string): void {
-        const current = this.windows.get(fingerprint(subject));
-        if (current && current.tries > 0) current.tries--;
+    /**
+     * The try turned out right, so it was no wrong guess. It is given back once, and only while the count it was taken
+     * in is still the live one: the password check takes a while, and if that count was dropped or its window ended
+     * meanwhile, a refund would lower a newer count that never held this try.
+     */
+    giveBack(attempt: GuessTry): void {
+        if (attempt.refunded) return;
+        attempt.refunded = true;
+        const held = this.windows.get(attempt.subject);
+        if (held !== attempt.counter || held.endsAt <= Date.now()) return;
+        if (held.tries > 0) held.tries--;
     }
 }
 
