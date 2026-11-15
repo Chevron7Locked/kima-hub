@@ -18,6 +18,7 @@ import { redisClient } from '../../utils/redis';
 import { coversBasePath } from '../../services/imageStorage';
 import os from 'os';
 import { config, useMusicFolder } from '../../config';
+import { AudioStreamingService } from '../../services/audioStreaming';
 import { mountAsServer } from "./helpers/serverMount";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
@@ -623,6 +624,51 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         const keys = await redisClient.keys(`*${shareId}*`);
         if (keys.length) await redisClient.del(...keys);
     };
+    /** A song long enough that a paused reply stays open. */
+    const longSong = async (name: string, trackNo: number) => {
+        fs.writeFileSync(path.join(config.music.musicPath, DIR, `${name}.flac`), Buffer.alloc(24 * 1024 * 1024));
+        return prisma.track.create({ data: { albumId, title: name, duration: 100, trackNo, filePath: `${DIR}/${name}.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
+    };
+    /**
+     * Only the timer a response keeps while it is open (it ticks more often than the window lasts) is captured, so a test runs
+     * its ticks by hand and can see whether the response stopped it.
+     */
+    const captureRenewTimers = () => {
+        const timers: Array<{ tick: () => void; handle: NodeJS.Timeout }> = [];
+        const realSetInterval = global.setInterval;
+        const spy = jest.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+            if (typeof ms === 'number' && ms < 30_000) {
+                const handle = realSetInterval(() => undefined, 60_000);
+                timers.push({ tick: fn, handle });
+                return handle;
+            }
+            return realSetInterval(fn, ms);
+        }) as typeof setInterval);
+        return { timers, tickAll: () => timers.forEach((timer) => timer.tick()), restore: () => spy.mockRestore() };
+    };
+    /** A request to the running server from one address and browser, so every request is the same listener's. */
+    const over = (port: number, requestPath: string, headers: Record<string, string> = {}) =>
+        new Promise<http.IncomingMessage>((resolve, reject) =>
+            http.get({ host: '127.0.0.1', port, path: requestPath, headers: { 'User-Agent': 'one-listener', ...headers } }, resolve).on('error', reject));
+    /** Reads a reply to its end and answers its status. */
+    const drain = (reply: http.IncomingMessage) =>
+        new Promise<number | undefined>((resolve, reject) => {
+            reply.on('error', reject).on('end', () => resolve(reply.statusCode)).resume();
+        });
+    /** Holds the statement that counts a play until `release`, and says when it is held. */
+    const stallCounting = () => {
+        const realExecute: any = prisma.$executeRaw.bind(prisma);
+        let release!: () => void;
+        let markStalled!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const stalled = new Promise<void>((resolve) => (markStalled = resolve));
+        const spy = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
+            String((args[0] as TemplateStringsArray)?.join?.(' ')).includes('+ 1')
+                ? (markStalled(), held.then(() => realExecute(...args)))
+                : realExecute(...args)) as never);
+        return { release, stalled, restore: () => spy.mockRestore() };
+    };
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     describe('counting plays', () => {
         it("serves a listener's follow-up requests for a play already counted, though the play limit is now reached", async () => {
@@ -873,16 +919,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             const long = await prisma.track.create({ data: { albumId, title: 'long', duration: 100, trackNo: 10, filePath: `${DIR}/long.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
             const { token, id } = await own({ maxPlays: 1 }, long.id);
 
-            // Only the timer a response keeps while it is open is captured, so the test runs it by hand.
-            const ticks: Array<() => void> = [];
-            const realSetInterval = global.setInterval;
-            const spy = jest.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
-                if (typeof ms === 'number' && ms < 30_000) {
-                    ticks.push(fn);
-                    return realSetInterval(() => undefined, 60_000);
-                }
-                return realSetInterval(fn, ms);
-            }) as typeof setInterval);
+            const renewing = captureRenewTimers();
             const server = http.createServer(app).listen(0);
             let reply: http.IncomingMessage | undefined;
             try {
@@ -893,12 +930,12 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 const [key] = await redisClient.keys(`*${id}*`);
                 await redisClient.expire(key, 3);
 
-                ticks.forEach(tick => tick());
+                renewing.tickAll();
                 await new Promise(resolve => setTimeout(resolve, 150));
 
                 expect(await redisClient.ttl(key)).toBeGreaterThan(25);
             } finally {
-                spy.mockRestore();
+                renewing.restore();
                 reply?.destroy();
                 server.closeAllConnections();
                 server.close();
@@ -945,15 +982,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             const long = await prisma.track.create({ data: { albumId, title: 'long2', duration: 100, trackNo: 11, filePath: `${DIR}/long2.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
             const { token, id } = await own({}, long.id);
 
-            const ticks: Array<() => void> = [];
-            const realSetInterval = global.setInterval;
-            const spy = jest.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
-                if (typeof ms === 'number' && ms < 30_000) {
-                    ticks.push(fn);
-                    return realSetInterval(() => undefined, 60_000);
-                }
-                return realSetInterval(fn, ms);
-            }) as typeof setInterval);
+            const renewing = captureRenewTimers();
             const server = http.createServer(app).listen(0);
             let reply: http.IncomingMessage | undefined;
             try {
@@ -965,12 +994,12 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 // The first listener's window passed and another listener's play took it, with 3 s of its own left.
                 await redisClient.set(key, 'another-listener', 'EX', 3);
 
-                ticks.forEach(tick => tick());
+                renewing.tickAll();
                 await new Promise(resolve => setTimeout(resolve, 150));
 
                 expect(await redisClient.ttl(key)).toBeLessThanOrEqual(3);
             } finally {
-                spy.mockRestore();
+                renewing.restore();
                 reply?.destroy();
                 server.closeAllConnections();
                 server.close();
@@ -978,34 +1007,6 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         });
 
         describe('a first request that fails while a seek of the same play is open', () => {
-            /** A song long enough that a paused reply stays open. */
-            const longSong = async (name: string, trackNo: number) => {
-                fs.writeFileSync(path.join(config.music.musicPath, DIR, `${name}.flac`), Buffer.alloc(24 * 1024 * 1024));
-                return prisma.track.create({ data: { albumId, title: name, duration: 100, trackNo, filePath: `${DIR}/${name}.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
-            };
-            /** A request to the running server from one address and browser, so every request is the same listener's. */
-            const over = (port: number, requestPath: string, headers: Record<string, string>) =>
-                new Promise<http.IncomingMessage>((resolve, reject) =>
-                    http.get({ host: '127.0.0.1', port, path: requestPath, headers: { 'User-Agent': 'one-listener', ...headers } }, resolve).on('error', reject));
-            /** Reads a reply to its end and answers its status. */
-            const drain = (reply: http.IncomingMessage) =>
-                new Promise<number | undefined>((resolve, reject) => {
-                    reply.on('error', reject).on('end', () => resolve(reply.statusCode)).resume();
-                });
-            /** Holds the statement that counts a play until `release`, and says when it is held. */
-            const stallCounting = () => {
-                const realExecute: any = prisma.$executeRaw.bind(prisma);
-                let release!: () => void;
-                let markStalled!: () => void;
-                const held = new Promise<void>((resolve) => (release = resolve));
-                const stalled = new Promise<void>((resolve) => (markStalled = resolve));
-                const spy = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
-                    String((args[0] as TemplateStringsArray)?.join?.(' ')).includes('+ 1')
-                        ? (markStalled(), held.then(() => realExecute(...args)))
-                        : realExecute(...args)) as never);
-                return { release, stalled, restore: () => spy.mockRestore() };
-            };
-
             it('leaves the window and the play to the seek that is using them', async () => {
                 const long = await longSong('long3', 12);
                 const { token, id } = await own({}, long.id);
@@ -1044,7 +1045,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 }
             }, 15_000);
 
-            it('leaves them to a seek that has found the window but is still looking up its song', async () => {
+            it('does not count a seek that is still looking up its song as part of the play: the first request gives its play back and the seek counts its own', async () => {
                 const long = await longSong('long5', 14);
                 const { token, id } = await own({}, long.id);
                 const stall = stallCounting();
@@ -1063,17 +1064,18 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                     const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${long.id}`, headers);
                     const first = listen({ 'If-None-Match': '*' }).then(drain);
                     await stall.stalled;
-                    const [key] = await redisClient.keys(`*${id}*`);
-                    const window = await redisClient.get(key);
                     const seek = listen({ Range: 'bytes=5-' }).then(drain);
                     await reached;
 
-                    // The first request fails while the seek, which found the window, has not yet started to stream.
+                    // The first request fails while the seek has only looked at its song: it has not joined the play, because
+                    // a request joins one only once it is sure to be answered with audio.
                     stall.release();
                     expect(await first).toBe(304);
                     await settleShareBackgroundWork();
+                    expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                    expect(await playsOf(token)).toBe(0);
 
-                    expect(await redisClient.get(key)).toBe(window);
+                    // The seek then plays, and the one play is counted once.
                     release();
                     expect(await seek).toBe(206);
                     expect(await playsOf(token)).toBe(1);
@@ -1118,6 +1120,174 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             }, 15_000);
         });
 
+        describe('the edges of a play window', () => {
+            /** A song of its own with a small file, so a test can spoil it without touching another's. */
+            const spoilable = async (name: string, trackNo: number) => {
+                fs.writeFileSync(path.join(config.music.musicPath, DIR, `${name}.flac`), BYTES);
+                return prisma.track.create({ data: { albumId, title: name, duration: 100, trackNo, filePath: `${DIR}/${name}.flac`, fileModified: new Date(), fileSize: BYTES.length } });
+            };
+
+            describe('a response stops renewing a window that is no longer its own', () => {
+                /** Opens a long song, pauses the reply, and runs the response's renewal once after `change` was done to the window. */
+                const renewOnceAfter = async (change: (key: string) => Promise<unknown> | void, trackNo: number) => {
+                    const long = await longSong(`long-renew-${trackNo}`, trackNo);
+                    const { token, id } = await own({}, long.id);
+                    const renewing = captureRenewTimers();
+                    const cleared = jest.spyOn(global, 'clearInterval');
+                    const server = http.createServer(app).listen(0);
+                    let reply: http.IncomingMessage | undefined;
+                    try {
+                        const { port } = server.address() as AddressInfo;
+                        reply = await over(port, `/share/${token}/stream/${long.id}`);
+                        reply.pause();
+                        const [key] = await redisClient.keys(`*${id}*`);
+                        await change(key);
+
+                        renewing.tickAll();
+                        await pause(150);
+                        return { handle: renewing.timers[0].handle, cleared: cleared.mock.calls.map(([handle]) => handle) };
+                    } finally {
+                        cleared.mockRestore();
+                        renewing.restore();
+                        reply?.destroy();
+                        server.closeAllConnections();
+                        server.close();
+                    }
+                };
+
+                it('when the window ended and another listener took it', async () => {
+                    const { handle, cleared } = await renewOnceAfter((key) => redisClient.set(key, 'another-listener', 'EX', 3), 30);
+                    expect(cleared).toContain(handle);
+                });
+
+                it('when the window ended and nobody took it', async () => {
+                    const { handle, cleared } = await renewOnceAfter((key) => redisClient.del(key), 31);
+                    expect(cleared).toContain(handle);
+                });
+
+                it('but not when Redis failed for a moment: the window may still be its own, so the next tick tries again', async () => {
+                    const logged = expectLog('warn');
+                    const failing = jest.spyOn(redisClient, 'eval');
+                    try {
+                        const { handle, cleared } = await renewOnceAfter(() => {
+                            failing.mockRejectedValueOnce(new Error('down'));
+                        }, 32);
+                        expect(logged).toHaveBeenCalledWith(expect.stringContaining('Could not renew a play window'));
+                        expect(cleared).not.toContain(handle);
+                    } finally {
+                        failing.mockRestore();
+                    }
+                });
+            });
+
+            describe('a request that is refused does not extend the window', () => {
+                it.each([
+                    ['the link no longer covers its song', 403, (token: string) => prisma.shareLink.update({ where: { token }, data: { entityId: songs.corrupt } })],
+                    ['its song has become corrupt', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { corrupt: true } })],
+                    ['its song has gone missing', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { missingSince: new Date() } })],
+                    ['its file has gone', 404, (_token: string, _song: string, file: string) => fs.promises.rm(file)],
+                ] as const)('when %s', async (what, status, spoil) => {
+                    const trackNo = 40 + what.length;
+                    const song = await spoilable(`refused-${trackNo}`, trackNo);
+                    const { token, id } = await own({}, song.id);
+                    expect((await get(token, song.id)).status).toBe(200);
+                    await settleShareBackgroundWork();
+                    const [key] = await redisClient.keys(`*${id}*`);
+                    // Most of the window has passed, as it does when a listener comes back to a long song.
+                    await redisClient.expire(key, 3);
+
+                    await spoil(token, song.id, path.join(config.music.musicPath, DIR, `refused-${trackNo}.flac`));
+                    expect((await get(token, song.id, { Range: 'bytes=5-' })).status).toBe(status);
+                    await settleShareBackgroundWork();
+
+                    expect(await redisClient.ttl(key)).toBeLessThanOrEqual(3);
+                    expect(await playsOf(token)).toBe(1);
+                });
+            });
+
+            describe('a play that never streamed', () => {
+                /** Holds the first request to reach the streaming module until `release`, and passes every other. */
+                const holdFirstToStream = () => {
+                    const real = AudioStreamingService.prototype.streamFileWithRangeSupport;
+                    let calls = 0;
+                    let release!: () => void;
+                    const held = new Promise<void>((resolve) => (release = resolve));
+                    const spy = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport').mockImplementation(function (this: AudioStreamingService, ...args) {
+                        return ++calls === 1 ? held.then(() => real.apply(this, args)) : real.apply(this, args);
+                    });
+                    return { release, restore: () => { release(); spy.mockRestore(); } };
+                };
+
+                it('is given back, and its window freed, when the last response of it ends without one, though the first to fail was not the last', async () => {
+                    const long = await longSong('long-gone-nowhere', 50);
+                    const { token, id } = await own({}, long.id);
+                    const stall = stallCounting();
+                    const hold = holdFirstToStream();
+                    const server = http.createServer(app).listen(0);
+                    try {
+                        const { port } = server.address() as AddressInfo;
+                        const listen = (headers: Record<string, string>) => over(port, `/share/${token}/stream/${long.id}`, headers);
+                        // The first request takes the window and waits to count its play; the listener's seek finds the window,
+                        // and is held just before it would stream.
+                        const first = listen({ 'If-None-Match': '*' }).then(drain);
+                        await stall.stalled;
+                        const seek = listen({ 'If-None-Match': '*', Range: 'bytes=5-' }).then(drain);
+                        await pause(200);
+
+                        // The first request fails with the seek open, so the play is left to the seek.
+                        stall.release();
+                        expect(await first).toBe(304);
+                        await settleShareBackgroundWork();
+                        expect(await playsOf(token)).toBe(1);
+
+                        // The seek, the last response of the play, fails as well: nothing was ever played.
+                        hold.release();
+                        expect(await seek).toBe(304);
+                        await settleShareBackgroundWork();
+                        expect(await playsOf(token)).toBe(0);
+                        expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                    } finally {
+                        hold.restore();
+                        stall.release();
+                        stall.restore();
+                        server.closeAllConnections();
+                        server.close();
+                    }
+                }, 15_000);
+
+                it('is kept when an earlier response of it streamed, whatever the last one does', async () => {
+                    const { token, id } = await own();
+                    expect((await get(token, songs.playable)).status).toBe(200);
+                    await settleShareBackgroundWork();
+
+                    expect((await get(token, songs.playable, { 'If-None-Match': '*' })).status).toBe(304);
+                    await settleShareBackgroundWork();
+
+                    expect(await playsOf(token)).toBe(1);
+                    expect(await redisClient.keys(`*${id}*`)).not.toEqual([]);
+                });
+            });
+
+            it('gives the play back and frees the window when counting it fails, so the next request is a first play', async () => {
+                const { token, id } = await own({ maxPlays: 1 });
+                const logged = expectLog('error');
+                const counting = jest.spyOn(prisma, '$executeRaw').mockRejectedValueOnce(new Error('database down'));
+                try {
+                    const failed = await get(token, songs.playable);
+                    expect(failed.status).toBe(500);
+                    expect(logged).toHaveBeenCalledWith(expect.stringContaining('database down'));
+                } finally {
+                    counting.mockRestore();
+                }
+                await settleShareBackgroundWork();
+
+                expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                expect(await playsOf(token)).toBe(0);
+                expect((await get(token, songs.playable)).status).toBe(200);
+                expect(await playsOf(token)).toBe(1);
+            });
+        });
+
         it('a request that is not a follow-up does not leave a window behind when it is refused', async () => {
             const { token, id } = await own({ maxPlays: 0 });
             await request(app).get(`/share/${token}/stream/${songs.playable}`);
@@ -1158,10 +1328,9 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             let markReached!: () => void;
             const held = new Promise<number>((resolve) => (release = resolve));
             const reached = new Promise<void>((resolve) => (markReached = resolve));
-            // The request's own claim of the window is renewed as the response closes (a script on the claim's token); that is held.
-            const realEval: any = redisClient.eval.bind(redisClient);
-            const expire = jest.spyOn(redisClient, 'eval').mockImplementation(((...args: unknown[]) =>
-                String(args[0]).includes('"pexpire"') && !String(args[0]).includes('"incr"') ? (markReached(), held) : realEval(...args)) as never);
+            // The count of open responses is renewed as the response closes, by a Redis call of its own (the opening and
+            // leaving are scripts, and are not this one); that renewal is held.
+            const expire = jest.spyOn(redisClient, 'pexpire').mockImplementation((() => (markReached(), held)) as never);
             try {
                 expect((await get(token, songs.playable)).status).toBe(200);
                 await reached;
