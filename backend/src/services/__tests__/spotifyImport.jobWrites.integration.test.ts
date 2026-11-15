@@ -261,17 +261,26 @@ describe("one build per import", () => {
     });
 
     it("still builds when Redis is down, for there is then no lock to take", async () => {
-        const acquire = jest.spyOn(distributedLock, "acquire").mockResolvedValue(false);
-        const status = redisClient.status;
-        Object.defineProperty(redisClient, "status", { value: "reconnecting", configurable: true, writable: true });
+        const acquire = jest.spyOn(distributedLock, "acquire").mockResolvedValue({ outcome: "unavailable", error: new Error("down") });
+        try {
+            await build(importJob([matched()]));
+            expect(acquire).toHaveBeenCalled();
+        } finally {
+            acquire.mockRestore();
+        }
+
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("leaves the build to the process that holds the import's lock", async () => {
+        await redisClient.set(`lock:import-build:${JOB}`, "another-process", "PX", 5000);
         try {
             await build(importJob([matched()]));
         } finally {
-            Object.defineProperty(redisClient, "status", { value: status, configurable: true, writable: true });
+            await redisClient.del(`lock:import-build:${JOB}`);
         }
 
-        expect(acquire).toHaveBeenCalled();
-        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(1);
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(0);
     });
 
     it("takes the lock for an import only while it builds", async () => {

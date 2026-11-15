@@ -16,6 +16,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { sessionLog } from "../utils/playlistLogger";
 import { distributedLock } from "../utils/distributedLock";
+import { LockHeldError } from "../utils/lockErrors";
 import { redisClient } from "../utils/redis";
 import {
     soulseekConnectionStatus,
@@ -550,7 +551,9 @@ class SoulseekService {
                 }
             });
         } catch (error: any) {
-            if (error.message.includes('Failed to acquire lock')) {
+            // Another process is connecting. With Redis down (LockUnavailableError) nobody can be waited for, so
+            // the error goes up as it is rather than after a 30 s wait.
+            if (error instanceof LockHeldError) {
                 sessionLog("SOULSEEK", "Connection already in progress - waiting for it to complete", "DEBUG");
                 await this.waitForConnection();
                 return;

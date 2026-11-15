@@ -342,3 +342,18 @@ describe("a cycle that loses the lock", () => {
         await until(() => queueOwedArtists.mock.calls.length === 1);
     });
 });
+
+describe("a cycle that cannot reach Redis for the lock", () => {
+    it("declines for it, not as a held lock, and offers nothing", async () => {
+        mockRedis.set.mockImplementation(async (key: string) => {
+            if (key.startsWith("lock:")) throw new Error("Stream isn't writeable");
+            return "OK";
+        });
+
+        const result = await triggerEnrichmentNow();
+
+        expect(result).toEqual(expect.objectContaining({ declined: "lock-unavailable" }));
+        expect(queueOwedArtists).not.toHaveBeenCalled();
+        mockRedis.set.mockResolvedValue("OK");
+    });
+});

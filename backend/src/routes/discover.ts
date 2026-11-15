@@ -18,6 +18,7 @@ import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidar
 import { NameIndex, hasRealArtistId, relocateDiscoverAlbums, sameArtist, sameName } from "../services/discovery/discoverEvidence";
 import { artistNamed, isArtistNamed } from "../services/artistIdentity";
 import { distributedLock } from '../utils/distributedLock';
+import { LockHeldError, LockUnavailableError } from '../utils/lockErrors';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
 import { config } from "../config";
@@ -250,11 +251,19 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
             jobId: result.jobId,
         });
     } catch (error) {
-        // Lock acquisition failure means another request is already processing
-        if (error instanceof Error && error.message.startsWith('Failed to acquire lock')) {
+        // A held lock means another request is already processing
+        if (error instanceof LockHeldError) {
             return res.status(409).json({
                 error: "Generation already in progress",
                 code: 'LOCK_CONFLICT',
+            });
+        }
+        // Redis down says nothing about another request: it is a failure, not a conflict
+        if (error instanceof LockUnavailableError) {
+            logger.error('Discover generation could not take its lock:', error);
+            return res.status(503).json({
+                error: 'Generation is temporarily unavailable',
+                code: 'LOCK_UNAVAILABLE',
             });
         }
 

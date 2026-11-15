@@ -41,6 +41,7 @@ import { startDiscoverWeeklyCron } from '../discoverCron';
 import { prisma } from '../../utils/db';
 import { discoverQueue } from '../queues';
 import { distributedLock } from '../../utils/distributedLock';
+import { LockHeldError } from '../../utils/lockErrors';
 
 const P = 'zz-discoverCron-';
 const USER_A = `${P}a`;
@@ -164,7 +165,7 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         withLock.mockImplementation(
             async (key: string, _t: number, fn: () => Promise<unknown>) => {
                 if (key === `discover:generate:${USER_A}`) {
-                    throw new Error(`Failed to acquire lock: discover:generate:${USER_A}`);
+                    throw new LockHeldError(`discover:generate:${USER_A}`);
                 }
                 return fn();
             }

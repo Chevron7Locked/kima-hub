@@ -2054,25 +2054,26 @@ class SpotifyImportService {
   /** One build per import at a time, across processes: a second one that finds the first running leaves it to finish. */
   private async buildPlaylist(job: ImportJob): Promise<void> {
     const lockKey = IMPORT_BUILD_LOCK_KEY(job.id);
-    if (!(await distributedLock.acquire(lockKey, IMPORT_BUILD_LOCK_TTL_MS))) {
-      // The lock says false for a Redis outage too, and nothing retries a build that skipped: with Redis down there is no
-      // lock to take, so the build runs, and the link to the playlist is still made once, in its transaction.
-      if (redisClient.status === "ready") {
-        jobLoggers.get(job.id)?.debug(`   Another build of job ${job.id} is running, skipping`);
-        return;
-      }
-      logger.warn(`[Import] Redis is not ready: building job ${job.id} without its lock`);
+    const taken = await distributedLock.acquire(lockKey, IMPORT_BUILD_LOCK_TTL_MS);
+    if (taken.outcome === "held") {
+      jobLoggers.get(job.id)?.debug(`   Another build of job ${job.id} is running, skipping`);
+      return;
+    }
+    if (taken.outcome === "unavailable") {
+      // Nothing retries a build that skipped: with Redis down there is no lock to take, so the build runs, and the
+      // link to the playlist is still made once, in its transaction.
+      logger.warn(`[Import] Redis is not reachable: building job ${job.id} without its lock`, taken.error);
       await this.buildPlaylistLocked(job);
       return;
     }
     // A build is thousands of rows and a preview lookup per waiting song: the lock is renewed while it runs, and frees
     // within its ttl if the process dies.
-    const stopRenewal = distributedLock.keepAlive(lockKey, IMPORT_BUILD_LOCK_TTL_MS);
+    const stopRenewal = taken.lease.keepAlive();
     try {
       await this.buildPlaylistLocked(job);
     } finally {
       stopRenewal();
-      await distributedLock.release(lockKey);
+      await taken.lease.release();
     }
   }
 

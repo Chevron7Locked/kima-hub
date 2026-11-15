@@ -791,7 +791,7 @@ async function runEnrichmentCycle(): Promise<{
      * Set when the cycle declined to run, as opposed to running and finding nothing.
      * An empty cycle backs off; a declined one should come back promptly.
      */
-    declined?: "already-running" | "too-soon" | "scan-running" | "stopped";
+    declined?: "already-running" | "too-soon" | "scan-running" | "stopped" | "lock-unavailable";
 }> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
@@ -879,16 +879,23 @@ async function runEnrichmentCycle(): Promise<{
 
     // The in-flight check above declines quickly; the lock is what keeps two cycles, in this process or
     // another, from offering the same records.
-    if (!(await distributedLock.acquire(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS))) {
+    const cycleLock = await distributedLock.acquire(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
+    if (cycleLock.outcome === "held") {
         return { ...emptyResult, declined: "already-running" };
     }
+    if (cycleLock.outcome === "unavailable") {
+        // Without the lock another process could be offering the same records, so the cycle waits for Redis.
+        logger.warn("[Enrichment] Redis is not reachable: cycle declined until it is", cycleLock.error);
+        return { ...emptyResult, declined: "lock-unavailable" };
+    }
+    const lease = cycleLock.lease;
     // A stop that landed while this cycle waited for the lock closed the worker, and its queues and connections
     // with it: this cycle was admitted before the stop and must not start after it.
     if (run.isClosed()) {
-        await distributedLock.release(CYCLE_LOCK_KEY);
+        await lease.release();
         return { ...emptyResult, declined: "stopped" };
     }
-    const stopLockRenewal = distributedLock.keepAlive(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
+    const stopLockRenewal = lease.keepAlive();
     // Spent only now that this cycle holds the lock: one that lost it leaves the request and the interval
     // for the cycle that holds it.
     run.takeWake();
@@ -1075,7 +1082,7 @@ async function runEnrichmentCycle(): Promise<{
         // The cycle settles only after the lease is let go, so a stop that returns leaves the next cycle a free
         // lock; and a release that fails cannot leave the stop waiting forever.
         try {
-            await distributedLock.release(CYCLE_LOCK_KEY);
+            await lease.release();
         } finally {
             run.endCycle();
         }

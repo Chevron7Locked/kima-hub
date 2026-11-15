@@ -28,6 +28,8 @@ import request from 'supertest';
 import discoverRoutes from '../discover';
 import { prisma } from '../../utils/db';
 import { discoverQueue } from '../../workers/queues';
+import { distributedLock } from '../../utils/distributedLock';
+import { LockHeldError, LockUnavailableError } from '../../utils/lockErrors';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
 import { mountAsServer } from "./helpers/serverMount";
@@ -165,5 +167,20 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
 
         expect(free.status).toBe(200);
         expect(discoverQueue.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('says generation is in progress when another request holds the lock, and unavailable when Redis is down', async () => {
+        const withLock = distributedLock.withLock as jest.Mock;
+        withLock.mockRejectedValueOnce(new LockHeldError('discover:generate:dgj_user'));
+        const held = await request(app).post('/discover/generate');
+
+        withLock.mockRejectedValueOnce(new LockUnavailableError('discover:generate:dgj_user'));
+        const down = await request(app).post('/discover/generate');
+
+        expect(held.status).toBe(409);
+        expect(held.body.code).toBe('LOCK_CONFLICT');
+        expect(down.status).toBe(503);
+        expect(down.body.code).toBe('LOCK_UNAVAILABLE');
+        expect(discoverQueue.add).not.toHaveBeenCalled();
     });
 });
