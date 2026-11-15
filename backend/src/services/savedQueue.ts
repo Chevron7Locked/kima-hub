@@ -14,12 +14,16 @@
  *   was shown, so a save carries the index into the stored queue (`acceptQueue` for a queue sent whole,
  *   `indexIntoStoredQueue` for one that sends no queue and names the current song, `saveQueueOfIds` for a Subsonic
  *   app's list of ids), and no index is stored past the stored queue's last entry.
- * - A save that reads the stored queue or the songs does it under the person's state row lock, in the transaction that
- *   writes (`lockPlaybackState`), the lock the library sweep takes when it rewrites a queue.
+ * - Every save takes the person's turn (`lockPlaybackState`) in the transaction that writes: an advisory lock on the
+ *   person, then their state row, which is what the library sweep waits on when it rewrites a queue that holds a song it
+ *   retires. A save of song ids reads songs, and the sweep waits on no row of a person whose queue lacks the song it
+ *   retires (or who has no row yet), so that save first holds the songs it reads (`holdSongs`) until it commits. The
+ *   order is the sweep's: songs, then the state row.
  */
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { QUEUE_LENGTH } from "../utils/systemSettings";
+import { getSystemSettings, QUEUE_LENGTH } from "../utils/systemSettings";
+import { logger } from "../utils/logger";
 
 export type QueueEntry = {
     id: string;
@@ -80,19 +84,17 @@ export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionCli
 }
 
 /**
- * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read on every queue
- * write (one row by primary key), so a saved limit applies at once. Every save cuts to it, web or Subsonic.
+ * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read through the
+ * system settings (a save of them drops the cache, so a saved limit applies at once). Every save cuts to it, web or
+ * Subsonic. A read that fails must not stop somebody's queue saving: it falls back to the default and says so.
  */
 export async function queueLimit(): Promise<number> {
     let value: number = QUEUE_LENGTH.default;
     try {
-        const settings = await prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { maxQueueLength: true },
-        });
+        const settings = await getSystemSettings();
         if (settings?.maxQueueLength) value = settings.maxQueueLength;
-    } catch {
-        // A settings read that fails must not stop somebody's queue saving.
+    } catch (error) {
+        logger.warn("[SavedQueue] Could not read the queue length limit, using the default:", error);
     }
     return Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
 }
@@ -169,10 +171,12 @@ export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolea
 }
 
 /**
- * Takes the person's state row until the transaction ends, so a save and the library sweep rewriting it go one at a
- * time. The one lock every save takes, web or Subsonic.
+ * Takes the person's turn to save, then their state row, until the transaction ends. The turn is a lock on the person
+ * (a first save has no row yet, and two saves of one person never meet); the row is what the library sweep rewriting a
+ * queue waits on. The one lock every save takes, web or Subsonic.
  */
-export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw">, userId: string): Promise<void> {
+export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">, userId: string): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`playback-state:${userId}`}, 0))`;
     await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
 }
 
@@ -186,7 +190,7 @@ export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$que
  * empty queue holds none) leaves the stored index as it is, which is `null` here, and a first save then creates 0.
  */
 export async function indexIntoStoredQueue(
-    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "playbackState" | "track">,
+    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "playbackState" | "track">,
     userId: string,
     clientIndex: unknown,
     trackId: unknown,
@@ -206,38 +210,62 @@ export async function indexIntoStoredQueue(
 export type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
 
 /**
- * Where the client's current song sits in the queue as stored, which leaves out the ids Kima did not know. The songs
- * before it that were dropped no longer count, so the stored index still names the client's current song.
+ * Where the client's current place sits in the queue as stored, which leaves out the ids Kima did not know. The places
+ * before it that were dropped no longer count, so the stored index still names the client's current place, counted by
+ * place and not by song (a song listed twice is two places). `queueLength` is how many entries the stored queue has.
+ * `placeKept` is whether that place itself is in the stored queue: its id is known and it was not cut; when it is not,
+ * the stored index is the place now standing in for it.
  */
-function storedIndexOf(ids: readonly string[], stored: readonly QueueEntry[], clientIndex: number): number {
-    if (stored.length === 0) return 0;
-    const known = new Set(stored.map((item) => item.id));
+function storedPlaceOf(
+    ids: readonly string[],
+    known: ReadonlySet<string>,
+    queueLength: number,
+    clientIndex: number,
+): { index: number; placeKept: boolean } {
+    if (queueLength === 0) return { index: 0, placeKept: false };
     const before = ids.slice(0, clientIndex).filter((id) => known.has(id)).length;
-    return Math.min(before, stored.length - 1);
+    return { index: Math.min(before, queueLength - 1), placeKept: known.has(ids[clientIndex]) && before < queueLength };
+}
+
+/**
+ * Holds the rows of the songs a save is about to read until the transaction ends, so the sweep (which holds the rows
+ * of the songs it retires, and takes the ones another transaction holds only on its next run) and the save go one at a
+ * time: a song retired first is not read, and one read first is not retired. A key lock, which only a retiring or
+ * deleting transaction conflicts with, so ordinary edits to the songs go on. Taken before the person's state row, the
+ * order the sweep takes them in, so the two never wait on each other.
+ */
+async function holdSongs(tx: Pick<Prisma.TransactionClient, "$queryRaw">, ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${[...new Set(ids)]}::text[]) ORDER BY id FOR KEY SHARE`;
 }
 
 const INT32_MAX = 2_147_483_647;
 /** The wait for the row lock counts toward a transaction's time limit (5 s by default), and a long queue takes a while to read. */
-const SAVE_TIMEOUT_MS = 30_000;
+export const SAVE_TIMEOUT_MS = 30_000;
 
 /**
- * A queue a Subsonic app saves, as song ids and the place it is on (`clientIndex` counts `ids`). The state row is
- * locked first and the songs are read, the index worked out and the queue written in the same transaction, so a library
- * sweep retiring a song at the same moment finishes first and the queue never stores what it took out, and a web save
- * meeting this one leaves one whole save. Ids Kima does not know are left out; when the current song is among them the
- * song now in its place is current, from its start. The queue is cut to the operator's limit (`queueLimit`) after those
- * are left out, as a web save cuts it; a current song past the cut leaves the last song kept as current, from its
- * start. (A person's first save has no row to lock yet.)
+ * A queue a Subsonic app saves, as song ids and the place it is on (`clientIndex` counts `ids`). The songs and the
+ * person's state row are locked first (`holdSongs`, then `lockPlaybackState`: the sweep waits on the row only when the
+ * queue holds a song it retires, and a first save has no row at all), then the songs are read, the index worked out
+ * and the queue written in the same transaction, so a library sweep retiring a song at the same moment finishes first
+ * and the queue never stores what it took out, and a web save meeting this one leaves one whole save. Ids Kima does
+ * not know are left out; when the current song is among them the song now in its place is current, from its start.
+ * The queue is cut to the operator's limit (`queueLimit`) after those are left out, as a web save cuts it; a current
+ * song past the cut leaves the last song kept as current, from its start. The position is kept when the current place
+ * itself is kept, not when another place holds its song.
  */
 export async function saveQueueOfIds(
     userId: string,
     save: { ids: string[]; clientIndex: number; position: number; changedBy: string },
 ): Promise<void> {
-    const limit = await queueLimit();
     await prisma.$transaction(async (tx) => {
+        await holdSongs(tx, save.ids);
         await lockPlaybackState(tx, userId);
-        const queue = (await hydrateQueue(save.ids, tx)).slice(0, limit);
-        const currentIndex = storedIndexOf(save.ids, queue, save.clientIndex);
+        const limit = await queueLimit();
+        const known = await hydrateQueue(save.ids, tx);
+        const queue = known.slice(0, limit);
+        const place = storedPlaceOf(save.ids, new Set(known.map((item) => item.id)), queue.length, save.clientIndex);
+        const currentIndex = place.index;
         const trackId = queue[currentIndex]?.id ?? null;
         const data = {
             playbackType: "track",
@@ -250,7 +278,8 @@ export async function saveQueueOfIds(
             currentIndex,
             isShuffle: false,
             // The column is a 32-bit integer; a larger number from a client is no position anyone reached.
-            position: trackId !== null && trackId === save.ids[save.clientIndex] ? Math.min(save.position, INT32_MAX) : 0,
+            // The position is the current place's own: another place holding the same song does not carry it.
+            position: place.placeKept ? Math.min(save.position, INT32_MAX) : 0,
             changedBy: save.changedBy,
         };
         await tx.playbackState.upsert({ where: { userId }, update: data, create: { userId, ...data } });

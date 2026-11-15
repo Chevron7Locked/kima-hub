@@ -31,6 +31,16 @@ function clientName(req: Request): string {
     return c && c.trim() ? c.trim().slice(0, 64) : "Kima";
 }
 
+/** A number a client sent as digits only ("2"), not "2abc", "1.5", "-1" or " 2"; null when it is not one. */
+function wholeNumber(raw: string): number | null {
+    return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+/** The position in the current song: 0 when none is sent (or it is blank), null when one is sent that is no whole number of 0 or more. */
+function positionOf(raw: string | undefined): number | null {
+    return raw === undefined || raw === "" ? 0 : wholeNumber(raw);
+}
+
 queueRouter.all("/getPlayQueue.view", wrap(async (req, res) => {
     const userId = req.user!.id;
     const state = await prisma.playbackState.findUnique({ where: { userId } });
@@ -78,9 +88,8 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     const ids = many(req, "id");
 
     const current = one(req, "current");
-    const positionRaw = one(req, "position");
-    const position = positionRaw ? parseInt(positionRaw, 10) : 0;
-    const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
+    const position = positionOf(one(req, "position"));
+    if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 
     // A parameter that is not sent is missing (code 10); one that is sent but names no song of the list is a wrong
     // value (code 0, what the spec's generic error is for).
@@ -94,7 +103,7 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     await saveQueueOfIds(userId, {
         ids,
         clientIndex: current ? ids.indexOf(current) : 0,
-        position: safePosition,
+        position,
         changedBy: clientName(req),
     });
 
@@ -107,11 +116,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     const ids = many(req, "id");
 
     const currentIndexRaw = one(req, "currentIndex");
-    const positionRaw = one(req, "position");
-    const position = positionRaw === undefined || positionRaw === ""
-        ? 0
-        : parseInt(positionRaw, 10);
-    const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
+    const position = positionOf(one(req, "position"));
+    if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 
     if (ids.length === 0 && currentIndexRaw !== undefined) {
         return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must not be set when id is not provided");
@@ -126,15 +132,15 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
         );
     }
 
-    const parsedIndex = currentIndexRaw !== undefined ? parseInt(currentIndexRaw, 10) : 0;
-    if (ids.length > 0 && (!Number.isInteger(parsedIndex) || parsedIndex < 0 || parsedIndex >= ids.length)) {
+    const parsedIndex = currentIndexRaw !== undefined ? wholeNumber(currentIndexRaw) : 0;
+    if (ids.length > 0 && (parsedIndex === null || parsedIndex >= ids.length)) {
         return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must be between 0 and queue length - 1");
     }
 
     await saveQueueOfIds(userId, {
         ids,
-        clientIndex: parsedIndex,
-        position: safePosition,
+        clientIndex: parsedIndex ?? 0,
+        position,
         changedBy: clientName(req),
     });
 

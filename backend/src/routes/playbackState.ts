@@ -2,7 +2,7 @@ import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
-import { acceptQueue, indexIntoStoredQueue, lockPlaybackState, namesCurrentSong, queueLimit, shownState, type PlaybackStateRow } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, lockPlaybackState, namesCurrentSong, queueLimit, SAVE_TIMEOUT_MS, shownState, type PlaybackStateRow } from "../services/savedQueue";
 
 const router = express.Router();
 
@@ -64,22 +64,34 @@ router.post("/", async (req, res) => {
         // the stored queue: only an explicit array replaces it. Same for the fields
         // below; an omitted field is left alone rather than reset to its default.
         const queueProvided = Array.isArray(queue);
-        const accepted = queueProvided ? acceptQueue(queue, currentIndex, await queueLimit()) : null;
-        const safeQueue = accepted?.queue ?? null;
-        const storedQueue = safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue);
         const indexOnly = !queueProvided && namesCurrentSong(currentIndex, trackId);
 
-        // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
-        // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
-        const safeQueueSource =
-            safeQueue !== null && typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= MAX_QUEUE_SOURCE_LENGTH
-                ? queueSource
-                : null;
+        // The queue as it will be stored, cut to the limit as it stands when the save has the person's lock (so a limit
+        // saved while the save waits applies to it).
+        const accept = async () => {
+            const accepted = queueProvided ? acceptQueue(queue, currentIndex, await queueLimit()) : null;
+            const safeQueue = accepted?.queue ?? null;
+            return {
+                currentIndex: accepted?.currentIndex ?? 0,
+                safeQueue,
+                storedQueue: safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue),
+                // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and
+                // sends no source (an older client, the iOS app) clears it, and a save without a queue leaves it.
+                safeQueueSource:
+                    safeQueue !== null && typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= MAX_QUEUE_SOURCE_LENGTH
+                        ? queueSource
+                        : null,
+            };
+        };
 
         // `safeCurrentIndex` null: the save names a song the stored queue does not hold, so the stored index stays.
         // Returns null when the save named a time and the stored state is no longer the one saved at it (or is gone):
         // nothing was written.
-        const write = async (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number | null): Promise<PlaybackStateRow | null> => {
+        const write = async (
+            db: Pick<Prisma.TransactionClient, "playbackState">,
+            { storedQueue, safeQueueSource }: Awaited<ReturnType<typeof accept>>,
+            safeCurrentIndex: number | null,
+        ): Promise<PlaybackStateRow | null> => {
             const queueUpdate = queueProvided
                 ? {
                       queue: storedQueue,
@@ -124,17 +136,19 @@ router.post("/", async (req, res) => {
         };
 
         // The index points into a queue: the one sent, or for a save without one the queue as it stands, which stays
-        // locked until this save is written (see `indexIntoStoredQueue`). A time the save names is checked by that write,
-        // so inside the same lock; a save that names one and carries its own queue takes the lock too, so the row it
-        // answers with is the one it wrote and not one a later save made.
+        // locked until this save is written (see `indexIntoStoredQueue`). Every other save takes the same lock, a first
+        // save included: the queue is accepted under it, a time the save names is checked by the write inside it, and
+        // the row a save answers with is the one it wrote and not one a later save made.
         const playbackState = indexOnly
-            ? await prisma.$transaction(async (tx) => write(tx, await indexIntoStoredQueue(tx, userId, currentIndex, trackId)))
-            : expectedAt
-              ? await prisma.$transaction(async (tx) => {
-                    await lockPlaybackState(tx, userId);
-                    return write(tx, accepted?.currentIndex ?? 0);
-                })
-              : await write(prisma, accepted?.currentIndex ?? 0);
+            ? await prisma.$transaction(async (tx) => {
+                  const index = await indexIntoStoredQueue(tx, userId, currentIndex, trackId);
+                  return write(tx, await accept(), index);
+              }, { timeout: SAVE_TIMEOUT_MS })
+            : await prisma.$transaction(async (tx) => {
+                  await lockPlaybackState(tx, userId);
+                  const plan = await accept();
+                  return write(tx, plan, plan.currentIndex);
+              }, { timeout: SAVE_TIMEOUT_MS });
 
         if (!playbackState) {
             // What is stored now, as a client is shown it, so the client can take it up without asking again.

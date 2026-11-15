@@ -71,8 +71,8 @@ afterAll(async () => {
 });
 
 describe("a Subsonic queue save meeting the library sweep", () => {
-    // The sweep rewrites the saved queues that hold the song it retires and holds their rows until it commits. A save
-    // reading the song before it waits would store the retired song after it.
+    // The sweep holds the rows of the songs it retires until it commits. A save reading a song before the sweep
+    // commits would store the retired song after it, whatever the person's saved queue holds.
     it.each([
         ["savePlayQueue", "/savePlayQueue.view", { id: [song("a"), song("gone"), song("b")], current: song("b") }, 1],
         ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", { id: [song("a"), song("gone"), song("b")], currentIndex: "2" }, 1],
@@ -85,7 +85,7 @@ describe("a Subsonic queue save meeting the library sweep", () => {
         await prisma.$transaction(async (tx) => {
             expect((await reconcileDeletedTracks(tx, new Date(Date.now() - MIN))).removed).toBe(1);
             answer = save(path, query).then((r) => r);
-            await untilLockWait(`"PlaybackState"`);
+            await untilLockWait(`FOR KEY SHARE`);
         });
         expect((await answer).status).toBe(200);
 
@@ -93,6 +93,31 @@ describe("a Subsonic queue save meeting the library sweep", () => {
         const state = await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } });
         expect(state.currentIndex).toBe(expectedIndex);
         expect(state.trackId).toBe(song("b"));
+    });
+
+    // The sweep waits on a person's row only when their saved queue holds the song it retires. A person with no row yet,
+    // or whose queue does not hold it, gives the sweep nothing to wait on, so the save holds the songs it reads.
+    it.each([
+        ["savePlayQueue", "/savePlayQueue.view", { id: [song("a"), song("gone"), song("b")], current: song("b") }, "no state row"],
+        ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", { id: [song("a"), song("gone"), song("b")], currentIndex: "2" }, "no state row"],
+        ["savePlayQueue", "/savePlayQueue.view", { id: [song("a"), song("gone"), song("b")], current: song("b") }, "a row without a queue"],
+        ["savePlayQueue", "/savePlayQueue.view", { id: [song("a"), song("gone"), song("b")], current: song("b") }, "a row whose queue lacks the song"],
+    ])("%s waits for the sweep and stores only the songs that remain, for a person with %s", async (_name, path, query, rowKind) => {
+        if (rowKind === "a row without a queue") await prisma.playbackState.create({ data: { userId: USER, playbackType: "track" } });
+        if (rowKind === "a row whose queue lacks the song") {
+            await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song("a"), title: "a" }], currentIndex: 0 } });
+        }
+
+        let answer!: Promise<request.Response>;
+        await prisma.$transaction(async (tx) => {
+            expect((await reconcileDeletedTracks(tx, new Date(Date.now() - MIN))).removed).toBe(1);
+            answer = save(path, query).then((r) => r);
+            await untilLockWait(`FOR KEY SHARE`);
+        });
+        expect((await answer).status).toBe(200);
+
+        expect(await storedIds()).toEqual([song("a"), song("b")]);
+        expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } })).currentIndex).toBe(1);
     });
 
     it("stores a position past a 32-bit integer as the largest the column holds, not an error", async () => {

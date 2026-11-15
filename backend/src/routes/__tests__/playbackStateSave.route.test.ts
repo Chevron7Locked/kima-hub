@@ -14,6 +14,7 @@ jest.mock("../../middleware/auth", () => ({
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
+import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
 import { mountAsServer } from "./helpers/serverMount";
@@ -491,12 +492,53 @@ describe("GET /api/playback-state/limit", () => {
         const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
         try {
             await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: 10000 }, update: { maxQueueLength: 10000 } });
+            invalidateSystemSettingsCache();
             expect((await request(app).get("/api/playback-state/limit").set("x-user", "anyone")).body.maxQueueLength).toBe(10000);
 
             await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: 2500 } });
+            invalidateSystemSettingsCache();
             expect((await request(app).get("/api/playback-state/limit").set("x-user", "anyone")).body.maxQueueLength).toBe(2500);
         } finally {
             await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
+            invalidateSystemSettingsCache();
+        }
+    });
+});
+
+describe("POST /api/playback-state: every save that sends a queue takes the person's lock", () => {
+    // The queue is cut to the limit as it stands when the save has the lock, not as it stood when the request came in.
+    it.each([
+        ["names no time", {}],
+        ["names the time it saw", { expectedUpdatedAt: "now" }],
+    ])("a save that %s cuts the queue under the lock", async (why, extra) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-lock-${why.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+        const row = await prisma.playbackState.create({ data: { userId: user.id, playbackType: "track" } });
+        const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
+        const setLimit = async (n: number) => {
+            await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: n }, update: { maxQueueLength: n } });
+            invalidateSystemSettingsCache();
+        };
+        const queue = Array.from({ length: 150 }, (_, n) => ({ id: `${S}q${n}`, title: `q${n}`, duration: 100 }));
+        try {
+            await setLimit(100);
+            let answer!: Promise<request.Response>;
+            await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${user.id} FOR UPDATE`;
+                answer = request(app)
+                    .post("/api/playback-state")
+                    .set("x-user", user.id)
+                    .send({ playbackType: "track", queue, ...("expectedUpdatedAt" in extra ? { expectedUpdatedAt: row.updatedAt.toISOString() } : {}) })
+                    .then((r) => r);
+                await untilLockWait(`"PlaybackState"`);
+                await setLimit(120);
+            });
+
+            const res = await answer;
+            expect(res.status).toBe(200);
+            expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).queue).toHaveLength(120);
+        } finally {
+            await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
+            invalidateSystemSettingsCache();
         }
     });
 });

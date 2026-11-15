@@ -7,7 +7,7 @@
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
-import { QUEUE_LENGTH } from "../../../utils/systemSettings";
+import { invalidateSystemSettingsCache, QUEUE_LENGTH } from "../../../utils/systemSettings";
 import { entriesOf } from "../../../services/savedQueue";
 import { queueRouter } from "../queue";
 
@@ -52,6 +52,7 @@ beforeAll(async () => {
 beforeEach(async () => {
     await prisma.playbackState.deleteMany({ where: { userId: USER } });
     await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: QUEUE_LENGTH.min }, update: { maxQueueLength: QUEUE_LENGTH.min } });
+    invalidateSystemSettingsCache();
 });
 afterAll(async () => {
     if (savedLimit !== undefined) await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: savedLimit } });
@@ -85,6 +86,34 @@ describe("a Subsonic queue save and the operator's queue length limit", () => {
         expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([QUEUE_LENGTH.min - 1, song(QUEUE_LENGTH.min - 1), 0]);
     });
 
+    // The position belongs to the place the player is at, not to the song: a song listed twice is two places.
+    it("with the current place being a repeat of the last song kept that was cut, starts the last song kept from its start", async () => {
+        const ids = [...all.slice(0, QUEUE_LENGTH.min), song(QUEUE_LENGTH.min - 1)];
+
+        const reply = await send("/savePlayQueueByIndex.view", { id: ids, currentIndex: String(QUEUE_LENGTH.min), position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([QUEUE_LENGTH.min - 1, song(QUEUE_LENGTH.min - 1), 0]);
+    });
+
+    it("keeps the position when the current place is a repeat of a song that is kept", async () => {
+        const reply = await send("/savePlayQueueByIndex.view", { id: [song(0), song(1), song(0)], currentIndex: "2", position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(0), song(1), song(0)]);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([2, song(0), 7000]);
+    });
+
+    it("starts the song now in the place from its start when the current place held an unknown id, even if that song sits elsewhere in the list", async () => {
+        const reply = await send("/savePlayQueueByIndex.view", { id: [song(1), `${P}-unknown`, song(1)], currentIndex: "1", position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([1, song(1), 0]);
+    });
+
     it("counts the songs it keeps: ids Kima does not know do not use up the limit", async () => {
         const unknown = Array.from({ length: 5 }, (_, n) => `${P}-unknown-${n}`);
 
@@ -95,6 +124,7 @@ describe("a Subsonic queue save and the operator's queue length limit", () => {
 
     it("applies a limit the operator saved at once", async () => {
         await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: QUEUE_LENGTH.min + 10 } });
+        invalidateSystemSettingsCache();
 
         await send("/savePlayQueueByIndex.view", { id: all, currentIndex: "0" });
 
@@ -132,6 +162,55 @@ describe("a Subsonic queue save with a current song or index that is sent but is
 
         expect(reply.status).toBe("failed");
         expect(reply.error.code).toBe(MISSING);
+    });
+
+    it.each([
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "2abc" }, "an index with trailing text"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "1.5" }, "a fractional index"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: " 1" }, "an index with a space"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "+1" }, "a signed index"],
+    ])("%s answers code 0 for %#, and saves nothing", async (name, query, _why) => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "kept" }], currentIndex: 0 } });
+
+        const reply = await send(`/${name}.view`, query);
+
+        expect(reply.status).toBe("failed");
+        expect(reply.error.code).toBe(GENERIC);
+        expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual([song(5)]);
+    });
+
+    it.each([
+        ["savePlayQueue", "-5", "a negative position"],
+        ["savePlayQueue", "abc", "a position that is no number"],
+        ["savePlayQueue", "1.5", "a fractional position"],
+        ["savePlayQueue", "7s", "a position with trailing text"],
+        ["savePlayQueueByIndex", "-5", "a negative position"],
+        ["savePlayQueueByIndex", "abc", "a position that is no number"],
+        ["savePlayQueueByIndex", "1.5", "a fractional position"],
+        ["savePlayQueueByIndex", "7s", "a position with trailing text"],
+    ])("%s answers code 0 for %#, and saves nothing", async (name, position, _why) => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "kept" }], currentIndex: 0 } });
+        const query: Record<string, string | string[]> = name === "savePlayQueue" ? { id: [song(0), song(1)], current: song(1), position } : { id: [song(0), song(1)], currentIndex: "1", position };
+
+        const reply = await send(`/${name}.view`, query);
+
+        expect(reply.status).toBe("failed");
+        expect(reply.error.code).toBe(GENERIC);
+        expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual([song(5)]);
+    });
+
+    it.each([
+        ["savePlayQueue", { id: [song(0), song(1)], current: song(1) }, 0, "no position"],
+        ["savePlayQueue", { id: [song(0), song(1)], current: song(1), position: "" }, 0, "a blank position"],
+        ["savePlayQueue", { id: [song(0), song(1)], current: song(1), position: "0" }, 0, "a position of zero"],
+        ["savePlayQueue", { id: [song(0), song(1)], current: song(1), position: "4200" }, 4200, "a whole position"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "1" }, 0, "no position"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "1", position: "" }, 0, "a blank position"],
+        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "1", position: "4200" }, 4200, "a whole position"],
+    ])("%s keeps a valid position: %#", async (name, query, expected, _why) => {
+        expect((await send(`/${name}.view`, query)).status).toBe("ok");
+
+        expect((await stored())!.position).toBe(expected);
     });
 
     it("still takes a save with no songs and nothing else, which clears the queue", async () => {
