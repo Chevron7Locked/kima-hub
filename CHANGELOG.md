@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A blank hour in the stats hour view, or an empty genre in the podcast genre list, is refused instead of being read as 0.
+- Discover settings, an album's year and a track's number no longer accept values with trailing text or fractions.
+- A fault while pausing, resuming or stopping enrichment is reported as a server error, not as a bad request.
+- A device's name is trimmed and cut to 100 characters the same way whether it is linked by code or added with an API key.
+- An m3u upload that sends the playlist name twice gets a clear error instead of failing.
 - A device that finds a saved item gone no longer wipes playback another device saved a moment earlier; the newer playback is kept and picked up.
 - Subsonic apps that save a play queue without naming the current song no longer get an error; the queue starts from its first song.
 - A library sweep never points a saved queue, or the song you were on, at a Discover copy.
