@@ -97,8 +97,9 @@ export function PlaylistSelector({
     // The id of the playlist this dialog made for these songs and could not finish adding to: a retry adds to it, whatever the form says now.
     const createdId = useRef<string | null>(null);
     // The key a create goes out with. A retry of a create whose answer was lost sends the same key, so the server returns
-    // the playlist the first try made. Fresh for each set of songs and each time the dialog opens.
-    const createKey = useRef<string | null>(null);
+    // the playlist the first try made. Fresh for each set of songs and each time the dialog opens, and for each name and
+    // visibility: the server refuses a key that comes again with other parameters, so it is kept with what it was made for.
+    const createKey = useRef<{ key: string; name: string; isPublic: boolean } | null>(null);
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     // Reset dialog state when `isOpen` flips. Done during render (the
@@ -205,8 +206,11 @@ export function PlaylistSelector({
             if (pending) {
                 playlist = { id: pending };
             } else {
-                createKey.current ??= newRequestKey();
-                playlist = await api.createPlaylist(name, isPublic, createKey.current);
+                const held = createKey.current;
+                if (!held || held.name !== name || held.isPublic !== isPublic) {
+                    createKey.current = { key: newRequestKey(), name, isPublic };
+                }
+                playlist = await api.createPlaylist(name, isPublic, createKey.current!.key);
                 announcePlaylistEvent("playlist-created", playlist);
                 if (session.current !== mine) return;
             }

@@ -484,6 +484,40 @@ describe("a create that is retried", () => {
         await click("create");
         expect(keyOf(1)).not.toBe(keyOf(0));
     });
+
+    // The server refuses a key that comes again with another name or visibility, so an edited form is a new create.
+    it("sends a new key once the name was edited after the failed try", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "early" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await typeName("early");
+        await click("create");
+        expect(createPlaylist.mock.calls[1][0]).toBe("early");
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+
+    it("sends a new key once the public box was flipped after the failed try", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await act(async () => (document.querySelector("input[type=checkbox]") as HTMLInputElement).click());
+        await click("create");
+        expect(createPlaylist.mock.calls[1][1]).toBe(true);
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+
+    it("keeps the key when the name was edited back to what the failed try sent", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await typeName("something else");
+        await typeName("late night  ");
+        await click("create");
+        expect(keyOf(1)).toBe(keyOf(0));
+    });
 });
 
 describe("the list refresh after a failed create-then-add", () => {
