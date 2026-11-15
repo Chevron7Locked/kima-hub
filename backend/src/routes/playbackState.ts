@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { acceptQueue, indexIntoStoredQueue, playableQueue } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, playableQueue } from "../services/savedQueue";
 
 const router = express.Router();
 
@@ -86,7 +86,7 @@ router.post("/", async (req, res) => {
         const accepted = queueProvided ? acceptQueue(queue, currentIndex, await queueLimit()) : null;
         const safeQueue = accepted?.queue ?? null;
         const storedQueue = safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue);
-        const indexOnly =!queueProvided && typeof currentIndex === "number";
+        const indexOnly = !queueProvided && namesCurrentSong(currentIndex, trackId);
 
         // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
         // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
@@ -95,14 +95,15 @@ router.post("/", async (req, res) => {
                 ? queueSource
                 : null;
 
-        const write = (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number) => {
+        // `safeCurrentIndex` null: the save names a song the stored queue does not hold, so the stored index stays.
+        const write = (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number | null) => {
             const queueUpdate = queueProvided
                 ? {
                       queue: storedQueue,
                       queueSource: safeQueueSource,
-                      currentIndex: safeCurrentIndex,
+                      currentIndex: safeCurrentIndex ?? 0,
                   }
-                : indexOnly
+                : indexOnly && safeCurrentIndex !== null
                   ? { currentIndex: safeCurrentIndex }
                   : {};
             return db.playbackState.upsert({
@@ -124,7 +125,7 @@ router.post("/", async (req, res) => {
                     podcastId: podcastId || null,
                     queue: storedQueue,
                     queueSource: safeQueueSource,
-                    currentIndex: safeCurrentIndex,
+                    currentIndex: safeCurrentIndex ?? 0,
                     isShuffle: isShuffle || false,
                 },
             });

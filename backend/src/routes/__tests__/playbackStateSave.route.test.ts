@@ -74,6 +74,43 @@ describe("POST /api/playback-state", () => {
         expect(saved?.playbackType).toBe("track");
     });
 
+    // Two devices of one person saving for the first time at once: the second is an update of the first's row, not a failure.
+    it.each([
+        ["with a queue each", { queue: [{ id: `${S}s1`, title: "s1" }] }, { queue: [{ id: `${S}s2`, title: "s2" }] }],
+        ["with a queue and a position only", { queue: [{ id: `${S}s1`, title: "s1" }] }, { currentIndex: 0, trackId: `${S}s1` }],
+        ["with no queue either", { isShuffle: true }, { currentIndex: 3 }],
+    ])("answers 200 to both of two first saves sent together, %s", async (_name, first, second) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-race-${_name.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+        const send = (body: object) => request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", ...body }).then((r) => r);
+
+        const answers = await Promise.all([send(first), send(second)]);
+
+        expect(answers.map((a) => a.status)).toEqual([200, 200]);
+        expect(await prisma.playbackState.count({ where: { userId: user.id } })).toBe(1);
+    });
+
+    // The same, with the other device's first save held uncommitted so the two certainly meet: the save that finds the
+    // row taken once it commits updates it.
+    it.each([
+        ["sends a queue", { queue: [{ id: `${S}s2`, title: "s2" }] }],
+        ["moves the index only", { currentIndex: 3 }],
+    ])("answers 200 to a first save that meets another device's first save still in flight, when it %s", async (_name, body) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-meet-${_name.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+
+        let answer!: Promise<request.Response>;
+        await prisma.$transaction(async (tx) => {
+            await tx.playbackState.create({ data: { userId: user.id, playbackType: "track", isShuffle: true } });
+            answer = request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", ...body }).then((r) => r);
+            await untilLockWait(`"PlaybackState"`);
+        });
+
+        const res = await answer;
+        expect(res.status).toBe(200);
+        const saved = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+        expect(saved.isShuffle).toBe(true);
+        expect(saved.playbackType).toBe("track");
+    });
+
     it("keeps a queued song's edited title, so another device shows the edit too", async () => {
         const user = await prisma.user.create({
             data: { username: `${PREFIX}-title`, passwordHash: "x", role: "user" },
@@ -192,6 +229,47 @@ describe("POST /api/playback-state: where the player is in the queue", () => {
         expect(await storedIndex(user.id)).toBe(3);
         await save(user.id, { playbackType: "track", trackId: `${S}s4`, currentIndex: 1 }).expect(200);
         expect(await storedIndex(user.id)).toBe(2);
+    });
+
+    describe("a save that names the current song and sends no index", () => {
+        it("moves the index to the named song, where the stored queue holds it", async () => {
+            const user = await newUser("named-moves");
+            await save(user.id, { playbackType: "track", queue: withGone, currentIndex: 0 }).expect(200);
+
+            await save(user.id, { playbackType: "track", trackId: `${S}s3` }).expect(200);
+
+            expect(await storedIndex(user.id)).toBe(3);
+            expect((await prisma.playbackState.findUnique({ where: { userId: user.id } }))?.trackId).toBe(`${S}s3`);
+        });
+
+        it("keeps the stored index when the song is not in the stored queue, or the save names none", async () => {
+            const user = await newUser("named-absent");
+            await save(user.id, { playbackType: "track", queue: withGone, currentIndex: 2 }).expect(200);
+
+            await save(user.id, { playbackType: "track", trackId: `${S}s4` }).expect(200);
+            expect(await storedIndex(user.id)).toBe(2);
+            await save(user.id, { playbackType: "track", trackId: null }).expect(200);
+            expect(await storedIndex(user.id)).toBe(2);
+            await save(user.id, { playbackType: "track", trackId: "" }).expect(200);
+            expect(await storedIndex(user.id)).toBe(2);
+        });
+
+        it("with the song twice in the queue, keeps the place nearest the stored index", async () => {
+            const user = await newUser("named-twice");
+            await save(user.id, { playbackType: "track", queue: [song("s1"), song("s2"), song("s1"), song("s3")], currentIndex: 3 }).expect(200);
+
+            await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+
+            expect(await storedIndex(user.id)).toBe(2);
+        });
+
+        it("stores 0 for a person with no stored queue", async () => {
+            const user = await newUser("named-noqueue");
+
+            await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+
+            expect(await storedIndex(user.id)).toBe(0);
+        });
     });
 
     it("counts the index after the entries without an id are dropped, for a save that sends the queue", async () => {

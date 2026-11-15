@@ -140,24 +140,39 @@ export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: unkn
     const mapped = shownAt.length === 0 ? counted : shownAt[Math.min(asked, shownAt.length - 1)];
     if (typeof trackId !== "string" || trackId === "") return mapped;
     for (const at of [mapped, counted]) if (stored[at].id === trackId) return at;
-    const holding = stored.flatMap((item, i) => (item.id === trackId ? [i] : []));
-    if (holding.length === 0) return mapped;
-    return holding.reduce((best, i) => (Math.abs(i - mapped) < Math.abs(best - mapped) ? i : best));
+    return placeNearest(stored, trackId, mapped) ?? mapped;
+}
+
+/** Where the stored queue holds the song, the place nearest `to` when it sits more than once; null when it does not. */
+function placeNearest(stored: readonly QueueEntry[], id: unknown, to: number): number | null {
+    const holding = stored.flatMap((item, i) => (item.id === id ? [i] : []));
+    if (holding.length === 0) return null;
+    return holding.reduce((best, i) => (Math.abs(i - to) < Math.abs(best - to) ? i : best));
+}
+
+/** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
+export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
+    return typeof clientIndex === "number" || (typeof trackId === "string" && trackId !== "");
 }
 
 /**
  * The index to store for a save that sends no queue, worked out against the queue as it stands. The state row is
  * locked first, so a queue being written at the same moment finishes first and the index points into that queue, and
  * the caller's write, in the same transaction, lands before any other. Stores 0 for a person with no stored queue.
+ *
+ * A save that names the song but sends no index finds it in the stored queue (the place nearest the stored index, when
+ * it sits twice); a song the stored queue does not hold leaves the stored index as it is, which is `null` here.
  */
 export async function indexIntoStoredQueue(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "playbackState" | "track">,
     userId: string,
     clientIndex: unknown,
     trackId: unknown,
-): Promise<number> {
+): Promise<number | null> {
     await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
-    const stored = entriesOf((await tx.playbackState.findUnique({ where: { userId }, select: { queue: true } }))?.queue);
+    const state = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
+    const stored = entriesOf(state?.queue);
+    if (typeof clientIndex !== "number") return placeNearest(stored, trackId, state?.currentIndex ?? 0);
     if (stored.length === 0) return 0;
     const playable = new Set(
         (await tx.track.findMany({ where: { id: { in: stored.map((item) => item.id) }, ...PLAYABLE_SONG }, select: { id: true } })).map((t) => t.id),
