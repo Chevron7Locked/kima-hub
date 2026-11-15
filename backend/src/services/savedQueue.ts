@@ -281,7 +281,8 @@ export async function lockForQueueSave(
     for (let start = 0, end = Math.min(limit, candidates.length); start < end; ) {
         for (const id of await holdSongs(tx, candidates.slice(start, end))) taken.add(id);
         start = end;
-        const stored = candidates.filter((id) => taken.has(id)).length;
+        // Places, not songs: only the places looked at count, so a repeat further down the list takes none of the room.
+        const stored = candidates.slice(0, end).filter((id) => taken.has(id)).length;
         end = Math.min(candidates.length, end + Math.max(0, limit - stored));
     }
     await lockStateRow(tx, userId);
@@ -457,7 +458,10 @@ export interface PlayableQueue {
     queue: QueueEntry[];
     currentIndex: number;
     position: number;
-    /** The track the state names, or the song now current when that one is not playable. */
+    /**
+     * The current song of the shown queue when the state names a track. With no queue shown, the track named while it
+     * is playable. None when the state names none.
+     */
     trackId: string | null;
 }
 
@@ -477,9 +481,11 @@ export async function playableQueue(
     // Each song is shown as it is now (an edited title, a renamed artist, a new cover), not as it was when saved.
     const queue = saved.flatMap((item) => now.get(item.id) ?? []);
     const { index: currentIndex } = shownPlace(saved.map((item) => item.id), state?.currentIndex ?? 0, (id) => now.has(id));
-    // A song the state names that is not playable (gone, or on a Discover album) is never handed back: the song now
-    // current stands in for it, and there is none when the queue shows nothing.
-    const trackId = named === null || now.has(named) ? named : (queue[currentIndex]?.id ?? null);
+    // A state that names a track is shown the current song of the queue as shown (a stand-in when the stored one is
+    // hidden), whatever the stored name says. With no queue shown, the name stays only while that song is playable.
+    // No name stays none. `shownPlace` gives an index into the shown queue whenever it holds a song.
+    let trackId: string | null = null;
+    if (named !== null) trackId = queue.length > 0 ? queue[currentIndex].id : now.has(named) ? named : null;
     return {
         queue,
         currentIndex,
@@ -491,8 +497,8 @@ export async function playableQueue(
 
 /**
  * A playback state row as a client is shown it, whether it asked for it or has just saved it: only the queue's playable
- * songs, the index into those, and the song now current when the one named is not playable. What is stored stays as it
- * is. No row stays no row.
+ * songs, the index into those, and, for a state that names a track, the shown queue's current song as the track. What
+ * is stored stays as it is. No row stays no row.
  */
 export async function shownState(state: PlaybackStateRow | null) {
     if (!state) return state;

@@ -1062,6 +1062,22 @@ describe("POST /api/playback-state: a save holds only the songs it stores", () =
         expect(await storedIds(user.id)).toEqual(all.slice(0, LIM));
     });
 
+    it("counts the places held, not the songs: a repeat after the window does not use up the place of a song the sweep deletes", async () => {
+        const gone = `${S}limgone2`;
+        await prisma.track.create({ data: { id: gone, albumId: `${S}alb`, title: gone, trackNo: 951, duration: 100, filePath: `/tmp/${gone}.flac`, fileModified: new Date(), fileSize: 1 } });
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-held-repeat`, passwordHash: "x", role: "user" } });
+        let answer!: Promise<request.Response>;
+        const ids = [gone, ...all.slice(0, LIM), all[0]];
+        await prisma.$transaction(async (tx) => {
+            await tx.track.delete({ where: { id: gone } });
+            answer = request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", queue: ids.map((id) => ({ id })), currentIndex: 0 }).then((r) => r);
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        });
+
+        expect((await answer).status).toBe(200);
+        expect(await storedIds(user.id)).toEqual(all.slice(0, LIM));
+    });
+
     it("still waits for a song it stores, even a missing one", async () => {
         expect((await finishesWhileHeld([lim(1)], { queue: [{ id: lim(0) }, { id: lim(1) }], currentIndex: 0 })).finished).toBe(false);
         expect((await finishesWhileHeld([`${S}gone`], { queue: [{ id: lim(0) }, { id: `${S}gone` }], currentIndex: 0 })).finished).toBe(false);

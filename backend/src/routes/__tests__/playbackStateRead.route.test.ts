@@ -154,9 +154,26 @@ describe("GET /api/playback-state", () => {
         expect(res.body.position).toBe(900);
     });
 
-    it("a named track that is playable stays named, even when it is not the queue's current song", async () => {
+    it("with a queue shown, the track is its current song, even when the one named is playable and not in the queue", async () => {
         await save([`${P}ok1`, `${P}ok2`], 1, { trackId: `${P}ok3` });
+        const res = await get();
+        expect(res.body.currentIndex).toBe(1);
+        expect(res.body.trackId).toBe(`${P}ok2`);
+    });
+
+    it("with a queue shown, the track is its current song, even when the one named is another song of the queue", async () => {
+        await save([`${P}ok1`, `${P}gone`, `${P}ok2`], 2, { trackId: `${P}ok1` });
+        expect((await get()).body.trackId).toBe(`${P}ok2`);
+    });
+
+    it("a state with no queue naming a playable song keeps it", async () => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", trackId: `${P}ok3` } });
         expect((await get()).body.trackId).toBe(`${P}ok3`);
+    });
+
+    it("a state that names no track still names none when its queue is shown", async () => {
+        await save([`${P}ok1`, `${P}ok2`], 1);
+        expect((await get()).body.trackId).toBeNull();
     });
 
     it("a named Discover or corrupt track with an empty queue comes back naming no track", async () => {

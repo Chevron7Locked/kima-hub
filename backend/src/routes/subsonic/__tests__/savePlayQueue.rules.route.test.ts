@@ -121,6 +121,26 @@ describe("a Subsonic queue save and the operator's queue length limit", () => {
         expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([QUEUE_LENGTH.min - 1, song(QUEUE_LENGTH.min - 1), 0]);
     });
 
+    it("counts places, not songs: a repeat after a place that was left out keeps its own place and position", async () => {
+        const reply = await send("/savePlayQueueByIndex.view", { id: [song(0), DISCOVER_SONG, song(0)], currentIndex: "2", position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(0), song(0)]);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([1, song(0), 7000]);
+    });
+
+    it("counts places, not songs: a repeat the limit cuts, behind ids left out, starts the last song kept from its start", async () => {
+        const ids = [`${P}-unknown`, ...all.slice(0, QUEUE_LENGTH.min), song(0)];
+
+        const reply = await send("/savePlayQueueByIndex.view", { id: ids, currentIndex: String(QUEUE_LENGTH.min + 1), position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue)).toHaveLength(QUEUE_LENGTH.min);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([QUEUE_LENGTH.min - 1, song(QUEUE_LENGTH.min - 1), 0]);
+    });
+
     it("keeps the position when the current place is a repeat of a song that is kept", async () => {
         const reply = await send("/savePlayQueueByIndex.view", { id: [song(0), song(1), song(0)], currentIndex: "2", position: "7000" });
 
