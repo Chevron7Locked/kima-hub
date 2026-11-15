@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import { NO_ACCOUNT_PASSWORD_HASH } from "../services/users/credentials";
 import { subsonicError, SubsonicError } from "../utils/subsonicResponse";
 import { findApiKeyUser } from "../services/users/apiKeyStore";
-import { subsonicGuesses } from "../services/users/guessLimits";
+import { passwordGuessSubject, subsonicGuesses } from "../services/users/guessLimits";
 import { findUserByUsername, normalizeUsername } from "../services/users/accounts";
 import { one } from "../utils/subsonicParams";
 
@@ -24,7 +24,7 @@ export async function subsonicAuth(
     res: Response,
     next: NextFunction
 ): Promise<void> {
-    // The name as sent, for finding an account stored with padding; counted and compared by the trimmed name.
+    // The name as sent, for finding an account stored with padding; compared by the trimmed name, and counted per account.
     const given = one(req, "u") ?? "";
     const username = normalizeUsername(given);
     const apiKey = one(req, "apiKey");
@@ -93,7 +93,8 @@ export async function subsonicAuth(
             });
 
             // Subsonic reports failures inside HTTP 200 replies, so this is counted here, not from a status code.
-            if (!subsonicGuesses.take(username)) {
+            const guessSubject = passwordGuessSubject(given, user);
+            if (!subsonicGuesses.take(guessSubject)) {
                 subsonicError(
                     req,
                     res,
@@ -109,7 +110,7 @@ export async function subsonicAuth(
                 subsonicError(req, res, SubsonicError.WRONG_CREDENTIALS, "Wrong username or password");
                 return;
             }
-            subsonicGuesses.giveBack(username);
+            subsonicGuesses.giveBack(guessSubject);
 
             // Subsonic cannot ask for a second factor, so a 2FA account cannot log in
             // with its password here; it must use an API key. The message says so, since

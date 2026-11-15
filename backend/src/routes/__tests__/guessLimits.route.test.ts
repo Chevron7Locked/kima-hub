@@ -239,6 +239,81 @@ describe("app keys", () => {
     });
 });
 
+describe("counted per account, not per typed name", () => {
+    // Two old accounts whose names trim alike: neither is stored under the trimmed name, so each is reached only by
+    // typing its name exactly as stored.
+    async function twoPaddedAccounts() {
+        const base = `${PREFIX}padded-${++users}`;
+        const hash = await bcrypt.hash(PASSWORD, 4);
+        const [leading, trailing] = await Promise.all([
+            prisma.user.create({ data: { username: ` ${base}`, passwordHash: hash } }),
+            prisma.user.create({ data: { username: `${base} `, passwordHash: hash } }),
+        ]);
+        return { leading, trailing };
+    }
+
+    it("web login: 20 wrong passwords at one account do not lock another whose name trims alike", async () => {
+        const { leading, trailing } = await twoPaddedAccounts();
+
+        await times(20, async () => expect((await login(trailing.username, "wrong")).status).toBe(401));
+        expect((await login(trailing.username, "wrong")).status).toBe(429);
+
+        expect((await login(leading.username, PASSWORD)).status).toBe(200);
+    });
+
+    it("Subsonic: 20 wrong passwords at one account do not lock another whose name trims alike", async () => {
+        const { leading, trailing } = await twoPaddedAccounts();
+
+        await times(20, async () => expect(reply(await subsonic({ u: trailing.username, p: "wrong" })).error.code).toBe(40));
+        expect(reply(await subsonic({ u: trailing.username, p: PASSWORD })).error.message).toMatch(/too many wrong passwords/i);
+
+        expect(reply(await subsonic({ u: leading.username, p: PASSWORD })).status).toBe("ok");
+    });
+
+    it("web login: every way of typing one account's name shares that account's count", async () => {
+        const { username } = await user();
+
+        await times(10, async () => expect((await login(username, "wrong")).status).toBe(401));
+        await times(10, async () => expect((await login(`${username} `, "wrong")).status).toBe(401));
+
+        expect((await login(` ${username}`, PASSWORD)).status).toBe(429);
+    });
+
+    it("Subsonic: every way of typing one account's name shares that account's count", async () => {
+        const { username } = await user();
+
+        await times(10, () => subsonic({ u: username, p: "wrong" }));
+        await times(10, () => subsonic({ u: `${username} `, p: "wrong" }));
+
+        expect(reply(await subsonic({ u: ` ${username}`, p: PASSWORD })).error.message).toMatch(/too many wrong passwords/i);
+    });
+
+    it("keeps each sign-in surface's own count for an account", async () => {
+        const { trailing } = await twoPaddedAccounts();
+        await times(21, () => login(trailing.username, "wrong"));
+
+        expect(reply(await subsonic({ u: trailing.username, p: PASSWORD })).status).toBe("ok");
+    });
+
+    it("web login: a name that matches no account is still limited, however it is padded", async () => {
+        const unknown = nobody();
+
+        await times(10, async () => expect((await login(unknown, "wrong")).status).toBe(401));
+        await times(10, async () => expect((await login(`${unknown}  `, "wrong")).status).toBe(401));
+
+        expect((await login(` ${unknown}`, "wrong")).status).toBe(429);
+    });
+
+    it("Subsonic: a name that matches no account is still limited, however it is padded", async () => {
+        const unknown = nobody();
+
+        await times(10, () => subsonic({ u: unknown, p: "wrong" }));
+        await times(10, () => subsonic({ u: `${unknown}  `, p: "wrong" }));
+
+        expect(reply(await subsonic({ u: ` ${unknown}`, p: "wrong" })).error.message).toMatch(/too many wrong passwords/i);
+    });
+});
+
 describe("the two sign-in surfaces", () => {
     it("an old password in a Subsonic app cannot lock its owner out of web login", async () => {
         const { username } = await user();

@@ -18,7 +18,7 @@ import {
     invalidateUserCache,
 } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimiter";
-import { webLoginGuesses } from "../services/users/guessLimits";
+import { passwordGuessSubject, webLoginGuesses } from "../services/users/guessLimits";
 import { encrypt, decrypt } from "../utils/encryption";
 import { isTransactionConflict } from "../utils/dbConflict";
 
@@ -33,8 +33,6 @@ const loginSchema = z.object({
 router.post("/login", async (req, res) => {
     try {
         const { username: given, password } = loginSchema.parse(req.body);
-        // Counted by the trimmed name; the account is found by it first, then by the name as given.
-        const username = normalizeUsername(given);
         // The two-factor code, if sent; a client may send it as a number.
         const token = req.body.token == null || req.body.token === "" ? undefined : String(req.body.token);
 
@@ -49,7 +47,9 @@ router.post("/login", async (req, res) => {
             tokenVersion: true,
         });
 
-        if (!webLoginGuesses.take(username)) {
+        // Counted against the account the typed name reached, or the trimmed name when it reached none.
+        const guessSubject = passwordGuessSubject(given, user);
+        if (!webLoginGuesses.take(guessSubject)) {
             return res.status(429).json({ error: "Too many login attempts, please try again in 15 minutes." });
         }
 
@@ -61,7 +61,7 @@ router.post("/login", async (req, res) => {
         // Check if 2FA is enabled
         if (user.twoFactorEnabled && user.twoFactorSecret) {
             if (!token) {
-                webLoginGuesses.giveBack(username);
+                webLoginGuesses.giveBack(guessSubject);
                 return res.status(200).json({
                     requires2FA: true,
                     message: "2FA token required",
@@ -104,7 +104,7 @@ router.post("/login", async (req, res) => {
             }
         }
 
-        webLoginGuesses.giveBack(username);
+        webLoginGuesses.giveBack(guessSubject);
 
         // Generate JWT tokens
         const jwtToken = generateToken({

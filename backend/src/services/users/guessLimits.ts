@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "crypto";
+import { normalizeUsername } from "./accounts";
 
 /** The tries taken so far at one secret, and when that count ends. */
 interface Counter {
@@ -59,10 +60,19 @@ export class GuessLimit {
     }
 }
 
+/**
+ * What a password guess is counted against, built here for both sign-in surfaces. A typed name that reached an account
+ * counts against that account, so every way of typing it shares one count and two accounts whose names trim alike keep
+ * their own. A name that reached no account counts against the trimmed name, so guessing at a made-up name stays limited
+ * and the reply gives nothing away. The two kinds of subject cannot be mistaken for each other.
+ */
+export const passwordGuessSubject = (typedName: string, account: { id: string } | null): string =>
+    account ? `account:${account.id}` : `name:${normalizeUsername(typedName)}`;
+
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
-/** Passwords and two-factor codes at web login, per username. */
+/** Passwords and two-factor codes at web login, per account. */
 export const webLoginGuesses = new GuessLimit(20, FIFTEEN_MINUTES);
 
-/** Passwords over Subsonic, per username: its own count, apart from web login. */
+/** Passwords over Subsonic, per account: its own count, apart from web login. */
 export const subsonicGuesses = new GuessLimit(20, FIFTEEN_MINUTES);
