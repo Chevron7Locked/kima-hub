@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A podcast chart request with an empty category is refused instead of showing the first category's chart.
+- The m3u import form says in plain words when a file is too large, isn't a playlist file, isn't text, or has too many songs.
+- Badly formed requests the server refuses all answer "Invalid request", and the reason goes to the server log instead of the reply.
+- Creating an API key with a device name that isn't text is refused instead of failing with a server error.
 - Mood mixes remember what they gave you separately for each mood, so saving a mix for one mood no longer makes another mood forget.
 - Two mood mix requests at the same moment no longer give the same songs.
 - Subsonic apps now see each song's real bitrate. Existing files fill it in on the next scan.
