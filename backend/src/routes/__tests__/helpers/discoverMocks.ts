@@ -19,9 +19,13 @@ export const systemSettingsMock = () => ({
 
 export const emptyLidarrMock = () => ({ lidarrService: {} });
 
-/** A lock that runs the guarded body at once. */
+/** A lock that runs the guarded body at once, with a signal that has not aborted. */
 export const distributedLockMock = () => ({
-    distributedLock: { withLock: jest.fn(async (_key: string, _ttl: number, fn: () => unknown) => fn()) },
+    distributedLock: {
+        withLock: jest.fn(async (_key: string, _ttl: number, fn: (signal: AbortSignal) => unknown) =>
+            fn(new AbortController().signal),
+        ),
+    },
 });
 
 export const musicConfigMock = () => ({ config: { music: { musicPath: "/music" } } });

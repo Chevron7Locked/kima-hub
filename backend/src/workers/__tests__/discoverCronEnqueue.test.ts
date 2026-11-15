@@ -33,7 +33,9 @@ jest.mock('../queues', () => ({
 // callback). A race/failure test overrides it to reject for a specific user.
 jest.mock('../../utils/distributedLock', () => ({
     distributedLock: {
-        withLock: jest.fn(async (_key: string, _ttl: number, fn: () => Promise<unknown>) => fn()),
+        withLock: jest.fn(async (_key: string, _ttl: number, fn: (signal: AbortSignal) => Promise<unknown>) =>
+            fn(new AbortController().signal),
+        ),
     },
 }));
 
@@ -41,7 +43,7 @@ import { startDiscoverWeeklyCron } from '../discoverCron';
 import { prisma } from '../../utils/db';
 import { discoverQueue } from '../queues';
 import { distributedLock } from '../../utils/distributedLock';
-import { LockHeldError } from '../../utils/lockErrors';
+import { LockHeldError, LockLostError } from '../../utils/lockErrors';
 
 const P = 'zz-discoverCron-';
 const USER_A = `${P}a`;
@@ -118,7 +120,7 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         jest.clearAllMocks();
         await wipe();
         withLock.mockImplementation(
-            async (_k: string, _t: number, fn: () => Promise<unknown>) => fn()
+            async (_k: string, _t: number, fn: (signal: AbortSignal) => Promise<unknown>) => fn(new AbortController().signal)
         );
         add.mockResolvedValue({ id: 'new-job' });
         getJob.mockResolvedValue(null);
@@ -163,11 +165,28 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
     it('a lock failure for one user does not block the others', async () => {
         await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25 }]);
         withLock.mockImplementation(
-            async (key: string, _t: number, fn: () => Promise<unknown>) => {
+            async (key: string, _t: number, fn: (signal: AbortSignal) => Promise<unknown>) => {
                 if (key === `discover:generate:${USER_A}`) {
                     throw new LockHeldError(`discover:generate:${USER_A}`);
                 }
-                return fn();
+                return fn(new AbortController().signal);
+            }
+        );
+
+        await tickCron()();
+
+        const addedUserIds = addCalls().map((c) => c[1]?.userId);
+        expect(addedUserIds).not.toContain(USER_A);
+        expect(addedUserIds).toContain(USER_B);
+    });
+
+    it('enqueues nothing for a user whose lock was lost before the enqueue, and goes on to the next', async () => {
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25 }]);
+        withLock.mockImplementation(
+            async (key: string, _t: number, fn: (signal: AbortSignal) => Promise<unknown>) => {
+                const lost = new AbortController();
+                if (key === `discover:generate:${USER_A}`) lost.abort(new LockLostError(key));
+                return fn(lost.signal);
             }
         );
 

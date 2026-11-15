@@ -103,10 +103,10 @@ describe("the mood step", () => {
         expect(redis.del).not.toHaveBeenCalled();
     });
 
-    it("drops only the cached mix lists, not the familiarity results, scan locks or the energy band", async () => {
+    it("drops only the cached mix lists, not the familiarity results or the energy band", async () => {
         mockBuildMoods.mockResolvedValue({ scored: 1, stateChanged: false });
         const redis = fakeRedis([
-            "mixes:u1", "mixes:familiar:u1", "mixes:familiar-lock:u1", "mixes:energy-band", "mixes:u2",
+            "mixes:u1", "mixes:familiar:u1", "mixes:energy-band", "mixes:u2",
         ]);
         await stepOver(redis)();
         expect(redis.dropped).toEqual(["mixes:u1", "mixes:u2"]);

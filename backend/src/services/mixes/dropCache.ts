@@ -3,7 +3,7 @@ import { dependsOnMoods } from "./cacheKeys";
 
 /**
  * Drop the cached mixes so the next read rebuilds them; returns how many were dropped. With `moodsOnly`, only the keys
- * a change to the moods makes stale (cacheKeys.ts): the familiarity results, their locks and the energy band stay.
+ * a change to the moods makes stale (cacheKeys.ts): the familiarity results and the energy band stay. The familiarity scan's lock is under `lock:`, so no drop touches it.
  */
 export async function dropCachedMixes(redis: Pick<Redis, "scan" | "del">, moodsOnly = false): Promise<number> {
     const keys: string[] = [];

@@ -7,6 +7,7 @@
  */
 import { prisma } from "../../../utils/db";
 import { redisClient } from "../../../utils/redis";
+import { distributedLock } from "../../../utils/distributedLock";
 import { forgetStationSessions } from "./helpers/stationSessions";
 import { removeMoodRows } from "../../__tests__/helpers/moodRows";
 import { UNKNOWN_ARTIST, VARIOUS_ARTISTS_CANONICAL } from "../../../utils/artistNormalization";
@@ -856,7 +857,7 @@ describe("familiarity: songs that sound like what the listener plays most", () =
 describe("familiarity: the kept result, the scan shared between callers, ties and failures", () => {
     const USER_ID = `${P}famuser2`;
     const LIB: Song[] = [...background(10), { name: "near", moods: { calm: 2.45 } }, { name: "top", moods: { calm: 5 } }];
-    const lockKey = `mixes:familiar-lock:${USER_ID}`;
+    const lockKey = `lock:mixes:familiar-lock:${USER_ID}`;
     const heard = (name: string, times: number, playedAt?: Date) =>
         prisma.play.createMany({
             data: Array.from({ length: times }, () => ({ userId: USER_ID, trackId: id(name), heard: true, ...(playedAt ? { playedAt } : {}) })),
@@ -929,6 +930,17 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
         await redisClient.del(familiarCacheKey(USER_ID));
         await familiarBoost(USER_ID);
         expect(await redisClient.exists(lockKey)).toBe(0);
+    });
+
+    it("scans itself, without waiting, when the scan lock cannot be asked for", async () => {
+        await heard("bg0", 5);
+        jest.spyOn(distributedLock, "acquire").mockResolvedValue({ outcome: "unavailable", error: new Error("down") });
+        const isHeld = jest.spyOn(distributedLock, "isHeld");
+        familiarTiming.waitMs = 5000;
+        const started = Date.now();
+        expect((await familiarBoost(USER_ID))!.ids).toContain(id("bg0"));
+        expect(Date.now() - started).toBeLessThan(2000);
+        expect(isHeld).not.toHaveBeenCalled();
     });
 
     it("breaks ties between equally heard songs by the most recent listen, not by id", async () => {

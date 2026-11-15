@@ -29,7 +29,7 @@ import discoverRoutes from '../discover';
 import { prisma } from '../../utils/db';
 import { discoverQueue } from '../../workers/queues';
 import { distributedLock } from '../../utils/distributedLock';
-import { LockHeldError, LockUnavailableError } from '../../utils/lockErrors';
+import { LockHeldError, LockLostError, LockUnavailableError } from '../../utils/lockErrors';
 import { redisClient } from '../../utils/redis';
 import { closeClient } from '../../utils/closeRedisClient';
 import { mountAsServer } from "./helpers/serverMount";
@@ -181,6 +181,21 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         expect(held.body.code).toBe('LOCK_CONFLICT');
         expect(down.status).toBe(503);
         expect(down.body.code).toBe('LOCK_UNAVAILABLE');
+        expect(discoverQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('enqueues nothing, and says to try again, when the lock is lost before the enqueue', async () => {
+        const withLock = distributedLock.withLock as jest.Mock;
+        withLock.mockImplementationOnce(async (key: string, _ttl: number, fn: (signal: AbortSignal) => unknown) => {
+            const lost = new AbortController();
+            lost.abort(new LockLostError(key));
+            return fn(lost.signal);
+        });
+
+        const res = await request(app).post('/discover/generate');
+
+        expect(res.status).toBe(503);
+        expect(res.body.code).toBe('LOCK_LOST');
         expect(discoverQueue.add).not.toHaveBeenCalled();
     });
 });

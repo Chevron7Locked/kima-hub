@@ -9,6 +9,7 @@ import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
+import { distributedLock, type LockLease } from "../../utils/distributedLock";
 import { matchingContext, topScores } from "../matching/rank";
 import { playRowsSql } from "../stats/listens";
 import { FAMILIAR_KEY_PREFIX } from "./cacheKeys";
@@ -105,21 +106,15 @@ async function writeKept(userId: string, entry: Kept): Promise<FamiliarBoost | n
     return entry.boost;
 }
 
-/** Deletes the lock only if it still holds the caller's token (it may have expired and been taken by another scan). */
-const RELEASE_LOCK = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
-
-type Lock = { state: "mine"; token: string } | { state: "busy" } | { state: "unavailable" };
+type Lock = { state: "mine"; lease: LockLease } | { state: "busy" } | { state: "unavailable" };
 
 /** "mine": this caller scans; "busy": another process is scanning; "unavailable": no Redis to lock with, so scan. */
 async function takeLock(userId: string): Promise<Lock> {
-    try {
-        const token = crypto.randomBytes(16).toString("hex");
-        const got = await redisClient.set(familiarLockKey(userId), token, "EX", familiarTiming.lockSeconds, "NX");
-        return got === "OK" ? { state: "mine", token } : { state: "busy" };
-    } catch (error) {
-        logger.debug(`[Mixes] familiarity lock unavailable: ${error instanceof Error ? error.message : error}`);
-        return { state: "unavailable" };
-    }
+    const taken = await distributedLock.acquire(familiarLockKey(userId), familiarTiming.lockSeconds * 1000);
+    if (taken.outcome === "acquired") return { state: "mine", lease: taken.lease };
+    if (taken.outcome === "held") return { state: "busy" };
+    logger.debug(`[Mixes] familiarity lock unavailable: ${taken.error instanceof Error ? taken.error.message : taken.error}`);
+    return { state: "unavailable" };
 }
 
 /**
@@ -133,7 +128,7 @@ async function waitForKept(userId: string, signature: string): Promise<Kept | nu
         await new Promise((resolve) => setTimeout(resolve, familiarTiming.pollMs));
         let held: boolean;
         try {
-            held = (await redisClient.exists(familiarLockKey(userId))) > 0;
+            held = await distributedLock.isHeld(familiarLockKey(userId));
         } catch {
             return null;
         }
@@ -169,7 +164,7 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
         return await writeKept(userId, { signature, boost });
     } finally {
         if (lock.state === "mine") {
-            await redisClient.eval(RELEASE_LOCK, 1, familiarLockKey(userId), lock.token).catch(() => undefined);
+            await lock.lease.release();
         }
     }
 }

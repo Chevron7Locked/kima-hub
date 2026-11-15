@@ -4,7 +4,7 @@
  * scan from plays and sound vectors), so a mood change leaves them valid.
  */
 export const ENERGY_BAND_KEY = "mixes:energy-band";
-/** Prefix of the familiarity scan's result and its lock (familiarity.ts). */
+/** Prefix of the familiarity scan's result (familiarity.ts); its lock is named with it, and lives under `lock:` (distributedLock). */
 export const FAMILIAR_KEY_PREFIX = "mixes:familiar";
 
 /** True for a `mixes:` key that a change to the moods makes stale. */

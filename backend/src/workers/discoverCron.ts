@@ -48,7 +48,7 @@ export function startDiscoverWeeklyCron() {
                 await distributedLock.withLock(
                     `discover:generate:${config.userId}`,
                     30000,
-                    async () => {
+                    async (signal) => {
                         const existing = await discoverQueue.getJob(jobId);
                         if (existing) {
                             const state = await existing.getState();
@@ -56,6 +56,8 @@ export function startDiscoverWeeklyCron() {
                                 await existing.remove();
                             }
                         }
+                        // Past a lost lock another enqueue may have run; this one is skipped, as a held lock skips it.
+                        signal.throwIfAborted();
                         await discoverQueue.add("discover-weekly", {
                             userId: config.userId,
                         }, { jobId });

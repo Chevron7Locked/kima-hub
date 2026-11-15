@@ -6,7 +6,8 @@
  */
 import Redis from "ioredis";
 import { DistributedLock, distributedLock } from "../distributedLock";
-import { LockHeldError, LockUnavailableError } from "../lockErrors";
+import { LockHeldError, LockLostError, LockUnavailableError } from "../lockErrors";
+import { logger } from "../logger";
 import { redisClient } from "../redis";
 import { closeClient } from "../closeRedisClient";
 
@@ -64,8 +65,8 @@ describe("distributedLock.acquire", () => {
         const first = await distributedLock.acquire(KEY, 5000);
         if (first.outcome !== "acquired") throw new Error("expected the lock");
 
-        expect(await first.lease.release()).toBe(true);
-        expect(await first.lease.release()).toBe(false);
+        expect(await first.lease.release()).toBe("released");
+        expect(await first.lease.release()).toBe("released");
         expect((await distributedLock.acquire(KEY, 5000)).outcome).toBe("acquired");
     });
 });
@@ -78,10 +79,10 @@ describe("two holders in one process", () => {
         const second = await distributedLock.acquire(KEY, 5000);
         if (second.outcome !== "acquired") throw new Error("expected the lock after expiry");
 
-        expect(await first.lease.release()).toBe(false);
+        expect(await first.lease.release()).toBe("lost");
 
         expect((await distributedLock.acquire(KEY, 5000)).outcome).toBe("held");
-        expect(await second.lease.release()).toBe(true);
+        expect(await second.lease.release()).toBe("released");
     });
 
     it("a lease that was released does not renew the lock a later holder took", async () => {
@@ -151,6 +152,153 @@ describe("distributedLock.withLock", () => {
 
             await expect(lock.withLock(KEY, 5000, run)).rejects.toBeInstanceOf(LockUnavailableError);
             expect(run).not.toHaveBeenCalled();
+        } finally {
+            await close();
+        }
+    });
+});
+
+/** Another holder takes the key, as if this lease's had expired. */
+const stolen = () => redisClient.set(`lock:${KEY}`, "someone-else", "PX", 5000);
+
+describe("lease.release says why it did not free the lock", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("says lost, and logs it once, when the lock expired or another holder has it", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const held = await distributedLock.acquire(KEY, 5000);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        await stolen();
+
+        expect(await held.lease.release()).toBe("lost");
+        expect(await held.lease.release()).toBe("lost");
+
+        expect(warn.mock.calls.filter(([message]) => String(message).includes(KEY))).toHaveLength(1);
+        expect(await redisClient.get(`lock:${KEY}`)).toBe("someone-else");
+    });
+
+    it("says released, and logs nothing, for a lock still its own", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const held = await distributedLock.acquire(KEY, 5000);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+
+        expect(await held.lease.release()).toBe("released");
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("says unreachable, not lost, when Redis fails the release, and logs no loss", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const held = await distributedLock.acquire(KEY, 5000);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        jest.spyOn(redisClient, "eval").mockRejectedValueOnce(new Error("connection reset"));
+
+        expect(await held.lease.release()).toBe("unreachable");
+
+        expect(warn.mock.calls.filter(([message]) => String(message).includes("lost"))).toHaveLength(0);
+        jest.restoreAllMocks();
+        await redisClient.del(`lock:${KEY}`);
+    });
+});
+
+describe("a lease that is kept alive says when its lock is lost", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("aborts its signal with LockLostError when a renewal finds another holder, and logs once", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const held = await distributedLock.acquire(KEY, 300);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        const stop = held.lease.keepAlive();
+        await wait(150);
+        expect(held.lease.signal.aborted).toBe(false);
+
+        await stolen();
+        await wait(400);
+        stop();
+
+        expect(held.lease.signal.aborted).toBe(true);
+        expect(held.lease.signal.reason).toBeInstanceOf(LockLostError);
+        expect(await redisClient.get(`lock:${KEY}`)).toBe("someone-else");
+        await held.lease.release();
+        expect(warn.mock.calls.filter(([message]) => String(message).includes(KEY))).toHaveLength(1);
+    });
+
+    it("aborts its signal when Redis stays unreachable for the whole ttl, but not for one missed renewal", async () => {
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const held = await distributedLock.acquire(KEY, 600);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        const evalSpy = jest.spyOn(redisClient, "eval").mockRejectedValueOnce(new Error("connection reset"));
+        const stop = held.lease.keepAlive();
+        await wait(350);
+        expect(held.lease.signal.aborted).toBe(false);
+
+        evalSpy.mockRejectedValue(new Error("connection reset"));
+        await wait(900);
+        stop();
+
+        expect(held.lease.signal.aborted).toBe(true);
+        jest.restoreAllMocks();
+        await redisClient.del(`lock:${KEY}`);
+    });
+
+    it("does not abort a lease that was released", async () => {
+        const held = await distributedLock.acquire(KEY, 300);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        const stop = held.lease.keepAlive();
+        await held.lease.release();
+        await wait(500);
+        stop();
+
+        expect(held.lease.signal.aborted).toBe(false);
+    });
+});
+
+describe("distributedLock.withLock keeps the lock while the callback runs", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("renews past the ttl, so a callback longer than the ttl is still the only holder", async () => {
+        const during = await distributedLock.withLock(KEY, 300, async (signal) => {
+            await wait(900);
+            return { aborted: signal.aborted, other: (await distributedLock.acquire(KEY, 300)).outcome };
+        });
+
+        expect(during).toEqual({ aborted: false, other: "held" });
+        expect(await redisClient.get(`lock:${KEY}`)).toBeNull();
+    });
+
+    it("aborts the callback's signal when the lock is lost, and leaves the callback to decide what to do", async () => {
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const seen = await distributedLock.withLock(KEY, 300, async (signal) => {
+            await stolen();
+            await wait(400);
+            return signal.aborted;
+        });
+
+        expect(seen).toBe(true);
+        // The release found the lock another holder's and left it.
+        expect(await redisClient.get(`lock:${KEY}`)).toBe("someone-else");
+    });
+
+    it("stops renewing once the callback has finished", async () => {
+        await distributedLock.withLock(KEY, 300, async () => "done");
+        expect((await distributedLock.acquire(KEY, 300)).outcome).toBe("acquired");
+        await wait(500);
+        expect(await redisClient.get(`lock:${KEY}`)).toBeNull();
+    });
+});
+
+describe("distributedLock.isHeld", () => {
+    it("says whether anyone holds the key, and throws when Redis cannot be asked", async () => {
+        expect(await distributedLock.isHeld(KEY)).toBe(false);
+        const held = await distributedLock.acquire(KEY, 5000);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        expect(await distributedLock.isHeld(KEY)).toBe(true);
+        await held.lease.release();
+        expect(await distributedLock.isHeld(KEY)).toBe(false);
+
+        const { lock, close } = downLock();
+        try {
+            await expect(lock.isHeld(KEY)).rejects.toBeDefined();
         } finally {
             await close();
         }

@@ -488,11 +488,24 @@ class SoulseekService {
             this.forceDisconnect();
         }
 
+        // The backoff is slept before the lock is taken: the lock covers a connect (its connect and login timeouts
+        // add up to 20 s) and is renewed while it runs, and a caller that finds it held waits for that connect.
+        if (!force) {
+            if (this.connecting && this.connectPromise) {
+                await this.connectPromise;
+                return;
+            }
+            await this.waitOutBackoff();
+            if (this.client && this.client.loggedIn && this.checkConnectionHealth()) {
+                return;
+            }
+        }
+
         const lockKey = 'soulseek:connection';
-        const lockTtl = 360000; // 6 minutes - exceeds max backoff (5min)
+        const lockTtl = 60_000;
 
         try {
-            await distributedLock.withLock(lockKey, lockTtl, async () => {
+            await distributedLock.withLock(lockKey, lockTtl, async (signal) => {
                 if (!force && this.client && this.client.loggedIn) {
                     if (this.checkConnectionHealth()) {
                         return;
@@ -506,28 +519,6 @@ class SoulseekService {
 
                 if (this.client && !this.client.loggedIn) {
                     this.forceDisconnect();
-                }
-
-                // Apply exponential backoff (slskd practice).
-                // NOTE: This sleeps inside the distributed lock. Lock TTL (360s) exceeds max
-                // backoff (300s). Other callers hitting the lock fall through to waitForConnection()
-                // which polls for 30s -- acceptable since long backoffs only occur after many failures.
-                const backoffDelay = force ? 0 : this.getReconnectDelay();
-                if (backoffDelay > 0) {
-                    const now = Date.now();
-                    const timeSinceLastAttempt = this.lastConnectAttempt > 0
-                        ? now - this.lastConnectAttempt
-                        : backoffDelay + 1;
-
-                    if (timeSinceLastAttempt < backoffDelay) {
-                        const waitMs = backoffDelay - timeSinceLastAttempt;
-                        sessionLog(
-                            "SOULSEEK",
-                            `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
-                            "WARN"
-                        );
-                        await new Promise(resolve => setTimeout(resolve, waitMs));
-                    }
                 }
 
                 this.connecting = true;
@@ -549,6 +540,13 @@ class SoulseekService {
                     this.connecting = false;
                     this.connectPromise = null;
                 }
+
+                // The lock was lost while connecting: another process may now be connecting as the same account, and
+                // a second login would knock one of them off. Drop this one.
+                if (signal.aborted) {
+                    this.forceDisconnect();
+                    throw signal.reason;
+                }
             });
         } catch (error: any) {
             // Another process is connecting. With Redis down (LockUnavailableError) nobody can be waited for, so
@@ -560,6 +558,23 @@ class SoulseekService {
             }
             throw error;
         }
+    }
+
+    /** Sleeps out what is left of the exponential backoff (slskd practice) since the last connect attempt. */
+    private async waitOutBackoff(): Promise<void> {
+        const backoffDelay = this.getReconnectDelay();
+        if (backoffDelay <= 0) return;
+        const timeSinceLastAttempt = this.lastConnectAttempt > 0
+            ? Date.now() - this.lastConnectAttempt
+            : backoffDelay + 1;
+        if (timeSinceLastAttempt >= backoffDelay) return;
+        const waitMs = backoffDelay - timeSinceLastAttempt;
+        sessionLog(
+            "SOULSEEK",
+            `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
+            "WARN"
+        );
+        await new Promise(resolve => setTimeout(resolve, waitMs));
     }
 
     /**

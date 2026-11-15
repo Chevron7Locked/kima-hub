@@ -186,11 +186,35 @@ describe("finding a job for an album by name, under a lock", () => {
         await prisma.downloadJob.deleteMany({ where: { userId: USER, subject: "Zz Lock Artist - Zz Lock Album" } });
     });
 
-    it("leaves the job to the request that holds the lock", async () => {
-        jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockHeldError("download-job"));
+    const holder = async () => {
+        const held = await distributedLock.acquire(`download-job:${USER}:${BY_NAME.artistName}::${BY_NAME.albumTitle}:null`, 5000);
+        if (held.outcome !== "acquired") throw new Error("expected the lock");
+        return held.lease;
+    };
 
-        await expect(find()).rejects.toBeInstanceOf(LockHeldError);
-        expect(await prisma.downloadJob.count({ where: { userId: USER, subject: "Zz Lock Artist - Zz Lock Album" } })).toBe(0);
+    it("answers with the job of the request that holds the lock, once that request has made it", async () => {
+        const lease = await holder();
+        try {
+            const asking = find();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const made = await prisma.downloadJob.create({
+                data: { userId: USER, type: "album", status: "pending", subject: "Zz Lock Artist - Zz Lock Album", metadata: {} },
+            });
+
+            expect(await asking).toMatchObject({ created: false, job: { id: made.id } });
+        } finally {
+            await lease.release();
+        }
+    });
+
+    it("throws LockHeldError, making no job, only when the holder's job never appears", async () => {
+        const lease = await holder();
+        try {
+            await expect(find()).rejects.toBeInstanceOf(LockHeldError);
+            expect(await prisma.downloadJob.count({ where: { userId: USER, subject: "Zz Lock Artist - Zz Lock Album" } })).toBe(0);
+        } finally {
+            await lease.release();
+        }
     });
 
     it("still makes the job, once, when Redis is down and there is no lock to take", async () => {

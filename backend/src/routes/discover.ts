@@ -18,7 +18,7 @@ import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidar
 import { NameIndex, hasRealArtistId, relocateDiscoverAlbums, sameArtist, sameName } from "../services/discovery/discoverEvidence";
 import { artistNamed, isArtistNamed } from "../services/artistIdentity";
 import { distributedLock } from '../utils/distributedLock';
-import { LockHeldError, LockUnavailableError } from '../utils/lockErrors';
+import { LockHeldError, LockLostError, LockUnavailableError } from '../utils/lockErrors';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
 import { config } from "../config";
@@ -205,7 +205,7 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
         const result = await distributedLock.withLock(
             `discover:generate:${userId}`,
             30000,
-            async () => {
+            async (signal) => {
                 const existingBatch = await prisma.discoveryBatch.findFirst({
                     where: {
                         userId,
@@ -232,6 +232,8 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
                         await existing.remove();
                     }
                 }
+                // The check above is only good while the lock is: past a lost one, another request may have queued.
+                signal.throwIfAborted();
                 const job = await discoverQueue.add("discover-weekly", { userId }, { jobId });
 
                 return { conflict: false as const, jobId: job.id };
@@ -256,6 +258,14 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
             return res.status(409).json({
                 error: "Generation already in progress",
                 code: 'LOCK_CONFLICT',
+            });
+        }
+        // The lock expired or was taken over mid-request, so the check made under it may be stale: ask to try again
+        if (error instanceof LockLostError) {
+            logger.warn('Discover generation lost its lock before queuing:', error);
+            return res.status(503).json({
+                error: 'Generation is temporarily unavailable',
+                code: 'LOCK_LOST',
             });
         }
         // Redis down says nothing about another request: it is a failure, not a conflict

@@ -17,7 +17,7 @@ import { getArtistCorrection } from "./artistCorrection";
 import { isMbid } from "./artistIdentity";
 import { AcquisitionErrorType } from "./lidarr";
 import { distributedLock } from "../utils/distributedLock";
-import { LockUnavailableError } from "../utils/lockErrors";
+import { LockHeldError, LockUnavailableError } from "../utils/lockErrors";
 import PQueue from "p-queue";
 import { downloadJobsTotal, downloadJobDuration } from "../utils/metrics";
 import {
@@ -25,6 +25,13 @@ import {
   IntegrationError,
   ConfigurationError,
 } from '../utils/errors';
+
+/**
+ * A request that finds the by-name lock held looks for the holder's job this often, this many times (2 s in all, the
+ * holder's work is one insert), before it leaves the album to the holder.
+ */
+const HELD_FIND_ATTEMPTS = 20;
+const HELD_FIND_POLL_MS = 100;
 
 /** Where an acquisition came from (Discovery batch or Spotify import), for linking its download jobs. */
 interface AcquisitionContext {
@@ -769,9 +776,18 @@ class AcquisitionService {
             return create();
         };
         try {
-            // A held lock throws LockHeldError: another request is making the job.
             return await distributedLock.withLock(lockKey, 5000, findOrCreate);
         } catch (error) {
+            if (error instanceof LockHeldError) {
+                // Another request is making this very job: answer with theirs, as the album-id path does for the
+                // loser of its race, once it shows. Only a holder that makes none leaves this request without one.
+                for (let attempt = 0; attempt < HELD_FIND_ATTEMPTS; attempt++) {
+                    await new Promise((resolve) => setTimeout(resolve, HELD_FIND_POLL_MS));
+                    const winner = await findExisting();
+                    if (winner) return { job: winner, created: false };
+                }
+                throw error;
+            }
             if (!(error instanceof LockUnavailableError)) throw error;
             // With Redis down there is no lock to take, and refusing the download would cost more than the rare
             // duplicate the lock guards against: the lookup above still finds an existing job.
