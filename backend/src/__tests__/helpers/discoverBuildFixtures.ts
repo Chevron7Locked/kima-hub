@@ -12,6 +12,8 @@ export interface JobSeed {
     artistName: string;
     albumTitle: string;
     albumMbid?: string;
+    /** The artist's MusicBrainz id, as the job records it. */
+    artistMbid?: string | null;
     lidarrAlbumId?: number;
     similarity?: number;
     tier?: string;
@@ -21,6 +23,8 @@ export interface ScannedSeed {
     artistName: string;
     albumTitle: string;
     rgMbid: string;
+    /** The scanned artist's MusicBrainz id; none by default. */
+    artistMbid?: string | null;
 }
 
 export function discoverBuildFixtures(prefix: string) {
@@ -56,11 +60,13 @@ export function discoverBuildFixtures(prefix: string) {
                     status: "completed",
                     discoveryBatchId: batchId,
                     targetMbid: job.albumMbid,
+                    artistMbid: job.artistMbid,
                     lidarrAlbumId: job.lidarrAlbumId,
                     metadata: {
                         artistName: job.artistName,
                         albumTitle: job.albumTitle,
                         albumMbid: job.albumMbid,
+                        artistMbid: job.artistMbid,
                         similarity: job.similarity,
                         tier: job.tier,
                     },
@@ -74,7 +80,7 @@ export function discoverBuildFixtures(prefix: string) {
         const artistId = `${batchId}-art`;
         const albumId = `${batchId}-alb`;
         await prisma.artist.create({
-            data: { id: artistId, name: scanned.artistName, identityKey: artistIdentityKey(scanned.artistName) },
+            data: { id: artistId, name: scanned.artistName, mbid: scanned.artistMbid, identityKey: artistIdentityKey(scanned.artistName) },
         });
         await prisma.album.create({
             data: {

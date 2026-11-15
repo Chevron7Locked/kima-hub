@@ -50,14 +50,16 @@ export const hasRealArtistId = (artistMbid: string | null | undefined): artistMb
 
 /**
  * Whether two Discover records name the same artist: by MusicBrainz id when both have a real one (two artists with one
- * name and different ids are namesakes), by name (sameName) only when either's id is missing or a `temp-` placeholder.
+ * name and different ids are namesakes), by name only when either's id is missing or a `temp-` placeholder. The name
+ * test is `sameName` unless the caller has a looser or stricter one of its own (`sameNames`); the id half is always this.
  */
 export function sameArtist(
     a: { artistMbid?: string | null; artistName?: string | null },
     b: { artistMbid?: string | null; artistName?: string | null },
+    sameNames: (a: string, b: string) => boolean = sameName,
 ): boolean {
     if (hasRealArtistId(a.artistMbid) && hasRealArtistId(b.artistMbid)) return a.artistMbid === b.artistMbid;
-    return !!a.artistName && !!b.artistName && sameName(a.artistName, b.artistName);
+    return !!a.artistName && !!b.artistName && sameNames(a.artistName, b.artistName);
 }
 
 /**

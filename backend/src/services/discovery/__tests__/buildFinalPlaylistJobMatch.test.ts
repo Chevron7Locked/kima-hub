@@ -102,4 +102,60 @@ describe("buildFinalPlaylist links a Discover album to its download job", () => 
         expect(suggestion).not.toBeNull();
         expect(suggestion?.lidarrAlbumId).toBeNull();
     });
+
+    describe("with the artist-identity rule (sameArtist)", () => {
+        const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+        const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
+        const PLACEHOLDER = "temp-1793617784650-0.5";
+        const names = { artistName: "Ed O'Brien", albumTitle: "Blue Morpho" };
+        const scanned = { ...names, rgMbid: SCANNED_MBID, artistMbid: ARTIST };
+
+        it("does not take a namesake's job for this album, even when it comes first", async () => {
+            await fx.seedScanningBatch(BATCH, [
+                { ...names, albumMbid: "11111111-aaaa-4aaa-8aaa-111111111111", artistMbid: NAMESAKE, lidarrAlbumId: 111, tier: "wild" },
+                { ...names, albumMbid: "22222222-aaaa-4aaa-8aaa-222222222222", artistMbid: ARTIST, lidarrAlbumId: 222, tier: "core" },
+            ]);
+            await fx.seedDiscoverSong(BATCH, scanned);
+
+            await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+            const suggestion = await recordedSuggestion();
+            expect(suggestion?.lidarrAlbumId).toBe(222);
+            expect(suggestion?.tier).toBe("core");
+        });
+
+        it("records no job for an album only a namesake's job names", async () => {
+            // Found by its release-group id, so the build goes on; no job is this artist's.
+            await fx.seedScanningBatch(BATCH, [{ ...names, albumMbid: SCANNED_MBID, artistMbid: NAMESAKE, lidarrAlbumId: 111, tier: "wild" }]);
+            await fx.seedDiscoverSong(BATCH, scanned);
+
+            await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+            const suggestion = await recordedSuggestion();
+            expect(suggestion).not.toBeNull();
+            expect(suggestion?.lidarrAlbumId).toBeNull();
+        });
+
+        it.each([
+            ["the same id", ARTIST],
+            ["no id", null],
+            ["a temp- placeholder", PLACEHOLDER],
+        ])("takes the job that has %s", async (_how, artistMbid) => {
+            await fx.seedScanningBatch(BATCH, [{ ...names, albumMbid: SCANNED_MBID, artistMbid, lidarrAlbumId: 222, tier: "core" }]);
+            await fx.seedDiscoverSong(BATCH, scanned);
+
+            await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+            expect((await recordedSuggestion())?.lidarrAlbumId).toBe(222);
+        });
+
+        it("takes a job by name when the scanned artist has no real id", async () => {
+            await fx.seedScanningBatch(BATCH, [{ ...names, albumMbid: SCANNED_MBID, artistMbid: NAMESAKE, lidarrAlbumId: 222, tier: "core" }]);
+            await fx.seedDiscoverSong(BATCH, { ...scanned, artistMbid: null });
+
+            await discoverWeeklyService.buildFinalPlaylist(BATCH);
+
+            expect((await recordedSuggestion())?.lidarrAlbumId).toBe(222);
+        });
+    });
 });

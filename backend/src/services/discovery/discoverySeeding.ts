@@ -6,7 +6,7 @@ import { lidarrService } from '../lidarr';
 import { subWeeks } from 'date-fns';
 import { normalizeForMatching, stringSimilarity } from '../../utils/normalization';
 import { LIBRARY_LOCATION } from '../libraryFilters';
-import { hasRealArtistId } from './discoverEvidence';
+import { hasRealArtistId, sameArtist } from './discoverEvidence';
 import { playCounts } from '../stats/listens';
 
 export interface SeedArtist {
@@ -21,8 +21,8 @@ export interface SeedArtist {
  * LIBRARY only filter on it.
  */
 interface OwnedAlbumIndex {
-    albums: Array<{ artistName: string; title: string; location: string; rgMbid: string }>;
-    ownedAlbumArtists: Array<{ artistName: string; rgMbid: string }>;
+    albums: Array<{ artistName: string; artistMbid: string | null; title: string; location: string; rgMbid: string }>;
+    ownedAlbumArtists: Array<{ artistName: string; artistMbid: string | null; rgMbid: string }>;
     albumTitleByRgMbid: Map<string, string>;
 }
 
@@ -133,10 +133,10 @@ export class DiscoverySeeding {
         const now = Date.now();
         const [albumRows, ownedAlbumRows] = await Promise.all([
             prisma.album.findMany({
-                select: { rgMbid: true, title: true, location: true, artist: { select: { name: true } } },
+                select: { rgMbid: true, title: true, location: true, artist: { select: { name: true, mbid: true } } },
             }),
             prisma.ownedAlbum.findMany({
-                select: { rgMbid: true, artist: { select: { name: true } } },
+                select: { rgMbid: true, artist: { select: { name: true, mbid: true } } },
             }),
         ]);
 
@@ -156,6 +156,7 @@ export class DiscoverySeeding {
 
         const albums = albumRows.map((a) => ({
             artistName: a.artist.name,
+            artistMbid: a.artist.mbid,
             title: a.title,
             location: a.location as string,
             rgMbid: a.rgMbid,
@@ -166,6 +167,7 @@ export class DiscoverySeeding {
             albums,
             ownedAlbumArtists: ownedAlbumRows.map((o) => ({
                 artistName: o.artist.name,
+                artistMbid: o.artist.mbid,
                 rgMbid: o.rgMbid,
             })),
             albumTitleByRgMbid: albumTitles,
@@ -173,12 +175,17 @@ export class DiscoverySeeding {
         return this.ownedIndexCache;
     }
 
-    /** Whether an album is owned: OwnedAlbum, Album, past discovery, pending downloads, Lidarr, then fuzzy names. */
+    /**
+     * Whether an album is owned: OwnedAlbum, Album, past discovery, pending downloads, Lidarr, then fuzzy names. The
+     * fuzzy names never take an owned album of a namesake: another real MusicBrainz id than `artistMbid` is another
+     * artist (sameArtist).
+     */
     async isAlbumOwned(
         albumMbid: string,
         userId: string,
         artistName?: string,
-        albumTitle?: string
+        albumTitle?: string,
+        artistMbid?: string | null
     ): Promise<boolean> {
         // Exact MBID checks
         const ownedAlbum = await prisma.ownedAlbum.findFirst({
@@ -225,18 +232,21 @@ export class DiscoverySeeding {
                 const { albums, ownedAlbumArtists, albumTitleByRgMbid } = await this.getOwnedAlbumIndex();
                 // Both sides normalised the same way: no leading article, no edition suffix.
                 const normTitle = normalizeForMatching(albumTitle);
-                const candidates: Array<{ artistName: string; title: string }> = albums.filter(
+                const candidates: Array<{ artistName: string; artistMbid: string | null; title: string }> = albums.filter(
                     (a) => a.location === LIBRARY_LOCATION
                 );
                 for (const owned of ownedAlbumArtists) {
                     const title = albumTitleByRgMbid.get(owned.rgMbid);
-                    if (title) candidates.push({ artistName: owned.artistName, title });
+                    if (title) candidates.push({ artistName: owned.artistName, artistMbid: owned.artistMbid, title });
                 }
+
+                const similarArtistNames = (owner: string) =>
+                    normalizeForMatching(owner).startsWith(artistFirstWord) &&
+                    stringSimilarity(normArtist, normalizeForMatching(owner)) >= 75;
 
                 for (const album of candidates) {
                     if (
-                        normalizeForMatching(album.artistName).startsWith(artistFirstWord) &&
-                        stringSimilarity(normArtist, normalizeForMatching(album.artistName)) >= 75 &&
+                        sameArtist(album, { artistName, artistMbid }, similarArtistNames) &&
                         stringSimilarity(normTitle, normalizeForMatching(album.title)) >= 75
                     ) {
                         logger.debug(`[DiscoverySeeding] Fuzzy match: ${artistName} - ${albumTitle} = ${album.artistName} - ${album.title}`);

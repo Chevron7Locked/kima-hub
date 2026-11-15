@@ -436,6 +436,41 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         expect(titles(res.body)).toEqual([song(1)]);
     });
 
+    describe("a suggestion with no release id is matched to its album with the artist-identity rule", () => {
+        const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+        const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
+
+        /** A Discover album whose artist has `albumArtistMbid`, and a suggestion of it with no release id under `suggestedMbid`. */
+        async function arrange(albumArtistMbid: string | null, suggestedMbid: string | null) {
+            const song = await suggestWithSongs("same", [{ trackNo: 1 }]);
+            await prisma.artist.updateMany({ where: { identityKey: `${MARK}-same` }, data: { mbid: albumArtistMbid } });
+            await prisma.discoveryAlbum.updateMany({ where: { rgMbid: `${MARK}-rg-same` }, data: { rgMbid: "", artistMbid: suggestedMbid } });
+            return song(1);
+        }
+
+        it("does not show a namesake's song on the card", async () => {
+            await arrange(NAMESAKE, ARTIST);
+
+            const res = await request(app).get("/discover/current");
+
+            expect(res.body.tracks).toHaveLength(1);
+            expect(res.body.tracks[0]).toMatchObject({ available: false, isPending: true });
+        });
+
+        it.each([
+            ["the same id", ARTIST, ARTIST],
+            ["no id on the suggestion", ARTIST, null],
+            ["no id on the album's artist", null, ARTIST],
+            ["a temp- id on the suggestion", ARTIST, "temp-1793617784650-0.5"],
+        ])("shows the song with %s", async (_how, albumArtistMbid, suggestedMbid) => {
+            const song = await arrange(albumArtistMbid, suggestedMbid);
+
+            const res = await request(app).get("/discover/current");
+
+            expect(titles(res.body)).toEqual([song]);
+        });
+    });
+
     it("asks the database the same number of questions for one suggestion as for six", async () => {
         const count = async () => {
             const spies = [prisma.album, prisma.track, prisma.discoveryAlbum].flatMap((model) => [

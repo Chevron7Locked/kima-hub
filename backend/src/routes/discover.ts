@@ -15,7 +15,7 @@ import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist 
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
+import { NameIndex, relocateDiscoverAlbums, sameArtist } from "../services/discovery/discoverEvidence";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -340,7 +340,7 @@ type StandIn = { song: { id: string; title: string; duration: number }; coverUrl
 /**
  * The songs GET /current lists for a week's suggestions, in suggestion order, in a fixed number of queries. A
  * suggestion lists its recorded songs that are playable; with none, one stand-in: the first playable song in track
- * order of its album, found by release id (title and artist only when it has no release id); with no album or no
+ * order of its album, found by release id (title and the same artist (sameArtist) only when it has no release id); with no album or no
  * playable song yet, a pending placeholder.
  */
 async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
@@ -389,14 +389,18 @@ async function songsOfGroup(group: SuggestionWithSongs[], liked: boolean) {
         const albums = await prisma.album.findMany({
             where: { AND: [liked ? {} : { location: "DISCOVER" as const }, { OR: matches }] },
             include: {
-                artist: { select: { name: true } },
+                artist: { select: { name: true, mbid: true } },
                 tracks: { where: rule, take: 1, orderBy: { trackNo: "asc" } },
             },
         });
         for (const s of needy) {
             const album = s.rgMbid
                 ? albums.find((a) => a.rgMbid === s.rgMbid)
-                : albums.find((a) => a.title === s.albumTitle && a.artist.name === s.artistName);
+                : albums.find(
+                      (a) =>
+                          a.title === s.albumTitle &&
+                          sameArtist({ artistMbid: a.artist.mbid, artistName: a.artist.name }, { artistMbid: s.artistMbid, artistName: s.artistName }),
+                  );
             if (album && album.tracks.length > 0) standIns.set(s.id, { song: album.tracks[0], coverUrl: album.coverUrl });
         }
     }

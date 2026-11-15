@@ -5,7 +5,7 @@
 
 import { logger } from "../utils/logger";
 import { artistNamed, isMbid, normalizeArtistName } from "./artistIdentity";
-import { sameName } from "./discovery/discoverEvidence";
+import { sameArtist, sameName } from "./discovery/discoverEvidence";
 import { titlesAgree } from "./albumIdentity";
 import { nameWords } from "./nameFold";
 import type { SeedArtist } from "./discovery/discoverySeeding";
@@ -103,14 +103,24 @@ async function failBatchDownloads(batchId: string, error: string) {
     return downloadJobs.fail(waiting, error);
 }
 
+/** The artist a download job is for: its column, else the id its metadata recorded. */
+const jobArtistMbid = (job: { artistMbid: string | null; metadata: unknown }): string | null =>
+    job.artistMbid ?? (job.metadata as { artistMbid?: string | null } | null)?.artistMbid ?? null;
+
 class DiscoverWeeklyService {
-    /** The songs whose files are there and were read, on the DISCOVER album an artist and title name, ignoring case and accents (nameKey). */
-    private async findDiscoverTracksByName(artistName: string, albumTitle: string) {
+    /**
+     * The songs whose files are there and were read, on the DISCOVER album an artist and title name, ignoring case and
+     * accents (nameKey). An artist whose MusicBrainz id differs from `artistMbid` is a namesake (sameArtist).
+     */
+    private async findDiscoverTracksByName(artistName: string, albumTitle: string, artistMbid?: string | null) {
         const albums = await prisma.album.findMany({
             where: { location: "DISCOVER", artist: artistNamed(artistName) },
-            select: { id: true, title: true },
+            select: { id: true, title: true, artist: { select: { mbid: true } } },
         });
-        const albumIds = albums.filter((a) => sameName(a.title, albumTitle)).map((a) => a.id);
+        // artistNamed matched the names, so only the ids are left for sameArtist to tell a namesake by.
+        const albumIds = albums
+            .filter((a) => sameName(a.title, albumTitle) && sameArtist({ artistMbid: a.artist.mbid, artistName }, { artistMbid, artistName }, () => true))
+            .map((a) => a.id);
         if (albumIds.length === 0) return [];
         return prisma.track.findMany({
             where: { AND: [PLAYABLE_DISCOVER_SONG, { albumId: { in: albumIds } }] },
@@ -121,9 +131,10 @@ class DiscoverWeeklyService {
     /**
      * A Discover album's playable songs (only albums filed as Discover: a library album of the same name is the
      * listener's own): by release-group id, then by artist and title ignoring case and accents, then by the artist's
-     * normalised name for Unicode and special characters.
+     * normalised name for Unicode and special characters. A namesake (another real MusicBrainz id than `artistMbid`)
+     * is never the artist (sameArtist).
      */
-    private async discoverAlbumTracks(c: { albumMbid?: string | null; artistName?: string; albumTitle?: string }): Promise<any[]> {
+    private async discoverAlbumTracks(c: { albumMbid?: string | null; artistName?: string; artistMbid?: string | null; albumTitle?: string }): Promise<any[]> {
         if (c.albumMbid) {
             const byId = await prisma.track.findMany({
                 where: { AND: [PLAYABLE_DISCOVER_SONG, { album: { rgMbid: c.albumMbid } }] },
@@ -133,7 +144,7 @@ class DiscoverWeeklyService {
         }
         if (!c.artistName || !c.albumTitle) return [];
 
-        const byName = await this.findDiscoverTracksByName(c.artistName, c.albumTitle);
+        const byName = await this.findDiscoverTracksByName(c.artistName, c.albumTitle, c.artistMbid);
         if (byName.length > 0) return byName;
 
         // On the full normalised name when it has several words: a first word like "the" or "dj" matches too much.
@@ -143,11 +154,18 @@ class DiscoverWeeklyService {
         if (!artistSearchTerm) return [];
         const discoverAlbums = await prisma.album.findMany({
             where: { location: "DISCOVER" },
-            select: { id: true, title: true, artist: { select: { name: true } } },
+            select: { id: true, title: true, artist: { select: { name: true, mbid: true } } },
             orderBy: { title: "asc" },
         });
         const artistAlbumIds = discoverAlbums
-            .filter((a) => nameWords(a.artist.name).includes(artistSearchTerm) && titlesAgree(a.title, c.albumTitle!))
+            .filter(
+                (a) =>
+                    sameArtist(
+                        { artistMbid: a.artist.mbid, artistName: a.artist.name },
+                        { artistMbid: c.artistMbid, artistName: c.artistName },
+                        (albumArtist) => nameWords(albumArtist).includes(artistSearchTerm),
+                    ) && titlesAgree(a.title, c.albumTitle!),
+            )
             .slice(0, 20)
             .map((a) => a.id);
         const album = await prisma.album.findFirst({
@@ -834,6 +852,7 @@ class DiscoverWeeklyService {
                     artistName: metadata?.artistName || "",
                     albumTitle: metadata?.albumTitle || "",
                     albumMbid: metadata?.albumMbid || j.targetMbid || "",
+                    artistMbid: jobArtistMbid(j),
                 };
             })
             .filter((c) => c.artistName && c.albumTitle);
@@ -947,12 +966,15 @@ class DiscoverWeeklyService {
                     let discoveryAlbumId = createdAlbums.get(albumKey);
 
                     if (!discoveryAlbumId) {
-                        // By sameName: Lidarr's names keep accents and typographic marks the scanned names may not.
+                        // By sameArtist and sameName: Lidarr's names keep accents and typographic marks the scanned names may
+                        // not, and a namesake's job (another real MusicBrainz id) is not this artist's.
                         const job = completedJobs.find((j) => {
                             const metadata = j.metadata as any;
                             return (
-                                sameName(metadata?.artistName, track.album.artist.name) &&
-                                sameName(metadata?.albumTitle, track.album.title)
+                                sameArtist(
+                                    { artistMbid: jobArtistMbid(j), artistName: metadata?.artistName },
+                                    { artistMbid: track.album.artist.mbid, artistName: track.album.artist.name },
+                                ) && sameName(metadata?.albumTitle, track.album.title)
                             );
                         });
 
@@ -1202,7 +1224,12 @@ class DiscoverWeeklyService {
                     `     Album "${albumTitle}" by "${artistName}" missing from Discovery - checking library...`
                 );
 
-                const tracks = await this.discoverAlbumTracks({ albumMbid, artistName, albumTitle });
+                const tracks = await this.discoverAlbumTracks({
+                    albumMbid,
+                    artistName,
+                    artistMbid: jobArtistMbid(job),
+                    albumTitle,
+                });
 
                 if (tracks.length === 0) {
                     logger.debug(
@@ -1465,23 +1492,29 @@ class DiscoverWeeklyService {
         return false;
     }
 
-    /** Owned under another id: same artist name once folded, and agreeing titles. */
+    /**
+     * Owned under another id: the same artist (sameArtist: by MusicBrainz id when both have a real one, else by name
+     * once folded) and agreeing titles.
+     */
     private async isAlbumOwnedByName(
         artistName: string,
-        albumTitle: string
+        albumTitle: string,
+        artistMbid?: string | null
     ): Promise<boolean> {
         const wantedArtist = normalizeArtistName(artistName);
         if (!wantedArtist) return false;
-        const sameArtist = (name: string) => normalizeArtistName(name) === wantedArtist;
+        const foldedNames = (owner: string) => normalizeArtistName(owner) === wantedArtist;
+        const ownedBySame = (o: { artistName: string; artistMbid: string | null }) =>
+            sameArtist(o, { artistName, artistMbid }, foldedNames);
 
         const { albums, ownedAlbumArtists, albumTitleByRgMbid } =
             await discoverySeeding.getOwnedAlbumIndex();
 
         const owned =
-            albums.some((a) => sameArtist(a.artistName) && titlesAgree(a.title, albumTitle)) ||
+            albums.some((a) => ownedBySame(a) && titlesAgree(a.title, albumTitle)) ||
             ownedAlbumArtists.some((o) => {
                 const title = albumTitleByRgMbid.get(o.rgMbid);
-                return !!title && sameArtist(o.artistName) && titlesAgree(title, albumTitle);
+                return !!title && ownedBySame(o) && titlesAgree(title, albumTitle);
             });
         if (owned) {
             logger.debug(`     [OWNED-NAME] Found "${albumTitle}" by "${artistName}"`);
@@ -1512,14 +1545,15 @@ class DiscoverWeeklyService {
         albumMbid: string,
         userId: string,
         artistName: string,
-        albumTitle: string
+        albumTitle: string,
+        artistMbid?: string | null
     ): Promise<{ valid: boolean; reason: "owned" | "excluded" | "error" | null }> {
         const ERROR = Symbol("error");
         const [owned, ownedByName, excluded] = await Promise.all([
             discoverySeeding
-                .isAlbumOwned(albumMbid, userId, artistName, albumTitle)
+                .isAlbumOwned(albumMbid, userId, artistName, albumTitle, artistMbid)
                 .catch(() => ERROR),
-            this.isAlbumOwnedByName(artistName, albumTitle).catch(() => ERROR),
+            this.isAlbumOwnedByName(artistName, albumTitle, artistMbid).catch(() => ERROR),
             this.isAlbumExcluded(albumMbid, userId).catch(() => ERROR),
         ]);
 
@@ -1615,7 +1649,8 @@ class DiscoverWeeklyService {
                     mbAlbum.id,
                     userId,
                     artist.name,
-                    album.name
+                    album.name,
+                    artist.mbid
                 );
                 if (!candidate.valid) continue;
 
