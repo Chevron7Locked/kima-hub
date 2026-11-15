@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Turning off two-factor, or making new recovery codes, while the server is too busy now says to try again, and your code is not used up.
+- A request the server cannot read now gets a plain "invalid request" everywhere, without listing which fields were wrong.
 - **A saved queue's position never points past its end**, and a replaced song in a queue moves only to a copy that can play.
 - **A library scan that finds files gone or back, or an enrichment restart, no longer fails when it collides with enrichment work**; it tries once more.
 - **A code used to turn off two-factor sign-in or make new recovery codes is used up only if the change goes through.**
