@@ -188,7 +188,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""
                     )}
-                    isPlayingThisAlbum={currentTrack?.album?.id === album.id}
                 />
             </AlbumHero>
 

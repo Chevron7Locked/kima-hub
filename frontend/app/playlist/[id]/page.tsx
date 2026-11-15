@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { playablePlaylist, playingItemId, playlistTrackToAudio, type PlaylistEntry } from "@/lib/playlist-track";
+import { queueSource, useQueueFrom } from "@/lib/queue-source";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
@@ -390,8 +391,10 @@ export default function PlaylistDetailPage() {
         [playlist?.items, currentQueueKey, currentTrack?.id],
     );
 
-    // A song of this playlist is what the player has loaded, sounding or paused.
-    const isThisPlaylistCurrent = playingItem !== null;
+    // The loaded queue came from this playlist's play button or one of its rows, sounding or paused: not merely a
+    // song of it that was started elsewhere.
+    const source = queueSource.playlist(playlistId);
+    const isThisPlaylistCurrent = useQueueFrom(source);
 
     const totalDuration = useMemo(() => {
         if (!playlist?.items) return 0;
@@ -408,7 +411,7 @@ export default function PlaylistDetailPage() {
         // This playlist pauses or resumes where it is; otherwise the button starts it.
         playRow(isThisPlaylistCurrent, () => {
             const queue = playablePlaylist(playlist.items);
-            if (queue) playTracks(queue.tracks, 0);
+            if (queue) playTracks(queue.tracks, 0, { source });
         });
     };
 
@@ -418,7 +421,7 @@ export default function PlaylistDetailPage() {
         // On the row that is playing the button pauses or resumes it; on another row it starts the queue there.
         playRow(playlist.items[index]?.id === playingItem, () => {
             const queue = playablePlaylist(playlist.items, index);
-            if (queue) playTracks(queue.tracks, queue.start);
+            if (queue) playTracks(queue.tracks, queue.start, { source });
         }, gesture);
     };
 
@@ -670,7 +673,7 @@ export default function PlaylistDetailPage() {
                         }}
                         disabled={isUnavailable}
                         className="w-8 h-8 flex items-center justify-center disabled:cursor-default"
-                        aria-label={isUnavailable ? "Unavailable" : isCurrentlyPlaying && isPlaying ? "Pause" : "Play"}
+                        aria-label={isUnavailable ? "unavailable" : isCurrentlyPlaying && isPlaying ? "pause" : "play"}
                     >
                         <span
                             className={cn(
@@ -943,7 +946,8 @@ export default function PlaylistDetailPage() {
                     {playlist.items?.some((item: PlaylistItem) => !item.unavailable) && (
                         <button
                             onClick={handlePlayPlaylist}
-                            aria-label={isThisPlaylistCurrent && isPlaying ? "Pause" : "Play all"}
+                            // Named by what pressing does: pause what sounds, resume what is paused, else start the playlist.
+                            aria-label={!isThisPlaylistCurrent ? "play all" : isPlaying ? "pause" : "resume"}
                             className="h-12 w-12 rounded-lg bg-brand hover:bg-brand-hover hover:scale-105 flex items-center justify-center transition-all"
                         >
                             {isThisPlaylistCurrent && isPlaying ? (
@@ -958,7 +962,7 @@ export default function PlaylistDetailPage() {
                         <button
                             onClick={() => {
                                 const queue = playablePlaylist(playlist.items);
-                                if (queue) playTracks(shuffleArray(queue.tracks), 0);
+                                if (queue) playTracks(shuffleArray(queue.tracks), 0, { source });
                             }}
                             className="h-8 w-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-[var(--text-muted)] hover:text-white transition-all"
                             title="shuffle play"

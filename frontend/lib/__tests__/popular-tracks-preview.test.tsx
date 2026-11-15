@@ -41,7 +41,7 @@ describe("Popular previews on a touch screen (#228)", () => {
         render("t1", true);
         const row = rows()[0];
         expect(row.querySelector(".animate-pulse")).not.toBeNull();
-        expect(row.querySelector('button[aria-label^="Pause"]')).not.toBeNull();
+        expect(row.querySelector('button[aria-label^="pause"]')).not.toBeNull();
         // The other row is not marked.
         expect(rows()[1].querySelector(".animate-pulse")).toBeNull();
     });
@@ -53,7 +53,7 @@ describe("Popular previews on a touch screen (#228)", () => {
 
     it("swaps the number for a play icon only where the screen can hover", () => {
         render(null, false);
-        const play = rows()[0].querySelector("button[aria-label^='Play']")!;
+        const play = rows()[0].querySelector("button[aria-label^='play']")!;
         const [number, icon] = [play.querySelector("span")!, play.querySelector("svg")!];
         expect(number.className).toContain("can-hover:group-hover:hidden");
         expect(number.className).not.toMatch(/(^|\s)group-hover:hidden/);

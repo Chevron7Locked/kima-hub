@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo, useCallback } from "react";
+import { useState, memo, useCallback, useLayoutEffect, useRef } from "react";
 import { Track } from "../types";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { LibraryListStatus } from "./LibraryGrid";
@@ -28,7 +28,7 @@ interface TrackRowProps {
     index: number;
     isCurrentlyPlaying: boolean;
     isSounding: boolean;
-    onPlayTrack: (gesture?: "press" | "double") => void;
+    onPlayTrack: (track: Track, index: number, gesture?: "press" | "double") => void;
     onAddToQueue: (track: Track) => void;
     onShowAddToPlaylist: (trackId: string) => void;
     onDelete?: (trackId: string, trackTitle: string) => void;
@@ -45,7 +45,7 @@ const TrackRow = memo(
         onShowAddToPlaylist,
         onDelete,
     }: TrackRowProps) {
-        const doubleTapProps = useDoubleTap(() => onPlayTrack("double"));
+        const doubleTapProps = useDoubleTap(() => onPlayTrack(track, index, "double"));
         const displayTrackNumber =
             typeof track.trackNumber === "number"
                 ? track.trackNumber
@@ -75,10 +75,10 @@ const TrackRow = memo(
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            onPlayTrack();
+                            onPlayTrack(track, index);
                         }}
                         className="group/play w-10 h-10 flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                        aria-label={isSounding ? "Pause" : "Play"}
+                        aria-label={isSounding ? "pause" : "play"}
                     >
                         <span
                             className={cn(
@@ -178,7 +178,8 @@ const TrackRow = memo(
             prevProps.track.id === nextProps.track.id &&
             prevProps.isCurrentlyPlaying === nextProps.isCurrentlyPlaying &&
             prevProps.isSounding === nextProps.isSounding &&
-            prevProps.index === nextProps.index
+            prevProps.index === nextProps.index &&
+            prevProps.onPlayTrack === nextProps.onPlayTrack
         );
     },
 );
@@ -193,6 +194,19 @@ export function TracksList({
     const { currentTrack } = useAudioState();
     const currentTrackId = currentTrack?.id;
     const { isPlaying, playRow } = usePlayRow();
+
+    // Rows are memoised, so what a row calls on a press must not be a copy from an older render: that one would play
+    // the list as it was then, not as it is now. This handler never changes and reads the latest list, current song,
+    // play callback and `playRow` from a ref.
+    const latest = useRef({ tracks, currentTrackId, onPlay, playRow });
+    useLayoutEffect(() => {
+        latest.current = { tracks, currentTrackId, onPlay, playRow };
+    }, [tracks, currentTrackId, onPlay, playRow]);
+    // The song that is current pauses or resumes; any other starts the list from it.
+    const handlePlayTrack = useCallback((track: Track, index: number, gesture?: "press" | "double") => {
+        const { tracks: list, currentTrackId: current, onPlay: play, playRow: row } = latest.current;
+        row(current === track.id, () => play(list, index), gesture);
+    }, []);
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
 
@@ -224,8 +238,7 @@ export function TracksList({
                             index={index}
                             isCurrentlyPlaying={isCurrentlyPlaying}
                             isSounding={isCurrentlyPlaying && isPlaying}
-                            // The song that is current pauses or resumes; any other starts the list from it.
-                            onPlayTrack={(gesture) => playRow(isCurrentlyPlaying, () => onPlay(tracks, index), gesture)}
+                            onPlayTrack={handlePlayTrack}
                             onAddToQueue={onAddToQueue}
                             onShowAddToPlaylist={handleShowAddToPlaylist}
                             onDelete={onDelete}

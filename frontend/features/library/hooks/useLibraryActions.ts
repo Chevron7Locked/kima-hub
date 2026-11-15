@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { queueSource } from "@/lib/queue-source";
 import { Track } from "../types";
 
 const formatTrackForAudio = (track: Track) => ({
@@ -77,7 +78,7 @@ export function useLibraryActions() {
                 },
             }));
 
-            playTracks(tracksWithAlbum, 0);
+            playTracks(tracksWithAlbum, 0, { source: queueSource.album(album.id) });
         } catch (error) {
             console.error("Error playing album:", error);
         }

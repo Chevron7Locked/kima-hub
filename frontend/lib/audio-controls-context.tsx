@@ -39,10 +39,16 @@ function operationTrackIds(operation: VibeOperation): string[] {
         : [];
 }
 
+interface PlayTracksOptions {
+    skipOperationCheck?: boolean;
+    /** Which page's play button started this queue (see `queue-source.ts`), so that button can tell it is current. */
+    source?: string;
+}
+
 interface AudioControlsContextType {
     // Track methods
     playTrack: (track: Track) => void;
-    playTracks: (tracks: Track[], startIndex?: number) => void;
+    playTracks: (tracks: Track[], startIndex?: number, options?: PlayTracksOptions) => void;
     /** Plays a station: when its last track starts, fetchBatch is asked for more and the new tracks are appended. */
     playStation: (tracks: Track[], fetchBatch: () => Promise<Track[]>, options?: { serverOrdered?: boolean }) => void;
 
@@ -309,9 +315,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playTracks = useCallback(
-        (songs: Track[], startIndex = 0, { skipOperationCheck = false } = {}) => {
+        (songs: Track[], startIndex = 0, { skipOperationCheck = false, source }: PlayTracksOptions = {}) => {
             if (songs.length === 0) return;
             const tracks = withQueueKeys(songs);
+            state.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey!)) } : null);
             stationRef.current = null;
 
             if (!skipOperationCheck && state.activeOperation.type !== 'idle') {

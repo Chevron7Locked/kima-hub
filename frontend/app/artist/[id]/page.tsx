@@ -11,6 +11,7 @@ import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
+import { queueSource } from "@/lib/queue-source";
 
 import { useArtistData } from "@/features/artist/hooks/useArtistData";
 import { useArtistActions } from "@/features/artist/hooks/useArtistActions";
@@ -86,7 +87,7 @@ export default function ArtistPage() {
                     },
                     artist: albumData.artist,
                 }));
-                playTracks(tracksWithAlbum, 0);
+                playTracks(tracksWithAlbum, 0, { source: queueSource.album(albumData.id) });
             }
         } catch {
             notify.error("Failed to play album");
@@ -113,7 +114,7 @@ export default function ArtistPage() {
         const startIndex = formattedTracks.findIndex(
             (t: { id: string }) => t.id === track.id,
         );
-        playTracks(formattedTracks, Math.max(0, startIndex));
+        playTracks(formattedTracks, Math.max(0, startIndex), { source: queueSource.artist(artist.id) });
     }
 
     function handleDownloadAlbum(album: Album) {
@@ -176,6 +177,7 @@ export default function ArtistPage() {
                 onReload={reloadArtist}
             >
                 <ArtistActionBar
+                    artistId={artist.id}
                     albums={albums}
                     source={source}
                     onPlayAll={() => playAll(artist, albums)}
@@ -184,10 +186,6 @@ export default function ArtistPage() {
                     onStartRadio={handleStartRadio}
                     onDelete={user?.role === "admin" && source === "library" && ownedAlbums.length > 0 ? () => setConfirmingDelete(true) : undefined}
                     isPendingDownload={isPendingByMbid(artist.mbid || "")}
-                    isPlayingThisArtist={
-                        currentTrack?.artist?.id === artist.id ||
-                        currentTrack?.artist?.name === artist.name
-                    }
                 />
             </ArtistHero>
 

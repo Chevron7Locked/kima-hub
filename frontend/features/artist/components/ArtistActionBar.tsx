@@ -2,9 +2,11 @@ import { Download, Radio, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { MediaActionBar, MediaActionButton } from "@/components/ui/MediaActionBar";
 import { usePlayRow } from "@/hooks/usePlayRow";
+import { queueSource, useQueueFrom } from "@/lib/queue-source";
 import type { Album, ArtistSource } from "../types";
 
 interface ArtistActionBarProps {
+    artistId: string;
     albums: Album[];
     source: ArtistSource | null;
     onPlayAll: () => void;
@@ -15,11 +17,10 @@ interface ArtistActionBarProps {
     /** Absent unless the viewer may delete this library artist: no delete button then. */
     onDelete?: () => void;
     isPendingDownload: boolean;
-    /** What the player has loaded is a song of this artist, sounding or paused. */
-    isPlayingThisArtist: boolean;
 }
 
 export function ArtistActionBar({
+    artistId,
     albums,
     source,
     onPlayAll,
@@ -28,9 +29,10 @@ export function ArtistActionBar({
     onStartRadio,
     onDelete,
     isPendingDownload,
-    isPlayingThisArtist,
 }: ArtistActionBarProps) {
     const { isPlaying, playRow } = usePlayRow();
+    // Current only while the loaded queue came from this artist's play button, by id: two artists can share a name.
+    const isPlayingThisArtist = useQueueFrom(queueSource.artist(artistId));
     const availableAlbums = albums.filter(
         (album) => album.availability !== "unavailable"
     );

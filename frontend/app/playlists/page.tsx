@@ -31,6 +31,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { plural } from "@/lib/format";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
+import { queueSource } from "@/lib/queue-source";
 
 type ActionPanel = "create" | "importUrl" | "importFile" | null;
 
@@ -566,7 +567,7 @@ export default function PlaylistsPage() {
         try {
             const playlist = await api.getPlaylist(playlistId);
             const queue = playablePlaylist(playlist?.items ?? []);
-            if (queue) playTracks(queue.tracks, 0);
+            if (queue) playTracks(queue.tracks, 0, { source: queueSource.playlist(playlistId) });
         } catch (error) {
             console.error("Failed to play playlist:", error);
         }

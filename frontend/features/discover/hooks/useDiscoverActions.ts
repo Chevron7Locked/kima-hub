@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { notify } from "@/lib/notify";
 import { api } from "@/lib/api";
+import { queueSource } from "@/lib/queue-source";
 import { DiscoverTrack, DiscoverPlaylist } from "../types";
 
 export function useDiscoverActions(
@@ -91,14 +92,14 @@ export function useDiscoverActions(
     const handlePlayPlaylist = useCallback(() => {
         const formattedTracks = formatPlaylistTracks();
         if (!formattedTracks) return;
-        playTracks(formattedTracks, 0);
+        playTracks(formattedTracks, 0, { source: queueSource.discover });
     }, [formatPlaylistTracks, playTracks]);
 
     const handlePlayTrack = useCallback(
         (index: number) => {
             const formattedTracks = formatPlaylistTracks();
             if (!formattedTracks) return;
-            playTracks(formattedTracks, index);
+            playTracks(formattedTracks, index, { source: queueSource.discover });
         },
         [formatPlaylistTracks, playTracks]
     );

@@ -65,10 +65,6 @@ export default function DiscoverWeeklyPage() {
         }
     };
 
-    const isPlaylistPlaying = playlist?.tracks.some(
-        (t) => t.id === currentTrack?.id
-    );
-
     // The settings element handed to the side panel; the refs keep it stable across renders.
     const discoverSettingsRef = useRef<React.ReactNode>(null);
     const settingsOwnerRef = useRef(settingsOwner);
@@ -182,7 +178,6 @@ export default function DiscoverWeeklyPage() {
 
                 <DiscoverActionBar
                     playlist={playlist}
-                    isPlaylistPlaying={isPlaylistPlaying || false}
                     onPlayAll={handlePlayPlaylist}
                     isGenerating={isGenerating}
                     onCancelGeneration={handleCancelGeneration}

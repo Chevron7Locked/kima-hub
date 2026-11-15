@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo } from "react";
+import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { Play, Pause, Volume2, ListPlus, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { Track, Album, AlbumSource } from "../types";
@@ -130,7 +130,7 @@ const TrackRow = memo(
                             handleRowClick();
                         }}
                         className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/5 transition-colors"
-                        aria-label={isSounding ? "Pause" : "Play"}
+                        aria-label={isSounding ? "pause" : "play"}
                     >
                         <span
                             className={cn(
@@ -256,7 +256,8 @@ const TrackRow = memo(
             prevProps.isSounding === nextProps.isSounding &&
             prevProps.isPreviewPlaying === nextProps.isPreviewPlaying &&
             prevProps.index === nextProps.index &&
-            prevProps.isOwned === nextProps.isOwned
+            prevProps.isOwned === nextProps.isOwned &&
+            prevProps.onPlayTrack === nextProps.onPlayTrack
         );
     }
 );
@@ -281,6 +282,18 @@ export const TrackList = memo(function TrackList({
     );
     const shouldGroupByDisc = discNumbers.length > 1;
     const { isPlaying: audioPlaying, playRow } = usePlayRow();
+
+    // Rows are memoised, so what a row calls on a press must not be a copy from an older render. This one handler
+    // never changes and reads the list's latest play callback, current song and `playRow` from a ref.
+    const latest = useRef({ currentTrackId, onPlayTrack, playRow });
+    useLayoutEffect(() => {
+        latest.current = { currentTrackId, onPlayTrack, playRow };
+    }, [currentTrackId, onPlayTrack, playRow]);
+    // The song that is current pauses or resumes; any other starts the album from it.
+    const handlePlayTrack = useCallback((t: Track, i: number, gesture?: "press" | "double") => {
+        const { currentTrackId: current, onPlayTrack: play, playRow: row } = latest.current;
+        row(current === t.id, () => play(t, i), gesture);
+    }, []);
 
     return (
         <section>
@@ -317,8 +330,7 @@ export const TrackList = memo(function TrackList({
                                 isSounding={isPlaying && audioPlaying}
                                 isPreviewPlaying={isPreviewPlaying}
                                 colors={colors}
-                                // The song that is current pauses or resumes; any other starts the album from it.
-                                onPlayTrack={(t, i, gesture) => playRow(isPlaying, () => onPlayTrack(t, i), gesture)}
+                                onPlayTrack={handlePlayTrack}
                                 onAddToQueue={onAddToQueue}
                                 onAddToPlaylist={onAddToPlaylist}
                                 onPreview={onPreview}

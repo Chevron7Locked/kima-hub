@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { shuffleArray } from "@/lib/shuffle";
+import { queueSource } from "@/lib/queue-source";
 import { notify } from "@/lib/notify";
 import { isMbid } from "@/lib/mbid";
 import { Album, Track } from "../types";
@@ -37,12 +38,14 @@ export function useAlbumActions() {
 
     const playAlbum = (album: Album | null, startIndex: number = 0) => {
         if (!requireAlbum(album) || !album.tracks) return;
-        playTracks(album.tracks.map((t) => toQueueTrack(t, album)), startIndex);
+        playTracks(album.tracks.map((t) => toQueueTrack(t, album)), startIndex, { source: queueSource.album(album.id) });
     };
 
     const shufflePlay = (album: Album | null) => {
         if (!requireAlbum(album) || !album.tracks) return;
-        playTracks(shuffleArray(album.tracks.map((t) => toQueueTrack(t, album))), 0);
+        playTracks(shuffleArray(album.tracks.map((t) => toQueueTrack(t, album))), 0, {
+            source: queueSource.album(album.id),
+        });
     };
 
     const playTrack = (track: Track, album: Album | null) => {

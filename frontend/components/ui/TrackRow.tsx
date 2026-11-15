@@ -74,7 +74,7 @@ export function TrackRow({
                         onPlay();
                     }}
                     className="group/play min-h-[44px] min-w-[44px] flex items-center justify-center"
-                    aria-label={showsPause ? `Pause ${title}` : `Play ${title}`}
+                    aria-label={showsPause ? `pause ${title}` : `play ${title}`}
                 >
                     <span
                         className={cn(

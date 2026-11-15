@@ -1,8 +1,9 @@
 /**
  * The big play button on an album, an artist, a mix and a Discover playlist. When what is playing belongs to the thing
  * on the page it pauses what sounds and resumes what is paused, from the same point; otherwise it starts it. The
- * action bars and pages are the real components with the audio providers stood in for, so a press shows whether the
- * start callback (a restart) or `pause`/`resume` ran.
+ * loaded queue's source says which: a paused song of this album that was started from somewhere else (a playlist,
+ * say) does not make the album current. The action bars and pages are the real components with the audio providers
+ * stood in for, so a press shows whether the start callback (a restart) or `pause`/`resume` ran.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React, { act } from "react";
@@ -11,12 +12,14 @@ import { mountHost } from "./helpers/dom";
 const audio = {
     isPlaying: false,
     currentTrack: null as { id: string } | null,
+    /** Where the loaded queue came from, as the audio state reports it. */
+    queueSource: null as string | null,
     pause: vi.fn(),
     resumeWithGesture: vi.fn(async () => undefined),
     playTracks: vi.fn(),
 };
 
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ currentTrack: audio.currentTrack }) }));
+vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ currentTrack: audio.currentTrack, currentQueueSource: audio.queueSource }) }));
 vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: audio.isPlaying }) }));
 vi.mock("@/lib/audio-controls-context", () => ({
     useAudioControls: () => ({
@@ -68,6 +71,7 @@ const dom = mountHost();
 beforeEach(() => {
     audio.isPlaying = false;
     audio.currentTrack = null;
+    audio.queueSource = null;
     audio.pause.mockClear();
     audio.resumeWithGesture.mockClear();
     audio.playTracks.mockClear();
@@ -77,15 +81,13 @@ beforeEach(() => {
 const disc = () => dom.host.querySelector<HTMLButtonElement>("button")!;
 const press = () => act(async () => disc().click());
 
-/**
- * What the disc does in each state. `mount(current)` renders the thing with `current` saying whether what is
- * playing belongs to it; the mix page works that out itself from the current song (a or b is the mix's).
- */
-function behaves(mount: (current: boolean) => void, started: () => number) {
+/** What the disc does in each state. `mount()` renders the thing; `source` is the queue source that means "this one". */
+function behaves(source: string, mount: () => void, started: () => number) {
     it("pauses what sounds when it is the one on the page, and does not start it again", async () => {
         audio.currentTrack = { id: "a" };
         audio.isPlaying = true;
-        mount(true);
+        audio.queueSource = source;
+        mount();
         expect(disc().getAttribute("aria-label")).toMatch(/pause/i);
 
         await press();
@@ -97,7 +99,8 @@ function behaves(mount: (current: boolean) => void, started: () => number) {
     it("resumes what is paused when it is the one on the page, and does not start it again", async () => {
         audio.currentTrack = { id: "a" };
         audio.isPlaying = false;
-        mount(true);
+        audio.queueSource = source;
+        mount();
         expect(disc().getAttribute("aria-label")).toMatch(/play/i);
 
         await press();
@@ -110,7 +113,33 @@ function behaves(mount: (current: boolean) => void, started: () => number) {
     it("starts it when something else is playing", async () => {
         audio.currentTrack = { id: "z" };
         audio.isPlaying = true;
-        mount(false);
+        audio.queueSource = "playlist:other";
+        mount();
+
+        await press();
+
+        expect(audio.pause).not.toHaveBeenCalled();
+        expect(started()).toBe(1);
+    });
+
+    it("starts it, and does not resume, when its own song is paused but the queue came from somewhere else", async () => {
+        audio.currentTrack = { id: "a" };
+        audio.isPlaying = false;
+        audio.queueSource = "playlist:other";
+        mount();
+
+        await press();
+
+        expect(audio.resumeWithGesture).not.toHaveBeenCalled();
+        expect(started()).toBe(1);
+    });
+
+    it("starts it, and does not pause, when its own song sounds but the queue came from somewhere else", async () => {
+        audio.currentTrack = { id: "a" };
+        audio.isPlaying = true;
+        audio.queueSource = "playlist:other";
+        mount();
+        expect(disc().getAttribute("aria-label")).toMatch(/play/i);
 
         await press();
 
@@ -119,7 +148,7 @@ function behaves(mount: (current: boolean) => void, started: () => number) {
     });
 
     it("starts it when nothing is playing", async () => {
-        mount(false);
+        mount();
 
         await press();
 
@@ -132,7 +161,8 @@ describe("an album's big play button", () => {
     const onPlayAll = vi.fn();
     beforeEach(() => onPlayAll.mockClear());
     behaves(
-        (current) =>
+        "album:al",
+        () =>
             act(() =>
                 dom.root.render(
                     <AlbumActionBar
@@ -142,7 +172,6 @@ describe("an album's big play button", () => {
                         onShuffle={() => {}}
                         onAddToPlaylist={() => {}}
                         isPendingDownload={false}
-                        isPlayingThisAlbum={current}
                     />,
                 ),
             ),
@@ -154,17 +183,18 @@ describe("an artist's big play button", () => {
     const onPlayAll = vi.fn();
     beforeEach(() => onPlayAll.mockClear());
     behaves(
-        (current) =>
+        "artist:ar",
+        () =>
             act(() =>
                 dom.root.render(
                     <ArtistActionBar
+                        artistId="ar"
                         albums={[]}
                         source="library"
                         onPlayAll={onPlayAll}
                         onShuffle={() => {}}
                         onStartRadio={() => {}}
                         isPendingDownload={false}
-                        isPlayingThisArtist={current}
                     />,
                 ),
             ),
@@ -174,6 +204,7 @@ describe("an artist's big play button", () => {
 
 describe("a mix's big play button", () => {
     behaves(
+        "mix:mix-1",
         () => act(() => dom.root.render(<MixPage />)),
         () => audio.playTracks.mock.calls.length,
     );
@@ -183,12 +214,12 @@ describe("the Discover playlist's big play button", () => {
     const onPlayAll = vi.fn();
     beforeEach(() => onPlayAll.mockClear());
     behaves(
-        (current) =>
+        "discover",
+        () =>
             act(() =>
                 dom.root.render(
                     <DiscoverActionBar
                         playlist={{ tracks: [{ id: "a" }] } as never}
-                        isPlaylistPlaying={current}
                         onPlayAll={onPlayAll}
                         isGenerating={false}
                     />,

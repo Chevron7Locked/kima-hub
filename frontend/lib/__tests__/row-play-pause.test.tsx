@@ -86,7 +86,7 @@ function behaves(mount: () => void, started: () => number) {
         audio.currentTrack = { id: "b" };
         audio.isPlaying = true;
         mount();
-        expect(button(1).getAttribute("aria-label")).toMatch(/^Pause/);
+        expect(button(1).getAttribute("aria-label")).toMatch(/^pause/);
 
         await press(1);
 
@@ -98,7 +98,7 @@ function behaves(mount: () => void, started: () => number) {
         audio.currentTrack = { id: "b" };
         audio.isPlaying = false;
         mount();
-        expect(button(1).getAttribute("aria-label")).toMatch(/^Play/);
+        expect(button(1).getAttribute("aria-label")).toMatch(/^play/);
 
         await press(1);
 

@@ -2,6 +2,7 @@ import { Download, ListPlus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { MediaActionBar, MediaActionButton } from "@/components/ui/MediaActionBar";
 import { usePlayRow } from "@/hooks/usePlayRow";
+import { queueSource, useQueueFrom } from "@/lib/queue-source";
 import type { Album, AlbumSource } from "../types";
 
 interface AlbumActionBarProps {
@@ -15,8 +16,6 @@ interface AlbumActionBarProps {
     /** Absent unless the viewer may delete this library album: no delete button then. */
     onDelete?: () => void;
     isPendingDownload: boolean;
-    /** What the player has loaded is a song of this album, sounding or paused. */
-    isPlayingThisAlbum: boolean;
 }
 
 export function AlbumActionBar({
@@ -28,9 +27,10 @@ export function AlbumActionBar({
     onAddToPlaylist,
     onDelete,
     isPendingDownload,
-    isPlayingThisAlbum,
 }: AlbumActionBarProps) {
     const { isPlaying, playRow } = usePlayRow();
+    // Current only while the loaded queue came from this album's play button, not whenever one of its songs is loaded.
+    const isPlayingThisAlbum = useQueueFrom(queueSource.album(album.id));
     const isOwned = album.owned !== undefined ? album.owned : source === "library";
     const showDownload = !isOwned && (album.mbid || album.rgMbid) && onDownloadAlbum;
     const showPause = isPlaying && isPlayingThisAlbum;

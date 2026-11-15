@@ -36,6 +36,12 @@ export interface Track {
     queueKey?: string;
 }
 
+/** A queue started from a page: its source, and the keys of the entries that start put in the queue. */
+export interface QueueOrigin {
+    source: string;
+    keys: ReadonlySet<string>;
+}
+
 export interface AudiobookTrack {
     index: number;
     startOffset: number;
@@ -97,6 +103,11 @@ interface AudioStateContextType {
     shuffleIndices: number[];
     /** The key of the queue entry that is playing, or null when no queue entry is. */
     currentQueueKey: string | null;
+    /**
+     * Where the queue that is playing came from (see `queue-source.ts`), or null when the entry that is playing was not
+     * started from a page's play button, or was added to the queue since.
+     */
+    currentQueueSource: string | null;
 
     // UI state
     /** Whether the full-screen player is open over the page. */
@@ -118,6 +129,8 @@ interface AudioStateContextType {
         type: SetStateAction<"track" | "audiobook" | "podcast" | null>
     ) => void;
     setQueue: (queue: SetStateAction<Track[]>) => void;
+    /** Records which entries a page's play button put in the queue. Entries added later are not among them. */
+    setQueueOrigin: (origin: QueueOrigin | null) => void;
     setCurrentIndex: (index: SetStateAction<number>) => void;
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
     setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
@@ -208,6 +221,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         return stored === "track" ? null : stored;
     });
     const [queue, setQueueRaw] = useState<Track[]>([]);
+    const [queueOrigin, setQueueOrigin] = useState<QueueOrigin | null>(null);
     // Every queue that is set has every entry keyed, whichever way it arrives (a play, an edit, a restore).
     const setQueue = useCallback(
         (action: SetStateAction<Track[]>) =>
@@ -732,6 +746,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         return playbackType === "track" && entry && entry.id === currentTrack?.id ? (entry.queueKey ?? null) : null;
     }, [queue, currentIndex, currentTrack?.id, playbackType]);
 
+    // The playing entry came from the source only if that start put it in the queue: an entry queued later, or a queue
+    // restored from the server, was not.
+    const currentQueueSource = useMemo(
+        () => (queueOrigin && currentQueueKey && queueOrigin.keys.has(currentQueueKey) ? queueOrigin.source : null),
+        [queueOrigin, currentQueueKey],
+    );
+
     const value = useMemo(
         () => ({
             currentTrack,
@@ -744,6 +765,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             repeatMode,
             shuffleIndices,
             currentQueueKey,
+            currentQueueSource,
             overlayOpen,
             volume,
             isMuted,
@@ -754,6 +776,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setCurrentPodcast,
             setPlaybackType,
             setQueue,
+            setQueueOrigin,
             setCurrentIndex,
             setIsShuffle,
             setRepeatMode,
@@ -775,12 +798,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             repeatMode,
             shuffleIndices,
             currentQueueKey,
+            currentQueueSource,
             overlayOpen,
             volume,
             isMuted,
             activeOperation,
             repeatOneCount,
             setQueue,
+            setQueueOrigin,
         ]
     );
 

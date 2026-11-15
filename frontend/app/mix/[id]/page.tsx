@@ -18,6 +18,7 @@ import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { shownTitle } from "@/lib/track-title";
+import { queueSource, useQueueFrom } from "@/lib/queue-source";
 
 interface MixTrack {
     id: string;
@@ -62,15 +63,9 @@ export default function MixPage() {
         return mins === 0 ? `${hours} hr` : `${hours} hr ${mins} min`;
     };
 
-    const mixTrackIds = useMemo(() => {
-        return new Set(mix?.tracks?.map((track: MixTrack) => track.id) || []);
-    }, [mix?.tracks]);
-
-    // What the player has loaded is a song of this mix, sounding or paused.
-    const isThisMixCurrent = useMemo(() => {
-        if (!currentTrack || !mix?.tracks?.length) return false;
-        return mixTrackIds.has(currentTrack.id);
-    }, [currentTrack, mixTrackIds, mix?.tracks?.length]);
+    // The loaded queue came from this mix's play button, sounding or paused, not merely a song of the mix.
+    const source = queueSource.mix(mixId);
+    const isThisMixCurrent = useQueueFrom(source);
 
     const formatTracksForPlayback = (tracks: MixTrack[]) => {
         return tracks.map((track) => ({
@@ -94,14 +89,14 @@ export default function MixPage() {
         if (!mix?.tracks || mix.tracks.length === 0) return;
 
         // This mix pauses or resumes where it is; otherwise the button starts it.
-        playRow(isThisMixCurrent, () => playTracks(formatTracksForPlayback(mix.tracks), 0));
+        playRow(isThisMixCurrent, () => playTracks(formatTracksForPlayback(mix.tracks), 0, { source }));
     };
 
     const handlePlayTrack = (index: number, gesture: "press" | "double" = "press") => {
         if (!mix?.tracks || mix.tracks.length === 0) return;
         // The song that is current pauses or resumes; any other starts the mix from it.
         playRow(currentTrack?.id === mix.tracks[index]?.id, () =>
-            playTracks(formatTracksForPlayback(mix.tracks), index), gesture
+            playTracks(formatTracksForPlayback(mix.tracks), index, { source }), gesture
         );
     };
 
@@ -111,7 +106,7 @@ export default function MixPage() {
         if (!mix?.tracks) return;
         const tracks = formatTracksForPlayback(mix.tracks);
         const shuffled = shuffleArray(tracks);
-        playTracks(shuffled, 0);
+        playTracks(shuffled, 0, { source });
     };
 
     const handleAddToQueue = (track: MixTrack) => addToQueue(formatTracksForPlayback([track])[0]);
@@ -219,14 +214,14 @@ export default function MixPage() {
                             showPause={isThisMixCurrent && isPlaying}
                             onClick={handlePlayMix}
                             shape="circle"
-                            label={isThisMixCurrent && isPlaying ? `Pause ${mix.name}` : `Play ${mix.name}`}
+                            label={isThisMixCurrent && isPlaying ? `pause ${mix.name}` : `play ${mix.name}`}
                         />
                     )}
 
                     {mix.tracks && mix.tracks.length > 1 && (
                         <MediaActionButton
                             icon={<Shuffle className="w-5 h-5" />}
-                            label={`Shuffle play ${mix.name}`}
+                            label={`shuffle play ${mix.name}`}
                             onClick={handleShuffle}
                             shape="circle"
                         />

@@ -137,7 +137,7 @@ const rows = () => [...container.querySelectorAll<HTMLElement>("[data-track-inde
 /** The places (0-based) of the playlist rows shown as playing. */
 const playingRows = () => rows().filter((r) => r.getAttribute("aria-current") === "true").map((r) => Number(r.dataset.trackIndex));
 const startRow = (place: number) =>
-    act(async () => rows()[place].querySelector<HTMLButtonElement>('button[aria-label="Play"]')!.click());
+    act(async () => rows()[place].querySelector<HTMLButtonElement>('button[aria-label="play"]')!.click());
 
 async function mountPage(list = A_B_A) {
     listed = list;
@@ -242,7 +242,7 @@ describe("the button on a playlist row", () => {
         await mountPage();
         await startRow(1);
         await status("playing");
-        expect(rowButton(1).getAttribute("aria-label")).toBe("Pause");
+        expect(rowButton(1).getAttribute("aria-label")).toBe("pause");
         engine.load.mockClear();
 
         await press(1);
@@ -258,7 +258,7 @@ describe("the button on a playlist row", () => {
         await status("playing");
         await press(1);
         await status("paused");
-        expect(rowButton(1).getAttribute("aria-label")).toBe("Play");
+        expect(rowButton(1).getAttribute("aria-label")).toBe("play");
         engine.load.mockClear();
 
         await press(1);
@@ -314,7 +314,7 @@ describe("the big play button on a playlist", () => {
     const status = (value: string) => act(async () => engine.setStatus(value));
     /** The disc over the list: the only Pause or Play all button outside a row. */
     const disc = () =>
-        [...container.querySelectorAll<HTMLButtonElement>('button[aria-label="Pause"], button[aria-label="Play all"]')].find(
+        [...container.querySelectorAll<HTMLButtonElement>('button[aria-label="pause"], button[aria-label="resume"], button[aria-label="play all"]')].find(
             (b) => !b.closest("[data-track-index]"),
         )!;
 
@@ -335,7 +335,7 @@ describe("the big play button on a playlist", () => {
         await startRow(1);
         await status("playing");
         await status("paused");
-        expect(disc().getAttribute("aria-label")).toBe("Play all");
+        expect(disc().getAttribute("aria-label")).toBe("resume");
         engine.load.mockClear();
 
         await act(async () => disc().click());
@@ -343,6 +343,49 @@ describe("the big play button on a playlist", () => {
         expect(engine.play).toHaveBeenCalledTimes(1);
         expect(engine.load).not.toHaveBeenCalled();
         expect(probe.state.currentIndex).toBe(1);
+    });
+
+    it("is labelled by what pressing does: play all, then pause while it sounds, then resume once paused", async () => {
+        await mountPage();
+        expect(disc().getAttribute("aria-label")).toBe("play all");
+
+        await startRow(1);
+        await status("playing");
+        expect(disc().getAttribute("aria-label")).toBe("pause");
+
+        await status("paused");
+        expect(disc().getAttribute("aria-label")).toBe("resume");
+    });
+
+    it("starts the playlist, and does not resume, when its song is paused but the queue came from somewhere else", async () => {
+        await mountPage();
+        // Song B of this playlist, started on its own (from the library, say), then paused.
+        await act(async () => probe.controls.playTracks([song("B") as unknown as Track], 0));
+        await status("playing");
+        await status("paused");
+        expect(disc().getAttribute("aria-label")).toBe("play all");
+        engine.play.mockClear();
+        engine.load.mockClear();
+
+        await act(async () => disc().click());
+
+        expect(engine.play).not.toHaveBeenCalled();
+        expect(engine.load).toHaveBeenCalledTimes(1);
+        expect(probe.state.currentIndex).toBe(0);
+        expect(probe.state.queue.map((t) => t.id)).toEqual(["A", "B", "A"]);
+    });
+
+    it("starts the playlist, and does not pause, when its song sounds from a queue that came from somewhere else", async () => {
+        await mountPage();
+        await act(async () => probe.controls.playTracks([song("B") as unknown as Track], 0));
+        await status("playing");
+        engine.load.mockClear();
+
+        await act(async () => disc().click());
+
+        expect(engine.pause).not.toHaveBeenCalled();
+        expect(engine.load).toHaveBeenCalledTimes(1);
+        expect(probe.state.queue).toHaveLength(3);
     });
 
     it("starts the playlist from its first song when nothing from it is current", async () => {

@@ -4,12 +4,11 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PlayDisc } from "@/components/ui/MediaActionBar";
 import { usePlayRow } from "@/hooks/usePlayRow";
+import { queueSource, useQueueFrom } from "@/lib/queue-source";
 import type { DiscoverPlaylist } from "../types";
 
 interface DiscoverActionBarProps {
     playlist: DiscoverPlaylist | null;
-    /** What the player has loaded is a song of this playlist, sounding or paused. */
-    isPlaylistPlaying: boolean;
     onPlayAll: () => void;
     isGenerating: boolean;
     onCancelGeneration?: () => void;
@@ -17,12 +16,13 @@ interface DiscoverActionBarProps {
 
 export function DiscoverActionBar({
     playlist,
-    isPlaylistPlaying,
     onPlayAll,
     isGenerating,
     onCancelGeneration,
 }: DiscoverActionBarProps) {
     const { isPlaying, playRow } = usePlayRow();
+    // Current only while the loaded queue came from this playlist's play button.
+    const isPlaylistPlaying = useQueueFrom(queueSource.discover);
     const canPlay = !!playlist && playlist.tracks.length > 0;
     const canCancel = isGenerating && !!onCancelGeneration;
     if (!canPlay && !canCancel) return null;

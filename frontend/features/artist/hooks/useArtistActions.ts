@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { useAudioControls } from '@/lib/audio-context';
 import { Artist, Album } from '../types';
 import { shuffleArray } from '@/lib/shuffle';
+import { queueSource } from '@/lib/queue-source';
 
 interface FormattedTrack {
   id: string;
@@ -80,7 +81,7 @@ export function useArtistActions() {
         }
 
         // Unshuffled order is newest album first, track 1 to end, then the next album
-        playTracks(shuffle ? shuffleArray(allTracks) : allTracks);
+        playTracks(shuffle ? shuffleArray(allTracks) : allTracks, 0, { source: queueSource.artist(artist.id) });
       } catch (error) {
         console.error('Failed to play artist:', error);
       }
