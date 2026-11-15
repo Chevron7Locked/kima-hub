@@ -4,7 +4,6 @@ import { z } from "zod";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { safeError } from "../utils/errors";
-import { toAudioFeaturesDTO } from "../utils/audioFeatures";
 import {
     requirePlaylistOwner,
     requirePlaylistReader,
@@ -12,7 +11,7 @@ import {
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
 import { createPlaylist, MAX_KEY_LENGTH } from "../services/playlistCreate";
-import { namedFields, playlistFields } from "../services/playlistFields";
+import { namedFields, playlistFields, playlistItemFields } from "../services/playlistFields";
 import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
@@ -202,23 +201,7 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
                     select: { id: true },
                 },
                 items: {
-                    include: {
-                        track: {
-                            include: {
-                                album: {
-                                    include: {
-                                        artist: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                                mbid: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
+                    select: playlistItemFields,
                     orderBy: { rank: "asc" },
                 },
                 pendingTracks: {
@@ -243,36 +226,52 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             (order.data === undefined && playlist.reverseOrder);
 
         const markedItems = await playlistService.markUnavailable(playlist.items);
-        const formattedItems = markedItems.map((item) => ({
-            ...item,
-            type: "track" as const,
-            track: {
-                ...item.track,
-                album: {
-                    ...item.track.album,
-                    coverArt: item.track.album.coverUrl,
+        // Items and pending tracks share one rank space, so a string compare orders them; the rank itself is not sent.
+        const songs = markedItems.map((item) => ({
+            rank: item.rank,
+            entry: {
+                id: item.id,
+                type: "track" as const,
+                sort: item.sort,
+                trackId: item.trackId,
+                unavailable: item.unavailable,
+                track: {
+                    id: item.track.id,
+                    title: item.track.title,
+                    displayTitle: item.track.displayTitle,
+                    duration: item.track.duration,
+                    album: {
+                        id: item.track.album.id,
+                        title: item.track.album.title,
+                        coverArt: item.track.album.coverUrl,
+                        artist: { id: item.track.album.artist.id, name: item.track.album.artist.name },
+                    },
                 },
-                audioFeatures: toAudioFeaturesDTO(item.track),
             },
         }));
 
-        const formattedPending = playlist.pendingTracks.map((pending) => ({
-            id: pending.id,
-            type: "pending" as const,
-            sort: pending.sort,
-            rank: pending.rank,
-            pending: {
-                id: pending.id,
-                artist: pending.spotifyArtist,
-                title: pending.spotifyTitle,
-                album: pending.spotifyAlbum,
-                previewUrl: pending.deezerPreviewUrl,
-                missingFromDisk: pending.missingFromDisk,
+        const pending = playlist.pendingTracks.map((row) => ({
+            rank: row.rank,
+            entry: {
+                id: row.id,
+                type: "pending" as const,
+                sort: row.sort,
+                pending: {
+                    id: row.id,
+                    artist: row.spotifyArtist,
+                    title: row.spotifyTitle,
+                    album: row.spotifyAlbum,
+                    previewUrl: row.deezerPreviewUrl,
+                    missingFromDisk: row.missingFromDisk,
+                },
             },
         }));
 
-        // Items and pending tracks share one rank space, so a string compare orders them.
-        const mergedItems = [...formattedItems, ...formattedPending].sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
+        const formattedItems = songs.map((song) => song.entry);
+        const formattedPending = pending.map((row) => row.entry);
+        const mergedItems = [...songs, ...pending]
+            .sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0))
+            .map((row) => row.entry);
 
         const displayItems = reversed ? [...formattedItems].reverse() : formattedItems;
         const displayMerged = reversed ? [...mergedItems].reverse() : mergedItems;

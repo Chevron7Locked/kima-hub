@@ -31,10 +31,16 @@ const DETAIL_KEYS = [
     "isHidden",
 ].sort();
 const EDIT_KEYS = [...PLAYLIST_FIELDS].sort();
+// What the web (PlaylistEntry in lib/playlist-track.ts, the playlist page) and the iOS app (PlaylistModels.swift) read.
+const ITEM_KEYS = ["id", "sort", "trackId", "type", "unavailable", "track"].sort();
+const TRACK_KEYS = ["id", "title", "displayTitle", "duration", "album"].sort();
+const ALBUM_KEYS = ["id", "title", "coverArt", "artist"].sort();
+const ARTIST_KEYS = ["id", "name"].sort();
 
 let owner: string;
 let other: string;
 let playlistId: string;
+let itemId: string;
 
 const keys = (body: object) => Object.keys(body).sort();
 
@@ -59,10 +65,41 @@ beforeAll(async () => {
         })
     ).id;
     await prisma.hiddenPlaylist.create({ data: { userId: other, playlistId } });
+
+    const artist = await prisma.artist.create({ data: { name: `${MARK} artist`, identityKey: `${MARK}-artist`, mbid: `${MARK}-mbid` } });
+    const album = await prisma.album.create({
+        data: {
+            rgMbid: `${MARK}-rg`,
+            identityKey: `${MARK}-album`,
+            primaryType: "Album",
+            title: `${MARK} album`,
+            artistId: artist.id,
+            coverUrl: "https://example.test/cover.jpg",
+        },
+    });
+    const track = await prisma.track.create({
+        data: {
+            title: `${MARK} song`,
+            displayTitle: `${MARK} shown`,
+            albumId: album.id,
+            trackNo: 1,
+            duration: 200,
+            filePath: `/${MARK}/song.flac`,
+            fileModified: new Date(),
+            fileSize: 1000,
+            bpm: 120,
+        },
+    });
+    itemId = (await prisma.playlistItem.create({ data: { playlistId, trackId: track.id, sort: 0, rank: "a0" } })).id;
+    await prisma.playlistPendingTrack.create({
+        data: { playlistId, spotifyArtist: "a", spotifyTitle: "t", spotifyAlbum: "b", sort: 1, rank: "a1" },
+    });
 });
 
 afterAll(async () => {
     await cleanup();
+    await prisma.album.deleteMany({ where: { identityKey: { startsWith: MARK } } });
+    await prisma.artist.deleteMany({ where: { identityKey: { startsWith: MARK } } });
     await closeEngineConnections();
 });
 
@@ -85,6 +122,20 @@ describe.each([
         expect(res.status).toBe(200);
         expect(keys(res.body)).toEqual(DETAIL_KEYS);
         expect(res.body.user).toEqual({ username: `${MARK}-owner` });
+    });
+
+    it("carries each song as the named fields the clients read, no file path or analysis", async () => {
+        const res = await request(app).get(`/playlists/${playlistId}`).set("Authorization", as(viewer()));
+
+        for (const item of [res.body.items[0], res.body.mergedItems.find((i: { type: string }) => i.type === "track")]) {
+            expect(item.id).toBe(itemId);
+            expect(keys(item)).toEqual(ITEM_KEYS);
+            expect(keys(item.track)).toEqual(TRACK_KEYS);
+            expect(keys(item.track.album)).toEqual(ALBUM_KEYS);
+            expect(keys(item.track.album.artist)).toEqual(ARTIST_KEYS);
+            expect(item.track.album.coverArt).toBe("https://example.test/cover.jpg");
+            expect(item.track.displayTitle).toBe(`${MARK} shown`);
+        }
     });
 });
 
