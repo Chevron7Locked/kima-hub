@@ -3,8 +3,10 @@
  * scan still cannot find. Every retirement is snapshotted to RemovalLog (with its cache
  * artifacts) before the delete, and a mass disappearance stands the sweep down. A song whose plays would move while a
  * listener's play history is being repaired is left for the next sweep, never waited for; so is a song whose stage
- * records or row another job holds at that moment. A retired song leaves every saved queue, or, when another copy of
- * the song takes over its history, is replaced there by that copy.
+ * records or row another job holds at that moment. A retired song hands its history (plays, likes, playlist places,
+ * bookmarks) to the best copy of the same song on a library album, a corrupt one included and a Discover one never; it
+ * leaves every saved queue, or is replaced there by the best copy a person can play (a queue is never pointed at a file
+ * that cannot play).
  *
  * Every list of ids goes to the database as one array parameter (`= ANY(${ids}::text[])`): a statement takes at most
  * 32767 bind parameters, and a library that lost a drive can retire more songs than that in one sweep.
@@ -19,10 +21,10 @@ import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { retryOnConflict } from "../utils/dbConflict";
+import { retryOnDeadlock } from "../utils/dbConflict";
+import { nodeClock } from "../utils/nodeClock";
 import { announcePlaylistsChanged, playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { songsWithBusyPlayHistory } from "./playRecording";
-import { playableSongSql } from "../utils/playableSong";
 import { entriesOf, hydrateQueue, type QueueEntry } from "./savedQueue";
 
 interface ReconcileResult {
@@ -49,10 +51,15 @@ export function transcodeArtifactPath(cachePath: string): string {
 const MASS_MISSING_ABORT = 0.10;
 const MASS_MISSING_FLOOR = 10;
 
-/** A missing song and the other copy of the same song that takes over its history. */
+/**
+ * A missing song and the copies of the same song that take over from it: `history` is the best copy on a library album
+ * (a corrupt one counts: its history waits there for a fixed file), `queue` the best of those a person can play, or
+ * null when none can be played. They are the same copy whenever a playable one exists.
+ */
 interface Replacement {
     gone: string;
-    kept: string;
+    history: string;
+    queue: string | null;
 }
 
 export async function reconcileDeletedTracks(
@@ -99,7 +106,9 @@ export async function reconcileDeletedTracks(
     const busy = await songsWithBusyPlayHistory(tx, replacements.filter((p) => heldIds.has(p.gone)).map((p) => p.gone));
     const retiring = missing.filter((t) => !busy.has(t.id));
     const retiringIds = new Set(retiring.map((t) => t.id));
-    const pairs = replacements.filter((p) => retiringIds.has(p.gone));
+    // The copies that take over are held from here until the commit: a copy deleted between choosing and moving would
+    // fail the move on its foreign key, so a copy that has gone since it was chosen is no copy.
+    const pairs = await holdCopies(tx, replacements.filter((p) => retiringIds.has(p.gone)));
     if (busy.size > 0) {
         logger.info(`[RECONCILE] ${busy.size} track(s) left for the next sweep: a listener's play history is being repaired`);
     }
@@ -121,6 +130,7 @@ export async function reconcileDeletedTracks(
     // A file replaced by another copy of the same song (an album upgraded from mp3 to flac, say) hands its history
     // to the copy before it goes: plays, likes, playlist places, bookmarks and audit choices.
     const replacedBy = await carryHistoryToReplacements(tx, pairs);
+    const queueCopy = new Map(pairs.flatMap((p) => (p.queue ? [[p.gone, p.queue] as const] : [])));
 
     await tx.removalLog.createMany({
         data: retiring.map((t) => ({
@@ -139,7 +149,7 @@ export async function reconcileDeletedTracks(
     // Soft references first: NULL, never delete — discovery rows keep their user-keep
     // history this way, and playback state keeps its queue.
     await tx.$executeRaw`UPDATE "DiscoveryTrack" SET "trackId" = NULL WHERE "trackId" = ANY(${ids}::text[])`;
-    await updatePlaybackStates(tx, ids, replacedBy);
+    await updatePlaybackStates(tx, ids, queueCopy);
 
     await tx.$executeRaw`DELETE FROM "Track" WHERE id = ANY(${ids}::text[])`;
 
@@ -186,22 +196,23 @@ async function holdSongs<T extends { id: string }>(tx: Prisma.TransactionClient,
 }
 
 /**
- * Playback states that name a retiring song. A saved queue loses the song (or takes its copy), and the track a state
- * names follows; a state naming the song with no queue to follow names its copy, or nothing. Another device sees these
+ * Playback states that name a retiring song. A saved queue loses the song (or takes its playable copy, `movedTo`), and
+ * the track a state names follows; a state naming the song with no queue to follow names its playable copy, or nothing. Another device sees these
  * as changes by the server: `changedBy` is left empty, which every reader shows as "Kima".
  */
 async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: string[], movedTo: Map<string, string>): Promise<void> {
     await updateSavedQueues(tx, retired, movedTo);
+    const at = new Date();
     const gone = [...movedTo.keys()];
     const kept = gone.map((id) => movedTo.get(id)!);
     if (gone.length > 0) {
         await tx.$executeRaw`
-            UPDATE "PlaybackState" s SET "trackId" = m.kept, "changedBy" = NULL, "updatedAt" = now()
+            UPDATE "PlaybackState" s SET "trackId" = m.kept, "changedBy" = NULL, "updatedAt" = ${nodeClock(at)}
               FROM unnest(${gone}::text[], ${kept}::text[]) AS m(gone, kept)
              WHERE s."trackId" = m.gone`;
     }
     await tx.$executeRaw`
-        UPDATE "PlaybackState" SET "trackId" = NULL, "changedBy" = NULL, "updatedAt" = now()
+        UPDATE "PlaybackState" SET "trackId" = NULL, "changedBy" = NULL, "updatedAt" = ${nodeClock(at)}
          WHERE "trackId" = ANY(${retired}::text[])`;
 }
 
@@ -270,31 +281,60 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
 }
 
 /**
- * For each retiring track, the playable song that is the same song on the same album (same disc and track number,
- * same title ignoring case). A copy that is corrupt, or on a Discover album, is no copy: a queue or playlist is never
- * pointed at a song a person could not play.
+ * For each retiring track, the copies of the same song on the same album (same disc and track number, same title
+ * ignoring case), from one candidate query: its history goes to the best copy on a library album, and its queue places
+ * to the best of those a person can play. A copy on a Discover album is no copy at all (a Discover song reaches nothing
+ * that is not Discover), and neither is one whose file is flagged missing (it retires itself). A corrupt copy is a
+ * copy for history only: a queue or playlist is never pointed at a file a person could not play, but a fixed file has
+ * its history waiting.
+ *
+ * Best means: playable, then a lossless codec, then the higher bitrate (file size over duration; Track keeps no
+ * bitrate, and a song of unknown duration ranks last), then the lower id, so every sweep chooses the same.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
-    const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; goneTitle: string; keptTitle: string }>>`
-        SELECT g.id AS gone, k.id AS kept, g.title AS "goneTitle", k.title AS "keptTitle"
+    const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; playable: boolean; goneTitle: string; keptTitle: string }>>`
+        SELECT g.id AS gone, k.id AS kept, NOT k.corrupt AS playable, g.title AS "goneTitle", k.title AS "keptTitle"
           FROM "Track" g
           JOIN "Track" k
             ON k."albumId" = g."albumId"
            AND k."trackNo" = g."trackNo"
            AND k."discNumber" IS NOT DISTINCT FROM g."discNumber"
            AND k.id <> g.id
-          JOIN "Album" ka ON ka.id = k."albumId"
-           AND ${playableSongSql("k", "ka")}
+          JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
          WHERE g.id = ANY(${ids}::text[])
-         ORDER BY g.id, k.id
+           AND k."missingSince" IS NULL
+         ORDER BY g.id,
+                  NOT k.corrupt DESC,
+                  COALESCE(k.mime ~* '(^|[^a-z])(flac|alac|pcm|wavpack|ape|monkey|tta|dsd|lossless|wav|aiff)([^a-z]|$)', false) DESC,
+                  k."fileSize"::float8 / NULLIF(k.duration, 0) DESC NULLS LAST,
+                  k.id
     `;
     const pairs: Replacement[] = [];
     for (const row of sameSlot) {
         if (row.goneTitle.toLowerCase() !== row.keptTitle.toLowerCase()) continue;
-        if (pairs.at(-1)?.gone !== row.gone) pairs.push({ gone: row.gone, kept: row.kept });
+        const last = pairs.at(-1);
+        if (last?.gone !== row.gone) pairs.push({ gone: row.gone, history: row.kept, queue: row.playable ? row.kept : null });
+        else if (last.queue === null && row.playable) last.queue = row.kept;
     }
     return pairs;
+}
+
+/**
+ * Holds the copies chosen to take over, and answers the pairs whose copies are still there. A key share lock: it stops
+ * a delete or key change of the copy until the sweep commits, and nothing a stage move or a scan writes to an ordinary
+ * column. Taken after the retiring songs' own rows (a copy is never a retiring song, so the two never meet), in id
+ * order, and never waited for in earnest: only a delete holds it up, and a deleted copy is no copy.
+ */
+async function holdCopies(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Replacement[]> {
+    if (pairs.length === 0) return pairs;
+    const wanted = [...new Set(pairs.flatMap((p) => (p.queue ? [p.history, p.queue] : [p.history])))].sort();
+    const held = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "Track" WHERE id = ANY(${wanted}::text[]) ORDER BY id FOR KEY SHARE`;
+    const heldIds = new Set(held.map((r) => r.id));
+    return pairs
+        .filter((p) => heldIds.has(p.history))
+        .map((p) => ({ ...p, queue: p.queue !== null && heldIds.has(p.queue) ? p.queue : null }));
 }
 
 /**
@@ -305,7 +345,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
  * the middle.
  */
 async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Map<string, string>> {
-    for (const { gone, kept } of pairs) {
+    for (const { gone, history: kept } of pairs) {
         await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
         await tx.$executeRaw`
             UPDATE "LikedTrack" l SET "trackId" = ${kept}
@@ -323,7 +363,7 @@ async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: R
                AND NOT EXISTS (SELECT 1 FROM "PlayAuditIgnore" o WHERE o."userId" = a."userId" AND o."trackId" = ${kept})`;
     }
     if (pairs.length > 0) logger.info(`[RECONCILE] ${pairs.length} retiring track(s) handed their history to another copy of the same song`);
-    return new Map(pairs.map((p) => [p.gone, p.kept]));
+    return new Map(pairs.map((p) => [p.gone, p.history]));
 }
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
@@ -351,9 +391,8 @@ export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult
     // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.
     // A deadlock with another job's transaction (the sweep takes its locks without waiting, but the cascade of a delete
     // reaches rows other jobs write) rolls the whole sweep back, so it runs once more.
-    const res = await retryOnConflict(
-        () => prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 }),
-        { runs: 2, onLostRun: ({ run, runs }) => logger.warn(`[RECONCILE] sweep lost to another transaction (run ${run} of ${runs}); running it again`) },
+    const res = await retryOnDeadlock("the library sweep",() =>
+        prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 }),
     );
     await unlinkArtifacts(res.artifacts);
     announcePlaylistsChanged(res.playlists);

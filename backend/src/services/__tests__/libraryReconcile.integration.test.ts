@@ -751,7 +751,7 @@ describe("reconcileDeletedTracks", () => {
                 expect((await prisma.playbackState.findUnique({ where: { userId: `${P}user` } }))!.trackId).toBe(`${P}qbcopy`);
             });
 
-            it("a copy that is corrupt is no copy: the entry goes, and the track the state names follows the queue", async () => {
+            it("a copy that is corrupt is no copy for a queue (it takes the history, below): the entry goes, and the track the state names follows the queue", async () => {
                 await prisma.track.update({ where: { id: `${P}qbcopy` }, data: { corrupt: true } });
                 await seedQueue(`${P}user`, q("a", "b", "c"), 1);
                 await sweep();
@@ -845,5 +845,157 @@ describe("reconcileDeletedTracks", () => {
             stop();
             await prisma.playlist.deleteMany({ where: { id: list.id } });
         }
+    });
+});
+
+/**
+ * A retiring song's history goes to a copy of the same song on a LIBRARY album, whether or not that copy can be played
+ * (a corrupt file is repaired, or replaced, and the history is there when it is); its saved queues are pointed only at a
+ * copy a person can play. Among copies the better file is chosen: the playable one, then lossless, then the higher
+ * bitrate, then the lower id. A Discover copy gets nothing.
+ */
+describe("which copy takes over", () => {
+    interface CopyOpts { corrupt?: boolean; missing?: boolean; album?: string; mime?: string; fileSize?: number; duration?: number }
+    const SLOT = { trackNo: 1, title: "Schema" };
+
+    async function seedGone(id = "g") {
+        await prisma.track.create({
+            data: { id: `${P}${id}`, albumId: `${P}alb`, ...SLOT, duration: 200, filePath: `/tmp/${P}${id}.mp3`, fileModified: new Date(), fileSize: 1,
+                missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+    }
+    async function seedCopy(id: string, opts: CopyOpts = {}) {
+        await prisma.track.create({
+            data: { id: `${P}${id}`, albumId: opts.album ?? `${P}alb`, ...SLOT, title: "SCHEMA", duration: opts.duration ?? 200,
+                filePath: `/tmp/${P}${id}.bin`, fileModified: new Date(), fileSize: opts.fileSize ?? 1, mime: opts.mime ?? "MPEG 1 Layer 3",
+                corrupt: opts.corrupt ?? false, ...(opts.missing ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
+        });
+    }
+    async function seedHistoryAndQueue(goneId = "g") {
+        await prisma.play.create({ data: { userId: `${P}user`, trackId: `${P}${goneId}`, playedAt: new Date(Date.now() - 3 * MIN) } });
+        await prisma.likedTrack.create({ data: { userId: `${P}user`, trackId: `${P}${goneId}` } });
+        await prisma.playlist.create({
+            data: { id: `${P}pl`, userId: `${P}user`, name: "Recon", items: { create: [{ trackId: `${P}${goneId}`, rank: "a", sort: 0 }] } },
+        });
+        const entry = { id: `${P}${goneId}`, title: "Schema", displayTitle: null, duration: 200, artist: null, album: null };
+        await prisma.playbackState.create({ data: { userId: `${P}user`, playbackType: "track", trackId: `${P}${goneId}`, queue: [entry], currentIndex: 0 } });
+    }
+    const sweep = () => prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+    async function where() {
+        const [play] = await prisma.play.findMany({ where: { userId: `${P}user` } });
+        const like = await prisma.likedTrack.findFirst({ where: { userId: `${P}user` } });
+        const item = await prisma.playlistItem.findFirst({ where: { playlistId: `${P}pl` } });
+        const state = await prisma.playbackState.findUnique({ where: { userId: `${P}user` } });
+        return {
+            play: play?.trackId ?? null,
+            like: like?.trackId ?? null,
+            item: item?.trackId ?? null,
+            queue: (state?.queue as Array<{ id: string }> | null)?.map((e) => e.id) ?? null,
+            stateTrack: state?.trackId ?? null,
+        };
+    }
+
+    it("a corrupt library copy takes the history, and the queue drops the song: nobody is pointed at a file that cannot play", async () => {
+        await seedGone();
+        await seedCopy("bad", { corrupt: true });
+        await seedHistoryAndQueue();
+
+        expect((await sweep()).removed).toBe(1);
+
+        expect(await where()).toEqual({ play: `${P}bad`, like: `${P}bad`, item: `${P}bad`, queue: null, stateTrack: null });
+        const log = await prisma.removalLog.findFirstOrThrow({ where: { filePath: `/tmp/${P}g.mp3` } });
+        expect(log.reason).toBe("replaced-by-another-file");
+        // The corrupt song is still there: a fixed file comes back with its history.
+        expect(await prisma.track.findUnique({ where: { id: `${P}bad` } })).not.toBeNull();
+    });
+
+    it("a copy on a Discover album gets nothing: no history, no queue place", async () => {
+        await prisma.album.create({
+            data: { id: `${P}disc`, artistId: `${P}art`, rgMbid: `${P}-drg2`, identityKey: `${P}-dak2`, title: "Recon Discover", primaryType: "Album", location: "DISCOVER" },
+        });
+        // The retiring song is on the library album; its only look-alike is on a Discover album.
+        await seedGone();
+        await seedCopy("disc", { album: `${P}disc` });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toEqual({ play: null, like: null, item: null, queue: null, stateTrack: null });
+        expect((await prisma.removalLog.findFirstOrThrow({ where: { filePath: `/tmp/${P}g.mp3` } })).reason).toBe("file-missing-confirmed");
+    });
+
+    it("a copy whose own file is missing is no copy", async () => {
+        await seedGone();
+        await seedCopy("lost", { missing: true });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        // Both flagged songs retire in the one sweep; the history of neither lands on the other.
+        expect(await where()).toEqual({ play: null, like: null, item: null, queue: null, stateTrack: null });
+    });
+
+    it("a playable copy takes both the history and the queue place, whatever a corrupt lossless copy offers", async () => {
+        await seedGone();
+        await seedCopy("a-flac-bad", { corrupt: true, mime: "FLAC", fileSize: 30_000_000 });
+        await seedCopy("z-mp3", { mime: "MPEG 1 Layer 3", fileSize: 4_000_000 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toEqual({ play: `${P}z-mp3`, like: `${P}z-mp3`, item: `${P}z-mp3`, queue: [`${P}z-mp3`], stateTrack: `${P}z-mp3` });
+    });
+
+    it("of two playable copies, the lossless one wins even when its id sorts later", async () => {
+        await seedGone();
+        await seedCopy("a-mp3", { mime: "MPEG 1 Layer 3", fileSize: 8_000_000 });
+        await seedCopy("z-flac", { mime: "FLAC", fileSize: 1_000_000 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}z-flac`, queue: [`${P}z-flac`] });
+    });
+
+    it("of two lossy copies the higher bitrate wins, and equal quality goes to the lower id", async () => {
+        await seedGone();
+        await seedCopy("a-low", { fileSize: 2_000_000 });
+        await seedCopy("m-high", { fileSize: 6_000_000 });
+        await seedCopy("z-high", { fileSize: 6_000_000 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}m-high`, queue: [`${P}m-high`] });
+    });
+
+    it("a copy of unknown duration ranks last by bitrate", async () => {
+        await seedGone();
+        await seedCopy("a-nodur", { duration: 0, fileSize: 9_000_000 });
+        await seedCopy("b-known", { fileSize: 1_000_000 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}b-known` });
+    });
+
+    it("holds the copy it chose against a delete or a key change until the sweep commits, but not against ordinary writes, and holds no other candidate", async () => {
+        await seedGone();
+        await seedCopy("chosen", { mime: "FLAC" });
+        await seedCopy("other", { mime: "MPEG 1 Layer 3" });
+        await seedHistoryAndQueue();
+
+        await prisma.$transaction(async (tx) => {
+            await reconcileDeletedTracks(tx, scanStartedAt());
+            const probe = (lock: string, id: string) =>
+                prisma.$transaction(async (other) => {
+                    await other.$executeRawUnsafe(`SET LOCAL lock_timeout = '300ms'`);
+                    await other.$queryRawUnsafe(`SELECT id FROM "Track" WHERE id = $1 ${lock}`, id);
+                });
+            await expect(probe("FOR UPDATE", `${P}chosen`)).rejects.toThrow();
+            await expect(probe("FOR NO KEY UPDATE", `${P}chosen`)).resolves.toBeUndefined();
+            await expect(probe("FOR UPDATE", `${P}other`)).resolves.toBeUndefined();
+        }, { timeout: 30_000 });
     });
 });
