@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Saving your queue from the web player, the iOS app or a Subsonic app no longer drops songs whose file is missing or unreadable. They stay in the saved queue, hidden, and come back when the file is fixed.
+- When the current song is hidden because its file is missing, your place in the song is kept instead of reset to the start.
 - An artist picture or album cover address you type in the editor must be a full http or https address. Anything else is refused.
 - A saved name edit or reset no longer shows an error when a follow-up library update fails.
 - An admin turning off someone's two-factor sign-in now signs that person out on every device.
