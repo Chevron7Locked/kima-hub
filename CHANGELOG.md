@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Generating Discover Weekly while Redis is unreachable says generation is temporarily unavailable**, instead of wrongly saying it is already in progress. While Redis is down, the Soulseek connection fails at once with the reason instead of after 30 seconds, and library enrichment pauses until Redis is back.
 - **A library scan no longer stalls while a play-history repair runs.** A replaced song whose listener's history is being repaired is retired on the next scan instead.
 - **A play reported for a song at the moment a scan removes it is refused cleanly** instead of being recorded and then lost.
 - **Songs removed from the library leave saved play queues**, and the queue keeps its place.
