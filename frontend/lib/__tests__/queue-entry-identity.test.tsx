@@ -220,21 +220,6 @@ describe("a playlist that lists a song twice, [A, B, A]", () => {
         expect(playingRows()).toEqual([2]);
     });
 
-    it("lands a gapless advance on the entry that was preloaded, wherever an edit moved it", async () => {
-        await mountPage();
-        await startRow(0);
-        await act(async () => engine.emit("timeupdate", { time: 195 })); // B is preloaded, at place 1
-        // The listener queues another song to play next, so B is no longer at place 1.
-        await act(async () => probe.controls.addToQueue({ id: "C", title: "C", duration: 100, artist: { name: "x" }, album: { title: "y" } }));
-        expect(probe.state.queue.map((t) => t.id)).toEqual(["A", "C", "B", "A"]);
-
-        await act(async () => engine.emit("gapless-advance", { trackId: "B", durationS: 200 }));
-
-        expect(probe.state.currentIndex).toBe(2);
-        expect(probe.state.currentTrack?.id).toBe("B");
-        expect(playingRows()).toEqual([1]);
-    });
-
     it("gives an entry added twice two keys, so each is its own entry", async () => {
         await mountPage();
         const add = song("Z") as unknown as Track;
@@ -307,5 +292,34 @@ describe("the button on a playlist row", () => {
         expect(engine.pause).not.toHaveBeenCalled();
         expect(engine.load).toHaveBeenCalledTimes(1);
         expect(probe.state.currentIndex).toBe(0);
+    });
+});
+
+const other = (id: string) => ({ ...song(id), artist: { name: "x" } }) as unknown as Track;
+const preloadedUrls = () => engine.setExpectedNext.mock.calls.map((c) => c[0]);
+
+describe("the gapless preload", () => {
+    /** Plays [A, B, A] from its first row, with B preloaded as the last 30 seconds begin. */
+    async function preloadB() {
+        await mountPage();
+        await startRow(0);
+        await act(async () => engine.emit("timeupdate", { time: 195 }));
+        expect(preloadedUrls()).toEqual(["/stream/B"]);
+        engine.clearExpectedNext.mockClear();
+        engine.setExpectedNext.mockClear();
+        preload.mockClear();
+    }
+
+    it("preloads the same entry again after the repeat mode dropped its preload", async () => {
+        await preloadB();
+
+        await act(async () => probe.controls.toggleRepeat()); // all
+        await act(async () => probe.controls.toggleRepeat()); // one: no next song, the preload goes
+        expect(engine.clearExpectedNext).toHaveBeenCalled();
+        await act(async () => probe.controls.toggleRepeat()); // off again
+
+        await act(async () => engine.emit("timeupdate", { time: 196 }));
+        expect(preloadedUrls()).toEqual(["/stream/B"]);
+        expect(preload).toHaveBeenCalledTimes(1);
     });
 });

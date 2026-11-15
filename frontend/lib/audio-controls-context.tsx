@@ -200,6 +200,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const queueEndedRef = useRef(false);
     const refillStationNowRef = useRef<() => Promise<boolean>>(() => Promise.resolve(false));
     const pendingGaplessNextRef = useRef<(Track & { index: number }) | null>(null);
+    // Forgets the preloaded next entry everywhere it is held: the engine's expectation, the entry it was for, and
+    // the note that it was prewarmed, so the same entry can be preloaded again.
+    const dropExpectedNext = useCallback(() => {
+        controllerRef.current?.clearExpectedNext();
+        pendingGaplessNextRef.current = null;
+        prewarmedKeyRef.current = null;
+    }, []);
 
     // Session ref: always consulted by seek, handleEnded, and progress saves.
     const bookSessionRef = useRef<BookSession | null>(null);
@@ -1319,9 +1326,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // preloaded next-track buffer can no longer be swapped in validly.
     useEffect(() => {
         if (state.playbackType !== "track" || state.repeatMode === "one") {
-            controllerRef.current?.clearExpectedNext();
+            dropExpectedNext();
         }
-    }, [state.playbackType, state.repeatMode]);
+    }, [state.playbackType, state.repeatMode, dropExpectedNext]);
 
     // -- Canplay handler: duration update only --
     useEffect(() => {
