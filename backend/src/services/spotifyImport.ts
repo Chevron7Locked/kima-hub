@@ -392,17 +392,21 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
  */
 const MIN_WORD_LENGTH = 3;
 
+/** A normalized artist name without its leading "the" ("the beatles" is "beatles"); a name that is only "the" is kept. */
+const withoutLeadingThe = (name: string): string => name.replace(/^the\s+/, "") || name;
+
 /**
  * The word the M3U fuzzy tier looks an artist up by: the longest word of the entry's primary artist (the first of
  * equals), with a leading "the" dropped, so "The Beatles" looks for "beatles" and not for every artist whose name has
  * "the". When every word is shorter than MIN_WORD_LENGTH the whole name is the key ("U2", "Bo Xx"), which finds the
- * artists holding those words together. "" when the name has nothing to look up.
+ * artists holding those words together ("&" counts as the word "and" there, as it is stored). "" when the name has
+ * nothing to look up.
  */
 function artistLookupWord(artistName: string): string {
-  const name = normalizeArtistName(parseCredit(artistName).primary || artistName);
-  const withoutThe = name.replace(/^the\s+/, "") || name;
+  const withoutThe = withoutLeadingThe(normalizeArtistName(parseCredit(artistName).primary || artistName));
   const words = withoutThe.split(" ").filter(Boolean);
-  const longest = words.reduce((best, word) => (word.length > best.length ? word : best), "");
+  // normalizeArtistName writes "&" as "and": the joining word is never the artist's word to look up.
+  const longest = words.reduce((best, word) => (word !== "and" && word.length > best.length ? word : best), "");
   return longest.length >= MIN_WORD_LENGTH ? longest : words.join(" ");
 }
 
@@ -672,8 +676,7 @@ const CREDIT_SEPARATORS = /\s*&\s*|\s+and\s+|\s*,\s+|\s+[/+]\s+|(?<=[\p{L}\p{N}]
 
 /** An artist name as the words that tell it from another, for scoring: no case, accents, punctuation or leading "the". */
 const artistWordsForScoring = (name: string): string => {
-  const normalized = normalizeArtistName(name);
-  return nameWords(normalized.replace(/^the\s+/, "") || normalized);
+  return nameWords(withoutLeadingThe(normalizeArtistName(name)));
 };
 
 /**

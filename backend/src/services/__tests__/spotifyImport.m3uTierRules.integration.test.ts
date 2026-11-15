@@ -14,7 +14,7 @@
  *   M3UNothingMatched.
  */
 import { prisma } from "../../utils/db";
-import { artistIdentityKey } from "../artistIdentity";
+import { artistIdentityKey, normalizeArtistName } from "../artistIdentity";
 import { spotifyImportService } from "../spotifyImport";
 import { M3UNothingMatched, type M3UEntry } from "../m3uParser";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -24,7 +24,7 @@ jest.setTimeout(120_000);
 const P = "zz-m3u-rules";
 const USER = `${P}-user`;
 /** Artists the tier 4 tests seed under names no other test uses (every word short, a short word first, credits), removed by name. */
-const SHORT_ARTISTS = ["zq", "zq xy", "zq zzburnham", "zzbeetles", "zzqueen", "zzqueen zzlatifah", "zzpinkish zzfloyd", "zzjayz feat. zzkanye", "zzsimon & zzgarf", "zzhall, zzoates / zzthird", "zzflorence + zzmachine", "zzhall/zzoates", "zz/xy"];
+const SHORT_ARTISTS = ["zq", "zq xy", "zq zzburnham", "zq & xy", "zzbeetles", "zzqueen", "zzqueen zzlatifah", "zzpinkish zzfloyd", "zzjayz feat. zzkanye", "zzsimon & zzgarf", "zzhall, zzoates / zzthird", "zzflorence + zzmachine", "zzhall/zzoates", "zz/xy"];
 
 async function cleanup() {
     await prisma.notification.deleteMany({ where: { userId: USER } });
@@ -39,7 +39,7 @@ async function cleanup() {
 
 /** One artist and album holding the songs given as [id suffix, title, file path stored relative to the music folder]. */
 async function seedSongs(key: string, artistName: string, songs: [string, string, string][]) {
-    const artist = await prisma.artist.create({ data: { name: artistName, normalizedName: artistName.toLowerCase(), identityKey: artistIdentityKey(artistName) } });
+    const artist = await prisma.artist.create({ data: { name: artistName, normalizedName: normalizeArtistName(artistName), identityKey: artistIdentityKey(artistName) } });
     const album = await prisma.album.create({
         data: { rgMbid: `${P}-${key}-rg`, identityKey: `${P}-${key}-album`, primaryType: "Album", title: `${P} ${key} album`, artistId: artist.id, location: "LIBRARY" },
     });
@@ -300,6 +300,11 @@ describe("tier 4 finds the artist by the longest word of its name", () => {
         await seedSongs("t4m", "zq xy", [["a", "zzmulti two", `${P}/t4m/one.flac`]]);
         await seedSongs("t4n", "zzbeetles", [["a", "zzlet it be", `${P}/t4n/one.flac`]]);
         await seedSongs("t4w", "zq zzburnham", [["a", "zzinside two", `${P}/t4w/one.flac`]]);
+        await seedSongs("t4x", "zq & xy", [["a", "zzamp two", `${P}/t4x/one.flac`]]);
+    });
+
+    it("reaches an artist of short words joined by an ampersand, which is stored as the word \"and\"", async () => {
+        expect(await match(entry("/nowhere/zq-nothing.flac", "zq & xy", "two zzamp"))).toBe(`${P}-t4x-a`);
     });
 
     // The titles differ from the stored ones in word order only, which tier 3's exact compare refuses and tier 4 accepts.
