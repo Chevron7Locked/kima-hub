@@ -190,3 +190,18 @@ describe("Discover plays", () => {
         expect(await prisma.play.count({ where: { userId: USER } })).toBe(4);
     });
 });
+
+describe("the ignored list", () => {
+    it("lists ignored library songs only, not Discover ones", async () => {
+        await given([play("l1", 0, 200, "lib1"), play("d1", 10, 200, "disc1", false, "disc")]);
+        await prisma.playAuditIgnore.createMany({
+            data: [
+                { userId: USER, trackId: `${P}lib1` },
+                { userId: USER, trackId: `${P}disc1` },
+            ],
+        });
+        const audit = await auditFalseStarts(USER);
+        expect(audit.ignored.map((r) => r.trackId)).toEqual([`${P}lib1`]);
+    });
+});
+

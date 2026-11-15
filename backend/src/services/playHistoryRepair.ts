@@ -174,7 +174,8 @@ export async function auditFalseStarts(userId: string): Promise<FalseStartAudit>
     const [listens, ignoredRows] = await Promise.all([
         listensOf(userId),
         prisma.playAuditIgnore.findMany({
-            where: { userId },
+            // Library songs only: the audit never reports a Discover song, so it has none to un-ignore.
+            where: { userId, track: { album: { location: "LIBRARY" } } },
             orderBy: { ignoredAt: "desc" },
             select: {
                 trackId: true,
