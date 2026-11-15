@@ -123,8 +123,9 @@ class ShareRefused extends Error {
     }
 }
 
-/** The reason in a refusal's body, when it is one the page knows; an unreadable body or a new reason is no reason. */
+/** The reason in a 410's body, when it is one the page knows; any other status, an unreadable body or a new reason has none. */
 async function refusalReason(res: Response): Promise<EndedReason | undefined> {
+    if (res.status !== 410) return undefined;
     const body: unknown = await res.json().catch(() => null);
     const reason = (body as { reason?: unknown } | null)?.reason;
     return reason === "expired" || reason === "play-limit" ? reason : undefined;
@@ -325,7 +326,7 @@ function SharePage({ token }: { token: string }) {
         fetch(shareResolvePath(token), { signal: check.signal })
             .then(async (res) => {
                 if (res.ok) return say("Playback error occurred.");
-                sayFailure({ status: res.status, reason: res.status === 410 ? await refusalReason(res) : undefined });
+                sayFailure({ status: res.status, reason: await refusalReason(res) });
             })
             .catch(() => sayFailure({ status: null }));
     }, [token]);
