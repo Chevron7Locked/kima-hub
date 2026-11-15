@@ -7,10 +7,10 @@ export interface LockLease {
   /** True when this lease's lock was freed; false when it had already expired or another holder took it since. */
   release(): Promise<boolean>;
   /**
-   * Renew the lock's expiry every third of `ttlMs` (the acquire's ttl by default) until the returned stop is called.
-   * A process that dies stops renewing, so its lock frees within `ttlMs`.
+   * Renew the lock's expiry every third of the ttl it was acquired with, until the returned stop is called.
+   * A process that dies stops renewing, so its lock frees within that ttl.
    */
-  keepAlive(ttlMs?: number): () => void;
+  keepAlive(): () => void;
 }
 
 /** Taken, held by someone else, or not known because Redis could not be reached. */
@@ -60,17 +60,17 @@ export class DistributedLock {
           return false;
         }
       },
-      keepAlive: (renewTtlMs = ttlMs) => {
+      keepAlive: () => {
         let timer: NodeJS.Timeout | null = null;
         const schedule = () => {
           timer = setTimeout(async () => {
             try {
-              await this.redis.eval(RENEW_SCRIPT, 1, lockKey, token, String(renewTtlMs));
+              await this.redis.eval(RENEW_SCRIPT, 1, lockKey, token, String(ttlMs));
             } catch {
               // A missed renewal is retried on the next tick; the lock lasts its ttl.
             }
             if (timer) schedule();
-          }, Math.max(1, Math.floor(renewTtlMs / 3)));
+          }, Math.max(1, Math.floor(ttlMs / 3)));
           timer.unref();
         };
         schedule();

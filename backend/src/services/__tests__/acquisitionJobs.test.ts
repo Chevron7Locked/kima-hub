@@ -15,6 +15,8 @@ import { soulseekService } from "../soulseek";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import * as downloadJobs from "../downloads/jobs";
 import { acquisitionService } from "../acquisitionService";
+import { distributedLock } from "../../utils/distributedLock";
+import { LockHeldError, LockUnavailableError } from "../../utils/lockErrors";
 
 jest.setTimeout(30_000);
 
@@ -173,6 +175,32 @@ describe("a Lidarr album", () => {
         await lidarr(job);
 
         expect((await read(job.id)).metadata).toMatchObject({ webhookNote: "kept", lidarrAttempts: 3, statusText: "Lidarr #3" });
+    });
+});
+
+describe("finding a job for an album by name, under a lock", () => {
+    const BY_NAME = { artistName: "Zz Lock Artist", albumTitle: "Zz Lock Album" };
+    const find = () => acquisitionService.findOrCreateDownloadJob(BY_NAME, { userId: USER });
+    afterEach(async () => {
+        jest.restoreAllMocks();
+        await prisma.downloadJob.deleteMany({ where: { userId: USER, subject: "Zz Lock Artist - Zz Lock Album" } });
+    });
+
+    it("leaves the job to the request that holds the lock", async () => {
+        jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockHeldError("download-job"));
+
+        await expect(find()).rejects.toBeInstanceOf(LockHeldError);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, subject: "Zz Lock Artist - Zz Lock Album" } })).toBe(0);
+    });
+
+    it("still makes the job, once, when Redis is down and there is no lock to take", async () => {
+        jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockUnavailableError("download-job"));
+
+        const first = await find();
+        const second = await find();
+
+        expect(first.created).toBe(true);
+        expect(second).toMatchObject({ created: false, job: { id: first.job.id } });
     });
 });
 

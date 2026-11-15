@@ -17,6 +17,7 @@ import { getArtistCorrection } from "./artistCorrection";
 import { isMbid } from "./artistIdentity";
 import { AcquisitionErrorType } from "./lidarr";
 import { distributedLock } from "../utils/distributedLock";
+import { LockUnavailableError } from "../utils/lockErrors";
 import PQueue from "p-queue";
 import { downloadJobsTotal, downloadJobDuration } from "../utils/metrics";
 import {
@@ -761,12 +762,22 @@ class AcquisitionService {
         }
 
         const lockKey = `download-job:${context.userId}:${dedupKey}:${context.discoveryBatchId || 'null'}`;
-        return await distributedLock.withLock(lockKey, 5000, async () => {
+        const findOrCreate = async () => {
             // Another request may have made it while this one waited for the lock.
             const doubleCheck = await findExisting();
             if (doubleCheck) return { job: doubleCheck, created: false };
             return create();
-        });
+        };
+        try {
+            // A held lock throws LockHeldError: another request is making the job.
+            return await distributedLock.withLock(lockKey, 5000, findOrCreate);
+        } catch (error) {
+            if (!(error instanceof LockUnavailableError)) throw error;
+            // With Redis down there is no lock to take, and refusing the download would cost more than the rare
+            // duplicate the lock guards against: the lookup above still finds an existing job.
+            logger.warn(`[Acquisition] Redis is not reachable: making the download job for ${dedupKey} without its lock`, error);
+            return findOrCreate();
+        }
     }
 
     /**

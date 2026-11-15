@@ -84,15 +84,15 @@ describe("two holders in one process", () => {
         expect(await second.lease.release()).toBe(true);
     });
 
-    it("a lease that expired does not renew the lock a later holder took", async () => {
-        const first = await distributedLock.acquire(KEY, 100);
+    it("a lease that was released does not renew the lock a later holder took", async () => {
+        const first = await distributedLock.acquire(KEY, 5000);
         if (first.outcome !== "acquired") throw new Error("expected the lock");
-        await wait(200);
+        await first.lease.release();
         const second = await distributedLock.acquire(KEY, 300);
-        if (second.outcome !== "acquired") throw new Error("expected the lock after expiry");
+        if (second.outcome !== "acquired") throw new Error("expected the lock after release");
 
-        const stop = first.lease.keepAlive(5000);
-        await wait(450);
+        const stop = first.lease.keepAlive();
+        await wait(2000);
         stop();
 
         // The second holder's 300 ms was not stretched to the first one's 5 s.
@@ -104,7 +104,7 @@ describe("lease.keepAlive", () => {
     it("keeps the lock past its expiry while renewed, and lets it expire once stopped", async () => {
         const held = await distributedLock.acquire(KEY, 300);
         if (held.outcome !== "acquired") throw new Error("expected the lock");
-        const stop = held.lease.keepAlive(300);
+        const stop = held.lease.keepAlive();
         await wait(900);
         expect((await distributedLock.acquire(KEY, 300)).outcome).toBe("held");
         stop();
