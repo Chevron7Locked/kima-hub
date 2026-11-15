@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A shared song that fails to start no longer keeps the listener waiting** when the server's database is slow.
+- **The artist recount's progress reaches 100%** even when some artists could not be updated; the log says how many failed.
 - **Two-factor sign-in setup keeps its secret on the server**, so turning it on always uses the secret your authenticator scanned. Setup expires after 10 minutes; start again if it does.
 - **You can turn two-factor sign-in off with a recovery code** if you have lost your authenticator, and make a new set of recovery codes from settings without turning it off. The old codes stop working.
 - **An admin can turn off two-factor sign-in for another person** from the users list, for someone locked out.
