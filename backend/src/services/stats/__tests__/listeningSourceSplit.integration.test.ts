@@ -1,6 +1,7 @@
 /**
  * The stats page's "where plays came from" split, on the real database. Plays carry only LIBRARY or SUBSONIC; a play of a
- * song on a Discover album is its own segment, told by where the album is, so the library segment is not inflated by it.
+ * song on a Discover album is in no segment (Kevin, 2026-11-15: statistics count library plays only), so neither the
+ * split nor any other figure shows it.
  */
 import { prisma } from "../../../utils/db";
 import { listeningStats } from "../listening";
@@ -59,7 +60,8 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
-it("counts a play of a Discover song as discover, not as library", async () => {
+it("leaves a play of a Discover song out of the split, and out of the library segment", async () => {
     const stats = await withListens(USER, "all", (l) => listeningStats(l, "UTC"));
-    expect(stats.bySource).toEqual({ LIBRARY: 2, SUBSONIC: 1, DISCOVER: 1 });
+    expect(stats.bySource).toEqual({ LIBRARY: 2, SUBSONIC: 1 });
+    expect(stats.plays).toBe(3);
 });

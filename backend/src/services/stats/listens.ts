@@ -69,12 +69,15 @@ const WINDOW: Record<Exclude<Period, "all">, string> = {
  * it. `onlyTrackId` can narrow the input because the walk is per track; so can
  * `touchedSince`, which walks only the songs with a row at or after it (each such song
  * is walked whole, so its listens are exact; songs untouched since have no listen after it).
+ * `libraryOnly` drops the plays of songs on a Discover album, told by the album's location: the stats page counts
+ * those nowhere.
  */
 export function listenRows(
     userId: string,
     period: Period = "all",
     onlyTrackId?: string,
     touchedSince?: Date,
+    libraryOnly?: true,
 ): Prisma.Sql {
     return Prisma.sql`
         WITH RECURSIVE ordered AS (
@@ -91,6 +94,7 @@ export function listenRows(
                        > GREATEST(t.duration, ${MIN_LISTEN_WINDOW_SECONDS}) AS opens_run
             FROM "Play" p
             JOIN "Track" t ON t.id = p."trackId"
+            ${libraryOnly ? Prisma.sql`JOIN "Album" lib ON lib.id = t."albumId" AND lib.location = 'LIBRARY'` : Prisma.empty}
             WHERE p."userId" = ${userId}
               ${onlyTrackId ? Prisma.sql`AND p."trackId" = ${onlyTrackId}` : Prisma.empty}
               ${touchedSince
@@ -158,7 +162,8 @@ export interface FoldedListens {
 }
 
 /**
- * Fold the plays once and read the listens as often as `work` likes. A page that shows several figures from the
+ * Fold the plays once and read the listens as often as `work` likes: the listens of songs on library albums only, since
+ * a Discover play is in no statistic. A page that shows several figures from the
  * same listens would otherwise run the whole recursive fold once per figure, all at the same time, each holding a
  * connection. The fold lands in a temporary table that lives until the transaction ends. One request folds once: a
  * request with several sections calls this once and hands the result to each.
@@ -171,7 +176,7 @@ export async function withListens<T>(
     return prisma.$transaction(
         async (db) => {
             await db.$executeRaw(
-                Prisma.sql`CREATE TEMP TABLE folded_listens ON COMMIT DROP AS ${listenRows(userId, period)} SELECT * FROM p`,
+                Prisma.sql`CREATE TEMP TABLE folded_listens ON COMMIT DROP AS ${listenRows(userId, period, undefined, undefined, true)} SELECT * FROM p`,
             );
             return work({ fold: Prisma.sql`WITH p AS (SELECT * FROM folded_listens)`, db });
         },

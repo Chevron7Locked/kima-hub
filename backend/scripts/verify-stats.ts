@@ -113,7 +113,7 @@ async function main() {
         FROM "Play" p
         JOIN "Track" t  ON t.id  = p."trackId"
         JOIN "Album" al ON al.id = t."albumId"
-        WHERE p."userId" = ${user.id}`;
+        WHERE p."userId" = ${user.id} AND al.location = 'LIBRARY'`;
 
     const listens = collapse(raw);
     console.log(`Raw play rows: ${raw.length.toLocaleString()}   collapsed to listens: ${listens.length.toLocaleString()}\n`);
@@ -145,8 +145,8 @@ async function main() {
 
     check("bySource sums to plays", Object.values(L.bySource).reduce((a, b) => a + b, 0), L.plays);
     const src: Record<string, number> = {};
-    // A play of a song still in Discover is its own source, whichever client played it (the album's location says so).
-    for (const r of listens) { const k = r.location === "DISCOVER" ? "DISCOVER" : r.source; src[k] = (src[k] ?? 0) + 1; }
+    // Discover plays are in no statistic: the rows above are library plays only.
+    for (const r of listens) src[r.source] = (src[r.source] ?? 0) + 1;
     // A record has no meaningful key order (the query's GROUP BY returns sources in whatever order its plan likes).
     const bySorted = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
     check("bySource breakdown", bySorted(L.bySource), bySorted(src));

@@ -25,7 +25,7 @@ export interface ListeningStats {
     distinctAlbums: number;
     firstPlay: string | null;
     lastPlay: string | null;
-    /** Where the plays came from: Kima's own player, a Subsonic client, or a song still in Discover (the album's location says so). */
+    /** Where the plays came from: Kima's own player or a Subsonic client. Plays of Discover songs are not counted anywhere here. */
     bySource: Record<string, number>;
     /** [weekday 0=Sunday][hour 0-23] -> play count, in the user's own timezone. */
     clock: number[][];
@@ -92,10 +92,7 @@ export async function listeningStats(
             JOIN "Album" al ON al.id = p."albumId"`),
 
             db.$queryRaw<Array<{ source: string; n: number }>>(Prisma.sql`${fold}
-            SELECT CASE WHEN al.location = 'DISCOVER' THEN 'DISCOVER' ELSE p.source::text END AS source, count(*)::int AS n
-            FROM p
-            JOIN "Album" al ON al.id = p."albumId"
-            GROUP BY 1`),
+            SELECT p.source::text AS source, count(*)::int AS n FROM p GROUP BY 1`),
 
             db.$queryRaw<Array<{ dow: number; hour: number; n: number }>>(Prisma.sql`${fold}
             SELECT EXTRACT(DOW  FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::int AS dow,

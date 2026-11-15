@@ -1,26 +1,23 @@
 "use client";
 
 /**
- * Where plays came from: your shelf, Subsonic clients, or songs still in
- * Discover. One bar, three segments. Plays carry no Discover label: where
- * the album sits says that.
+ * Where plays came from: your shelf or Subsonic clients. One bar, two
+ * segments. Discover plays are in no statistic, so there is no Discover part.
  */
 
 import type { ListeningStats } from "../types";
 
-const ORDER = ["LIBRARY", "SUBSONIC", "DISCOVER"] as const;
+const ORDER = ["LIBRARY", "SUBSONIC"] as const;
 
 const SAY: Record<string, string> = {
     LIBRARY: "library",
     SUBSONIC: "subsonic apps",
-    DISCOVER: "discover",
 };
 
 /** Opacity, not hue. The accent stays one colour and share does the work. */
 const INK: Record<string, string> = {
     LIBRARY: "100%",
     SUBSONIC: "62%",
-    DISCOVER: "34%",
 };
 
 export function SourceSplit({ listening }: { listening: ListeningStats }) {
