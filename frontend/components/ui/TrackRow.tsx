@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
-import { Music, Play } from "lucide-react";
+import { Music, Pause, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -85,7 +85,12 @@ export function TrackRow({
                     >
                         {showsPause ? <Music className="w-4 h-4 text-brand animate-pulse" /> : index + 1}
                     </span>
-                    <Play className="w-4 h-4 text-white hidden can-hover:group-hover:block group-focus-visible/play:block" />
+                    {/* The icon says what the press does, so it matches the label: pause while the song sounds. */}
+                    {showsPause ? (
+                        <Pause className="w-4 h-4 text-white hidden can-hover:group-hover:block group-focus-visible/play:block" />
+                    ) : (
+                        <Play className="w-4 h-4 text-white hidden can-hover:group-hover:block group-focus-visible/play:block" />
+                    )}
                 </button>
             </div>
 

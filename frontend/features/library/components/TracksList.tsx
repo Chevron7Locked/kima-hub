@@ -5,7 +5,7 @@ import { Track } from "../types";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { LibraryListStatus } from "./LibraryGrid";
 import { CachedImage } from "@/components/ui/CachedImage";
-import { AudioLines, ListPlus, Plus, Trash2, Play } from "lucide-react";
+import { AudioLines, ListPlus, Pause, Plus, Trash2, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
 import { api } from "@/lib/api";
@@ -91,7 +91,10 @@ const TrackRow = memo(
                                 <AudioLines className="w-4 h-4 text-brand" />
                             :   displayTrackLabel}
                         </span>
-                        <Play className="w-4 h-4 text-brand opacity-0 group-hover:opacity-100 group-focus-visible/play:opacity-100 transition-opacity duration-150 fill-current" />
+                        {/* The icon says what the press does, so it matches the label. */}
+                        {isSounding ?
+                            <Pause className="w-4 h-4 text-brand opacity-0 group-hover:opacity-100 group-focus-visible/play:opacity-100 transition-opacity duration-150 fill-current" />
+                        :   <Play className="w-4 h-4 text-brand opacity-0 group-hover:opacity-100 group-focus-visible/play:opacity-100 transition-opacity duration-150 fill-current" />}
                     </button>
                 </div>
 

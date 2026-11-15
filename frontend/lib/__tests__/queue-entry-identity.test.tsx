@@ -268,6 +268,21 @@ describe("the button on a playlist row", () => {
         expect(probe.state.currentIndex).toBe(1);
     });
 
+    it("shows the pause icon on the row that sounds and the play icon on the others", async () => {
+        const icon = (place: number, name: string) => rowButton(place).querySelector(`.lucide-${name}`) !== null;
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        expect(icon(1, "pause")).toBe(true);
+        expect(icon(1, "play")).toBe(false);
+        expect(icon(0, "play")).toBe(true);
+        expect(icon(0, "pause")).toBe(false);
+
+        await status("paused");
+        expect(icon(1, "play")).toBe(true);
+        expect(icon(1, "pause")).toBe(false);
+    });
+
     it("starts the queue from another row, as before", async () => {
         await mountPage();
         await startRow(1);

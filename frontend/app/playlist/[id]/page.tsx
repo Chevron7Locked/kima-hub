@@ -692,7 +692,12 @@ export default function PlaylistDetailPage() {
                                 trackIndex + 1
                             )}
                         </span>
-                        {!isUnavailable && <Play className="w-4 h-4 text-white hidden group-hover:block" />}
+                        {!isUnavailable &&
+                            (isCurrentlyPlaying && isPlaying ? (
+                                <Pause className="w-4 h-4 text-white hidden group-hover:block" />
+                            ) : (
+                                <Play className="w-4 h-4 text-white hidden group-hover:block" />
+                            ))}
                     </button>
                     {playlist?.isOwner && (
                         <button

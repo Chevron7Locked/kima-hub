@@ -142,10 +142,18 @@ const TrackRow = memo(
                         >
                             {displayTrackNumber}
                         </span>
-                        <Play
-                            className="hidden group-hover:inline-block w-4 h-4 text-white"
-                            fill="currentColor"
-                        />
+                        {/* The icon says what the press does, so it matches the label. */}
+                        {isSounding ? (
+                            <Pause
+                                className="hidden group-hover:inline-block w-4 h-4 text-white"
+                                fill="currentColor"
+                            />
+                        ) : (
+                            <Play
+                                className="hidden group-hover:inline-block w-4 h-4 text-white"
+                                fill="currentColor"
+                            />
+                        )}
                     </button>
                 </div>
 

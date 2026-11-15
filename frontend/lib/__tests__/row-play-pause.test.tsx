@@ -128,6 +128,22 @@ function behaves(mount: () => void, started: () => number) {
         expect(started()).toBe(1);
     });
 
+    it("shows the pause icon on the song that sounds, and the play icon on a paused or other one", async () => {
+        const icons = (place: number) => ({
+            pause: button(place).querySelector(".lucide-pause") !== null,
+            play: button(place).querySelector(".lucide-play") !== null,
+        });
+        audio.currentTrack = { id: "b" };
+        audio.isPlaying = true;
+        mount();
+        expect(icons(1)).toEqual({ pause: true, play: false });
+        expect(icons(0)).toEqual({ pause: false, play: true });
+
+        audio.isPlaying = false;
+        mount();
+        expect(icons(1)).toEqual({ pause: false, play: true });
+    });
+
     it("starts the list from another row, as before", async () => {
         audio.currentTrack = { id: "b" };
         audio.isPlaying = true;
