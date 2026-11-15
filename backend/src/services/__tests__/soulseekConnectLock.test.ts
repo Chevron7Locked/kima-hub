@@ -2,6 +2,12 @@
  * Soulseek connects from one process at a time. A connect that finds the lock held waits for the other
  * process's connection; one that finds Redis down has nobody to wait for and fails at once with the reason.
  */
+// The real client unless a test hands one out: connect() asks this for the client to log in with.
+jest.mock("../../lib/soulseek/client", () => {
+    const actual = jest.requireActual("../../lib/soulseek/client");
+    return { ...actual, resolveSlskClient: jest.fn(actual.resolveSlskClient) };
+});
+
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { redisClient } from "../../utils/redis";
@@ -9,6 +15,9 @@ import { closeClient } from "../../utils/closeRedisClient";
 import { queues } from "../../workers/queues";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { distributedLock } from "../../utils/distributedLock";
+import { soulseekLogin } from "../soulseekLogin";
+import { EventEmitter } from "events";
+import { resolveSlskClient } from "../../lib/soulseek/client";
 import { LockHeldError, LockLostError, LockUnavailableError } from "../../utils/lockErrors";
 
 let before: Record<string, unknown> | null;
@@ -111,6 +120,149 @@ describe("a lock another process holds", () => {
         jest.spyOn(distributedLock, "isHeld").mockRejectedValue(new Error("connection reset"));
 
         await expect(service().ensureConnected("force")).rejects.toThrow("connection reset");
+    });
+});
+
+describe("the login marker", () => {
+    const service = () => soulseekService as any;
+    const holder = { by: "other-host:77", at: new Date("2026-11-15T10:00:00Z") };
+    afterEach(() => {
+        service().connecting = false;
+        service().connectPromise = null;
+        service().client = null;
+    });
+
+    it("keeps a process that waited from logging in over another process that is now logged in", async () => {
+        const withLock = jest.spyOn(distributedLock, "withLock")
+            .mockRejectedValueOnce(new LockHeldError("soulseek:connection"))
+            .mockImplementation(async (_key, _ttl, callback) => callback(new AbortController().signal));
+        jest.spyOn(distributedLock, "isHeld").mockResolvedValue(false);
+        jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(holder);
+        const connect = jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+
+        const failure = await service().ensureConnected("request").catch((err: Error) => err);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain("another process");
+        expect((failure as Error).message).toContain("other-host:77");
+        expect(connect).not.toHaveBeenCalled();
+        expect(withLock).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets a process that waited log in when nobody else is recorded", async () => {
+        jest.spyOn(distributedLock, "withLock")
+            .mockRejectedValueOnce(new LockHeldError("soulseek:connection"))
+            .mockImplementationOnce(async (_key, _ttl, callback) => callback(new AbortController().signal));
+        jest.spyOn(distributedLock, "isHeld").mockResolvedValue(false);
+        jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(null);
+        const connect = jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+
+        await service().ensureConnected("request");
+
+        expect(connect).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not look for another login when the lock was free to begin with", async () => {
+        jest.spyOn(distributedLock, "withLock").mockImplementation(async (_key, _ttl, callback) => callback(new AbortController().signal));
+        const heldByOther = jest.spyOn(soulseekLogin, "heldByOther");
+        jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+
+        await service().ensureConnected("request");
+
+        expect(heldByOther).not.toHaveBeenCalled();
+    });
+
+    it("is removed when this process drops its connection, by a reset and by a forced disconnect", () => {
+        const clear = jest.spyOn(soulseekLogin, "clear").mockResolvedValue(undefined);
+
+        soulseekService.disconnect();
+        expect(clear).toHaveBeenCalledTimes(1);
+
+        service().forceDisconnect();
+        expect(clear).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("a login on the Soulseek server", () => {
+    const service = () => soulseekService as any;
+    afterEach(() => {
+        service().client = null;
+        service().connectedAt = null;
+    });
+
+    // A fake client whose server socket the test can open and close.
+    const fakeClient = () => {
+        const conn = new EventEmitter() as EventEmitter & { destroyed: boolean; writable: boolean };
+        conn.destroyed = false;
+        conn.writable = true;
+        const client = { loggedIn: false, destroy: jest.fn(), on: jest.fn(), login: jest.fn(), server: { conn } };
+        client.login.mockImplementation(async () => { client.loggedIn = true; });
+        return client;
+    };
+    const connectWith = async (client: ReturnType<typeof fakeClient>) => {
+        (resolveSlskClient as jest.Mock).mockReturnValueOnce(function () { return client; });
+        const connecting = service().connect();
+        setImmediate(() => client.server.conn.emit("connect"));
+        await connecting;
+    };
+
+    it("is recorded for other processes once a direct login succeeds", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+        const mark = jest.spyOn(soulseekLogin, "mark").mockResolvedValue(undefined);
+
+        await connectWith(fakeClient());
+
+        expect(mark).toHaveBeenCalledTimes(1);
+    });
+
+    it("is not recorded for slskd, which holds the account itself", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "slskd", enabled: true, slskdUrl: "http://slskd", slskdApiKey: "k" });
+        const mark = jest.spyOn(soulseekLogin, "mark").mockResolvedValue(undefined);
+
+        await connectWith(fakeClient());
+
+        expect(mark).not.toHaveBeenCalled();
+    });
+
+    it("is not recorded when the login is refused", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+        const mark = jest.spyOn(soulseekLogin, "mark").mockResolvedValue(undefined);
+        const refused = fakeClient();
+        refused.login.mockRejectedValue(new Error("login refused"));
+
+        await expect(connectWith(refused)).rejects.toThrow("login refused");
+
+        expect(mark).not.toHaveBeenCalled();
+    });
+
+    it("leaves the connection made since, and its login marker, alone when a dropped one closes", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+        const clear = jest.spyOn(soulseekLogin, "clear").mockResolvedValue(undefined);
+        const first = fakeClient();
+        const second = fakeClient();
+        await connectWith(first);
+        // A reset drops the first connection and connects again at once; the first one's close arrives afterwards.
+        service().client = null;
+        await connectWith(second);
+        clear.mockClear();
+
+        first.server.conn.emit("close");
+
+        expect(service().client).toBe(second);
+        expect(second.destroy).not.toHaveBeenCalled();
+        expect(clear).not.toHaveBeenCalled();
+    });
+
+    it("drops the connection and removes the marker when the current connection closes", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+        const clear = jest.spyOn(soulseekLogin, "clear").mockResolvedValue(undefined);
+        const only = fakeClient();
+        await connectWith(only);
+
+        only.server.conn.emit("close");
+
+        expect(service().client).toBeNull();
+        expect(clear).toHaveBeenCalledTimes(1);
     });
 });
 

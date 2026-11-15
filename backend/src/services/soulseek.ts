@@ -18,6 +18,7 @@ import { sessionLog } from "../utils/playlistLogger";
 import { distributedLock } from "../utils/distributedLock";
 import { LockHeldError, LockLostError } from "../utils/lockErrors";
 import { redisClient } from "../utils/redis";
+import { soulseekLogin } from "./soulseekLogin";
 import {
     soulseekConnectionStatus,
     soulseekSearchesTotal,
@@ -391,6 +392,9 @@ class SoulseekService {
         }
 
         this.connectedAt = new Date();
+        // The connection lock lasts only as long as the connect, so this marker is what tells a process that waited
+        // for it that this one is now logged in. slskd holds the account itself: nothing to record for it.
+        if (!isSlskd) await soulseekLogin.mark();
         this.consecutiveEmptySearches = 0;
         this.failedConnectionAttempts = 0; // Reset on successful connection
         soulseekConnectionStatus.set(1);
@@ -409,17 +413,20 @@ class SoulseekService {
         }
 
         // Reconnects go through ensureConnected(), which holds the distributed lock and backoff.
-        this.client.server.conn.once('close', () => {
+        const connected = this.client;
+        connected.server.conn.once('close', () => {
+            // Destroying a client closes its socket later. By then a reset may have connected a new client, which this
+            // close says nothing about.
+            if (this.client !== connected) return;
             sessionLog("SOULSEEK", "Server connection closed unexpectedly", "WARN");
-            if (this.client) {
-                try {
-                    this.client.destroy();
-                } catch {
-                    // ignore cleanup errors
-                }
+            try {
+                connected.destroy();
+            } catch {
+                // ignore cleanup errors
             }
             this.client = null;
             this.connectedAt = null;
+            void soulseekLogin.clear();
             soulseekConnectionStatus.set(0);
         });
     }
@@ -461,6 +468,7 @@ class SoulseekService {
         }
         this.client = null;
         this.connectedAt = null;
+        void soulseekLogin.clear();
     }
 
     /**
@@ -607,6 +615,15 @@ class SoulseekService {
                 waited.forHolder = true;
                 sessionLog("SOULSEEK", "Connection already in progress - waiting for it to complete", "DEBUG");
                 if ((await this.waitForConnection()) === "free") {
+                    // The lock is free because the other process's connect is over, and it may have logged in. A second
+                    // login as the account drops the first, so this process does not make one.
+                    const other = await soulseekLogin.heldByOther();
+                    if (other) {
+                        const since = Number.isNaN(other.at.getTime()) ? "an unknown time" : other.at.toISOString();
+                        throw new Error(
+                            `soulseek is connected by another process (${other.by}, since ${since}); only one process can be logged in as the account`,
+                        );
+                    }
                     await this.connectOnce(mode, waited);
                 }
                 return;
@@ -2032,6 +2049,7 @@ class SoulseekService {
         }
         this.client = null;
         this.connectedAt = null;
+        void soulseekLogin.clear();
         this.searchRateLimiter.destroy();
         this.searchRateLimiter = new SlidingWindowRateLimiter(30, 220_000);
         soulseekConnectionStatus.set(0);
