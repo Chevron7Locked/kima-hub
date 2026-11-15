@@ -19,6 +19,8 @@ import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { encrypt } from "../../utils/encryption";
+import { Prisma } from "@prisma/client";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { readTwoFactorSecret, spendAndChange } from "../../services/users/credentials";
 import { generateToken, clearUserCache } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -910,6 +912,55 @@ describe("a secret the client still sends to enable", () => {
 
         expect([res.status, res.body]).toEqual([400, { error: "2FA is already enabled" }]);
         expect(await stored()).toEqual(before);
+    });
+});
+
+describe("a transaction that cannot start or finish in time", () => {
+    const timedOut = (code: string) =>
+        jest.spyOn(prisma, "$transaction").mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError("Transaction API error: the transaction took too long", { code, clientVersion: "test" }),
+        );
+
+    it.each([["P2028", "the transaction ran out of time"], ["P2024", "no connection came free in time"]])(
+        "answers 503 try again to a disable, and spends nothing (%s: %s)",
+        async (code) => {
+            const [recovery] = await twoFactorOn();
+            const before = await stored();
+            expectLog("error");
+            const spy = timedOut(code);
+
+            const res = await disable(recovery);
+            spy.mockRestore();
+
+            expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+            expect(await stored()).toEqual(before);
+        },
+    );
+
+    it("answers 503 try again to new recovery codes, and spends nothing", async () => {
+        await twoFactorOn();
+        const before = await stored();
+        expectLog("error");
+        const spy = timedOut("P2028");
+
+        const res = await newCodes(codeNow());
+        spy.mockRestore();
+
+        expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+        expect(await stored()).toEqual(before);
+    });
+
+    it("still answers 500 to any other database error", async () => {
+        await twoFactorOn();
+        expectLog("error");
+        const spy = jest.spyOn(prisma, "$transaction").mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError("a unique constraint failed", { code: "P2002", clientVersion: "test" }),
+        );
+
+        const res = await disable(codeNow());
+        spy.mockRestore();
+
+        expect(res.status).toBe(500);
     });
 });
 

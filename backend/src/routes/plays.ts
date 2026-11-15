@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { z } from "zod";
 import { recordPlay } from "../services/playRecording";
+import { invalidRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -30,9 +31,7 @@ router.post("/", async (req, res) => {
         res.json(outcome);
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: error.issues });
+            return invalidRequest(req, res, error);
         }
         logger.error("Create play error:", error);
         res.status(500).json({ error: "Failed to log play" });

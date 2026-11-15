@@ -8,6 +8,7 @@ import { generateRefreshToken, generateToken, signedInUser } from "../middleware
 import { refusalMessage, signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
 import { runAsRequestWork } from "../utils/stopCheck";
+import { invalidRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -74,7 +75,7 @@ function serviceStep(name: string, fields: ServiceFields, connects: (url: string
             });
         } catch (err: any) {
             if (err instanceof z.ZodError) {
-                return res.status(400).json({ error: "Invalid request", details: err.issues });
+                return invalidRequest(req, res, err);
             }
             logger.error(`${name} config error:`, err);
             res.status(500).json({ error: "Failed to save configuration" });
@@ -128,10 +129,7 @@ router.post("/register", async (req, res) => {
         });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            logger.error("[ONBOARDING] Validation error:", err.issues);
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
+            return invalidRequest(req, res, err);
         }
         logger.error("[ONBOARDING] Registration error:", { message: err.message, code: err.code, stack: err.stack });
         res.status(500).json({ error: "Failed to create account" });
@@ -199,9 +197,7 @@ router.post("/soulseek", async (req, res) => {
         });
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: err.issues });
+            return invalidRequest(req, res, err);
         }
         logger.error("Soulseek config error:", err);
         res.status(500).json({ error: "Failed to save configuration" });

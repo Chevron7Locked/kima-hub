@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { logger } from "../utils/logger";
-import { AppError, ErrorCategory, UserFacingError } from "../utils/errors";
+import { AppError, ErrorCategory, UserFacingError, invalidRequest } from "../utils/errors";
 import { config } from "../config";
 
 export function errorHandler(
@@ -59,14 +59,9 @@ export function errorHandler(
         });
     }
 
-    // A failed Zod parse is a bad request: 400 with the issues.
+    // A failed Zod parse is a bad request: a plain 400, the issues in the log.
     if (err instanceof ZodError) {
-        logger.warn(`[ZodError] ${req.method} ${req.path}: ${err.issues.length} issue(s)`);
-
-        return res.status(400).json({
-            error: "Invalid request",
-            details: err.issues,
-        });
+        return invalidRequest(req, res, err);
     }
 
     // A request body that cannot be read (bad JSON, too large) is the client's error.

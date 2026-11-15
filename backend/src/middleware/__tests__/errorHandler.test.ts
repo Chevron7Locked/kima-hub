@@ -133,7 +133,7 @@ describe("an error after the response started cannot be answered", () => {
 describe("a failed Zod parse is the client's fault, not the server's", () => {
     const schema = z.object({ trackId: z.string(), ms: z.number().int() });
 
-    it("answers 400 with the issues, rather than 500 with them hidden", async () => {
+    it("answers 400 with a plain message and no issues, rather than 500", async () => {
         let thrown: Error;
         try {
             schema.parse({ trackId: 123, ms: "nope" });
@@ -145,12 +145,29 @@ describe("a failed Zod parse is the client's fault, not the server's", () => {
         const res = await request(appThrowing(thrown!)).get("/boom");
 
         expect(res.status).toBe(400);
-        expect(res.body.error).toBe("Invalid request");
-        expect(res.body.details).toHaveLength(2);
-        expect(res.body.details[0]).toMatchObject({ path: ["trackId"] });
+        expect(res.body).toEqual({ error: "Invalid request" });
     });
 
-    it("says so in production too -- which field was wrong is not a server secret", async () => {
+    it("says nothing of the fields in development either, and logs them", async () => {
+        mockConfig.nodeEnv = "development";
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => {});
+        let thrown: Error;
+        try {
+            schema.parse({ trackId: 1, ms: 1 });
+            throw new Error("schema should have rejected this");
+        } catch (e) {
+            thrown = e as Error;
+        }
+
+        const res = await request(appThrowing(thrown!)).get("/boom");
+        const lines = warn.mock.calls.map((call) => String(call[0]));
+        warn.mockRestore();
+
+        expect(res.body).toEqual({ error: "Invalid request" });
+        expect(lines.some((line) => line.includes("/boom") && line.includes("trackId"))).toBe(true);
+    });
+
+    it("says so in production too: which field was wrong goes to the log, never to the caller", async () => {
         mockConfig.nodeEnv = "production";
 
         let thrown: Error;
@@ -164,7 +181,7 @@ describe("a failed Zod parse is the client's fault, not the server's", () => {
         const res = await request(appThrowing(thrown!)).get("/boom");
 
         expect(res.status).toBe(400);
-        expect(res.body.details.length).toBeGreaterThan(0);
+        expect(res.body).toEqual({ error: "Invalid request" });
     });
 });
 

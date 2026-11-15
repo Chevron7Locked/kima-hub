@@ -16,7 +16,7 @@ import {
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
 import { config, musicFolderProblem, musicPathFixedByEnv, useMusicFolder } from "../config";
 import { createLidarrClient } from "../services/lidarrClient";
-import { safeError } from "../utils/errors";
+import { invalidRequest, safeError } from "../utils/errors";
 
 const router = Router();
 
@@ -194,9 +194,7 @@ router.post("/", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res
-        .status(400)
-        .json({ error: "Invalid settings", details: error.issues });
+      return invalidRequest(req, res, error);
     }
     logger.error("Update system settings error:", error);
     res.status(500).json({ error: "Failed to update system settings" });

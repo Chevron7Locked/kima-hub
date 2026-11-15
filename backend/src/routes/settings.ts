@@ -6,6 +6,7 @@ import { staleJobCleanupService } from "../services/staleJobCleanup";
 import { defaultUserSettingsFor } from "../utils/userSettingsDefaults";
 import { encryptField } from "../utils/encryption";
 import { isPublicListener, setLiveHidden } from "../services/liveListening";
+import { invalidRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -79,9 +80,7 @@ router.post("/", async (req, res) => {
         res.json(publicSettings(settings, publicListener));
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid settings", details: error.issues });
+            return invalidRequest(req, res, error);
         }
         logger.error("Update settings error:", error);
         res.status(500).json({ error: "Failed to update settings" });

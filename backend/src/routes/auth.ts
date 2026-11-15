@@ -1,4 +1,4 @@
-import { Response, Router } from "express";
+import { Request, Response, Router } from "express";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
@@ -20,10 +20,13 @@ import { authLimiter } from "../middleware/rateLimiter";
 import { passwordGuessSubject, webLoginGuesses } from "../services/users/guessLimits";
 import { encrypt } from "../utils/encryption";
 import { isTransactionConflict } from "../utils/dbConflict";
+import { invalidRequest } from "../utils/errors";
 
 const router = Router();
 
 const ALREADY_ENABLED = "2FA is already enabled";
+/** The database ran out of time or connections for a code check; nothing was spent or changed. */
+const BUSY = "Try again";
 const SETUP_AGAIN = "Start setup again: there is no 2FA setup waiting, or it timed out";
 const UNREADABLE_SECRET = "2FA is on but its secret cannot be read, so it was left on";
 const UNREADABLE_SECRET_CODES = "2FA is on but its secret cannot be read, so the recovery codes were left as they were";
@@ -36,10 +39,10 @@ const setupBody = z.object({}).optional();
 const enableBody = z.object({ token: secondFactor });
 const proveBody = z.object({ password: z.string().min(1), token: secondFactor });
 
-/** A zod refusal as the 400 the routes answer; null when the error is something else. It names no field and no rule: a stranger learns nothing of the schema. */
-function invalidBody(err: unknown, res: Response): Response | null {
+/** A zod refusal as the 400 the routes answer; null when the error is something else. The caller learns nothing of the schema; the log gets the issues. */
+function invalidBody(err: unknown, req: Request, res: Response): Response | null {
     if (!(err instanceof z.ZodError)) return null;
-    return res.status(400).json({ error: "Invalid request" });
+    return invalidRequest(req, res, err);
 }
 
 /**
@@ -147,7 +150,7 @@ router.post("/login", async (req, res) => {
             },
         });
     } catch (err) {
-        if (invalidBody(err, res)) return;
+        if (invalidBody(err, req, res)) return;
         logger.error("Login error:", err);
         res.status(500).json({ error: "Internal error" });
     }
@@ -400,7 +403,7 @@ router.post("/2fa/setup", async (req, res) => {
             qrCode: qrCodeDataUrl,
         });
     } catch (error) {
-        if (invalidBody(error, res)) return;
+        if (invalidBody(error, req, res)) return;
         logger.error("2FA setup error:", error);
         res.status(500).json({ error: "Failed to setup 2FA" });
     }
@@ -467,7 +470,7 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
             recoveryCodes: recovery.codes,
         });
     } catch (error) {
-        if (invalidBody(error, res)) return;
+        if (invalidBody(error, req, res)) return;
         logger.error("2FA enable error:", error);
         res.status(500).json({ error: "Failed to enable 2FA" });
     }
@@ -513,6 +516,9 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
             token,
             async (tx) => ((await turnOffTwoFactor(user.id, tx)) ? true : null),
         );
+        if (off.outcome === "busy") {
+            return res.status(503).json({ error: BUSY });
+        }
         if (off.outcome === "wrong-code") {
             return res.status(400).json({ error: "Invalid 2FA token" });
         }
@@ -524,7 +530,7 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {
-        if (invalidBody(error, res)) return;
+        if (invalidBody(error, req, res)) return;
         logger.error("2FA disable error:", error);
         res.status(500).json({ error: "Failed to disable 2FA" });
     }
@@ -563,6 +569,9 @@ router.post("/2fa/recovery-codes", authLimiter, async (req, res) => {
             token,
             (tx) => replaceRecoveryCodes(user.id, tx),
         );
+        if (made.outcome === "busy") {
+            return res.status(503).json({ error: BUSY });
+        }
         if (made.outcome === "wrong-code") {
             return res.status(400).json({ error: "Invalid 2FA token" });
         }
@@ -575,7 +584,7 @@ router.post("/2fa/recovery-codes", authLimiter, async (req, res) => {
 
         res.json({ recoveryCodes: codes });
     } catch (error) {
-        if (invalidBody(error, res)) return;
+        if (invalidBody(error, req, res)) return;
         logger.error("2FA recovery codes error:", error);
         res.status(500).json({ error: "Failed to make new recovery codes" });
     }

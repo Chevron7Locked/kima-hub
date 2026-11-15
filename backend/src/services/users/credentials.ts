@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { decrypt, encrypt } from "../../utils/encryption";
@@ -126,8 +126,21 @@ export async function spendSecondFactor(
 /** Thrown inside the transaction to undo a spend whose change landed nothing. */
 class ChangeNotMade extends Error {}
 
-/** What `spendAndChange` came to: the code was wrong, the code was right but the change landed nothing (so the code is not spent), or both happened. */
-export type SpendAndChange<T> = { outcome: "wrong-code" } | { outcome: "not-changed" } | { outcome: "changed"; value: T };
+/**
+ * What `spendAndChange` came to: the code was wrong, the code was right but the change landed nothing (so the code is
+ * not spent), both happened, or the database could not give the transaction the time or a connection (`busy`: nothing
+ * was spent or changed, and the same request can be sent again).
+ */
+export type SpendAndChange<T> =
+    | { outcome: "wrong-code" }
+    | { outcome: "not-changed" }
+    | { outcome: "busy" }
+    | { outcome: "changed"; value: T };
+
+/** Prisma's transaction timeout or already-closed transaction (P2028), and a pool with no connection free in time (P2024). */
+function isOutOfTime(error: unknown): boolean {
+    return error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2028" || error.code === "P2024");
+}
 
 /**
  * Spends a person's second-factor code and makes the change it allows, in one transaction: the code is used up only if
@@ -150,6 +163,10 @@ export async function spendAndChange<T>(
         });
     } catch (error) {
         if (error instanceof ChangeNotMade) return { outcome: "not-changed" };
+        if (isOutOfTime(error)) {
+            logger.warn(`[2FA] ${user.id}: the database could not run the code check in time (${(error as Prisma.PrismaClientKnownRequestError).code})`);
+            return { outcome: "busy" };
+        }
         throw error;
     }
 }

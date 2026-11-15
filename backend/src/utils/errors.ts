@@ -1,4 +1,5 @@
-import { Response } from "express";
+import { Request, Response } from "express";
+import type { ZodError } from "zod";
 import { logger } from "./logger";
 
 /**
@@ -20,6 +21,18 @@ function describeForLog(error: unknown): string {
 export function safeError(res: Response, context: string, error: unknown, statusCode = 500): void {
     logger.error(`${context}: ${describeForLog(error)}`);
     res.status(statusCode).json({ error: "Internal server error" });
+}
+
+/**
+ * Answer a request that did not parse: a plain 400 that says nothing of the schema, and the issues in the log for
+ * whoever runs the server. The path is baseUrl + path, never originalUrl, which can carry a token in its query.
+ */
+export function invalidRequest(req: Request, res: Response, error: ZodError): Response {
+    const issues = error.issues
+        .map((issue) => `${issue.path.join(".") || "(body)"}: ${issue.message}`)
+        .join("; ");
+    logger.warn(`[InvalidRequest] ${req.method} ${req.baseUrl}${req.path}: ${issues}`);
+    return res.status(400).json({ error: "Invalid request" });
 }
 
 /**

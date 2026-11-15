@@ -4,7 +4,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
-import { ConfigurationError } from "../utils/errors";
+import { ConfigurationError, invalidRequest } from "../utils/errors";
 import { requireAcquirePermission } from "../middleware/auth";
 import { acquisitionService } from "../services/acquisitionService";
 import { withAlbumArtwork } from "../services/artwork";
@@ -150,10 +150,7 @@ router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) =
         // The radar row carries artist and title, and the acquisition searches sources by name.
         const parsed = downloadReleaseSchema.safeParse(req.body);
         if (!parsed.success) {
-            return res.status(400).json({
-                error: "artistName and albumTitle are required to download a release",
-                details: parsed.error.issues,
-            });
+            return invalidRequest(req, res, parsed.error);
         }
         const { artistName, albumTitle } = parsed.data;
 

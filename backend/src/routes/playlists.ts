@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { z } from "zod";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { safeError } from "../utils/errors";
+import { invalidRequest, safeError } from "../utils/errors";
 import {
     requirePlaylistOwner,
     requirePlaylistReader,
@@ -171,9 +171,7 @@ router.post("/", async (req, res) => {
         res.json(playlist);
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: error.issues });
+            return invalidRequest(req, res, error);
         }
         if (error instanceof KeyParamsMismatch) {
             return res.status(422).json({ error: error.message });
@@ -219,9 +217,7 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
 
         const order = playlistOrderSchema.safeParse(req.query.order);
         if (!order.success) {
-            return res
-                .status(400)
-                .json({ error: "Invalid order", details: order.error.issues });
+            return invalidRequest(req, res, order.error);
         }
         // An explicit ?order= wins; otherwise the playlist's stored flag.
         const reversed =
@@ -318,9 +314,7 @@ async function updatePlaylist(req: Request, res: Response) {
         res.json(namedFields(playlist));
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res
-                .status(400)
-                .json({ error: "Invalid request", details: error.issues });
+            return invalidRequest(req, res, error);
         }
         logger.error("Update playlist error:", error);
         res.status(500).json({ error: "Failed to update playlist" });
@@ -390,10 +384,7 @@ router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
     try {
         const parsed = addTracksSchema.safeParse(req.body);
         if (!parsed.success) {
-            return res.status(400).json({
-                error: "Invalid request",
-                details: parsed.error.issues,
-            });
+            return invalidRequest(req, res, parsed.error);
         }
 
         const result = await addSongs(req, parsed.data.trackIds ?? [parsed.data.trackId!], {
@@ -429,10 +420,7 @@ router.post("/:id/items/batch", requirePlaylistOwner, async (req, res) => {
     try {
         const parsed = addTracksBatchSchema.safeParse(req.body);
         if (!parsed.success) {
-            return res.status(400).json({
-                error: "Invalid request",
-                details: parsed.error.issues,
-            });
+            return invalidRequest(req, res, parsed.error);
         }
         const { trackIds } = parsed.data;
         const result = await addSongs(req, trackIds);
@@ -484,10 +472,7 @@ router.patch("/:id/items/:itemId/move", requirePlaylistOwner, async (req, res) =
     try {
         const parsed = moveItemSchema.safeParse(req.body);
         if (!parsed.success) {
-            return res.status(400).json({
-                error: "Invalid request",
-                details: parsed.error.issues,
-            });
+            return invalidRequest(req, res, parsed.error);
         }
 
         const { rank } = await playlistService.moveItem(
