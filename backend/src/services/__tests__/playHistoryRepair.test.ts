@@ -4,6 +4,10 @@
 
 import { listensOf, collapseCandidates, auditFalseStarts, collapseDuplicateRows, removeFalseStarts } from "../playHistoryRepair";
 import { prisma } from "../../utils/db";
+import { lockPlayHistory, recordPlay } from "../playRecording";
+
+// Nothing here may reach ListenBrainz.
+jest.mock("../listenBrainz", () => ({ listenBrainzService: { submitListens: jest.fn().mockResolvedValue(false) } }));
 
 const P = "zz-playRepair-";
 const USER = `${P}u1`;
@@ -208,6 +212,148 @@ describe("the ignored list", () => {
         });
         const audit = await auditFalseStarts(USER);
         expect(audit.ignored.map((r) => r.trackId)).toEqual([`${P}lib1`]);
+    });
+});
+
+describe("reading the history in pages", () => {
+    /** A history with listens that span pages, Discover plays between library ones, and rows sharing one instant. */
+    const mixed = () => {
+        const rows: ReturnType<typeof play>[] = [];
+        for (let i = 0; i < 12; i++) {
+            const t = i * 400;
+            const song = `s${i % 4}`;
+            rows.push(play(`a${i}`, t, 200, song), play(`b${i}`, t + 10, 200, song), play(`c${i}`, t + 20, 200, song));
+            if (i % 2 === 0) {
+                // A Discover play 40 seconds after the last row: a library skip, proven only by the Discover play ending it.
+                rows.push(play(`d${i}`, t + 60, 200, `d${i % 4}`, false, "disc"));
+            } else {
+                // A fourth row, and a Discover play too late to prove anything: unclear, with two rows a collapse may drop.
+                rows.push(play(`e${i}`, t + 30, 200, song), play(`d${i}`, t + 150, 200, `d${i % 4}`, false, "disc"));
+            }
+        }
+        rows.push(play("tie1", 5000, 200, "s5", true), play("tie2", 5000, 200, "s6", true), play("tie3", 5000, 200, "d9", false, "disc"));
+        rows.push(play("z", 9000, 200, "s7"));
+        return rows;
+    };
+
+    it("gives the same audit whatever the page size, with listens spanning page boundaries", async () => {
+        await given(mixed());
+        const whole = await auditFalseStarts(USER, { pageSize: 10_000 });
+        expect(whole.totalListens).toBeGreaterThan(5);
+        expect(whole.collapsibleRows).toBeGreaterThan(0);
+        expect(whole.skipped).toBeGreaterThan(0);
+        for (const pageSize of [1, 2, 3, 5, 7, 11]) {
+            expect(await auditFalseStarts(USER, { pageSize })).toEqual(whole);
+        }
+    });
+
+    it("gives the same listens whatever the page size, in the order they began", async () => {
+        await given(mixed());
+        const whole = await listensOf(USER, { pageSize: 10_000 });
+        expect(await listensOf(USER, { pageSize: 3 })).toEqual(whole);
+        expect(whole.map((l) => l.startedAt.getTime())).toEqual([...whole.map((l) => l.startedAt.getTime())].sort((x, y) => x - y));
+    });
+
+    it("collapses and removes the same rows whatever the page size", async () => {
+        await given(mixed());
+        const audit = await auditFalseStarts(USER);
+        expect(audit.collapsibleRows).toBeGreaterThan(0);
+        expect(audit.skipped).toBeGreaterThan(0);
+        expect(await collapseDuplicateRows(USER, { pageSize: 3 })).toEqual({ removed: audit.collapsibleRows });
+        // A collapse keeps each listen's first and last rows, so no verdict moved: each skipped listen has two rows left.
+        const tracks = Array.from({ length: 4 }, (_, i) => `${P}s${i}`);
+        expect(await removeFalseStarts(USER, tracks, { pageSize: 3 })).toEqual({ removed: audit.skipped * 2, tracks: audit.tracks.length });
+        expect(await collapseDuplicateRows(USER, { pageSize: 3 })).toEqual({ removed: 0 });
+        // Discover rows were never touched.
+        expect(await prisma.play.count({ where: { userId: USER, id: { startsWith: `${P}d` } } })).toBe(12);
+    });
+
+    it("never asks for more than a page at a time, and takes several to read a longer history", async () => {
+        await given(mixed());
+        const spy = jest.spyOn(prisma.play, "findMany");
+        await auditFalseStarts(USER, { pageSize: 10 });
+        const asked = spy.mock.calls.map(([args]) => args?.take);
+        spy.mockRestore();
+        expect(asked.length).toBeGreaterThan(3);
+        expect(asked.every((take) => take === 10)).toBe(true);
+    });
+});
+
+describe("a play landing while the audit reads and deletes", () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** What a recordPlay in flight looks like: holding the shared lock with its row written but not committed. */
+    async function recordingInFlight(write: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<void>) {
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => (release = resolve));
+        let locked!: () => void;
+        const holding = new Promise<void>((resolve) => (locked = resolve));
+        const tx = prisma.$transaction(
+            async (t) => {
+                await lockPlayHistory(t, USER);
+                await write(t);
+                locked();
+                await released;
+            },
+            { timeout: 20_000 },
+        );
+        await holding;
+        return { release, done: tx };
+    }
+
+    it("is seen by the removal: the read and the delete wait for it, so a verdict is never judged without it", async () => {
+        // lib1 was left after 20 seconds (a skip); a heard row of it lands inside its window while the removal starts.
+        await given([play("l1", 0, 200, "lib1"), play("l2", 30, 200, "lib2"), play("l3", 1000, 200, "lib3", true)]);
+        const flight = await recordingInFlight(async (tx) => {
+            await tx.play.create({ data: { id: `${P}late`, userId: USER, trackId: `${P}lib1`, playedAt: new Date(T0 + 20_000), heard: true } });
+        });
+        const removal = removeFalseStarts(USER, [`${P}lib1`]);
+        await sleep(400); // long enough for an unguarded read to have finished
+        flight.release();
+        await flight.done;
+        expect(await removal).toEqual({ removed: 0, tracks: 0 });
+        expect(await prisma.play.count({ where: { userId: USER, trackId: `${P}lib1` } })).toBe(2);
+    });
+
+    it("is seen by the collapse in the same way", async () => {
+        // Three rows of one listen: the middle one would be collapsed. A fourth row lands, and the collapse must judge four.
+        await given([play("a", 0, 200), play("b", 40, 200), play("c", 80, 200)]);
+        const flight = await recordingInFlight(async (tx) => {
+            await tx.play.create({ data: { id: `${P}late`, userId: USER, trackId: `${P}t1`, playedAt: new Date(T0 + 60_000) } });
+        });
+        const collapse = collapseDuplicateRows(USER);
+        await sleep(400);
+        flight.release();
+        await flight.done;
+        expect(await collapse).toEqual({ removed: 2 });
+        expect((await prisma.play.findMany({ where: { userId: USER } })).map((r) => r.id).sort()).toEqual([`${P}a`, `${P}c`]);
+    });
+
+    it("waits for a removal in progress: a play is recorded after it, never in the middle of it", async () => {
+        await given([play("l1", 0, 200, "lib1")]);
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => (release = resolve));
+        let locked!: () => void;
+        const holding = new Promise<void>((resolve) => (locked = resolve));
+        const audit = prisma.$transaction(
+            async (t) => {
+                await lockPlayHistory(t, USER, { exclusive: true });
+                locked();
+                await released;
+            },
+            { timeout: 20_000 },
+        );
+        await holding;
+        let recorded = false;
+        const recording = recordPlay({ userId: USER, trackId: `${P}lib1`, secondsListened: 150, playedAt: new Date(T0 + 5000_000) }).then((o) => {
+            recorded = true;
+            return o;
+        });
+        await sleep(400);
+        expect(recorded).toBe(false);
+        release();
+        await audit;
+        expect(await recording).toMatchObject({ recorded: true });
     });
 });
 

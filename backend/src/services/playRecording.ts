@@ -118,6 +118,27 @@ async function lockPlayDedupe(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PLAY_DEDUP_LOCK_NAMESPACE}::int, hashtext(${`${userId}:${trackId}`}))`;
 }
 
+/** A second namespace, for the lock on one listener's whole play history (see `lockPlayHistory`). */
+const PLAY_HISTORY_LOCK_NAMESPACE = 7002;
+
+/**
+ * Guards one listener's play history as a whole. Recording a play takes it shared, so recordings never wait for one
+ * another; the false-start audit takes it exclusive around its read and delete, so no play lands between the
+ * two and a verdict is never carried out on history that has since changed. Taken before the per-track lock, never after.
+ * Released with the transaction.
+ */
+export async function lockPlayHistory(
+    tx: Pick<typeof prisma, "$executeRaw">,
+    userId: string,
+    options: { exclusive?: true } = {},
+): Promise<void> {
+    if (options.exclusive) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId}))`;
+    } else {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId}))`;
+    }
+}
+
 /**
  * Record a play if the listening earns it. Duration is read from the database,
  * never the request. Check and insert run in one transaction behind a
@@ -164,6 +185,7 @@ export async function recordPlay(
     // No isolationLevel on purpose: READ COMMITTED is what makes the lock work
     // (see lockPlayDedupe).
     const outcome = await prisma.$transaction(async (tx) => {
+        await lockPlayHistory(tx, userId);
         await lockPlayDedupe(tx, userId, trackId);
 
         // Strict bounds on both sides: exactly one duration away, the song has

@@ -9,7 +9,7 @@
  * Two meanings are kept apart, each as its first readers had it:
  * - played: raw Play rows, repeats and skips included (`playRowsSql`,
  *   `neverPlayedSql`, `playedMoreThanSql`, `playCounts`, `mostPlayedTrackIds`,
- *   `recentPlayArtists`, `playHistory`, `countPlaysBefore`, `hasPlayBetween`);
+ *   `recentPlayArtists`, `playHistoryPages`, `countPlaysBefore`, `hasPlayBetween`);
  * - listened: the folded listens (`listenRows`, `listenedMoreThanSql`,
  *   `withListens`, `recentListenArtists`).
  * Two readers keep to the rows the listen rule recorded (`heard`: the mixes' night
@@ -19,7 +19,7 @@
  * asks of albums whoever played them. Which songs count is the caller's rule
  * (the playable-song rule, usually), passed in or composed in its own SQL.
  * The stats page (`libraryOnly`, which `withListens` sets) and the play-history audit (which reports library plays only, though
- * its `playHistory` carries every play, so a Discover play still ends the gap after a library one) leave Discover plays out of
+ * its `playHistoryPages` carry every play, so a Discover play still ends the gap after a library one) leave Discover plays out of
  * their statistics. Every other reader keeps its own meaning.
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  */
@@ -272,16 +272,41 @@ export async function albumsPlayedAtLeast(
     return new Set(rows.map((r) => r.albumId));
 }
 
-/**
- * Every Play row of this listener's, oldest first (the row id breaks a tie), with the song's title, length and artist: the
- * whole history, for the audit that looks for skips. Nothing calls it on a page load. `library` says whether the song is on a
- * library album (told by the album's location): the audit sequences every play but reports, collapses and removes library
- * plays only.
- */
-export async function playHistory(userId: string) {
-    const rows = await prisma.play.findMany({
-        where: { userId },
+/** How many Play rows `playHistoryPages` reads at a time. */
+export const PLAY_HISTORY_PAGE_SIZE = 5000;
+
+/** One Play row of the history, with its song's title, length and artist, and whether the song is on a library album. */
+export interface PlayHistoryRow {
+    id: string;
+    trackId: string;
+    playedAt: Date;
+    heard: boolean;
+    /** The song is on a library album, told by the album's location. */
+    library: boolean;
+    track: {
+        title: string;
+        displayTitle: string | null;
+        duration: number;
+        album: { artist: { name: string; displayName: string | null } };
+    };
+}
+
+/** The rows of one page: strictly after `after` in (playedAt, id) order, at most `take` of them. */
+async function playHistoryPage(
+    db: Prisma.TransactionClient,
+    userId: string,
+    after: { playedAt: Date; id: string } | null,
+    take: number,
+): Promise<PlayHistoryRow[]> {
+    const rows = await db.play.findMany({
+        where: {
+            userId,
+            ...(after
+                ? { OR: [{ playedAt: { gt: after.playedAt } }, { playedAt: after.playedAt, id: { gt: after.id } }] }
+                : {}),
+        },
         orderBy: [{ playedAt: "asc" }, { id: "asc" }],
+        take,
         select: {
             id: true,
             trackId: true,
@@ -302,6 +327,30 @@ export async function playHistory(userId: string) {
         library: location === "LIBRARY",
         track: { ...track, album: { artist } },
     }));
+}
+
+/**
+ * Every Play row of this listener's, oldest first (the row id breaks a tie), a page at a time: for the audit that looks for
+ * skips, which must see the whole history but never hold it. Pages are cut by keyset on (playedAt, id), so a page costs
+ * the same however deep it is, and each starts strictly after the last row of the one before. Nothing calls it on a page
+ * load. `library` says whether the song is on a library album: the audit sequences every play but reports, collapses and
+ * removes library plays only. `db` is the transaction to read through, when the caller holds one.
+ */
+export async function* playHistoryPages(
+    userId: string,
+    options: { db?: Prisma.TransactionClient; pageSize?: number } = {},
+): AsyncGenerator<PlayHistoryRow[]> {
+    const db = options.db ?? prisma;
+    const take = options.pageSize ?? PLAY_HISTORY_PAGE_SIZE;
+    let after: { playedAt: Date; id: string } | null = null;
+    for (;;) {
+        const page: PlayHistoryRow[] = await playHistoryPage(db, userId, after, take);
+        if (page.length === 0) return;
+        yield page;
+        if (page.length < take) return;
+        const last: PlayHistoryRow = page[page.length - 1];
+        after = { playedAt: last.playedAt, id: last.id };
+    }
 }
 
 /** How many Play rows this listener has from before `moment`. */

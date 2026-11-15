@@ -12,7 +12,7 @@ import {
     countPlaysBefore,
     hasPlayBetween,
     playCounts,
-    playHistory,
+    playHistoryPages,
     playRowsSql,
     recentListenArtists,
 } from "../listens";
@@ -154,6 +154,13 @@ describe("albums played at least", () => {
     });
 });
 
+/** The whole history, read in pages of the given size. */
+async function playHistory(user: string, pageSize?: number) {
+    const rows = [];
+    for await (const page of playHistoryPages(user, { pageSize })) rows.push(...page);
+    return rows;
+}
+
 describe("play history", () => {
     it("is every row of this listener's, oldest first, with the song's title, length and artist", async () => {
         const rows = await playHistory(A);
@@ -169,6 +176,17 @@ describe("play history", () => {
         const all = await playHistory(A);
         expect(all.find((r) => r.trackId === id("q1"))?.library).toBe(false); // alb_q is the Discover album
         expect(all.find((r) => r.trackId === id("p1"))?.library).toBe(true);
+    });
+
+    it("reads the same rows whatever the page size, with a page boundary inside a tie", async () => {
+        const at = ago(41 * DAY);
+        await prisma.play.createMany({
+            data: ["a", "b", "c", "d", "e"].map((x) => ({ id: `${P}pg_${x}`, userId: B, trackId: id("p3"), playedAt: at })),
+        });
+        const whole = await playHistory(B);
+        for (const size of [1, 2, 3]) expect((await playHistory(B, size)).map((r) => r.id)).toEqual(whole.map((r) => r.id));
+        expect(whole.filter((r) => r.id.startsWith(`${P}pg_`)).map((r) => r.id)).toEqual(["a", "b", "c", "d", "e"].map((x) => `${P}pg_${x}`));
+        await prisma.play.deleteMany({ where: { id: { startsWith: `${P}pg_` } } });
     });
 
     it("breaks a tie on the row id", async () => {
