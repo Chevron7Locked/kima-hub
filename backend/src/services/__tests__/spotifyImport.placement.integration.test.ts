@@ -14,7 +14,10 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
 import { spotifyImportService } from "../spotifyImport";
+import * as playlistService from "../playlistService";
 import { moveItem } from "../playlistService";
+import { eventBus, type SSEEvent } from "../eventBus";
+import { notificationService } from "../notificationService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-import-place";
@@ -233,5 +236,33 @@ describe("a refresh that finds a waiting song", () => {
         const result = await spotifyImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(2);
         expect(await held(playlistId)).toEqual([x.id, ids[0], x.id]);
+    });
+});
+
+describe("a scan over every playlist", () => {
+    it("finishes the playlists after one that fails, and tells their owners", async () => {
+        const first = await importOf([entry(0), waiting()]);
+        const second = await importOf([entry(1), waiting()]);
+        const [broken, sound] = [first, second].sort();
+        const x = await libraryGains();
+        const place = playlistService.placeFoundSongs;
+        const spy = jest.spyOn(playlistService, "placeFoundSongs").mockImplementation((playlistId, found) =>
+            playlistId === broken ? Promise.reject(new Error("playlist locked")) : place(playlistId, found)
+        );
+        const heard: SSEEvent[] = [];
+        const stop = eventBus.subscribe(USER, { send: (event) => (heard.push(event), true) });
+        (notificationService.create as jest.Mock).mockClear();
+        try {
+            const result = await spotifyImportService.reconcilePendingTracks();
+            expect(result).toEqual({ playlistsUpdated: 1, tracksAdded: 1 });
+        } finally {
+            stop();
+            spy.mockRestore();
+        }
+        expect((await held(sound)).includes(x.id)).toBe(true);
+        expect((await held(broken)).includes(x.id)).toBe(false);
+        expect(heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload)).toEqual([{ playlistId: sound, deleted: false }]);
+        expect(notificationService.create).toHaveBeenCalledTimes(1);
+        expect((notificationService.create as jest.Mock).mock.calls[0][0].metadata).toEqual({ playlistId: sound, tracksAdded: 1 });
     });
 });

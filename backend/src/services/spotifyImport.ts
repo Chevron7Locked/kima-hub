@@ -2571,8 +2571,7 @@ class SpotifyImportService {
     );
 
     let totalTracksAdded = 0;
-    const playlistsWithAdditions = new Set<string>();
-    const matchedPendingTrackIds: string[] = [];
+    let playlistsUpdated = 0;
     const shownArtists = await ShownArtists.load();
 
     // Group by playlist for efficient processing
@@ -2583,55 +2582,46 @@ class SpotifyImportService {
       tracksByPlaylist.set(pt.playlistId, existing);
     }
 
+    // One playlist failing does not stop the rest: each is placed, announced and notified on its own.
     for (const [playlistId, pendingTracks] of tracksByPlaylist) {
-      const found = await this.matchWaitingEntries(pendingTracks, shownArtists);
-
-      // Each found song takes its waiting entry's place; one another scan already placed is not added twice.
-      const placed = await placeFoundSongs(playlistId, found);
-      if (placed.length > 0) {
-        for (const song of placed) if (song.pendingId) matchedPendingTrackIds.push(song.pendingId);
-        totalTracksAdded += placed.length;
-        playlistsWithAdditions.add(playlistId);
+      let placed: FoundSong[];
+      try {
+        const found = await this.matchWaitingEntries(pendingTracks, shownArtists);
+        // Each found song takes its waiting entry's place; one another scan already placed is not added twice.
+        placed = await placeFoundSongs(playlistId, found);
+      } catch (err) {
+        logger.error(`   Could not reconcile pending tracks of playlist ${playlistId}:`, err);
+        continue;
       }
-    }
+      if (placed.length === 0) continue;
 
-    if (playlistsWithAdditions.size > 0) {
-      for (const playlistId of playlistsWithAdditions) {
-        const playlist = await prisma.playlist.findUnique({
-          where: { id: playlistId },
-          select: { id: true, name: true, userId: true },
+      totalTracksAdded += placed.length;
+      playlistsUpdated++;
+
+      const { playlist } = pendingTracks[0];
+      announcePlaylistChange(playlist.userId, playlist.id);
+      try {
+        await notificationService.create({
+          userId: playlist.userId,
+          type: "playlist_ready",
+          title: "Playlist Updated",
+          message: `${placed.length} new track${placed.length !== 1 ? "s" : ""} added to "${playlist.name}"`,
+          metadata: {
+            playlistId: playlist.id,
+            tracksAdded: placed.length,
+          },
         });
-
-        if (playlist) {
-          announcePlaylistChange(playlist.userId, playlist.id);
-          const tracksAddedToPlaylist = matchedPendingTrackIds.filter((id) =>
-            allPendingTracks.find(
-              (pt) => pt.id === id && pt.playlistId === playlistId,
-            ),
-          ).length;
-
-          await notificationService.create({
-            userId: playlist.userId,
-            type: "playlist_ready",
-            title: "Playlist Updated",
-            message: `${tracksAddedToPlaylist} new track${
-              tracksAddedToPlaylist !== 1 ? "s" : ""
-            } added to "${playlist.name}"`,
-            metadata: {
-              playlistId: playlist.id,
-              tracksAdded: tracksAddedToPlaylist,
-            },
-          });
-        }
+      } catch (err) {
+        logger.error(`   Could not notify about playlist ${playlist.id}:`, err);
       }
     }
 
     logger.debug(
-      `   Reconciliation complete: ${totalTracksAdded} tracks added to ${playlistsWithAdditions.size} playlists`,
+      `   Reconciliation complete: ${totalTracksAdded} tracks added to ${playlistsUpdated} playlists`,
     );
 
     return {
-      playlistsUpdated: playlistsWithAdditions.size,
+      playlistsUpdated,
       tracksAdded: totalTracksAdded,
     };
   }
