@@ -129,3 +129,125 @@ describe("the library's song list", () => {
         expect(start).toBe(0);
     });
 });
+
+describe("the album's song list, the other buttons of a row", () => {
+    type Props = Partial<React.ComponentProps<typeof AlbumTrackList>>;
+    const render = (props: Props, titles: Record<string, string> = {}) =>
+        act(() =>
+            dom.root.render(
+                <AlbumTrackList
+                    tracks={["a", "b"].map((id) => ({ ...albumTrack(id), title: titles[id] ?? `Song ${id}` })) as never}
+                    album={{ id: "al", title: "Album", artist: { name: "Artist" } } as never}
+                    source="library"
+                    currentTrackId={undefined}
+                    colors={null}
+                    onPlayTrack={() => {}}
+                    onAddToQueue={() => {}}
+                    onAddToPlaylist={() => {}}
+                    previewTrack={null}
+                    previewPlaying={false}
+                    onPreview={() => {}}
+                    {...props}
+                />,
+            ),
+        );
+    const button = (label: string, place = 1) =>
+        dom.host.querySelectorAll<HTMLElement>("[data-track-index]")[place].querySelector<HTMLElement>(`[aria-label="${label}"]`)!;
+
+    it("add to queue calls the latest callback", async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        render({ onAddToQueue: first });
+        render({ onAddToQueue: second });
+        await act(async () => button("add to queue").click());
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledTimes(1);
+        expect(second.mock.calls[0][0]).toMatchObject({ id: "b" });
+    });
+
+    it("add to playlist calls the latest callback", async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        render({ onAddToPlaylist: first });
+        render({ onAddToPlaylist: second });
+        await act(async () => button("add to playlist").click());
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledWith("b");
+    });
+
+    it("preview calls the latest callback", async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        render({ source: "discovery", onPreview: first });
+        render({ source: "discovery", onPreview: second });
+        await act(async () => button("play preview").click());
+        expect(first).not.toHaveBeenCalled();
+        expect(second.mock.calls[0][0]).toMatchObject({ id: "b" });
+    });
+
+    it("the playing row's edge takes the latest colours", async () => {
+        render({ currentTrackId: "a", colors: { vibrant: "#111111" } as never });
+        render({ currentTrackId: "a", colors: { vibrant: "#222222" } as never });
+        const row = dom.host.querySelectorAll<HTMLElement>("[data-track-index]")[0];
+        expect(row.style.borderLeftColor).toBe("#222222");
+    });
+
+    it("a song edited in place shows its new title and hands the new song to a callback", async () => {
+        const play = vi.fn();
+        render({ onPlayTrack: play });
+        render({ onPlayTrack: play }, { b: "Song b, remastered" });
+        expect(dom.host.textContent).toContain("Song b, remastered");
+        await act(async () => playButton(1).click());
+        expect(play.mock.calls[0][0]).toMatchObject({ title: "Song b, remastered" });
+    });
+});
+
+describe("the library's song list, the other buttons of a row", () => {
+    const render = (props: Partial<React.ComponentProps<typeof LibraryTracksList>>, titles: Record<string, string> = {}) =>
+        act(() =>
+            dom.root.render(
+                <LibraryTracksList
+                    tracks={["a", "b"].map((id) => ({ ...libraryTrack(id), title: titles[id] ?? `Song ${id}` })) as never}
+                    onPlay={() => {}}
+                    onAddToQueue={() => {}}
+                    {...props}
+                />,
+            ),
+        );
+    const button = (title: string, place = 1) =>
+        dom.host.querySelectorAll<HTMLElement>("[data-tv-card-index]")[place].querySelector<HTMLElement>(`[title="${title}"]`)!;
+
+    it("add to queue calls the latest callback", async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        render({ onAddToQueue: first });
+        render({ onAddToQueue: second });
+        await act(async () => button("add to queue").click());
+        expect(first).not.toHaveBeenCalled();
+        expect(second.mock.calls[0][0]).toMatchObject({ id: "b" });
+    });
+
+    it("delete calls the latest callback, and appears and goes with it", async () => {
+        const first = vi.fn();
+        const second = vi.fn();
+        render({ onDelete: first });
+        render({ onDelete: second });
+        await act(async () => button("delete track").click());
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledWith("b", "Song b");
+
+        render({});
+        expect(dom.host.querySelector('[title="delete track"]')).toBeNull();
+        render({ onDelete: second });
+        expect(dom.host.querySelector('[title="delete track"]')).not.toBeNull();
+    });
+
+    it("a song edited in place shows its new title and hands the new song to a callback", async () => {
+        const add = vi.fn();
+        render({ onAddToQueue: add });
+        render({ onAddToQueue: add }, { b: "Song b, remastered" });
+        expect(dom.host.textContent).toContain("Song b, remastered");
+        await act(async () => button("add to queue").click());
+        expect(add.mock.calls[0][0]).toMatchObject({ title: "Song b, remastered" });
+    });
+});

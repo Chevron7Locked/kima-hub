@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import { Play, Pause, Volume2, ListPlus, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { Track, Album, AlbumSource } from "../types";
@@ -8,6 +8,7 @@ import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
 import { shownTitle } from "@/lib/track-title";
 import { usePlayRow } from "@/hooks/usePlayRow";
+import { useLatest } from "@/hooks/useLatest";
 
 interface TrackListProps {
     tracks: Track[];
@@ -249,15 +250,22 @@ const TrackRow = memo(
             </div>
         );
     },
+    // The handlers are stable, so a row draws again only when something it shows changes. `colors` is read for the
+    // playing row's edge alone.
     (prevProps, nextProps) => {
         return (
-            prevProps.track.id === nextProps.track.id &&
+            prevProps.track === nextProps.track &&
+            prevProps.album === nextProps.album &&
             prevProps.isPlaying === nextProps.isPlaying &&
             prevProps.isSounding === nextProps.isSounding &&
             prevProps.isPreviewPlaying === nextProps.isPreviewPlaying &&
             prevProps.index === nextProps.index &&
             prevProps.isOwned === nextProps.isOwned &&
-            prevProps.onPlayTrack === nextProps.onPlayTrack
+            (!nextProps.isPlaying || prevProps.colors === nextProps.colors) &&
+            prevProps.onPlayTrack === nextProps.onPlayTrack &&
+            prevProps.onAddToQueue === nextProps.onAddToQueue &&
+            prevProps.onAddToPlaylist === nextProps.onAddToPlaylist &&
+            prevProps.onPreview === nextProps.onPreview
         );
     }
 );
@@ -283,17 +291,17 @@ export const TrackList = memo(function TrackList({
     const shouldGroupByDisc = discNumbers.length > 1;
     const { isPlaying: audioPlaying, playRow } = usePlayRow();
 
-    // Rows are memoised, so what a row calls on a press must not be a copy from an older render. This one handler
-    // never changes and reads the list's latest play callback, current song and `playRow` from a ref.
-    const latest = useRef({ currentTrackId, onPlayTrack, playRow });
-    useLayoutEffect(() => {
-        latest.current = { currentTrackId, onPlayTrack, playRow };
-    }, [currentTrackId, onPlayTrack, playRow]);
+    // Rows are memoised, so what a row calls on a press must not be a copy from an older render. These handlers
+    // never change and read the list's latest callbacks, current song and `playRow` from a ref.
+    const latest = useLatest({ currentTrackId, onPlayTrack, onAddToQueue, onAddToPlaylist, onPreview, playRow });
     // The song that is current pauses or resumes; any other starts the album from it.
     const handlePlayTrack = useCallback((t: Track, i: number, gesture?: "press" | "double") => {
         const { currentTrackId: current, onPlayTrack: play, playRow: row } = latest.current;
         row(current === t.id, () => play(t, i), gesture);
-    }, []);
+    }, [latest]);
+    const handleAddToQueue = useCallback((t: Track) => latest.current.onAddToQueue(t), [latest]);
+    const handleAddToPlaylist = useCallback((id: string) => latest.current.onAddToPlaylist(id), [latest]);
+    const handlePreview = useCallback((t: Track) => latest.current.onPreview(t), [latest]);
 
     return (
         <section>
@@ -331,9 +339,9 @@ export const TrackList = memo(function TrackList({
                                 isPreviewPlaying={isPreviewPlaying}
                                 colors={colors}
                                 onPlayTrack={handlePlayTrack}
-                                onAddToQueue={onAddToQueue}
-                                onAddToPlaylist={onAddToPlaylist}
-                                onPreview={onPreview}
+                                onAddToQueue={handleAddToQueue}
+                                onAddToPlaylist={handleAddToPlaylist}
+                                onPreview={handlePreview}
                             />
                         </React.Fragment>
                     );

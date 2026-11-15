@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo, useCallback, useLayoutEffect, useRef } from "react";
+import { useState, memo, useCallback } from "react";
 import { Track } from "../types";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { LibraryListStatus } from "./LibraryGrid";
@@ -11,6 +11,7 @@ import { formatTime } from "@/lib/format";
 import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { usePlayRow } from "@/hooks/usePlayRow";
+import { useLatest } from "@/hooks/useLatest";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
 import { shownTitle } from "@/lib/track-title";
@@ -173,13 +174,17 @@ const TrackRow = memo(
             </div>
         );
     },
+    // The handlers are stable, so a row draws again only when something it shows changes.
     (prevProps, nextProps) => {
         return (
-            prevProps.track.id === nextProps.track.id &&
+            prevProps.track === nextProps.track &&
             prevProps.isCurrentlyPlaying === nextProps.isCurrentlyPlaying &&
             prevProps.isSounding === nextProps.isSounding &&
             prevProps.index === nextProps.index &&
-            prevProps.onPlayTrack === nextProps.onPlayTrack
+            prevProps.onPlayTrack === nextProps.onPlayTrack &&
+            prevProps.onAddToQueue === nextProps.onAddToQueue &&
+            prevProps.onShowAddToPlaylist === nextProps.onShowAddToPlaylist &&
+            prevProps.onDelete === nextProps.onDelete
         );
     },
 );
@@ -196,17 +201,18 @@ export function TracksList({
     const { isPlaying, playRow } = usePlayRow();
 
     // Rows are memoised, so what a row calls on a press must not be a copy from an older render: that one would play
-    // the list as it was then, not as it is now. This handler never changes and reads the latest list, current song,
-    // play callback and `playRow` from a ref.
-    const latest = useRef({ tracks, currentTrackId, onPlay, playRow });
-    useLayoutEffect(() => {
-        latest.current = { tracks, currentTrackId, onPlay, playRow };
-    }, [tracks, currentTrackId, onPlay, playRow]);
+    // the list as it was then, not as it is now. These handlers never change and read the latest list, current song,
+    // callbacks and `playRow` from a ref.
+    const latest = useLatest({ tracks, currentTrackId, onPlay, onAddToQueue, onDelete, playRow });
     // The song that is current pauses or resumes; any other starts the list from it.
     const handlePlayTrack = useCallback((track: Track, index: number, gesture?: "press" | "double") => {
         const { tracks: list, currentTrackId: current, onPlay: play, playRow: row } = latest.current;
         row(current === track.id, () => play(list, index), gesture);
-    }, []);
+    }, [latest]);
+    const handleAddToQueue = useCallback((track: Track) => latest.current.onAddToQueue(track), [latest]);
+    // A row shows its delete button only when the list can delete, so it gets this handler only then.
+    const handleDelete = useCallback((id: string, title: string) => latest.current.onDelete?.(id, title), [latest]);
+    const canDelete = onDelete !== undefined;
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
 
@@ -239,9 +245,9 @@ export function TracksList({
                             isCurrentlyPlaying={isCurrentlyPlaying}
                             isSounding={isCurrentlyPlaying && isPlaying}
                             onPlayTrack={handlePlayTrack}
-                            onAddToQueue={onAddToQueue}
+                            onAddToQueue={handleAddToQueue}
                             onShowAddToPlaylist={handleShowAddToPlaylist}
-                            onDelete={onDelete}
+                            onDelete={canDelete ? handleDelete : undefined}
                         />
                     );
                 })}
