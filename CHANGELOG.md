@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Discover tells apart artists who share a name.** When both have a MusicBrainz id, a different artist with the same name no longer hides a recommendation as already owned, and their songs, download or tier no longer show up on your Discover cards.
 - **Dismissing a waiting import song sticks.** A song you dismiss from an import's waiting list comes off the import's total and its saved listing, and a library scan running at the same moment can no longer add it back.
 - **An import's matched count counts songs found later.** Songs found for waiting entries after the import now raise its matched count, a refresh no longer overwrites the import with an older copy, and an open import page updates its counts as songs are found or dismissed.
 - **Subsonic apps see when a playlist changed.** Playlist replies now carry `created` and `changed`, and adding, removing or replacing songs moves `changed`, so apps that sync by that time pick up the edit.
