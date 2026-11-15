@@ -288,8 +288,6 @@ export default function PlaylistDetailPage() {
             }));
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
 
-            announcePlaylistEvent("playlist-updated", { playlistId });
-
             if (!playlist.isHidden) {
                 router.push("/playlists");
             }

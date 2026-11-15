@@ -4,21 +4,19 @@ import { newRequestKey } from "../request-key";
 
 it("announces each playlist event on the window with its detail", () => {
     const heard = vi.fn();
-    for (const name of ["playlist-created", "playlist-updated", "playlist-deleted"]) window.addEventListener(name, heard);
+    for (const name of ["playlist-created", "playlist-deleted"]) window.addEventListener(name, heard);
 
     announcePlaylistEvent("playlist-created", { id: "p1" });
     announcePlaylistEvent("playlist-created");
-    announcePlaylistEvent("playlist-updated", { playlistId: "p2" });
     announcePlaylistEvent("playlist-deleted", { playlistId: "p3" });
 
     const seen = heard.mock.calls.map(([e]) => [(e as CustomEvent).type, (e as CustomEvent).detail]);
     expect(seen).toEqual([
         ["playlist-created", { id: "p1" }],
         ["playlist-created", null],
-        ["playlist-updated", { playlistId: "p2" }],
         ["playlist-deleted", { playlistId: "p3" }],
     ]);
-    for (const name of ["playlist-created", "playlist-updated", "playlist-deleted"]) window.removeEventListener(name, heard);
+    for (const name of ["playlist-created", "playlist-deleted"]) window.removeEventListener(name, heard);
 });
 
 it("makes request keys the server accepts, that differ each time, without crypto.randomUUID", () => {

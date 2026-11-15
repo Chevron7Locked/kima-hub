@@ -553,12 +553,10 @@ export default function PlaylistsPage() {
         };
 
         window.addEventListener("playlist-created", handlePlaylistEvent);
-        window.addEventListener("playlist-updated", handlePlaylistEvent);
         window.addEventListener("playlist-deleted", handlePlaylistEvent);
 
         return () => {
             window.removeEventListener("playlist-created", handlePlaylistEvent);
-            window.removeEventListener("playlist-updated", handlePlaylistEvent);
             window.removeEventListener("playlist-deleted", handlePlaylistEvent);
         };
     }, [queryClient]);

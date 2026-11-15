@@ -1,7 +1,6 @@
-/** What the window is told about playlists, and what each signal carries. The playlists page refreshes on all three. */
+/** What the window is told about playlists, and what each signal carries. The playlists page refreshes on both. */
 interface PlaylistEvents {
     "playlist-created": { id: string } | undefined;
-    "playlist-updated": { playlistId: string };
     "playlist-deleted": { playlistId: string };
 }
 
