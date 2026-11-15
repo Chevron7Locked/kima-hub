@@ -208,11 +208,14 @@ test.describe("Security", () => {
                 headers: { Authorization: `Bearer ${token}` },
             });
             expect(res.ok(), "security setup failed: res.ok()").toBeTruthy();
-            const playlist = await res.json() as { id: string; userId: string };
+            const playlist = await res.json() as { id: string };
 
-            // Must belong to the real authenticated user, not the injected ID
-            expect(playlist.userId).not.toBe("injected-attacker-id");
-            expect(playlist.userId).toBeTruthy();
+            // The answer carries no owner id, so ownership is read back: the real authenticated user owns it, not the injected ID
+            const read = await page.request.get(`/api/playlists/${playlist.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            expect(read.ok(), "security setup failed: read.ok()").toBeTruthy();
+            expect((await read.json() as { isOwner: boolean }).isOwner).toBe(true);
 
             await page.request.delete(`/api/playlists/${playlist.id}`, {
                 headers: { Authorization: `Bearer ${token}` },
