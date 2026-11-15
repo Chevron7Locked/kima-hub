@@ -207,10 +207,12 @@ export function PlaylistSelector({
                 playlist = { id: pending };
             } else {
                 const held = createKey.current;
-                if (!held || held.name !== name || held.isPublic !== isPublic) {
-                    createKey.current = { key: newRequestKey(), name, isPublic };
-                }
-                playlist = await api.createPlaylist(name, isPublic, createKey.current!.key);
+                const sending =
+                    held && held.name === name && held.isPublic === isPublic
+                        ? held
+                        : { key: newRequestKey(), name, isPublic };
+                createKey.current = sending;
+                playlist = await api.createPlaylist(name, isPublic, sending.key);
                 announcePlaylistEvent("playlist-created", playlist);
                 if (session.current !== mine) return;
             }

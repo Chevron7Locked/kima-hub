@@ -29,7 +29,7 @@ export function namedFields(playlist: Prisma.PlaylistGetPayload<{ select: typeof
 /**
  * What a playlist's song rows read from the database: the fields the web player and the iOS app use to list and play
  * them (named in the answer one by one). Not here on purpose: the file path and its size, analysis, the artist's mbid,
- * the playlist id and the item's rank.
+ * the playlist id. The item's rank is read to order the rows and is never sent.
  */
 export const playlistItemFields = {
     id: true,

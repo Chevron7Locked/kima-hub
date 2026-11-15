@@ -11,6 +11,7 @@ const server = vi.hoisted(() => ({
     state: null as Record<string, unknown> | null,
     trackDelay: 0,
     trackFails: false,
+    saveFails: false,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -30,6 +31,7 @@ vi.mock("@/lib/api", () => {
             return { id, title: id, duration: 200, artist: { name: "Artist" }, album: { title: "Album" } };
         },
         savePlaybackState: async (state: Record<string, unknown>) => {
+            if (server.saveFails) throw Object.assign(new Error("server error"), { status: 500 });
             server.saves.push(state);
             return { updatedAt: new Date(server.now()).toISOString() };
         },
@@ -128,6 +130,7 @@ beforeEach(() => {
     localStorage.clear();
     server.saves = [];
     server.trackDelay = 0;
+    server.saveFails = false;
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -413,6 +416,18 @@ describe("another device's song", () => {
         server.state = fromOtherDevice({});
         await pollNow(tick());
         expect(probe.state.currentTrack?.id).toBe("e");
+    });
+
+    it("does not replace a song started here whose save failed", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        server.state = fromOtherDevice({});
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("c");
     });
 
     it("is taken when nothing plays here because the restore failed, though the server state is the one this page already saw", async () => {

@@ -624,15 +624,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 const result = await api.savePlaybackState(state);
                 serverKnownRef.current = key;
                 setLastServerSync(new Date(result.updatedAt));
+                if (saveRunRef.current === run) savePendingRef.current = false;
             } catch (err: unknown) {
+                // The flag stays set: the change is still only here, and another device's state must not replace it.
                 if (err instanceof Error && err.message !== "Not authenticated") {
                     console.error(
                         "[AudioState] Failed to save to server:",
                         err
                     );
                 }
-            } finally {
-                if (saveRunRef.current === run) savePendingRef.current = false;
             }
         };
 
@@ -679,7 +679,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 // Past the check above the server's state is newer than the last one this device saw (both are the
                 // server's own times). It is newer than what this device holds unless a change made here is still
                 // on its way: saves are debounced, so right after a play the server holds the previous state.
-                const serverIsNewer = !savePendingRef.current;
+                const noSaveOwed = !savePendingRef.current;
 
                 const serverMediaId =
                     serverState.trackId ||
@@ -692,7 +692,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
                 // Cleared on another device: the newest word wins here as it does for a song change. Playing on would
                 // write the cleared song straight back.
-                if (!serverMediaId && !serverState.queue?.length && currentMediaId && serverIsNewer) {
+                if (!serverMediaId && !serverState.queue?.length && currentMediaId && noSaveOwed) {
                     setCurrentTrack(null);
                     setCurrentAudiobook(null);
                     setCurrentPodcast(null);
@@ -718,7 +718,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.playbackType !== playbackType;
                 // A song or book playing here is replaced only by a newer word; with nothing playing (a restore that
                 // failed) the server's state is taken whatever its age.
-                if (mediaDiffers && (serverIsNewer || !currentMediaId)) {
+                if (mediaDiffers && (noSaveOwed || !currentMediaId)) {
                     if (
                         serverState.playbackType === "track" &&
                         serverState.trackId
@@ -727,7 +727,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             const track = await api.getTrack(
                                 serverState.trackId
                             );
-                            if (!mounted) return;
+                            // A change made here while the song was fetched (the queue edited, say) is still unsaved.
+                            if (!mounted || (currentMediaId && savePendingRef.current)) return;
                             setCurrentTrack(track);
                             setPlaybackType("track");
                             setCurrentAudiobook(null);
@@ -788,7 +789,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (!mounted) return;
                 // Another device changed the queue, or the page it came from, while the same song plays here too.
                 // Audiobooks and podcasts keep no queue, so only a song's queue is compared.
-                if (!adopted && serverIsNewer && serverState.playbackType === "track" && playbackType === "track" && queueDiffers()) {
+                if (!adopted && noSaveOwed && serverState.playbackType === "track" && playbackType === "track" && queueDiffers()) {
                     adoptQueue(serverState.queue || [], serverState.queueSource);
                     setCurrentIndex(serverState.currentIndex || 0);
                     setIsShuffle(serverState.isShuffle || false);

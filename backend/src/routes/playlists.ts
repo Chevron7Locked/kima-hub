@@ -176,7 +176,7 @@ router.post("/", async (req, res) => {
                 .json({ error: "Invalid request", details: error.issues });
         }
         if (error instanceof KeyParamsMismatch) {
-            return res.status(422).json({ error: "Idempotency-Key was already used with different parameters" });
+            return res.status(422).json({ error: error.message });
         }
         logger.error("Create playlist error:", error);
         res.status(500).json({ error: "Failed to create playlist" });
@@ -230,7 +230,7 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
 
         const markedItems = await playlistService.markUnavailable(playlist.items);
         // Items and pending tracks share one rank space, so a string compare orders them; the rank itself is not sent.
-        const songs = markedItems.map((item) => ({
+        const songRows = markedItems.map((item) => ({
             rank: item.rank,
             entry: {
                 id: item.id,
@@ -253,7 +253,7 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             },
         }));
 
-        const pending = playlist.pendingTracks.map((row) => ({
+        const pendingRows = playlist.pendingTracks.map((row) => ({
             rank: row.rank,
             entry: {
                 id: row.id,
@@ -270,9 +270,9 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
             },
         }));
 
-        const formattedItems = songs.map((song) => song.entry);
-        const formattedPending = pending.map((row) => row.entry);
-        const mergedItems = [...songs, ...pending]
+        const formattedItems = songRows.map((row) => row.entry);
+        const formattedPending = pendingRows.map((row) => row.entry);
+        const mergedItems = [...songRows, ...pendingRows]
             .sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0))
             .map((row) => row.entry);
 
