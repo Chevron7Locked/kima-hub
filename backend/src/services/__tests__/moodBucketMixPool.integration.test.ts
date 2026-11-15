@@ -12,7 +12,6 @@ import { moodBucketService, MoodType } from "../moodBucketService";
 import { buildMoodState } from "../moods/state";
 import { MIN_MIX_TRACKS } from "../mixes/artistCap";
 import { pickRecipeStation } from "../../__tests__/helpers/stationPicks";
-import { untilLockWait } from "../../__tests__/helpers/lockWait";
 import {
     removeSyntheticLibrary,
     seedSyntheticLibrary,
@@ -210,29 +209,33 @@ describe("getMoodMix draws from the mood page's recipe (database)", () => {
     it("a serving waits while another for the same listener and mood is drawing, and not for another mood", async () => {
         const userId = "mmp_user_lock";
         await prisma.user.create({ data: { id: userId, username: "mmp-lock", passwordHash: "x" } });
+        // The first chill drawing is held in the middle of its draw, until released.
         let release!: () => void;
         const held = new Promise<void>((resolve) => (release = resolve));
-        const holding = prisma.$transaction(
-            async (tx) => {
-                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mood-serve:${userId}:chill`}, 0))`;
-                await held;
-            },
-            { timeout: 60_000 },
-        );
+        const draw = moodBucketService.getMoodMix.bind(moodBucketService);
+        let chillDraws = 0;
+        const spy = jest.spyOn(moodBucketService, "getMoodMix").mockImplementation(async (mood, limit, skip) => {
+            if (mood === "chill" && chillDraws++ === 0) await held;
+            return draw(mood, limit, skip);
+        });
         try {
+            const first = moodBucketService.serveMoodMix(userId, "chill", 15);
             // Another mood is not held up.
             expect(await moodBucketService.serveMoodMix(userId, "party", 15)).not.toBeNull();
 
             let done = false;
             const waiting = moodBucketService.serveMoodMix(userId, "chill", 15).then((mix) => ((done = true), mix));
-            await untilLockWait("pg_advisory_xact_lock");
+            await new Promise((resolve) => setTimeout(resolve, 200));
             expect(done).toBe(false);
+            expect(chillDraws).toBe(1);
 
             release();
-            expect((await waiting)!.trackIds).toHaveLength(15);
+            const a = (await first)!;
+            const b = (await waiting)!;
+            expect(b.trackIds.filter((id) => a.trackIds.includes(id))).toEqual([]);
         } finally {
             release();
-            await holding;
+            spy.mockRestore();
         }
     });
 
