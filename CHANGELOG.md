@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The add-to-playlist dialog says when a song couldn't be added.** It stays open and shows, for example, "1 song couldn't be added" until you close it. If a new playlist was made but adding to it failed, trying again adds to that playlist instead of making a second one with the same name. The dialog's text is lowercase.
+- **The play-history review leaves out Discover plays.** The false-starts check on the stats page no longer lists, collapses or removes plays of Discover songs.
 - **Discover tells apart artists who share a name.** When both have a MusicBrainz id, a different artist with the same name no longer hides a recommendation as already owned, and their songs, download or tier no longer show up on your Discover cards.
 - **Dismissing a waiting import song sticks.** A song you dismiss from an import's waiting list comes off the import's total and its saved listing, and a library scan running at the same moment can no longer add it back.
 - **An import's matched count counts songs found later.** Songs found for waiting entries after the import now raise its matched count, a refresh no longer overwrites the import with an older copy, and an open import page updates its counts as songs are found or dismissed.
