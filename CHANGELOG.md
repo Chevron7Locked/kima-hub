@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A saved queue's position never points past its end**, and a replaced song in a queue moves only to a copy that can play.
+- **A library scan that finds files gone or back, or an enrichment restart, no longer fails when it collides with enrichment work**; it tries once more.
+- **A code used to turn off two-factor sign-in or make new recovery codes is used up only if the change goes through.**
+- **A malformed sign-in request gets a plain "invalid request"** without listing which fields were wrong.
 - **Soulseek searches and downloads made while Soulseek is reconnecting say "soulseek is reconnecting, try again in Ns" at once** instead of hanging.
 - **The weekly Discover job is still queued when Redis is unreachable**, and generating Discover Weekly says "try again in a moment" when it cannot start.
 - **Sign-in rejects a two-factor code sent as anything but text**, and the sign-in page recognises two-factor prompts and wrong codes from a code the server sends, not from the wording of its message.
