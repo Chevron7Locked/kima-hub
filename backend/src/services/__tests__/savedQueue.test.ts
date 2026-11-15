@@ -1,42 +1,34 @@
 /**
- * What a saved queue keeps of a queue a client sends: the entries without an id are dropped before the queue is cut to
- * the limit, and the index follows its song through both.
+ * What a saved queue reads of a queue a web client sends: only the ids of its entries (the details stored are Kima's
+ * own), the entries without an id are dropped, and the index follows its place through that.
  */
-import { acceptQueue } from "../savedQueue";
+import { queueIdsOf } from "../savedQueue";
 
 const song = (id: string) => ({ id, title: id });
-const ids = (accepted: ReturnType<typeof acceptQueue>) => accepted.queue?.map((e) => e.id);
 
-describe("acceptQueue", () => {
-    it("cuts to the limit after the entries without an id are dropped, so they do not use up the limit", () => {
-        const accepted = acceptQueue([{ title: "no id" }, song("a"), song("b"), song("c")], 0, 2);
+describe("queueIdsOf", () => {
+    it("reads only the id of each entry, in order, and nothing of what the client says the song is", () => {
+        expect(queueIdsOf([{ id: "a", title: "stale", artist: { name: "Old" } }, { id: 7 }, song("b")], 0).ids).toEqual(["a", "7", "b"]);
+    });
 
-        expect(ids(accepted)).toEqual(["a", "b"]);
+    it("drops the entries without an id", () => {
+        expect(queueIdsOf([{ title: "no id" }, song("a"), null, "text", { id: "" }, song("b")], 0).ids).toEqual(["a", "b"]);
     });
 
     it("moves the index back by the entries dropped before it, and onto the next entry kept when its own was dropped", () => {
-        expect(acceptQueue([null, song("a"), { title: "x" }, song("b")], 3, 10).currentIndex).toBe(1);
-        expect(acceptQueue([song("a"), { title: "x" }, song("b")], 1, 10).currentIndex).toBe(1);
+        expect(queueIdsOf([null, song("a"), { title: "x" }, song("b")], 3).clientIndex).toBe(1);
+        expect(queueIdsOf([song("a"), { title: "x" }, song("b")], 1).clientIndex).toBe(1);
     });
 
-    it("keeps the index inside the queue kept, and stores no queue and index 0 for none", () => {
-        expect(acceptQueue([song("a"), song("b"), song("c")], 9, 2).currentIndex).toBe(1);
-        expect(acceptQueue([song("a")], -4, 10).currentIndex).toBe(0);
-        expect(acceptQueue([song("a")], "x", 10).currentIndex).toBe(0);
-        expect(acceptQueue([], 5, 10)).toEqual({ queue: null, currentIndex: 0 });
-        expect(acceptQueue([{ title: "x" }], 0, 10)).toEqual({ queue: null, currentIndex: 0 });
+    it("reads an index that is no whole number as 0 and a fraction down, below 0 as 0, and leaves one past the end for the plan to clamp", () => {
+        expect(queueIdsOf([song("a")], -4).clientIndex).toBe(0);
+        expect(queueIdsOf([song("a")], "x").clientIndex).toBe(0);
+        expect(queueIdsOf([song("a")], 1.7).clientIndex).toBe(1);
+        expect(queueIdsOf([song("a"), song("b")], 9).clientIndex).toBe(9);
     });
 
-    it("fills what a player draws with its limits", () => {
-        const [entry] = acceptQueue([{ id: 7, title: "t".repeat(900), duration: "12", artist: { id: 1 }, album: { title: "al", coverArt: "c" } }], 0, 10).queue!;
-
-        expect(entry).toEqual({
-            id: "7",
-            title: "t".repeat(500),
-            displayTitle: null,
-            duration: 12,
-            artist: { id: "1", name: "Unknown" },
-            album: { id: "", title: "al", coverArt: "c" },
-        });
+    it("gives no ids for no entries", () => {
+        expect(queueIdsOf([], 5)).toEqual({ ids: [], clientIndex: 5 });
+        expect(queueIdsOf([{ title: "x" }], 0)).toEqual({ ids: [], clientIndex: 0 });
     });
 });

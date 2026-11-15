@@ -14,7 +14,9 @@ jest.mock("../../middleware/auth", () => ({
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
+import * as systemSettings from "../../utils/systemSettings";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { reconcileDeletedTracks } from "../../services/libraryReconcile";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import playbackStateRouter from "../playbackState";
 import { mountAsServer } from "./helpers/serverMount";
@@ -39,11 +41,16 @@ async function cleanup() {
 async function seedSongs() {
     await prisma.artist.create({ data: { id: `${S}art`, name: "Save Artist", identityKey: `${S}-a` } });
     await prisma.album.create({ data: { id: `${S}alb`, artistId: `${S}art`, rgMbid: `${S}-rg`, identityKey: `${S}-ak`, title: "Save Album", primaryType: "Album" } });
-    for (const [id, missing] of [["s1", false], ["s2", false], ["s3", false], ["s4", false], ["gone", true]] as const) {
+    // `bad` is read as corrupt, and `d1` is on a Discover album.
+    await prisma.album.create({ data: { id: `${S}dalb`, artistId: `${S}art`, rgMbid: `${S}-drg`, identityKey: `${S}-dk`, title: "Discover Album", primaryType: "Album", location: "DISCOVER" } });
+    for (const [id, missing, corrupt, albumId] of [
+        ["s1", false, false, `${S}alb`], ["s2", false, false, `${S}alb`], ["s3", false, false, `${S}alb`], ["s4", false, false, `${S}alb`],
+        ["gone", true, false, `${S}alb`], ["bad", false, true, `${S}alb`], ["d1", false, false, `${S}dalb`],
+    ] as const) {
         await prisma.track.create({
             data: {
-                id: `${S}${id}`, albumId: `${S}alb`, title: id, trackNo: 1, duration: 100, filePath: `/tmp/${S}${id}.flac`,
-                fileModified: new Date(), fileSize: 1, missingSince: missing ? new Date() : null,
+                id: `${S}${id}`, albumId, title: id, trackNo: 1, duration: 100, filePath: `/tmp/${S}${id}.flac`,
+                fileModified: new Date(), fileSize: 1, missingSince: missing ? new Date() : null, corrupt,
             },
         });
     }
@@ -116,18 +123,24 @@ describe("POST /api/playback-state", () => {
         const user = await prisma.user.create({
             data: { username: `${PREFIX}-title`, passwordHash: "x", role: "user" },
         });
-        const queue = [
-            { id: "t1", title: "file title", displayTitle: "edited title", duration: 200 },
-            { id: "t2", title: "no edit", duration: 100 },
-        ];
+        await prisma.track.update({ where: { id: `${S}s1` }, data: { displayTitle: "edited title" } });
+        try {
+            // The client sends the entries it holds, which may be older than Kima's record of the songs.
+            const queue = [
+                { id: `${S}s1`, title: "file title", displayTitle: "stale edit", duration: 200 },
+                { id: `${S}s2`, title: "no edit", duration: 100 },
+            ];
 
-        await request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", queue }).expect(200);
+            await request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", queue }).expect(200);
 
-        const saved = await prisma.playbackState.findUnique({ where: { userId: user.id } });
-        expect((saved?.queue as Array<{ title: string; displayTitle: string | null }>).map((q) => [q.title, q.displayTitle])).toEqual([
-            ["file title", "edited title"],
-            ["no edit", null],
-        ]);
+            const saved = await prisma.playbackState.findUnique({ where: { userId: user.id } });
+            expect((saved?.queue as Array<{ title: string; displayTitle: string | null }>).map((q) => [q.title, q.displayTitle])).toEqual([
+                ["s1", "edited title"],
+                ["s2", null],
+            ]);
+        } finally {
+            await prisma.track.update({ where: { id: `${S}s1` }, data: { displayTitle: null } });
+        }
     });
 
     // A Subsonic app reads who changed the queue last. A save from the web is Kima's, and takes the place of the name
@@ -487,6 +500,199 @@ describe("POST /api/playback-state: a save that names the time it saw (expectedU
     });
 });
 
+describe("POST /api/playback-state: the songs of a saved queue are Kima's own", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+    const entry = (n: string) => ({ id: `${S}${n}`, title: "client says", duration: 1, artist: { id: "x", name: "client artist" }, album: { id: "y", title: "client album" } });
+    const storedEntries = async (userId: string) =>
+        ((await prisma.playbackState.findUnique({ where: { userId } }))?.queue as Array<{ id: string; title: string; artist: { name: string }; album: { title: string }; duration: number }> | null) ?? [];
+
+    it("stores what Kima knows of each song, not what the client sent, and leaves out the ids Kima does not know", async () => {
+        const user = await newUser("own-details");
+
+        const res = await save(user.id, { playbackType: "track", queue: [entry("s1"), { id: `${S}nosuch`, title: "ghost" }, entry("s2")], currentIndex: 0 }).expect(200);
+
+        const stored = await storedEntries(user.id);
+        expect(stored.map((e) => [e.id, e.title, e.artist.name, e.album.title, e.duration])).toEqual([
+            [`${S}s1`, "s1", "Save Artist", "Save Album", 100],
+            [`${S}s2`, "s2", "Save Artist", "Save Album", 100],
+        ]);
+        expect(res.body.queue.map((q: { id: string }) => q.id)).toEqual([`${S}s1`, `${S}s2`]);
+    });
+
+    it("carries the index past the ids left out, onto the song that stands in for an unknown current one", async () => {
+        const user = await newUser("own-index");
+
+        await save(user.id, { playbackType: "track", queue: [{ id: `${S}nosuch` }, entry("s1"), { id: `${S}nosuch2` }, entry("s2"), entry("s3")], currentIndex: 3 }).expect(200);
+        const row = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+        expect([row.currentIndex, (row.queue as Array<{ id: string }>).map((e) => e.id)]).toEqual([1, [`${S}s1`, `${S}s2`, `${S}s3`]]);
+
+        await save(user.id, { playbackType: "track", queue: [entry("s1"), { id: `${S}nosuch` }, entry("s2")], currentIndex: 1 }).expect(200);
+        expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).currentIndex).toBe(1);
+    });
+
+    it("stores no queue when no id sent is a known song", async () => {
+        const user = await newUser("own-none");
+        await save(user.id, { playbackType: "track", queue: [entry("s1")] }).expect(200);
+
+        await save(user.id, { playbackType: "track", queue: [{ id: `${S}nosuch` }], queueSource: "album:a" }).expect(200);
+
+        const row = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+        expect([row.queue, row.queueSource, row.currentIndex]).toEqual([null, null, 0]);
+    });
+
+    // "Discover is only Discover": a song on a Discover album is never kept in a queue. A song whose file is gone, or
+    // that was read as corrupt, is kept (it may come back) and hidden when the queue is read.
+    it("never stores a Discover song, and keeps a missing or corrupt library song, hidden on read", async () => {
+        const user = await newUser("own-discover");
+
+        const res = await save(user.id, { playbackType: "track", queue: [entry("s1"), entry("d1"), entry("gone"), entry("bad"), entry("s2")], currentIndex: 4 }).expect(200);
+
+        expect((await storedEntries(user.id)).map((e) => e.id)).toEqual([`${S}s1`, `${S}gone`, `${S}bad`, `${S}s2`]);
+        expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).currentIndex).toBe(3);
+        expect(res.body.queue.map((q: { id: string }) => q.id)).toEqual([`${S}s1`, `${S}s2`]);
+        expect(res.body.currentIndex).toBe(1);
+    });
+
+    it("names the song now current when the one a track save names was left out or cut, and keeps the named song otherwise", async () => {
+        const user = await newUser("own-named");
+        const stored = async () => (await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).trackId;
+
+        await save(user.id, { playbackType: "track", trackId: `${S}d1`, queue: [entry("s1"), entry("d1"), entry("s2")], currentIndex: 1 }).expect(200);
+        expect(await stored()).toBe(`${S}s2`);
+
+        await save(user.id, { playbackType: "track", trackId: `${S}nosuch`, queue: [entry("s1"), entry("s2")], currentIndex: 0 }).expect(200);
+        expect(await stored()).toBe(`${S}s1`);
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [entry("s1"), entry("s2")], currentIndex: 1 }).expect(200);
+        expect(await stored()).toBe(`${S}s2`);
+
+        await save(user.id, { playbackType: "track", queue: [entry("s1"), entry("s2")], currentIndex: 0 }).expect(200);
+        expect(await stored()).toBe(`${S}s2`);
+    });
+
+    it("cuts the queue to the limit after the ids left out", async () => {
+        const user = await newUser("own-limit");
+        const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
+        try {
+            await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: 100 }, update: { maxQueueLength: 100 } });
+            invalidateSystemSettingsCache();
+            const queue = [{ id: `${S}nosuch` }, ...Array.from({ length: 101 }, () => entry("s1"))];
+
+            await save(user.id, { playbackType: "track", queue, currentIndex: 0 }).expect(200);
+
+            expect(await storedEntries(user.id)).toHaveLength(100);
+        } finally {
+            await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
+            invalidateSystemSettingsCache();
+        }
+    });
+});
+
+describe("POST /api/playback-state: a save that sends a queue holds its songs and meets the library sweep", () => {
+    const MIN = 60_000;
+    const sweepSong = `${S}sweep`;
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+
+    beforeEach(async () => {
+        await prisma.track.create({
+            data: { id: sweepSong, albumId: `${S}alb`, title: "sweep", trackNo: 1, duration: 100, filePath: `/tmp/${S}sweep.flac`, fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+    });
+    afterEach(async () => {
+        await prisma.removalLog.deleteMany({ where: { filePath: { startsWith: `/tmp/${S}` } } });
+        await prisma.track.deleteMany({ where: { id: sweepSong } });
+    });
+
+    // The sweep holds the rows of the songs it retires until it commits. A save reading one before then would store it
+    // after: whether the person's saved queue holds it (the sweep waits on their row), or does not, or they have no row.
+    it.each(["no state row", "a row without a queue", "a row whose queue lacks the song", "a row whose queue holds the song"])(
+        "waits for the sweep, then stores only the songs that remain, for a person with %s",
+        async (rowKind) => {
+            const user = await prisma.user.create({ data: { username: `${PREFIX}-sweep-${rowKind.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+            if (rowKind === "a row without a queue") await prisma.playbackState.create({ data: { userId: user.id, playbackType: "track" } });
+            if (rowKind === "a row whose queue lacks the song") {
+                await prisma.playbackState.create({ data: { userId: user.id, playbackType: "track", queue: [{ id: `${S}s1`, title: "s1" }], currentIndex: 0 } });
+            }
+            if (rowKind === "a row whose queue holds the song") {
+                await prisma.playbackState.create({ data: { userId: user.id, playbackType: "track", queue: [{ id: sweepSong, title: "sweep" }], currentIndex: 0 } });
+            }
+
+            let answer!: Promise<request.Response>;
+            await prisma.$transaction(async (tx) => {
+                expect((await reconcileDeletedTracks(tx, new Date(Date.now() - MIN))).removed).toBe(1);
+                answer = save(user.id, { playbackType: "track", queue: [{ id: `${S}s1` }, { id: sweepSong }, { id: `${S}s2` }], currentIndex: 2 }).then((r) => r);
+                await untilLockWait(`FOR KEY SHARE`);
+            });
+
+            expect((await answer).status).toBe(200);
+            const row = await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } });
+            expect([(row.queue as Array<{ id: string }>).map((e) => e.id), row.currentIndex]).toEqual([[`${S}s1`, `${S}s2`], 1]);
+        },
+    );
+});
+
+describe("POST /api/playback-state: the queue limit is read before the transaction opens", () => {
+    // A save holding a pooled connection must not wait for a second one: the limit is read first.
+    it("reads the limit outside the transaction, for a save that sends a queue", async () => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-limit-before`, passwordHash: "x", role: "user" } });
+        let inside = false;
+        let opened = 0;
+        const readsInside: boolean[] = [];
+        const realTransaction = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>, options?: unknown) => Promise<unknown>;
+        const transaction = jest.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: unknown) => Promise<unknown>, options?: unknown) =>
+            realTransaction(async (tx) => {
+                inside = true;
+                opened += 1;
+                try {
+                    return await fn(tx);
+                } finally {
+                    inside = false;
+                }
+            }, options)) as never);
+        const realGet = systemSettings.getSystemSettings;
+        const settings = jest.spyOn(systemSettings, "getSystemSettings").mockImplementation(async () => {
+            readsInside.push(inside);
+            return realGet();
+        });
+        try {
+            await request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", queue: [{ id: `${S}s1` }] }).expect(200);
+        } finally {
+            transaction.mockRestore();
+            settings.mockRestore();
+        }
+
+        expect(opened).toBe(1);
+        expect(readsInside).toEqual([false]);
+    });
+});
+
+describe("POST /api/playback-state: an id that is no string", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+
+    it.each(["trackId", "audiobookId", "podcastId"])("answers 400 for a %s that is present and is no string or null, and writes nothing", async (field) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-ids-${field}`, passwordHash: "x", role: "user" } });
+        const logged = expectLog("warn");
+
+        for (const value of [7, true, {}, ["a"], 0, false]) {
+            const res = await save(user.id, { playbackType: "track", [field]: value });
+            expect([field, res.status, res.body]).toEqual([field, 400, { error: "Invalid request" }]);
+        }
+
+        expect(logged.mock.calls.some((call) => String(call[0]).includes(`${field}: text or null required`))).toBe(true);
+
+        expect(await prisma.playbackState.findUnique({ where: { userId: user.id } })).toBeNull();
+    });
+
+    it.each(["trackId", "audiobookId", "podcastId"])("still takes a %s that is a string, null, empty or left out", async (field) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-ids-ok-${field}`, passwordHash: "x", role: "user" } });
+
+        for (const body of [{ [field]: null }, { [field]: "" }, {}]) {
+            await save(user.id, { playbackType: "track", ...body }).expect(200);
+        }
+    });
+});
+
 describe("GET /api/playback-state/limit", () => {
     it("answers a newly saved limit at once, not one the server read earlier", async () => {
         const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
@@ -498,44 +704,6 @@ describe("GET /api/playback-state/limit", () => {
             await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: 2500 } });
             invalidateSystemSettingsCache();
             expect((await request(app).get("/api/playback-state/limit").set("x-user", "anyone")).body.maxQueueLength).toBe(2500);
-        } finally {
-            await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
-            invalidateSystemSettingsCache();
-        }
-    });
-});
-
-describe("POST /api/playback-state: every save that sends a queue takes the person's lock", () => {
-    // The queue is cut to the limit as it stands when the save has the lock, not as it stood when the request came in.
-    it.each([
-        ["names no time", {}],
-        ["names the time it saw", { expectedUpdatedAt: "now" }],
-    ])("a save that %s cuts the queue under the lock", async (why, extra) => {
-        const user = await prisma.user.create({ data: { username: `${PREFIX}-lock-${why.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
-        const row = await prisma.playbackState.create({ data: { userId: user.id, playbackType: "track" } });
-        const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });
-        const setLimit = async (n: number) => {
-            await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", maxQueueLength: n }, update: { maxQueueLength: n } });
-            invalidateSystemSettingsCache();
-        };
-        const queue = Array.from({ length: 150 }, (_, n) => ({ id: `${S}q${n}`, title: `q${n}`, duration: 100 }));
-        try {
-            await setLimit(100);
-            let answer!: Promise<request.Response>;
-            await prisma.$transaction(async (tx) => {
-                await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${user.id} FOR UPDATE`;
-                answer = request(app)
-                    .post("/api/playback-state")
-                    .set("x-user", user.id)
-                    .send({ playbackType: "track", queue, ...("expectedUpdatedAt" in extra ? { expectedUpdatedAt: row.updatedAt.toISOString() } : {}) })
-                    .then((r) => r);
-                await untilLockWait(`"PlaybackState"`);
-                await setLimit(120);
-            });
-
-            const res = await answer;
-            expect(res.status).toBe(200);
-            expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).queue).toHaveLength(120);
         } finally {
             await prisma.systemSettings.update({ where: { id: "default" }, data: { maxQueueLength: before?.maxQueueLength ?? 10000 } });
             invalidateSystemSettingsCache();

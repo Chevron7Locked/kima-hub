@@ -7,6 +7,7 @@
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
+import * as systemSettings from "../../../utils/systemSettings";
 import { invalidateSystemSettingsCache, QUEUE_LENGTH } from "../../../utils/systemSettings";
 import { entriesOf } from "../../../services/savedQueue";
 import { queueRouter } from "../queue";
@@ -14,6 +15,9 @@ import { queueRouter } from "../queue";
 const P = "zz-spqr";
 const USER = `${P}-user`;
 const SONGS = QUEUE_LENGTH.min + 20;
+const DISCOVER_SONG = `${P}-disc`;
+const MISSING_SONG = `${P}-miss`;
+const CORRUPT_SONG = `${P}-corr`;
 
 function app() {
     const a = express();
@@ -47,6 +51,15 @@ beforeAll(async () => {
     await prisma.album.create({ data: { id: `${P}-al`, artistId: `${P}-ar`, rgMbid: `${P}-rg`, primaryType: "Album", title: `${P} Album`, location: "LIBRARY" } });
     await prisma.track.createMany({
         data: all.map((id, n) => ({ id, albumId: `${P}-al`, title: id, trackNo: n + 1, duration: 100, filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1 })),
+    });
+    // A Discover song, a library song whose file is gone and one read as corrupt.
+    await prisma.album.create({ data: { id: `${P}-dal`, artistId: `${P}-ar`, rgMbid: `${P}-drg`, identityKey: `${P}-dk`, primaryType: "Album", title: `${P} Discover`, location: "DISCOVER" } });
+    await prisma.track.createMany({
+        data: [
+            { id: DISCOVER_SONG, albumId: `${P}-dal` },
+            { id: MISSING_SONG, albumId: `${P}-al`, missingSince: new Date() },
+            { id: CORRUPT_SONG, albumId: `${P}-al`, corrupt: true },
+        ].map((t, n) => ({ ...t, title: t.id, trackNo: 900 + n, duration: 100, filePath: `/tmp/${t.id}.flac`, fileModified: new Date(), fileSize: 1 })),
     });
 });
 beforeEach(async () => {
@@ -219,5 +232,81 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         expect((await send("/savePlayQueue.view", {})).status).toBe("ok");
         expect((await send("/savePlayQueueByIndex.view", {})).status).toBe("ok");
         expect((await stored())!.queue).toBeNull();
+    });
+
+    // `current` is not sent: with no songs there is no current song, and the place is 0 whatever the state held.
+    it.each([
+        ["savePlayQueue", { position: "5000" }],
+        ["savePlayQueueByIndex", { position: "5000" }],
+    ])("%s with no songs and no current song stores index 0, no current song and position 0", async (name, query) => {
+        await prisma.playbackState.create({
+            data: { userId: USER, playbackType: "track", queue: [song(5), song(6), song(7), song(8)].map((id) => ({ id, title: id })), currentIndex: 3, trackId: song(8), position: 9000 },
+        });
+
+        expect((await send(`/${name}.view`, query)).status).toBe("ok");
+
+        const state = await stored();
+        expect([state!.queue, state!.currentIndex, state!.trackId, state!.position]).toEqual([null, 0, null, 0]);
+    });
+});
+
+describe("a Subsonic queue save and the songs a queue may hold", () => {
+    // "Discover is only Discover": a Discover song is never stored in a queue. A library song whose file is gone, or that
+    // was read as corrupt, is stored (it may come back) and hidden when the queue is read.
+    it.each([
+        ["savePlayQueue", "/savePlayQueue.view", (current: string) => ({ current })],
+        ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", (current: string) => ({ currentIndex: String([song(0), DISCOVER_SONG, MISSING_SONG, CORRUPT_SONG, song(1)].indexOf(current)) })],
+    ])("%s leaves a Discover song out, and keeps a missing and a corrupt one", async (_name, path, query) => {
+        const reply = await send(path, { id: [song(0), DISCOVER_SONG, MISSING_SONG, CORRUPT_SONG, song(1)], ...query(song(1)), position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(0), MISSING_SONG, CORRUPT_SONG, song(1)]);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([3, song(1), 7000]);
+    });
+
+    it("starts the song standing in for a Discover song that was the current one, from its start", async () => {
+        const reply = await send("/savePlayQueue.view", { id: [song(0), DISCOVER_SONG, song(1)], current: DISCOVER_SONG, position: "7000" });
+
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([1, song(1), 0]);
+    });
+});
+
+describe("a Subsonic queue save and the queue limit read", () => {
+    // A save holding a pooled connection must not wait for a second one: the limit is read before the transaction opens.
+    it.each([
+        ["savePlayQueue", "/savePlayQueue.view", { id: [song(0)], current: song(0) }],
+        ["savePlayQueueByIndex", "/savePlayQueueByIndex.view", { id: [song(0)], currentIndex: "0" }],
+    ])("%s reads the limit outside the transaction", async (_name, path, query) => {
+        let inside = false;
+        let opened = 0;
+        const readsInside: boolean[] = [];
+        const realTransaction = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>, options?: unknown) => Promise<unknown>;
+        const transaction = jest.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: unknown) => Promise<unknown>, options?: unknown) =>
+            realTransaction(async (tx) => {
+                inside = true;
+                opened += 1;
+                try {
+                    return await fn(tx);
+                } finally {
+                    inside = false;
+                }
+            }, options)) as never);
+        const realGet = systemSettings.getSystemSettings;
+        const settings = jest.spyOn(systemSettings, "getSystemSettings").mockImplementation(async () => {
+            readsInside.push(inside);
+            return realGet();
+        });
+        try {
+            expect((await send(path, query)).status).toBe("ok");
+        } finally {
+            transaction.mockRestore();
+            settings.mockRestore();
+        }
+
+        expect(opened).toBe(1);
+        expect(readsInside).toEqual([false]);
     });
 });

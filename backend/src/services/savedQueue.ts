@@ -3,7 +3,11 @@
  * pick it up. This is the one place that knows what an entry holds and which entries a client may be shown.
  *
  * - An entry carries what a player needs to draw it (title, artist, album, cover), so a device lists the queue
- *   without asking for every song.
+ *   without asking for every song. Kima is the source of truth for those details: a save, web or Subsonic, sends song
+ *   ids (a web save sends entries, of which only the id is read), and the entry stored is Kima's own description of the
+ *   song. An id Kima does not know is left out.
+ * - A Discover song is never stored in a queue ("Discover is only Discover"): a save leaves it out like an unknown id.
+ *   A song whose file went missing, or that was read as corrupt, is stored (it may come back) and hidden on read.
  * - A client is shown each song as it is now (an edited title, a renamed artist, a new cover), not as the entry was
  *   saved; the stored entries stay as saved.
  * - A client is shown only the playable songs of the stored queue (a song whose file went missing, or a Discover
@@ -11,14 +15,16 @@
  *   When the current song is left out, the next playable one becomes current (else the last one before it), from its
  *   start.
  * - The index kept with the queue and the entries stay in one coordinate system: the stored one. A client counts what it
- *   was shown, so a save carries the index into the stored queue (`acceptQueue` for a queue sent whole,
- *   `indexIntoStoredQueue` for one that sends no queue and names the current song, `saveQueueOfIds` for a Subsonic
- *   app's list of ids), and no index is stored past the stored queue's last entry.
+ *   was shown, so a save carries the index into the stored queue (`planQueue` for a queue sent as ids, whole or as
+ *   entries, `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored
+ *   past the stored queue's last entry.
  * - Every save takes the person's turn (`lockPlaybackState`) in the transaction that writes: an advisory lock on the
  *   person, then their state row, which is what the library sweep waits on when it rewrites a queue that holds a song it
- *   retires. A save of song ids reads songs, and the sweep waits on no row of a person whose queue lacks the song it
- *   retires (or who has no row yet), so that save first holds the songs it reads (`holdSongs`) until it commits. The
- *   order is the sweep's: songs, then the state row.
+ *   retires. A save that sends song ids reads songs, and the sweep waits on no row of a person whose queue lacks the
+ *   song it retires (or who has no row yet), so that save first holds the songs it reads until it commits
+ *   (`lockForQueueSave`). The order is the sweep's: songs, then the state row.
+ * - A save reads the queue limit (`queueLimit`) before it opens its transaction, never inside it: the read may take its
+ *   own connection from the pool, and a save must not hold one connection while it waits for a second.
  */
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -73,12 +79,17 @@ function describeSong(t: Prisma.TrackGetPayload<{ select: typeof DESCRIBED }>): 
 
 /**
  * Song ids as the full entries a player stores and renders, in the given order; ids Kima does not know are left out.
- * It describes the song as it is now: its edited title, its artist's display name, its album's chosen cover.
+ * It describes the song as it is now: its edited title, its artist's display name, its album's chosen cover. `only`
+ * narrows which songs count as known.
  */
-export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionClient, "track"> = prisma): Promise<QueueEntry[]> {
+export async function hydrateQueue(
+    ids: string[],
+    db: Pick<Prisma.TransactionClient, "track"> = prisma,
+    only: Prisma.TrackWhereInput = {},
+): Promise<QueueEntry[]> {
     if (ids.length === 0) return [];
 
-    const tracks = await db.track.findMany({ where: { id: { in: ids } }, select: DESCRIBED });
+    const tracks = await db.track.findMany({ where: { id: { in: ids }, ...only }, select: DESCRIBED });
     const byId = new Map(tracks.map((t) => [t.id, describeSong(t)]));
     return ids.map((id) => byId.get(id)).filter((entry): entry is QueueEntry => entry != null);
 }
@@ -104,38 +115,20 @@ function wholeIndex(raw: unknown): number {
     return Math.max(0, Math.floor(Number(raw) || 0));
 }
 
-const clip = (value: unknown, max: number, fallback: string) => String(value || fallback).substring(0, max);
-
 /**
- * A queue as a client sends it, made into what is stored: entries without an id are dropped, then the queue is cut to
- * `limit`, and the index (counted over the entries as sent) is carried over to where its song now sits. An index whose
- * own entry was dropped points at the next entry kept; one past the end points at the last. No entries at all stores
- * no queue and index 0.
+ * The song ids of a queue a web client sends as entries, in order, and the place it is on counted over those ids. Only
+ * an entry's id is read: the song's details are Kima's own (`planQueue`). Entries without an id are dropped, and the
+ * index (counted over the entries as sent) moves back by the ones dropped before it, so an index whose own entry was
+ * dropped points at the next entry kept.
  */
-export function acceptQueue(raw: readonly unknown[], rawIndex: unknown, limit: number): { queue: QueueEntry[] | null; currentIndex: number } {
+export function queueIdsOf(raw: readonly unknown[], rawIndex: unknown): { ids: string[]; clientIndex: number } {
     const index = wholeIndex(rawIndex);
-    const withId = (item: unknown): item is Record<string, any> => Boolean(item && typeof item === "object" && (item as { id?: unknown }).id);
-    const droppedBefore = raw.slice(0, index).filter((item) => !withId(item)).length;
-    const queue = raw
-        .filter(withId)
-        .slice(0, limit)
-        .map((item): QueueEntry => ({
-            id: String(item.id),
-            title: clip(item.title, 500, "Unknown"),
-            // The title as edited in Kima, so every device shows the edit.
-            displayTitle: item.displayTitle ? String(item.displayTitle).substring(0, 500) : null,
-            duration: Number(item.duration) || 0,
-            artist: item.artist ? { id: String(item.artist.id || ""), name: clip(item.artist.name, 200, "Unknown") } : null,
-            album: item.album
-                ? {
-                      id: String(item.album.id || ""),
-                      title: clip(item.album.title, 500, "Unknown"),
-                      coverArt: item.album.coverArt ? String(item.album.coverArt).substring(0, 1000) : null,
-                  }
-                : null,
-        }));
-    if (queue.length === 0) return { queue: null, currentIndex: 0 };
-    return { queue, currentIndex: Math.min(Math.max(index - droppedBefore, 0), queue.length - 1) };
+    const idOf = (item: unknown): string | null => {
+        const id = item && typeof item === "object" ? (item as { id?: unknown }).id : undefined;
+        return id ? String(id) : null;
+    };
+    const droppedBefore = raw.slice(0, index).filter((item) => idOf(item) === null).length;
+    return { ids: raw.flatMap((item) => idOf(item) ?? []), clientIndex: index - droppedBefore };
 }
 
 /**
@@ -231,12 +224,49 @@ function storedPlaceOf(
  * Holds the rows of the songs a save is about to read until the transaction ends, so the sweep (which holds the rows
  * of the songs it retires, and takes the ones another transaction holds only on its next run) and the save go one at a
  * time: a song retired first is not read, and one read first is not retired. A key lock, which only a retiring or
- * deleting transaction conflicts with, so ordinary edits to the songs go on. Taken before the person's state row, the
- * order the sweep takes them in, so the two never wait on each other.
+ * deleting transaction conflicts with, so ordinary edits to the songs go on.
  */
 async function holdSongs(tx: Pick<Prisma.TransactionClient, "$queryRaw">, ids: readonly string[]): Promise<void> {
     if (ids.length === 0) return;
     await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${[...new Set(ids)]}::text[]) ORDER BY id FOR KEY SHARE`;
+}
+
+/**
+ * What a save that sends song ids takes before it reads them: the songs (`holdSongs`), then the person's turn and state
+ * row (`lockPlaybackState`), the order the sweep takes them in, so the two never wait on each other. Held until the
+ * transaction ends. A save that sends no ids takes `lockPlaybackState` alone.
+ */
+export async function lockForQueueSave(
+    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+    userId: string,
+    ids: readonly string[],
+): Promise<void> {
+    await holdSongs(tx, ids);
+    await lockPlaybackState(tx, userId);
+}
+
+/** The part of the playable-song rule a stored queue holds songs to: a library album's song. */
+const STORABLE_SONG = { album: PLAYABLE_SONG.album } satisfies Prisma.TrackWhereInput;
+
+/**
+ * A queue sent as song ids, made into what is stored, read under the locks `lockForQueueSave` took: the entries are
+ * Kima's own description of each song. Ids Kima does not know, and songs on a Discover album, are left out; a song whose
+ * file is missing or corrupt is kept (it is hidden when the queue is read). The queue is cut to `limit` after those are
+ * left out, and `clientIndex` (counting `ids`) is carried over to where its place now sits: the places before it that
+ * were left out no longer count, and an index whose own place was left out or cut points at the place standing in for
+ * it, the last one at most. `placeKept` is whether the place itself is in the stored queue. No song kept stores no
+ * queue, index 0.
+ */
+export async function planQueue(
+    tx: Pick<Prisma.TransactionClient, "track">,
+    ids: string[],
+    clientIndex: number,
+    limit: number,
+): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean }> {
+    const known = await hydrateQueue(ids, tx, STORABLE_SONG);
+    const queue = known.slice(0, limit);
+    const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), queue.length, clientIndex);
+    return { queue: queue.length > 0 ? queue : null, currentIndex: place.index, placeKept: place.placeKept };
 }
 
 const INT32_MAX = 2_147_483_647;
@@ -245,41 +275,35 @@ export const SAVE_TIMEOUT_MS = 30_000;
 
 /**
  * A queue a Subsonic app saves, as song ids and the place it is on (`clientIndex` counts `ids`). The songs and the
- * person's state row are locked first (`holdSongs`, then `lockPlaybackState`: the sweep waits on the row only when the
- * queue holds a song it retires, and a first save has no row at all), then the songs are read, the index worked out
- * and the queue written in the same transaction, so a library sweep retiring a song at the same moment finishes first
- * and the queue never stores what it took out, and a web save meeting this one leaves one whole save. Ids Kima does
- * not know are left out; when the current song is among them the song now in its place is current, from its start.
- * The queue is cut to the operator's limit (`queueLimit`) after those are left out, as a web save cuts it; a current
- * song past the cut leaves the last song kept as current, from its start. The position is kept when the current place
- * itself is kept, not when another place holds its song.
+ * person's state row are locked first (`lockForQueueSave`: the sweep waits on the row only when the queue holds a song
+ * it retires, and a first save has no row at all), then the songs are read, the index worked out and the queue written
+ * in the same transaction, so a library sweep retiring a song at the same moment finishes first and the queue never
+ * stores what it took out, and a web save meeting this one leaves one whole save. What is left out, and how the queue is
+ * cut and the index carried over, is `planQueue`'s; when the current song is left out, the song now in its place is
+ * current, from its start. The position is kept when the current place itself is kept, not when another place holds its
+ * song. The queue limit is read before the transaction opens.
  */
 export async function saveQueueOfIds(
     userId: string,
     save: { ids: string[]; clientIndex: number; position: number; changedBy: string },
 ): Promise<void> {
+    const limit = await queueLimit();
     await prisma.$transaction(async (tx) => {
-        await holdSongs(tx, save.ids);
-        await lockPlaybackState(tx, userId);
-        const limit = await queueLimit();
-        const known = await hydrateQueue(save.ids, tx);
-        const queue = known.slice(0, limit);
-        const place = storedPlaceOf(save.ids, new Set(known.map((item) => item.id)), queue.length, save.clientIndex);
-        const currentIndex = place.index;
-        const trackId = queue[currentIndex]?.id ?? null;
+        await lockForQueueSave(tx, userId, save.ids);
+        const plan = await planQueue(tx, save.ids, save.clientIndex, limit);
         const data = {
             playbackType: "track",
-            trackId,
+            trackId: plan.queue?.[plan.currentIndex]?.id ?? null,
             audiobookId: null,
             podcastId: null,
-            queue: queue.length > 0 ? (queue as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            queue: plan.queue ? (plan.queue as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             // A queue a Subsonic app saved did not come from a Kima page.
             queueSource: null,
-            currentIndex,
+            currentIndex: plan.currentIndex,
             isShuffle: false,
             // The column is a 32-bit integer; a larger number from a client is no position anyone reached.
             // The position is the current place's own: another place holding the same song does not carry it.
-            position: place.placeKept ? Math.min(save.position, INT32_MAX) : 0,
+            position: plan.placeKept ? Math.min(save.position, INT32_MAX) : 0,
             changedBy: save.changedBy,
         };
         await tx.playbackState.upsert({ where: { userId }, update: data, create: { userId, ...data } });
