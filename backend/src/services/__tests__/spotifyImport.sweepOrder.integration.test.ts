@@ -124,7 +124,7 @@ describe("an artist with more than 50 songs, the wanted one on the highest id", 
     it("the M3U fuzzy tier finds it", async () => {
         const title = `${P} four wanted`;
         await seed("four", "qzdfour band", LAST_IS(title));
-        expect(await m3uMatch("qzdfour", title)).toBe(highest("four"));
+        expect(await m3uMatch("qzdfour band", title)).toBe(highest("four"));
     });
 });
 
@@ -152,7 +152,7 @@ describe("a common first word shared by many artists with lower ids", () => {
     });
 
     it("the M3U fuzzy tier finds the wanted song", async () => {
-        expect(await m3uMatch("The Qzefive", title)).toBe(highest("five"));
+        expect(await m3uMatch("The Qzefive Band", title)).toBe(highest("five"));
     });
 });
 
@@ -167,7 +167,7 @@ describe("80 namesake songs inserted highest id first", () => {
     it("the M3U fuzzy tier matches the same song", async () => {
         const title = `${P} seven song`;
         await seed("seven", "qzgseven band", SAME(title));
-        expect(await m3uMatch("qzgseven", title)).toBe(lowest("seven"));
+        expect(await m3uMatch("qzgseven band", title)).toBe(lowest("seven"));
     });
 });
 
@@ -247,7 +247,7 @@ describe("a word held by more artists than a query can carry ids for", () => {
     });
 
     it("the M3U fuzzy tier still finds it", async () => {
-        expect(await m3uMatch("Qzwide", wanted)).toBe(songId(50));
+        expect(await m3uMatch("Qzwide Band", wanted)).toBe(songId(50));
     });
 
     it("the lowest id wins a tie", async () => {
