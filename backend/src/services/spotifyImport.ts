@@ -204,6 +204,36 @@ async function saveImportJob(job: ImportJob): Promise<void> {
   announceImportProgress(job);
 }
 
+/**
+ * Change only the fields given on an import's row, then cache and announce the row as the database holds it. A write
+ * that closes an import (it failed) uses this instead of `saveImportJob`, so the counts and listing that a dismissal or
+ * a scan changed since the job was read are not written back over.
+ */
+async function updateImportJobFields(
+  importJobId: string,
+  data: Prisma.SpotifyImportJobUncheckedUpdateManyInput,
+): Promise<void> {
+  await prisma.spotifyImportJob.updateMany({
+    where: { id: importJobId },
+    data: { ...data, updatedAt: new Date() },
+  });
+  await publishImportJob(importJobId);
+}
+
+/** Cache an import's row as the database holds it and tell the person's open import page. */
+async function publishImportJob(importJobId: string): Promise<void> {
+  const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId } });
+  if (!row) return;
+  const job = toImportJob(row);
+  try {
+    await redisClient.setex(IMPORT_JOB_KEY(importJobId), IMPORT_JOB_TTL, JSON.stringify(job));
+  } catch (error) {
+    logger.warn(`Failed to cache import job ${importJobId} in Redis:`, error);
+    // Continue - Redis is optional, DB is source of truth
+  }
+  announceImportProgress(job);
+}
+
 function announceImportProgress(job: ImportJob): void {
   eventBus.emit({
     type: "import:progress",
@@ -2111,27 +2141,6 @@ class SpotifyImportService {
     jobLogger?.info(
       `Matched tracks after scan: ${matchedEntries.length}/${job.tracksTotal}`,
     );
-    const playlist = await prisma.playlist.create({
-      data: {
-        userId: job.userId,
-        name: job.playlistName,
-        isPublic: false,
-        spotifyPlaylistId: job.spotifyPlaylistId,
-        items:
-          matchedEntries.length > 0
-            ? {
-                create: matchedEntries.map(({ trackId, position }, index) => ({
-                  trackId,
-                  sort: index,
-                  // Rank from the listing's ORIGINAL Spotify position (0-based), the
-                  // same scale the pending tracks use, so the two interleave into the
-                  // playlist's real order rather than forming two sequences.
-                  rank: rankForPosition(position - 1),
-                })),
-              }
-            : undefined,
-      },
-    });
 
     // Recalculate unmatched - tracks that weren't added to playlist
     const matchedTitlesNormalized = new Set<string>();
@@ -2166,6 +2175,7 @@ class SpotifyImportService {
         );
       });
 
+    let waitingEntries: Array<Omit<Prisma.PlaylistPendingTrackCreateManyInput, "playlistId">> = [];
     if (pendingTracksToSave.length > 0) {
       jobLogger?.debug(
         `   Saving ${pendingTracksToSave.length} pending tracks for future auto-matching`,
@@ -2206,36 +2216,81 @@ class SpotifyImportService {
         `Pending previews found: ${previewsFound}/${pendingTracksToSave.length}`,
       );
 
-      await prisma.playlistPendingTrack.createMany({
-        data: pendingTracksWithPreviews.map((track) => ({
-          playlistId: playlist.id,
-          spotifyArtist: track.artist,
-          spotifyTitle: track.title,
-          spotifyAlbum: track.album,
-          albumMbid: track.albumMbid,
-          artistMbid: track.artistMbid,
-          deezerPreviewUrl: track.deezerPreviewUrl,
-          isrc: track.isrc || null,
-          sort: track.originalIndex,
-          rank: rankForPosition(track.originalIndex),
-        })),
-      });
+      waitingEntries = pendingTracksWithPreviews.map((track) => ({
+        spotifyArtist: track.artist,
+        spotifyTitle: track.title,
+        spotifyAlbum: track.album,
+        albumMbid: track.albumMbid,
+        artistMbid: track.artistMbid,
+        deezerPreviewUrl: track.deezerPreviewUrl,
+        isrc: track.isrc || null,
+        sort: track.originalIndex,
+        rank: rankForPosition(track.originalIndex),
+      }));
+    }
 
+    // The playlist, its songs, its waiting entries and the job's link to it commit together. A scan or a dismissal that
+    // finds the playlist finds its job, with counts that match the entries, and nothing here writes over them afterwards.
+    const playlist = await prisma.$transaction(
+      async (tx) => {
+        const made = await tx.playlist.create({
+          data: {
+            userId: job.userId,
+            name: job.playlistName,
+            isPublic: false,
+            spotifyPlaylistId: job.spotifyPlaylistId,
+            items:
+              matchedEntries.length > 0
+                ? {
+                    create: matchedEntries.map(({ trackId, position }, index) => ({
+                      trackId,
+                      sort: index,
+                      // Rank from the listing's ORIGINAL Spotify position (0-based), the
+                      // same scale the pending tracks use, so the two interleave into the
+                      // playlist's real order rather than forming two sequences.
+                      rank: rankForPosition(position - 1),
+                    })),
+                  }
+                : undefined,
+          },
+        });
+        if (waitingEntries.length > 0) {
+          await tx.playlistPendingTrack.createMany({
+            data: waitingEntries.map((entry) => ({ ...entry, playlistId: made.id })),
+          });
+        }
+        await tx.spotifyImportJob.update({
+          where: { id: job.id },
+          data: {
+            createdPlaylistId: made.id,
+            tracksMatched: matchedEntries.length,
+            status: "completed",
+            progress: 100,
+            updatedAt: new Date(),
+          },
+        });
+        return made;
+      },
+      // A long playlist is thousands of rows: well past the default five seconds.
+      { timeout: 60_000, maxWait: 10_000 },
+    );
+
+    job.createdPlaylistId = playlist.id;
+    job.tracksMatched = matchedEntries.length;
+    job.status = "completed";
+    job.progress = 100;
+    job.updatedAt = new Date();
+    announcePlaylistChange(job.userId, playlist.id);
+    // The cache and the open page get the row as the database holds it, not this copy of the job.
+    await publishImportJob(job.id);
+
+    if (waitingEntries.length > 0) {
       // Auto-retry: attempt per-track Soulseek download for unmatched tracks
       // This runs in the background - tracks will be reconciled on next scan
       this.autoRetryPendingTracks(job, pendingTracksToSave).catch((err) => {
         jobLogger?.debug(`Auto-retry error: ${err.message}`);
       });
     }
-
-    job.createdPlaylistId = playlist.id;
-    announcePlaylistChange(job.userId, playlist.id);
-    job.tracksMatched = matchedEntries.length;
-    job.status = "completed";
-    job.progress = 100;
-    job.updatedAt = new Date();
-
-    await saveImportJob(job);
 
     jobLogger?.logPlaylistCreated(
       playlist.id,
@@ -3178,9 +3233,8 @@ class SpotifyImportService {
       return;
     }
 
-    job.status = "failed";
-    job.updatedAt = new Date();
-    await saveImportJob(job);
+    // Only the status and the error: the counts and the listing are whatever a dismissal or a scan left them.
+    await updateImportJobFields(importJobId, { status: "failed", error: errorMessage });
   }
 }
 
