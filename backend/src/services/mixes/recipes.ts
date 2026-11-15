@@ -299,7 +299,7 @@ export function definedCtes(
     });
     return Prisma.sql`
         ${usesPace ? Prisma.sql`pace_scale AS MATERIALIZED (
-            SELECT avg(dpace) AS mean, stddev_pop(dpace) AS sd FROM ${Prisma.raw(source)}
+            SELECT avg(dpace ORDER BY id) AS mean, stddev_pop(dpace ORDER BY id) AS sd FROM ${Prisma.raw(source)}
         ),` : Prisma.empty}
         defined AS (
             SELECT l.*${scores.length > 0 ? Prisma.sql`, ${Prisma.join(scores)}` : Prisma.empty}${extra.columns ?? Prisma.empty}
@@ -311,8 +311,8 @@ export function definedCtes(
 /** `def_stats` over `defined`: each defined mood's library mean (`<mood>_mean`) and population SD (`<mood>_sd`). */
 export function definedStatsCte(definitions: readonly MoodDefinition[]): Prisma.Sql {
     const columns = definitions.flatMap(({ mood }) => [
-        `avg(${scoreColumn(mood)}) AS ${mood}_mean`,
-        `stddev_pop(${scoreColumn(mood)}) AS ${mood}_sd`,
+        `avg(${scoreColumn(mood)} ORDER BY id) AS ${mood}_mean`,
+        `stddev_pop(${scoreColumn(mood)} ORDER BY id) AS ${mood}_sd`,
     ]);
     return Prisma.sql`def_stats AS MATERIALIZED (SELECT ${Prisma.raw(columns.join(", "))} FROM defined)`;
 }
@@ -326,7 +326,9 @@ export function definedZSql(mood: Mood, row = "l"): string {
  * The recipe's score for every song it ranks, as CTEs of a WITH clause over `state`: `library`, `defined` (plus any
  * familiarity `boost`), `key_scale`, `eligible`, `spread`, `ranked` (`recipe_z`) and `placed` (arousal percentile,
  * `in_filters`). The key's scale is computed here, and the one-row aggregates are MATERIALIZED. A component missing from
- * `state` or with no spread throws UnrankableLibraryError.
+ * `state` or with no spread throws UnrankableLibraryError. Every average and spread adds its rows in id order (`ORDER BY id`
+ * inside the aggregate, as the matching and mood statistics do): a float sum changes in its last digits with the order it
+ * is added in, and the order rows reach it in changes with the plan.
  */
 export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: FamiliarBoost | null): Prisma.Sql {
     const { components, filters } = recipe;
@@ -423,7 +425,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: Famil
         ${defined},
         ${definitions.length > 0 ? Prisma.sql`${definedStatsCte(definitions)},` : Prisma.empty}
         key_scale AS MATERIALIZED (
-            SELECT avg(minor) AS mean, stddev_pop(minor) AS sd FROM defined
+            SELECT avg(minor ORDER BY id) AS mean, stddev_pop(minor ORDER BY id) AS sd FROM defined
         ),
         eligible AS (
             SELECT l.*, (${terms}) / ${totalWeight}::float8 AS score
@@ -431,7 +433,7 @@ export function recipeRankingSql(recipe: Recipe, state: MoodState, boost?: Famil
             WHERE ${Prisma.raw(present.length > 0 ? present.join(" AND ") : "true")}
         ),
         spread AS MATERIALIZED (
-            SELECT count(*)::int AS eligible, avg(score) AS mean, stddev_pop(score) AS sd FROM eligible
+            SELECT count(*)::int AS eligible, avg(score ORDER BY id) AS mean, stddev_pop(score ORDER BY id) AS sd FROM eligible
         ),
         ranked AS (
             SELECT e.*, (e.score - s.mean ${

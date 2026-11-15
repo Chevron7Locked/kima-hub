@@ -727,6 +727,39 @@ describe("the mix draw", () => {
     });
 });
 
+describe("the ranking does not depend on the order the rows come back in", () => {
+    // A sum of floats changes in its last digits with the order it is added in, and the order rows come back in changes with
+    // the plan (an analyze between two runs, a different join). The same library must score the same under every plan.
+    // The songs are written out of id order, so a plan that reads them in the order they were stored differs from one that
+    // reads them by id.
+    const SONGS: Song[] = Array.from({ length: 40 }, (_, k) => {
+        const i = (k * 17) % 40;
+        return { name: `s${String(i).padStart(2, "0")}`, moods: { calm: Math.sqrt(i + 1) * 1.37 - Math.PI } };
+    });
+    const PLANS = [
+        ["the default plan", []],
+        ["scans and hash joins", ["enable_nestloop", "enable_mergejoin", "enable_indexscan", "enable_bitmapscan"]],
+        ["merge joins", ["enable_nestloop", "enable_hashjoin"]],
+    ] as const;
+
+    const scoresUnder = (recipeUnderTest: Recipe, off: readonly string[]) =>
+        prisma.$transaction(async (tx) => {
+            for (const setting of off) await tx.$executeRawUnsafe(`SET LOCAL ${setting} = off`);
+            const state = (await loadMoodState())!;
+            const rows = await tx.$queryRaw<Array<{ id: string; recipe_z: number }>>`
+                WITH ${recipeRankingSql(recipeUnderTest, state)} SELECT id, recipe_z FROM ranked ORDER BY id`;
+            return rows.map((r) => [r.id.slice(P.length), r.recipe_z]);
+        });
+
+    it("gives every song the same score under every plan", async () => {
+        await library(SONGS);
+        const [[, noSettings], ...others] = PLANS;
+        const expected = await scoresUnder(CALM, noSettings);
+        expect(expected).toHaveLength(40);
+        for (const [, off] of others) expect(await scoresUnder(CALM, off)).toEqual(expected);
+    });
+});
+
 describe("familiarity: songs that sound like what the listener plays most", () => {
     const USER_ID = `${P}famuser`;
     const FAMILIAR = parseRecipes({ fam: { name: "Fam", components: { calm: 1 }, familiarity: 0.3 } }).get("fam")!;
