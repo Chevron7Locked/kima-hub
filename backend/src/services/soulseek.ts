@@ -16,7 +16,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { sessionLog } from "../utils/playlistLogger";
 import { distributedLock } from "../utils/distributedLock";
-import { LockHeldError } from "../utils/lockErrors";
+import { LockHeldError, LockLostError } from "../utils/lockErrors";
 import { redisClient } from "../utils/redis";
 import {
     soulseekConnectionStatus,
@@ -28,6 +28,11 @@ import {
 import { sourcePauseController } from "./sourcePauseController";
 import { soulseekConfigured } from "../utils/soulseekConfigured";
 import { nameKey, nameWords } from "./nameFold";
+
+const SOULSEEK_LOCK_KEY = "soulseek:connection";
+
+/** Who is asking for a connection: a search or download, the startup connect, or a reset that connects now. */
+type ConnectMode = "request" | "background" | "force";
 
 export interface SearchResult {
     user: string;
@@ -241,7 +246,7 @@ class SoulseekService {
                 return;
             }
             sessionLog("SOULSEEK", "Attempting eager connection on startup...", "DEBUG");
-            await this.ensureConnected();
+            await this.ensureConnected("background");
             sessionLog("SOULSEEK", "Eager connection successful", "DEBUG");
         } catch (err: any) {
             sessionLog("SOULSEEK", `Eager connection failed (will retry on use): ${err.message}`, "DEBUG");
@@ -477,7 +482,26 @@ class SoulseekService {
         return true;
     }
 
-    private async ensureConnected(force: boolean = false): Promise<void> {
+    /**
+     * Makes sure the client is logged in. `request` is a search or a download: during the reconnect backoff it fails
+     * at once saying when to try again, because nobody should wait minutes on it. `background` (the startup connect)
+     * sleeps the backoff out. `force` drops the client and connects now.
+     */
+    private async ensureConnected(mode: ConnectMode = "request"): Promise<void> {
+        try {
+            await this.connectOnce(mode, false);
+        } catch (error) {
+            // A lock lost under a connect says nothing about whether another process connected, so it is tried once more.
+            if (error instanceof LockLostError) {
+                await this.connectOnce(mode, false);
+                return;
+            }
+            throw error;
+        }
+    }
+
+    private async connectOnce(mode: ConnectMode, waitedForHolder: boolean): Promise<void> {
+        const force = mode === "force";
         if (!force && this.client && this.client.loggedIn) {
             if (this.checkConnectionHealth()) {
                 return;
@@ -488,12 +512,23 @@ class SoulseekService {
             this.forceDisconnect();
         }
 
-        // The backoff is slept before the lock is taken: the lock covers a connect (its connect and login timeouts
-        // add up to 20 s) and is renewed while it runs, and a caller that finds it held waits for that connect.
-        // Sleepers wake at different times (the delay carries jitter). One that finds another attempt was made while it
-        // slept goes back to what that attempt left behind, a connected client or a longer backoff, and does not
-        // make an attempt of its own on top of it.
-        if (!force) {
+        // The backoff is not slept inside the lock: the lock covers a connect (its connect and login timeouts add up to
+        // 20 s) and is renewed while it runs, and a caller that finds it held waits for that connect.
+        if (mode === "request") {
+            if (this.connecting && this.connectPromise) {
+                await this.connectPromise;
+                return;
+            }
+            const left = this.backoffLeftMs();
+            if (left > 0) {
+                throw new Error(`soulseek is reconnecting, try again in ${Math.ceil(left / 1000)}s`);
+            }
+        }
+
+        // Background sleepers wake at different times (the delay carries jitter). One that finds another attempt was
+        // made while it slept goes back to what that attempt left behind, a connected client or a longer backoff, and
+        // does not make an attempt of its own on top of it.
+        if (mode === "background") {
             for (;;) {
                 if (this.connecting && this.connectPromise) {
                     await this.connectPromise;
@@ -508,7 +543,7 @@ class SoulseekService {
             }
         }
 
-        const lockKey = 'soulseek:connection';
+        const lockKey = SOULSEEK_LOCK_KEY;
         const lockTtl = 60000; // 3x a connect's worst case (CONNECT_TIMEOUT + LOGIN_TIMEOUT = 20 s), and renewed while it runs
 
         try {
@@ -564,23 +599,33 @@ class SoulseekService {
             // Another process is connecting. With Redis down (LockUnavailableError) nobody can be waited for, so
             // the error goes up as it is rather than after a 30 s wait.
             if (error instanceof LockHeldError) {
+                if (waitedForHolder) {
+                    throw new Error("soulseek connection is busy in another process, try again");
+                }
                 sessionLog("SOULSEEK", "Connection already in progress - waiting for it to complete", "DEBUG");
-                await this.waitForConnection();
+                if ((await this.waitForConnection()) === "free") {
+                    await this.connectOnce(mode, true);
+                }
                 return;
             }
             throw error;
         }
     }
 
-    /** Sleeps out what is left of the exponential backoff (slskd practice) since the last connect attempt. */
-    private async waitOutBackoff(): Promise<void> {
+    /** What is left, in ms, of the exponential backoff since the last connect attempt; 0 when none is running. */
+    private backoffLeftMs(): number {
         const backoffDelay = this.getReconnectDelay();
-        if (backoffDelay <= 0) return;
+        if (backoffDelay <= 0) return 0;
         const timeSinceLastAttempt = this.lastConnectAttempt > 0
             ? Date.now() - this.lastConnectAttempt
             : backoffDelay + 1;
-        if (timeSinceLastAttempt >= backoffDelay) return;
-        const waitMs = backoffDelay - timeSinceLastAttempt;
+        return Math.max(0, backoffDelay - timeSinceLastAttempt);
+    }
+
+    /** Sleeps out what is left of the exponential backoff (slskd practice) since the last connect attempt. */
+    private async waitOutBackoff(): Promise<void> {
+        const waitMs = this.backoffLeftMs();
+        if (waitMs <= 0) return;
         sessionLog(
             "SOULSEEK",
             `Exponential backoff: waiting ${Math.round(waitMs / 1000)}s before reconnect attempt (attempt #${this.failedConnectionAttempts})`,
@@ -590,10 +635,11 @@ class SoulseekService {
     }
 
     /**
-     * Wait for an in-progress connection attempt to complete.
-     * Polls connection state with short intervals instead of failing immediately.
+     * Waits while another process holds the connection lock. Answers "connected" when this process's own connect
+     * finished or its client is logged in, and "free" when the lock was let go, so the caller connects itself.
+     * A connection another process made is not visible here, so only the lock says when it is done.
      */
-    private async waitForConnection(maxWaitMs: number = 30000): Promise<void> {
+    private async waitForConnection(maxWaitMs: number = 30000): Promise<"connected" | "free"> {
         const pollInterval = 500;
         const deadline = Date.now() + maxWaitMs;
 
@@ -601,14 +647,18 @@ class SoulseekService {
             if (this.connectPromise) {
                 try {
                     await this.connectPromise;
-                    return;
+                    return "connected";
                 } catch {
                     throw new Error('Soulseek connection attempt failed');
                 }
             }
 
             if (this.client && this.client.loggedIn) {
-                return;
+                return "connected";
+            }
+
+            if (!(await distributedLock.isHeld(SOULSEEK_LOCK_KEY))) {
+                return "free";
             }
 
             await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -677,7 +727,7 @@ class SoulseekService {
         if (options?.signal?.aborted) {
             throw new DOMException('The operation was aborted.', 'AbortError');
         }
-        await this.ensureConnected();
+        await this.ensureConnected("request");
         return this.client!.search(query, options ?? {});
     }
 
@@ -721,7 +771,7 @@ class SoulseekService {
         // rateLimitedSearch also calls ensureConnected, but this avoids wasting a slot
         // when credentials are missing or the service is disabled.
         try {
-            await this.ensureConnected();
+            await this.ensureConnected("request");
         } catch (err: any) {
             sessionLog(
                 "SOULSEEK",
@@ -1143,7 +1193,7 @@ class SoulseekService {
                 : this.DOWNLOAD_TIMEOUT_RETRY;
 
         try {
-            await this.ensureConnected();
+            await this.ensureConnected("request");
         } catch (err: any) {
             this.activeDownloads--;
             return { success: false, error: err.message };
@@ -2014,7 +2064,7 @@ class SoulseekService {
         this.disconnect();
 
         try {
-            await this.ensureConnected(true);
+            await this.ensureConnected("force");
             sessionLog("SOULSEEK", "Reset and reconnect successful", "DEBUG");
         } catch (err: any) {
             sessionLog("SOULSEEK", `Reset and reconnect failed: ${err.message}`, "ERROR");
