@@ -13,7 +13,9 @@ async function buildSettings() {
     return resolveEncryptedSettings(settings, lidarrSelfRepairingFields);
 }
 
-let cachedSettings: Awaited<ReturnType<typeof buildSettings>> | null = null;
+type Settings = Awaited<ReturnType<typeof buildSettings>>;
+
+let cachedSettings: Settings = null;
 let cacheExpiry = 0;
 // Bumped by every invalidation, so a read that began before one can tell its answer may be out of date.
 let generation = 0;
@@ -27,16 +29,13 @@ export function invalidateSystemSettingsCache() {
 /** The queue length limit an operator may set (the schema's default is 10000). */
 export const QUEUE_LENGTH = { min: 100, max: 100000, default: 10000 } as const;
 
-type Settings = Awaited<ReturnType<typeof buildSettings>>;
-
 // The read in flight, and the generation it began in. Calls that find the cache cold join it, so a burst of
 // them reads the row once; a call made after an invalidation does not, because that read may predate the save.
-let pending: { generation: number; read: Promise<Settings> } | null = null;
+let pending: { began: number; read: Promise<Settings> } | null = null;
 
 function startRead(): Promise<Settings> {
     const started = generation;
-    const slot = { generation: started } as NonNullable<typeof pending>;
-    slot.read = (async () => {
+    const read = (async () => {
         try {
             const resolved = await buildSettings();
             // An invalidation while the row was being read means the answer may predate a save: it is returned, not kept.
@@ -46,12 +45,13 @@ function startRead(): Promise<Settings> {
             }
             return resolved;
         } finally {
-            // Only this read's own slot: a newer read may have replaced it. A failed read leaves nothing to join.
-            if (pending === slot) pending = null;
+            // Only this read's own slot (one read per generation is ever in flight): a newer read may have replaced it.
+            // A failed read leaves nothing to join.
+            if (pending?.began === started) pending = null;
         }
     })();
-    pending = slot;
-    return slot.read;
+    pending = { began: started, read };
+    return read;
 }
 
 export async function getSystemSettings() {
@@ -59,7 +59,7 @@ export async function getSystemSettings() {
         return { ...cachedSettings };
     }
 
-    const resolved = await (pending && pending.generation === generation ? pending.read : startRead());
+    const resolved = await (pending && pending.began === generation ? pending.read : startRead());
     return resolved && { ...resolved };
 }
 

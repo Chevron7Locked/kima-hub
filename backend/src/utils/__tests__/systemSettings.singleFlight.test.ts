@@ -19,6 +19,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+    // transcodeCacheMaxGb is just a plain numeric column to tell one saved row from another
     const start = { transcodeCacheMaxGb: 10 };
     await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...start }, update: start });
     invalidateSystemSettingsCache();
@@ -45,9 +46,14 @@ function watchReads() {
         return row;
     })()) as never);
     const waitForRead = async (count: number) => {
-        while (releases.length < count) await new Promise((resolve) => setTimeout(resolve, 5));
+        const deadline = Date.now() + 3000;
+        while (releases.length < count) {
+            if (Date.now() > deadline) throw new Error(`expected ${count} open reads of the row, saw ${releases.length}`);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
     };
-    return { spy, releases, waitForRead };
+    const releaseAll = () => releases.forEach((release) => release());
+    return { spy, releases, waitForRead, releaseAll };
 }
 
 describe("getSystemSettings with a cold cache", () => {
@@ -56,7 +62,7 @@ describe("getSystemSettings with a cold cache", () => {
 
         const calls = Array.from({ length: 8 }, () => getSystemSettings());
         await reads.waitForRead(1);
-        reads.releases.forEach((release) => release());
+        reads.releaseAll();
         const answers = await Promise.all(calls);
 
         expect(reads.spy).toHaveBeenCalledTimes(1);
@@ -89,7 +95,7 @@ describe("getSystemSettings with a cold cache", () => {
         const late = getSystemSettings();
         const alsoLate = getSystemSettings();
         await reads.waitForRead(2);
-        reads.releases.forEach((release) => release());
+        reads.releaseAll();
 
         expect(reads.spy).toHaveBeenCalledTimes(2);
         expect((await early)?.transcodeCacheMaxGb).toBe(10);
@@ -152,7 +158,7 @@ describe("saveSystemSettings and a read in flight", () => {
         await saveSystemSettings({ transcodeCacheMaxGb: 15 });
         const fresh = getSystemSettings();
         await reads.waitForRead(2);
-        reads.releases.forEach((release) => release());
+        reads.releaseAll();
 
         expect((await stale)?.transcodeCacheMaxGb).toBe(10);
         expect((await fresh)?.transcodeCacheMaxGb).toBe(15);
