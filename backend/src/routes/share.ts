@@ -47,6 +47,19 @@ function getMimeType(filePath: string): string {
     return mimeTypes[ext] || "application/octet-stream";
 }
 
+/**
+ * Why a link has ended, in the 410 body next to the message: the page tells "expired" from "play limit" by `reason`, not by
+ * the words in `error`. The status stays 410 for both; the iOS app reads only the status.
+ */
+type EndedReason = "expired" | "play-limit";
+
+function sendEnded(res: Response, reason: EndedReason): void {
+    res.status(410).json({
+        error: reason === "expired" ? "Share link has expired" : "Share link play limit reached",
+        reason,
+    });
+}
+
 /** The share link for `token`, or null once the response has gone out: 404 unknown, 410 expired or out of plays. */
 async function loadUsableShareLink(token: string, res: Response) {
     const shareLink = await prisma.shareLink.findUnique({ where: { token } });
@@ -57,12 +70,12 @@ async function loadUsableShareLink(token: string, res: Response) {
     }
 
     if (shareLink.expiresAt && shareLink.expiresAt < new Date()) {
-        res.status(410).json({ error: "Share link has expired" });
+        sendEnded(res, "expired");
         return null;
     }
 
     if (shareLink.maxPlays && shareLink.playCount >= shareLink.maxPlays) {
-        res.status(410).json({ error: "Share link play limit reached" });
+        sendEnded(res, "play-limit");
         return null;
     }
 
@@ -249,7 +262,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
                 `;
                 if (updated === 0) {
                     recentPlays.delete(playKey);
-                    return res.status(410).json({ error: "Share link play limit reached" });
+                    return sendEnded(res, "play-limit");
                 }
             } else {
                 await prisma.shareLink.update({

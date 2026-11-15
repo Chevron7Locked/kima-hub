@@ -174,12 +174,12 @@ it("unknown, expired, spent and emptied links answer as before", async () => {
     const expiredToken = `${TAG}-expired`;
     await prisma.shareLink.create({ data: { token: expiredToken, entityType: "track", entityId: firstTrack, createdBy: userId, expiresAt: new Date(Date.now() - 1000) } });
     const expired = await resolve(expiredToken);
-    expect([expired.status, expired.body]).toEqual([410, { error: "Share link has expired" }]);
+    expect([expired.status, expired.body]).toEqual([410, { error: "Share link has expired", reason: "expired" }]);
 
     const spentToken = `${TAG}-spent`;
     await prisma.shareLink.create({ data: { token: spentToken, entityType: "track", entityId: firstTrack, createdBy: userId, maxPlays: 2, playCount: 2 } });
     const spent = await resolve(spentToken);
-    expect([spent.status, spent.body]).toEqual([410, { error: "Share link play limit reached" }]);
+    expect([spent.status, spent.body]).toEqual([410, { error: "Share link play limit reached", reason: "play-limit" }]);
 
     const gone = await resolve(await link("track", `${TAG}-no-such-track`));
     expect([gone.status, gone.body]).toEqual([404, { error: "Shared content no longer exists" }]);

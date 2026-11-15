@@ -552,6 +552,35 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         expect(res.status).toBe(403);
     });
 
+    describe('a link that has ended answers 410 with the reason, on every address that opens it', () => {
+        const ended = {
+            expired: { expiresAt: new Date(Date.now() - 1000) },
+            'play-limit': { maxPlays: 2, playCount: 2 },
+        } as const;
+
+        it.each(['expired', 'play-limit'] as const)('says %s', async (reason) => {
+            const token = `${TAG}-ended-${reason}`;
+            await prisma.shareLink.create({ data: { token, entityType: 'track', entityId: songs.playable, createdBy: OWNER, ...ended[reason] } });
+            const message = reason === 'expired' ? 'Share link has expired' : 'Share link play limit reached';
+
+            for (const address of [`/share/${token}`, `/share/${token}/stream/${songs.playable}`, `/share/${token}/cover-art/native:albums%2Fx.jpg`]) {
+                const res = await request(app).get(address);
+                expect([address, res.status, res.body]).toEqual([address, 410, { error: message, reason }]);
+            }
+        });
+
+        it('says play-limit when the last play is taken between the check and the count', async () => {
+            const token = await covering('track', songs.playable);
+            await prisma.shareLink.update({ where: { token }, data: { maxPlays: 1 } });
+            const raw = jest.spyOn(prisma, '$executeRaw').mockResolvedValueOnce(0);
+
+            const res = await request(app).get(`/share/${token}/stream/${songs.playable}`);
+            raw.mockRestore();
+
+            expect([res.status, res.body]).toEqual([410, { error: 'Share link play limit reached', reason: 'play-limit' }]);
+        });
+    });
+
     it('counts a visit only for a song that streams', async () => {
         const token = await covering('track', songs.corrupt);
         await stream(token, songs.corrupt);
