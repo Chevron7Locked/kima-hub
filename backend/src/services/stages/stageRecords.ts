@@ -17,6 +17,9 @@
  * - `fail` / `failOutcome`: an attempt failed, was parked by a rate limit, or can never be answered.
  * - `closeDependents`: a question that needs a closed question's output is closed with it.
  * - `closeForMissingFiles`: the open questions of songs whose file is gone are closed, so nothing waits on them.
+ * - `flagMissingFiles` / `returnFiles`: a scan found songs' files gone (flagged, their questions closed) or back (flag
+ *   cleared, the closed questions opened again), each in one transaction that takes the songs' records before their
+ *   rows. `holdRecords` is the same hold for a caller that writes rows before it moves records (the restart).
  * - `askAgain`: questions are opened again from the start (set-based, any number of songs; it can join the caller's
  *   transaction, so a reset that also clears answers commits as one).
  * - `decide`: a person parks questions as blocked.
@@ -994,6 +997,91 @@ export async function closeForMissingFiles(within?: Tx, trackIds?: string[]): Pr
         return closed.length;
     };
     return within ? run(within) : retryOnDeadlock("closing records of missing files", () => prisma.$transaction(run, BULK_TX));
+}
+
+/** Which records `holdRecords` takes: any that match one of the parts. */
+export interface HoldScope {
+    /** Every record of these songs. */
+    trackIds?: readonly string[];
+    /** Every record of every song flagged missing: the ones `closeForMissingFiles` will close. */
+    flagged?: boolean;
+    /** The records of these stages that no person has decided: the ones a re-run resets. */
+    undecidedStages?: readonly string[];
+}
+
+/**
+ * Takes records, in one statement and in the order every move takes them (song, then stage), before the caller writes
+ * any `Track` row: the lock a move on any of the same questions needs first. A caller that writes rows and then moves
+ * records, and a move that takes records and then writes its rows, so cannot wait on each other. Waits for a record
+ * another move holds. Joins the caller's transaction.
+ */
+export async function holdRecords(tx: Tx, scope: HoldScope): Promise<void> {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    if (scope.trackIds && scope.trackIds.length > 0) {
+        params.push(scope.trackIds);
+        parts.push(`"trackId" = ANY($${params.length}::text[])`);
+    }
+    if (scope.flagged) parts.push(`"trackId" IN (SELECT id FROM "Track" WHERE "missingSince" IS NOT NULL)`);
+    if (scope.undecidedStages && scope.undecidedStages.length > 0) {
+        params.push(scope.undecidedStages);
+        parts.push(`(stage = ANY($${params.length}::text[]) AND "decidedAt" IS NULL)`);
+    }
+    if (parts.length === 0) return;
+    await tx.$queryRawUnsafe(
+        `SELECT count(*) FROM (SELECT 1 FROM "TrackStage" WHERE ${parts.join(" OR ")} ORDER BY "trackId", stage FOR UPDATE) held`,
+        ...params,
+    );
+}
+
+/**
+ * A scan found these songs' files gone. Each is flagged missing now (one already flagged keeps its first time: the
+ * stamp is when a scan found the file gone, not a later scan re-stamping an old fact) and every open question of every
+ * flagged song closes, in one transaction, so no reader sees a flagged song whose questions are still owed. The
+ * records of the named and the already flagged songs are held first, then their rows, the order of every move here;
+ * a deadlock Postgres still picks it for runs once more. Also closes the questions of songs flagged earlier when none
+ * are named. Returns how many songs were flagged now and how many records closed.
+ */
+export async function flagMissingFiles(trackIds: readonly string[]): Promise<{ flagged: number; closed: number }> {
+    return retryOnDeadlock("flagging missing files", () => prisma.$transaction(async (tx) => {
+        await holdRecords(tx, { trackIds, flagged: true });
+        // Ids go as one array parameter: a library's worth of vanished songs is past a statement's bind limit.
+        // The stamp is the server's clock, as Prisma writes it: a scan compares it with its own start time, which the
+        // database's clock (a container's can differ by milliseconds) must not move.
+        const flagged = trackIds.length === 0 ? 0 : await tx.$executeRawUnsafe(
+            `UPDATE "Track" SET "missingSince" = ($2::timestamptz AT TIME ZONE 'UTC'), "updatedAt" = ($2::timestamptz AT TIME ZONE 'UTC') WHERE id = ANY($1::text[]) AND "missingSince" IS NULL`,
+            trackIds,
+            new Date().toISOString(),
+        );
+        return { flagged, closed: await closeForMissingFiles(tx) };
+    }, BULK_TX));
+}
+
+/**
+ * A scan found these songs' files again. Each song's flag clears and the questions the closure closed (FILE_MISSING,
+ * undecided) open again at attempt 0; a record closed for another reason, or decided by a person, stays. The song's
+ * records are held before its row, the order of every move here, and a deadlock Postgres still picks it for runs once
+ * more. Returns how many records it reopened.
+ */
+export async function returnFiles(trackIds: readonly string[]): Promise<number> {
+    if (trackIds.length === 0) return 0;
+    return retryOnDeadlock("returning files", () => prisma.$transaction(async (tx) => {
+        await holdRecords(tx, { trackIds });
+        await tx.$executeRawUnsafe(
+            `UPDATE "Track" SET "missingSince" = NULL, "updatedAt" = ($2::timestamptz AT TIME ZONE 'UTC') WHERE id = ANY($1::text[]) AND "missingSince" IS NOT NULL`,
+            trackIds,
+            new Date().toISOString(),
+        );
+        return askAgain({
+            stages: STAGE_ORDER,
+            trackIds: [...trackIds],
+            statuses: ["failed"],
+            retryable: false,
+            failureClass: "FILE_MISSING",
+            undecidedOnly: true,
+            evidence: { reason: "file returned" },
+        }, tx);
+    }, BULK_TX));
 }
 
 export type RecordStatus = "pending" | "working" | "done" | "failed" | "blocked";

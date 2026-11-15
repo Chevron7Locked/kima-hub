@@ -3,6 +3,7 @@
  * recording and artist each file is, artist images, user edits, playlists, plays and likes stay.
  */
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { wipeEnrichment } from "../enrichmentRestart";
 import { redisClient } from "../../utils/redis";
 import { trackQueue, vibeQueue } from "../../workers/enrichmentQueues";
@@ -230,4 +231,57 @@ describe("wiping the enrichment", () => {
         expect(await prisma.play.count({ where: { userId: `${P}usr` } })).toBe(1);
         expect(await prisma.likedTrack.count({ where: { userId: `${P}usr` } })).toBe(1);
     });
+});
+
+describe("a wipe beside the moves of the stage module", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    async function waitUntilBlocked(): Promise<void> {
+        for (let i = 0; i < 400; i++) {
+            const [row] = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+                `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+                  WHERE NOT l.granted AND a.datname = current_database()`,
+            );
+            if (row.n > 0) return;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error("nothing ever blocked on a lock");
+    }
+
+    it("takes the records of a song whose file is gone before it writes any song row, so a move holding one of them and then writing the row is not caught in a deadlock", async () => {
+        // The fingerprint record is not one the wipe resets: only the closure at its end reaches it.
+        await prisma.trackStage.upsert({
+            where: { trackId_stage: { trackId: `${P}gone`, stage: "fingerprint" } },
+            create: { id: `${P}gone__fingerprint`, trackId: `${P}gone`, stage: "fingerprint", status: "pending" },
+            update: { status: "pending" },
+        });
+
+        // The wipe's one more run would hide a deadlock; it must not have needed it.
+        const warned = jest.spyOn(logger, "warn");
+        let wiping!: Promise<unknown>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRawUnsafe(`SELECT id FROM "TrackStage" WHERE id = $1 FOR UPDATE`, `${P}gone__fingerprint`);
+            wiping = wipeEnrichment();
+            wiping.catch(() => undefined);
+            await waitUntilBlocked();
+            await tx.$executeRawUnsafe(`UPDATE "Track" SET "analysisStatus" = 'processing' WHERE id = $1`, `${P}gone`);
+        }, { timeout: 30_000 });
+        await expect(wiping).resolves.toBeDefined();
+        expect(warned).not.toHaveBeenCalledWith(expect.stringMatching(/lost a transaction conflict/));
+
+        const stage = await prisma.trackStage.findUniqueOrThrow({ where: { id: `${P}gone__fingerprint` } });
+        expect(stage).toMatchObject({ status: "failed", failureClass: "FILE_MISSING" });
+    }, 60_000);
+
+    it("runs once more when Postgres ends it for a conflict, and not for any other failure", async () => {
+        const deadlock = () => Object.assign(new Error("deadlock detected"), { code: "P2010", meta: { code: "40P01" } });
+        const spy = jest.spyOn(prisma, "$transaction").mockRejectedValueOnce(deadlock() as never);
+        await expect(wipeEnrichment()).resolves.toMatchObject({ artists: expect.any(Number) });
+        expect(spy).toHaveBeenCalledTimes(2);
+
+        spy.mockReset();
+        spy.mockRejectedValueOnce(new Error("connection reset") as never);
+        await expect(wipeEnrichment()).rejects.toThrow("connection reset");
+        expect(spy).toHaveBeenCalledTimes(1);
+    }, 60_000);
 });

@@ -6,6 +6,7 @@
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { retryOnConflict } from "../utils/dbConflict";
 import { logger } from "../utils/logger";
 import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
@@ -127,14 +128,14 @@ function releaseMoodState(tx: Tx): Promise<unknown> {
 }
 
 /**
- * The stage rows a re-run resets, locked right after the state and before any track or vector row. Both analyzers
- * lock a track's stage row before they write its track or vector, so taking the stage rows first keeps one order and
- * no deadlock: an analyzer holding one finishes first, and its claim is then refused when it next reports.
+ * The stage records a re-run resets, and every record of a song whose file is gone (the closure at the end of the
+ * re-run reaches those too), held right after the state and before any track or vector row, in the stage module's
+ * order. Both analyzers and every stage move take a song's records before they write its track or vector, so taking
+ * the records first keeps one order and no deadlock: a move holding one finishes first, and a claim it held is then
+ * refused when it next reports.
  */
 function lockStages(tx: Tx, stages: string[]): Promise<unknown> {
-    return tx.$queryRaw`
-        SELECT count(*) FROM (SELECT 1 FROM "TrackStage" WHERE stage = ANY(${stages}) AND "decidedAt" IS NULL FOR UPDATE) locked
-    `;
+    return stageRecords.holdRecords(tx, { undecidedStages: stages, flagged: true });
 }
 
 function resetMoods(tx: Tx): Promise<unknown> {
@@ -173,7 +174,9 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
         await vibeQueue.drain();
         await trackQueue.drain();
     }
-    const wiped = await prisma.$transaction(
+    // The whole reset is one transaction, so one Postgres ended for a conflict with another left nothing behind and
+    // runs once more.
+    const wiped = await retryOnConflict(() => prisma.$transaction(
         async (tx) => {
             if (clears.similarity) await releaseMatchingState(tx);
             if (clears.moods) await releaseMoodState(tx);
@@ -206,7 +209,10 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             return { artists, tracks, vectors };
         },
         { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },
-    );
+    ), {
+        runs: 2,
+        onLostRun: () => logger.warn(`[Enrichment] The ${from} re-run lost a transaction conflict; trying once more`),
+    });
     // After the reset has committed: the album vote reads the songs it votes on from the database, so a round
     // running during the reset may still write a verdict from the old state; clearing last removes that too.
     if (clears.recording) {

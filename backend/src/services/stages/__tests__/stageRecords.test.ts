@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "../../../utils/db";
+import { logger } from "../../../utils/logger";
 import { sourcePauseController } from "../../sourcePauseController";
 import * as stageRecords from "../stageRecords";
 import { claimOf } from "../stageRecords";
@@ -907,6 +908,188 @@ describe("closeForMissingFiles", () => {
 
         expect((await record(gone, "analysis"))?.status).toBe("pending");
         await expectColumnsMatch(gone);
+    });
+});
+
+describe("flagMissingFiles and returnFiles", () => {
+    const deadlock = () => Object.assign(new Error("deadlock detected"), { code: "P2010", meta: { code: "40P01" } });
+    afterEach(() => jest.restoreAllMocks());
+
+    /**
+     * Another move holds a song's records, as any move of this module does first, and writes its row while the move
+     * under test waits for the records: the row must be free for it, so the two never wait on each other.
+     */
+    async function whileAnotherMoveHolds(trackId: string, move: () => Promise<unknown>): Promise<unknown> {
+        // The move's one more run would hide a deadlock; it must not have needed it.
+        const warned = jest.spyOn(logger, "warn");
+        let moving!: Promise<unknown>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRawUnsafe(`SELECT id FROM "TrackStage" WHERE "trackId" = $1 ORDER BY stage FOR UPDATE`, trackId);
+            moving = move();
+            moving.catch(() => undefined);
+            await waitUntilBlocked();
+            await tx.$executeRawUnsafe(`UPDATE "Track" SET "analysisStatus" = 'processing' WHERE id = $1`, trackId);
+        }, { timeout: 20_000 });
+        const result = await moving;
+        expect(warned).not.toHaveBeenCalledWith(expect.stringMatching(/lost a transaction conflict/));
+        return result;
+    }
+
+    it("flags songs once and closes their open questions with the columns saying the same", async () => {
+        const first = await seedTrack("f1");
+        const again = await seedTrack("f2", { missing: true });
+        const here = await seedTrack("f3");
+        for (const id of [first, again, here]) {
+            await put(id, "analysis", "pending");
+            await put(id, "fingerprint", "pending");
+            await setColumns(id, "pending", "pending");
+        }
+        const stamp = (await prisma.track.findUniqueOrThrow({ where: { id: again } })).missingSince;
+
+        const result = await stageRecords.flagMissingFiles([first, again]);
+
+        // `again` was flagged by an earlier scan: it keeps that time, and is not counted as found gone now.
+        expect(result).toEqual({ flagged: 1, closed: 4 });
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: first } })).missingSince).not.toBeNull();
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: again } })).missingSince).toEqual(stamp);
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: here } })).missingSince).toBeNull();
+        for (const id of [first, again]) {
+            expect(await record(id, "analysis")).toMatchObject({ status: "failed", failureClass: "FILE_MISSING" });
+            expect(await record(id, "fingerprint")).toMatchObject({ status: "failed", failureClass: "FILE_MISSING" });
+        }
+        expect((await record(here, "analysis"))?.status).toBe("pending");
+        for (const id of [first, again, here]) await expectColumnsMatch(id);
+    });
+
+    it("with no songs named still closes the questions of songs flagged earlier", async () => {
+        const gone = await seedTrack("f4", { missing: true });
+        await put(gone, "analysis", "pending");
+        await setColumns(gone, "pending", "pending");
+
+        expect(await stageRecords.flagMissingFiles([])).toEqual({ flagged: 0, closed: 1 });
+        expect((await record(gone, "analysis"))?.failureClass).toBe("FILE_MISSING");
+        await expectColumnsMatch(gone);
+    });
+
+    it("returnFiles clears the flag and reopens only the questions the closure closed", async () => {
+        const back = await seedTrack("r1");
+        await put(back, "analysis", "pending");
+        await put(back, "embedding", "failed", { retryable: false, failureClass: "DAMAGED" });
+        await put(back, "recording", "done");
+        await setColumns(back, "pending", "permanently_failed");
+        await stageRecords.flagMissingFiles([back]);
+        const other = await seedTrack("r2", { missing: true });
+        await put(other, "analysis", "failed", { retryable: false, failureClass: "FILE_MISSING" });
+        await setColumns(other, "permanently_failed", "pending");
+
+        const reopened = await stageRecords.returnFiles([back]);
+
+        expect(reopened).toBe(1);
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: back } })).missingSince).toBeNull();
+        expect(await record(back, "analysis")).toMatchObject({ status: "pending", failures: 0 });
+        expect(await record(back, "embedding")).toMatchObject({ status: "failed", failureClass: "DAMAGED" });
+        expect((await record(back, "recording"))?.status).toBe("done");
+        // A song not named stays flagged and closed.
+        expect((await prisma.track.findUniqueOrThrow({ where: { id: other } })).missingSince).not.toBeNull();
+        expect((await record(other, "analysis"))?.status).toBe("failed");
+        for (const id of [back, other]) await expectColumnsMatch(id);
+        expect(await stageRecords.returnFiles([])).toBe(0);
+    });
+
+    it("flagMissingFiles takes a song's records before its row, so a move holding the records and then writing the row is not caught in a deadlock", async () => {
+        const id = await seedTrack("f5");
+        await put(id, "analysis", "pending");
+        await put(id, "fingerprint", "pending");
+
+        const result = await whileAnotherMoveHolds(id, () => stageRecords.flagMissingFiles([id]));
+
+        expect(result).toEqual({ flagged: 1, closed: 2 });
+        expect((await prisma.track.findUniqueOrThrow({ where: { id } })).missingSince).not.toBeNull();
+        await expectColumnsMatch(id);
+    });
+
+    it("flagMissingFiles also holds the records of songs flagged earlier before it writes any row", async () => {
+        const earlier = await seedTrack("f6", { missing: true });
+        await put(earlier, "analysis", "pending");
+        await put(earlier, "fingerprint", "pending");
+        const now = await seedTrack("f7");
+        await put(now, "analysis", "pending");
+
+        const result = await whileAnotherMoveHolds(earlier, () => stageRecords.flagMissingFiles([now]));
+
+        expect(result).toEqual({ flagged: 1, closed: 3 });
+        await expectColumnsMatch(earlier);
+        await expectColumnsMatch(now);
+    });
+
+    it("returnFiles takes a song's records before its row too", async () => {
+        const id = await seedTrack("r3", { missing: true });
+        await put(id, "analysis", "failed", { retryable: false, failureClass: "FILE_MISSING" });
+        await put(id, "fingerprint", "failed", { retryable: false, failureClass: "FILE_MISSING" });
+        await setColumns(id, "permanently_failed", "pending");
+
+        const reopened = await whileAnotherMoveHolds(id, () => stageRecords.returnFiles([id]));
+
+        expect(reopened).toBe(2);
+        expect((await prisma.track.findUniqueOrThrow({ where: { id } })).missingSince).toBeNull();
+        await expectColumnsMatch(id);
+    });
+
+    /** The records of the suite's `h` songs that another transaction could take right now, as `trackId:stage`. */
+    const takeable = async () =>
+        (await prisma.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
+            `SELECT "trackId", stage FROM "TrackStage" WHERE "trackId" LIKE $1 ORDER BY "trackId", stage FOR UPDATE SKIP LOCKED`,
+            `${PREFIX}_h%`,
+        )).map((r) => `${r.trackId.slice(PREFIX.length + 1)}:${r.stage}`);
+
+    async function seedHoldSongs(): Promise<void> {
+        const gone = await seedTrack("h1", { missing: true });
+        await put(gone, "analysis", "pending");
+        await put(gone, "fingerprint", "pending", { decided: true });
+        const here = await seedTrack("h2");
+        await put(here, "analysis", "pending");
+        await put(here, "fingerprint", "pending");
+        await put(here, "embedding", "pending", { decided: true });
+    }
+
+    it("holdRecords holds, for the transaction, only the records the scope names", async () => {
+        await seedHoldSongs();
+
+        await prisma.$transaction(async (tx) => {
+            await stageRecords.holdRecords(tx, { flagged: true });
+            expect(await takeable()).toEqual(["h2:analysis", "h2:embedding", "h2:fingerprint"]);
+        });
+        await prisma.$transaction(async (tx) => {
+            await stageRecords.holdRecords(tx, { trackIds: [tid("h2")] });
+            expect(await takeable()).toEqual(["h1:analysis", "h1:fingerprint"]);
+        });
+        await prisma.$transaction(async (tx) => {
+            // A re-run's records: the stage's, no person's decision among them, and every record of a flagged song.
+            await stageRecords.holdRecords(tx, { undecidedStages: ["analysis"], flagged: true });
+            expect(await takeable()).toEqual(["h2:embedding", "h2:fingerprint"]);
+        });
+        await prisma.$transaction(async (tx) => {
+            await stageRecords.holdRecords(tx, {});
+            expect(await takeable()).toHaveLength(5);
+        });
+    });
+
+    it.each([
+        ["flagMissingFiles", async (id: string) => stageRecords.flagMissingFiles([id]), { flagged: 1, closed: 1 }],
+        ["returnFiles", async (id: string) => stageRecords.returnFiles([id]), 1],
+    ] as const)("%s tries once more when it loses a deadlock, and gives up after that", async (name, run, expected) => {
+        const id = await seedTrack(`d${name.length}`, { missing: name === "returnFiles" });
+        await put(id, "analysis", name === "returnFiles" ? "failed" : "pending", name === "returnFiles"
+            ? { retryable: false, failureClass: "FILE_MISSING" }
+            : {});
+        const spy = jest.spyOn(prisma, "$transaction").mockRejectedValueOnce(deadlock() as never);
+        expect(await run(id)).toEqual(expected);
+        expect(spy).toHaveBeenCalledTimes(2);
+
+        spy.mockReset();
+        spy.mockRejectedValueOnce(deadlock() as never).mockRejectedValueOnce(deadlock() as never);
+        await expect(run(id)).rejects.toThrow("deadlock detected");
+        expect(spy).toHaveBeenCalledTimes(2);
     });
 });
 

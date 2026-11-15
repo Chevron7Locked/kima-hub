@@ -11,6 +11,8 @@ import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { lockPlayHistory, recordPlay } from "../playRecording";
+import * as stageRecords from "../stages/stageRecords";
+import { logger } from "../../utils/logger";
 
 const P = "recon";
 const MIN = 60_000;
@@ -486,6 +488,40 @@ describe("reconcileDeletedTracks", () => {
             await expect(sweep()).resolves.toMatchObject({ removed: 1 });
             expect(await prisma.track.findUnique({ where: { id: `${P}rowbusy` } })).toBeNull();
         });
+    });
+
+    describe("beside the scan's own moves on the same songs", () => {
+        afterEach(() => jest.restoreAllMocks());
+
+        it("sweeps, flags and returns songs at the same time without anyone losing a deadlock, waiting, or failing", async () => {
+            const warned = jest.spyOn(logger, "warn");
+            const sweep = () => prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()), { timeout: 30_000 });
+            for (let round = 0; round < 6; round++) {
+                const ids = Array.from({ length: 25 }, (_, i) => `${P}c${round}x${i}`);
+                for (const id of ids) {
+                    await seedTrack(id, { missingMinutesAgo: 5 });
+                    await prisma.trackStage.createMany({ data: [
+                        { trackId: id, stage: "recording" }, { trackId: id, stage: "analysis" }, { trackId: id, stage: "fingerprint" },
+                    ] });
+                }
+                const first = ids.slice(0, 15);
+                const second = ids.slice(10);
+                const started = Date.now();
+                await Promise.all([
+                    sweep(),
+                    stageRecords.flagMissingFiles(first),
+                    stageRecords.returnFiles(second),
+                    sweep(),
+                    stageRecords.flagMissingFiles(second),
+                    stageRecords.returnFiles(first),
+                ]);
+                expect(Date.now() - started).toBeLessThan(15_000);
+            }
+            // Whatever order they ran in, each song is whole: deleted with its records, or there with them.
+            const songs = await prisma.track.findMany({ where: { id: { startsWith: `${P}c` } }, select: { id: true } });
+            for (const { id } of songs) expect(await prisma.trackStage.count({ where: { trackId: id } })).toBe(3);
+            expect(warned).not.toHaveBeenCalledWith(expect.stringMatching(/lost a transaction conflict/));
+        }, 120_000);
     });
 
     describe("a drive's worth of songs", () => {

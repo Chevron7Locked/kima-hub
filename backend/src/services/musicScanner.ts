@@ -42,31 +42,6 @@ async function reopenStagesForChangedFile(trackId: string): Promise<void> {
     }
 }
 
-/**
- * Reopen the FILE_MISSING records of a returned file at attempt 0. Records
- * closed for other reasons, or re-decided by a human, stay as they are.
- */
-async function reopenStagesForReturnedTracks(
-    tx: Prisma.TransactionClient,
-    trackIds: string[]
-): Promise<void> {
-    if (trackIds.length === 0) return;
-    const reopened = await stageRecords.askAgain({
-        stages: stageRecords.STAGE_ORDER,
-        trackIds,
-        statuses: ["failed"],
-        retryable: false,
-        failureClass: "FILE_MISSING",
-        undecidedOnly: true,
-        evidence: { reason: "file returned" },
-    }, tx);
-    if (reopened > 0) {
-        logger.debug(
-            `[Scanner] Re-opened ${reopened} stage record(s): files returned`
-        );
-    }
-}
-
 // Supported audio formats
 const AUDIO_EXTENSIONS = new Set([
     ".mp3",
@@ -385,13 +360,10 @@ export class MusicScannerService {
         if (returned.length > 0) {
             const returnedIds = returned.map((t) => t.id);
             await touchArtistsOf(returnedIds, "returning");
-            await prisma.$transaction(async (tx) => {
-                await tx.track.updateMany({
-                    where: { id: { in: returnedIds } },
-                    data: { missingSince: null },
-                });
-                await reopenStagesForReturnedTracks(tx, returnedIds);
-            });
+            const reopened = await stageRecords.returnFiles(returnedIds);
+            if (reopened > 0) {
+                logger.debug(`[Scanner] Re-opened ${reopened} stage record(s): files returned`);
+            }
             logger.debug(
                 `Cleared the missing flag on ${returned.length} track(s) whose files are back`
             );
@@ -411,32 +383,17 @@ export class MusicScannerService {
             // Only songs this scan flags move a count: one flagged by an earlier scan was counted out then.
             await touchArtistsOf(vanished.filter((t) => !t.missingSince).map((t) => t.id));
 
-            // Flag and stage records change together, so no reader sees a flagged track
-            // whose questions are still owed.
-            await prisma.$transaction(async (tx) => {
-                if (vanished.length > 0) {
-                    // Only rows not already flagged change: the timestamp is when
-                    // THIS scan found the file gone, not a later one re-stamping
-                    // an old fact.
-                    const marked = await tx.track.updateMany({
-                        where: {
-                            id: { in: vanished.map((t) => t.id) },
-                            missingSince: null,
-                        },
-                        data: { missingSince: new Date() },
-                    });
-                    result.tracksMissing = marked.count;
-                    logger.debug(
-                        `Flagged ${marked.count} track(s) missing (files not found on disk)`
-                    );
-                }
-                const closed = await stageRecords.closeForMissingFiles(tx);
-                if (closed > 0) {
-                    logger.debug(
-                        `[Scanner] Closed ${closed} stage record(s) for files not in the library`
-                    );
-                }
-            });
+            // Flag and stage records change together (one move of the stage module), so no reader sees a flagged
+            // track whose questions are still owed. Only rows not already flagged change: the timestamp is when THIS
+            // scan found the file gone, not a later one re-stamping an old fact.
+            const { flagged, closed } = await stageRecords.flagMissingFiles(vanished.map((t) => t.id));
+            if (vanished.length > 0) {
+                result.tracksMissing = flagged;
+                logger.debug(`Flagged ${flagged} track(s) missing (files not found on disk)`);
+            }
+            if (closed > 0) {
+                logger.debug(`[Scanner] Closed ${closed} stage record(s) for files not in the library`);
+            }
         }
 
         // Retires tracks flagged by the previous scan and still gone (RemovalLog records them; the `flag` mode only
