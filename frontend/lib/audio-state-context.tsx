@@ -169,6 +169,9 @@ function parseStorageJson<T>(key: string, fallback: T): T {
  * Only a 404 means the item is gone. Any other failure, such as a timeout or a
  * 500, is retried later rather than discarding what the user was listening to.
  */
+// Polls are 30 s apart, so a save that keeps failing is tried again at most every 8th check (about four minutes).
+const MAX_CHECKS_TO_SKIP = 7;
+
 function isGone(err: unknown): boolean {
     return (err as { status?: number } | null)?.status === 404;
 }
@@ -342,13 +345,16 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const savePendingRef = useRef(false);
     // Numbers each run of the save effect, so a save that settles late does not clear the flag of a newer change.
     const saveRunRef = useRef(0);
-    // The newest run's save, for the poll to send again when it failed. Counted in checks, not time: after the nth failed
-    // try in a row the poll skips min(2^(n-1)-1, 7) checks before sending again, so a server that is down is not hit every
-    // check; a save that goes through starts the count over.
-    const retrySaveRef = useRef<(() => Promise<void>) | null>(null);
-    const saveInFlightRef = useRef(false);
-    const saveFailuresRef = useRef(0);
-    const saveSkipRef = useRef(0);
+    // A save that failed is sent again by the poll. Counted in checks, not time: after the nth failed try in a row the
+    // poll lets `checksToSkip` = min(2^(n-1)-1, MAX_CHECKS_TO_SKIP) checks pass first, so a server that is down is not
+    // hit every check; a save that goes through starts the count over. `send` is the newest run's save; `inFlightRun`
+    // is the run whose save is on its way (0 for none). Only the newest run's outcome counts, a late older one does not.
+    const saveRetryRef = useRef<{ send: (() => Promise<void>) | null; inFlightRun: number; failures: number; checksToSkip: number }>({
+        send: null,
+        inFlightRun: 0,
+        failures: 0,
+        checksToSkip: 0,
+    });
     useEffect(() => {
         queueRef.current = queue;
     }, [queue]);
@@ -627,19 +633,24 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (saveRunRef.current === run) savePendingRef.current = false;
                 return;
             }
-            saveInFlightRef.current = true;
+            const retry = saveRetryRef.current;
+            retry.inFlightRun = run;
             try {
                 const result = await api.savePlaybackState(state);
                 serverKnownRef.current = key;
                 setLastServerSync(new Date(result.updatedAt));
-                saveFailuresRef.current = 0;
-                saveSkipRef.current = 0;
-                if (saveRunRef.current === run) savePendingRef.current = false;
+                if (saveRunRef.current === run) {
+                    savePendingRef.current = false;
+                    retry.failures = 0;
+                    retry.checksToSkip = 0;
+                }
             } catch (err: unknown) {
                 // The flag stays set: the change is still only here, and another device's state must not replace it.
                 // The poll sends it again, later each time it fails.
-                saveFailuresRef.current += 1;
-                saveSkipRef.current = Math.min(2 ** (saveFailuresRef.current - 1) - 1, 7);
+                if (saveRunRef.current === run) {
+                    retry.failures += 1;
+                    retry.checksToSkip = Math.min(2 ** (retry.failures - 1) - 1, MAX_CHECKS_TO_SKIP);
+                }
                 if (err instanceof Error && err.message !== "Not authenticated") {
                     console.error(
                         "[AudioState] Failed to save to server:",
@@ -647,10 +658,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     );
                 }
             } finally {
-                saveInFlightRef.current = false;
+                if (retry.inFlightRun === run) retry.inFlightRun = 0;
             }
         };
-        retrySaveRef.current = saveToServer;
+        saveRetryRef.current.send = saveToServer;
 
         const timeoutId = setTimeout(saveToServer, 1000);
         return () => clearTimeout(timeoutId);
@@ -684,9 +695,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
             // A save that failed is owed still: sent again here, before anything of the server's is looked at, since
             // another device's state may not replace a change that never reached the server.
-            if (savePendingRef.current && saveFailuresRef.current > 0 && retrySaveRef.current && !saveInFlightRef.current) {
-                if (saveSkipRef.current > 0) saveSkipRef.current -= 1;
-                else await retrySaveRef.current();
+            const retry = saveRetryRef.current;
+            if (savePendingRef.current && retry.failures > 0 && retry.send && !retry.inFlightRun) {
+                if (retry.checksToSkip > 0) retry.checksToSkip -= 1;
+                else await retry.send();
                 if (!mounted) return;
             }
 
