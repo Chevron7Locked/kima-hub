@@ -45,8 +45,7 @@ function invalidBody(err: unknown, res: Response): Response | null {
 }
 
 /**
- * Machine codes the login answers beside its text, so a client reads the code and never the words: the text can change
- * and the iOS app keeps going on status codes alone.
+ * Machine codes the login answers beside its text, so a client reads the code and never the words: the text can change.
  */
 const SECOND_FACTOR_REQUIRED = "2FA_REQUIRED";
 const SECOND_FACTOR_UNAVAILABLE = "2FA_UNAVAILABLE";

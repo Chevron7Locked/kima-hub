@@ -20,7 +20,6 @@ export function isFactor(value: string): boolean {
 /** The codes the server answers beside its text when a sign-in meets the second factor. The page reads these, never the words. */
 export const SECOND_FACTOR_CODE = {
     required: "2FA_REQUIRED",
-    unavailable: "2FA_UNAVAILABLE",
     invalid: "INVALID_2FA_TOKEN",
     invalidRecovery: "INVALID_RECOVERY_CODE",
 } as const;
