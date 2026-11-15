@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Saving the queue you are already on, from the web or the iOS app, keeps a Subsonic app's resume point. Only a changed queue or a different song resets it.
+- A queue save that names a song not in the saved queue is ignored, so the saved song and place never disagree.
+- A queue place that is negative or not a whole number is refused instead of being quietly moved.
 - Clearing an artist's name, picture or bio in the editor removes your edit and shows the artist's own again.
 - An artist edit with a malformed field gets a plain error instead of a server error, and changing an artist's MusicBrainz id is saved together with the rest of the edit or not at all.
 - The album editor shows the album's MusicBrainz id, and saving with nothing changed just closes the editor.
