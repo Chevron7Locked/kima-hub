@@ -87,7 +87,8 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
 
     const ids = many(req, "id");
 
-    const current = one(req, "current");
+    // A blank `current` is no current song: apps send the parameter empty when nothing is playing.
+    const current = one(req, "current") || undefined;
     const position = positionOf(one(req, "position"));
     if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 
@@ -120,15 +121,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must not be set when id is not provided");
     }
 
-    if (ids.length > 0 && currentIndexRaw === undefined) {
-        return subsonicError(
-            req,
-            res,
-            SubsonicError.MISSING_PARAM,
-            "Required parameter is missing: currentIndex"
-        );
-    }
-
+    // The index is optional here as `current` is in the other form (OpenSubsonic): songs and no index store the queue
+    // from its first song, position 0. One that is sent and is no place in the list is a wrong value (code 0).
     const parsedIndex = currentIndexRaw !== undefined ? wholeNumber(currentIndexRaw) : 0;
     if (ids.length > 0 && (parsedIndex === null || parsedIndex >= ids.length)) {
         return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must be between 0 and queue length - 1");
@@ -137,7 +131,7 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     await saveQueueOfIds(userId, {
         ids,
         clientIndex: parsedIndex ?? 0,
-        position,
+        position: currentIndexRaw === undefined ? 0 : position,
         changedBy: clientName(req),
     });
 

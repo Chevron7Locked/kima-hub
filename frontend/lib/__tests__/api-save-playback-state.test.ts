@@ -80,6 +80,13 @@ it("clears the stored state, naming the time it saw when it has one and nothing 
     expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/playback-state$/);
 });
 
+it("hands back what the server answered to a clear: whether it succeeded and how many states it cleared", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok({ success: true, cleared: 1 })));
+    // The annotation is the check: the reply is typed as the server sends it, not void.
+    const reply: { success: boolean; cleared: number } = await api.clearPlaybackState();
+    expect(reply).toEqual({ success: true, cleared: 1 });
+});
+
 it("throws a refused clear (409) with the state the server holds, and does not log it as a failure", async () => {
     const held = { trackId: "z", updatedAt: "2026-01-01T00:00:05.000Z" };
     vi.stubGlobal(

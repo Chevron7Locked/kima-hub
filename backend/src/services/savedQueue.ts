@@ -24,7 +24,9 @@
  *   retires. A save that sends song ids reads songs, and the sweep waits on no row of a person whose queue lacks the
  *   song it retires (or who has no row yet), so that save first holds the songs it stores until it commits
  *   (`lockForQueueSave`: only the ones that will be stored, so a song left out or cut is not waited for). The order is
- *   the sweep's: the person's turn, the songs, then the state row.
+ *   the sweep's: the person's turn, the songs, then the state row. A save that sends no queue but names the current song
+ *   holds that one song (a limit of 1), and a podcast episode a save names is checked under the same turn
+ *   (`namesEpisode`), so a song or episode that is gone is stored as none.
  * - A save reads the queue limit (`queueLimit`) before it opens its transaction, never inside it: the read may take its
  *   own connection from the pool, and a save must not hold one connection while it waits for a second.
  */
@@ -158,7 +160,8 @@ function placeNearest(stored: readonly QueueEntry[], id: unknown, to: number): n
     return holding.reduce((best, i) => (Math.abs(i - to) < Math.abs(best - to) ? i : best));
 }
 
-const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
+/** Whether a save names a song: an id that is text and not empty. */
+export const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
 
 /** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
 export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
@@ -252,39 +255,48 @@ export const ON_LIBRARY_ALBUM = { album: { location: "LIBRARY" } } satisfies Pri
 /**
  * What a save that sends song ids takes before it reads them, the order the sweep takes them in so the two never wait
  * on each other: the person's turn, then the songs (`holdSongs`), then the person's state row. Held until the
- * transaction ends. A save that sends no ids takes `lockPlaybackState` alone.
+ * transaction ends. A save with no ids to hold (`ids` empty) holds no song and takes only the turn and the state row.
  *
- * Given the queue `limit`, only the songs the queue will store are held: the ids that are a library song, cut to the
- * first `limit` of them, in id order. Those are returned, and `planQueue` reads only those. A song left out or cut is
- * not stored, so it is not waited for. Without a `limit` every id is held and returned. The limit is read before the
- * transaction opens (`queueLimit`), never here.
+ * Only the songs the queue will store are held: the ids that are a library song, cut to the first `limit` of them, in
+ * id order. Those are returned, and `planQueue` reads only those. A song left out or cut is not stored, so it is not
+ * waited for. The limit is read before the transaction opens (`queueLimit`), never here.
+ *
+ * A save that stores no queue but names a song (the one the player is on) takes it with a `limit` of 1: the song is
+ * held the same way, and is stored as named only when it is among the songs returned.
  */
 export async function lockForQueueSave(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "track">,
     userId: string,
     ids: readonly string[],
-    limit?: number,
+    limit: number,
 ): Promise<ReadonlySet<string>> {
     await takeTurn(tx, userId);
-    let held: ReadonlySet<string>;
-    if (limit === undefined) {
-        held = await holdSongs(tx, ids);
-    } else {
-        const storable = new Set((await tx.track.findMany({ where: { id: { in: [...new Set(ids)] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id));
-        const candidates = ids.filter((id) => storable.has(id));
-        const taken = new Set<string>();
-        // That read takes no lock, so a song it saw may be gone once the hold gets its turn (the sweep retired it): the
-        // hold comes back short, and the next songs in line are held to fill the places it left, until the queue is full.
-        for (let start = 0, end = Math.min(limit, candidates.length); start < end; ) {
-            for (const id of await holdSongs(tx, candidates.slice(start, end))) taken.add(id);
-            start = end;
-            const stored = candidates.filter((id) => taken.has(id)).length;
-            end = Math.min(candidates.length, end + Math.max(0, limit - stored));
-        }
-        held = taken;
+    const storable =
+        ids.length === 0 ? new Set<string>() : new Set((await tx.track.findMany({ where: { id: { in: [...new Set(ids)] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id));
+    const candidates = ids.filter((id) => storable.has(id));
+    const taken = new Set<string>();
+    // That read takes no lock, so a song it saw may be gone once the hold gets its turn (the sweep retired it): the
+    // hold comes back short, and the next songs in line are held to fill the places it left, until the queue is full.
+    for (let start = 0, end = Math.min(limit, candidates.length); start < end; ) {
+        for (const id of await holdSongs(tx, candidates.slice(start, end))) taken.add(id);
+        start = end;
+        const stored = candidates.filter((id) => taken.has(id)).length;
+        end = Math.min(candidates.length, end + Math.max(0, limit - stored));
     }
     await lockStateRow(tx, userId);
-    return held;
+    return taken;
+}
+
+/**
+ * Whether the id a web player sends for the episode it is on names one Kima holds: `<podcast id>:<episode id>`, with
+ * the episode belonging to that podcast. Anything else (another shape, an episode of another show, one that was
+ * removed) names nothing. Read under the person's turn, so it agrees with the state it is stored in.
+ */
+export async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEpisode">, podcastId: unknown): Promise<boolean> {
+    if (typeof podcastId !== "string") return false;
+    const parts = podcastId.split(":");
+    if (parts.length !== 2 || parts[0] === "" || parts[1] === "") return false;
+    return (await tx.podcastEpisode.findFirst({ where: { id: parts[1], podcastId: parts[0] }, select: { id: true } })) !== null;
 }
 
 /**
@@ -294,16 +306,16 @@ export async function lockForQueueSave(
  * left out, and `clientIndex` (counting `ids`) is carried over to where its place now sits: the places before it that
  * were left out no longer count, and an index whose own place was left out or cut points at the place standing in for
  * it, the last one at most. `placeKept` is whether the place itself is in the stored queue. No song kept stores no
- * queue, index 0. Given the `held` songs `lockForQueueSave` returned, only those are read.
+ * queue, index 0. Only the `held` songs `lockForQueueSave` returned are read.
  */
 export async function planQueue(
     tx: Pick<Prisma.TransactionClient, "track">,
     ids: string[],
     clientIndex: number,
     limit: number,
-    held?: ReadonlySet<string>,
+    held: ReadonlySet<string>,
 ): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean }> {
-    const known = await hydrateQueue(held ? ids.filter((id) => held.has(id)) : ids, tx, ON_LIBRARY_ALBUM);
+    const known = await hydrateQueue(ids.filter((id) => held.has(id)), tx, ON_LIBRARY_ALBUM);
     const queue = known.slice(0, limit);
     const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), queue.length, clientIndex);
     return { queue: queue.length > 0 ? queue : null, currentIndex: place.index, placeKept: place.placeKept };
@@ -406,4 +418,26 @@ export async function shownState(state: PlaybackStateRow | null) {
         position: shown.position,
         trackId: shown.trackId,
     };
+}
+
+// The time of a state as the server answers it (`updatedAt` in JSON): an ISO 8601 date and time with its zone.
+const SEEN_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The time of the state a save or a clear says it saw (`expectedUpdatedAt`), or null when what was sent is not one:
+ * not text, or not an ISO 8601 date and time with its zone. `new Date` alone would take "1" as a year and "2026-01-01"
+ * as midnight, times the server never answered, and a check against one of those can only fail.
+ */
+export function seenTime(raw: unknown): Date | null {
+    if (typeof raw !== "string" || !SEEN_TIME.test(raw)) return null;
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/**
+ * The answer to a save or a clear that named a time other than the stored one (409): the state as stored now, shown as
+ * a read shows it, so the client can take it up without asking again. The one body both answer with.
+ */
+export async function changedSinceRead(current: PlaybackStateRow | null) {
+    return { error: "Playback state changed since it was read", state: await shownState(current) };
 }

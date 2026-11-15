@@ -147,11 +147,9 @@ describe("a Subsonic queue save and the operator's queue length limit", () => {
 
 describe("a Subsonic queue save with a current song or index that is sent but is no place in the list", () => {
     const GENERIC = 0;
-    const MISSING = 10;
 
     it.each([
         ["savePlayQueue", { id: [song(0), song(1)], current: song(2) }, "a current song that is not in the list"],
-        ["savePlayQueue", { id: [song(0), song(1)], current: "" }, "a blank current song"],
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "2" }, "an index past the end"],
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "-1" }, "a negative index"],
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "abc" }, "an index that is no number"],
@@ -167,26 +165,24 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual([song(5)]);
     });
 
-    it("savePlayQueueByIndex still answers code 10 for songs and no index: the parameter is missing", async () => {
-        const reply = await send("/savePlayQueueByIndex.view", { id: [song(0), song(1)] });
-
-        expect(reply.status).toBe("failed");
-        expect(reply.error.code).toBe(MISSING);
-    });
-
-    // OpenSubsonic: `current` is optional. With songs and no current song the queue is stored from its first song.
-    it("savePlayQueue with songs and no current song stores the queue at index 0, position 0, whatever position is sent", async () => {
+    // OpenSubsonic: `current` is optional, and so is the index of the by-index form. With songs and no current song (a
+    // blank `current` is none) the queue is stored from its first song.
+    it.each([
+        ["savePlayQueue", "no current song", "/savePlayQueue.view", {}],
+        ["savePlayQueue", "no current song and a position", "/savePlayQueue.view", { position: "7000" }],
+        ["savePlayQueue", "a blank current song", "/savePlayQueue.view", { current: "" }],
+        ["savePlayQueue", "a blank current song and a position", "/savePlayQueue.view", { current: "", position: "7000" }],
+        ["savePlayQueueByIndex", "no index", "/savePlayQueueByIndex.view", {}],
+        ["savePlayQueueByIndex", "no index and a position", "/savePlayQueueByIndex.view", { position: "7000" }],
+    ])("%s with songs and %s stores the queue at index 0, position 0, whatever position is sent", async (_name, _what, path, extra: Record<string, string>) => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "old" }], currentIndex: 0, position: 9000 } });
 
-        const queries: Array<Record<string, string | string[]>> = [{ id: [song(2), song(1), song(0)] }, { id: [song(2), song(1), song(0)], position: "7000" }];
-        for (const query of queries) {
-            const reply = await send("/savePlayQueue.view", query);
+        const reply = await send(path, { id: [song(2), song(1), song(0)], ...extra });
 
-            expect(reply.status).toBe("ok");
-            const state = await stored();
-            expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(2), song(1), song(0)]);
-            expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([0, song(2), 0]);
-        }
+        expect(reply.status).toBe("ok");
+        const state = await stored();
+        expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(2), song(1), song(0)]);
+        expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([0, song(2), 0]);
     });
 
     it.each([

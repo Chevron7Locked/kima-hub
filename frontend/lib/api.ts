@@ -1590,7 +1590,7 @@ class ApiClient {
      */
     async clearPlaybackState(options: { expectedUpdatedAt?: string } = {}) {
         const named = options.expectedUpdatedAt;
-        return this.request<void>(
+        return this.request<{ success: boolean; cleared: number }>(
             named === undefined ? "/playback-state" : `/playback-state?expectedUpdatedAt=${encodeURIComponent(named)}`,
             {
                 method: "DELETE",

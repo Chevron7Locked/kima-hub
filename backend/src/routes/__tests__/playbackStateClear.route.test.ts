@@ -138,4 +138,64 @@ describe("DELETE /api/playback-state with expectedUpdatedAt", () => {
         expect(res.body).toEqual({ success: true, cleared: 1 });
         expect(await stored(user.id)).toBeNull();
     });
+
+    // The same rule as a save's: a time is an ISO date with its zone, as the server writes it. "1" is a number of
+    // milliseconds to `new Date`, and "2026-01-01" a date with no time: neither is a time the server ever answered.
+    it.each(["1", "2026-01-01", "yesterday", "2026-13-45T00:00:00Z", " 2026-01-01T00:00:00Z", "2026-01-01T00:00:00", "Thu, 01 Jan 2026 00:00:00 GMT"])(
+        "answers 400 for %j, logs it as a refused request, and clears nothing",
+        async (expectedUpdatedAt) => {
+            const logged = expectLog("warn");
+            const user = await newUser(`iso-${expectedUpdatedAt.replace(/\W+/g, "")}`);
+            await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+
+            const res = await clear(user.id, expectedUpdatedAt);
+
+            expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
+            expect(logged.mock.calls.some((call) => String(call[0]).includes("expectedUpdatedAt"))).toBe(true);
+            expect(await stored(user.id)).not.toBeNull();
+        },
+    );
+
+    it("takes the same instant written with an offset", async () => {
+        const user = await newUser("offset");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString().replace("Z", "+00:00");
+
+        const res = await clear(user.id, seen);
+
+        expect(res.body).toEqual({ success: true, cleared: 1 });
+    });
+
+    it("refuses with the body a save refuses with, for the same stale time", async () => {
+        const user = await newUser("same-409");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+        await save(user.id, { playbackType: "track", trackId: `${S}s3` }).expect(200);
+
+        const saved = await save(user.id, { playbackType: "track", trackId: `${S}s1`, expectedUpdatedAt: seen });
+        const cleared = await clear(user.id, seen);
+
+        expect([saved.status, cleared.status]).toEqual([409, 409]);
+        expect(cleared.body).toEqual(saved.body);
+    });
+});
+
+describe("DELETE /api/playback-state with no time named", () => {
+    // It takes the turn every save takes, so a save in flight is either before it or after it.
+    it("waits for the turn a save holds, then clears what that save wrote", async () => {
+        const user = await newUser("plain-turn");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+
+        let waiting!: Promise<request.Response>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`playback-state:${user.id}`}, 0))`;
+            waiting = clear(user.id).then((r) => r);
+            await untilLockWait("pg_advisory_xact_lock");
+            await tx.playbackState.update({ where: { userId: user.id }, data: { trackId: `${S}s3` } });
+        });
+
+        const res = await waiting;
+        expect([res.status, res.body]).toEqual([200, { success: true, cleared: 1 }]);
+        expect(await stored(user.id)).toBeNull();
+    });
 });
