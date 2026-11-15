@@ -394,7 +394,7 @@ async function songsOfGroup(group: SuggestionWithSongs[], liked: boolean) {
                 : []),
         ];
         const albums = await prisma.album.findMany({
-            where: { AND: [liked ? {} : { location: "DISCOVER" as const }, { OR: matches }] },
+            where: { AND: [{ location: liked ? ("LIBRARY" as const) : ("DISCOVER" as const) }, { OR: matches }] },
             include: {
                 artist: { select: { name: true, identityKey: true, mbid: true } },
                 tracks: { where: rule, take: 1, orderBy: { trackNo: "asc" } },

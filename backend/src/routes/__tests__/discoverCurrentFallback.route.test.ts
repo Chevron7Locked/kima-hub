@@ -428,6 +428,32 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         expect(titles(res.body)).toEqual([`${MARK} song of original`]);
     });
 
+    it("finds a liked suggestion's library album by title and artist, not a Discover album of the same name made first", async () => {
+        const artist = await prisma.artist.create({ data: { name: `${MARK} namesakes`, identityKey: artistIdentityKey(`${MARK} namesakes`) } });
+        const make = async (tag: string, location: "DISCOVER" | "LIBRARY") => {
+            const album = await prisma.album.create({
+                data: { rgMbid: `${MARK}-rg-${tag}`, identityKey: `${MARK}-${tag}`, title: `${MARK} shared name`, primaryType: "Album", artistId: artist.id, location },
+            });
+            await prisma.track.create({
+                data: { albumId: album.id, title: `${MARK} song of ${tag}`, trackNo: 1, duration: 200, filePath: `/music/${MARK}/${tag}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            return album;
+        };
+        // The Discover album sorts first, so a lookup that does not ask for the library finds it and shows no song.
+        await make("elsewhere", "DISCOVER");
+        const liked = await make("kept", "LIBRARY");
+        await prisma.discoveryAlbum.create({
+            data: {
+                userId: listener, rgMbid: "", artistName: artist.name, albumTitle: liked.title,
+                weekStartDate: THIS_WEEK, status: "LIKED", downloadedAt: THIS_WEEK, similarity: 0.9, tier: "core",
+            },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([`${MARK} song of kept`]);
+    });
+
     it("falls back to the title and artist when a suggestion carries no release id", async () => {
         const song = await suggestWithSongs("noid", [{ trackNo: 1 }]);
         await prisma.discoveryAlbum.updateMany({ where: { rgMbid: `${MARK}-rg-noid` }, data: { rgMbid: "" } });
