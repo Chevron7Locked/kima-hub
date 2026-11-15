@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A playback change you make just as you close or hide the tab is still saved, even when an earlier save was already on its way.
+- When a save that replaces your playback fails and is tried again, it still won't overwrite a newer state saved from another device.
+- If another device clears your playback, going back to the same song on this device saves it again.
+- After the server was unreachable, your newest playback change is retried promptly instead of waiting out the earlier failures.
 - Turning off two-factor or making new recovery codes while another request is changing the same account now says to try again, and your code is not used up.
 - A playback change made just before you close or hide the tab is saved instead of lost.
 - Picking up where another device left off no longer overwrites that device's newer playback with an older one.
