@@ -93,6 +93,19 @@ describe("a lock another process holds", () => {
         expect(withLock).toHaveBeenCalledTimes(3);
     });
 
+    it("names the real cause, and keeps it as the error's cause, when the connect it waited on fails", async () => {
+        const cause = new Error("login refused: invalid password");
+        const failed = Promise.reject(cause);
+        failed.catch(() => undefined);
+        service().connectPromise = failed;
+
+        const failure = await service().waitForConnection().catch((err: Error) => err);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain("login refused: invalid password");
+        expect((failure as Error).cause).toBe(cause);
+    });
+
     it("answers with Redis's error when it cannot be asked whether the lock is free", async () => {
         jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockHeldError("soulseek:connection"));
         jest.spyOn(distributedLock, "isHeld").mockRejectedValue(new Error("connection reset"));

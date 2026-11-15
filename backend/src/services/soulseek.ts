@@ -651,8 +651,9 @@ class SoulseekService {
                 try {
                     await this.connectPromise;
                     return "connected";
-                } catch {
-                    throw new Error('Soulseek connection attempt failed');
+                } catch (cause) {
+                    const reason = cause instanceof Error ? cause.message : String(cause);
+                    throw new Error(`Soulseek connection attempt failed: ${reason}`, { cause });
                 }
             }
 
