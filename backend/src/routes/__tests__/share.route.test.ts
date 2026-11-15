@@ -571,6 +571,38 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         expect(res.status).toBe(403);
     });
 
+    it('answers 403 for a song outside the album or the playlist of the link, and for an id that is no song', async () => {
+        const outside = await prisma.track.create({ data: { albumId: discoverId, title: 'outside', duration: 100, trackNo: 9, filePath: `${DIR}/outside.flac`, fileModified: new Date(), fileSize: BYTES.length } });
+        try {
+            const links = { album: await covering('album', albumId), playlist: await covering('playlist', playlistId) };
+            for (const [type, song] of [['album', outside.id], ['playlist', outside.id], ['album', 'no-such-song'], ['playlist', 'no-such-song']] as const) {
+                const res = await stream(links[type], song);
+                expect([type, song, res.status]).toEqual([type, song, 403]);
+            }
+        } finally {
+            await prisma.track.delete({ where: { id: outside.id } });
+        }
+    });
+
+    // A query count is the only way to see this: the answer is the same either way. A song that plays is the usual request,
+    // and each request is made once per range a listener's player asks for.
+    it('finds the song a link plays with one lookup, whatever the link covers', async () => {
+        const tracks = jest.spyOn(prisma.track, 'findFirst');
+        const items = jest.spyOn(prisma.playlistItem, 'findFirst');
+        try {
+            for (const [type, id] of [['track', songs.playable], ['album', albumId], ['playlist', playlistId]]) {
+                const token = await covering(type, id);
+                tracks.mockClear();
+                items.mockClear();
+                expect((await stream(token, songs.playable)).status).toBe(200);
+                expect([type, tracks.mock.calls.length, items.mock.calls.length]).toEqual([type, 1, 0]);
+            }
+        } finally {
+            tracks.mockRestore();
+            items.mockRestore();
+        }
+    });
+
     describe('a link that has ended answers 410 with the reason, on every address that opens it', () => {
         const ended = {
             expired: { expiresAt: new Date(Date.now() - 1000) },
