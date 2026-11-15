@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **New recovery codes are 16 characters long**, so they are much harder to guess. Older 8-character codes keep working until you make new ones.
+- **Two-factor and recovery codes can be pasted with spaces or dashes, in any case**, at sign-in and in settings.
+- **Turning two-factor sign-in on or off, and making new recovery codes, are written to the server log** with the account.
+- **Making new recovery codes twice at the same moment leaves one valid list**; the second request is told to try again.
+- **Turning two-factor sign-in off resets it fully**, so a later setup starts clean.
 - **Asking for the same download twice while the first is being set up returns that download** instead of an error.
 - **Long background tasks stop if they lose their lock** (for example when Redis restarts) instead of carrying on beside a second copy; generating Discover Weekly then says it is temporarily unavailable.
 - **Clearing mix caches no longer lets two familiarity scans run at once.**
