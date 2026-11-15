@@ -1003,7 +1003,7 @@ export async function closeForMissingFiles(within?: Tx, trackIds?: string[]): Pr
 export interface HoldScope {
     /** Every record of these songs. */
     trackIds?: readonly string[];
-    /** Every record of every song flagged missing: the ones `closeForMissingFiles` will close. */
+    /** The open records of every song flagged missing: the ones `closeForMissingFiles` can close. */
     flagged?: boolean;
     /** The records of these stages that no person has decided: the ones a re-run resets. */
     undecidedStages?: readonly string[];
@@ -1022,7 +1022,12 @@ export async function holdRecords(tx: Tx, scope: HoldScope): Promise<void> {
         params.push(scope.trackIds);
         parts.push(`"trackId" = ANY($${params.length}::text[])`);
     }
-    if (scope.flagged) parts.push(`"trackId" IN (SELECT id FROM "Track" WHERE "missingSince" IS NOT NULL)`);
+    // Only the open records of flagged songs, the ones the closure can change: an answered record is nobody's to wait
+    // for, and a library gone missing is not held whole.
+    if (scope.flagged) {
+        parts.push(`("trackId" IN (SELECT id FROM "Track" WHERE "missingSince" IS NOT NULL)
+                     AND (status = 'pending' OR (status = 'failed' AND retryable)))`);
+    }
     if (scope.undecidedStages && scope.undecidedStages.length > 0) {
         params.push(scope.undecidedStages);
         parts.push(`(stage = ANY($${params.length}::text[]) AND "decidedAt" IS NULL)`);
@@ -1038,7 +1043,7 @@ export async function holdRecords(tx: Tx, scope: HoldScope): Promise<void> {
  * A scan found these songs' files gone. Each is flagged missing now (one already flagged keeps its first time: the
  * stamp is when a scan found the file gone, not a later scan re-stamping an old fact) and every open question of every
  * flagged song closes, in one transaction, so no reader sees a flagged song whose questions are still owed. The
- * records of the named and the already flagged songs are held first, then their rows, the order of every move here;
+ * records of the named songs and the open records of the already flagged ones are held first, then their rows, the order of every move here;
  * a deadlock Postgres still picks it for runs once more. Also closes the questions of songs flagged earlier when none
  * are named. Returns how many songs were flagged now and how many records closed.
  */

@@ -1046,6 +1046,8 @@ describe("flagMissingFiles and returnFiles", () => {
         const gone = await seedTrack("h1", { missing: true });
         await put(gone, "analysis", "pending");
         await put(gone, "fingerprint", "pending", { decided: true });
+        // An answered record of a flagged song is not the closure's to change, so no scope holds it for that.
+        await put(gone, "embedding", "done");
         const here = await seedTrack("h2");
         await put(here, "analysis", "pending");
         await put(here, "fingerprint", "pending");
@@ -1057,20 +1059,20 @@ describe("flagMissingFiles and returnFiles", () => {
 
         await prisma.$transaction(async (tx) => {
             await stageRecords.holdRecords(tx, { flagged: true });
-            expect(await takeable()).toEqual(["h2:analysis", "h2:embedding", "h2:fingerprint"]);
+            expect(await takeable()).toEqual(["h1:embedding", "h2:analysis", "h2:embedding", "h2:fingerprint"]);
         });
         await prisma.$transaction(async (tx) => {
             await stageRecords.holdRecords(tx, { trackIds: [tid("h2")] });
-            expect(await takeable()).toEqual(["h1:analysis", "h1:fingerprint"]);
+            expect(await takeable()).toEqual(["h1:analysis", "h1:embedding", "h1:fingerprint"]);
         });
         await prisma.$transaction(async (tx) => {
-            // A re-run's records: the stage's, no person's decision among them, and every record of a flagged song.
+            // A re-run's records: the stage's, no person's decision among them, and every open record of a flagged song.
             await stageRecords.holdRecords(tx, { undecidedStages: ["analysis"], flagged: true });
-            expect(await takeable()).toEqual(["h2:embedding", "h2:fingerprint"]);
+            expect(await takeable()).toEqual(["h1:embedding", "h2:embedding", "h2:fingerprint"]);
         });
         await prisma.$transaction(async (tx) => {
             await stageRecords.holdRecords(tx, {});
-            expect(await takeable()).toHaveLength(5);
+            expect(await takeable()).toHaveLength(6);
         });
     });
 

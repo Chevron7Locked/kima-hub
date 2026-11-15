@@ -128,7 +128,7 @@ function releaseMoodState(tx: Tx): Promise<unknown> {
 }
 
 /**
- * The stage records a re-run resets, and every record of a song whose file is gone (the closure at the end of the
+ * The stage records a re-run resets, and every open record of a song whose file is gone (the closure at the end of the
  * re-run reaches those too), held right after the state and before any track or vector row, in the stage module's
  * order. Both analyzers and every stage move take a song's records before they write its track or vector, so taking
  * the records first keeps one order and no deadlock: a move holding one finishes first, and a claim it held is then
@@ -174,7 +174,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
         await vibeQueue.drain();
         await trackQueue.drain();
     }
-    // The whole reset is one transaction, so one Postgres ended for a conflict with another left nothing behind and
+    // The whole reset is one transaction, so a conflict that makes Postgres end it leaves nothing behind, and it
     // runs once more.
     const wiped = await retryOnConflict(() => prisma.$transaction(
         async (tx) => {
