@@ -11,6 +11,7 @@ import {
     permanent,
 } from "../utils/outcome";
 import { USER_AGENT } from "../config";
+import { stripEditionNote } from "../utils/normalization";
 import {
     normalizeIsrc,
     pickRecording,
@@ -565,18 +566,13 @@ class MusicBrainzService {
      * titles only; stored titles keep their markers.
      */
     normalizeForSearch(str: string): string {
-        return (
+        return stripEditionNote(
             str
                 .replace(/\s*\([^)]*\)\s*/g, " ")
                 .replace(/\s*\[[^\]]*\]\s*/g, " ")
-                .replace(
-                    /\s*-\s*(\d{4}\s+)?(deluxe|remastered|remaster|edition|version|expanded|bonus|explicit|clean|single|radio edit|remix|acoustic|live|mono|stereo)(\s+\d{4})?\s*(edition|version|mix)?\s*/gi,
-                    " "
-                )
-                .replace(/\s*-\s*\d{4}\s*$/gi, " ")
-                .replace(/\s+/g, " ")
-                .trim()
-        );
+        )
+            .replace(/\s+/g, " ")
+            .trim();
     }
 
     /**

@@ -6,14 +6,46 @@ export function normalizeApostrophes(str: string): string {
     .replace(/[\u201C\u201D]/g, '"');
 }
 
+/** The words that open a dash edition note: "- Remastered 2011", "- Radio Edit", "- Live". */
+const EDITION_KEYWORD =
+  "remaster(?:ed)?|deluxe|expanded|bonus|single|radio (?:edit|mix|version)|remix|acoustic|live|mono|stereo|version|edition|mix|demo|edit|explicit|clean";
+
+/** The words and groups that may follow the keyword and still be part of the note: "- Remastered 2011 Version (Mono)". */
+const EDITION_TAIL = String.raw`(?:\s+(?:\d{4}|${EDITION_KEYWORD}|track|tracks|album|original|extended|anniversary|special|and)\b|\s*[(\[][^)\]]*[)\]])*`;
+
+const DASHES = String.raw`\s+[-–—]\s+`;
+
+const EDITION_NOTE = new RegExp(
+  [
+    // "- 2011 Remaster", "- Radio Edit", "- Live 1985": a keyword, then only years and note words.
+    String.raw`${DASHES}(?:\d{4}\s+)?(?:${EDITION_KEYWORD})\b${EDITION_TAIL}\s*$`,
+    // "- Live at Wembley": a live note names a place, so what follows is not checked.
+    String.raw`${DASHES}live\s+(?:at|from|in|on)\b.*$`,
+    // "- 2011": a bare year.
+    String.raw`${DASHES}\d{4}\s*$`,
+  ].join("|"),
+  "i",
+);
+
+/**
+ * `str` without a trailing edition note after a dash: "Song - 2011 Remaster", "Song – Radio Edit", "Song - Live at
+ * Wembley" are "Song". The dash (hyphen, en or em dash) needs a space on each side, so "Jay-Z" and "Anti-Mix" are
+ * whole, and the note is only a keyword followed by years and known note words, so "Song - Live and Let Die" and
+ * "Song - Live Forever" keep their subtitle. One rule for every caller that cuts edition notes: titles, albums,
+ * artist names and search strings.
+ */
+export function stripEditionNote(str: string): string {
+  let stripped = str;
+  for (let before = ""; before !== stripped; ) {
+    before = stripped;
+    stripped = stripped.replace(EDITION_NOTE, "");
+  }
+  return stripped;
+}
+
 export function stripTrackSuffix(str: string): string {
   return (
-    normalizeApostrophes(str)
-      .replace(
-        /\s*-\s*(\d{4}\s+)?(remaster(ed)?|deluxe|bonus|single|radio edit|remix|acoustic|live|mono|stereo|version|edition|mix)\b(\s+\d{4})?(\s+(version|edition|mix))?.*$/i,
-        "",
-      )
-      .replace(/\s*-\s*\d{4}\s*$/, "")
+    stripEditionNote(normalizeApostrophes(str))
       .replace(
         /\s*\([^)]*(?:live at|live from|recorded at|performed at)[^)]*\)\s*/gi,
         " ",

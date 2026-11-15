@@ -8,6 +8,7 @@ import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import * as fuzz from "fuzzball";
 import { sessionLog } from "../utils/playlistLogger";
 import { nameWords } from "./nameFold";
+import { stripEditionNote } from "../utils/normalization";
 
 export type SearchFn = (
     query: string,
@@ -87,10 +88,7 @@ export function normalizeTrackTitleForSearch(title: string, level: 'aggressive' 
         const bracketPatterns = /\s*\[[^\]]*(?:live|remaster|remix|version|edit|demo|acoustic|radio|single|extended|instrumental)[^\]]*\]\s*/gi;
         normalized = normalized.replace(bracketPatterns, " ");
 
-        normalized = normalized.replace(
-            /\s*-\s*(\d{4}|remaster|live|remix|version|edit|demo|acoustic).*$/i,
-            ""
-        );
+        normalized = stripEditionNote(normalized);
     } else if (level === 'moderate') {
         normalized = stripFeaturingArtists(normalized);
         normalized = stripClassicalMetadata(normalized);

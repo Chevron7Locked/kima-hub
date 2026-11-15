@@ -1,5 +1,21 @@
 import { normalizeTrackTitleForSearch, prepareArtistForSearch, titleFileScore, titleMatchKey } from "../soulseek-search-strategies";
 
+describe("normalizeTrackTitleForSearch - edition notes after a dash", () => {
+    it.each([
+        ["Song - 2011 Remaster", "Song"],
+        ["Song – Live at Wembley", "Song"],
+        ["Song - Demo", "Song"],
+        ["Song - 1999", "Song"],
+    ])("cuts the note of %s", (input, expected) => {
+        expect(normalizeTrackTitleForSearch(input, "aggressive")).toBe(expected);
+    });
+
+    it("keeps a subtitle that only begins like a note", () => {
+        expect(normalizeTrackTitleForSearch("Song - Live and Let Die", "aggressive")).toBe("Song - Live and Let Die");
+        expect(normalizeTrackTitleForSearch("Song - Versions of Me", "aggressive")).toBe("Song - Versions of Me");
+    });
+});
+
 describe("normalizeTrackTitleForSearch - Classical Music", () => {
     it("should strip movement numbers from classical music titles", () => {
         const input = "I. Allegro con brio";

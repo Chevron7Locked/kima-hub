@@ -17,6 +17,10 @@ describe("stripTrackSuffix after a dash", () => {
         ["Song - Deluxe Edition", "Song"],
         ["Song - Bonus Track", "Song"],
         ["Song - Acoustic", "Song"],
+        ["Song – Remastered 2011", "Song"],
+        ["Song — Radio Edit", "Song"],
+        ["Song - Remastered 2011 (Mono)", "Song"],
+        ["Song - 2011", "Song"],
     ])("cuts the edition note of %s", (title, expected) => {
         expect(stripTrackSuffix(title)).toBe(expected);
     });
@@ -29,6 +33,8 @@ describe("stripTrackSuffix after a dash", () => {
         ["Song - Mixtape", "Song - Mixtape"],
         ["Song - Versions of Me", "Song - Versions of Me"],
         ["Song - Remixes", "Song - Remixes"],
+        ["Song - Live and Let Die", "Song - Live and Let Die"],
+        ["Song-Live", "Song-Live"],
     ])("keeps %s, whose word only begins like an edition note", (title, expected) => {
         expect(stripTrackSuffix(title)).toBe(expected);
     });

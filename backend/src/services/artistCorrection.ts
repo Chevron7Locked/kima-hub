@@ -11,6 +11,7 @@ import { prisma } from "../utils/db";
 import { musicBrainzService } from "./musicbrainz";
 import { absent, answered, failureCause, Outcome } from "../utils/outcome";
 import { normalizeArtistName } from "./artistIdentity";
+import { stripEditionNote } from "../utils/normalization";
 import { isGenericAlbumTitle, titlesAgree } from "./albumIdentity";
 
 export interface ArtistCorrection {
@@ -27,7 +28,7 @@ const CORRECTION_TTL = 2592000;
  * "Gun N' Roses (feat. Codex)" → "Gun N' Roses"
  * "The Beatles [2009 Remaster]" → "The Beatles"
  */
-function stripArtistSuffixes(name: string): string {
+export function stripArtistSuffixes(name: string): string {
     let cleaned = name
         .replace(
             /\s*[\[(](?:feat|ft|featuring|with)\.?\s+[^\])]*[\])]/gi,
@@ -37,8 +38,8 @@ function stripArtistSuffixes(name: string): string {
             /\s*[\[(](?:\d{4} )?(?:remaster|remastered|deluxe|expanded|anniversary|bonus|special|mono|stereo)(?:\s+edition)?[^\])]*[\])]/gi,
             ""
         )
-        .replace(/\s*-\s*(?:\d{4} )?(?:remaster|remastered|single|live|acoustic)(?:\s+version)?$/i, "")
         .trim();
+    cleaned = stripEditionNote(cleaned).trim();
     if (!cleaned || cleaned.length < 2) cleaned = name.trim();
     return cleaned;
 }
