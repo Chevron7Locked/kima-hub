@@ -82,9 +82,8 @@ describe("POST /playlists with an Idempotency-Key", () => {
         const b = await create(userB, `${MARK} theirs`, "key-0003-aaaa");
 
         expect(b.body.id).not.toBe(a.body.id);
-        expect(b.body.userId).toBe(userB);
         expect(await rows(userA)).toHaveLength(1);
-        expect(await rows(userB)).toHaveLength(1);
+        expect((await rows(userB)).map((r) => r.id)).toEqual([b.body.id]);
     });
 
     it("makes a different playlist for a different key", async () => {

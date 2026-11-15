@@ -11,7 +11,8 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
-import { createPlaylist, MAX_KEY_LENGTH, withoutKey } from "../services/playlistCreate";
+import { createPlaylist, MAX_KEY_LENGTH } from "../services/playlistCreate";
+import { namedFields, playlistFields } from "../services/playlistFields";
 import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
@@ -109,7 +110,10 @@ router.get("/", async (req, res) => {
             orderBy: { createdAt: "desc" },
             skip: (page - 1) * limit,
             take: limit,
-            include: {
+            select: {
+                ...playlistFields,
+                // Read to tell the owner; never sent.
+                userId: true,
                 user: {
                     select: {
                         username: true,
@@ -136,7 +140,9 @@ router.get("/", async (req, res) => {
         });
 
         const playlistsWithCounts = playlists.map((playlist) => ({
-            ...withoutKey(playlist),
+            ...namedFields(playlist),
+            user: playlist.user,
+            items: playlist.items,
             trackCount: playlist._count.items,
             isOwner: playlist.userId === userId,
             isHidden: hiddenPlaylistIds.has(playlist.id),
@@ -182,7 +188,10 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
 
         const playlist = await prisma.playlist.findUnique({
             where: { id: req.params.id },
-            include: {
+            select: {
+                ...playlistFields,
+                // Read to tell the owner; never sent.
+                userId: true,
                 user: {
                     select: {
                         username: true,
@@ -269,7 +278,8 @@ router.get("/:id", requirePlaylistReader, async (req, res) => {
         const displayMerged = reversed ? [...mergedItems].reverse() : mergedItems;
 
         res.json({
-            ...withoutKey(playlist),
+            ...namedFields(playlist),
+            user: playlist.user,
             isOwner: playlist.userId === userId,
             isHidden: playlist.hiddenByUsers.length > 0,
             trackCount: playlist.items.length,
@@ -299,10 +309,11 @@ async function updatePlaylist(req: Request, res: Response) {
                     reverseOrder: data.reverseOrder,
                 }),
             },
+            select: playlistFields,
         });
 
         announcePlaylistChange(req.user!.id, playlist.id);
-        res.json(withoutKey(playlist));
+        res.json(namedFields(playlist));
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res
