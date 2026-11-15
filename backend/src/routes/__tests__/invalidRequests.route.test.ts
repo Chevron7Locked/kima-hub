@@ -128,6 +128,13 @@ const ROUTES: Row[] = [
     ["enrichment: a retry with no ids", "post", () => "/api/enrichment/retry", {}],
     ["enrichment: an album year that is not a number", "put", () => "/api/enrichment/albums/none/metadata", { year: "abc" }],
     ["enrichment: an album year with trailing text", "put", () => "/api/enrichment/albums/none/metadata", { year: "2020abc" }],
+    ["enrichment: an album year below 1000", "put", () => "/api/enrichment/albums/none/metadata", { year: 999 }],
+    ["enrichment: an album year above 9999", "put", () => "/api/enrichment/albums/none/metadata", { year: 10000 }],
+    ["enrichment: an album year too big for the database", "put", () => "/api/enrichment/albums/none/metadata", { year: "99999999999" }],
+    ["enrichment: a track number of zero", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: 0 }],
+    ["enrichment: a negative track number", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: -1 }],
+    ["enrichment: a track number above 9999", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: 10000 }],
+    ["enrichment: a track number too big for the database", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: 99999999999 }],
     ["enrichment: a track number with trailing text", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: "3x" }],
     ["enrichment: a track number that is not a number", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: "abc" }],
     ["enrichment: a concurrency that is not a number", "put", () => "/api/enrichment/concurrency", {}],
@@ -176,6 +183,8 @@ describe("a request that does not parse", () => {
             ["system settings: test audiobookshelf with nothing", "post", "/api/system-settings/test-audiobookshelf", {}, "URL and API key are required"],
             ["system settings: test fanart with nothing", "post", "/api/system-settings/test-fanart", {}, "API key is required"],
             ["spotify: a quick import of an address with no scheme", "post", "/api/spotify/import/quick", { url: "open.spotify.com/playlist/abc" }, FULL_LINK_MESSAGE],
+            ["browse: a link with no scheme", "post", "/api/browse/playlists/parse", { url: "open.spotify.com/playlist/abc" }, FULL_LINK_MESSAGE],
+            ["browse: a full address that is not a music site", "post", "/api/browse/playlists/parse", { url: "https://example.com/x" }, "Invalid or unsupported URL. Please provide a Spotify, Deezer, or YouTube playlist URL."],
             ["spotify: an m3u import with no file", "post", "/api/spotify/import/m3u", {}, "No file uploaded"],
             ["whats new: a choice no release has", "post", "/api/whats-new/1.11.0/choice", { key: "no-such-choice", enabled: true }, "Unknown choice"],
         ];
@@ -185,6 +194,38 @@ describe("a request that does not parse", () => {
         }
         const lines = logged.mock.calls.map((call) => String(call[0]));
         expect(lines.filter((line) => line.includes("[InvalidRequest]")).length).toBeGreaterThanOrEqual(cases.length);
+    });
+
+    it("takes the edges of a year and a track number, and a clear, past the range check", async () => {
+        // None of these ids exist, so a value the range accepts is answered not-found, never 400.
+        const answers: [string, string, object][] = [
+            ["year 1000", "/api/enrichment/albums/none/metadata", { year: 1000 }],
+            ["year 9999", "/api/enrichment/albums/none/metadata", { year: "9999" }],
+            ["year cleared with null", "/api/enrichment/albums/none/metadata", { year: null }],
+            ["year cleared with empty text", "/api/enrichment/albums/none/metadata", { year: "" }],
+            ["track number 1", "/api/enrichment/tracks/none/metadata", { trackNo: 1 }],
+            ["track number 9999", "/api/enrichment/tracks/none/metadata", { trackNo: "9999" }],
+            ["track number cleared with null", "/api/enrichment/tracks/none/metadata", { trackNo: null }],
+        ];
+        for (const [name, path, body] of answers) {
+            const res = await request(app).put(path).set("Authorization", bearer).send(body);
+            expect([name, res.status]).toEqual([name, 404]);
+        }
+    });
+
+    it("refuses a float, a boolean and a list as a year or track number", async () => {
+        expectLog("warn");
+        const bad: [string, object][] = [
+            ["/api/enrichment/albums/none/metadata", { year: 1999.5 }],
+            ["/api/enrichment/albums/none/metadata", { year: true }],
+            ["/api/enrichment/albums/none/metadata", { year: [1999] }],
+            ["/api/enrichment/tracks/none/metadata", { trackNo: 1.5 }],
+            ["/api/enrichment/tracks/none/metadata", { trackNo: false }],
+        ];
+        for (const [path, body] of bad) {
+            const res = await request(app).put(path).set("Authorization", bearer).send(body);
+            expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 400]);
+        }
     });
 
     it("refuses a playlist name sent twice in an m3u upload with 400, not a server fault", async () => {
@@ -244,6 +285,7 @@ describe("a request that does not parse", () => {
     });
 
     it("leaves the answers a person reads and acts on in their own words", async () => {
+        expectLog("warn");
         const stays = await request(app).post("/api/vibe/alchemy").set("Authorization", bearer).send({ add: [CUID] });
         // Unknown track: the similarity step has not seen it. The iOS app reads this text.
         expect(stays.status).toBe(400);

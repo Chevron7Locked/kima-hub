@@ -521,8 +521,8 @@ router.put("/albums/:id/metadata", async (req, res) => {
       if (year !== undefined) {
         // An emptied field arrives as null (or an empty string) and removes the override.
         const parsedYear = year === null || year === "" ? null : wholeNumber(year);
-        if (parsedYear !== null && Number.isNaN(parsedYear)) {
-          return refuseRequest(req, res, "year: must be a number");
+        if (parsedYear !== null && !(parsedYear >= 1000 && parsedYear <= 9999)) {
+          return refuseRequest(req, res, "year: a whole number 1000-9999");
         }
         updateData.displayYear = parsedYear;
         hasOverrides = true;
@@ -598,11 +598,11 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       hasOverrides = true;
     }
     if (trackNo !== undefined) {
-      // Same as displayYear above: null clears the override, anything unparseable is the
+      // Same as displayYear above: null clears the override, anything unparseable or outside the range is the
       // caller's mistake and gets a 400 rather than a 500.
       const parsedTrackNo = trackNo === null || trackNo === "" ? null : wholeNumber(trackNo);
-      if (parsedTrackNo !== null && Number.isNaN(parsedTrackNo)) {
-        return refuseRequest(req, res, "trackNo: must be a number");
+      if (parsedTrackNo !== null && !(parsedTrackNo >= 1 && parsedTrackNo <= 9999)) {
+        return refuseRequest(req, res, "trackNo: a whole number 1-9999");
       }
       updateData.displayTrackNo = parsedTrackNo;
       hasOverrides = true;

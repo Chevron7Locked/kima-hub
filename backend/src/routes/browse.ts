@@ -175,12 +175,15 @@ router.post("/playlists/parse", async (req, res) => {
         }
 
         if (lacksLinkScheme(url)) {
-            return res.status(400).json({ error: FULL_LINK_MESSAGE });
+            return refuseRequest(req, res, "url: not a full http or https address", FULL_LINK_MESSAGE);
         }
 
-        return res.status(400).json({
-            error: "Invalid or unsupported URL. Please provide a Spotify, Deezer, or YouTube playlist URL."
-        });
+        return refuseRequest(
+            req,
+            res,
+            "url: not a supported playlist link",
+            "Invalid or unsupported URL. Please provide a Spotify, Deezer, or YouTube playlist URL.",
+        );
     } catch (error) {
         safeError(res, "Parse URL", error);
     }
