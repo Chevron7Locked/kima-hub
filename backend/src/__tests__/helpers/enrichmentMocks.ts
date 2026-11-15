@@ -55,6 +55,9 @@ export const mockRedis = {
     del: jest.fn().mockResolvedValue(1),
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue("OK"),
+    // distributedLock's compare-and-delete and compare-and-renew (1 = the lock was this holder's) and its isHeld.
+    eval: jest.fn().mockResolvedValue(1),
+    exists: jest.fn().mockResolvedValue(0),
     publish: jest.fn().mockResolvedValue(1),
     subscribe: jest.fn().mockResolvedValue(undefined),
     on: jest.fn(),
