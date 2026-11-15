@@ -103,9 +103,12 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
         setConfirmDelete(null);
     };
 
+    /** This person's reset, when it is the one on screen. */
+    const resetOf = (userId: string) => (reset?.userId === userId ? reset : null);
+
     // Two clicks: the first asks, the second turns it off. The answer stays on the row until the next click.
     const handleResetTwoFactor = async (userId: string) => {
-        if (reset?.userId !== userId || reset.step !== "confirm") {
+        if (resetOf(userId)?.step !== "confirm") {
             setReset({ userId, step: "confirm", message: "Click again to turn off their 2FA" });
             return;
         }
@@ -235,25 +238,25 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
 
                                 {currentUser?.id !== user.id && (
                                     <div className="flex items-center gap-3">
-                                        {reset?.userId === user.id && reset.step !== "confirm" && (
+                                        {resetOf(user.id) && resetOf(user.id)?.step !== "confirm" && (
                                             <InlineStatus
-                                                status={reset.step === "working" ? "loading" : reset.step === "done" ? "success" : "error"}
-                                                message={reset.message}
+                                                status={resetOf(user.id)?.step === "working" ? "loading" : resetOf(user.id)?.step === "done" ? "success" : "error"}
+                                                message={resetOf(user.id)?.message}
                                                 onClear={() => setReset(null)}
                                             />
                                         )}
                                         {user.twoFactorEnabled && (
                                             <button
                                                 onClick={() => void handleResetTwoFactor(user.id)}
-                                                disabled={reset?.userId === user.id && reset.step === "working"}
+                                                disabled={resetOf(user.id)?.step === "working"}
                                                 className={`text-xs transition-colors ${
-                                                    reset?.userId === user.id && reset.step === "confirm"
+                                                    resetOf(user.id)?.step === "confirm"
                                                         ? "text-danger-light hover:brightness-125"
                                                         : "text-[var(--text-muted)] hover:text-white/70"
                                                 }`}
                                                 aria-label={`reset 2fa for ${user.username}`}
                                             >
-                                                {reset?.userId === user.id && reset.step === "confirm" ? "Confirm reset" : "Reset 2FA"}
+                                                {resetOf(user.id)?.step === "confirm" ? "Confirm reset" : "Reset 2FA"}
                                             </button>
                                         )}
                                         <button

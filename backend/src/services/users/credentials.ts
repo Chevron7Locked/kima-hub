@@ -101,7 +101,7 @@ export async function spendSecondFactor(
     secret: string,
     token: string,
 ): Promise<boolean> {
-    if (RECOVERY_CODE.test(token)) return spendRecoveryCode(user.id, user.recoveryCodes, token);
+    if (isRecoveryCodeShaped(token)) return spendRecoveryCode(user.id, user.recoveryCodes, token);
     const step = totpStep(secret, token);
     return step !== null && (await spendTotpStep(user.id, step));
 }

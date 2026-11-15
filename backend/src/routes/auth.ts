@@ -575,6 +575,7 @@ router.post("/users/:id/reset-2fa", async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
         invalidateUserCache(req.params.id);
+        logger.info(`[2FA] admin ${req.user?.id} turned off 2FA for ${req.params.id}`);
         res.json({ message: "2FA turned off" });
     } catch (error) {
         logger.error("2FA reset error:", error);
