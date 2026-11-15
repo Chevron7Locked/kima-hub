@@ -293,3 +293,85 @@ describe("a new MusicBrainz id with the rest of an artist edit", () => {
         expect(await artist()).toMatchObject({ displayName: "Earlier Edit", mbid: AR });
     });
 });
+
+describe("the address of an artist's picture or an album's cover", () => {
+    const stored = { artist: () => artist().then((a) => a.userHeroUrl), album: () => album().then((a) => a.userCoverUrl) };
+    const send = {
+        artist: (value: unknown) => put(`/enrichment/artists/${ARTIST}/metadata`, { heroUrl: value }),
+        album: (value: unknown) => put(`/enrichment/albums/${ALBUM}/metadata`, { coverUrl: value }),
+    };
+    const kinds = ["artist", "album"] as const;
+
+    // The forms Kima writes itself: a full address, and a stored picture by name (with or without its version).
+    const accepted = [
+        "https://img.example/a.jpg",
+        "http://img.example:8080/a/b.png?size=big",
+        "native:artists/abc-123.jpg",
+        "native:albums/abc-123.jpg?v=9f3a1c",
+        "native:abc-123.jpg",
+    ];
+    const refused = [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:image/png;base64,AAAA",
+        "ftp://img.example/a.jpg",
+        "//img.example/a.jpg",
+        "img.example/a.jpg",
+        "/api/library/cover-art/abc",
+        "../a.jpg",
+        "https:/img.example/a.jpg",
+        "https://",
+        "native:",
+        "native:albums",
+        "native:artists/",
+        "native:../../etc/passwd",
+        "native:artists/../../secret.jpg",
+        "native:/etc/passwd",
+    ];
+
+    describe.each(kinds)("on an %s", (kind) => {
+        it.each(accepted)("stores %s", async (value) => {
+            await send[kind](value).expect(200);
+
+            expect(await stored[kind]()).toBe(value);
+        });
+
+        it("stores the scheme in lower case, which Subsonic's cover lookup tests for", async () => {
+            await send[kind]("HTTPS://IMG.EXAMPLE/A.JPG").expect(200);
+
+            expect(await stored[kind]()).toBe("https://IMG.EXAMPLE/A.JPG");
+        });
+
+        it("stores an address without the blanks around it", async () => {
+            await send[kind]("  https://img.example/a.jpg \n").expect(200);
+
+            expect(await stored[kind]()).toBe("https://img.example/a.jpg");
+        });
+
+        it.each(refused)("refuses %s with a 400 and keeps the earlier address", async (value) => {
+            expectLog("warn");
+            const before = await stored[kind]();
+
+            await send[kind](value).expect(400);
+
+            expect(await stored[kind]()).toBe(before);
+        });
+
+        it("still clears the override for an empty, blank or null address", async () => {
+            for (const value of ["", "  ", null]) {
+                await send[kind]("https://img.example/a.jpg").expect(200);
+                await send[kind](value).expect(200);
+                expect(await stored[kind]()).toBeNull();
+            }
+        });
+
+        it("stores nothing of the rest of the edit when the address is refused", async () => {
+            expectLog("warn");
+            const path = kind === "artist" ? `/enrichment/artists/${ARTIST}/metadata` : `/enrichment/albums/${ALBUM}/metadata`;
+
+            await put(path, kind === "artist" ? { name: "Fresh", heroUrl: "javascript:x" } : { title: "Fresh", coverUrl: "javascript:x" }).expect(400);
+
+            expect(kind === "artist" ? (await artist()).displayName : (await album()).displayTitle).toBe("Earlier Edit");
+        });
+    });
+});

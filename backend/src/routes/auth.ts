@@ -598,6 +598,8 @@ router.post("/users/:id/reset-2fa", async (req, res) => {
                 twoFactorPendingSecret: null,
                 twoFactorPendingAt: null,
                 twoFactorLastStep: 0,
+                // Whoever holds a session of this account may be who the reset is for: all of them end, and the person signs in again.
+                tokenVersion: { increment: 1 },
             },
         });
         if (reset.count !== 1) {

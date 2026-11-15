@@ -7,7 +7,7 @@ import { prisma } from "../../../utils/db";
 import { discoverySeeding } from "../discoverySeeding";
 import { forgetOwnedIndex } from "../ownedIndexVersion";
 import { returnToDiscover, takeIntoLibrary } from "../discoveryAlbumLifecycle";
-import { reassignArtistMbid } from "../../mbidReassign";
+import { moveArtistMbid } from "../../mbidReassign";
 import { artistIdentityKey, resolveArtist } from "../../artistIdentity";
 import { useNoLidarr } from "../../../__tests__/helpers/lidarrSettings";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
@@ -82,7 +82,8 @@ describe("the owned-album check reads a change at once, not after the snapshot e
         await seed(null, "LIBRARY");
         expect(await owned(ARTIST)).toBe(true);
 
-        await reassignArtistMbid(`${P}ar`, NAMESAKE);
+        await moveArtistMbid(prisma, `${P}ar`, NAMESAKE);
+        forgetOwnedIndex();
 
         expect(await owned(ARTIST)).toBe(false);
     });

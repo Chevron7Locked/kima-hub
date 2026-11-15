@@ -65,7 +65,6 @@ jest.mock("../../services/imageBackfill", () => ({
 jest.mock("../../services/mbidReassign", () => ({
     DuplicateMbidError: class DuplicateMbidError extends Error {},
     reassignAlbumRgMbid: jest.fn(),
-    reassignArtistMbid: jest.fn(),
 }));
 
 import express from "express";

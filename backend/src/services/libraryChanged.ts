@@ -42,6 +42,21 @@ export async function markLibraryChangedQuietly(what: string): Promise<void> {
 const holdsPlayableSong = async (where: Prisma.TrackWhereInput): Promise<boolean> =>
     (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, where] }, select: { id: true } })) !== null;
 
+/**
+ * A shown name changed, and the marker moves when a client lists the item (`listed`). The edit is already saved, so a
+ * check or a write that fails is logged under `what` and never fails the request that made the edit.
+ */
+export async function markLibraryChangedIfListed(listed: () => Promise<boolean>, what: string): Promise<void> {
+    let moves: boolean;
+    try {
+        moves = await listed();
+    } catch (e) {
+        logger.error(`Failed to check whether a client lists the item (${what}):`, e);
+        return;
+    }
+    if (moves) await markLibraryChangedQuietly(what);
+}
+
 /** Whether a client lists the song: it is playable. Ask before a delete or an edit, for a row that is gone cannot be asked. */
 export const songIsListed = (songId: string) => holdsPlayableSong({ id: songId });
 

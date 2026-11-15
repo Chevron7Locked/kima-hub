@@ -11,6 +11,8 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import * as settings from "../../utils/systemSettings";
 import { mountAsServer } from "./helpers/serverMount";
 
 const P = "elm_";
@@ -57,6 +59,7 @@ beforeAll(async () => {
 });
 
 beforeEach(cleanup);
+afterEach(() => jest.restoreAllMocks());
 
 afterAll(async () => {
     await cleanup();
@@ -140,5 +143,48 @@ describe("resetting an edit", () => {
         expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
         expect(await markerMoves(() => post(`/enrichment/tracks/${s.track}/reset`))).toBe(false);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).displayTitle).toBeNull();
+    });
+});
+
+describe("a marker that cannot be asked or written", () => {
+    /** Each edit and reset that can move the marker, as the call a person makes. */
+    const calls: Array<[string, (s: { artist: string; album: string; track: string }) => request.Test]> = [
+        ["an artist edit", (s) => put(`/enrichment/artists/${s.artist}/metadata`, { name: "New" })],
+        ["an album edit", (s) => put(`/enrichment/albums/${s.album}/metadata`, { title: "New" })],
+        ["a song edit", (s) => put(`/enrichment/tracks/${s.track}/metadata`, { title: "New" })],
+        ["an artist reset", (s) => post(`/enrichment/artists/${s.artist}/reset`)],
+        ["an album reset", (s) => post(`/enrichment/albums/${s.album}/reset`)],
+        ["a song reset", (s) => post(`/enrichment/tracks/${s.track}/reset`)],
+    ];
+    const shownName = async (s: { artist: string; album: string; track: string }) => ({
+        artist: (await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).displayName,
+        album: (await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).displayTitle,
+        track: (await prisma.track.findUniqueOrThrow({ where: { id: s.track } })).displayTitle,
+    });
+
+    it.each(calls)("%s that is saved answers 200 when the check of whether a client lists it fails, and the failure is logged", async (_name, call) => {
+        const s = await seed("ask", "playable", _name.includes("reset"));
+        const logged = expectLog("error");
+        jest.spyOn(prisma.track, "findFirst").mockRejectedValue(new Error("database went away"));
+
+        await call(s).expect(200);
+
+        expect(logged).toHaveBeenCalled();
+        const after = await shownName(s);
+        const own = _name.includes("artist") ? "artist" : _name.includes("album") ? "album" : "track";
+        expect(after[own]).toBe(_name.includes("reset") ? null : "New");
+    });
+
+    it.each(calls)("%s that is saved answers 200 when the marker cannot be written, and the failure is logged", async (_name, call) => {
+        const s = await seed("write", "playable", _name.includes("reset"));
+        const logged = expectLog("error");
+        jest.spyOn(settings, "saveSystemSettings").mockRejectedValue(new Error("settings row locked"));
+
+        await call(s).expect(200);
+
+        expect(logged).toHaveBeenCalled();
+        const after = await shownName(s);
+        const own = _name.includes("artist") ? "artist" : _name.includes("album") ? "album" : "track";
+        expect(after[own]).toBe(_name.includes("reset") ? null : "New");
     });
 });

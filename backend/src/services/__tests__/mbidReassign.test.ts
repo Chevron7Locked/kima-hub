@@ -4,7 +4,7 @@
  */
 
 import { prisma } from "../../utils/db";
-import { DuplicateMbidError, reassignArtistMbid } from "../mbidReassign";
+import { DuplicateMbidError, moveArtistMbid } from "../mbidReassign";
 
 const P = "zz-mbidReassign";
 const ARTIST_ID = `${P}-artist-456`;
@@ -46,11 +46,11 @@ describe("DuplicateMbidError", () => {
     });
 });
 
-describe("reassignArtistMbid", () => {
+describe("moveArtistMbid", () => {
     afterEach(() => jest.restoreAllMocks());
 
     it("stores the new mbid on the artist", async () => {
-        await reassignArtistMbid(ARTIST_ID, ARTIST_MBID);
+        await moveArtistMbid(prisma, ARTIST_ID, ARTIST_MBID);
 
         expect((await prisma.artist.findUnique({ where: { id: ARTIST_ID } }))?.mbid).toBe(ARTIST_MBID);
     });
@@ -58,7 +58,7 @@ describe("reassignArtistMbid", () => {
     it("should throw DuplicateMbidError when another artist holds the mbid, and change nothing", async () => {
         await seedArtist(OTHER_ARTIST_ID, ARTIST_MBID);
 
-        await expect(reassignArtistMbid(ARTIST_ID, ARTIST_MBID)).rejects.toThrow(DuplicateMbidError);
+        await expect(moveArtistMbid(prisma, ARTIST_ID, ARTIST_MBID)).rejects.toThrow(DuplicateMbidError);
 
         expect((await prisma.artist.findUnique({ where: { id: ARTIST_ID } }))?.mbid).toBeNull();
     });
@@ -68,6 +68,6 @@ describe("reassignArtistMbid", () => {
             Object.assign(new Error("Some other error"), { code: "P2025" }) as never,
         );
 
-        await expect(reassignArtistMbid(ARTIST_ID, ARTIST_MBID)).rejects.toThrow("Some other error");
+        await expect(moveArtistMbid(prisma, ARTIST_ID, ARTIST_MBID)).rejects.toThrow("Some other error");
     });
 });

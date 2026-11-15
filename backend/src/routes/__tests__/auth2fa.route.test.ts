@@ -92,11 +92,11 @@ beforeAll(async () => {
 beforeEach(async () => {
     // Each test starts steps away from the last, with the account back to just-switched-off.
     clock += 20 * STEP_MS;
-    clearUserCache();
     await prisma.user.update({
         where: { id: USER },
-        data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null },
+        data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null, tokenVersion: 0 },
     });
+    clearUserCache();
 });
 
 afterAll(async () => {
@@ -1212,6 +1212,10 @@ describe("an admin turning off someone's 2FA", () => {
     const ADMIN = "zz-2fa-admin";
     const adminBearer = () => `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
     const reset = (id: string, auth = adminBearer()) => request(app).post(`/auth/users/${id}/reset-2fa`).set("Authorization", auth);
+    /** The person signs in once more, with the password, and gets a session of the new generation. */
+    const signedInAgain = async () => `Bearer ${(await login().expect(200)).body.token as string}`;
+    const setupWith = (auth: string) => request(app).post("/auth/2fa/setup").set("Authorization", auth);
+    const enableWith = (auth: string, token: string) => request(app).post("/auth/2fa/enable").set("Authorization", auth).send({ token });
 
     beforeAll(async () => {
         await prisma.user.deleteMany({ where: { id: ADMIN } });
@@ -1256,8 +1260,9 @@ describe("an admin turning off someone's 2FA", () => {
         expect(await stored()).toEqual({
             twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null,
         });
-        const made = (await setup().expect(200)).body.secret as string;
-        await enable(codeFor(made)).expect(200);
+        const auth = await signedInAgain();
+        const made = (await setupWith(auth).expect(200)).body.secret as string;
+        await enableWith(auth, codeFor(made)).expect(200);
         const row = await stored();
         expect(row.twoFactorEnabled).toBe(true);
         expect(readTwoFactorSecret(USER, row.twoFactorSecret)).toBe(made);
@@ -1269,8 +1274,45 @@ describe("an admin turning off someone's 2FA", () => {
 
         await reset(USER).expect(200);
 
-        const made = (await setup().expect(200)).body.secret as string;
-        await enable(codeFor(made)).expect(200);
+        const auth = await signedInAgain();
+        const made = (await setupWith(auth).expect(200)).body.secret as string;
+        await enableWith(auth, codeFor(made)).expect(200);
+    });
+
+    it("ends the sessions the person has: their access and refresh tokens from before the reset stop working, and signing in again works", async () => {
+        await twoFactorOn();
+        const before = (await login(codeNow()).expect(200)).body as { token: string; refreshToken: string };
+        const open = () => request(app).post("/auth/stream-ticket").set("Authorization", `Bearer ${before.token}`);
+        await open().expect(200);
+
+        await reset(USER).expect(200);
+
+        await open().expect(401);
+        await request(app).post("/auth/refresh").send({ refreshToken: before.refreshToken }).expect(401);
+        expect((await prisma.user.findUniqueOrThrow({ where: { id: USER }, select: { tokenVersion: true } })).tokenVersion).toBe(1);
+        const after = (await login().expect(200)).body as { token: string };
+        await request(app).post("/auth/stream-ticket").set("Authorization", `Bearer ${after.token}`).expect(200);
+    });
+
+    it("leaves other people's sessions alone", async () => {
+        const OTHER = "zz-2fa-other";
+        await prisma.user.deleteMany({ where: { id: OTHER } });
+        await prisma.user.create({ data: { id: OTHER, username: OTHER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+        try {
+            await reset(USER).expect(200);
+
+            expect((await prisma.user.findUniqueOrThrow({ where: { id: OTHER }, select: { tokenVersion: true } })).tokenVersion).toBe(0);
+            const token = generateToken({ id: OTHER, username: OTHER, role: "user", tokenVersion: 0 });
+            await request(app).post("/auth/stream-ticket").set("Authorization", `Bearer ${token}`).expect(200);
+        } finally {
+            await prisma.user.deleteMany({ where: { id: OTHER } });
+        }
+    });
+
+    it("answers 404 and bumps nothing for a person who does not exist", async () => {
+        await reset("zz-2fa-nobody-at-all").expect(404);
+
+        expect((await prisma.user.findUniqueOrThrow({ where: { id: USER }, select: { tokenVersion: true } })).tokenVersion).toBe(0);
     });
 
     it("answers 404 for a person who does not exist", async () => {

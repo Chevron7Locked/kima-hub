@@ -194,19 +194,6 @@ export async function moveDiscoverExclusions(tx: MoveClient, oldRgMbid: string, 
 }
 
 /**
- * Reassign an artist's mbid.
- *
- * If P2002 is raised (duplicate mbid), translate to DuplicateMbidError.
- */
-export async function reassignArtistMbid(
-    artistId: string,
-    newMbid: string
-): Promise<void> {
-    await moveArtistMbid(prisma, artistId, newMbid);
-    forgetOwnedIndex();
-}
-
-/**
  * The artist's mbid change inside the caller's transaction (or on the plain client), so it commits with the rest of an
  * edit. It does not forget the owned index: whoever commits does, once. A missing artist throws P2025, as any update does.
  */

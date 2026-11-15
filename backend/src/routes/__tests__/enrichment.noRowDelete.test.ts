@@ -143,7 +143,6 @@ jest.mock("../../services/imageBackfill", () => ({ repairBrokenCovers: jest.fn()
 jest.mock("../../services/mbidReassign", () => ({
     DuplicateMbidError: class extends Error {},
     reassignAlbumRgMbid: jest.fn(),
-    reassignArtistMbid: jest.fn(),
 }));
 jest.mock("../../services/artistIdentity", () => ({ artistSortName: jest.fn() }));
 jest.mock("../../utils/systemSettings", () => ({

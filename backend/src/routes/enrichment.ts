@@ -1,3 +1,4 @@
+import path from "path";
 import { Router, Response } from "express";
 import { logger } from "../utils/logger";
 import { refuseRequest, safeError } from "../utils/errors";
@@ -25,7 +26,8 @@ import {
 } from "../services/mbidReassign";
 import { forgetOwnedIndex } from "../services/discovery/ownedIndexVersion";
 import { artistSortName, isMbid } from "../services/artistIdentity";
-import { albumIsListed, artistIsListed, markLibraryChanged, songIsListed } from "../services/libraryChanged";
+import { albumIsListed, artistIsListed, markLibraryChangedIfListed, songIsListed } from "../services/libraryChanged";
+import { parseStoredCover, resolveInCoversDir } from "../services/imageStorage";
 import { parseLimit, parseOffset } from "./library/paging";
 import { wholeNumber } from "../utils/wholeNumber";
 
@@ -42,6 +44,34 @@ function textOverride(field: string, raw: unknown): string | null {
   if (raw === null) return null;
   if (typeof raw !== "string" || hasNull(raw)) throw new BadField(`${field}: text, or null to clear`);
   return raw.trim() === "" ? null : raw;
+}
+
+/**
+ * The address of an artist's picture or an album's cover: a full http or https address, or a picture Kima stored itself
+ * (`native:` and a path inside the covers folder), or null (or blank text) to remove the override. A client loads the
+ * address in a page and the cover proxy fetches it, so any other kind (`javascript:`, `file:`, `data:`, no scheme, a path
+ * that leaves the covers folder, a folder instead of a picture) is refused. The stored address has no blanks around it
+ * and its scheme is in lower case, the form Subsonic's cover lookup tests for.
+ */
+function coverAddressOverride(field: string, raw: unknown): string | null {
+  const text = textOverride(field, raw);
+  if (text === null) return null;
+  const address = text.trim();
+  const badAddress = () => new BadField(`${field}: a full http or https address, or null to clear`);
+  const stored = parseStoredCover(address);
+  if (stored) {
+    // Every stored picture is a file with an extension, so a bare folder name is not one.
+    const file = stored.relativePath === "" ? null : resolveInCoversDir(stored.relativePath);
+    if (file === null || path.extname(file) === "") throw badAddress();
+    return address;
+  }
+  if (!/^https?:\/\/[^/\s]/i.test(address)) throw badAddress();
+  try {
+    new URL(address);
+  } catch {
+    throw badAddress();
+  }
+  return address.replace(/^https?/i, (scheme) => scheme.toLowerCase());
 }
 
 /** A genre override: a list of text, or null for the empty list a reset writes. */
@@ -462,7 +492,7 @@ router.put("/artists/:id/metadata", async (req, res) => {
         hasOverrides = true;
       }
       if (heroUrl !== undefined) {
-        updateData.userHeroUrl = textOverride("heroUrl", heroUrl);
+        updateData.userHeroUrl = coverAddressOverride("heroUrl", heroUrl);
         hasOverrides = true;
       }
       if (genres !== undefined) {
@@ -503,8 +533,8 @@ router.put("/artists/:id/metadata", async (req, res) => {
       // A shown name is what a Subsonic client lists, so an edit that changes it moves the library's change marker. An
       // edit that sends the name already shown, a new MBID (it renames nothing), or an artist no client lists (Discover's,
       // or one whose songs are missing or corrupt) moves nothing.
-      if (before && (artist.displayName || artist.name) !== (before.displayName || before.name) && (await artistIsListed(req.params.id))) {
-        await markLibraryChanged();
+      if (before && (artist.displayName || artist.name) !== (before.displayName || before.name)) {
+        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name edit");
       }
       res.json(artist);
     } catch (error) {
@@ -548,7 +578,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
         hasOverrides = true;
       }
       if (coverUrl !== undefined) {
-        updateData.userCoverUrl = textOverride("coverUrl", coverUrl);
+        updateData.userCoverUrl = coverAddressOverride("coverUrl", coverUrl);
         hasOverrides = true;
       }
       if (genres !== undefined) {
@@ -588,8 +618,8 @@ router.put("/albums/:id/metadata", async (req, res) => {
       if (moved) forgetOwnedIndex();
 
       // Only a shown title that changed is a change to what a client lists.
-      if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title) && (await albumIsListed(req.params.id))) {
-        await markLibraryChanged();
+      if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title)) {
+        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title edit");
       }
       res.json(album);
     } catch (error) {
@@ -651,8 +681,8 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     });
 
     // Only a shown title that changed is a change to what a client lists.
-    if (before && (track.displayTitle || track.title) !== (before.displayTitle || before.title) && (await songIsListed(req.params.id))) {
-      await markLibraryChanged();
+    if (before && (track.displayTitle || track.title) !== (before.displayTitle || before.title)) {
+      await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title edit");
     }
     res.json(track);
   } catch (error) {
@@ -700,7 +730,7 @@ router.post("/artists/:id/reset", async (req, res) => {
     await forgetArtistHero(req.params.id);
 
     // Only a shown name that changed back is a change to what a client lists.
-    if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name && (await artistIsListed(req.params.id))) await markLibraryChanged();
+    if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name reset");
     res.json({
       message: "Artist metadata reset to original values",
       artist,
@@ -748,7 +778,7 @@ router.post("/albums/:id/reset", async (req, res) => {
     });
 
     // Only a shown title that changed back is a change to what a client lists.
-    if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title && (await albumIsListed(req.params.id))) await markLibraryChanged();
+    if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title reset");
     res.json({
       message: "Album metadata reset to original values",
       album,
@@ -790,7 +820,7 @@ router.post("/tracks/:id/reset", async (req, res) => {
     });
 
     // Only a shown title that changed back is a change to what a client lists.
-    if ((existingTrack.displayTitle || existingTrack.title) !== existingTrack.title && (await songIsListed(req.params.id))) await markLibraryChanged();
+    if ((existingTrack.displayTitle || existingTrack.title) !== existingTrack.title) await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title reset");
     res.json({
       message: "Track metadata reset to original values",
       track,
