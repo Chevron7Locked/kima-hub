@@ -737,9 +737,9 @@ describe("the ranking does not depend on the order the rows come back in", () =>
         return { name: `s${String(i).padStart(2, "0")}`, moods: { calm: Math.sqrt(i + 1) * 1.37 - Math.PI } };
     });
     const PLANS = [
-        ["the default plan", []],
-        ["scans and hash joins", ["enable_nestloop", "enable_mergejoin", "enable_indexscan", "enable_bitmapscan"]],
-        ["merge joins", ["enable_nestloop", "enable_hashjoin"]],
+        { name: "the default plan", off: [] },
+        { name: "scans and hash joins", off: ["enable_nestloop", "enable_mergejoin", "enable_indexscan", "enable_bitmapscan"] },
+        { name: "merge joins", off: ["enable_nestloop", "enable_hashjoin"] },
     ] as const;
 
     const scoresUnder = (recipeUnderTest: Recipe, off: readonly string[]) =>
@@ -753,10 +753,13 @@ describe("the ranking does not depend on the order the rows come back in", () =>
 
     it("gives every song the same score under every plan", async () => {
         await library(SONGS);
-        const [[, noSettings], ...others] = PLANS;
-        const expected = await scoresUnder(CALM, noSettings);
+        const [normal, ...others] = PLANS;
+        const expected = await scoresUnder(CALM, normal.off);
         expect(expected).toHaveLength(40);
-        for (const [, off] of others) expect(await scoresUnder(CALM, off)).toEqual(expected);
+        for (const { name, off } of others) {
+            // The plan's name is in the failure, so a difference says which plan moved the scores.
+            expect({ plan: name, scores: await scoresUnder(CALM, off) }).toEqual({ plan: name, scores: expected });
+        }
     });
 });
 

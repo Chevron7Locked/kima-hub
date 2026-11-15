@@ -159,10 +159,14 @@ if ARGV[1] == "1" then redis.call("set", KEYS[2], "1", "PX", ARGV[2]) end
 local open = redis.call("decr", KEYS[1])
 if open <= 0 then redis.call("del", KEYS[1]) open = 0 end
 return {open, redis.call("exists", KEYS[2])}`;
-/** Frees the window only while it holds this token, a window that ended and was taken again being another play's, and no response of it is open. */
+/**
+ * Frees the window only while it holds this token, a window that ended and was taken again being another play's, and no
+ * response of it is open. The play's played mark (KEYS[3]) goes with it.
+ */
 const RELEASE_WHEN_IDLE = `
 if redis.call("get", KEYS[1]) ~= ARGV[1] then return 0 end
 if tonumber(redis.call("get", KEYS[2]) or "0") > 0 then return 0 end
+redis.call("del", KEYS[3])
 return redis.call("del", KEYS[1])`;
 
 const PLAY_WINDOW_MS = PLAY_WINDOW_SECONDS * 1000;
@@ -271,6 +275,15 @@ function leaveResponse(claim: PlayClaim, streamed: boolean): Promise<PlayAfterLe
 }
 
 /**
+ * The claimer's play was not counted (the share had no play left, or counting failed). Nothing is owed back to a seek that
+ * joined the window meanwhile and then fails, so the play is marked as played: that seek must not take back a play that
+ * was never added.
+ */
+function leaveUncountedPlay(claim: PlayClaim): Promise<PlayAfterLeaving> {
+    return leaveResponse(claim, true);
+}
+
+/**
  * A listener who pauses holds one response open and may seek later, past the window. While a response of the play is
  * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play. A request renews
  * only the token it holds: the one it took the window with, or the one it found in the listener's window. Once the window
@@ -309,7 +322,7 @@ async function claimPlayWindow(key: string): Promise<PlayClaim | null> {
 async function releasePlayWindow(claim: PlayClaim): Promise<void> {
     if (claim.token === null) return;
     try {
-        await redisClient.eval(RELEASE_WHEN_IDLE, 2, claim.key, openCountKey(claim.token), claim.token);
+        await redisClient.eval(RELEASE_WHEN_IDLE, 3, claim.key, openCountKey(claim.token), playedKey(claim.token), claim.token);
     } catch (error) {
         logger.warn(`[Share] Could not release a play window: ${(error as Error).message}`);
     }
@@ -580,13 +593,12 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
                     counted = await countPlay(shareLink.id);
                 } catch (error) {
                     // The play was not counted, so the window it took must not let the listener's next request play free.
-                    await leaveResponse(claim, false);
+                    await leaveUncountedPlay(claim);
                     await releasePlayWindow(claim);
                     throw error;
                 }
                 if (!counted) {
-                    // Nothing was counted, so nothing is owed back to a seek that joined meanwhile and then fails.
-                    await leaveResponse(claim, true);
+                    await leaveUncountedPlay(claim);
                     await releasePlayWindow(claim);
                     return sendEnded(res, "play-limit");
                 }

@@ -1182,12 +1182,11 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
             describe('a request that is refused does not extend the window', () => {
                 it.each([
-                    ['the link no longer covers its song', 403, (token: string) => prisma.shareLink.update({ where: { token }, data: { entityId: songs.corrupt } })],
-                    ['its song has become corrupt', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { corrupt: true } })],
-                    ['its song has gone missing', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { missingSince: new Date() } })],
-                    ['its file has gone', 404, (_token: string, _song: string, file: string) => fs.promises.rm(file)],
-                ] as const)('when %s', async (what, status, spoil) => {
-                    const trackNo = 40 + what.length;
+                    ['the link no longer covers its song', 403, (token: string) => prisma.shareLink.update({ where: { token }, data: { entityId: songs.corrupt } }), 41],
+                    ['its song has become corrupt', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { corrupt: true } }), 42],
+                    ['its song has gone missing', 404, (_token: string, song: string) => prisma.track.update({ where: { id: song }, data: { missingSince: new Date() } }), 43],
+                    ['its file has gone', 404, (_token: string, _song: string, file: string) => fs.promises.rm(file), 44],
+                ] as const)('when %s', async (_what, status, spoil, trackNo) => {
                     const song = await spoilable(`refused-${trackNo}`, trackNo);
                     const { token, id } = await own({}, song.id);
                     expect((await get(token, song.id)).status).toBe(200);
@@ -1206,16 +1205,22 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             });
 
             describe('a play that never streamed', () => {
+                /** The counts of open responses and the played marks, which are kept under a window's token and not under its share. */
+                const tokenKeys = async () => [...(await redisClient.keys('share:open:*')), ...(await redisClient.keys('share:played:*'))];
                 /** Holds the first request to reach the streaming module until `release`, and passes every other. */
                 const holdFirstToStream = () => {
                     const real = AudioStreamingService.prototype.streamFileWithRangeSupport;
                     let calls = 0;
                     let release!: () => void;
+                    let arrive!: () => void;
                     const held = new Promise<void>((resolve) => (release = resolve));
+                    const reached = new Promise<void>((resolve) => (arrive = resolve));
                     const spy = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport').mockImplementation(function (this: AudioStreamingService, ...args) {
-                        return ++calls === 1 ? held.then(() => real.apply(this, args)) : real.apply(this, args);
+                        if (++calls > 1) return real.apply(this, args);
+                        arrive();
+                        return held.then(() => real.apply(this, args));
                     });
-                    return { release, restore: () => { release(); spy.mockRestore(); } };
+                    return { release, reached, restore: () => { release(); spy.mockRestore(); } };
                 };
 
                 it('is given back, and its window freed, when the last response of it ends without one, though the first to fail was not the last', async () => {
@@ -1223,6 +1228,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                     const { token, id } = await own({}, long.id);
                     const stall = stallCounting();
                     const hold = holdFirstToStream();
+                    const before = await tokenKeys();
                     const server = http.createServer(app).listen(0);
                     try {
                         const { port } = server.address() as AddressInfo;
@@ -1232,7 +1238,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                         const first = listen({ 'If-None-Match': '*' }).then(drain);
                         await stall.stalled;
                         const seek = listen({ 'If-None-Match': '*', Range: 'bytes=5-' }).then(drain);
-                        await pause(200);
+                        await hold.reached;
 
                         // The first request fails with the seek open, so the play is left to the seek.
                         stall.release();
@@ -1246,6 +1252,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                         await settleShareBackgroundWork();
                         expect(await playsOf(token)).toBe(0);
                         expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                        expect((await tokenKeys()).filter((key) => !before.includes(key))).toEqual([]);
                     } finally {
                         hold.restore();
                         stall.release();
@@ -1270,6 +1277,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
             it('gives the play back and frees the window when counting it fails, so the next request is a first play', async () => {
                 const { token, id } = await own({ maxPlays: 1 });
+                const before = [...(await redisClient.keys('share:open:*')), ...(await redisClient.keys('share:played:*'))];
                 const logged = expectLog('error');
                 const counting = jest.spyOn(prisma, '$executeRaw').mockRejectedValueOnce(new Error('database down'));
                 try {
@@ -1282,6 +1290,9 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 await settleShareBackgroundWork();
 
                 expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                // Neither the count of open responses nor the played mark outlives the window it was kept for.
+                const after = [...(await redisClient.keys('share:open:*')), ...(await redisClient.keys('share:played:*'))];
+                expect(after.filter((key) => !before.includes(key))).toEqual([]);
                 expect(await playsOf(token)).toBe(0);
                 expect((await get(token, songs.playable)).status).toBe(200);
                 expect(await playsOf(token)).toBe(1);
