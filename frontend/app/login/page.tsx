@@ -8,7 +8,7 @@ import { AuthShell } from "@/components/layout/AuthShell";
 import { Button } from "@/components/ui/Button";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { KimaMark } from "@/components/ui/KimaMark";
-import { RECOVERY_CODE_LENGTH, recoveryCodeInput } from "@/lib/second-factor";
+import { RECOVERY_CODE_LENGTH, SECOND_FACTOR_CODE, recoveryCodeInput, signInCode } from "@/lib/second-factor";
 
 const LOGIN_ERROR_MESSAGES: Record<string, string> = {
     "session_expired": "Your session has expired. Please sign in again.",
@@ -89,16 +89,14 @@ export default function LoginPage() {
             const errorMsg =
                 err instanceof Error ? err.message : "Login failed";
 
-            // Check if 2FA is required
-            if (
-                errorMsg.includes("2FA token required") ||
-                errorMsg.includes("requires2FA")
-            ) {
+            // The server's code says what happened; its words are only shown.
+            const code = signInCode(err);
+            if (code === SECOND_FACTOR_CODE.required) {
                 setRequires2FA(true);
                 setError("");
             } else if (
-                errorMsg.includes("Invalid 2FA token") ||
-                errorMsg.includes("Invalid recovery code")
+                code === SECOND_FACTOR_CODE.invalid ||
+                code === SECOND_FACTOR_CODE.invalidRecovery
             ) {
                 setError(errorMsg);
                 setTwoFactorToken(""); // Clear the token for retry

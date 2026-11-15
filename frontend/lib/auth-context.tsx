@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "./api";
+import { secondFactorRequired } from "./second-factor";
 
 interface User {
     id: string;
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (userData.requires2FA) {
                 // Don't set user or redirect, just throw an error to trigger 2FA UI
-                throw new Error("2FA token required");
+                throw secondFactorRequired();
             }
 
             setUser(userData);
