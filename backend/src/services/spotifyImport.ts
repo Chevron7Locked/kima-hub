@@ -229,26 +229,28 @@ async function updateImportJobFields(
   await publishImportJob(importJobId);
 }
 
-const CLOSED_IMPORT_STATES = ["completed", "failed", "cancelled"];
+const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
  * Marks an import as building its playlist: its status and progress, and its listing only when the row has none yet
  * (a row made before the listing was known). The link to a playlist, the counts and a listing a dismissal changed are
- * the row's own and are left alone. A job with no row yet gets one. False when the row is already linked to a playlist
- * or closed, so there is nothing to build.
+ * the row's own and are left alone, and the build reads the row's listing, not its own older copy (a song dismissed
+ * while the build waited stays dismissed). A job with no row yet gets one. False when the row is already linked to a
+ * playlist or closed, so there is nothing to build.
  */
 async function markBuilding(job: ImportJob): Promise<boolean> {
   const row = await prisma.spotifyImportJob.findUnique({ where: { id: job.id } });
   if (!row) {
     await saveImportJob({ ...job, status: "creating_playlist", progress: 90 });
   } else {
-    if (row.createdPlaylistId || CLOSED_IMPORT_STATES.includes(row.status)) return false;
+    if (row.createdPlaylistId || CLOSED_IMPORT_STATES.includes(row.status as ImportJob["status"])) return false;
     const listingEmpty = !Array.isArray(row.pendingTracks) || row.pendingTracks.length === 0;
     await updateImportJobFields(
       job.id,
       { status: "creating_playlist", progress: 90, ...(listingEmpty ? { pendingTracks: job.pendingTracks as any } : {}) },
       CLOSED_IMPORT_STATES,
     );
+    if (!listingEmpty) job.pendingTracks = toImportJob(row).pendingTracks;
   }
   job.status = "creating_playlist";
   job.progress = 90;
@@ -2053,7 +2055,14 @@ class SpotifyImportService {
   private async buildPlaylist(job: ImportJob): Promise<void> {
     const lockKey = IMPORT_BUILD_LOCK_KEY(job.id);
     if (!(await distributedLock.acquire(lockKey, IMPORT_BUILD_LOCK_TTL_MS))) {
-      jobLoggers.get(job.id)?.debug(`   Another build of job ${job.id} is running, skipping`);
+      // The lock says false for a Redis outage too, and nothing retries a build that skipped: with Redis down there is no
+      // lock to take, so the build runs, and the link to the playlist is still made once, in its transaction.
+      if (redisClient.status === "ready") {
+        jobLoggers.get(job.id)?.debug(`   Another build of job ${job.id} is running, skipping`);
+        return;
+      }
+      logger.warn(`[Import] Redis is not ready: building job ${job.id} without its lock`);
+      await this.buildPlaylistLocked(job);
       return;
     }
     // A build is thousands of rows and a preview lookup per waiting song: the lock is renewed while it runs, and frees
@@ -2073,6 +2082,7 @@ class SpotifyImportService {
     // Guard: playlist already created for this job
     if (job.createdPlaylistId) {
       jobLogger?.debug(`   Playlist already created: ${job.createdPlaylistId}, skipping`);
+      jobLoggers.delete(job.id);
       return;
     }
 

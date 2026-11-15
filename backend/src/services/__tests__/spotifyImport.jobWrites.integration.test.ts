@@ -16,6 +16,7 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
 import { spotifyImportService, getImportJob } from "../spotifyImport";
 import { deezerService } from "../deezer";
+import { distributedLock } from "../../utils/distributedLock";
 import { dismissWaitingEntry } from "../playlistService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -241,6 +242,36 @@ describe("one build per import", () => {
         await build(importJob(entries));
 
         expect(titles(await row())).toEqual([entries[0].title, entries[2].title]);
+    });
+
+    it("builds from the listing the row holds, so a song dismissed while the build waited is not built", async () => {
+        const entries = [matched(), waiting(1), waiting(2)];
+        await prisma.spotifyImportJob.create({
+            data: {
+                id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", progress: 80,
+                albumsTotal: 0, albumsCompleted: 0, tracksMatched: 0, tracksDownloadable: 0, tracksTotal: 2, pendingTracks: [entries[0], entries[2]] as any,
+            },
+        });
+
+        await build(importJob(entries));
+
+        const playlist = await prisma.playlist.findFirstOrThrow({ where: { userId: USER } });
+        const waitingTitles = (await prisma.playlistPendingTrack.findMany({ where: { playlistId: playlist.id } })).map((e) => e.spotifyTitle);
+        expect(waitingTitles).toEqual([entries[2].title]);
+    });
+
+    it("still builds when Redis is down, for there is then no lock to take", async () => {
+        const acquire = jest.spyOn(distributedLock, "acquire").mockResolvedValue(false);
+        const status = redisClient.status;
+        Object.defineProperty(redisClient, "status", { value: "reconnecting", configurable: true, writable: true });
+        try {
+            await build(importJob([matched()]));
+        } finally {
+            Object.defineProperty(redisClient, "status", { value: status, configurable: true, writable: true });
+        }
+
+        expect(acquire).toHaveBeenCalled();
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(1);
     });
 
     it("takes the lock for an import only while it builds", async () => {
