@@ -177,10 +177,18 @@ describe("two-factor sign-in", () => {
         const secret = speakeasy.generateSecret({ length: 20 }).base32;
         const { username } = await user({ twoFactorEnabled: true, twoFactorSecret: encrypt(secret) });
 
-        await times(25, async () => {
-            const code = speakeasy.totp({ secret, encoding: "base32" });
-            expect((await login(username, PASSWORD, newAddress(), code)).status).toBe(200);
-        });
+        // A code is spent by use, so each sign-in sends the next 30-second step's code.
+        const start = Date.now();
+        const clock = jest.spyOn(Date, "now");
+        try {
+            await times(25, async (i) => {
+                clock.mockReturnValue(start + i * 30_000);
+                const code = speakeasy.totp({ secret, encoding: "base32", time: Math.floor(Date.now() / 1000) });
+                expect((await login(username, PASSWORD, newAddress(), code)).status).toBe(200);
+            });
+        } finally {
+            clock.mockRestore();
+        }
     });
 });
 

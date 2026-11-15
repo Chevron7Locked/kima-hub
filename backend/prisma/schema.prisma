@@ -837,6 +837,7 @@ model User {
   twoFactorEnabled       Boolean                  @default(false)
   twoFactorSecret        String?
   twoFactorRecoveryCodes String?
+  twoFactorLastStep      Int                      @default(0)
   tokenVersion           Int                      @default(0)
   createdAt              DateTime                 @default(now())
   apiKeys                ApiKey[]

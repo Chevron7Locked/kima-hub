@@ -7,7 +7,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { NO_ACCOUNT_PASSWORD_HASH, totpMatches } from "../services/users/credentials";
+import { NO_ACCOUNT_PASSWORD_HASH, spendRecoveryCode, spendTotpStep, totpStep } from "../services/users/credentials";
 import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
@@ -73,43 +73,16 @@ router.post("/login", async (req, res) => {
             const isRecoveryCode = /^[A-F0-9]{8}$/i.test(token);
 
             if (isRecoveryCode && user.twoFactorRecoveryCodes) {
-                const encryptedCodes = user.twoFactorRecoveryCodes;
-                const decryptedCodes = decrypt(encryptedCodes);
-                const hashedCodes = decryptedCodes.split(",");
-
-                const providedHash = crypto
-                    .createHash("sha256")
-                    .update(token.toUpperCase())
-                    .digest("hex");
-
-                const codeIndex = hashedCodes.indexOf(providedHash);
-                if (codeIndex === -1) {
-                    return res
-                        .status(401)
-                        .json({ error: "Invalid recovery code" });
-                }
-
-                hashedCodes.splice(codeIndex, 1);
-                // Spent atomically: the write only lands if the list is still the one this code was found in,
-                // so of two sign-ins sending one code, one finds the list changed and is refused.
-                const spent = await prisma.user.updateMany({
-                    where: {
-                        id: user.id,
-                        twoFactorRecoveryCodes: encryptedCodes,
-                    },
-                    data: {
-                        twoFactorRecoveryCodes: encrypt(
-                            hashedCodes.join(",")
-                        ),
-                    },
-                });
-                if (spent.count === 0) {
+                // Spent atomically, so of two sign-ins sending one code, one is refused.
+                if (!(await spendRecoveryCode(user.id, user.twoFactorRecoveryCodes, token))) {
                     return res
                         .status(401)
                         .json({ error: "Invalid recovery code" });
                 }
             } else {
-                if (!totpMatches(decrypt(user.twoFactorSecret), token)) {
+                // A code is spent by use: the same one, or an earlier step's, is refused a second time.
+                const step = totpStep(decrypt(user.twoFactorSecret), token);
+                if (step === null || !(await spendTotpStep(user.id, step))) {
                     return res.status(401).json({ error: "Invalid 2FA token" });
                 }
             }
@@ -400,7 +373,8 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
                 .json({ error: "Secret and token are required" });
         }
 
-        if (!totpMatches(secret, token)) {
+        const step = totpStep(secret, token);
+        if (step === null) {
             return res
                 .status(400)
                 .json({ error: "Invalid token. Please try again." });
@@ -432,6 +406,8 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
                 twoFactorEnabled: true,
                 twoFactorSecret: encryptedSecret,
                 twoFactorRecoveryCodes: encryptedRecoveryCodes,
+                // The code that proved the secret is spent, so it cannot also sign in.
+                twoFactorLastStep: step,
             },
         });
 
@@ -473,7 +449,9 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
         }
 
         if (user.twoFactorSecret) {
-            if (!totpMatches(decrypt(user.twoFactorSecret), token)) {
+            // Spent like a sign-in's code: one just used to sign in cannot also turn it off.
+            const step = totpStep(decrypt(user.twoFactorSecret), token);
+            if (step === null || !(await spendTotpStep(user.id, step))) {
                 return res.status(400).json({ error: "Invalid 2FA token" });
             }
         }
