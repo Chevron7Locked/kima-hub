@@ -167,6 +167,9 @@ export class NetworkError extends Error {
     name = "NetworkError";
 }
 
+// A little under the 64 KB a kept alive request may carry in all, which browsers count across the page's requests.
+const KEEPALIVE_LIMIT_BYTES = 60_000;
+
 // Leaving the page (a reload, a typed address) makes the browser cancel every open request, just after pagehide.
 // Those cancellations are not failures: see the fetch in ApiClient.request. A page that comes back shows itself
 // with pageshow, or, for a phone or installed app resumed from the background, by becoming visible again.
@@ -1543,10 +1546,19 @@ class ApiClient {
         queueSource?: string | null;
         currentIndex?: number;
         isShuffle?: boolean;
+        /**
+         * The `updatedAt` of the state this save was decided on. The server writes only while that is still its time,
+         * else answers 409 (status 409, `data.state` the state it holds). Omitted, the save writes whatever is stored.
+         */
+        expectedUpdatedAt?: string;
     }) {
+        const body = JSON.stringify(state);
         return this.request<ApiData>("/playback-state", {
             method: "POST",
-            body: JSON.stringify(state),
+            body,
+            // Kept alive, so a save sent as the page closes is finished by the browser, not cancelled. A kept alive
+            // request may carry about 64 KB; a bigger one is refused outright, so it goes without.
+            keepalive: new TextEncoder().encode(body).length < KEEPALIVE_LIMIT_BYTES,
         });
     }
 

@@ -223,3 +223,22 @@ export async function playableQueue(
         trackId,
     };
 }
+
+/**
+ * A playback state row as a client is shown it, whether it asked for it or has just saved it: only the queue's playable
+ * songs, the index into those, and the song now current when the one named is not playable. What is stored stays as it
+ * is. No row stays no row.
+ */
+export async function shownState(state: Prisma.PlaybackStateGetPayload<object> | null) {
+    if (!state) return state;
+    const shown = await playableQueue(state);
+    if (!Array.isArray(state.queue)) return { ...state, trackId: shown.trackId };
+    return {
+        ...state,
+        queue: shown.queue.length > 0 ? shown.queue : null,
+        queueSource: shown.queue.length > 0 ? state.queueSource : null,
+        currentIndex: shown.currentIndex,
+        position: shown.position,
+        trackId: shown.trackId,
+    };
+}

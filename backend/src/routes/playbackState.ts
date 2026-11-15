@@ -3,9 +3,11 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, playableQueue } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, shownState } from "../services/savedQueue";
 
 const router = express.Router();
+
+type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
 
 // A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
 const MAX_QUEUE_SOURCE_LENGTH = 200;
@@ -37,22 +39,7 @@ router.get("/limit", async (_req, res) => {
 router.get("/", async (req, res) => {
     try {
         const userId = req.user!.id;
-
-        const state = await prisma.playbackState.findUnique({ where: { userId } });
-        if (!state) return res.json(state);
-
-        // Only the queue's playable songs are shown, as to a Subsonic client; what is stored stays as it is. A track the
-        // state names that is not playable gives way to the song now current.
-        const shown = await playableQueue(state);
-        if (!Array.isArray(state.queue)) return res.json({ ...state, trackId: shown.trackId });
-        res.json({
-            ...state,
-            queue: shown.queue.length > 0 ? shown.queue : null,
-            queueSource: shown.queue.length > 0 ? state.queueSource : null,
-            currentIndex: shown.currentIndex,
-            position: shown.position,
-            trackId: shown.trackId,
-        });
+        res.json(await shownState(await prisma.playbackState.findUnique({ where: { userId } })));
     } catch (error) {
         logger.error("Get playback state error:", error);
         res.status(500).json({ error: "Failed to get playback state" });
@@ -72,10 +59,22 @@ router.post("/", async (req, res) => {
             currentIndex,
             isShuffle,
             queueSource,
+            expectedUpdatedAt,
         } = req.body;
 
         if (!["track", "audiobook", "podcast"].includes(playbackType)) {
             return res.status(400).json({ error: "playbackType must be track, audiobook or podcast" });
+        }
+
+        // A save may name the time of the state it saw (`updatedAt`, as the server last answered it): it then writes
+        // only while that is still the stored time, so a state another device saved since is never overwritten by
+        // one decided on older word. Omitted, the save writes whatever is stored, as every client has until now.
+        let expectedAt: Date | null = null;
+        if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
+            expectedAt = typeof expectedUpdatedAt === "string" ? new Date(expectedUpdatedAt) : null;
+            if (!expectedAt || Number.isNaN(expectedAt.getTime())) {
+                return res.status(400).json({ error: "expectedUpdatedAt must be a date" });
+            }
         }
 
         // A request without a `queue` is a partial update — a shuffle toggle, or a
@@ -96,7 +95,9 @@ router.post("/", async (req, res) => {
                 : null;
 
         // `safeCurrentIndex` null: the save names a song the stored queue does not hold, so the stored index stays.
-        const write = (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number | null) => {
+        // Returns null when the save named a time and the stored state is no longer the one saved at it (or is gone):
+        // nothing was written.
+        const write = async (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number | null): Promise<PlaybackStateRow | null> => {
             const queueUpdate = queueProvided
                 ? {
                       queue: storedQueue,
@@ -106,17 +107,24 @@ router.post("/", async (req, res) => {
                 : indexOnly && safeCurrentIndex !== null
                   ? { currentIndex: safeCurrentIndex }
                   : {};
+            const update = {
+                playbackType,
+                // Omitted fields are left alone: native clients send partial updates.
+                ...(trackId !== undefined ? { trackId: trackId || null } : {}),
+                ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
+                ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
+                ...queueUpdate,
+                ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
+            };
+            // One statement matches the time and writes, so two saves naming the same time cannot both write; a
+            // state that is gone is never brought back by it.
+            if (expectedAt) {
+                const { count } = await db.playbackState.updateMany({ where: { userId, updatedAt: expectedAt }, data: update });
+                return count === 0 ? null : db.playbackState.findUnique({ where: { userId } });
+            }
             return db.playbackState.upsert({
                 where: { userId },
-                update: {
-                    playbackType,
-                    // Omitted fields are left alone: native clients send partial updates.
-                    ...(trackId !== undefined ? { trackId: trackId || null } : {}),
-                    ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
-                    ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
-                    ...queueUpdate,
-                    ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
-                },
+                update,
                 create: {
                     userId,
                     playbackType,
@@ -132,12 +140,19 @@ router.post("/", async (req, res) => {
         };
 
         // The index points into a queue: the one sent, or for a save without one the queue as it stands, which stays
-        // locked until this save is written (see `indexIntoStoredQueue`).
+        // locked until this save is written (see `indexIntoStoredQueue`). A time the save names is checked by that write,
+        // so inside the same lock.
         const playbackState = indexOnly
             ? await prisma.$transaction(async (tx) => write(tx, await indexIntoStoredQueue(tx, userId, currentIndex, trackId)))
             : await write(prisma, accepted?.currentIndex ?? 0);
 
-        res.json(playbackState);
+        if (!playbackState) {
+            // What is stored now, as a client is shown it, so the client can take it up without asking again.
+            const current = await prisma.playbackState.findUnique({ where: { userId } });
+            return res.status(409).json({ error: "Playback state changed since it was read", state: await shownState(current) });
+        }
+        // The reply is the state as a read of it would show it, so a client holds one shape whichever way it learned it.
+        res.json(await shownState(playbackState));
     } catch (error) {
         logger.error("Save playback state error:", error);
         res.status(500).json({ error: "Failed to save playback state" });

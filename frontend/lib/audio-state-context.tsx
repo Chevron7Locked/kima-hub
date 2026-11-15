@@ -192,6 +192,11 @@ function isGone(err: unknown): boolean {
     return (err as { status?: number } | null)?.status === 404;
 }
 
+/** The server refused a save that named the time it saw, because its state has been saved since. */
+function isConflict(err: unknown): boolean {
+    return (err as { status?: number } | null)?.status === 409;
+}
+
 /**
  * What a saved playback state says, as a string to compare: the item, the queue (cut to the server's limit, as a save
  * cuts it, and compared whole so an edited title still saves), the position in it and shuffle. Equal keys mean saving
@@ -377,7 +382,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         checksToSkip: number;
         // The wait before `latest` goes out; cleared when something else sends it first, so it is not tried twice.
         timer: ReturnType<typeof setTimeout> | null;
-    }>({ latest: null, queued: null, draining: false, drained: Promise.resolve(), failures: 0, checksToSkip: 0, timer: null });
+        // Set when the server refused a save for naming a time that was no longer its own (409); read by the check that sent it.
+        conflicted: boolean;
+    }>({ latest: null, queued: null, draining: false, drained: Promise.resolve(), failures: 0, checksToSkip: 0, timer: null, conflicted: false });
     // What the poll needs to know of the page as it is now, since the poll runs on from one render to the next.
     const mediaId = mediaIdOf(currentTrack, currentAudiobook, currentPodcast);
     const liveRef = useRef({ playbackType, mediaId });
@@ -416,6 +423,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 s.checksToSkip = 0;
                             }
                         } catch (err: unknown) {
+                            // Another device saved after the state this one was decided on: its word is the newer, so
+                            // nothing here is owed, and the check that sent this takes the other state up.
+                            if (isConflict(err)) {
+                                if (saveRunRef.current === next.run) savePendingRef.current = false;
+                                s.conflicted = true;
+                                continue;
+                            }
                             // The flag stays set: the change is still only here, and another device's state must not
                             // replace it. The poll sends it again, later each time it fails.
                             if (saveRunRef.current === next.run) {
@@ -736,6 +750,32 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         submitSave,
     ]);
 
+    // A page that is closing, or going to the background (where the browser may end it without notice), sends a change
+    // whose wait has not run out, at once. Saves are sent kept alive (see the api), so the browser finishes one that is
+    // on its way as the page goes. One that failed is sent again too, the poll being unlikely to get another turn.
+    useEffect(() => {
+        const flush = () => {
+            const s = saveRef.current;
+            if (!s.latest) return;
+            if (s.timer) {
+                clearTimeout(s.timer);
+                s.timer = null;
+                void submitSave(s.latest);
+            } else if (savePendingRef.current && s.failures > 0 && !s.draining) {
+                void submitSave(s.latest);
+            }
+        };
+        const flushIfHidden = () => {
+            if (document.hidden) flush();
+        };
+        window.addEventListener("pagehide", flush);
+        document.addEventListener("visibilitychange", flushIfHidden);
+        return () => {
+            window.removeEventListener("pagehide", flush);
+            document.removeEventListener("visibilitychange", flushIfHidden);
+        };
+    }, [submitSave]);
+
     // Poll server for changes from other devices (pauses when tab is hidden)
     useEffect(() => {
         let isAuthenticated = true;
@@ -819,7 +859,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (saveRef.current.timer) clearTimeout(saveRef.current.timer);
                     saveRef.current.timer = null;
                     if (saveRunRef.current === mine.run) savePendingRef.current = true;
-                    await submitSave({ ...mine, force: true });
+                    // Written only while the server's state is still the one just read: a device that saved in the
+                    // meantime is refused the overwrite, and its state is taken up by the check made next.
+                    saveRef.current.conflicted = false;
+                    await submitSave({ ...mine, force: true, state: { ...mine.state, expectedUpdatedAt: String(held.updatedAt) } });
+                    if (saveRef.current.conflicted) {
+                        saveRef.current.conflicted = false;
+                        nowOwed = true;
+                    }
                 } else {
                     serverKnownRef.current = null;
                     await api.clearPlaybackState().catch(() => {});

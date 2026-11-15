@@ -335,6 +335,92 @@ describe("POST /api/playback-state: where the player is in the queue", () => {
     });
 });
 
+describe("POST /api/playback-state: a save that names the time it saw (expectedUpdatedAt)", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+    const stored = (userId: string) => prisma.playbackState.findUnique({ where: { userId } });
+    const song = (n: string) => ({ id: `${S}${n}`, title: n, duration: 100 });
+
+    it("writes when the stored state is still the one seen, and answers the new row", async () => {
+        const user = await newUser("cond-ok");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+
+        const res = await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [song("s1"), song("s2")], currentIndex: 1, expectedUpdatedAt: seen });
+
+        expect(res.status).toBe(200);
+        expect(res.body.trackId).toBe(`${S}s2`);
+        expect(res.body.currentIndex).toBe(1);
+        expect((await stored(user.id))!.trackId).toBe(`${S}s2`);
+    });
+
+    it("refuses with 409 and the current state when another save came in since, and writes nothing", async () => {
+        const user = await newUser("cond-stale");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+        await save(user.id, { playbackType: "track", trackId: `${S}s3`, queue: [song("s3")], currentIndex: 0 }).expect(200);
+
+        const res = await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [song("s2")], currentIndex: 0, expectedUpdatedAt: seen });
+
+        expect(res.status).toBe(409);
+        expect(res.body.state.trackId).toBe(`${S}s3`);
+        expect(typeof res.body.error).toBe("string");
+        expect((await stored(user.id))!.trackId).toBe(`${S}s3`);
+    });
+
+    it("refuses with 409 and no state when the state was cleared since, and does not bring it back", async () => {
+        const user = await newUser("cond-cleared");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+        await prisma.playbackState.deleteMany({ where: { userId: user.id } });
+
+        const res = await save(user.id, { playbackType: "track", trackId: `${S}s1`, expectedUpdatedAt: seen });
+
+        expect(res.status).toBe(409);
+        expect(res.body.state).toBeNull();
+        expect(await stored(user.id)).toBeNull();
+    });
+
+    it("lets only one of two saves naming the same time write", async () => {
+        const user = await newUser("cond-race");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+
+        const answers = await Promise.all([
+            save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [song("s2")], currentIndex: 0, expectedUpdatedAt: seen }),
+            save(user.id, { playbackType: "track", trackId: `${S}s3`, queue: [song("s3")], currentIndex: 0, expectedUpdatedAt: seen }),
+        ]);
+
+        expect(answers.map((a) => a.status).sort()).toEqual([200, 409]);
+    });
+
+    it("guards a save without a queue (an index only) the same way", async () => {
+        const user = await newUser("cond-index");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2")], currentIndex: 0 }).expect(200);
+        const seen = (await stored(user.id))!.updatedAt.toISOString();
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, isShuffle: true }).expect(200);
+
+        const res = await save(user.id, { playbackType: "track", trackId: `${S}s2`, currentIndex: 1, expectedUpdatedAt: seen });
+
+        expect(res.status).toBe(409);
+        expect((await stored(user.id))!.currentIndex).toBe(0);
+    });
+
+    it("answers 400 for a time that is not a date, and writes nothing", async () => {
+        const user = await newUser("cond-bad");
+        const res = await save(user.id, { playbackType: "track", trackId: `${S}s1`, expectedUpdatedAt: "yesterday" });
+        expect(res.status).toBe(400);
+        expect(await stored(user.id)).toBeNull();
+    });
+
+    it("leaves a save that names no time as it was: it writes whatever is stored", async () => {
+        const user = await newUser("cond-none");
+        await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
+        await save(user.id, { playbackType: "track", trackId: `${S}s2` }).expect(200);
+        expect((await stored(user.id))!.trackId).toBe(`${S}s2`);
+    });
+});
+
 describe("GET /api/playback-state/limit", () => {
     it("answers a newly saved limit at once, not one the server read earlier", async () => {
         const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });

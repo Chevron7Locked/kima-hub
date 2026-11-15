@@ -24,6 +24,10 @@ const server = vi.hoisted(() => ({
     savesInFlight: 0,
     mostSavesInFlight: 0,
     stateReads: 0,
+    /** Runs as a save reaches the server, before it is written: another device saving in the meantime. */
+    beforeSave: null as (() => void) | null,
+    /** The saves the server refused for naming a time that was no longer its own. */
+    refused: [] as Array<Record<string, unknown>>,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -55,10 +59,17 @@ vi.mock("@/lib/api", () => {
             try {
                 if (server.saveGate) await server.saveGate;
                 if (fails) throw Object.assign(new Error("server error"), { status: 500 });
+                server.beforeSave?.();
+                const { expectedUpdatedAt, ...held } = state;
+                // A save naming the time it saw is written only while that is still the server's time.
+                if (expectedUpdatedAt !== undefined && server.state?.updatedAt !== expectedUpdatedAt) {
+                    server.refused.push(state);
+                    throw Object.assign(new Error("changed"), { status: 409, data: { state: server.state } });
+                }
                 server.saves.push(state);
                 // The server holds what it was last sent, as of its own clock.
                 const updatedAt = new Date(server.now()).toISOString();
-                server.state = { ...state, updatedAt };
+                server.state = { ...held, updatedAt };
                 return { updatedAt };
             } finally {
                 server.savesInFlight--;
@@ -177,6 +188,8 @@ beforeEach(() => {
     server.savesInFlight = 0;
     server.mostSavesInFlight = 0;
     server.stateReads = 0;
+    server.beforeSave = null;
+    server.refused = [];
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -629,6 +642,67 @@ describe("another device's audiobook or podcast that the server no longer has", 
         expect(probe.state.currentTrack?.id).toBe("e");
     });
 
+    it("names the time it saw when it is replaced, and a plain save names none", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).not.toHaveProperty("expectedUpdatedAt");
+
+        const gone = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.state = gone;
+        server.audiobookGone = true;
+        await pollNow(tick());
+        expect(server.saves).toHaveLength(2);
+        expect(server.saves[1]).toMatchObject({ trackId: "a", expectedUpdatedAt: gone.updatedAt });
+    });
+
+    it("is not written over a state another device saved between the check and the write, which is taken up at once", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        server.beforeSave = () => {
+            server.beforeSave = null;
+            server.state = fromOtherDevice({ trackId: "e", queue: [t("e"), t("f")], updatedAt: new Date(Date.now() + 9000).toISOString() });
+        };
+        await pollNow(tick());
+        // The server refused the replacement and kept the other device's state; this page took it up in the same check.
+        expect(server.refused).toHaveLength(1);
+        expect(server.saves).toEqual([]);
+        expect(server.state).toMatchObject({ trackId: "e" });
+        expect(probe.state.currentTrack?.id).toBe("e");
+        expect(server.clears).toBe(0);
+        // Nothing is owed any more: no save of "a" follows.
+        await wait(1500);
+        expect(server.saves).toEqual([]);
+    });
+
+    it("is not written back when a refusal answers that another device cleared the state", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        server.beforeSave = () => {
+            server.beforeSave = null;
+            server.state = null;
+        };
+        await pollNow(tick());
+        expect(server.refused).toHaveLength(1);
+        expect(server.saves).toEqual([]);
+        // Nothing is written behind the other device's back; this page's next change saves as usual.
+        await wait(1500);
+        expect(server.saves).toEqual([]);
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).not.toHaveProperty("expectedUpdatedAt");
+    });
+
     it("is not cleared over a change made here while it was being asked for, which saves as usual", async () => {
         const tick = capturePoll();
         server.trackFails = true;
@@ -811,6 +885,78 @@ describe("a change made here that undoes one still on its way", () => {
         expect(server.saveAttempts).toBe(attempts + 1);
         expect(JSON.parse(JSON.stringify(server.state)).trackId).toBe("a");
     }, 15_000);
+});
+
+describe("a page that is closing or going to the background", () => {
+    it("sends a change not yet saved as the page is hidden, and not again when its wait ends", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        expect(server.saveAttempts).toBe(0);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "c" });
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+    });
+
+    it("sends it when the tab becomes hidden, too", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => setHidden(true));
+        await wait(50);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "c" });
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+    });
+
+    it("sends nothing when nothing is owed", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await act(async () => setHidden(true));
+        await wait(50);
+        expect(server.saveAttempts).toBe(0);
+    });
+
+    it("sends nothing for a change already saved", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(1);
+    });
+
+    it("sends the newest state, when changes followed one another before it", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => probe.controls.playTracks([t("d") as never, t("c") as never], 0));
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "d" });
+    });
+
+    it("sends the owed change again later if the send as the page hid failed", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        await wait(50);
+        expect(server.saveAttempts).toBe(1);
+        server.saveFails = false;
+        await pollNow(tick());
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
+    });
 });
 
 describe("a tab that was hidden", () => {
