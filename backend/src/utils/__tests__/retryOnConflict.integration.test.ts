@@ -6,7 +6,8 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
-import { retryOnConflict } from "../dbConflict";
+import { retryOnConflict, retryOnDeadlock } from "../dbConflict";
+import { logger } from "../logger";
 import { untilLockWait } from "../../__tests__/helpers/lockWait";
 
 jest.setTimeout(60_000);
@@ -149,5 +150,30 @@ describe("retryOnConflict", () => {
             expect(l.waitMs).toBeGreaterThanOrEqual(50);
             expect(l.waitMs).toBeLessThan(200);
         }
+    });
+});
+
+// The one retry every transaction-owning module uses for a deadlock: one more run, and a log line that says what lost.
+describe("retryOnDeadlock", () => {
+    it("runs a lost transaction once more, says what lost in the log, and returns the second run's value", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const { run, started } = serializationRun((n) => n === 1);
+
+        expect(await retryOnDeadlock("the test move", run)).toBe(2);
+
+        expect(started).toHaveLength(2);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/the test move lost a transaction conflict; trying once more/));
+    });
+
+    it("throws a second conflict as it came, and any other failure at once, without a log line for it", async () => {
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const other = jest.fn().mockRejectedValue(new Error("connection reset"));
+
+        await expect(retryOnDeadlock("the test move", serializationRun(() => true).run)).rejects.toMatchObject({ code: "P2034" });
+        await expect(retryOnDeadlock("the test move", other)).rejects.toThrow("connection reset");
+
+        expect(other).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(1);
     });
 });

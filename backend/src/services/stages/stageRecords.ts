@@ -29,6 +29,11 @@
  * library scan is asked for. The flag takes the song's records, then its Track row, the order every move uses; a
  * deadlock Postgres still picks it for is retried once.
  *
+ * This module owns the song's missing flag (`Track.missingSince`) too: it is set and cleared only here (`flagMissingFiles`,
+ * `returnFiles`, and `fail` for an analyzer's report), always in the same transaction as the questions it closes or opens,
+ * and stamped from this process's clock (`nodeClock`), because a scan compares it with its own start time. The library
+ * sweep that later retires a flagged song only reads it.
+ *
  * A report that names its claim (the job id) applies only while that claim is the record's open one; a report for a
  * claim that was re-issued is dropped. An answered, closed or blocked record is never reopened by a report.
  *
@@ -41,7 +46,8 @@ import * as path from "path";
 import type { Prisma } from "@prisma/client";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
-import { retryOnConflict } from "../../utils/dbConflict";
+import { retryOnDeadlock } from "../../utils/dbConflict";
+import { nodeClock } from "../../utils/nodeClock";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { STAGE_RETRY_CAP, computeStageRetryWaitMs } from "../../workers/stageRetry";
@@ -122,19 +128,6 @@ const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retr
 const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 
 // ── Deadlocks ────────────────────────────────────────────────────────────
-
-/**
- * Runs a move's own transaction, and once more when Postgres ended it for a conflict with another transaction (a deadlock, in practice): the other transaction
- * has finished by then and the rolled-back move left nothing behind. The retry waits first (`retryOnConflict`). Any
- * other failure, and a second conflict, throw.
- * A move that joins its caller's transaction does not use this: the caller owns the retry.
- */
-async function retryOnDeadlock<T>(what: string, run: () => Promise<T>): Promise<T> {
-    return retryOnConflict(run, {
-        runs: 2,
-        onLostRun: () => logger.warn(`[Enrichment] ${what} lost a transaction conflict; trying once more`),
-    });
-}
 
 // ── Claim ids ────────────────────────────────────────────────────────────
 
@@ -233,17 +226,15 @@ async function mirrorMoved(tx: Tx, moved: Array<{ trackId: string; stage: string
 
 /** The shared valence/arousal pair from both analyzers' raw answers: the blend when both have answered, otherwise whichever has. */
 async function syncSharedValenceArousal(tx: Tx, trackIds: string[]): Promise<void> {
-    await tx.$executeRawUnsafe(
-        `UPDATE "Track"
-            SET valence = COALESCE(ROUND((0.7 * "deamValence" + 0.3 * "clapValenceRaw")::numeric, 3)::float8,
-                                   "deamValence", "clapValenceRaw"),
-                arousal = COALESCE(ROUND((0.5 * "deamArousal" + 0.5 * "clapArousalRaw")::numeric, 3)::float8,
-                                   "deamArousal", "clapArousalRaw"),
-                -- Raw SQL does not move updatedAt by itself; the mood step reads it to see that a reading changed.
-                "updatedAt" = now()
-          WHERE id = ANY($1::text[])`,
-        trackIds,
-    );
+    // Raw SQL does not move updatedAt by itself; the mood step reads it to see that a reading changed.
+    await tx.$executeRaw`
+        UPDATE "Track"
+           SET valence = COALESCE(ROUND((0.7 * "deamValence" + 0.3 * "clapValenceRaw")::numeric, 3)::float8,
+                                  "deamValence", "clapValenceRaw"),
+               arousal = COALESCE(ROUND((0.5 * "deamArousal" + 0.5 * "clapArousalRaw")::numeric, 3)::float8,
+                                  "deamArousal", "clapArousalRaw"),
+               "updatedAt" = ${nodeClock()}
+         WHERE id = ANY(${[...trackIds]}::text[])`;
 }
 
 const recordId = (trackId: string, stage: string) => `${trackId}__${stage}`;
@@ -1053,11 +1044,10 @@ export async function flagMissingFiles(trackIds: readonly string[]): Promise<{ f
         // Ids go as one array parameter: a library's worth of vanished songs is past a statement's bind limit.
         // The stamp is the server's clock, as Prisma writes it: a scan compares it with its own start time, which the
         // database's clock (a container's can differ by milliseconds) must not move.
-        const flagged = trackIds.length === 0 ? 0 : await tx.$executeRawUnsafe(
-            `UPDATE "Track" SET "missingSince" = ($2::timestamptz AT TIME ZONE 'UTC'), "updatedAt" = ($2::timestamptz AT TIME ZONE 'UTC') WHERE id = ANY($1::text[]) AND "missingSince" IS NULL`,
-            trackIds,
-            new Date().toISOString(),
-        );
+        const at = new Date();
+        const flagged = trackIds.length === 0 ? 0 : await tx.$executeRaw`
+            UPDATE "Track" SET "missingSince" = ${nodeClock(at)}, "updatedAt" = ${nodeClock(at)}
+             WHERE id = ANY(${[...trackIds]}::text[]) AND "missingSince" IS NULL`;
         return { flagged, closed: await closeForMissingFiles(tx) };
     }, BULK_TX));
 }
@@ -1072,11 +1062,9 @@ export async function returnFiles(trackIds: readonly string[]): Promise<number> 
     if (trackIds.length === 0) return 0;
     return retryOnDeadlock("returning files", () => prisma.$transaction(async (tx) => {
         await holdRecords(tx, { trackIds });
-        await tx.$executeRawUnsafe(
-            `UPDATE "Track" SET "missingSince" = NULL, "updatedAt" = ($2::timestamptz AT TIME ZONE 'UTC') WHERE id = ANY($1::text[]) AND "missingSince" IS NOT NULL`,
-            trackIds,
-            new Date().toISOString(),
-        );
+        await tx.$executeRaw`
+            UPDATE "Track" SET "missingSince" = NULL, "updatedAt" = ${nodeClock()}
+             WHERE id = ANY(${[...trackIds]}::text[]) AND "missingSince" IS NOT NULL`;
         return askAgain({
             stages: STAGE_ORDER,
             trackIds: [...trackIds],

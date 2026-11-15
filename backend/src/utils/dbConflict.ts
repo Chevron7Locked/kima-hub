@@ -8,6 +8,8 @@
  * it retries on. `P2034` does not say which of the two it was, so both recognise it.
  */
 
+import { logger } from "./logger";
+
 interface PrismaLikeError {
     code?: unknown;
     meta?: { code?: unknown };
@@ -83,4 +85,17 @@ export async function retryOnConflict<T>(
             await new Promise((resolve) => setTimeout(resolve, waitMs));
         }
     }
+}
+
+/**
+ * `retryOnConflict` as the modules that own a whole transaction use it: one more run when Postgres ended it for a
+ * conflict with another transaction (a deadlock, in practice), the log line naming what lost. The rolled-back run left
+ * nothing behind. A second conflict, and any other failure, throw. A step that joins its caller's transaction does not
+ * use this: the caller owns the retry.
+ */
+export async function retryOnDeadlock<T>(what: string, run: () => Promise<T>): Promise<T> {
+    return retryOnConflict(run, {
+        runs: 2,
+        onLostRun: () => logger.warn(`[DB] ${what} lost a transaction conflict; trying once more`),
+    });
 }

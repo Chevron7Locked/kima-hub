@@ -6,7 +6,7 @@
  */
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
-import { retryOnConflict } from "../utils/dbConflict";
+import { retryOnDeadlock } from "../utils/dbConflict";
 import { logger } from "../utils/logger";
 import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
@@ -176,7 +176,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
     }
     // The whole reset is one transaction, so a conflict that makes Postgres end it leaves nothing behind, and it
     // runs once more.
-    const wiped = await retryOnConflict(() => prisma.$transaction(
+    const wiped = await retryOnDeadlock(`The ${from} re-run`, () => prisma.$transaction(
         async (tx) => {
             if (clears.similarity) await releaseMatchingState(tx);
             if (clears.moods) await releaseMoodState(tx);
@@ -209,10 +209,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             return { artists, tracks, vectors };
         },
         { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },
-    ), {
-        runs: 2,
-        onLostRun: () => logger.warn(`[Enrichment] The ${from} re-run lost a transaction conflict; trying once more`),
-    });
+    ));
     // After the reset has committed: the album vote reads the songs it votes on from the database, so a round
     // running during the reset may still write a verdict from the old state; clearing last removes that too.
     if (clears.recording) {
