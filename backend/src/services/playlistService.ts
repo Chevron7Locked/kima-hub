@@ -6,7 +6,7 @@
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { rankAfter, rankBetween, rankSequence } from "../utils/lexoRank";
+import { rankAfter, rankBetween, rankForPosition, rankSequence, ranksBetween } from "../utils/lexoRank";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 
 /** Cap on a single bulk operation, so one request cannot pin a connection. */
@@ -270,6 +270,71 @@ export async function placeFoundSongs(playlistId: string, found: FoundSong[]): P
         await tx.playlist.update({ where: { id: playlistId }, data: { updatedAt: new Date() } });
         return placed;
     });
+}
+
+/**
+ * Replace every item of a playlist with `trackIds`, in that order, inside the caller's transaction (which holds
+ * the playlist lock). Waiting entries are not the caller's to see or move: each keeps its rank, and the new items
+ * are ranked around them. A waiting entry stays after the song that came before it in the old order, at that song's
+ * first place in the new list; when that song is gone, after the nearest earlier old song that is still there, or
+ * first when none is. Waiting entries keep their order among themselves, so one never passes the one that was ahead
+ * of it. Returns whether anything was removed or written.
+ */
+export async function replaceItems(
+    tx: Pick<typeof prisma, "playlistItem" | "playlistPendingTrack">,
+    playlistId: string,
+    trackIds: string[]
+): Promise<boolean> {
+    const [oldItems, waiting] = await Promise.all([
+        tx.playlistItem.findMany({ where: { playlistId }, orderBy: { rank: "asc" }, select: { trackId: true, rank: true } }),
+        tx.playlistPendingTrack.findMany({
+            where: { playlistId, rank: { not: "" } },
+            orderBy: { rank: "asc" },
+            select: { rank: true },
+        }),
+    ]);
+
+    const firstPlace = new Map<string, number>();
+    trackIds.forEach((trackId, index) => {
+        if (!firstPlace.has(trackId)) firstPlace.set(trackId, index);
+    });
+
+    // For each waiting entry (in rank order), the new position it follows: -1 for the start.
+    const follows: number[] = [];
+    let behind = -1;
+    let oldIndex = 0;
+    let latest = -1;
+    for (const entry of waiting) {
+        // The old items that sorted before this entry; the last of them that is still listed is its anchor.
+        while (oldIndex < oldItems.length && oldItems[oldIndex].rank < entry.rank) {
+            const place = firstPlace.get(oldItems[oldIndex].trackId);
+            if (place !== undefined) behind = place;
+            oldIndex += 1;
+        }
+        latest = Math.max(latest, behind);
+        follows.push(latest);
+    }
+
+    // Item positions after waiting entry j (and before j + 1) take ranks inside that gap.
+    // With none waiting the ranks are the plain fixed-width ones.
+    const ranks: string[] = [];
+    if (waiting.length === 0) {
+        trackIds.forEach((_, index) => ranks.push(rankForPosition(index)));
+    } else {
+        for (let gap = 0; gap <= waiting.length; gap += 1) {
+            const upTo = gap < waiting.length ? follows[gap] : trackIds.length - 1;
+            const count = upTo - ranks.length + 1;
+            const lower = gap === 0 ? "" : waiting[gap - 1].rank;
+            const upper = gap < waiting.length ? waiting[gap].rank : "";
+            ranks.push(...ranksBetween(lower, upper, count));
+        }
+    }
+
+    const removed = await tx.playlistItem.deleteMany({ where: { playlistId } });
+    const created = await tx.playlistItem.createMany({
+        data: trackIds.map((trackId, index) => ({ playlistId, trackId, sort: index, rank: ranks[index] })),
+    });
+    return removed.count > 0 || created.count > 0;
 }
 
 /**

@@ -8,6 +8,7 @@ import {
     rankForPosition,
     rankBetween,
     rankSequence,
+    ranksBetween,
 } from "../lexoRank";
 
 describe("rankBetween — the ordering invariant", () => {
@@ -194,6 +195,28 @@ describe("rankSequence — seeding a list", () => {
         const seq = rankSequence(3000);
         expect(seq).toEqual([...seq].sort());
         expect(new Set(seq).size).toBe(3000);
+    });
+});
+
+describe("ranksBetween - a run of keys inside a gap", () => {
+    it("gives count ascending keys strictly between the bounds", () => {
+        for (const [before, after] of [["", ""], ["", "001"], ["001", "002"], ["A", "B"], ["001V", "002"], ["Zz", ""]]) {
+            for (const count of [0, 1, 2, 7, 400]) {
+                const keys = ranksBetween(before, after, count);
+                expect(keys).toHaveLength(count);
+                expect(new Set(keys).size).toBe(count);
+                expect(keys).toEqual([...keys].sort());
+                for (const key of keys) {
+                    if (before) expect(key > before).toBe(true);
+                    if (after) expect(key < after).toBe(true);
+                }
+            }
+        }
+    });
+
+    it("keeps the keys short for a large run in a tight gap", () => {
+        const keys = ranksBetween("001", "002", 5000);
+        expect(Math.max(...keys.map((k) => k.length))).toBeLessThanOrEqual(8);
     });
 });
 

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { rankForPosition } from "../../utils/lexoRank";
-import { allocateAppendRanks, lockPlaylist } from "../../services/playlistService";
+import { allocateAppendRanks, lockPlaylist, replaceItems } from "../../services/playlistService";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapSong, wrap } from "./mappers";
@@ -136,17 +136,9 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
                     select: { trackId: true },
                 })
             ).map((item) => item.trackId);
-            const removed = await tx.playlistItem.deleteMany({ where: { playlistId } });
-            // rank is the playlist order and must be unique per playlist; a song named twice is two entries.
-            const created = await tx.playlistItem.createMany({
-                data: [...songIds, ...hidden].map((trackId, index) => ({
-                    playlistId,
-                    trackId,
-                    sort: index,
-                    rank: rankForPosition(index),
-                })),
-            });
-            return removed.count > 0 || created.count > 0;
+            // rank is the playlist order and must be unique per playlist; a song named twice is two entries. The
+            // entries an import still waits for keep their ranks, which the client never saw, and the songs go around them.
+            return replaceItems(tx, playlistId, [...songIds, ...hidden]);
         });
         resolvedPlaylistId = playlistId;
         changed = written;

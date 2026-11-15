@@ -122,6 +122,22 @@ export function rankSequence(count: number): string[] {
 }
 
 /**
+ * `count` ascending keys strictly between `before` and `after` ("" for an open end). Splits the gap in the middle
+ * and recurses, so the keys spread over it and grow by about a character for every 62-fold the run outgrows
+ * the gap, not by one per key.
+ */
+export function ranksBetween(before: string, after: string, count: number): string[] {
+    if (count <= 0) return [];
+    const middle = count >> 1;
+    const key = rankBetween(before, after);
+    return [
+        ...ranksBetween(before, key, middle),
+        key,
+        ...ranksBetween(key, after, count - middle - 1),
+    ];
+}
+
+/**
  * A fixed-width (3-character, ~238k positions) rank for a zero-based
  * position, matching SQL `kima_rank_from_position`. For orderings known up
  * front; use rankSequence to seed and rankBetween/rankAfter for edits.
