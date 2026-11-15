@@ -504,6 +504,83 @@ describe("POST /api/playback-state: a save that names the time it saw (expectedU
     });
 });
 
+// The position is a Subsonic client's place in the current song (`getPlayQueue`). The web player sends none, so a web
+// save that starts another queue or moves to another song must not leave an earlier position beside the new song.
+describe("POST /api/playback-state: the position in the current song", () => {
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });
+    const song = (n: string) => ({ id: `${S}${n}`, title: n, duration: 100 });
+    const position = async (userId: string) => (await prisma.playbackState.findUniqueOrThrow({ where: { userId } })).position;
+    // A state a Subsonic client left, 9 seconds into the first of three songs.
+    const withPosition = async (name: string) => {
+        const user = await newUser(name);
+        await prisma.playbackState.create({
+            data: { userId: user.id, playbackType: "track", queue: [song("s1"), song("s2"), song("s3")], currentIndex: 0, trackId: `${S}s1`, position: 9000 },
+        });
+        return user;
+    };
+
+    it("starts a queue the save replaces at position 0, the same queue and place included", async () => {
+        const user = await withPosition("pos-queue");
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [song("s1"), song("s2"), song("s3")], currentIndex: 0 }).expect(200);
+
+        expect(await position(user.id)).toBe(0);
+    });
+
+    it("starts at position 0 when a save with a queue creates the state", async () => {
+        const user = await newUser("pos-first");
+
+        await save(user.id, { playbackType: "track", queue: [song("s1")], currentIndex: 0 }).expect(200);
+
+        expect(await position(user.id)).toBe(0);
+    });
+
+    it("resets the position when a save without a queue moves to another entry, and keeps it when the entry is the same", async () => {
+        const user = await withPosition("pos-move");
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, currentIndex: 0 }).expect(200);
+        expect(await position(user.id)).toBe(9000);
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s3`, currentIndex: 2 }).expect(200);
+        expect(await position(user.id)).toBe(0);
+    });
+
+    it("resets the position when a save names a song and no index and that song is another entry", async () => {
+        const user = await withPosition("pos-named");
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s2` }).expect(200);
+
+        expect(await position(user.id)).toBe(0);
+    });
+
+    it("keeps the position for a save that leaves the place alone", async () => {
+        const user = await withPosition("pos-alone");
+
+        await save(user.id, { playbackType: "track", isShuffle: true }).expect(200);
+        await save(user.id, { playbackType: "audiobook", audiobookId: "book", queue: [], currentIndex: 0, trackId: null }).expect(200);
+
+        expect(await position(user.id)).toBe(9000);
+    });
+
+    it("keeps the position when a save names the entry the state is already on, counted from a shown index", async () => {
+        const user = await withPosition("pos-same");
+
+        await save(user.id, { playbackType: "track", currentIndex: 0 }).expect(200);
+
+        expect(await position(user.id)).toBe(9000);
+    });
+
+    it("resets the position when a save names the time it saw and moves the place", async () => {
+        const user = await withPosition("pos-timed");
+        const seen = (await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).updatedAt.toISOString();
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s2`, currentIndex: 1, expectedUpdatedAt: seen }).expect(200);
+
+        expect(await position(user.id)).toBe(0);
+    });
+});
+
 describe("POST /api/playback-state: the songs of a saved queue are Kima's own", () => {
     const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
     const newUser = (name: string) => prisma.user.create({ data: { username: `${PREFIX}-${name}`, passwordHash: "x", role: "user" } });

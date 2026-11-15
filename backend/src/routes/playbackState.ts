@@ -125,20 +125,26 @@ router.post("/", async (req, res) => {
         // `named`: the song and the episode the save names, as they are stored, which is null for an id that names
         // nothing Kima holds; undefined where the save names none and sends no queue, and the stored one is left alone. A
         // save that replaces the queue always names its current entry as the song.
+        // `movedPlace`: an index-only save landed on another entry than the stored one.
         const write = async (
             db: Pick<Prisma.TransactionClient, "playbackState">,
             replacement: Replacement | null,
             safeCurrentIndex: number | null,
             named: { trackId: string | null | undefined; podcastId: string | null | undefined },
+            movedPlace = false,
         ): Promise<PlaybackStateRow | null> => {
+            // The position is the place in the current song, which only a Subsonic client sends. A queue this save
+            // replaces starts at 0, and so does a move to another entry, so a position left by an earlier save never
+            // sits beside a song it was not reached in. A save that leaves the place alone leaves the position alone.
             const queueUpdate = replacement
                 ? {
                       queue: replacement.storedQueue,
                       queueSource: replacement.safeQueueSource,
                       currentIndex: safeCurrentIndex ?? 0,
+                      position: 0,
                   }
                 : indexOnly && safeCurrentIndex !== null
-                  ? { currentIndex: safeCurrentIndex }
+                  ? { currentIndex: safeCurrentIndex, ...(movedPlace ? { position: 0 } : {}) }
                   : {};
             const update = {
                 playbackType,
@@ -169,6 +175,7 @@ router.post("/", async (req, res) => {
                     queue: replacement?.storedQueue ?? Prisma.DbNull,
                     queueSource: replacement?.safeQueueSource ?? null,
                     currentIndex: safeCurrentIndex ?? 0,
+                    position: 0,
                     isShuffle: isShuffle || false,
                     changedBy: CHANGED_BY,
                 },
@@ -189,7 +196,11 @@ router.post("/", async (req, res) => {
                 podcastId: podcastId === undefined ? undefined : (await namesEpisode(tx, podcastId)) ? (podcastId as string) : null,
             };
             if (replacement) return write(tx, replacement, replacement.currentIndex, named);
-            return write(tx, null, indexOnly ? await indexIntoStoredQueue(tx, userId, currentIndex, trackId) : 0, named);
+            if (!indexOnly) return write(tx, null, 0, named);
+            const index = await indexIntoStoredQueue(tx, userId, currentIndex, trackId);
+            // The state row is locked by now, so the index read here is the one the write replaces.
+            const stored = index === null ? null : await tx.playbackState.findUnique({ where: { userId }, select: { currentIndex: true } });
+            return write(tx, null, index, named, stored !== null && stored.currentIndex !== index);
         }, { timeout: SAVE_TIMEOUT_MS });
 
         if (!playbackState) {
