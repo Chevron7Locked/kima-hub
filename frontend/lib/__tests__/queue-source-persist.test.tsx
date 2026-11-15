@@ -295,7 +295,8 @@ describe("a queue adopted from another device", () => {
         await open();
         await wait(50);
         await act(async () => probe.controls.playTracks([t("c") as never], 0));
-        await wait(5);
+        // The play made here has reached the server; the other device saved after it.
+        await wait(1500);
         server.state = {
             playbackType: "track",
             trackId: "e",
@@ -341,7 +342,7 @@ describe("a queue adopted from another device", () => {
             expect(probe.state.queue.map((q) => q.id)).toEqual(["a", "b", "z"]);
         });
 
-        it("keeps this device's queue when the server's is older than the change made here", async () => {
+        it("keeps this device's queue while the change made here has not been saved yet", async () => {
             const tick = capturePoll();
             await open();
             await wait(50);
