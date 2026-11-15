@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A device that finds a saved item gone no longer wipes playback another device saved a moment earlier; the newer playback is kept and picked up.
+- Subsonic apps that save a play queue without naming the current song no longer get an error; the queue starts from its first song.
+- A library sweep never points a saved queue, or the song you were on, at a Discover copy.
 - A queue you save from the web keeps Kima's own song details (title, artist, cover) rather than what the page last held.
 - Discover songs are no longer kept in your saved queue.
 - A playback save with a malformed track, audiobook or podcast id is refused.
