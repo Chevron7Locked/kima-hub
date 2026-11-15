@@ -8,6 +8,8 @@
  * - Tier 4 breaks a score tie by the exact artist, then the lowest id.
  * - Tier 4 scores titles by their words in any order, not by subset: a short title is not any longer title that
  *   contains it ("Love" is not "Love Me Do"), while a featured credit or a remaster note does not count against a title.
+ * - Tier 4 finds an artist by the longest word of the entry's name, or by the whole name when every word is short, so
+ *   "U2" and "Bo Burnham" reach it and "The Beatles" does not look for "the".
  * - When no entry matches, no playlist is made, the owner gets an "import failed" notification, and the import throws
  *   M3UNothingMatched.
  */
@@ -21,6 +23,8 @@ jest.setTimeout(120_000);
 
 const P = "zz-m3u-rules";
 const USER = `${P}-user`;
+/** Artists the tier 4 tests seed under names no other test uses (every word short, a short word first, credits), removed by name. */
+const SHORT_ARTISTS = ["zq", "zq xy", "zq zzburnham", "zzbeetles", "zzqueen", "zzqueen zzlatifah", "zzpinkish zzfloyd", "zzjayz feat. zzkanye", "zzsimon & zzgarf", "zzhall, zzoates / zzthird", "zzflorence + zzmachine", "zzhall/zzoates", "zz/xy"];
 
 async function cleanup() {
     await prisma.notification.deleteMany({ where: { userId: USER } });
@@ -30,6 +34,7 @@ async function cleanup() {
     await prisma.album.deleteMany({ where: { identityKey: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { identityKey: { startsWith: artistIdentityKey(P) } } });
     await prisma.artist.deleteMany({ where: { name: { startsWith: "zzquartz" } } });
+    await prisma.artist.deleteMany({ where: { name: { in: SHORT_ARTISTS } } });
 }
 
 /** One artist and album holding the songs given as [id suffix, title, file path stored relative to the music folder]. */
@@ -216,7 +221,7 @@ describe("tier 2 tries every reading of the path before skipping an entry", () =
 describe("tier 4 breaks a tie by the exact artist, then the lowest id", () => {
     const names = { exact: "zzquartz band", wider: "zzquartz band extra" };
     beforeAll(async () => {
-        // The lower id belongs to the wider artist name, which scores the same on the artist (a subset of words).
+        // The lower id belongs to the wider artist name, which scores lower on the artist (more words).
         await seedSongs("t4a", names.wider, [["a-first", "zzquartz hello world remastered", `${P}/t4/wider/one.flac`]]);
         await seedSongs("t4z", names.exact, [
             ["c-late", "zzquartz hello world remastered", `${P}/t4/exact/two.flac`],
@@ -286,6 +291,83 @@ describe("tier 4 scores a title by its words, not by subset", () => {
 
     it("counts the title a person edited a song to", async () => {
         expect(await byArtist("zzedit song")).toBe(`${P}-t4t-e-edited`);
+    });
+});
+
+describe("tier 4 finds the artist by the longest word of its name", () => {
+    beforeAll(async () => {
+        await seedSongs("t4s", "zq", [["a", "zzshort one", `${P}/t4s/one.flac`]]);
+        await seedSongs("t4m", "zq xy", [["a", "zzmulti two", `${P}/t4m/one.flac`]]);
+        await seedSongs("t4n", "zzbeetles", [["a", "zzlet it be", `${P}/t4n/one.flac`]]);
+        await seedSongs("t4w", "zq zzburnham", [["a", "zzinside two", `${P}/t4w/one.flac`]]);
+    });
+
+    // The titles differ from the stored ones in word order only, which tier 3's exact compare refuses and tier 4 accepts.
+    it("reaches a one-word artist whose name is shorter than three letters (U2)", async () => {
+        expect(await match(entry("/nowhere/zq-nothing.flac", "zq", "one zzshort"))).toBe(`${P}-t4s-a`);
+    });
+
+    it("reaches an artist whose every word is shorter than three letters", async () => {
+        expect(await match(entry("/nowhere/zq-nothing.flac", "zq xy", "two zzmulti"))).toBe(`${P}-t4m-a`);
+    });
+
+    it("finds an artist whose name has a short word first (Bo Burnham)", async () => {
+        expect(await match(entry("/nowhere/zq-nothing.flac", "zq zzburnham", "two zzinside"))).toBe(`${P}-t4w-a`);
+    });
+
+    it("finds a library artist that lacks the leading \"the\" the entry has (The Beatles)", async () => {
+        expect(await match(entry("/nowhere/zq-nothing.flac", "The zzbeetles", "it zzlet be"))).toBe(`${P}-t4n-a`);
+    });
+});
+
+describe("tier 4 scores the artist by its whole name, not by a subset of its words", () => {
+    beforeAll(async () => {
+        // Queen and Queen Latifah, stand-ins: the entry names the shorter artist, the title is the longer artist's.
+        await seedSongs("t4q", "zzqueen", [["a", "zzother anthem", `${P}/t4q/one.flac`]]);
+        await seedSongs("t4l", "zzqueen zzlatifah", [["a", "zzrhapsody", `${P}/t4l/one.flac`]]);
+        await seedSongs("t4p", "zzpinkish zzfloyd", [["a", "zzwall", `${P}/t4p/one.flac`]]);
+        // Credits: one of several credited artists is enough.
+        await seedSongs("t4c", "zzjayz feat. zzkanye", [["a", "zzcredit one", `${P}/t4c/one.flac`]]);
+        await seedSongs("t4d", "zzsimon & zzgarf", [["a", "zzcredit two", `${P}/t4d/one.flac`]]);
+        await seedSongs("t4e", "zzhall, zzoates / zzthird", [["a", "zzcredit three", `${P}/t4e/one.flac`]]);
+        await seedSongs("t4f", "zzflorence + zzmachine", [["a", "zzcredit four", `${P}/t4f/one.flac`]]);
+        // A slash between words of three letters or more splits; between short ones it is part of the name (AC/DC).
+        await seedSongs("t4g", "zzhall/zzoates", [["a", "zzcredit five", `${P}/t4g/one.flac`]]);
+        await seedSongs("t4h", "zz/xy", [["a", "zzcredit six", `${P}/t4h/one.flac`]]);
+    });
+    const named = (artist: string, title: string) => match(entry("/nowhere/zzq-nothing.flac", artist, title));
+
+    it("does not import the longer-named artist's song for an entry naming the shorter one, when the library holds both", async () => {
+        expect(await named("zzqueen", "zzrhapsody")).toBeNull();
+    });
+
+    it("does not import it either when the library holds only the longer-named artist", async () => {
+        expect(await named("zzpinkish", "zzwall")).toBeNull();
+    });
+
+    it("still imports the song of the artist the entry names, with the leading \"the\" and the case free", async () => {
+        expect(await named("The ZZQUEEN", "zzother anthem")).toBe(`${P}-t4q-a`);
+    });
+
+    it("still imports a song by one of several credited artists when the entry names that one", async () => {
+        expect(await named("zzjayz", "zzcredit one")).toBe(`${P}-t4c-a`);
+        expect(await named("zzkanye", "zzcredit one")).toBe(`${P}-t4c-a`);
+        expect(await named("zzjayz feat. zzkanye", "zzcredit one")).toBe(`${P}-t4c-a`);
+    });
+
+    it("keeps a slash between short words in the name, so one half does not import the whole act's song", async () => {
+        expect(await named("zz", "zzcredit six")).toBeNull();
+        expect(await named("zz/xy", "zzcredit six")).toBe(`${P}-t4h-a`);
+    });
+
+    it.each([
+        ["an ampersand", "zzgarf", "zzcredit two"],
+        ["a comma", "zzoates", "zzcredit three"],
+        ["a slash", "zzthird", "zzcredit three"],
+        ["a plus sign", "zzmachine", "zzcredit four"],
+        ["a slash without spaces", "zzoates", "zzcredit five"],
+    ])("still imports a song of an artist credited with %s when the entry names one of them", async (_how, artist, title) => {
+        expect(await named(artist, title)).not.toBeNull();
     });
 });
 

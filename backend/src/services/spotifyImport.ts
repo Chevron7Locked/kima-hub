@@ -385,12 +385,26 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
 }
 
 /**
- * The shortest word the primary artist's first-word sweep and the five-letter prefix sweep look up, the M3U fuzzy tier's
- * first word, and the shortest file name the M3U filename tier tries: shorter ones are too common to mean anything. The
- * credit sweep has no minimum, so a credit like "DJ Shadow" still finds its artist; it matches whole words only, and it
- * runs only when the three sweeps before it found nothing.
+ * The shortest word the primary artist's first-word sweep and the five-letter prefix sweep look up, the shortest word the
+ * M3U fuzzy tier looks an artist up by (see `artistLookupWord`), and the shortest file name the M3U filename tier tries:
+ * shorter ones are too common to mean anything. The credit sweep has no minimum, so a credit like "DJ Shadow" still
+ * finds its artist; it matches whole words only, and it runs only when the three sweeps before it found nothing.
  */
 const MIN_WORD_LENGTH = 3;
+
+/**
+ * The word the M3U fuzzy tier looks an artist up by: the longest word of the entry's primary artist (the first of
+ * equals), with a leading "the" dropped, so "The Beatles" looks for "beatles" and not for every artist whose name has
+ * "the". When every word is shorter than MIN_WORD_LENGTH the whole name is the key ("U2", "Bo Xx"), which finds the
+ * artists holding those words together. "" when the name has nothing to look up.
+ */
+function artistLookupWord(artistName: string): string {
+  const name = normalizeArtistName(parseCredit(artistName).primary || artistName);
+  const withoutThe = name.replace(/^the\s+/, "") || name;
+  const words = withoutThe.split(" ").filter(Boolean);
+  const longest = words.reduce((best, word) => (word.length > best.length ? word : best), "");
+  return longest.length >= MIN_WORD_LENGTH ? longest : words.join(" ");
+}
 
 /** Songs loaded per query when the artists a word finds have many: a query carries at most this many ids. */
 export const SONG_CHUNK_MAX = 10_000;
@@ -647,9 +661,65 @@ const isByArtistNamed = (artist: { name: string; identityKey: string; displayNam
 const isTitled = (song: { title: string; displayTitle: string | null }, title: string): boolean =>
   sameName(song.title, title) || (!!song.displayTitle && sameName(song.displayTitle, title));
 
-/** The best fuzzy score of `text` against the names given (a stored name and its edited one; a missing one counts for nothing), 0 when there is none. */
-const bestTokenSetScore = (text: string, names: (string | null)[]): number =>
-  Math.max(0, ...names.flatMap((name) => (name ? [fuzz.token_set_ratio(nameWords(text), nameWords(name))] : [])));
+/** The lowest artist score tier 4 accepts, whatever the title scores: the artist must be the one the entry names. */
+const ARTIST_SCORE_FLOOR = 80;
+
+/**
+ * What separates credited artists in a name beyond what `parseCredit` splits: "&", "and", ", ", and a slash or plus
+ * sign with spaces or with at least three letters or digits on each side ("Hall/Oates"; "AC/DC" stays one name).
+ */
+const CREDIT_SEPARATORS = /\s*&\s*|\s+and\s+|\s*,\s+|\s+[/+]\s+|(?<=[\p{L}\p{N}]{3})[/+](?=[\p{L}\p{N}]{3})/iu;
+
+/** An artist name as the words that tell it from another, for scoring: no case, accents, punctuation or leading "the". */
+const artistWordsForScoring = (name: string): string => {
+  const normalized = normalizeArtistName(name);
+  return nameWords(normalized.replace(/^the\s+/, "") || normalized);
+};
+
+/**
+ * The names a credit stands for, as scoring words: the whole credit, the artists `parseCredit` splits out of it
+ * (primary and featured), and each of those cut at the separators above. "Jay-Z feat. Kanye West" is also "Jay-Z" and
+ * "Kanye West"; "Simon & Garfunkel" is also "Simon" and "Garfunkel". A slash or plus sign between short words stays in
+ * the name ("AC/DC"). Entry and library names are cut alike, so an entry naming one of the artists matches.
+ */
+const creditWords = (credit: string): string[] => {
+  const { primary, featured } = parseCredit(credit);
+  const names = [credit, primary, ...featured].flatMap((name) => [name, ...name.split(CREDIT_SEPARATORS)]);
+  return [...new Set(names.map(artistWordsForScoring).filter(Boolean))];
+};
+
+/**
+ * The best fuzzy score of the artist credit whose words are `entryWords` (creditWords of the entry's artist) against
+ * the names given (a stored name and its edited one; a missing one counts for nothing), 0 when there is none. The best
+ * of every entry credit against every credit of the name. `read` keeps the credit words of a name, so a name shared by
+ * many songs is split once.
+ *
+ * Words in any order (token_sort_ratio), not subset (token_set_ratio): the subset score is 100 whenever one name's
+ * words all appear in the other, so "Queen" took "Queen Latifah", "Pink" took "Pink Floyd" and "Kate Bush" took "Bush".
+ * Measured 2026-11-15 on 19 true pairs (with "the", case, accents, punctuation, credits) and 16 wrong ones ("Queen" /
+ * "Queen Latifah", "Pink" / "Pink Floyd", "Bush" / "Kate Bush", "Prince" / "Prince Royce", ...), counting what reaches
+ * 80 combined with an exact title (artist >= 50) and with a title of 80 (artist >= 80):
+ *
+ *   scoring                                     true >=50  true >=80  wrong >=50  wrong >=80
+ *   token_set_ratio (before)                      19/19      19/19      15/16       10/16
+ *   token_sort_ratio, whole name                  17/19      16/19      11/16        0/16
+ *   token_sort_ratio + credits by parseCredit     18/19      18/19      11/16        0/16
+ *   token_sort_ratio + credits + & and , / +      19/19      19/19      11/16        0/16
+ *
+ * parseCredit never splits "&", so "Jay-Z" / "Jay-Z & Kanye West" (100 before, 35 after) needed the extra separators.
+ * The wrong pairs top out at 70 ("Genesis" / "Genesis Owusu"), but at 56 an exact title still reaches 80 combined
+ * (0.6 * 100 + 0.4 * 56 = 82), so the artist also has its own floor (ARTIST_SCORE_FLOOR).
+ */
+const bestArtistScore = (entryWords: string[], names: (string | null)[], read: Map<string, string[]>): number =>
+  Math.max(
+    0,
+    ...names.flatMap((name) => {
+      if (!name) return [];
+      let words = read.get(name);
+      if (!words) read.set(name, (words = creditWords(name)));
+      return entryWords.flatMap((entryName) => words.map((libraryName) => fuzz.token_sort_ratio(entryName, libraryName)));
+    }),
+  );
 
 /**
  * The best fuzzy score of the title `text` against the titles given (a stored one and its edited one; a missing one
@@ -2903,26 +2973,31 @@ class SpotifyImportService {
       // Tier 4: Fuzzy metadata match (fuzzball >= 80 threshold)
       if (!track && !ambiguous && entry.artist && entry.title) {
         const dbArtist = normalizeArtistName(entry.artist);
-        const firstWord = dbArtist.split(" ")[0];
-        if (firstWord.length >= MIN_WORD_LENGTH) {
-          const candidates = await reads.holdingWord.get(firstWord, () =>
+        // The pool is the artists holding the entry's longest word (artistLookupWord), so "U2" and "Bo Burnham" reach
+        // this tier and "The Beatles" does not pull in every artist whose name has "the"; the scores below decide.
+        const lookupWord = artistLookupWord(entry.artist);
+        if (lookupWord) {
+          const candidates = await reads.holdingWord.get(lookupWord, () =>
             songsOfArtistsHoldingWord(
-              firstWord,
+              lookupWord,
               { album: { include: { artist: { select: { name: true, displayName: true } } } } },
-              shownArtists.holding(firstWord),
+              shownArtists.holding(lookupWord),
             ),
           );
 
           let bestMatch: { id: string } | null = null;
           let bestScore = 0;
           let bestIsExact = false;
+          const entryArtistWords = creditWords(entry.artist);
+          const creditsRead = new Map<string, string[]>();
 
           // A tie goes to the song whose artist is the one named (not merely holding the same words), then to the
           // lowest id: the candidates come in id order, so the first of equals stays.
           for (const candidate of candidates) {
             // The title or artist name a person edited counts as well as the stored one.
             const titleScore = bestTitleScore(entry.title, [candidate.title, candidate.displayTitle]);
-            const artistScore = bestTokenSetScore(entry.artist, [candidate.album.artist.name, candidate.album.artist.displayName]);
+            const artistScore = bestArtistScore(entryArtistWords, [candidate.album.artist.name, candidate.album.artist.displayName], creditsRead);
+            if (artistScore < ARTIST_SCORE_FLOOR) continue;
             const combined = titleScore * 0.6 + artistScore * 0.4;
             if (combined < 80) continue;
             const isExact = [candidate.album.artist.name, candidate.album.artist.displayName].some((n) => n && normalizeArtistName(n) === dbArtist);
