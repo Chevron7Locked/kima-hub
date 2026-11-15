@@ -236,7 +236,7 @@ export function EpisodeList({
     return (
         <section>
             <SectionHeader
-                title="Episodes"
+                title="episodes"
                 type="podcast"
                 action={
                     <Button
