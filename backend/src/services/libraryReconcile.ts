@@ -161,12 +161,16 @@ export async function reconcileDeletedTracks(
  */
 async function holdSongs<T extends { id: string }>(tx: Prisma.TransactionClient, flagged: T[], scanStartedAt: Date): Promise<T[]> {
     const ids = flagged.map((t) => t.id);
-    const stageBusy = await tx.$queryRaw<Array<{ trackId: string }>>`
-        WITH locked AS (
-            SELECT id FROM "TrackStage" WHERE "trackId" = ANY(${ids}::text[]) ORDER BY "trackId", stage FOR UPDATE SKIP LOCKED)
-        SELECT DISTINCT s."trackId" FROM "TrackStage" s
-         WHERE s."trackId" = ANY(${ids}::text[]) AND NOT EXISTS (SELECT 1 FROM locked l WHERE l.id = s.id)`;
-    const unavailable = new Set(stageBusy.map((r) => r.trackId));
+    // Two plain statements, not one with the lock in a subquery: the planner may stop reading a lazily consumed subquery
+    // early, and a row it never reached would go unlocked. A song is unavailable when it has more stage records than
+    // this transaction managed to lock.
+    const lockedStages = await tx.$queryRaw<Array<{ trackId: string }>>`
+        SELECT "trackId" FROM "TrackStage" WHERE "trackId" = ANY(${ids}::text[]) ORDER BY "trackId", stage FOR UPDATE SKIP LOCKED`;
+    const allStages = await tx.$queryRaw<Array<{ trackId: string; n: number }>>`
+        SELECT "trackId", count(*)::int AS n FROM "TrackStage" WHERE "trackId" = ANY(${ids}::text[]) GROUP BY "trackId"`;
+    const lockedCount = new Map<string, number>();
+    for (const r of lockedStages) lockedCount.set(r.trackId, (lockedCount.get(r.trackId) ?? 0) + 1);
+    const unavailable = new Set(allStages.filter((r) => r.n > (lockedCount.get(r.trackId) ?? 0)).map((r) => r.trackId));
     const wanted = ids.filter((id) => !unavailable.has(id));
 
     const held = await tx.$queryRaw<Array<{ id: string }>>`
@@ -231,7 +235,7 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
             if (copy) copyIds.add(copy);
         }
     }
-    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds])).map((e) => [e.id, e]));
+    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds], tx)).map((e) => [e.id, e]));
     // What an entry becomes: itself, or for a retired one its copy, or nothing.
     const becomes = (entry: unknown): unknown[] => {
         if (!retiredEntry(entry)) return [entry];

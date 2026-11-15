@@ -125,6 +125,32 @@ describe("GET /api/playback-state", () => {
         expect(res.body).toMatchObject({ playbackType: "audiobook", audiobookId: "ab1", position: 1234, queue: null });
     });
 
+    it("a named track that is not playable never comes back, even when it is not the queue's current song", async () => {
+        await save([`${P}ok1`, `${P}ok2`], 1, { trackId: `${P}gone`, position: 900 });
+        const res = await get();
+        expect(res.body.trackId).toBe(`${P}ok2`);
+        expect(res.body.position).toBe(900);
+    });
+
+    it("a named track that is playable stays named, even when it is not the queue's current song", async () => {
+        await save([`${P}ok1`, `${P}ok2`], 1, { trackId: `${P}ok3` });
+        expect((await get()).body.trackId).toBe(`${P}ok3`);
+    });
+
+    it("a named Discover or corrupt track with an empty queue comes back naming no track", async () => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", trackId: `${P}disc`, queue: [] } });
+        const res = await get();
+        expect(res.body.trackId).toBeNull();
+        expect(res.body.queue).toBeNull();
+    });
+
+    it("a state with no queue naming a song that is gone comes back naming no track", async () => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", trackId: `${P}bad`, position: 300 } });
+        const res = await get();
+        expect(res.body.trackId).toBeNull();
+        expect(res.body.position).toBe(300);
+    });
+
     it("a queue that is not a list comes back as stored", async () => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: { odd: true } } });
         expect((await get()).body.queue).toEqual({ odd: true });

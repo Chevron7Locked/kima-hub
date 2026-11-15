@@ -9,6 +9,7 @@
  *   When the current song is left out, the next playable one becomes current (else the last one before it), from its
  *   start.
  */
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 
@@ -34,10 +35,10 @@ export function entriesOf(queue: unknown): QueueEntry[] {
  * Song ids as the full entries a player stores and renders, in the given order; ids Kima does not know are left out.
  * It describes the song as it is now: its edited title, its artist's display name, its album's chosen cover.
  */
-export async function hydrateQueue(ids: string[]): Promise<QueueEntry[]> {
+export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionClient, "track"> = prisma): Promise<QueueEntry[]> {
     if (ids.length === 0) return [];
 
-    const tracks = await prisma.track.findMany({
+    const tracks = await db.track.findMany({
         where: { id: { in: ids } },
         select: {
             id: true,
@@ -86,20 +87,22 @@ export interface PlayableQueue {
     queue: QueueEntry[];
     currentIndex: number;
     position: number;
-    /** The song the stored queue was on; it differs from the one now current when that song was left out. */
-    storedCurrentId: string | null;
+    /** The track the state names, or the song now current when that one is not playable. */
+    trackId: string | null;
 }
 
 export async function playableQueue(
-    state: { queue: unknown; currentIndex: number; position: number } | null,
+    state: { queue: unknown; currentIndex: number; position: number; trackId?: string | null } | null,
 ): Promise<PlayableQueue> {
     const saved = entriesOf(state?.queue);
+    const named = state?.trackId ?? null;
+    const asked = [...saved.map((item) => item.id), ...(named !== null ? [named] : [])];
     const playable = new Set(
-        saved.length === 0
+        asked.length === 0
             ? []
             : (
                   await prisma.track.findMany({
-                      where: { id: { in: saved.map((item) => item.id) }, ...PLAYABLE_SONG },
+                      where: { id: { in: asked }, ...PLAYABLE_SONG },
                       select: { id: true },
                   })
               ).map((t) => t.id),
@@ -108,10 +111,14 @@ export async function playableQueue(
     const shownBefore = saved.slice(0, savedIndex).filter((item) => playable.has(item.id)).length;
     const queue = saved.filter((item) => playable.has(item.id));
     const currentKept = saved.length > 0 && playable.has(saved[savedIndex].id);
+    const currentIndex = queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1);
+    // A song the state names that is not playable (gone, or on a Discover album) is never handed back: the song now
+    // current stands in for it, and there is none when the queue shows nothing.
+    const trackId = named === null || playable.has(named) ? named : (queue[currentIndex]?.id ?? null);
     return {
         queue,
-        currentIndex: queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1),
+        currentIndex,
         position: currentKept ? (state?.position ?? 0) : 0,
-        storedCurrentId: saved[savedIndex]?.id ?? null,
+        trackId,
     };
 }
