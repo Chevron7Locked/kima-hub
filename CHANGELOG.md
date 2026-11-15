@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A saved queue from the web player or an iOS app always names the queue's current song as the current song, even when the app sent a different song or none.
+- A Subsonic app that sends an empty current-song index when saving the queue gets the queue stored from its first song, the same as sending no index.
+- A Subsonic queue save that names a current song but sends no songs clears the queue instead of failing.
 - Saving your place in a book or podcast episode no longer wipes your music queue.
 - A saved current song or episode that Kima no longer has is stored as none.
 - A Subsonic queue save with an empty current song, or with songs but no current index, starts from the first song.
