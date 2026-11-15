@@ -1,8 +1,12 @@
 import crypto from "crypto";
+import type { Prisma } from "@prisma/client";
 import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { decrypt, encrypt } from "../../utils/encryption";
 import { logger } from "../../utils/logger";
+
+/** The database, or the transaction a spend and its change share. */
+type Db = Pick<Prisma.TransactionClient, "user">;
 
 /**
  * A bcrypt hash at the cost real ones use (10) that no password matches: checking a name that does not exist against
@@ -45,8 +49,8 @@ export function readTwoFactorSecret(userId: string, stored: string | null): stri
  * Spends a step for a person: true when it is newer than any they have used, false when it or a later one is spent
  * already. One conditional write, so two sign-ins sending one code together cannot both succeed.
  */
-export async function spendTotpStep(userId: string, step: number): Promise<boolean> {
-    const spent = await prisma.user.updateMany({
+export async function spendTotpStep(userId: string, step: number, db: Db = prisma): Promise<boolean> {
+    const spent = await db.user.updateMany({
         where: { id: userId, twoFactorLastStep: { lt: step } },
         data: { twoFactorLastStep: step },
     });
@@ -112,10 +116,42 @@ export async function spendSecondFactor(
     user: { id: string; recoveryCodes: string | null },
     secret: string,
     token: string,
+    db: Db = prisma,
 ): Promise<boolean> {
-    if (isRecoveryCodeShaped(token)) return spendRecoveryCode(user.id, user.recoveryCodes, token);
+    if (isRecoveryCodeShaped(token)) return spendRecoveryCode(user.id, user.recoveryCodes, token, db);
     const step = totpStep(secret, token);
-    return step !== null && (await spendTotpStep(user.id, step));
+    return step !== null && (await spendTotpStep(user.id, step, db));
+}
+
+/** Thrown inside the transaction to undo a spend whose change landed nothing. */
+class ChangeNotMade extends Error {}
+
+/** What `spendAndChange` came to: the code was wrong, the code was right but the change landed nothing (so the code is not spent), or both happened. */
+export type SpendAndChange<T> = { outcome: "wrong-code" } | { outcome: "not-changed" } | { outcome: "changed"; value: T };
+
+/**
+ * Spends a person's second-factor code and makes the change it allows, in one transaction: the code is used up only if
+ * the change lands. `change` runs after the spend, on the same transaction, and returns null when it wrote nothing
+ * (2FA was turned off in between); the spend is then undone. The spend leaves the person's row locked until the
+ * transaction ends, so whatever `change` reads from it cannot change under it.
+ */
+export async function spendAndChange<T>(
+    user: { id: string; recoveryCodes: string | null },
+    secret: string,
+    token: string,
+    change: (tx: Db) => Promise<T | null>,
+): Promise<SpendAndChange<T>> {
+    try {
+        return await prisma.$transaction(async (tx): Promise<SpendAndChange<T>> => {
+            if (!(await spendSecondFactor(user, secret, token, tx))) return { outcome: "wrong-code" };
+            const value = await change(tx);
+            if (value === null) throw new ChangeNotMade();
+            return { outcome: "changed", value };
+        });
+    } catch (error) {
+        if (error instanceof ChangeNotMade) return { outcome: "not-changed" };
+        throw error;
+    }
 }
 
 /** Ten new recovery codes: the plain codes to show once, and the list to store (hashes, encrypted). */
@@ -132,14 +168,14 @@ export function newRecoveryCodes(): { codes: string[]; stored: string } {
 }
 
 /**
- * Replaces a person's whole recovery list with ten new codes, only if the list stored is still `readList`: the one the
- * caller read after spending its own code. Returns the new codes to show once, or null when the list changed (or 2FA
- * was turned off) in between, so two requests cannot both be told their list is the one in force.
+ * Replaces a person's whole recovery list with ten new codes, if 2FA is still on. Returns the new codes to show once, or
+ * null when 2FA was turned off and nothing was written. Called after the caller's own code was spent in the same
+ * transaction, which holds the row, so no other request changes the list between the spend and this write.
  */
-export async function replaceRecoveryCodes(userId: string, readList: string | null): Promise<string[] | null> {
+export async function replaceRecoveryCodes(userId: string, db: Db = prisma): Promise<string[] | null> {
     const fresh = newRecoveryCodes();
-    const written = await prisma.user.updateMany({
-        where: { id: userId, twoFactorEnabled: true, twoFactorRecoveryCodes: readList },
+    const written = await db.user.updateMany({
+        where: { id: userId, twoFactorEnabled: true },
         data: { twoFactorRecoveryCodes: fresh.stored },
     });
     return written.count === 1 ? fresh.codes : null;
@@ -153,7 +189,7 @@ const MAX_SPEND_TRIES = 10;
  * list is still the one the code was found in. When another sign-in changed the list first, it is read again and the
  * code looked for in it, so two honest sign-ins with different codes both succeed, while one code sent twice works once.
  */
-export async function spendRecoveryCode(userId: string, encryptedCodes: string | null, code: string): Promise<boolean> {
+export async function spendRecoveryCode(userId: string, encryptedCodes: string | null, code: string, db: Db = prisma): Promise<boolean> {
     const hash = crypto.createHash("sha256").update(code.toUpperCase()).digest("hex");
     let current = encryptedCodes;
     for (let attempt = 0; attempt < MAX_SPEND_TRIES; attempt++) {
@@ -169,13 +205,13 @@ export async function spendRecoveryCode(userId: string, encryptedCodes: string |
         if (index === -1) return false;
         codes.splice(index, 1);
 
-        const spent = await prisma.user.updateMany({
+        const spent = await db.user.updateMany({
             where: { id: userId, twoFactorRecoveryCodes: current },
             data: { twoFactorRecoveryCodes: encrypt(codes.join(",")) },
         });
         if (spent.count === 1) return true;
 
-        const fresh = await prisma.user.findUnique({ where: { id: userId }, select: { twoFactorRecoveryCodes: true } });
+        const fresh = await db.user.findUnique({ where: { id: userId }, select: { twoFactorRecoveryCodes: true } });
         current = fresh?.twoFactorRecoveryCodes ?? null;
     }
     return false;

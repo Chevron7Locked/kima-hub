@@ -49,6 +49,21 @@ const codeNow = () => codeAt(0);
 const nextStep = () => { clock += STEP_MS; };
 const codeFor = (base32: string) => speakeasy.totp({ secret: base32, encoding: "base32", time: clock / 1000 });
 
+/** Runs `change` once, after a route has read the account and before the transaction that spends its code and changes it. */
+function beforeTheTransaction(change: () => Promise<unknown>): jest.SpyInstance {
+    const real = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+    let done = false;
+    return jest.spyOn(prisma, "$transaction").mockImplementation((async (...args: unknown[]) => {
+        if (!done) {
+            done = true;
+            await change();
+        }
+        return real(...args);
+    }) as never);
+}
+/** Another request turns 2FA off (leaving the secret and the recovery list where they were, as a half-done change would). */
+const turnedOffMeanwhile = () => prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: false } });
+
 /** Puts the account where setup leaves it: `secret` waiting, made now, for the code to be proved. */
 async function setupDone(pending: string = secret): Promise<void> {
     await prisma.user.update({ where: { id: USER }, data: { twoFactorPendingSecret: encrypt(pending), twoFactorPendingAt: new Date(clock) } });
@@ -405,6 +420,20 @@ describe("what a sign-in answers about the second factor, as a code a page can r
     });
 });
 
+describe("a sign-in body that is not what the route wants", () => {
+    it.each([
+        ["a number for the name", { username: 5, password: PASSWORD }],
+        ["no password", { username: USER }],
+        ["an object for the password", { username: USER, password: { $ne: "" } }],
+        ["a name of only spaces", { username: "   ", password: PASSWORD }],
+        ["nothing", {}],
+    ])("answers 400 with only a plain message, %s", async (_name, body) => {
+        const res = await request(app).post("/auth/login").send(body);
+
+        expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
+    });
+});
+
 describe("signing in with a code", () => {
     it("asks for a code, refuses a wrong one, and takes a current one", async () => {
         await twoFactorOn();
@@ -426,7 +455,7 @@ describe("signing in with a code", () => {
 
         const res = await send();
         expect(res.status).toBe(400);
-        expect(res.body.token).toBeUndefined();
+        expect(res.body).toEqual({ error: "Invalid request" });
 
         // The same on an account without 2FA: the body is wrong whatever the account.
         await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: false } });
@@ -810,58 +839,17 @@ describe("a code typed the way people copy it", () => {
 });
 
 describe("new recovery codes asked for together", () => {
-    it("leave exactly one list in force: the loser is told to try again, or its list was the one replaced", async () => {
+    it("leave exactly one list in force: the later request's list replaces the earlier one's", async () => {
         await twoFactorOn();
 
         const results = await Promise.all([newCodes(codeAt(-1)), newCodes(codeAt(0))]);
 
         const lists = results.filter((r) => r.status === 200).map((r) => r.body.recoveryCodes as string[]);
         expect(lists.length).toBeGreaterThanOrEqual(1);
-        for (const r of results.filter((r) => r.status !== 200)) expect([400, 409]).toContain(r.status);
+        for (const r of results.filter((r) => r.status !== 200)) expect(r.status).toBe(400);
         const working = [];
         for (const list of lists) if ((await login(list[0])).status === 200) working.push(list);
         expect(working).toHaveLength(1);
-    });
-
-    /** Runs `change` once, right after the request has read the list it will write over (the read that selects only the list). */
-    function afterListIsRead(change: () => Promise<void>): jest.SpyInstance {
-        const real = prisma.user.findUnique.bind(prisma.user);
-        let done = false;
-        return jest.spyOn(prisma.user, "findUnique").mockImplementation(((args: any) => {
-            const result = real(args);
-            const keys = Object.keys(args?.select ?? {});
-            if (!done && keys.length === 1 && keys[0] === "twoFactorRecoveryCodes") {
-                done = true;
-                return result.then(async (r: any) => { await change(); return r; });
-            }
-            return result;
-        }) as any);
-    }
-
-    it("answers 409 to the one whose list was replaced after it read it, and keeps the list that replaced it", async () => {
-        await twoFactorOn();
-        const interloper = encrypt("not-a-hash");
-        const spy = afterListIsRead(async () => {
-            await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: interloper } });
-        });
-
-        const res = await newCodes(codeNow());
-        spy.mockRestore();
-
-        expect([res.status, res.body.error]).toEqual([409, "Recovery codes changed, try again"]);
-        expect((await stored()).twoFactorRecoveryCodes).toBe(interloper);
-    });
-
-    it("answers 409 as well when a sign-in spent one of the codes in between, and the sign-in's spend stands", async () => {
-        const codes = await twoFactorOn();
-        const spy = afterListIsRead(async () => { await login(codes[4]).expect(200); });
-
-        const res = await newCodes(codeNow());
-        spy.mockRestore();
-
-        expect(res.status).toBe(409);
-        expect((await login(codes[4])).status).toBe(401);
-        expect((await login(codes[5])).status).toBe(200);
     });
 
     it("writes over the list it read after spending a recovery code of its own, which is the usual case", async () => {
@@ -871,6 +859,44 @@ describe("new recovery codes asked for together", () => {
 
         expect((await login(res.body.recoveryCodes[0])).status).toBe(200);
         expect((await login(code)).status).toBe(401);
+    });
+});
+
+describe("new recovery codes and the code they spend", () => {
+    it("spend an authenticator code only if the list lands: one from a request that found 2FA off still works", async () => {
+        await twoFactorOn();
+        const code = codeNow();
+        const before = (await stored()).twoFactorRecoveryCodes;
+        const spy = beforeTheTransaction(turnedOffMeanwhile);
+
+        const res = await newCodes(code);
+        spy.mockRestore();
+
+        expect([res.status, res.body.error]).toEqual([400, "2FA is not enabled"]);
+        const now = await stored();
+        expect([now.twoFactorLastStep, now.twoFactorRecoveryCodes]).toEqual([0, before]);
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: true } });
+        await newCodes(code).expect(200);
+    });
+
+    it("spend a recovery code only if the list lands: one from a request that found 2FA off stays in the list", async () => {
+        const [code] = await twoFactorOn();
+        const before = (await stored()).twoFactorRecoveryCodes;
+        const spy = beforeTheTransaction(turnedOffMeanwhile);
+
+        await newCodes(code).expect(400);
+        spy.mockRestore();
+
+        expect((await stored()).twoFactorRecoveryCodes).toBe(before);
+    });
+
+    it("give a wrong code no new list and spend nothing", async () => {
+        await twoFactorOn();
+        const before = await stored();
+
+        await newCodes("000000").expect(400);
+
+        expect(await stored()).toEqual(before);
     });
 });
 
@@ -895,6 +921,8 @@ describe("bodies that are not what the route wants", () => {
         const res = await post(path, body);
 
         expect(res.status).toBe(400);
+        // A body that parses but meets 2FA already on is refused for that, not as malformed.
+        expect(res.body).toEqual({ error: path.endsWith("/enable") && "secret" in body ? "2FA is already enabled" : "Invalid request" });
         expect(await stored()).toEqual(before);
     });
 
@@ -921,25 +949,71 @@ describe("turning it off when it is already off, or when another request just di
 
     it("writes only where 2FA is still on: a disable that lost the race answers 400 and does not write over what came after", async () => {
         await twoFactorOn();
-        const real = prisma.user.updateMany.bind(prisma.user);
-        let raced = false;
-        // Right before the request clears the account, another request turns 2FA off and a new setup is under way.
-        const spy = jest.spyOn(prisma.user, "updateMany").mockImplementation(((args: any) => {
-            if (!raced && args?.data?.twoFactorEnabled === false) {
-                raced = true;
-                return prisma.user
-                    .update({ where: { id: USER }, data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorPendingSecret: encrypt("PENDINGSECRETFROMANEWSETUP"), twoFactorPendingAt: new Date(clock) } })
-                    .then(() => real(args));
-            }
-            return real(args);
-        }) as any);
+        // Another request turns 2FA off and a new setup is under way.
+        const spy = beforeTheTransaction(() => prisma.user.update({
+            where: { id: USER },
+            data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorPendingSecret: encrypt("PENDINGSECRETFROMANEWSETUP"), twoFactorPendingAt: new Date(clock) },
+        }));
 
         const res = await disable(codeNow());
         spy.mockRestore();
 
         expect([res.status, res.body.error]).toEqual([400, "2FA is not enabled"]);
-        // The new setup's pending secret was not cleared by the request that lost.
         expect((await stored()).twoFactorPendingSecret).not.toBeNull();
+    });
+
+    it("spends an authenticator code only if the change lands: one from a disable that lost the race still works", async () => {
+        await twoFactorOn();
+        const code = codeNow();
+        const spy = beforeTheTransaction(turnedOffMeanwhile);
+
+        await disable(code).expect(400);
+        spy.mockRestore();
+
+        expect((await stored()).twoFactorLastStep).toBe(0);
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: true } });
+        await disable(code).expect(200);
+    });
+
+    it("spends a recovery code only if the change lands: one from a disable that lost the race stays in the list", async () => {
+        const [code] = await twoFactorOn();
+        const before = (await stored()).twoFactorRecoveryCodes;
+        const spy = beforeTheTransaction(turnedOffMeanwhile);
+
+        await disable(code).expect(400);
+        spy.mockRestore();
+
+        expect((await stored()).twoFactorRecoveryCodes).toBe(before);
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: true } });
+        await disable(code).expect(200);
+    });
+
+    it("still spends the code when the change lands", async () => {
+        const [code] = await twoFactorOn();
+
+        await disable(code).expect(200);
+        await twoFactorOn();
+        // A list made again holds different codes; the code the disable used is not in it, and the step is spent.
+        expect((await login(code)).status).toBe(401);
+    });
+
+    it("leaves a wrong code spending nothing and changing nothing", async () => {
+        await twoFactorOn();
+        const before = await stored();
+
+        await disable("000000").expect(400);
+
+        expect(await stored()).toEqual(before);
+    });
+
+    it("lets two disables sent together end with 2FA off, one 200 and one 400, and no code burned by the 400", async () => {
+        await twoFactorOn();
+
+        const results = await Promise.all([disable(codeAt(-1)), disable(codeAt(0))]);
+
+        expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+        const now = await stored();
+        expect([now.twoFactorEnabled, now.twoFactorLastStep]).toEqual([false, 0]);
     });
 
     it("logs the turning off once, from the request that did it", async () => {
