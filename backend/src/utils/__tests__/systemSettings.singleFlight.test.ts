@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     // transcodeCacheMaxGb is just a plain numeric column to tell one saved row from another
-    const start = { transcodeCacheMaxGb: 10 };
+    const start = { transcodeCacheMaxGb: 10, fanartApiKey: null, acoustidApiKey: null, discoverAlbumsSortedAt: null };
     await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...start }, update: start });
     invalidateSystemSettingsCache();
 });
@@ -166,14 +166,18 @@ describe("saveSystemSettings and a read in flight", () => {
     });
 });
 
-describe("what getSystemSettings hands out", () => {
-    // 'xc1.' marks the current format, and the rest is no valid ciphertext: stored, but the key cannot read it.
-    const unreadable = "xc1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+// 'xc1.' marks the current format, and the rest is no valid ciphertext: stored, but the key cannot read it.
+const unreadable = "xc1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+async function storeUnreadable(field: "fanartApiKey" | "acoustidApiKey", more: Record<string, unknown> = {}) {
+    await prisma.systemSettings.update({ where: { id: "default" }, data: { [field]: unreadable, ...more } });
+    invalidateSystemSettingsCache();
+}
+
+describe("what getSystemSettings hands out", () => {
     it("is a copy: changing it, nested values too, changes neither the next read nor the cache", async () => {
         const sortedAt = new Date("2026-01-02T03:04:05Z");
-        await prisma.systemSettings.update({ where: { id: "default" }, data: { fanartApiKey: unreadable, discoverAlbumsSortedAt: sortedAt } });
-        invalidateSystemSettingsCache();
+        await storeUnreadable("fanartApiKey", { discoverAlbumsSortedAt: sortedAt });
 
         const first = (await getSystemSettings())!;
         expect(first.unreadableFields).toEqual(["fanartApiKey"]);
@@ -191,8 +195,7 @@ describe("what getSystemSettings hands out", () => {
     });
 
     it("is a copy for callers who shared one read, too", async () => {
-        await prisma.systemSettings.update({ where: { id: "default" }, data: { fanartApiKey: unreadable } });
-        invalidateSystemSettingsCache();
+        await storeUnreadable("fanartApiKey");
 
         const [a, b] = await Promise.all([getSystemSettings(), getSystemSettings()]);
         a!.unreadableFields.push("lidarrApiKey");
@@ -200,10 +203,11 @@ describe("what getSystemSettings hands out", () => {
         expect(b!.unreadableFields).toEqual(["fanartApiKey"]);
         expect((await getSystemSettings())!.unreadableFields).toEqual(["fanartApiKey"]);
     });
+});
 
+describe("an unreadable credential", () => {
     it("still answers when the admin notice about an unreadable credential cannot be sent", async () => {
-        await prisma.systemSettings.update({ where: { id: "default" }, data: { acoustidApiKey: unreadable } });
-        invalidateSystemSettingsCache();
+        await storeUnreadable("acoustidApiKey");
         const notify = jest.spyOn(notificationService, "notifyAdmins").mockRejectedValue(new Error("notifications are down"));
 
         const settings = await getSystemSettings();
