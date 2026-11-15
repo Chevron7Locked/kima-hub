@@ -298,7 +298,7 @@ describe("the button on a playlist row", () => {
 const other = (id: string) => ({ ...song(id), artist: { name: "x" } }) as unknown as Track;
 const preloadedUrls = () => engine.setExpectedNext.mock.calls.map((c) => c[0]);
 
-describe("the gapless preload", () => {
+describe("the gapless preload follows the queue", () => {
     /** Plays [A, B, A] from its first row, with B preloaded as the last 30 seconds begin. */
     async function preloadB() {
         await mountPage();
@@ -309,6 +309,56 @@ describe("the gapless preload", () => {
         engine.setExpectedNext.mockClear();
         preload.mockClear();
     }
+
+    it("drops the preload when the preloaded entry is removed, and preloads the real next entry", async () => {
+        await preloadB();
+
+        await act(async () => probe.controls.removeFromQueue(1)); // B goes; the second A is next now
+        expect(engine.clearExpectedNext).toHaveBeenCalledTimes(1);
+
+        await act(async () => engine.emit("timeupdate", { time: 196 }));
+        expect(preloadedUrls()).toEqual(["/stream/A"]);
+        expect(preload).toHaveBeenCalledTimes(1);
+
+        await act(async () => engine.emit("gapless-advance", { trackId: "A", durationS: 200 }));
+        expect(probe.state.currentIndex).toBe(1);
+        expect(playingRows()).toEqual([2]); // the playlist still lists the second A as its third row
+    });
+
+    it("drops the preload when a song queued to play next takes B's place as next", async () => {
+        await preloadB();
+
+        await act(async () => probe.controls.addToQueue(other("C")));
+        expect(probe.state.queue.map((t) => t.id)).toEqual(["A", "C", "B", "A"]);
+        expect(engine.clearExpectedNext).toHaveBeenCalledTimes(1);
+
+        await act(async () => engine.emit("timeupdate", { time: 196 }));
+        expect(preloadedUrls()).toEqual(["/stream/C"]);
+        await act(async () => engine.emit("gapless-advance", { trackId: "C", durationS: 100 }));
+        expect(probe.state.currentTrack?.id).toBe("C");
+        expect(probe.state.currentIndex).toBe(1);
+    });
+
+    it("drops the preload when the queue is replaced under the playing song", async () => {
+        await preloadB();
+
+        await act(async () => probe.controls.setUpcoming([other("D"), other("E")], true));
+        expect(engine.clearExpectedNext).toHaveBeenCalledTimes(1);
+
+        await act(async () => engine.emit("timeupdate", { time: 196 }));
+        expect(preloadedUrls()).toEqual(["/stream/D"]);
+    });
+
+    it("keeps the preload through an edit that leaves the preloaded entry next", async () => {
+        await preloadB();
+
+        await act(async () => probe.controls.removeFromQueue(2)); // the last entry goes; B is still next
+        expect(engine.clearExpectedNext).not.toHaveBeenCalled();
+
+        await act(async () => engine.emit("gapless-advance", { trackId: "B", durationS: 200 }));
+        expect(probe.state.currentTrack?.id).toBe("B");
+        expect(probe.state.currentIndex).toBe(1);
+    });
 
     it("preloads the same entry again after the repeat mode dropped its preload", async () => {
         await preloadB();

@@ -1330,6 +1330,22 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
     }, [state.playbackType, state.repeatMode, dropExpectedNext]);
 
+    // Gapless follows the queue: when an edit, a reorder, a shuffle or a replaced queue leaves the preloaded entry
+    // no longer next, the engine would still swap to it while the player shows the entry that is next. Dropping
+    // the preload lets the next time update preload the real next entry.
+    useEffect(() => {
+        const pending = pendingGaplessNextRef.current;
+        if (!pending) return;
+        const next = getNextTrackInfo(
+            state.queue,
+            state.currentIndex,
+            state.isShuffle,
+            state.shuffleIndices,
+            state.repeatMode
+        );
+        if (next?.queueKey !== pending.queueKey) dropExpectedNext();
+    }, [state.queue, state.currentIndex, state.isShuffle, state.shuffleIndices, state.repeatMode, dropExpectedNext]);
+
     // -- Canplay handler: duration update only --
     useEffect(() => {
         const ctrl = controllerRef.current;
