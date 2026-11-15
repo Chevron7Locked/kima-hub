@@ -23,6 +23,7 @@ const server = vi.hoisted(() => ({
     saveGate: null as Promise<void> | null,
     savesInFlight: 0,
     mostSavesInFlight: 0,
+    stateReads: 0,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -35,7 +36,10 @@ const server = vi.hoisted(() => ({
 vi.mock("@/lib/api", () => {
     const named: Record<string, unknown> = {
         getQueueLimit: async () => ({ maxQueueLength: 1000 }),
-        getPlaybackState: async () => server.state,
+        getPlaybackState: async () => {
+            server.stateReads++;
+            return server.state;
+        },
         getTrack: async (id: string) => {
             await new Promise((r) => setTimeout(r, server.trackDelay));
             if (server.trackFails) throw Object.assign(new Error("server error"), { status: 500 });
@@ -172,6 +176,7 @@ beforeEach(() => {
     server.saveGate = null;
     server.savesInFlight = 0;
     server.mostSavesInFlight = 0;
+    server.stateReads = 0;
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -783,6 +788,31 @@ describe("saves that overlap", () => {
     }, 15_000);
 });
 
+describe("a change made here that undoes one still on its way", () => {
+    it("is owed to the server too: a failed send of it is sent again by the next check", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        // Back to what the server still holds, while the save of the other song has not landed.
+        await act(async () => probe.controls.playTracks([t("a") as never, t("b") as never], 0));
+        await wait(1500);
+        server.saveGate = null;
+        server.saveFails = true;
+        await act(async () => release());
+        await wait(50);
+        const attempts = server.saveAttempts;
+        expect(attempts).toBe(2);
+        server.saveFails = false;
+        await pollNow(tick());
+        expect(server.saveAttempts).toBe(attempts + 1);
+        expect(JSON.parse(JSON.stringify(server.state)).trackId).toBe("a");
+    }, 15_000);
+});
+
 describe("a tab that was hidden", () => {
     const fromOtherDevice = () => ({
         playbackType: "track", trackId: "e", audiobookId: null, podcastId: null, queue: [t("e"), t("f")], currentIndex: 0,
@@ -837,6 +867,38 @@ describe("a tab that was hidden", () => {
         await wait(50);
         expect(server.saves).toHaveLength(1);
         expect(server.saves[0]).toMatchObject({ trackId: "c" });
+    });
+
+    it("counts one failed try for a save the tab being shown sent early, not two", async () => {
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => setHidden(true));
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => setHidden(false));
+        await wait(1500);
+        // The debounced save that follows finds the early one already sent and does not send it again.
+        expect(server.saveAttempts).toBe(1);
+    });
+
+    it("is not lost when a check was already running as the tab was shown", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = { ...fromOtherDevice(), playbackType: "audiobook", trackId: null, queue: null, audiobookId: "book" };
+        server.audiobook = { id: "book", title: "Book" };
+        server.audiobookDelay = 300;
+        const readsBefore = server.stateReads;
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        await act(async () => setHidden(true));
+        await act(async () => setHidden(false));
+        await act(async () => polling);
+        await wait(500);
+        // The check that was running, then the one the shown tab asked for.
+        expect(server.stateReads - readsBefore).toBe(2);
     });
 
     it("keeps one 30-second check running through a change of song", async () => {
