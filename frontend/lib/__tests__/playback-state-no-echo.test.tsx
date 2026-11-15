@@ -12,6 +12,9 @@ const server = vi.hoisted(() => ({
     trackDelay: 0,
     trackFails: false,
     saveFails: false,
+    saveAttempts: 0,
+    clears: 0,
+    audiobookGone: false,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -31,12 +34,18 @@ vi.mock("@/lib/api", () => {
             return { id, title: id, duration: 200, artist: { name: "Artist" }, album: { title: "Album" } };
         },
         savePlaybackState: async (state: Record<string, unknown>) => {
+            server.saveAttempts++;
             if (server.saveFails) throw Object.assign(new Error("server error"), { status: 500 });
             server.saves.push(state);
             return { updatedAt: new Date(server.now()).toISOString() };
         },
-        clearPlaybackState: async () => ({}),
+        clearPlaybackState: async () => {
+            server.clears++;
+            server.state = null;
+            return {};
+        },
         getAudiobook: async () => {
+            if (server.audiobookGone) throw Object.assign(new Error("gone"), { status: 404 });
             if (server.audiobookFails) throw Object.assign(new Error("server error"), { status: 500 });
             return server.audiobook;
         },
@@ -131,6 +140,9 @@ beforeEach(() => {
     server.saves = [];
     server.trackDelay = 0;
     server.saveFails = false;
+    server.saveAttempts = 0;
+    server.clears = 0;
+    server.audiobookGone = false;
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -489,5 +501,148 @@ describe("a device clock that is not the server's", () => {
         };
         await pollNow(tick());
         expect(probe.state.currentTrack).toBeNull();
+    });
+});
+
+describe("another device's audiobook or podcast that the server no longer has", () => {
+    const fromOtherDevice = (fields: Record<string, unknown>) => ({
+        playbackType: "track", trackId: null, audiobookId: null, podcastId: null, queue: null, currentIndex: 0,
+        isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(), ...fields,
+    });
+
+    it("is forgotten for an audiobook, and not asked for again", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        await pollNow(tick());
+        expect(server.clears).toBe(1);
+        expect(probe.state.currentTrack?.id).toBe("a");
+        await pollNow(tick());
+        expect(server.clears).toBe(1);
+    });
+
+    it("is forgotten for a podcast, and not asked for again", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "podcast", podcastId: "show:ep-1" });
+        server.podcastGone = true;
+        await pollNow(tick());
+        expect(server.clears).toBe(1);
+        expect(probe.state.currentTrack?.id).toBe("a");
+        await pollNow(tick());
+        expect(server.clears).toBe(1);
+    });
+
+    it("lets the next change made here save, since the server holds nothing now", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        await pollNow(tick());
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
+    });
+
+    it("is not forgotten when asking for it failed for another reason", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookFails = true;
+        await pollNow(tick());
+        expect(server.clears).toBe(0);
+    });
+});
+
+describe("a save that failed", () => {
+    const fromOtherDevice = () => ({
+        playbackType: "track", trackId: "e", audiobookId: null, podcastId: null, queue: [t("e"), t("f")], currentIndex: 0,
+        isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(),
+    });
+
+    async function playWhileSavesFail() {
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+    }
+
+    it("is sent again on the next check once the server answers", async () => {
+        const tick = capturePoll();
+        await playWhileSavesFail();
+        server.saveFails = false;
+        await pollNow(tick());
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "c" });
+    });
+
+    it("waits longer after each failed try, so a server that stays down is not hit every check", async () => {
+        const tick = capturePoll();
+        await playWhileSavesFail();
+        const attempts: number[] = [];
+        for (let i = 0; i < 8; i++) {
+            await pollNow(tick());
+            attempts.push(server.saveAttempts);
+        }
+        // The first check retries, the next waits one check, then three, then seven.
+        expect(attempts).toEqual([2, 2, 3, 3, 3, 3, 4, 4]);
+    });
+
+    it("lets another device's newer state in once the retry went through", async () => {
+        const tick = capturePoll();
+        await playWhileSavesFail();
+        server.saveFails = false;
+        await pollNow(tick());
+        server.state = { ...fromOtherDevice(), updatedAt: new Date(Date.now() + 60_000).toISOString() };
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("e");
+    });
+
+    it("keeps the change here while the retries keep failing", async () => {
+        const tick = capturePoll();
+        await playWhileSavesFail();
+        server.state = fromOtherDevice();
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("c");
+    });
+});
+
+describe("another device's state that names no song", () => {
+    const queueOnly = () => ({
+        playbackType: "track", trackId: null, audiobookId: null, podcastId: null, queue: [t("x"), t("y")], currentIndex: 1,
+        isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(),
+    });
+
+    it("puts its queue here when nothing plays here", async () => {
+        server.state = null;
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        expect(probe.state.currentTrack).toBeNull();
+        server.state = queueOnly();
+        await pollNow(tick());
+        expect(probe.state.queue.map((q) => q.id)).toEqual(["x", "y"]);
+        expect(probe.state.currentTrack).toBeNull();
+        expect(server.saves).toEqual([]);
+    });
+
+    it("leaves an audiobook playing here alone", async () => {
+        server.state = { playbackType: "audiobook", audiobookId: "book", queue: null, currentIndex: 0, isShuffle: false, updatedAt: new Date(Date.now() - 60_000).toISOString() };
+        server.audiobook = { id: "book", title: "Book" };
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = queueOnly();
+        await pollNow(tick());
+        expect(probe.state.currentAudiobook?.id).toBe("book");
+        expect(probe.state.queue).toEqual([]);
+        expect(server.saves).toEqual([]);
     });
 });

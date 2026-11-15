@@ -342,6 +342,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const savePendingRef = useRef(false);
     // Numbers each run of the save effect, so a save that settles late does not clear the flag of a newer change.
     const saveRunRef = useRef(0);
+    // The newest run's save, for the poll to send again when it failed. Counted in checks, not time: after the nth failed
+    // try in a row the poll skips min(2^(n-1)-1, 7) checks before sending again, so a server that is down is not hit every
+    // check; a save that goes through starts the count over.
+    const retrySaveRef = useRef<(() => Promise<void>) | null>(null);
+    const saveInFlightRef = useRef(false);
+    const saveFailuresRef = useRef(0);
+    const saveSkipRef = useRef(0);
     useEffect(() => {
         queueRef.current = queue;
     }, [queue]);
@@ -620,21 +627,30 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (saveRunRef.current === run) savePendingRef.current = false;
                 return;
             }
+            saveInFlightRef.current = true;
             try {
                 const result = await api.savePlaybackState(state);
                 serverKnownRef.current = key;
                 setLastServerSync(new Date(result.updatedAt));
+                saveFailuresRef.current = 0;
+                saveSkipRef.current = 0;
                 if (saveRunRef.current === run) savePendingRef.current = false;
             } catch (err: unknown) {
                 // The flag stays set: the change is still only here, and another device's state must not replace it.
+                // The poll sends it again, later each time it fails.
+                saveFailuresRef.current += 1;
+                saveSkipRef.current = Math.min(2 ** (saveFailuresRef.current - 1) - 1, 7);
                 if (err instanceof Error && err.message !== "Not authenticated") {
                     console.error(
                         "[AudioState] Failed to save to server:",
                         err
                     );
                 }
+            } finally {
+                saveInFlightRef.current = false;
             }
         };
+        retrySaveRef.current = saveToServer;
 
         const timeoutId = setTimeout(saveToServer, 1000);
         return () => clearTimeout(timeoutId);
@@ -665,6 +681,20 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const pollInterval = setInterval(async () => {
             // Skip polling when tab is hidden, unmounted, or not authenticated
             if (!isAuthenticated || !mounted || !isVisible) return;
+
+            // A save that failed is owed still: sent again here, before anything of the server's is looked at, since
+            // another device's state may not replace a change that never reached the server.
+            if (savePendingRef.current && saveFailuresRef.current > 0 && retrySaveRef.current && !saveInFlightRef.current) {
+                if (saveSkipRef.current > 0) saveSkipRef.current -= 1;
+                else await retrySaveRef.current();
+                if (!mounted) return;
+            }
+
+            // The server remembers an item it no longer has: forgotten, so this page's next state is the server's.
+            const forgetGone = async () => {
+                serverKnownRef.current = null;
+                await api.clearPlaybackState().catch(() => {});
+            };
 
             try {
                 const serverState = await api.getPlaybackState();
@@ -746,19 +776,20 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             }
                         } catch (err) {
                             // The server remembers a track that is gone; what plays here stays.
-                            if (mounted && isGone(err)) {
-                                serverKnownRef.current = null;
-                                await api.clearPlaybackState().catch(() => {});
-                            }
+                            if (mounted && isGone(err)) await forgetGone();
                             return;
                         }
                     } else if (
                         serverState.playbackType === "audiobook" &&
                         serverState.audiobookId
                     ) {
-                        const audiobook = await api.getAudiobook(
-                            serverState.audiobookId
-                        );
+                        let audiobook: Awaited<ReturnType<typeof api.getAudiobook>>;
+                        try {
+                            audiobook = await api.getAudiobook(serverState.audiobookId);
+                        } catch (err) {
+                            if (mounted && isGone(err)) await forgetGone();
+                            return;
+                        }
                         if (!mounted) return;
                         if (audiobook) {
                             setCurrentAudiobook(audiobook);
@@ -773,7 +804,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     ) {
                         const [podcastId, episodeId] =
                             serverState.podcastId.split(":");
-                        const podcast: ShowWithEpisodes = await api.getPodcast(podcastId);
+                        let podcast: ShowWithEpisodes;
+                        try {
+                            podcast = await api.getPodcast(podcastId);
+                        } catch (err) {
+                            if (mounted && isGone(err)) await forgetGone();
+                            return;
+                        }
                         if (!mounted) return;
                         const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                         if (episode) {
@@ -783,13 +820,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentAudiobook(null);
                             applied = true;
                         }
+                    } else if (!serverMediaId) {
+                        // A state that names no item has nothing to play here: seen, so it is not looked at again. Its
+                        // queue, if it has one, is taken below where this page holds a song's queue (or none).
+                        applied = true;
                     }
                 }
 
                 if (!mounted) return;
                 // Another device changed the queue, or the page it came from, while the same song plays here too.
-                // Audiobooks and podcasts keep no queue, so only a song's queue is compared.
-                if (!adopted && noSaveOwed && serverState.playbackType === "track" && playbackType === "track" && queueDiffers()) {
+                // Audiobooks and podcasts keep no queue, so only a song's queue is compared; a page with nothing playing
+                // holds none of its own, so it takes a queue that names no song.
+                if (!adopted && noSaveOwed && serverState.playbackType === "track" && (playbackType === "track" || playbackType === null) && queueDiffers()) {
                     adoptQueue(serverState.queue || [], serverState.queueSource);
                     setCurrentIndex(serverState.currentIndex || 0);
                     setIsShuffle(serverState.isShuffle || false);
