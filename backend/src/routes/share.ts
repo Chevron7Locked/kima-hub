@@ -171,8 +171,11 @@ async function joinCountedPlay(key: string): Promise<PlayClaim | null> {
     try {
         const token = await redisClient.get(key);
         if (token === null) return null;
-        // Renewed in one step with its token: a window that ended since it was read is not this request's to follow.
-        return (await renewWindow(key, token)) ? newClaim(key, token) : null;
+        // Renewed and counted open in one step with its token: a window that ended since it was read is not this request's
+        // to follow, and from here a first request that fails leaves the window to it.
+        const claim = newClaim(key, token);
+        await openResponse(claim);
+        return claim.open ? claim : null;
     } catch (error) {
         logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
         return null;
@@ -242,6 +245,11 @@ function leaveResponse(claim: PlayClaim): Promise<number> {
  * only the token it holds: the one it took the window with, or the one it found in the listener's window.
  */
 function keepWindowWhileOpen(res: Response, claim: PlayClaim): void {
+    // A listener who left before this ran has already closed: "close" would never fire, and its count would stay.
+    if (res.destroyed) {
+        void track(leaveResponse(claim));
+        return;
+    }
     const timer = setInterval(() => void track(renewClaim(claim)), PLAY_WINDOW_MS / 3);
     timer.unref();
     res.once("close", () => {
@@ -311,7 +319,8 @@ async function undoWithinReason(undo: () => Promise<void>, shareId: string): Pro
 
 /**
  * Keeps a counted play only if the stream starts. A play whose response ends without one (304, 404, 416, 500, or a listener
- * who left first) is taken back and its window freed, so the next request counts. The take-back runs before the response
+ * who left first) is taken back and its window freed, so the next request counts, unless a seek of the same play is still
+ * open: that seek is playing it, so the play stays counted and the window stays. The take-back runs before the response
  * ends: a client cannot follow up in between and slip into a window that is about to be freed. The response waits for it
  * only up to TAKE_BACK_WAIT_MS, so a stalled database cannot hold the connection open.
  */
@@ -469,6 +478,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         // are not a new play, and the limit, which that play may just have reached, does not apply to them. Expiry still
         // does. Another listener's play is not this one's: it has its own window.
         const joined = await joinCountedPlay(playKey);
+        // Watched from the moment it is counted open, so every way this request ends (403, 404, a stream) leaves the count.
+        if (joined) keepWindowWhileOpen(res, joined);
         if (!joined && outOfPlays(shareLink)) {
             return sendEnded(res, "play-limit");
         }
@@ -519,9 +530,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // The first request of a listener's play takes the window and counts it. A request that finds the window taken
         // belongs to that play: two requests of one listener arriving together are one play.
-        let claim: PlayClaim | null = joined;
         if (!joined) {
-            claim = await claimPlayWindow(playKey);
+            const claim = await claimPlayWindow(playKey);
             if (claim) {
                 await openResponse(claim);
                 if (!(await countPlay(shareLink.id))) {
@@ -530,12 +540,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
                     return sendEnded(res, "play-limit");
                 }
                 keepPlayOnlyIfStreamStarts(res, shareLink.id, claim);
+                keepWindowWhileOpen(res, claim);
             }
-        } else {
-            await openResponse(joined);
-        }
-        if (claim) {
-            keepWindowWhileOpen(res, claim);
         }
 
         const mimeType = getMimeType(track.filePath);

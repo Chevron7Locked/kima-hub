@@ -4,6 +4,9 @@
  *
  * Both answer whether the key was this token's and was changed. A Redis failure throws: callers decide what an
  * unreachable Redis means for them.
+ *
+ * Only the two plain moves live here. A move that also reads or changes a second key (the share play window's open-response
+ * count in `routes/share.ts`) is its own script beside the code that owns that second key.
  */
 import type { redisClient } from "./redis";
 

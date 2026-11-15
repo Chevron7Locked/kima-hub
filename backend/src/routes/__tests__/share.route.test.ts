@@ -1044,6 +1044,49 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 }
             }, 15_000);
 
+            it('leaves them to a seek that has found the window but is still looking up its song', async () => {
+                const long = await longSong('long5', 14);
+                const { token, id } = await own({}, long.id);
+                const stall = stallCounting();
+                const realFind: any = prisma.track.findFirst.bind(prisma.track);
+                let lookups = 0;
+                let release!: () => void;
+                let markReached!: () => void;
+                const held = new Promise<void>((resolve) => (release = resolve));
+                const reached = new Promise<void>((resolve) => (markReached = resolve));
+                // The first request's lookup passes; the seek's, the second, is held.
+                const lookup = jest.spyOn(prisma.track, 'findFirst').mockImplementation(((...args: unknown[]) =>
+                    ++lookups === 2 ? (markReached(), held.then(() => realFind(...args))) : realFind(...args)) as never);
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${long.id}`, headers);
+                    const first = listen({ 'If-None-Match': '*' }).then(drain);
+                    await stall.stalled;
+                    const [key] = await redisClient.keys(`*${id}*`);
+                    const window = await redisClient.get(key);
+                    const seek = listen({ Range: 'bytes=5-' }).then(drain);
+                    await reached;
+
+                    // The first request fails while the seek, which found the window, has not yet started to stream.
+                    stall.release();
+                    expect(await first).toBe(304);
+                    await settleShareBackgroundWork();
+
+                    expect(await redisClient.get(key)).toBe(window);
+                    release();
+                    expect(await seek).toBe(206);
+                    expect(await playsOf(token)).toBe(1);
+                } finally {
+                    release();
+                    stall.release();
+                    stall.restore();
+                    lookup.mockRestore();
+                    server.closeAllConnections();
+                    server.close();
+                }
+            }, 15_000);
+
             it('frees the window and gives the play back once no response of it is open', async () => {
                 const long = await longSong('long4', 13);
                 const { token, id } = await own({}, long.id);
