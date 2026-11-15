@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A two-factor code works once.** A code that has already signed you in, or turned two-factor off, is refused if sent again. After signing in with a code, turning two-factor off waits for the next code.
+- **Two different recovery codes used at the same moment both work.** One no longer refuses the other.
+- **A library scan that replaces a song no longer upsets a play-history repair** running at the same time.
+- **A big play button keeps showing pause or resume** after a reload, on another device signed in to the same account, and while songs added with add to queue or play next are playing.
+- **Clicking a song in the queue panel jumps to it** without rebuilding the queue or changing the shuffle order.
+- **Starting a list at a place it does not have plays it from the top.**
+- **The buttons on a song row act on the list as it is now**, and a song edited in place shows its new title at once.
+- **Making a playlist from the add dialog never leaves a duplicate** when the answer is lost and you try again.
+- **The add dialog behaves after reopening.** An add still running from before no longer blocks the new one or shows its old error, and the playlist list stays on screen while it refreshes. The playlist page refreshes once after adding songs, not twice.
 - **A two-factor recovery code works once.** Two sign-ins sending the same recovery code at the same moment can no longer both get in.
 - **Discover's current list finds songs spelt differently.** A suggestion's song is found when its artist or title differs only in accents, case or apostrophes, or when the MusicBrainz artist is the same under another name. Liking, unliking, a scan or an artist id correction shows up in Discover's picks at once instead of up to five minutes later.
 - **Import counts stay right while the playlist is built.** A dismissal or a scan at that moment is kept, a failure that arrives late no longer resets the counts or marks a finished import as failed, and a cancelled import makes no playlist.
