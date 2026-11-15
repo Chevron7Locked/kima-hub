@@ -506,16 +506,14 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
         const pendingTrack = await ownedPendingTrack(req, res);
         if (!pendingTrack) return;
 
-        await prisma.playlistPendingTrack.delete({
-            where: { id: pendingTrack.id },
-        });
+        // Under the playlist lock, with the import's counts: a scan placing the same song cannot add it back.
+        if (!(await playlistService.dismissWaitingEntry(req.params.id, pendingTrack.id))) {
+            return res.status(404).json({ error: "Pending track not found" });
+        }
 
         announcePlaylistChange(req.user!.id, req.params.id);
         res.json({ message: "Pending track removed" });
     } catch (error: any) {
-        if (error.code === "P2025") {
-            return res.status(404).json({ error: "Pending track not found" });
-        }
         logger.error("Delete pending track error:", error);
         res.status(500).json({ error: "Failed to delete pending track" });
     }

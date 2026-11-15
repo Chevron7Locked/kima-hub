@@ -216,6 +216,21 @@ export async function addTracks(
     });
 }
 
+/**
+ * A person dismisses a waiting entry: they will not wait for that song. It is the one way a person removes an entry,
+ * and it takes the playlist lock like every other write, so a scan placing the same song cannot add it back after the
+ * entry is gone. Returns false when there is no such entry on the playlist (already answered or dismissed).
+ */
+export async function dismissWaitingEntry(playlistId: string, pendingId: string): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
+        await lockPlaylist(tx, playlistId);
+        const entry = await tx.playlistPendingTrack.findFirst({ where: { id: pendingId, playlistId } });
+        if (!entry) return false;
+        await tx.playlistPendingTrack.delete({ where: { id: entry.id } });
+        return true;
+    });
+}
+
 /** A song the library has found. `pendingId` is the waiting entry it answers, when there is one. */
 export interface FoundSong {
     trackId: string;
