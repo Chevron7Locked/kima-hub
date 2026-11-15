@@ -77,6 +77,22 @@ describe("a lock another process holds", () => {
         expect(withLock).toHaveBeenCalledTimes(2);
     });
 
+    it("does not wait a second time when the lock is lost on the connect that followed the wait", async () => {
+        const aborted = new AbortController();
+        aborted.abort(new LockLostError("soulseek:connection"));
+        const withLock = jest.spyOn(distributedLock, "withLock")
+            .mockRejectedValueOnce(new LockHeldError("soulseek:connection"))
+            .mockImplementationOnce((_key, _ttl, callback) => callback(aborted.signal))
+            .mockRejectedValue(new LockHeldError("soulseek:connection"));
+        const isHeld = jest.spyOn(distributedLock, "isHeld").mockResolvedValue(false);
+        jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+
+        await expect(service().ensureConnected("force")).rejects.toThrow("busy in another process");
+
+        expect(isHeld).toHaveBeenCalledTimes(1);
+        expect(withLock).toHaveBeenCalledTimes(3);
+    });
+
     it("answers with Redis's error when it cannot be asked whether the lock is free", async () => {
         jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockHeldError("soulseek:connection"));
         jest.spyOn(distributedLock, "isHeld").mockRejectedValue(new Error("connection reset"));

@@ -488,19 +488,21 @@ class SoulseekService {
      * sleeps the backoff out. `force` drops the client and connects now.
      */
     private async ensureConnected(mode: ConnectMode = "request"): Promise<void> {
+        // Whether a wait for another process's connect has been spent: it is spent once across both tries.
+        const waited = { forHolder: false };
         try {
-            await this.connectOnce(mode, false);
+            await this.connectOnce(mode, waited);
         } catch (error) {
             // A lock lost under a connect says nothing about whether another process connected, so it is tried once more.
             if (error instanceof LockLostError) {
-                await this.connectOnce(mode, false);
+                await this.connectOnce(mode, waited);
                 return;
             }
             throw error;
         }
     }
 
-    private async connectOnce(mode: ConnectMode, waitedForHolder: boolean): Promise<void> {
+    private async connectOnce(mode: ConnectMode, waited: { forHolder: boolean }): Promise<void> {
         const force = mode === "force";
         if (!force && this.client && this.client.loggedIn) {
             if (this.checkConnectionHealth()) {
@@ -599,12 +601,13 @@ class SoulseekService {
             // Another process is connecting. With Redis down (LockUnavailableError) nobody can be waited for, so
             // the error goes up as it is rather than after a 30 s wait.
             if (error instanceof LockHeldError) {
-                if (waitedForHolder) {
+                if (waited.forHolder) {
                     throw new Error("soulseek connection is busy in another process, try again");
                 }
+                waited.forHolder = true;
                 sessionLog("SOULSEEK", "Connection already in progress - waiting for it to complete", "DEBUG");
                 if ((await this.waitForConnection()) === "free") {
-                    await this.connectOnce(mode, true);
+                    await this.connectOnce(mode, waited);
                 }
                 return;
             }
