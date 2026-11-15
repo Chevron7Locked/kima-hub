@@ -687,6 +687,28 @@ class ApiClient {
         this.clearToken();
     }
 
+    /** Starts 2FA setup for the signed-in person: the server keeps the secret (ten minutes) and returns it with its QR code. */
+    async setupTwoFactor(): Promise<{ secret: string; qrCode: string }> {
+        return this.request<{ secret: string; qrCode: string }>("/auth/2fa/setup", { method: "POST", body: JSON.stringify({}) });
+    }
+
+    /** Turns 2FA on with a current code from the secret setup made; returns the ten recovery codes, shown once. */
+    async enableTwoFactor(token: string): Promise<string[]> {
+        const on = await this.request<{ recoveryCodes: string[] }>("/auth/2fa/enable", {
+            method: "POST",
+            body: JSON.stringify({ token }),
+        });
+        return on.recoveryCodes;
+    }
+
+    /** Turns 2FA off. Needs the password and a current authenticator code or an unused recovery code (400 when either is wrong). */
+    async disableTwoFactor(password: string, token: string): Promise<void> {
+        await this.request<{ message: string }>("/auth/2fa/disable", {
+            method: "POST",
+            body: JSON.stringify({ password, token }),
+        });
+    }
+
     /**
      * Replaces the signed-in person's recovery codes with ten new ones, returned once; 2FA stays on. Needs the password
      * and a current authenticator code or an unused recovery code (400 when either is wrong).

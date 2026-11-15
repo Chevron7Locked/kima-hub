@@ -30,7 +30,7 @@ export function useTwoFactor() {
     const setup2FA = async () => {
         try {
             setLoadingTwoFactor(true);
-            const response = await api.post<{ secret: string; qrCode: string }>("/auth/2fa/setup", {});
+            const response = await api.setupTwoFactor();
             setTwoFactorSecret(response.secret);
             setTwoFactorQR(response.qrCode);
             setSettingUpTwoFactor(true);
@@ -46,9 +46,7 @@ export function useTwoFactor() {
         try {
             setLoadingTwoFactor(true);
             // The server checks the code against the secret it kept at setup, so none is sent back.
-            const response = await api.post<{ recoveryCodes: string[] }>("/auth/2fa/enable", { token });
-
-            setRecoveryCodes(response.recoveryCodes);
+            setRecoveryCodes(await api.enableTwoFactor(token));
             setShowRecoveryCodes(true);
             setTwoFactorEnabled(true);
             setSettingUpTwoFactor(false);
@@ -64,10 +62,7 @@ export function useTwoFactor() {
     const disable2FA = async (password: string, token: string) => {
         try {
             setDisablingTwoFactor(true);
-            await api.post("/auth/2fa/disable", {
-                password,
-                token,
-            });
+            await api.disableTwoFactor(password, token);
 
             setTwoFactorEnabled(false);
             setDisableTwoFactorPassword("");

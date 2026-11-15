@@ -12,7 +12,9 @@ const { api, auth } = vi.hoisted(() => {
         status: { enabled: false },
         users: [] as Array<Record<string, unknown>>,
         get: vi.fn(),
-        post: vi.fn(),
+        setupTwoFactor: vi.fn(),
+        enableTwoFactor: vi.fn(),
+        disableTwoFactor: vi.fn(),
         newRecoveryCodes: vi.fn(),
         resetTwoFactor: vi.fn(),
     };
@@ -45,7 +47,9 @@ beforeEach(() => {
     api.status = { enabled: false };
     api.users = [];
     api.get.mockReset().mockImplementation(async (path: string) => (path === "/auth/users" ? api.users : api.status));
-    api.post.mockReset().mockResolvedValue({});
+    api.setupTwoFactor.mockReset().mockResolvedValue({ secret: "BASE32SECRET", qrCode: "" });
+    api.enableTwoFactor.mockReset().mockResolvedValue(["AAAA1111"]);
+    api.disableTwoFactor.mockReset().mockResolvedValue(undefined);
     api.newRecoveryCodes.mockReset().mockResolvedValue([]);
     api.resetTwoFactor.mockReset().mockResolvedValue(undefined);
     auth.user = { id: "me", username: "me", role: "admin" };
@@ -53,15 +57,14 @@ beforeEach(() => {
 
 describe("setting 2FA up", () => {
     it("sends only the code to enable it: the server checks it against the secret it kept", async () => {
-        api.post.mockImplementation(async (path: string) =>
-            path === "/auth/2fa/setup" ? { secret: "BASE32SECRET", qrCode: "" } : { recoveryCodes: ["AAAA1111"] },
-        );
         await showAccount();
         await act(async () => button("Enable")!.click());
         type(field("Enter 6-digit code"), "123456");
         await act(async () => button("Verify")!.click());
 
-        expect(api.post).toHaveBeenCalledWith("/auth/2fa/enable", { token: "123456" });
+        expect(api.setupTwoFactor).toHaveBeenCalledTimes(1);
+        expect(api.enableTwoFactor).toHaveBeenCalledWith("123456");
+        expect(document.querySelector('[role="dialog"]')?.textContent ?? "").toContain("AAAA1111");
     });
 });
 
@@ -78,7 +81,30 @@ describe("turning 2FA off", () => {
         expect(field("6-digit code or recovery code").value).toBe("A1B2C3D4");
         await act(async () => button("Disable 2FA")!.click());
 
-        expect(api.post).toHaveBeenCalledWith("/auth/2fa/disable", { password: "hunter22", token: "A1B2C3D4" });
+        expect(api.disableTwoFactor).toHaveBeenCalledWith("hunter22", "A1B2C3D4");
+    });
+
+    it("takes a sixteen-character recovery code, upper-cased, pasted with spaces or dashes, and no more than sixteen characters", async () => {
+        await showAccount();
+        await act(async () => button("Disable")!.click());
+        type(field("Password"), "hunter22");
+
+        type(field("6-digit code or recovery code"), "a1b2 c3d4-e5f6 0718 9aff");
+        expect(field("6-digit code or recovery code").value).toBe("A1B2C3D4E5F60718");
+        expect(button("Disable 2FA")!.hasAttribute("disabled")).toBe(false);
+        await act(async () => button("Disable 2FA")!.click());
+
+        expect(api.disableTwoFactor).toHaveBeenCalledWith("hunter22", "A1B2C3D4E5F60718");
+    });
+
+    it("holds the button back for a length between the two recovery code lengths", async () => {
+        await showAccount();
+        await act(async () => button("Disable")!.click());
+        type(field("Password"), "hunter22");
+
+        type(field("6-digit code or recovery code"), "A1B2C3D4E5F6");
+
+        expect(button("Disable 2FA")!.hasAttribute("disabled")).toBe(true);
     });
 
     it("still takes a six-digit code, and holds the button back for anything that is neither shape", async () => {
@@ -92,7 +118,7 @@ describe("turning 2FA off", () => {
         type(field("6-digit code or recovery code"), "123456");
         expect(button("Disable 2FA")!.hasAttribute("disabled")).toBe(false);
         await act(async () => button("Disable 2FA")!.click());
-        expect(api.post).toHaveBeenCalledWith("/auth/2fa/disable", { password: "hunter22", token: "123456" });
+        expect(api.disableTwoFactor).toHaveBeenCalledWith("hunter22", "123456");
     });
 });
 
