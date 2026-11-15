@@ -5,6 +5,7 @@ import {
     useContext,
     useState,
     useEffect,
+    useLayoutEffect,
     useRef,
     ReactNode,
     useMemo,
@@ -171,6 +172,9 @@ function parseStorageJson<T>(key: string, fallback: T): T {
  */
 // Polls are 30 s apart, so a save that keeps failing is tried again at most every 8th check (about four minutes).
 const MAX_CHECKS_TO_SKIP = 7;
+
+/** One save of the playback state: the run of the save effect that made it, its playbackKey, and what is sent. */
+type PlaybackSave = { run: number; key: string; state: Parameters<typeof api.savePlaybackState>[0] };
 
 function isGone(err: unknown): boolean {
     return (err as { status?: number } | null)?.status === 404;
@@ -345,16 +349,68 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const savePendingRef = useRef(false);
     // Numbers each run of the save effect, so a save that settles late does not clear the flag of a newer change.
     const saveRunRef = useRef(0);
-    // A save that failed is sent again by the poll. Counted in checks, not time: after the nth failed try in a row the
-    // poll lets `checksToSkip` = min(2^(n-1)-1, MAX_CHECKS_TO_SKIP) checks pass first, so a server that is down is not
-    // hit every check; a save that goes through starts the count over. `send` is the newest run's save; `inFlightRun`
-    // is the run whose save is on its way (0 for none). Only the newest run's outcome counts, a late older one does not.
-    const saveRetryRef = useRef<{ send: (() => Promise<void>) | null; inFlightRun: number; failures: number; checksToSkip: number }>({
-        send: null,
-        inFlightRun: 0,
-        failures: 0,
-        checksToSkip: 0,
-    });
+    // Saves go out one at a time, so an older one can never land after a newer one and leave the server (or
+    // `serverKnownRef`) with the older state. `latest` is the newest run's save, kept until the next run replaces it;
+    // `queued` is the newest one waiting for the one on its way (older waiting ones are replaced, not sent), and its
+    // dedupe check runs when it is taken up, not when it was queued. A save that failed is sent again by the poll,
+    // counted in checks, not time: after the nth failed try in a row the poll lets `checksToSkip` =
+    // min(2^(n-1)-1, MAX_CHECKS_TO_SKIP) checks pass first, so a server that is down is not hit every check; a save
+    // that goes through starts the count over. Only the newest run's outcome counts, an older one's does not.
+    const saveRef = useRef<{
+        latest: PlaybackSave | null;
+        queued: PlaybackSave | null;
+        draining: boolean;
+        drained: Promise<void>;
+        failures: number;
+        checksToSkip: number;
+    }>({ latest: null, queued: null, draining: false, drained: Promise.resolve(), failures: 0, checksToSkip: 0 });
+    // What the poll needs to know of the page as it is now, since the poll runs on from one render to the next.
+    const liveRef = useRef({ playbackType, mediaId: currentTrack?.id ?? currentAudiobook?.id ?? currentPodcast?.id ?? null });
+    useLayoutEffect(() => {
+        liveRef.current = { playbackType, mediaId: currentTrack?.id ?? currentAudiobook?.id ?? currentPodcast?.id ?? null };
+    }, [playbackType, currentTrack?.id, currentAudiobook?.id, currentPodcast?.id]);
+    const submitSave = useCallback((job: PlaybackSave): Promise<void> => {
+        const s = saveRef.current;
+        s.queued = job;
+        if (!s.draining) {
+            s.draining = true;
+            s.drained = (async () => {
+                try {
+                    while (s.queued) {
+                        const next = s.queued;
+                        s.queued = null;
+                        if (next.key === serverKnownRef.current) {
+                            if (saveRunRef.current === next.run) savePendingRef.current = false;
+                            continue;
+                        }
+                        try {
+                            const result = await api.savePlaybackState(next.state);
+                            serverKnownRef.current = next.key;
+                            setLastServerSync(new Date(result.updatedAt));
+                            if (saveRunRef.current === next.run) {
+                                savePendingRef.current = false;
+                                s.failures = 0;
+                                s.checksToSkip = 0;
+                            }
+                        } catch (err: unknown) {
+                            // The flag stays set: the change is still only here, and another device's state must not
+                            // replace it. The poll sends it again, later each time it fails.
+                            if (saveRunRef.current === next.run) {
+                                s.failures += 1;
+                                s.checksToSkip = Math.min(2 ** (s.failures - 1) - 1, MAX_CHECKS_TO_SKIP);
+                            }
+                            if (err instanceof Error && err.message !== "Not authenticated") {
+                                console.error("[AudioState] Failed to save to server:", err);
+                            }
+                        }
+                    }
+                } finally {
+                    s.draining = false;
+                }
+            })();
+        }
+        return s.drained;
+    }, []);
     useEffect(() => {
         queueRef.current = queue;
     }, [queue]);
@@ -601,6 +657,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         const run = ++saveRunRef.current;
         savePendingRef.current = false;
+        // This run replaces the older ones: a save of theirs still waiting its turn is not sent.
+        saveRef.current.latest = null;
+        saveRef.current.queued = null;
         if (!restoreSettled) return;
         const failedRestore = restoreFailedRef.current;
         restoreFailedRef.current = false;
@@ -628,42 +687,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         if (failedRestore && !listenerChose) serverKnownRef.current = key;
         savePendingRef.current = key !== serverKnownRef.current;
 
-        const saveToServer = async () => {
-            if (key === serverKnownRef.current) {
-                if (saveRunRef.current === run) savePendingRef.current = false;
-                return;
-            }
-            const retry = saveRetryRef.current;
-            retry.inFlightRun = run;
-            try {
-                const result = await api.savePlaybackState(state);
-                serverKnownRef.current = key;
-                setLastServerSync(new Date(result.updatedAt));
-                if (saveRunRef.current === run) {
-                    savePendingRef.current = false;
-                    retry.failures = 0;
-                    retry.checksToSkip = 0;
-                }
-            } catch (err: unknown) {
-                // The flag stays set: the change is still only here, and another device's state must not replace it.
-                // The poll sends it again, later each time it fails.
-                if (saveRunRef.current === run) {
-                    retry.failures += 1;
-                    retry.checksToSkip = Math.min(2 ** (retry.failures - 1) - 1, MAX_CHECKS_TO_SKIP);
-                }
-                if (err instanceof Error && err.message !== "Not authenticated") {
-                    console.error(
-                        "[AudioState] Failed to save to server:",
-                        err
-                    );
-                }
-            } finally {
-                if (retry.inFlightRun === run) retry.inFlightRun = 0;
-            }
-        };
-        saveRetryRef.current.send = saveToServer;
+        const job: PlaybackSave = { run, key, state };
+        saveRef.current.latest = job;
 
-        const timeoutId = setTimeout(saveToServer, 1000);
+        const timeoutId = setTimeout(() => void submitSave(job), 1000);
         return () => clearTimeout(timeoutId);
     }, [
         restoreSettled,
@@ -675,6 +702,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         queueOrigin,
         currentIndex,
         isShuffle,
+        submitSave,
     ]);
 
     // Poll server for changes from other devices (pauses when tab is hidden)
@@ -682,35 +710,75 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         let isAuthenticated = true;
         let mounted = true;
         let isVisible = !document.hidden;
+        // One check at a time: a check started by the tab being shown must not run over one the interval started.
+        let checking = false;
 
-        // Handle visibility changes to save battery/resources
+        // `now` is a check made because the tab was just shown: the save owed is sent whatever it is waiting for.
+        const check = async (now: boolean) => {
+            // Skip polling when tab is hidden, unmounted, or not authenticated
+            if (!isAuthenticated || !mounted || !isVisible || checking) return;
+            checking = true;
+            try {
+                await poll(now);
+            } finally {
+                checking = false;
+            }
+        };
+
+        // Hidden tabs do not look (battery, resources); shown again, the tab looks at once, for whatever it missed.
         const handleVisibilityChange = () => {
             isVisible = !document.hidden;
+            if (isVisible) void check(true);
         };
         document.addEventListener("visibilitychange", handleVisibilityChange);
 
-        const pollInterval = setInterval(async () => {
-            // Skip polling when tab is hidden, unmounted, or not authenticated
-            if (!isAuthenticated || !mounted || !isVisible) return;
-
-            // A save that failed is owed still: sent again here, before anything of the server's is looked at, since
-            // another device's state may not replace a change that never reached the server.
-            const retry = saveRetryRef.current;
-            if (savePendingRef.current && retry.failures > 0 && retry.send && !retry.inFlightRun) {
-                if (retry.checksToSkip > 0) retry.checksToSkip -= 1;
-                else await retry.send();
+        const poll = async (now: boolean) => {
+            // A change made here is owed to the server still when its save failed (sent again here, later each time it
+            // fails) or, for a tab just shown, when its save is still waiting out its delay. It goes before anything of
+            // the server's is looked at, since another device's state may not replace a change that never reached it.
+            const owed = saveRef.current;
+            if (savePendingRef.current && owed.latest && !owed.draining && (owed.failures > 0 || now)) {
+                if (now) owed.checksToSkip = 0;
+                if (owed.checksToSkip > 0) owed.checksToSkip -= 1;
+                else await submitSave(owed.latest);
                 if (!mounted) return;
             }
 
-            // The server remembers an item it no longer has: forgotten, so this page's next state is the server's.
-            const forgetGone = async () => {
-                serverKnownRef.current = null;
-                await api.clearPlaybackState().catch(() => {});
+            // What this page plays when the check starts. A check that finds it changed (a song started here while
+            // the server was being asked) is dropped: what it learned is stale, and the next one starts afresh.
+            const here = liveRef.current;
+            const changedHere = () =>
+                liveRef.current.playbackType !== here.playbackType || liveRef.current.mediaId !== here.mediaId;
+            const playbackType = here.playbackType;
+            const currentMediaId = here.mediaId ?? undefined;
+
+            // The server remembers an item it no longer has. A change made here, or another device's newer word, is
+            // never overwritten for it; what plays here replaces it (saved, never cleared first, since a device that
+            // looked in between would see an empty player and stop); with nothing playing here it is cleared.
+            const forgetGone = async (polledAt: Date) => {
+                const settledElsewhere = () =>
+                    !mounted ||
+                    changedHere() ||
+                    savePendingRef.current ||
+                    (lastServerSyncRef.current !== null && lastServerSyncRef.current > polledAt);
+                if (settledElsewhere()) return;
+                const held = await api.getPlaybackState().catch(() => null);
+                // Cleared, or saved again by another device (a newer time than the one that was polled).
+                if (!held || new Date(held.updatedAt) > polledAt || settledElsewhere()) return;
+                const mine = saveRef.current.latest;
+                if (mine && liveRef.current.mediaId) {
+                    serverKnownRef.current = null;
+                    if (saveRunRef.current === mine.run) savePendingRef.current = true;
+                    await submitSave(mine);
+                } else {
+                    serverKnownRef.current = null;
+                    await api.clearPlaybackState().catch(() => {});
+                }
             };
 
             try {
                 const serverState = await api.getPlaybackState();
-                if (!serverState || !mounted) return;
+                if (!serverState || !mounted || changedHere()) return;
 
                 const serverUpdatedAt = new Date(serverState.updatedAt);
 
@@ -727,10 +795,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.trackId ||
                     serverState.audiobookId ||
                     serverState.podcastId;
-                const currentMediaId =
-                    currentTrack?.id ||
-                    currentAudiobook?.id ||
-                    currentPodcast?.id;
 
                 // Cleared on another device: the newest word wins here as it does for a song change. Playing on would
                 // write the cleared song straight back.
@@ -770,7 +834,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 serverState.trackId
                             );
                             // A change made here while the song was fetched (the queue edited, say) is still unsaved.
-                            if (!mounted || (currentMediaId && savePendingRef.current)) return;
+                            if (!mounted || changedHere() || (currentMediaId && savePendingRef.current)) return;
                             setCurrentTrack(track);
                             setPlaybackType("track");
                             setCurrentAudiobook(null);
@@ -787,8 +851,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 setIsShuffle(serverState.isShuffle || false);
                             }
                         } catch (err) {
-                            // The server remembers a track that is gone; what plays here stays.
-                            if (mounted && isGone(err)) await forgetGone();
+                            if (mounted && isGone(err)) await forgetGone(serverUpdatedAt);
                             return;
                         }
                     } else if (
@@ -799,10 +862,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         try {
                             audiobook = await api.getAudiobook(serverState.audiobookId);
                         } catch (err) {
-                            if (mounted && isGone(err)) await forgetGone();
+                            if (mounted && isGone(err)) await forgetGone(serverUpdatedAt);
                             return;
                         }
-                        if (!mounted) return;
+                        if (!mounted || changedHere() || (currentMediaId && savePendingRef.current)) return;
                         if (audiobook) {
                             setCurrentAudiobook(audiobook);
                             setPlaybackType("audiobook");
@@ -820,10 +883,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         try {
                             podcast = await api.getPodcast(podcastId);
                         } catch (err) {
-                            if (mounted && isGone(err)) await forgetGone();
+                            if (mounted && isGone(err)) await forgetGone(serverUpdatedAt);
                             return;
                         }
-                        if (!mounted) return;
+                        if (!mounted || changedHere() || (currentMediaId && savePendingRef.current)) return;
                         const episode = podcast.episodes?.find((ep) => ep.id === episodeId);
                         if (episode) {
                             setCurrentPodcast(episodeForPlayer(podcastId, podcast, episode));
@@ -860,7 +923,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     clearInterval(pollInterval);
                 }
             }
-        }, 30000);
+        };
+
+        // Not restarted when the song changes: it runs on, reading the page as it is (liveRef) each time.
+        const pollInterval = setInterval(() => check(false), 30000);
 
         return () => {
             mounted = false;
@@ -872,12 +938,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         };
     }, [
         controller,
-        playbackType,
-        currentTrack?.id,
-        currentAudiobook?.id,
-        currentPodcast?.id,
         setQueue,
         adoptQueue,
+        submitSave,
     ]);
 
     // The playing entry is the queue's entry at the playing place, while it holds the song that is playing.

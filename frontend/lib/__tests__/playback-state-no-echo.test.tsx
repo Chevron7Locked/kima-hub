@@ -15,6 +15,14 @@ const server = vi.hoisted(() => ({
     saveAttempts: 0,
     clears: 0,
     audiobookGone: false,
+    audiobookDelay: 0,
+    /** Runs while an audiobook is being asked for, before it answers: another device acting in the meantime. */
+    whileAsking: null as (() => void) | null,
+    trackGone: false,
+    /** Holds every save until it is let go; counts the saves on their way at once. */
+    saveGate: null as Promise<void> | null,
+    savesInFlight: 0,
+    mostSavesInFlight: 0,
     podcastGone: false,
     audiobook: null as Record<string, unknown> | null,
     audiobookFails: false,
@@ -31,13 +39,26 @@ vi.mock("@/lib/api", () => {
         getTrack: async (id: string) => {
             await new Promise((r) => setTimeout(r, server.trackDelay));
             if (server.trackFails) throw Object.assign(new Error("server error"), { status: 500 });
+            if (server.trackGone) throw Object.assign(new Error("gone"), { status: 404 });
             return { id, title: id, duration: 200, artist: { name: "Artist" }, album: { title: "Album" } };
         },
         savePlaybackState: async (state: Record<string, unknown>) => {
             server.saveAttempts++;
-            if (server.saveFails) throw Object.assign(new Error("server error"), { status: 500 });
-            server.saves.push(state);
-            return { updatedAt: new Date(server.now()).toISOString() };
+            server.savesInFlight++;
+            server.mostSavesInFlight = Math.max(server.mostSavesInFlight, server.savesInFlight);
+            // Whether the server is failing is settled when the save is sent, not when the gate lets it through.
+            const fails = server.saveFails;
+            try {
+                if (server.saveGate) await server.saveGate;
+                if (fails) throw Object.assign(new Error("server error"), { status: 500 });
+                server.saves.push(state);
+                // The server holds what it was last sent, as of its own clock.
+                const updatedAt = new Date(server.now()).toISOString();
+                server.state = { ...state, updatedAt };
+                return { updatedAt };
+            } finally {
+                server.savesInFlight--;
+            }
         },
         clearPlaybackState: async () => {
             server.clears++;
@@ -45,6 +66,8 @@ vi.mock("@/lib/api", () => {
             return {};
         },
         getAudiobook: async () => {
+            if (server.audiobookDelay) await new Promise((r) => setTimeout(r, server.audiobookDelay));
+            server.whileAsking?.();
             if (server.audiobookGone) throw Object.assign(new Error("gone"), { status: 404 });
             if (server.audiobookFails) throw Object.assign(new Error("server error"), { status: 500 });
             return server.audiobook;
@@ -143,6 +166,12 @@ beforeEach(() => {
     server.saveAttempts = 0;
     server.clears = 0;
     server.audiobookGone = false;
+    server.audiobookDelay = 0;
+    server.whileAsking = null;
+    server.trackGone = false;
+    server.saveGate = null;
+    server.savesInFlight = 0;
+    server.mostSavesInFlight = 0;
     server.trackFails = false;
     server.podcastGone = false;
     server.audiobook = null;
@@ -161,11 +190,18 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
     vi.useRealTimers();
 });
+
+/** Hides or shows the tab, as the browser does: the flag, then the event. */
+function setHidden(hidden: boolean) {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    document.dispatchEvent(new Event("visibilitychange"));
+}
 
 /** Runs the 30-second check for another device's changes once, now. */
 async function pollNow(tick: () => unknown) {
@@ -510,33 +546,105 @@ describe("another device's audiobook or podcast that the server no longer has", 
         isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(), ...fields,
     });
 
-    it("is forgotten for an audiobook, and not asked for again", async () => {
+    it("is replaced by what plays here for an audiobook, and not asked for again", async () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
         server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
         server.audiobookGone = true;
         await pollNow(tick());
-        expect(server.clears).toBe(1);
         expect(probe.state.currentTrack?.id).toBe("a");
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ playbackType: "track", trackId: "a" });
         await pollNow(tick());
-        expect(server.clears).toBe(1);
+        expect(server.saves).toHaveLength(1);
+        // Never emptied first: another device that looked in between would see a cleared player and stop.
+        expect(server.clears).toBe(0);
     });
 
-    it("is forgotten for a podcast, and not asked for again", async () => {
+    it("is replaced by what plays here for a podcast, and not asked for again", async () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
         server.state = fromOtherDevice({ playbackType: "podcast", podcastId: "show:ep-1" });
         server.podcastGone = true;
         await pollNow(tick());
-        expect(server.clears).toBe(1);
         expect(probe.state.currentTrack?.id).toBe("a");
+        expect(server.saves).toHaveLength(1);
+        await pollNow(tick());
+        expect(server.saves).toHaveLength(1);
+        expect(server.clears).toBe(0);
+    });
+
+    it("is replaced by what plays here for a song, and not asked for again", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ trackId: "e", queue: [t("e"), t("f")] });
+        server.trackGone = true;
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("a");
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "a" });
+        await pollNow(tick());
+        expect(server.saves).toHaveLength(1);
+        expect(server.clears).toBe(0);
+    });
+
+    it("is cleared from the server when nothing plays here to take its place", async () => {
+        const tick = capturePoll();
+        server.trackFails = true;
+        await open();
+        await wait(1500);
+        expect(probe.state.currentTrack).toBeNull();
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        await pollNow(tick());
+        expect(server.clears).toBe(1);
+        expect(server.saves).toEqual([]);
         await pollNow(tick());
         expect(server.clears).toBe(1);
     });
 
-    it("lets the next change made here save, since the server holds nothing now", async () => {
+    it("is left alone when another device saved a newer state while it was being asked for", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        server.whileAsking = () => {
+            server.state = fromOtherDevice({ trackId: "e", queue: [t("e"), t("f")], updatedAt: new Date(Date.now() + 9000).toISOString() });
+        };
+        await pollNow(tick());
+        expect(server.clears).toBe(0);
+        expect(server.saves).toEqual([]);
+        // The newer state is looked at on the next check, as any other device's change.
+        server.whileAsking = null;
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("e");
+    });
+
+    it("is not cleared over a change made here while it was being asked for, which saves as usual", async () => {
+        const tick = capturePoll();
+        server.trackFails = true;
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice({ playbackType: "audiobook", audiobookId: "book" });
+        server.audiobookGone = true;
+        server.audiobookDelay = 300;
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        await act(async () => polling);
+        expect(server.clears).toBe(0);
+        expect(server.saves.at(-1)).toMatchObject({ trackId: "c" });
+        expect(probe.state.currentTrack?.id).toBe("c");
+    });
+
+    it("lets the next change made here save, since the server holds nothing of it", async () => {
         const tick = capturePoll();
         await open();
         await wait(1500);
@@ -610,6 +718,153 @@ describe("a save that failed", () => {
         await playWhileSavesFail();
         server.state = fromOtherDevice();
         await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("c");
+    });
+});
+
+describe("saves that overlap", () => {
+    function holdSaves() {
+        let release: () => void = () => undefined;
+        server.saveGate = new Promise<void>((resolve) => { release = resolve; });
+        return () => { server.saveGate = null; release(); };
+    }
+
+    it("go out one at a time, the newest last, so the server ends up with the newest", async () => {
+        await open();
+        await wait(1500);
+        const letGo = holdSaves();
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => probe.controls.playTracks([t("e") as never, t("f") as never], 0));
+        await wait(1500);
+        // The first is still on its way, so the second waits for it.
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => letGo());
+        await wait(50);
+        expect(server.mostSavesInFlight).toBe(1);
+        expect(server.saves.map((s) => s.trackId)).toEqual(["c", "e"]);
+        expect(JSON.parse(JSON.stringify(server.state)).trackId).toBe("e");
+    }, 15_000);
+
+    it("send only the newest of several made while one is on its way", async () => {
+        await open();
+        await wait(1500);
+        const letGo = holdSaves();
+        await act(async () => probe.controls.playTracks([t("c") as never], 0));
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("d") as never], 0));
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("e") as never], 0));
+        await wait(1500);
+        await act(async () => letGo());
+        await wait(50);
+        expect(server.saves.map((s) => s.trackId)).toEqual(["c", "e"]);
+    }, 15_000);
+
+    it("leave a failed older save out of the count once a newer one went through", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        const letGo = holdSaves();
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never], 0));
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("e") as never], 0));
+        await wait(1500);
+        server.saveFails = false;
+        await act(async () => letGo());
+        await wait(50);
+        // The older save went out while the server was failing, but the newest went through after it.
+        const attempts = server.saveAttempts;
+        await pollNow(tick());
+        expect(server.saveAttempts).toBe(attempts);
+        expect(JSON.parse(JSON.stringify(server.state)).trackId).toBe("e");
+    }, 15_000);
+});
+
+describe("a tab that was hidden", () => {
+    const fromOtherDevice = () => ({
+        playbackType: "track", trackId: "e", audiobookId: null, podcastId: null, queue: [t("e"), t("f")], currentIndex: 0,
+        isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(),
+    });
+
+    it("does not look at the server's state while hidden", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        await act(async () => setHidden(true));
+        server.state = fromOtherDevice();
+        await pollNow(tick());
+        expect(probe.state.currentTrack?.id).toBe("a");
+    });
+
+    it("looks at the server's state at once when shown again", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => setHidden(true));
+        server.state = fromOtherDevice();
+        await act(async () => setHidden(false));
+        await wait(50);
+        expect(probe.state.currentTrack?.id).toBe("e");
+    });
+
+    it("sends a change made here at once when shown again, without waiting for the debounce", async () => {
+        await open();
+        await wait(1500);
+        await act(async () => setHidden(true));
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => setHidden(false));
+        await wait(50);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "c" });
+        // The debounced save that follows finds it already sent.
+        await wait(1500);
+        expect(server.saves).toHaveLength(1);
+    });
+
+    it("sends a failed save again at once when shown, whatever the wait it was on", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.saveFails = true;
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        for (let i = 0; i < 3; i++) await pollNow(tick());
+        server.saveFails = false;
+        await act(async () => setHidden(true));
+        await act(async () => setHidden(false));
+        await wait(50);
+        expect(server.saves).toHaveLength(1);
+        expect(server.saves[0]).toMatchObject({ trackId: "c" });
+    });
+
+    it("keeps one 30-second check running through a change of song", async () => {
+        const spy = vi.spyOn(globalThis, "setInterval");
+        const checks = () => spy.mock.calls.filter((call) => call[1] === 30000).length;
+        await open();
+        await wait(1500);
+        const before = checks();
+        expect(before).toBeGreaterThan(0);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await wait(1500);
+        await act(async () => probe.controls.playTracks([t("e") as never], 0));
+        await wait(1500);
+        expect(checks()).toBe(before);
+    });
+
+    it("drops a check that outlived a change made here", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = fromOtherDevice();
+        server.trackDelay = 300;
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0));
+        await act(async () => polling);
         expect(probe.state.currentTrack?.id).toBe("c");
     });
 });
