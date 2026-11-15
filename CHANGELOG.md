@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Soulseek searches and downloads made while Soulseek is reconnecting say "soulseek is reconnecting, try again in Ns" at once** instead of hanging.
+- **The weekly Discover job is still queued when Redis is unreachable**, and generating Discover Weekly says "try again in a moment" when it cannot start.
+- **Sign-in rejects a two-factor code sent as anything but text**, and the sign-in page recognises two-factor prompts and wrong codes from a code the server sends, not from the wording of its message.
+- **Creating a playlist from the sidebar or the playlists page makes one playlist** even if you retry after the first answer was lost.
+- **A play position that could not be saved is sent again on later checks**, and a removed audiobook or podcast is no longer asked for again and again by another device.
 - **A song replaced by another copy (an upgraded album, say) keeps its place in saved queues** instead of dropping out, and the queue's current song moves on to the next one when its song is removed.
 - **The web player's saved queue never shows songs that are gone or unplayable.**
 - **New recovery codes are 16 characters long**, so they are much harder to guess. Older 8-character codes keep working until you make new ones.
