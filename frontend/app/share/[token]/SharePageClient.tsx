@@ -104,22 +104,45 @@ function getEntitySubtitle(shareData: ShareData): string {
     return "";
 }
 
+/** Why the server answers 410: the link has expired, or it is out of plays. */
+type EndedReason = "expired" | "play-limit";
+
+/** How a share's address failed: the status the server answered with (null when there was no answer) and, for a 410, why. */
+interface ShareFailure {
+    status: number | null;
+    reason?: EndedReason;
+}
+
 /** The server answered, and refused. */
 class ShareRefused extends Error {
-    constructor(readonly status: number) {
+    constructor(
+        readonly status: number,
+        readonly reason?: EndedReason,
+    ) {
         super(`Share refused (${status})`);
     }
 }
 
+/** The reason in a refusal's body, when it is one the page knows; an unreadable body or a new reason is no reason. */
+async function refusalReason(res: Response): Promise<EndedReason | undefined> {
+    const body: unknown = await res.json().catch(() => null);
+    const reason = (body as { reason?: unknown } | null)?.reason;
+    return reason === "expired" || reason === "play-limit" ? reason : undefined;
+}
+
 /**
  * What the page says when the share does not open, from the status the server answered with: 404 unknown link, 410 a
- * link that has ended (the server sends 410 for both an expired link and one out of plays), 429 the per-address limit
- * on opening shares, anything else, or no answer at all, a general failure.
+ * link that has ended (its `reason` says whether it expired or is out of plays; with no reason, the combined wording),
+ * 429 the per-address limit on opening shares, anything else, or no answer at all, a general failure.
  */
-function failureText(failure: { status: number | null }): { title: string; hint: string } {
+function failureText(failure: ShareFailure): { title: string; hint: string } {
     const askForNew = "Ask whoever shared it for a new link.";
     if (failure.status === 404) return { title: "Share link not found", hint: askForNew };
-    if (failure.status === 410) return { title: "This link has expired or reached its play limit", hint: askForNew };
+    if (failure.status === 410) {
+        if (failure.reason === "expired") return { title: "This link has expired", hint: askForNew };
+        if (failure.reason === "play-limit") return { title: "This link has reached its play limit", hint: askForNew };
+        return { title: "This link has expired or reached its play limit", hint: askForNew };
+    }
     if (failure.status === 429) return { title: "Too many requests", hint: "Wait a minute and try again." };
     return { title: "Couldn't open this share", hint: "Try again in a moment." };
 }
@@ -134,7 +157,7 @@ export default function SharePageClient() {
 function SharePage({ token }: { token: string }) {
     const [data, setData] = useState<ShareData | null>(null);
     // How opening the share failed: the status the server answered with, or null when there was no answer.
-    const [failure, setFailure] = useState<{ status: number | null } | null>(null);
+    const [failure, setFailure] = useState<ShareFailure | null>(null);
     const [loading, setLoading] = useState(true);
 
     const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -146,21 +169,31 @@ function SharePage({ token }: { token: string }) {
     const [playbackError, setPlaybackError] = useState<string | null>(null);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    // The request that asks the share why the audio failed, while one is on its way.
+    const playbackCheck = useRef<AbortController | null>(null);
+
+    // A new play starts clean: the last failure and a check still on its way are dropped.
+    const clearPlaybackError = useCallback(() => {
+        playbackCheck.current?.abort();
+        setPlaybackError(null);
+    }, []);
     const progressBarRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         // The request goes with the page (or with the token it was for); a cancelled one is not a failure to show.
         const request = new AbortController();
         fetch(shareResolvePath(token), { signal: request.signal })
-            .then((res) => {
-                if (!res.ok) throw new ShareRefused(res.status);
+            .then(async (res) => {
+                if (!res.ok) throw new ShareRefused(res.status, await refusalReason(res));
                 return res.json();
             })
             .then((shared) => {
                 if (!request.signal.aborted) setData(shared);
             })
             .catch((err) => {
-                if (!request.signal.aborted) setFailure({ status: err instanceof ShareRefused ? err.status : null });
+                if (!request.signal.aborted) {
+                    setFailure(err instanceof ShareRefused ? { status: err.status, reason: err.reason } : { status: null });
+                }
             })
             .finally(() => {
                 if (!request.signal.aborted) setLoading(false);
@@ -175,7 +208,9 @@ function SharePage({ token }: { token: string }) {
         if (!audio) return;
         return () => {
             audio.pause();
-            audio.src = "";
+            // An empty `src` is an address the browser tries and fails on; removing it and loading releases the media.
+            audio.removeAttribute("src");
+            audio.load();
             // React runs this cleanup instead of calling the ref with null.
             audioRef.current = null;
         };
@@ -201,13 +236,13 @@ function SharePage({ token }: { token: string }) {
         (index: number) => {
             if (!audioRef.current || !tracks[index]) return;
             setCurrentTrackIndex(index);
-            setPlaybackError(null);
+            clearPlaybackError();
             audioRef.current.src = getStreamUrl(tracks[index].id);
             audioRef.current.play()
                 .then(() => setIsPlaying(true))
                 .catch(() => setIsPlaying(false));
         },
-        [tracks, getStreamUrl]
+        [tracks, getStreamUrl, clearPlaybackError]
     );
 
     const togglePlay = useCallback(() => {
@@ -219,12 +254,12 @@ function SharePage({ token }: { token: string }) {
             if (!audioRef.current.src || audioRef.current.src === window.location.href) {
                 audioRef.current.src = getStreamUrl(currentTrack.id);
             }
-            setPlaybackError(null);
+            clearPlaybackError();
             audioRef.current.play()
                 .then(() => setIsPlaying(true))
                 .catch(() => setIsPlaying(false));
         }
-    }, [isPlaying, currentTrack, getStreamUrl]);
+    }, [isPlaying, currentTrack, getStreamUrl, clearPlaybackError]);
 
     const nextTrack = useCallback(() => {
         if (currentTrackIndex < tracks.length - 1) {
@@ -269,19 +304,31 @@ function SharePage({ token }: { token: string }) {
         }
     }, [volume]);
 
+    // A media error does not say why the audio failed (a 410 from the stream reads as an unsupported format in some
+    // browsers), so the share's own address is asked again and its answer says. The check goes with the page.
+    useEffect(() => {
+        return () => playbackCheck.current?.abort();
+    }, []);
+
     const handleAudioError = useCallback(() => {
         setIsPlaying(false);
-        if (audioRef.current?.error) {
-            const code = audioRef.current.error.code;
-            if (code === MediaError.MEDIA_ERR_NETWORK) {
-                setPlaybackError("Playback failed. The link may have expired or reached its play limit.");
-            } else if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-                setPlaybackError("This audio format is not supported by your browser.");
-            } else {
-                setPlaybackError("Playback error occurred.");
-            }
-        }
-    }, []);
+        playbackCheck.current?.abort();
+        const check = new AbortController();
+        playbackCheck.current = check;
+        const say = (message: string) => {
+            if (!check.signal.aborted) setPlaybackError(message);
+        };
+        const sayFailure = (failure: ShareFailure) => {
+            const { title, hint } = failureText(failure);
+            say(`${title}. ${hint}`);
+        };
+        fetch(shareResolvePath(token), { signal: check.signal })
+            .then(async (res) => {
+                if (res.ok) return say("Playback error occurred.");
+                sayFailure({ status: res.status, reason: res.status === 410 ? await refusalReason(res) : undefined });
+            })
+            .catch(() => sayFailure({ status: null }));
+    }, [token]);
 
     const totalDuration = tracks.reduce((sum, t) => sum + (t.duration || 0), 0);
 

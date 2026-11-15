@@ -24,23 +24,30 @@ let signal: AbortSignal | undefined;
 // What the server answers for a share token; a token with no entry never gets an answer.
 let answers: Record<string, unknown> = {};
 // Tokens the server refuses with a status and a message; the message is the backend's own wording.
-let refused: Record<string, { status: number; error?: string }> = {};
+let refused: Record<string, { status: number; error?: string; reason?: string }> = {};
+/** The addresses asked for, in order. */
+let asked: string[] = [];
 
 beforeEach(() => {
     token = "tok";
     signal = undefined;
     answers = {};
     refused = {};
+    asked = [];
     vi.stubGlobal(
         "fetch",
         vi.fn((url: string, init?: RequestInit) => {
             signal = init?.signal ?? undefined;
+            asked.push(url);
             const refusal = refused[tokenOf(url)];
             if (refusal) {
                 return Promise.resolve({
                     ok: false,
                     status: refusal.status,
-                    json: async () => (refusal.error ? { error: refusal.error } : Promise.reject(new SyntaxError("not json"))),
+                    json: async () =>
+                        refusal.error
+                            ? { error: refusal.error, ...(refusal.reason ? { reason: refusal.reason } : {}) }
+                            : Promise.reject(new SyntaxError("not json")),
                 });
             }
             const answered = Object.entries(answers).find(([tok]) => tok === tokenOf(url));
@@ -112,6 +119,7 @@ describe("SharePageClient", () => {
     it("stops the audio and clears its source when the page goes away", async () => {
         answers = { tok: { entityType: "album", entity: { id: "a1", title: "First Album", artist: { name: "First Artist" }, tracks: [] } } };
         const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+        const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
         await act(async () => root.render(<SharePageClient />));
         const audio = host.querySelector("audio")!;
         expect(audio).not.toBeNull();
@@ -120,8 +128,12 @@ describe("SharePageClient", () => {
         await act(async () => root.unmount());
 
         expect(pause).toHaveBeenCalled();
-        expect(audio.getAttribute("src")).toBe("");
+        // Releasing the media is removing the attribute and loading: an empty `src` is itself an address the browser tries
+        // (and fails on, with an error event).
+        expect(audio.hasAttribute("src")).toBe(false);
+        expect(load).toHaveBeenCalled();
         pause.mockRestore();
+        load.mockRestore();
     });
 
     describe("a failure to open the share reads from the status", () => {
@@ -137,9 +149,31 @@ describe("SharePageClient", () => {
             expect(await opened()).toContain("Share link not found");
         });
 
-        it("410 is a link that has ended: expired or out of plays, which the server does not tell apart by status", async () => {
-            refused = { tok: { status: 410, error: "Share link play limit reached" } };
+        it("410 with the reason expired is a link that has expired", async () => {
+            refused = { tok: { status: 410, error: "Share link has expired", reason: "expired" } };
+            const text = await opened();
+            expect(text).toContain("This link has expired");
+            expect(text).not.toContain("play limit");
+        });
+
+        it("410 with the reason play-limit is a link that has reached its play limit", async () => {
+            refused = { tok: { status: 410, error: "Share link play limit reached", reason: "play-limit" } };
+            const text = await opened();
+            expect(text).toContain("This link has reached its play limit");
+            expect(text).not.toContain("expired");
+        });
+
+        it.each([
+            ["no reason", { status: 410, error: "Share link play limit reached" }],
+            ["a reason the page does not know", { status: 410, error: "Gone", reason: "something-new" }],
+        ])("410 with %s keeps the combined wording", async (_name, refusal) => {
+            refused = { tok: refusal };
             expect(await opened()).toContain("This link has expired or reached its play limit");
+        });
+
+        it("a reason on any other status changes nothing", async () => {
+            refused = { tok: { status: 500, error: "x", reason: "expired" } };
+            expect(await opened()).toContain("Couldn't open this share");
         });
 
         it("429 is too many requests, not a link that reached its play limit", async () => {
@@ -162,6 +196,149 @@ describe("SharePageClient", () => {
         it("a request that never got an answer is a general failure", async () => {
             vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
             expect(await opened()).toContain("Couldn't open this share");
+        });
+    });
+
+    describe("an audio error asks the share again, and says what the answer says", () => {
+        const album = { entityType: "album", entity: { id: "a1", title: "First Album", artist: { name: "First Artist" }, tracks: [{ id: "t1", title: "One", duration: 10 }] } };
+        const audioError = (): Promise<void> =>
+            act(async () => {
+                host.querySelector("audio")!.dispatchEvent(new Event("error"));
+            });
+        const open = () => act(async () => root.render(<SharePageClient />));
+
+        beforeEach(() => {
+            answers = { tok: album };
+        });
+
+        it("asks the share's resolve address once more, with a request that can be cancelled", async () => {
+            await open();
+            expect(asked).toEqual(["/api/share/tok"]);
+
+            await audioError();
+
+            expect(asked).toEqual(["/api/share/tok", "/api/share/tok"]);
+            expect(signal).toBeDefined();
+            await act(async () => root.unmount());
+        });
+
+        it("says the link has expired when the share answers 410 with the reason expired", async () => {
+            await open();
+            refused = { tok: { status: 410, error: "Share link has expired", reason: "expired" } };
+            await audioError();
+
+            expect(host.textContent).toContain("This link has expired");
+            expect(host.textContent).not.toContain("Playback error");
+            await act(async () => root.unmount());
+        });
+
+        it("says the link has reached its play limit when the share answers 410 with the reason play-limit", async () => {
+            await open();
+            refused = { tok: { status: 410, error: "Share link play limit reached", reason: "play-limit" } };
+            await audioError();
+
+            expect(host.textContent).toContain("This link has reached its play limit");
+            await act(async () => root.unmount());
+        });
+
+        it.each([
+            [410, "This link has expired or reached its play limit"],
+            [404, "Share link not found"],
+            [429, "Too many requests"],
+        ])("says what a %i answer says", async (status, text) => {
+            await open();
+            refused = { tok: { status } };
+            await audioError();
+
+            expect(host.textContent).toContain(text);
+            expect(host.textContent).not.toContain("Playback error");
+            await act(async () => root.unmount());
+        });
+
+        it("shows a generic playback error only when the share still opens", async () => {
+            await open();
+            await audioError();
+
+            expect(host.textContent).toContain("Playback error occurred.");
+            await act(async () => root.unmount());
+        });
+
+        it("shows nothing about playback while the share has not answered yet", async () => {
+            await open();
+            // The second request hangs.
+            answers = {};
+            await audioError();
+
+            expect(host.textContent).not.toContain("Playback");
+            expect(host.textContent).not.toContain("expired");
+            await act(async () => root.unmount());
+        });
+
+        it("says the share could not be opened when the second request got no answer at all", async () => {
+            await open();
+            vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+            await audioError();
+
+            expect(host.textContent).toContain("Couldn't open this share");
+            expect(host.textContent).not.toContain("Playback error");
+            await act(async () => root.unmount());
+        });
+
+        it("cancels the second request when the page goes away", async () => {
+            await open();
+            answers = {};
+            await audioError();
+            const second = signal!;
+            expect(second.aborted).toBe(false);
+
+            await act(async () => root.unmount());
+
+            expect(second.aborted).toBe(true);
+        });
+
+        it("ignores an answer that arrives after the page moved to another share", async () => {
+            let late!: (value: unknown) => void;
+            const lateAnswer = new Promise((resolve) => (late = resolve));
+            await open();
+            const real = globalThis.fetch;
+            vi.stubGlobal("fetch", vi.fn(() => lateAnswer));
+            await audioError();
+
+            vi.stubGlobal("fetch", real);
+            token = "other";
+            answers = { other: { entityType: "album", entity: { id: "a2", title: "Other Album", artist: { name: "Other Artist" }, tracks: [{ id: "t2", title: "Two", duration: 10 }] } } };
+            await open();
+            expect(host.textContent).toContain("Other Album");
+
+            await act(async () => {
+                late({ ok: false, status: 410, json: async () => ({ error: "Share link has expired", reason: "expired" }) });
+                await lateAnswer;
+            });
+
+            expect(host.textContent).toContain("Other Album");
+            expect(host.textContent).not.toContain("expired");
+            await act(async () => root.unmount());
+        });
+
+        it("a new play drops a check still on its way", async () => {
+            await open();
+            let late!: (value: unknown) => void;
+            const lateAnswer = new Promise((resolve) => (late = resolve));
+            vi.stubGlobal("fetch", vi.fn(() => lateAnswer));
+            await audioError();
+            const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+            const playButton = Array.from(host.querySelectorAll("button")).find((b) => b.className.includes("rounded-full"));
+            await act(async () => {
+                playButton!.click();
+            });
+            await act(async () => {
+                late({ ok: false, status: 410, json: async () => ({ error: "x", reason: "expired" }) });
+                await lateAnswer;
+            });
+
+            expect(host.textContent).not.toContain("expired");
+            play.mockRestore();
+            await act(async () => root.unmount());
         });
     });
 });
