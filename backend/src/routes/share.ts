@@ -38,7 +38,7 @@ const PLAY_WINDOW_SECONDS = 30;
  * listener's seeks, wherever they come from in the same browser, are one.
  */
 function listenerOf(req: Request): string {
-    const userId = (req as Request & { session?: { userId?: string } }).session?.userId;
+    const userId = req.session?.userId;
     const who = userId ? `user:${userId}` : `anon:${req.ip ?? ""}|${req.get("user-agent") ?? ""}`;
     return createHash("sha256").update(who).digest("hex").slice(0, 24);
 }
@@ -151,9 +151,9 @@ async function joinCountedPlay(key: string): Promise<PlayClaim | null> {
     try {
         const token = await redisClient.get(key);
         if (token === null) return null;
+        // Renewed in one step with its token: a window that ended since it was read is not this request's to follow.
         const claim = { token };
-        await renewClaim(key, claim);
-        return claim;
+        return (await renewClaim(key, claim)) ? claim : null;
     } catch (error) {
         logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
         return null;
@@ -168,12 +168,14 @@ interface PlayClaim {
     token: string | null;
 }
 
-async function renewClaim(key: string, claim: PlayClaim): Promise<void> {
-    if (claim.token === null) return;
+/** Renews the claim's window. Answers whether it was renewed: false when the window ended, was taken by another claim, or Redis failed. */
+async function renewClaim(key: string, claim: PlayClaim): Promise<boolean> {
+    if (claim.token === null) return false;
     try {
-        await redisClient.eval(RENEW_IF_MINE, 1, key, claim.token, String(PLAY_WINDOW_SECONDS * 1000));
+        return (await redisClient.eval(RENEW_IF_MINE, 1, key, claim.token, String(PLAY_WINDOW_SECONDS * 1000))) === 1;
     } catch (error) {
         logger.warn(`[Share] Could not renew a play window: ${(error as Error).message}`);
+        return false;
     }
 }
 
@@ -407,8 +409,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         // A listener's follow-up requests (a seek, the next range) belong to a play already counted for that listener: they
         // are not a new play, and the limit, which that play may just have reached, does not apply to them. Expiry still
         // does. Another listener's play is not this one's: it has its own window.
-        const followUp = await joinCountedPlay(playKey);
-        if (!followUp && outOfPlays(shareLink)) {
+        const joined = await joinCountedPlay(playKey);
+        if (!joined && outOfPlays(shareLink)) {
             return sendEnded(res, "play-limit");
         }
 
@@ -458,8 +460,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // The first request of a listener's play takes the window and counts it. A request that finds the window taken
         // belongs to that play: two requests of one listener arriving together are one play.
-        let claim: PlayClaim | null = followUp;
-        if (!followUp) {
+        let claim: PlayClaim | null = joined;
+        if (!joined) {
             claim = await claimPlayWindow(playKey);
             if (claim) {
                 if (!(await countPlay(shareLink.id))) {

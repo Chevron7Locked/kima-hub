@@ -38,7 +38,9 @@ afterEach(clear);
 
 /** A job for this week's id, run by hand to `state` ("completed" or "failed"). */
 async function finishedJob(state: "completed" | "failed") {
-    const job = await discoverQueue.add("discover-weekly", { userId: USER }, { jobId, attempts: 1 });
+    // Last in, first out: other suites of the run share this queue and may have a job waiting, and this one must be the
+    // next the worker takes.
+    const job = await discoverQueue.add("discover-weekly", { userId: USER }, { jobId, attempts: 1, lifo: true });
     const taken = await worker.getNextJob(TOKEN);
     expect(taken?.id).toBe(job.id);
     if (state === "completed") await taken!.moveToCompleted({}, TOKEN, false);
@@ -79,6 +81,21 @@ it("leaves the finished job in place when putting it back fails, so the week sti
     await expect(queueWeeklyJob(USER)).rejects.toThrow("redis down");
 
     expect(await discoverQueue.getJob(jobId)).not.toBeNull();
+    jest.restoreAllMocks();
+});
+
+it("adds the job again when the finished one was evicted from the queue between looking at it and putting it back", async () => {
+    const finished = await finishedJob("completed");
+    jest.spyOn(finished.constructor.prototype, "retry").mockImplementationOnce(async function (this: { remove(): Promise<void> }) {
+        // The queue's removeOnComplete cleanup takes the job, and the retry finds nothing to move.
+        await this.remove();
+        throw new Error("Missing key for job to retry");
+    });
+
+    const id = await queueWeeklyJob(USER);
+
+    expect(id).toBe(jobId);
+    expect(await (await discoverQueue.getJob(jobId))!.getState()).toBe("waiting");
     jest.restoreAllMocks();
 });
 

@@ -1032,6 +1032,24 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
         expect((await familiarBoost(USER_ID))!.ids).toContain(id("bg0"));
     });
 
+    it("keeps nothing either when the scan lock is lost while the closest songs are being scored", async () => {
+        await heard("bg0", 5);
+        familiarTiming.lockSeconds = 0.6;
+        const score = matchingRank.topScores;
+        jest.spyOn(matchingRank, "topScores").mockImplementationOnce(async (...args) => {
+            await redisClient.set(lockKey, "someone-else", "PX", 5000);
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            return score(...args);
+        });
+
+        expect(await familiarBoost(USER_ID)).toBeNull();
+
+        expect(await redisClient.exists(familiarCacheKey(USER_ID))).toBe(0);
+        expect(await redisClient.get(lockKey)).toBe("someone-else");
+        await redisClient.del(lockKey);
+        expect((await familiarBoost(USER_ID))!.ids).toContain(id("bg0"));
+    });
+
     it("gives no boost, and keeps that for a minute at most, while the similarity data is not built", async () => {
         await heard("bg0", 5);
         await prisma.$executeRaw`DELETE FROM matching_state`;

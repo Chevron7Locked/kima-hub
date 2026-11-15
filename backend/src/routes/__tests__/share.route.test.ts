@@ -715,6 +715,17 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 expect((await redisClient.keys(`*${id}*`)).length).toBe(2);
             });
 
+            it('counts a play when the window ended between it being read and being renewed', async () => {
+                const { token } = await own();
+                // The window was there when read, and gone when its token was to be renewed.
+                jest.spyOn(redisClient, 'get').mockResolvedValueOnce('a-token-that-just-expired');
+
+                expect((await get(token, songs.playable, listener('listener-a'))).status).toBe(200);
+
+                expect(await playsOf(token)).toBe(1);
+                jest.restoreAllMocks();
+            });
+
             it('keeps the listener out of the window key in the clear', async () => {
                 const { token, id } = await own();
                 await get(token, songs.playable, listener('a-very-recognisable-agent'));

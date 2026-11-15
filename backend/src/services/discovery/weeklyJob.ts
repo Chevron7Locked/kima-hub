@@ -21,8 +21,14 @@ export async function queueWeeklyJob(userId: string, signal?: AbortSignal): Prom
         if (state === "completed" || state === "failed") {
             // The state seen above is only good while the lock is: past a lost one another request may have queued.
             signal?.throwIfAborted();
-            await existing.retry(state, { resetAttemptsMade: true, resetAttemptsStarted: true });
-            return existing.id;
+            try {
+                await existing.retry(state, { resetAttemptsMade: true, resetAttemptsStarted: true });
+                return existing.id;
+            } catch (error) {
+                // The queue's cleanup of finished jobs may have taken it since it was looked at: there is then nothing
+                // to put back, and the week gets a new job below. Any other failure leaves the job where it is.
+                if (await discoverQueue.getJob(jobId)) throw error;
+            }
         }
     }
     signal?.throwIfAborted();

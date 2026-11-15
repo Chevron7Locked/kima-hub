@@ -44,6 +44,16 @@ afterEach(() => jest.restoreAllMocks());
 
 const ensureConnected = () => (soulseekService as any).ensureConnected("force") as Promise<void>;
 
+/** Lets a connect that is waiting for the server socket to open have it: the socket opens once the connect listens. */
+async function whileSocketOpens(connecting: Promise<void>, conn: EventEmitter): Promise<void> {
+    const timer = setInterval(() => conn.emit("connect"), 5);
+    try {
+        await connecting;
+    } finally {
+        clearInterval(timer);
+    }
+}
+
 it("waits for the other process's connection when the lock is held", async () => {
     jest.spyOn(distributedLock, "withLock").mockRejectedValue(new LockHeldError("soulseek:connection"));
     (soulseekService as any).connectPromise = Promise.resolve();
@@ -132,42 +142,58 @@ describe("the login marker", () => {
         service().client = null;
     });
 
+    const directLogin = () => jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "p2p", enabled: true, username: "u", password: "p" });
+
     it("keeps a process that waited from logging in over another process that is now logged in", async () => {
-        const withLock = jest.spyOn(distributedLock, "withLock")
+        directLogin();
+        jest.spyOn(distributedLock, "withLock")
             .mockRejectedValueOnce(new LockHeldError("soulseek:connection"))
             .mockImplementation(async (_key, _ttl, callback) => callback(new AbortController().signal));
         jest.spyOn(distributedLock, "isHeld").mockResolvedValue(false);
         jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(holder);
-        const connect = jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+        (resolveSlskClient as jest.Mock).mockClear();
 
         const failure = await service().ensureConnected("request").catch((err: Error) => err);
 
         expect(failure).toBeInstanceOf(Error);
         expect((failure as Error).message).toContain("another process");
         expect((failure as Error).message).toContain("other-host:77");
-        expect(connect).not.toHaveBeenCalled();
-        expect(withLock).toHaveBeenCalledTimes(1);
+        expect(resolveSlskClient).not.toHaveBeenCalled();
     });
 
-    it("lets a process that waited log in when nobody else is recorded", async () => {
-        jest.spyOn(distributedLock, "withLock")
-            .mockRejectedValueOnce(new LockHeldError("soulseek:connection"))
-            .mockImplementationOnce(async (_key, _ttl, callback) => callback(new AbortController().signal));
-        jest.spyOn(distributedLock, "isHeld").mockResolvedValue(false);
-        jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(null);
-        const connect = jest.spyOn(service(), "connect").mockResolvedValue(undefined);
-
-        await service().ensureConnected("request");
-
-        expect(connect).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not look for another login when the lock was free to begin with", async () => {
+    it("keeps the next request of that process from logging in over it as well, whether or not it waited", async () => {
+        directLogin();
         jest.spyOn(distributedLock, "withLock").mockImplementation(async (_key, _ttl, callback) => callback(new AbortController().signal));
-        const heldByOther = jest.spyOn(soulseekLogin, "heldByOther");
-        jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+        jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(holder);
+        (resolveSlskClient as jest.Mock).mockClear();
 
-        await service().ensureConnected("request");
+        const first = await service().ensureConnected("force").catch((err: Error) => err);
+        const second = await service().ensureConnected("force").catch((err: Error) => err);
+
+        expect((first as Error).message).toContain("other-host:77");
+        expect((second as Error).message).toContain("other-host:77");
+        expect(resolveSlskClient).not.toHaveBeenCalled();
+    });
+
+    it("lets a process log in when nobody else is recorded", async () => {
+        directLogin();
+        jest.spyOn(soulseekLogin, "heldByOther").mockResolvedValue(null);
+        jest.spyOn(soulseekLogin, "mark").mockResolvedValue(undefined);
+        const only = { loggedIn: false, destroy: jest.fn(), on: jest.fn(), login: jest.fn(), server: { conn: new EventEmitter() } };
+        only.login.mockImplementation(async () => { only.loggedIn = true; });
+        (resolveSlskClient as jest.Mock).mockReturnValueOnce(function () { return only; });
+        await whileSocketOpens(service().connect(), only.server.conn);
+
+        expect(only.login).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not look for another login for slskd, which holds the account itself", async () => {
+        jest.spyOn(service(), "getSettings").mockResolvedValue({ mode: "slskd", enabled: true, slskdUrl: "http://slskd", slskdApiKey: "k" });
+        const heldByOther = jest.spyOn(soulseekLogin, "heldByOther");
+        jest.spyOn(soulseekLogin, "mark").mockResolvedValue(undefined);
+        const only = { loggedIn: false, destroy: jest.fn(), on: jest.fn(), login: jest.fn(), server: { conn: new EventEmitter() } };
+        (resolveSlskClient as jest.Mock).mockReturnValueOnce(function () { return only; });
+        await whileSocketOpens(service().connect(), only.server.conn);
 
         expect(heldByOther).not.toHaveBeenCalled();
     });
@@ -201,9 +227,7 @@ describe("a login on the Soulseek server", () => {
     };
     const connectWith = async (client: ReturnType<typeof fakeClient>) => {
         (resolveSlskClient as jest.Mock).mockReturnValueOnce(function () { return client; });
-        const connecting = service().connect();
-        setImmediate(() => client.server.conn.emit("connect"));
-        await connecting;
+        await whileSocketOpens(service().connect(), client.server.conn);
     };
 
     it("is recorded for other processes once a direct login succeeds", async () => {

@@ -319,6 +319,15 @@ class SoulseekService {
             if (!settings.username || !settings.password) {
                 throw new Error("Soulseek credentials not configured");
             }
+            // A second login as the account drops the first. The connection lock covers a connect only, so whoever
+            // finds it free, after a wait or not, looks for a login another process already holds before making one.
+            const other = await soulseekLogin.heldByOther();
+            if (other) {
+                const since = Number.isNaN(other.at.getTime()) ? "an unknown time" : other.at.toISOString();
+                throw new Error(
+                    `soulseek is connected by another process (${other.by}, since ${since}); only one process can be logged in as the account`,
+                );
+            }
             sessionLog("SOULSEEK", `Connecting as ${settings.username}...`);
         }
 
@@ -615,15 +624,7 @@ class SoulseekService {
                 waited.forHolder = true;
                 sessionLog("SOULSEEK", "Connection already in progress - waiting for it to complete", "DEBUG");
                 if ((await this.waitForConnection()) === "free") {
-                    // The lock is free because the other process's connect is over, and it may have logged in. A second
-                    // login as the account drops the first, so this process does not make one.
-                    const other = await soulseekLogin.heldByOther();
-                    if (other) {
-                        const since = Number.isNaN(other.at.getTime()) ? "an unknown time" : other.at.toISOString();
-                        throw new Error(
-                            `soulseek is connected by another process (${other.by}, since ${since}); only one process can be logged in as the account`,
-                        );
-                    }
+                    // The other process's connect is over and it may have logged in: connect() looks before it logs in.
                     await this.connectOnce(mode, waited);
                 }
                 return;

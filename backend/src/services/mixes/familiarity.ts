@@ -221,6 +221,8 @@ async function closestToSeeds(seeds: SeedRow[], signal?: AbortSignal): Promise<F
         matches,
         withData.map((s) => s.id),
     );
+    // What the scoring found is not kept for a lock that was lost while it ran.
+    signal?.throwIfAborted();
     const boosts = new Map<string, number>();
     closest.forEach((row, rank) => boosts.set(row.id, 1 - rank / matches));
     for (const s of withData) boosts.set(s.id, 1);
