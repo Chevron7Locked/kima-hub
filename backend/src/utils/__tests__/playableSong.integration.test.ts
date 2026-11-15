@@ -249,6 +249,10 @@ async function importRefreshed(pending: ReturnType<typeof pendingOf>[]): Promise
     await prisma.spotifyImportJob.create({
         data: { id, userId: USER, spotifyPlaylistId: "pl", playlistName: id, status: "completed", albumsTotal: 0, tracksTotal: pending.length, createdPlaylistId: id, pendingTracks: pending as never },
     });
+    // A refresh fills the playlist's waiting entries, so each pending song is one.
+    await prisma.playlistPendingTrack.createMany({
+        data: pending.map((p, i) => ({ playlistId: id, spotifyArtist: p.artist, spotifyTitle: p.title, spotifyAlbum: p.album, sort: i, rank: `a${i}` })),
+    });
     try {
         await spotifyImportService.refreshJobMatches(id);
     } finally {
