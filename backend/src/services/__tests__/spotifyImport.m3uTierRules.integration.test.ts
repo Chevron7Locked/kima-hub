@@ -6,6 +6,8 @@
  * - A file name that more than one library song answers to is skipped, not given to the lowest id: the song sharing the
  *   most trailing path with the entry wins, and equally long hits are skipped (a bare name is a path of one segment).
  * - Tier 4 breaks a score tie by the exact artist, then the lowest id.
+ * - Tier 4 scores titles by their words in any order, not by subset: a short title is not any longer title that
+ *   contains it ("Love" is not "Love Me Do"), while a featured credit or a remaster note does not count against a title.
  * - When no entry matches, no playlist is made, the owner gets an "import failed" notification, and the import throws
  *   M3UNothingMatched.
  */
@@ -229,6 +231,61 @@ describe("tier 4 breaks a tie by the exact artist, then the lowest id", () => {
 
     it("then takes the lowest id", async () => {
         expect(await match(entry("/nowhere/zzquartz-nothing.flac", names.exact, "zzquartz hello world"))).toBe(`${P}-t4z-b-early`);
+    });
+});
+
+describe("tier 4 scores a title by its words, not by subset", () => {
+    const ARTIST = "zzfuzz band";
+    beforeAll(async () => {
+        await seedSongs("t4t", ARTIST, [
+            ["a-me-do", "zzlo me do", `${P}/t4t/one.flac`],
+            ["b-stan", "zzstan (feat. zzdido)", `${P}/t4t/two.flac`],
+            ["c-jude", "zzhey jude (remastered 2015)", `${P}/t4t/three.flac`],
+            ["d-lucky", "zzget lucky - feat. zzpharrell williams", `${P}/t4t/four.flac`],
+        ]);
+        // A song whose stored title is another's, edited to read as the one the entry names.
+        const album = await prisma.album.findFirstOrThrow({ where: { identityKey: `${P}-t4t-album` } });
+        await prisma.track.create({
+            data: {
+                id: `${P}-t4t-e-edited`, title: "zzoriginal wrong", displayTitle: "zzedit song [feat. zzguest]",
+                albumId: album.id, trackNo: 9, duration: 100, filePath: `${P}/t4t/five.flac`, fileModified: new Date(), fileSize: 1,
+            },
+        });
+    });
+    const byArtist = (title: string) => match(entry("/nowhere/zzfuzz-nothing.flac", ARTIST, title));
+
+    // "zzlo" / "zzlo me do" is the length ratio of "Love" / "Love Me Do" (4 to 10 characters, a title score of 57).
+    it("does not import a longer title because it holds all of the entry's words", async () => {
+        expect(await byArtist("zzlo")).toBeNull();
+    });
+
+    it("still imports the title the entry names, whatever else the library holds", async () => {
+        expect(await byArtist("zzlo me do")).toBe(`${P}-t4t-a-me-do`);
+    });
+
+    it("imports a song whose title carries a featured credit in parentheses", async () => {
+        expect(await byArtist("zzstan")).toBe(`${P}-t4t-b-stan`);
+    });
+
+    it("imports a song whose title carries a featured credit after a dash", async () => {
+        expect(await byArtist("zzget lucky")).toBe(`${P}-t4t-d-lucky`);
+    });
+
+    it("imports a song whose title carries a remaster note", async () => {
+        expect(await byArtist("zzhey jude")).toBe(`${P}-t4t-c-jude`);
+    });
+
+    it("lets the entry carry the featured credit instead", async () => {
+        expect(await byArtist("zzstan ft. zzdido")).toBe(`${P}-t4t-b-stan`);
+    });
+
+    it("still scores a title that is only bracketed text, as before", async () => {
+        await seedSongs("t4b", "zzbracket band", [["a", "[zzbr one]", `${P}/t4b/one.flac`]]);
+        expect(await match(entry("/nowhere/zzbracket-nothing.flac", "zzbracket band", "[zzbr two]"))).toBe(`${P}-t4b-a`);
+    });
+
+    it("counts the title a person edited a song to", async () => {
+        expect(await byArtist("zzedit song")).toBe(`${P}-t4t-e-edited`);
     });
 });
 

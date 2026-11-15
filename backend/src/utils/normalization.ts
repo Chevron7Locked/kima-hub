@@ -33,6 +33,29 @@ export function normalizeTrackTitle(str: string): string {
   return nameWords(stripTrackSuffix(str));
 }
 
+/**
+ * A title without its featured-artist credit: "Stan (feat. Dido)", "Stan [ft. Dido]", "Stan - feat. Dido" and
+ * "Stan feat. Dido" are "Stan". A title that is only a credit is kept whole. (The other callers' strippers also cut
+ * "with", which is a word in real titles, so this one does not.)
+ */
+export function stripFeaturedCredit(str: string): string {
+  const stripped = str
+    .replace(/\s*[([]\s*(?:feat|ft|featuring)\b\.?[^)\]]*[)\]]/gi, " ")
+    .replace(/\s+[-–—]\s*(?:feat|ft|featuring)\b\.?\s.*$/i, "")
+    .replace(/\s+(?:feat\.?|featuring|ft\.)\s.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped || str;
+}
+
+/**
+ * A song title as the words that tell it from another, for scoring: no case, accents, punctuation, edition notes or
+ * featured credit. A title that is only bracketed text keeps its words rather than scoring as empty.
+ */
+export function titleWordsForScoring(str: string): string {
+  return normalizeTrackTitle(stripFeaturedCredit(str)) || nameWords(str);
+}
+
 export function normalizeAlbumForMatching(str: string): string {
   return stripTrackSuffix(str).trim();
 }

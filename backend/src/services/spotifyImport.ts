@@ -45,7 +45,7 @@ import {
   toMatchCandidates,
   type MatchCandidate,
 } from "./trackMatching";
-import { stripTrackSuffix, normalizeTrackTitle } from "../utils/normalization";
+import { stripTrackSuffix, normalizeTrackTitle, titleWordsForScoring } from "../utils/normalization";
 import { nameKey, nameWords } from "./nameFold";
 
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
@@ -596,6 +596,24 @@ const isTitled = (song: { title: string; displayTitle: string | null }, title: s
 /** The best fuzzy score of `text` against the names given (a stored name and its edited one; a missing one counts for nothing), 0 when there is none. */
 const bestTokenSetScore = (text: string, names: (string | null)[]): number =>
   Math.max(0, ...names.flatMap((name) => (name ? [fuzz.token_set_ratio(nameWords(text), nameWords(name))] : [])));
+
+/**
+ * The best fuzzy score of the title `text` against the titles given (a stored one and its edited one; a missing one
+ * counts for nothing), 0 when there is none.
+ *
+ * Words in any order (token_sort_ratio), not subset (token_set_ratio): the subset score is 100 whenever one title's
+ * words all appear in the other, so "Love" took "Love Me Do". Measured 2026-11-15 on 14 true pairs ("Hey Jude" /
+ * "Hey Jude (Remastered 2015)", "Mr Brightside" / "Mr. Brightside", ...) and 14 wrong ones ("Love" / "Love Me Do",
+ * "Help" / "Help Me Rhonda", "One" / "One More Time", ...): token_set_ratio passed 14/14 true and 14/14 wrong;
+ * token_sort_ratio over normalizeTrackTitle passed 12/14 true and 0/14 wrong, the wrong ones topping out at 64
+ * ("Yesterday" / "Yesterday Once More"). With an exact artist a song needs a title score of 66.7 to reach 80 combined.
+ * The two true misses were featured credits ("Stan" / "Stan (feat. Dido)" 44, "Get Lucky" / "Get Lucky (feat. Pharrell
+ * ...)" 33), so the credit is taken off both sides first.
+ */
+const bestTitleScore = (text: string, titles: (string | null)[]): number => {
+  const words = titleWordsForScoring(text);
+  return Math.max(0, ...titles.flatMap((title) => (title ? [fuzz.token_sort_ratio(words, titleWordsForScoring(title))] : [])));
+};
 
 /** The most title-only candidates one lookup reads. */
 const TITLE_CANDIDATES_MAX = 500;
@@ -2818,9 +2836,9 @@ class SpotifyImportService {
 
   /**
    * Import an M3U playlist, matching entries by file path, then filename, then
-   * exact EXTINF artist and title, then fuzzy metadata (token_set_ratio >= 80). The metadata tiers read the name a
-   * person edited an artist or song to as well as the stored one. A file in which no entry matches makes no playlist:
-   * it throws M3UNothingMatched, after telling the owner.
+   * exact EXTINF artist and title, then fuzzy metadata (0.6 title + 0.4 artist >= 80; see bestTitleScore). The
+   * metadata tiers read the name a person edited an artist or song to as well as the stored one. A file in which no
+   * entry matches makes no playlist: it throws M3UNothingMatched, after telling the owner.
    */
   async importFromM3U(
     userId: string,
@@ -2915,7 +2933,7 @@ class SpotifyImportService {
           // lowest id: the candidates come in id order, so the first of equals stays.
           for (const candidate of candidates) {
             // The title or artist name a person edited counts as well as the stored one.
-            const titleScore = bestTokenSetScore(entry.title, [candidate.title, candidate.displayTitle]);
+            const titleScore = bestTitleScore(entry.title, [candidate.title, candidate.displayTitle]);
             const artistScore = bestTokenSetScore(entry.artist, [candidate.album.artist.name, candidate.album.artist.displayName]);
             const combined = titleScore * 0.6 + artistScore * 0.4;
             if (combined < 80) continue;
