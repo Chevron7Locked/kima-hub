@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { redisClient } from "./redis";
 import { logger } from "./logger";
 import { LockHeldError, LockLostError, LockUnavailableError } from "./lockErrors";
+import { deleteIfToken, pexpireIfToken } from "./tokenGuardedKey";
 
 /**
  * What `release` found: "released" (the lock was this lease's and is freed), "lost" (it had expired or another holder
@@ -31,22 +32,6 @@ export type LockResult =
   | { outcome: "acquired"; lease: LockLease }
   | { outcome: "held" }
   | { outcome: "unavailable"; error: unknown };
-
-const RELEASE_SCRIPT = `
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
-  else
-    return 0
-  end
-`;
-
-const RENEW_SCRIPT = `
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("pexpire", KEYS[1], ARGV[2])
-  else
-    return 0
-  end
-`;
 
 export class DistributedLock {
   constructor(private redis: typeof redisClient) {}
@@ -90,7 +75,7 @@ export class DistributedLock {
         if (released) return released;
         let outcome: ReleaseOutcome;
         try {
-          outcome = (await this.redis.eval(RELEASE_SCRIPT, 1, lockKey, token)) === 1 ? "released" : "lost";
+          outcome = (await deleteIfToken(this.redis, lockKey, token)) ? "released" : "lost";
         } catch {
           logger.warn(`[Lock] ${key} could not be released, Redis is unreachable: it frees itself within ${ttlMs} ms`);
           return "unreachable";
@@ -106,8 +91,8 @@ export class DistributedLock {
           // Stamped before asking: the key was extended no earlier than this, so the lock is never thought held longer than it is.
           const askedAt = Date.now();
           try {
-            const kept = await this.redis.eval(RENEW_SCRIPT, 1, lockKey, token, String(ttlMs));
-            if (kept === 1) {
+            const kept = await pexpireIfToken(this.redis, lockKey, token, ttlMs);
+            if (kept) {
               confirmedAt = askedAt;
               return;
             }

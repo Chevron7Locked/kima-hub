@@ -14,13 +14,9 @@
 import os from "os";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import { deleteIfToken, pexpireIfToken } from "../utils/tokenGuardedKey";
 
 const DEFAULT_KEY = "soulseek:logged-in-by";
-
-/** Removes the marker only while it holds this process's own value. */
-const CLEAR_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
-/** Renews the marker only while it holds this process's own value. */
-const RENEW_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`;
 
 export interface LoginHolder {
     /** The process that is logged in. */
@@ -68,7 +64,7 @@ export class SoulseekLogin {
         // Only a login that is still this one keeps beating: a clear or a newer mark may have come while the write ran.
         if (this.value !== value) return;
         this.beat = setInterval(() => {
-            redisClient.eval(RENEW_IF_MINE, 1, this.key, value, String(this.ttlMs)).catch((error: Error) => {
+            pexpireIfToken(redisClient, this.key, value, this.ttlMs).catch((error: Error) => {
                 logger.warn(`[Soulseek] Could not renew the login marker: ${error.message}`);
             });
         }, this.beatMs);
@@ -82,7 +78,7 @@ export class SoulseekLogin {
         this.value = null;
         if (value === null) return;
         try {
-            await redisClient.eval(CLEAR_IF_MINE, 1, this.key, value);
+            await deleteIfToken(redisClient, this.key, value);
         } catch (error) {
             logger.warn(`[Soulseek] Could not remove the login marker: ${(error as Error).message}`);
         }
