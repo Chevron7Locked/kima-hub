@@ -100,14 +100,14 @@ function PlaylistCard({
             type="track"
             index={index}
             className={cn(isHiddenView && "opacity-60 hover:opacity-100")}
-            action={{ icon: Play, label: "Play", onClick: () => onPlay(playlist.id) }}
+            action={{ icon: Play, label: "play", onClick: () => onPlay(playlist.id) }}
             corner={
                 isShared && (
                     <button
                         type="button"
                         onClick={handleToggleHide}
                         disabled={isHiding}
-                        aria-label={playlist.isHidden ? "Show playlist" : "Hide playlist"}
+                        aria-label={playlist.isHidden ? "show playlist" : "hide playlist"}
                         title={playlist.isHidden ? "show playlist" : "hide playlist"}
                         className={cn(
                             "w-8 h-8 rounded-lg flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 touch-reveal",
@@ -170,7 +170,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                 router.push(`/playlist/${result.id}`);
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to create playlist");
+            setError(err instanceof Error ? err.message : "failed to create playlist");
             setIsSubmitting(false);
         }
     };
@@ -182,7 +182,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Playlist name..."
+                placeholder="playlist name..."
                 className={cn("flex-1 min-w-[180px]", PANEL_INPUT)}
                 disabled={isSubmitting}
             />
@@ -196,7 +196,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                         : "bg-white/5 border-white/10 text-[var(--text-muted)] hover:text-white/60"
                 )}
             >
-                {isPublic ? "Public" : "Private"}
+                {isPublic ? "public" : "private"}
             </button>
             <Button
                 variant="primary"
@@ -206,7 +206,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
                 isLoading={isSubmitting}
             >
                 {!isSubmitting && <Check className="w-3.5 h-3.5" />}
-                Create
+                create
             </Button>
             <PanelCloseButton onClick={onClose} />
             {error && (
@@ -237,7 +237,7 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
             await api.post<{ jobId: string }>("/spotify/import/quick", { url: trimmed });
             onClose();
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to start import");
+            setError(err instanceof Error ? err.message : "failed to start import");
         } finally {
             setIsSubmitting(false);
         }
@@ -250,7 +250,7 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
                 type="text"
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setError(null); }}
-                placeholder="Paste a playlist URL (Spotify, YouTube, SoundCloud...)"
+                placeholder="paste a playlist url (spotify, youtube, soundcloud...)"
                 className={cn("flex-1 min-w-[220px]", PANEL_INPUT)}
                 disabled={isSubmitting}
             />
@@ -262,7 +262,7 @@ function ImportUrlPanel({ onClose }: { onClose: () => void }) {
                 isLoading={isSubmitting}
             >
                 {!isSubmitting && <Link2 className="w-3.5 h-3.5" />}
-                Import
+                import
             </Button>
             <PanelCloseButton onClick={onClose} disabled={isSubmitting} />
             {error && (
@@ -314,7 +314,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
             setResult({ playlistId: res.playlistId, matched: res.matched, total: res.total });
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
         } catch (err) {
-            setError(err instanceof Error ? err.message : "M3U import failed");
+            setError(err instanceof Error ? err.message : "m3u import failed");
             setIsSubmitting(false);
         }
     };
@@ -332,7 +332,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                     href={`/playlist/${result.playlistId}`}
                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-brand-hover transition-colors"
                 >
-                    View Playlist
+                    view playlist
                 </Link>
                 <PanelCloseButton onClick={onClose} />
             </div>
@@ -359,7 +359,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                         type="text"
                         value={playlistName}
                         onChange={(e) => setPlaylistName(e.target.value)}
-                        placeholder="Playlist name..."
+                        placeholder="playlist name..."
                         className={cn("flex-1 min-w-[180px]", PANEL_INPUT)}
                         disabled={isSubmitting}
                     />
@@ -371,7 +371,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                         isLoading={isSubmitting}
                     >
                         {!isSubmitting && <Check className="w-3.5 h-3.5" />}
-                        Create Playlist
+                        create playlist
                     </Button>
                     <PanelCloseButton onClick={onClose} />
                     {error && (
@@ -472,15 +472,15 @@ function GettingStarted({
             <div className="flex items-center gap-3 mb-8 pb-4 border-b border-white/10">
                 <div className="w-2 h-2 bg-white/30" />
                 <span className="text-xs text-[var(--text-secondary)]">
-                    Getting Started
+                    getting started
                 </span>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
                 <ActionRow
                     icon={Plus}
-                    title="Create your first playlist"
-                    subtitle="Start from scratch"
+                    title="create your first playlist"
+                    subtitle="start from scratch"
                     brand
                     onClick={() => toggle("create")}
                 >
@@ -489,8 +489,8 @@ function GettingStarted({
 
                 <ActionRow
                     icon={Link2}
-                    title="Import from Spotify or Deezer"
-                    subtitle="Paste a playlist URL"
+                    title="import from spotify or deezer"
+                    subtitle="paste a playlist url"
                     onClick={() => toggle("importUrl")}
                 >
                     {activeAction === "importUrl" && <ImportUrlPanel onClose={close} />}
@@ -498,8 +498,8 @@ function GettingStarted({
 
                 <ActionRow
                     icon={FileMusic}
-                    title="Import from M3U file"
-                    subtitle="Upload .m3u or .m3u8"
+                    title="import from m3u file"
+                    subtitle="upload .m3u or .m3u8"
                     onClick={() => toggle("importFile")}
                 >
                     {activeAction === "importFile" && <ImportM3UPanel onClose={close} />}
@@ -514,8 +514,8 @@ function GettingStarted({
                             <Compass className="w-5 h-5 text-[var(--text-muted)]" />
                         </div>
                         <div>
-                            <h3 className="text-sm font-bold tracking-tight text-white">Browse public playlists</h3>
-                            <p className="text-xs text-[var(--text-muted)]">Discover shared music</p>
+                            <h3 className="text-sm font-bold tracking-tight text-white">browse public playlists</h3>
+                            <p className="text-xs text-[var(--text-muted)]">discover shared music</p>
                         </div>
                     </Link>
                 </div>
@@ -602,7 +602,7 @@ export default function PlaylistsPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#0a0a0a] to-black section-stack">
             <PageHeader
-                title="Playlists"
+                title="playlists"
                 description={
                     `${visiblePlaylists.length} ${visiblePlaylists.length === 1 ? "playlist" : "playlists"}` +
                     (hiddenPlaylists.length > 0 ? ` · ${hiddenPlaylists.length} hidden` : "")
@@ -615,7 +615,7 @@ export default function PlaylistsPage() {
                             aria-pressed={showHiddenTab}
                             onClick={() => setShowHiddenTab(!showHiddenTab)}
                         >
-                            {showHiddenTab ? "Show all" : `Hidden (${hiddenPlaylists.length})`}
+                            {showHiddenTab ? "show all" : `hidden (${hiddenPlaylists.length})`}
                         </Button>
                     )
                 }
@@ -623,20 +623,20 @@ export default function PlaylistsPage() {
                 <div className="flex flex-wrap items-center gap-2 mt-5">
                     <ActionButton
                         icon={Plus}
-                        label="Create"
+                        label="create"
                         active={activeAction === "create"}
                         onClick={() => toggleAction("create")}
                         primary
                     />
                     <ActionButton
                         icon={Link2}
-                        label="Import URL"
+                        label="import url"
                         active={activeAction === "importUrl"}
                         onClick={() => toggleAction("importUrl")}
                     />
                     <ActionButton
                         icon={FileMusic}
-                        label="Import File"
+                        label="import file"
                         active={activeAction === "importFile"}
                         onClick={() => toggleAction("importFile")}
                     />
@@ -646,7 +646,7 @@ export default function PlaylistsPage() {
                         className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[var(--text-secondary)] hover:bg-white/5 border border-white/10 hover:text-white/70 hover:border-white/20 transition-all"
                     >
                         <Compass className="w-4 h-4" />
-                        <span className="hidden sm:inline">Browse</span>
+                        <span className="hidden sm:inline">browse</span>
                     </Link>
                 </div>
 
@@ -670,14 +670,14 @@ export default function PlaylistsPage() {
                 {showHiddenTab && (
                     <div className="mb-6 px-4 py-3 bg-white/5 rounded-lg border border-white/10">
                         <p className="text-xs text-[var(--text-muted)]">
-                            Unhide with the eye button.
+                            unhide with the eye button.
                         </p>
                     </div>
                 )}
 
                 {displayedPlaylists.length > 0 ? (
                     <div>
-                        <SectionHeader type="track" title={showHiddenTab ? "Hidden" : "All Playlists"} count={displayedPlaylists.length} />
+                        <SectionHeader type="track" title={showHiddenTab ? "hidden" : "all playlists"} count={displayedPlaylists.length} />
 
                         <div
                             data-tv-section="playlists"
@@ -701,8 +701,8 @@ export default function PlaylistsPage() {
                     showHiddenTab ? (
                         <EmptyState
                             icon={<ListMusic className="w-12 h-12" />}
-                            title="No hidden playlists"
-                            description="You haven't hidden any playlists"
+                            title="no hidden playlists"
+                            description="you haven't hidden any playlists"
                         />
                     ) : (
                         <GettingStarted
