@@ -8,6 +8,7 @@ import { getSystemSettings, invalidateSystemSettingsCache, saveSystemSettings } 
 import { redisClient } from "../redis";
 import { closeClient } from "../closeRedisClient";
 import { queues } from "../../workers/queues";
+import { notificationService } from "../../services/notificationService";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 
 let before: Record<string, unknown> | null;
@@ -162,5 +163,53 @@ describe("saveSystemSettings and a read in flight", () => {
 
         expect((await stale)?.transcodeCacheMaxGb).toBe(10);
         expect((await fresh)?.transcodeCacheMaxGb).toBe(15);
+    });
+});
+
+describe("what getSystemSettings hands out", () => {
+    // 'xc1.' marks the current format, and the rest is no valid ciphertext: stored, but the key cannot read it.
+    const unreadable = "xc1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    it("is a copy: changing it, nested values too, changes neither the next read nor the cache", async () => {
+        const sortedAt = new Date("2026-01-02T03:04:05Z");
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { fanartApiKey: unreadable, discoverAlbumsSortedAt: sortedAt } });
+        invalidateSystemSettingsCache();
+
+        const first = (await getSystemSettings())!;
+        expect(first.unreadableFields).toEqual(["fanartApiKey"]);
+        first.unreadableFields.push("lidarrApiKey");
+        first.discoverAlbumsSortedAt!.setTime(0);
+        first.transcodeCacheMaxGb = 99;
+
+        // answered from the cache: no read of the row
+        const spy = jest.spyOn(prisma.systemSettings, "findUnique");
+        const second = (await getSystemSettings())!;
+        expect(spy).not.toHaveBeenCalled();
+        expect(second.unreadableFields).toEqual(["fanartApiKey"]);
+        expect(second.discoverAlbumsSortedAt).toEqual(sortedAt);
+        expect(second.transcodeCacheMaxGb).toBe(10);
+    });
+
+    it("is a copy for callers who shared one read, too", async () => {
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { fanartApiKey: unreadable } });
+        invalidateSystemSettingsCache();
+
+        const [a, b] = await Promise.all([getSystemSettings(), getSystemSettings()]);
+        a!.unreadableFields.push("lidarrApiKey");
+
+        expect(b!.unreadableFields).toEqual(["fanartApiKey"]);
+        expect((await getSystemSettings())!.unreadableFields).toEqual(["fanartApiKey"]);
+    });
+
+    it("still answers when the admin notice about an unreadable credential cannot be sent", async () => {
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { acoustidApiKey: unreadable } });
+        invalidateSystemSettingsCache();
+        const notify = jest.spyOn(notificationService, "notifyAdmins").mockRejectedValue(new Error("notifications are down"));
+
+        const settings = await getSystemSettings();
+
+        expect(settings?.acoustidApiKey).toBeNull();
+        expect(settings?.unreadableFields).toContain("acoustidApiKey");
+        expect(notify).toHaveBeenCalled();
     });
 });

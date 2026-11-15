@@ -3,6 +3,7 @@ import { callSettingsListeners, type SystemSettingsChanges, type SystemSettingsF
 import { decryptOrNull, ENCRYPTED_FIELDS, encryptSettings, resolveEncryptedSettings, type EncryptedField } from "./encryptedFields";
 import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 
+// Other processes see a save up to this late, by design: no pub/sub (ruled 2026-11-11).
 const CACHE_TTL_MS = 60 * 1000;
 
 async function buildSettings() {
@@ -54,13 +55,15 @@ function startRead(): Promise<Settings> {
     return read;
 }
 
+// Every caller gets a deep copy (the unreadable-fields list and the dates inside are mutable), so no caller can
+// change what the next one reads.
 export async function getSystemSettings() {
     if (cachedSettings && cacheExpiry > Date.now()) {
-        return { ...cachedSettings };
+        return structuredClone(cachedSettings);
     }
 
     const resolved = await (pending && pending.began === generation ? pending.read : startRead());
-    return resolved && { ...resolved };
+    return resolved && structuredClone(resolved);
 }
 
 export { onSystemSettingsChange } from "./systemSettingsListeners";
