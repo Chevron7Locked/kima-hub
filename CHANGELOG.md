@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dismissing a waiting import song sticks.** A song you dismiss from an import's waiting list comes off the import's total and its saved listing, and a library scan running at the same moment can no longer add it back.
+- **An import's matched count counts songs found later.** Songs found for waiting entries after the import now raise its matched count, and a refresh no longer overwrites the import with an older copy.
+- **Subsonic apps see when a playlist changed.** Playlist replies now carry `created` and `changed`, and adding, removing or replacing songs moves `changed`, so apps that sync by that time pick up the edit.
 - **Wrong-password limits count per account.** Wrong guesses at one account no longer lock another account whose name differs only by spaces.
 - **Play buttons resume.** The play icon on a song row turns to pause while that song plays. The big play button on an album, artist, mix, playlist or Discover page resumes a paused song from where it stopped instead of starting the list again, and on a playlist, mix or Discover page it pauses what is playing. In the Discover list and the search page's songs, a row's button pauses and resumes the current song.
 - **The pause button on the playing song pauses.** In a playlist, mix, album, your songs list or an artist's popular songs, pressing pause on the playing song now pauses it and play resumes from the same point, instead of starting the list again; a double click on the playing song no longer pauses it. Removing, moving or replacing the next song in the last 30 seconds of a song now plays the song the queue shows next, and a one-song repeat keeps playing without a gap.
