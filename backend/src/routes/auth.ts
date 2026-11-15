@@ -44,17 +44,28 @@ function invalidBody(err: unknown, res: Response): Response | null {
     return res.status(400).json({ error: "Invalid request", details: err.issues });
 }
 
+/**
+ * Machine codes the login answers beside its text, so a client reads the code and never the words: the text can change
+ * and the iOS app keeps going on status codes alone.
+ */
+const SECOND_FACTOR_REQUIRED = "2FA_REQUIRED";
+const SECOND_FACTOR_UNAVAILABLE = "2FA_UNAVAILABLE";
+const INVALID_SECOND_FACTOR = "INVALID_2FA_TOKEN";
+const INVALID_RECOVERY_CODE = "INVALID_RECOVERY_CODE";
+
+/** A `token` that is not text is a 400, not a number turned into text; empty text, or text of only spaces and dashes, is not sent. */
 const loginSchema = z.object({
     username: z.string().refine((name) => normalizeUsername(name) !== ""),
     password: z.string().min(1),
+    token: z.string().nullish(),
 });
 
 // POST /auth/login
 router.post("/login", async (req, res) => {
     try {
-        const { username: given, password } = loginSchema.parse(req.body);
-        // The two-factor code, if sent; a client may send it as a number. A code that is only spaces counts as not sent.
-        const typed = req.body.token == null ? "" : normalizeSecondFactor(String(req.body.token));
+        const { username: given, password, token: sent } = loginSchema.parse(req.body);
+        // The two-factor code, if sent. A code that is only spaces and dashes counts as not sent.
+        const typed = sent == null ? "" : normalizeSecondFactor(sent);
         const token = typed === "" ? undefined : typed;
 
         const user = await findUserByUsername(given, {
@@ -88,13 +99,14 @@ router.post("/login", async (req, res) => {
             if (secret === null) {
                 // The password was right, so this is not a wrong guess: it must not count toward locking the account.
                 webLoginGuesses.giveBack(guess);
-                return res.status(401).json({ error: "Two-factor sign-in is unavailable for this account" });
+                return res.status(401).json({ error: "Two-factor sign-in is unavailable for this account", code: SECOND_FACTOR_UNAVAILABLE });
             }
 
             if (!token) {
                 webLoginGuesses.giveBack(guess);
                 return res.status(200).json({
                     requires2FA: true,
+                    code: SECOND_FACTOR_REQUIRED,
                     message: "2FA token required",
                 });
             }
@@ -106,7 +118,11 @@ router.post("/login", async (req, res) => {
             // code is spent by use: the same one, or an earlier step's, is refused a second time.
             const spent = await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token);
             if (!spent) {
-                return res.status(401).json({ error: isRecoveryCodeShaped(token) ? "Invalid recovery code" : "Invalid 2FA token" });
+                return res.status(401).json(
+                    isRecoveryCodeShaped(token)
+                        ? { error: "Invalid recovery code", code: INVALID_RECOVERY_CODE }
+                        : { error: "Invalid 2FA token", code: INVALID_SECOND_FACTOR },
+                );
             }
         }
 
@@ -484,24 +500,27 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
             return res.status(400).json({ error: "Invalid password" });
         }
 
-        if (user.twoFactorEnabled) {
-            // A secret that is missing or unreadable cannot check a code, and is not a reason to skip the check:
-            // it stays on, stored as it is, until the key that reads it is restored or an admin resets it.
-            const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
-            if (secret === null) {
-                return res.status(409).json({ error: UNREADABLE_SECRET });
-            }
-            // Spent like a sign-in's code: one just used to sign in cannot also turn it off, and a recovery code is
-            // taken the way a sign-in takes it, so a person who lost their phone can still turn it off.
-            const spent = await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token);
-            if (!spent) {
-                return res.status(400).json({ error: "Invalid 2FA token" });
-            }
+        if (!user.twoFactorEnabled) {
+            return res.status(400).json({ error: "2FA is not enabled" });
         }
 
-        // Disable 2FA
-        await prisma.user.update({
-            where: { id: req.user!.id },
+        // A secret that is missing or unreadable cannot check a code, and is not a reason to skip the check:
+        // it stays on, stored as it is, until the key that reads it is restored or an admin resets it.
+        const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
+        if (secret === null) {
+            return res.status(409).json({ error: UNREADABLE_SECRET });
+        }
+        // Spent like a sign-in's code: one just used to sign in cannot also turn it off, and a recovery code is
+        // taken the way a sign-in takes it, so a person who lost their phone can still turn it off.
+        const spent = await spendSecondFactor({ id: user.id, recoveryCodes: user.twoFactorRecoveryCodes }, secret, token);
+        if (!spent) {
+            return res.status(400).json({ error: "Invalid 2FA token" });
+        }
+
+        // Disable 2FA, only where it is still on: if another request turned it off since the read above, this one
+        // writes nothing, so it cannot clear a setup begun after.
+        const off = await prisma.user.updateMany({
+            where: { id: user.id, twoFactorEnabled: true },
             data: {
                 twoFactorEnabled: false,
                 twoFactorSecret: null,
@@ -513,7 +532,11 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
             },
         });
 
-        if (user.twoFactorEnabled) logger.info(`[2FA] ${user.id} turned off 2FA`);
+        if (off.count === 0) {
+            return res.status(400).json({ error: "2FA is not enabled" });
+        }
+
+        logger.info(`[2FA] ${user.id} turned off 2FA`);
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {

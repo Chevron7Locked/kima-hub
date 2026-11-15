@@ -362,6 +362,49 @@ describe("a credential the key cannot read", () => {
     });
 });
 
+describe("what a sign-in answers about the second factor, as a code a page can read", () => {
+    it("asks for a code with 2FA_REQUIRED, the message as it was", async () => {
+        await twoFactorOn();
+
+        const res = await login().expect(200);
+
+        expect(res.body).toEqual({ requires2FA: true, code: "2FA_REQUIRED", message: "2FA token required" });
+    });
+
+    it("refuses a wrong authenticator code with INVALID_2FA_TOKEN, the text as it was", async () => {
+        await twoFactorOn();
+
+        const res = await login("000000");
+
+        expect([res.status, res.body]).toEqual([401, { error: "Invalid 2FA token", code: "INVALID_2FA_TOKEN" }]);
+    });
+
+    it("refuses a wrong recovery code with INVALID_RECOVERY_CODE, the text as it was", async () => {
+        await twoFactorOn();
+
+        const res = await login("0123456789ABCDEF");
+
+        expect([res.status, res.body]).toEqual([401, { error: "Invalid recovery code", code: "INVALID_RECOVERY_CODE" }]);
+    });
+
+    it("says 2FA_UNAVAILABLE when the secret cannot be read, the text as it was", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+
+        const res = await login(codeNow());
+
+        expect([res.status, res.body]).toEqual([401, { error: "Two-factor sign-in is unavailable for this account", code: "2FA_UNAVAILABLE" }]);
+    });
+
+    it("gives no code to a wrong password, so a page cannot tell it from an unknown name", async () => {
+        await twoFactorOn();
+
+        const res = await request(app).post("/auth/login").send({ username: USER, password: "nope", token: "000000" });
+
+        expect([res.status, res.body]).toEqual([401, { error: "Invalid credentials" }]);
+    });
+});
+
 describe("signing in with a code", () => {
     it("asks for a code, refuses a wrong one, and takes a current one", async () => {
         await twoFactorOn();
@@ -371,12 +414,36 @@ describe("signing in with a code", () => {
         expect((await login(codeNow()).expect(200)).body.token).toEqual(expect.any(String));
     });
 
-    it("reads a code sent as a number like one sent as text, and never fails on one", async () => {
+    it.each([
+        ["a number", 123456],
+        ["an object", { a: 1 }],
+        ["a list", ["123456"]],
+        ["true", true],
+    ])("answers 400 to a code sent as %s, whatever the account, and changes nothing", async (_name, token) => {
+        await twoFactorOn();
+        const before = await stored();
+        const send = () => request(app).post("/auth/login").send({ username: USER, password: PASSWORD, token });
+
+        const res = await send();
+        expect(res.status).toBe(400);
+        expect(res.body.token).toBeUndefined();
+
+        // The same on an account without 2FA: the body is wrong whatever the account.
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: false } });
+        expect((await send()).status).toBe(400);
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorEnabled: true } });
+
+        expect(await stored()).toEqual(before);
+    });
+
+    it("counts a code that is empty, spaces, or null as not sent", async () => {
         await twoFactorOn();
         const send = (token: unknown) => request(app).post("/auth/login").send({ username: USER, password: PASSWORD, token });
 
-        expect((await send(12345678)).status).toBe(401);
-        expect((await send(Number(codeNow()))).status).toBe(codeNow().startsWith("0") ? 401 : 200);
+        for (const token of ["", "  ", null]) {
+            const res = await send(token);
+            expect([res.status, res.body.requires2FA]).toEqual([200, true]);
+        }
     });
 
     it("refuses a code the second time, and takes a later step's", async () => {
@@ -845,8 +912,48 @@ describe("bodies that are not what the route wants", () => {
     });
 });
 
-it("answers a disable with 2FA already off as before, whatever code it carries", async () => {
-    await disable("000000").expect(200);
+describe("turning it off when it is already off, or when another request just did", () => {
+    it("answers 400 that 2FA is not enabled, whatever code it carries, as the other 2FA routes do", async () => {
+        const res = await disable("000000");
+
+        expect([res.status, res.body.error]).toEqual([400, "2FA is not enabled"]);
+    });
+
+    it("writes only where 2FA is still on: a disable that lost the race answers 400 and does not write over what came after", async () => {
+        await twoFactorOn();
+        const real = prisma.user.updateMany.bind(prisma.user);
+        let raced = false;
+        // Right before the request clears the account, another request turns 2FA off and a new setup is under way.
+        const spy = jest.spyOn(prisma.user, "updateMany").mockImplementation(((args: any) => {
+            if (!raced && args?.data?.twoFactorEnabled === false) {
+                raced = true;
+                return prisma.user
+                    .update({ where: { id: USER }, data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorPendingSecret: encrypt("PENDINGSECRETFROMANEWSETUP"), twoFactorPendingAt: new Date(clock) } })
+                    .then(() => real(args));
+            }
+            return real(args);
+        }) as any);
+
+        const res = await disable(codeNow());
+        spy.mockRestore();
+
+        expect([res.status, res.body.error]).toEqual([400, "2FA is not enabled"]);
+        // The new setup's pending secret was not cleared by the request that lost.
+        expect((await stored()).twoFactorPendingSecret).not.toBeNull();
+    });
+
+    it("logs the turning off once, from the request that did it", async () => {
+        const info = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
+        await twoFactorOn();
+
+        await disable(codeNow()).expect(200);
+        nextStep();
+        await disable(codeNow()).expect(400);
+
+        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => /turned off 2FA/.test(l));
+        info.mockRestore();
+        expect(lines).toHaveLength(1);
+    });
 });
 
 it("refuses an unknown name and a wrong password alike", async () => {
