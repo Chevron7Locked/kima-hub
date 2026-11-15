@@ -4,8 +4,8 @@
  */
 
 import { logger } from "../utils/logger";
-import { artistNamed, isMbid, normalizeArtistName } from "./artistIdentity";
-import { sameArtist, sameName } from "./discovery/discoverEvidence";
+import { artistNamed, isArtistNamed, isMbid, normalizeArtistName } from "./artistIdentity";
+import { hasRealArtistId, sameArtist, sameName } from "./discovery/discoverEvidence";
 import { titlesAgree } from "./albumIdentity";
 import { nameWords } from "./nameFold";
 import type { SeedArtist } from "./discovery/discoverySeeding";
@@ -109,17 +109,25 @@ const jobArtistMbid = (job: { artistMbid: string | null; metadata: unknown }): s
 
 class DiscoverWeeklyService {
     /**
-     * The songs whose files are there and were read, on the DISCOVER album an artist and title name, ignoring case and
-     * accents (nameKey). An artist whose MusicBrainz id differs from `artistMbid` is a namesake (sameArtist).
+     * The songs whose files are there and were read, on the DISCOVER album an artist and title name by `nameKey`
+     * (case, accents and punctuation do not matter). The artist is the one named, or the one with the same real
+     * MusicBrainz id however it is spelt; a namesake under another id is not (sameArtist).
      */
     private async findDiscoverTracksByName(artistName: string, albumTitle: string, artistMbid?: string | null) {
         const albums = await prisma.album.findMany({
-            where: { location: "DISCOVER", artist: artistNamed(artistName) },
-            select: { id: true, title: true, artist: { select: { mbid: true } } },
+            where: {
+                location: "DISCOVER",
+                artist: { OR: [artistNamed(artistName), ...(hasRealArtistId(artistMbid) ? [{ mbid: artistMbid }] : [])] },
+            },
+            select: { id: true, title: true, artist: { select: { name: true, identityKey: true, mbid: true } } },
         });
-        // artistNamed matched the names, so only the ids are left for sameArtist to tell a namesake by.
+        // The name matched by the identity key stands in for sameArtist's name test; the ids decide a namesake.
         const albumIds = albums
-            .filter((a) => sameName(a.title, albumTitle) && sameArtist({ artistMbid: a.artist.mbid, artistName }, { artistMbid, artistName }, () => true))
+            .filter(
+                (a) =>
+                    sameName(a.title, albumTitle) &&
+                    sameArtist({ artistMbid: a.artist.mbid, artistName: a.artist.name }, { artistMbid, artistName }, () => isArtistNamed(a.artist, artistName)),
+            )
             .map((a) => a.id);
         if (albumIds.length === 0) return [];
         return prisma.track.findMany({

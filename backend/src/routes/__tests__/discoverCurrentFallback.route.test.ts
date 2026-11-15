@@ -23,6 +23,7 @@ import { useMidWeekClock } from "./helpers/midWeekClock";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { mountAsServer } from "./helpers/serverMount";
+import { artistIdentityKey } from "../../services/artistIdentity";
 
 const MARK = "zz-curfall";
 let listener: string;
@@ -321,7 +322,7 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         status: "ACTIVE" | "LIKED" = "ACTIVE",
         recorded: number[] = [],
     ) {
-        const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: `${MARK}-${name}` } });
+        const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: artistIdentityKey(`${MARK} ${name}`) } });
         const album = await prisma.album.create({
             data: {
                 rgMbid: `${MARK}-rg-${name}`, identityKey: `${MARK}-${name}`, title: `${MARK} ${name} LP`,
@@ -443,7 +444,7 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
         /** A Discover album whose artist has `albumArtistMbid`, and a suggestion of it with no release id under `suggestedMbid`. */
         async function arrange(albumArtistMbid: string | null, suggestedMbid: string | null) {
             const song = await suggestWithSongs("same", [{ trackNo: 1 }]);
-            await prisma.artist.updateMany({ where: { identityKey: `${MARK}-same` }, data: { mbid: albumArtistMbid } });
+            await prisma.artist.updateMany({ where: { name: `${MARK} same` }, data: { mbid: albumArtistMbid } });
             await prisma.discoveryAlbum.updateMany({ where: { rgMbid: `${MARK}-rg-same` }, data: { rgMbid: "", artistMbid: suggestedMbid } });
             return song(1);
         }
@@ -468,6 +469,54 @@ describe("GET /discover/current -- the stand-in song for a suggestion with no re
             const res = await request(app).get("/discover/current");
 
             expect(titles(res.body)).toEqual([song]);
+        });
+    });
+
+    describe("a suggestion with no release id is matched to its album by the one name rule", () => {
+        const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+
+        /** The album and artist as the scanner stored them, and the suggestion as Lidarr or the recommender spelt them. */
+        async function arrange(stored: { artist: string; title: string }, suggested: { artist: string; title: string }, mbids: [string | null, string | null] = [null, null]) {
+            const song = await suggestWithSongs("fold", [{ trackNo: 1 }]);
+            await prisma.artist.updateMany({ where: { name: `${MARK} fold` }, data: { name: stored.artist, identityKey: artistIdentityKey(stored.artist), mbid: mbids[0] } });
+            await prisma.album.updateMany({ where: { rgMbid: `${MARK}-rg-fold` }, data: { title: stored.title } });
+            await prisma.discoveryAlbum.updateMany({
+                where: { rgMbid: `${MARK}-rg-fold` },
+                data: { rgMbid: "", artistName: suggested.artist, albumTitle: suggested.title, artistMbid: mbids[1] },
+            });
+            return song(1);
+        }
+
+        it.each([
+            ["a curly apostrophe against a straight one", { artist: `${MARK} Ed O'Brien`, title: `${MARK} Don't Stop` }, { artist: `${MARK} Ed O’Brien`, title: `${MARK} Don’t Stop` }],
+            ["accents against none", { artist: `${MARK} Sigur Rós`, title: `${MARK} Ágætis` }, { artist: `${MARK} Sigur Ros`, title: `${MARK} Agaetis` }],
+            ["a different case", { artist: `${MARK} Low`, title: `${MARK} Double Negative` }, { artist: `${MARK} LOW`, title: `${MARK} double negative` }],
+        ])("shows the song despite %s", async (_how, stored, suggested) => {
+            const song = await arrange(stored, suggested);
+
+            const res = await request(app).get("/discover/current");
+
+            expect(titles(res.body)).toEqual([song]);
+        });
+
+        it("shows the song when the artist is spelt differently but has the same real MusicBrainz id", async () => {
+            const song = await arrange(
+                { artist: `${MARK} Kanye West`, title: `${MARK} Donda` },
+                { artist: `${MARK} Ye`, title: `${MARK} Donda` },
+                [ARTIST, ARTIST],
+            );
+
+            const res = await request(app).get("/discover/current");
+
+            expect(titles(res.body)).toEqual([song]);
+        });
+
+        it("does not show the song of another title", async () => {
+            await arrange({ artist: `${MARK} Low`, title: `${MARK} Double Negative` }, { artist: `${MARK} Low`, title: `${MARK} Hey What` });
+
+            const res = await request(app).get("/discover/current");
+
+            expect(res.body.tracks[0]).toMatchObject({ available: false, isPending: true });
         });
     });
 

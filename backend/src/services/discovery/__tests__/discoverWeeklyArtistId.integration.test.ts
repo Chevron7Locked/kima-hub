@@ -128,6 +128,27 @@ describe("a Discover album's songs are found for the same artist only", () => {
         });
     });
 
+    it("finds the songs whatever the apostrophes, accents and case of the names", async () => {
+        await seed(null, "DISCOVER", `${P}Ed O'Brién`);
+        await prisma.album.update({ where: { id: `${P}al` }, data: { title: `${P}Don't Stop` } });
+
+        const ids = (songs: Array<{ id: string }>) => songs.map((t) => t.id);
+        const name = `${P}ED O’BRIEN`;
+        const title = `${P}Don’t stop`;
+
+        expect(ids(await (discoverWeeklyService as any).findDiscoverTracksByName(name, title, null))).toEqual([`${P}t`]);
+        expect(ids(await (discoverWeeklyService as any).discoverAlbumTracks({ artistName: name, albumTitle: title }))).toEqual([`${P}t`]);
+    });
+
+    it("finds the songs of the same real MusicBrainz artist spelt differently, but not of the same name under another id", async () => {
+        await seed(ARTIST, "DISCOVER", `${P}Kanye West`);
+        const asked = (name: string, mbid: string | null) => (discoverWeeklyService as any).findDiscoverTracksByName(name, TITLE, mbid);
+
+        expect((await asked(`${P}Ye`, ARTIST)).map((t: { id: string }) => t.id)).toEqual([`${P}t`]);
+        expect(await asked(`${P}Ye`, NAMESAKE)).toEqual([]);
+        expect(await asked(`${P}Ye`, null)).toEqual([]);
+    });
+
     it("does not pick up a namesake's songs by the artist's normalised name either", async () => {
         // "Low" is found inside "Low & Friends" only by the last, looser way.
         await seed(NAMESAKE, "DISCOVER", `${P}Low & Friends`);

@@ -15,7 +15,8 @@ import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist 
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
-import { NameIndex, relocateDiscoverAlbums, sameArtist } from "../services/discovery/discoverEvidence";
+import { NameIndex, hasRealArtistId, relocateDiscoverAlbums, sameArtist, sameName } from "../services/discovery/discoverEvidence";
+import { artistNamed, isArtistNamed } from "../services/artistIdentity";
 import { distributedLock } from '../utils/distributedLock';
 import { withArtistArtwork } from "../services/artwork";
 import { parseLimit } from "./library/paging";
@@ -382,24 +383,31 @@ async function songsOfGroup(group: SuggestionWithSongs[], liked: boolean) {
     const needy = group.filter((s) => recordedOf(s).length === 0);
     const standIns = new Map<string, StandIn>();
     if (needy.length > 0) {
+        const noId = needy.filter((s) => !s.rgMbid);
+        const mbids = noId.map((s) => s.artistMbid).filter(hasRealArtistId);
         const matches = [
             { rgMbid: { in: needy.filter((s) => s.rgMbid).map((s) => s.rgMbid) } },
-            ...needy.filter((s) => !s.rgMbid).map((s) => ({ title: s.albumTitle, artist: { name: s.artistName } })),
+            // By artist: the one the suggestion names (by the identity key), or one with its real MusicBrainz id however
+            // spelt. The title is compared below, by nameKey, which the database cannot do.
+            ...(noId.length > 0
+                ? [{ artist: { OR: [...noId.map((s) => artistNamed(s.artistName)), ...(mbids.length > 0 ? [{ mbid: { in: mbids } }] : [])] } }]
+                : []),
         ];
         const albums = await prisma.album.findMany({
             where: { AND: [liked ? {} : { location: "DISCOVER" as const }, { OR: matches }] },
             include: {
-                artist: { select: { name: true, mbid: true } },
+                artist: { select: { name: true, identityKey: true, mbid: true } },
                 tracks: { where: rule, take: 1, orderBy: { trackNo: "asc" } },
             },
+            orderBy: { id: "asc" },
         });
         for (const s of needy) {
             const album = s.rgMbid
                 ? albums.find((a) => a.rgMbid === s.rgMbid)
                 : albums.find(
                       (a) =>
-                          a.title === s.albumTitle &&
-                          sameArtist({ artistMbid: a.artist.mbid, artistName: a.artist.name }, { artistMbid: s.artistMbid, artistName: s.artistName }),
+                          sameName(a.title, s.albumTitle) &&
+                          sameArtist({ artistMbid: a.artist.mbid, artistName: a.artist.name }, { artistMbid: s.artistMbid, artistName: s.artistName }, () => isArtistNamed(a.artist, s.artistName)),
                   );
             if (album && album.tracks.length > 0) standIns.set(s.id, { song: album.tracks[0], coverUrl: album.coverUrl });
         }
