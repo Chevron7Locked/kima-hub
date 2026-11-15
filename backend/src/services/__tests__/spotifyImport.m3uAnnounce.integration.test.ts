@@ -6,6 +6,7 @@ import { prisma } from "../../utils/db";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { artistIdentityKey } from "../artistIdentity";
 import { spotifyImportService } from "../spotifyImport";
+import { M3UNothingMatched } from "../m3uParser";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-m3u-announce";
@@ -41,7 +42,7 @@ const heardDuring = async (filePath: string) => {
     const stop = eventBus.subscribe(`${P}-usr`, { send: (event) => (heard.push(event), true) });
     const result = await spotifyImportService
         .importFromM3U(`${P}-usr`, `${P} list`, [{ filePath, artist: null, title: null, durationSeconds: 100 }])
-        .catch(() => null)
+        .catch((error) => (error instanceof M3UNothingMatched ? null : Promise.reject(error)))
         .finally(stop);
     return { result, events: heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload) };
 };
