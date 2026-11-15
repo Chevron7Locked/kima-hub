@@ -7,6 +7,7 @@
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
 import { albumCoverUrls, getMixColor, tracksByIds } from "./mixes/helpers";
 import { RECIPE_LINE, UnrankableLibraryError, getRecipe, pageMemberCount, pickPageTracks } from "./mixes/recipes";
@@ -35,6 +36,14 @@ const MOOD_FIELDS: MoodField[] = MOODS.map((m) => m.field);
 export const NEUTRAL = "neutral";
 /** No current mood scores for this track (analysis, its sound vector or the mood step pending, or failed). */
 export const UNANALYZED = "unanalyzed";
+
+/**
+ * How many served song ids a listener's mood memory keeps: the newest 300. A mix serves 15 songs (MOOD_MIX_LIMIT in
+ * routes/mixesValidation.ts), so that is about twenty servings, a month of daily visits; the id array stays a few
+ * kilobytes and the mix still has songs to draw on, since the pick only skips remembered ids while at least
+ * MIN_MIX_TRACKS fresh ones remain.
+ */
+export const SERVED_MEMORY = 300;
 
 const MOOD_BY_ID: Record<MoodType, (typeof MOODS)[number]> = Object.fromEntries(
     MOODS.map((m) => [m.id, m])
@@ -451,10 +460,13 @@ class MoodBucketService {
     }
 
     /**
-     * Remember the exact ids a mix was served with, so the next mix for this
-     * user skips them. Update-only: without a saved mix there is nothing to
-     * remember against, and creating one would surface an empty mix on the
-     * home page. Keyed on the mood too, so the memory can't leak across moods.
+     * Add the ids a mix was served with to what this user was already served,
+     * so the next mix skips all of it, not just the last serving. A song served
+     * again moves to the newest place; the memory keeps the SERVED_MEMORY most
+     * recent. One statement, so two servings at once both land. Update-only:
+     * without a saved mix there is nothing to remember against, and creating
+     * one would surface an empty mix on the home page. Keyed on the mood too,
+     * so the memory can't leak across moods.
      */
     async recordServedTracks(
         userId: string,
@@ -463,10 +475,23 @@ class MoodBucketService {
     ): Promise<void> {
         if (trackIds.length === 0) return;
 
-        await prisma.userMoodMix.updateMany({
-            where: { userId, mood },
-            data: { servedTrackIds: trackIds },
-        });
+        await prisma.$executeRaw`
+            UPDATE "UserMoodMix" u SET
+                "servedTrackIds" = (
+                    SELECT COALESCE(array_agg(kept.id ORDER BY kept.last), '{}'::text[])
+                    FROM (
+                        SELECT id, last FROM (
+                            SELECT e.id, max(e.pos) AS last
+                            FROM unnest(u."servedTrackIds" || ${trackIds}::text[]) WITH ORDINALITY AS e(id, pos)
+                            GROUP BY e.id
+                        ) d
+                        ORDER BY last DESC
+                        LIMIT ${SERVED_MEMORY}
+                    ) kept
+                ),
+                "updatedAt" = ${nodeClock()}
+            WHERE u."userId" = ${userId} AND u.mood = ${mood}
+        `;
     }
 }
 
