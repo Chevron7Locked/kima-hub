@@ -729,13 +729,14 @@ describe("POST /api/playback-state: a save of the queue the player was shown", (
         expect(await storedIds(user.id)).toEqual(["s3", "gone", "s1", "bad"]);
     });
 
-    it("keeps the position when the player is on the song standing in for a hidden current one", async () => {
+    it("resets the position when the player is on the song standing in for a hidden current one, which this save makes the stored current", async () => {
         const user = await withHidden("hid-standin", ["s1", "gone", "s2"], 1);
 
         await save(user.id, { playbackType: "track", queue: shown("s1", "s2"), currentIndex: 1 }).expect(200);
 
         expect(await storedIds(user.id)).toEqual(["s1", "gone", "s2"]);
-        expect((await row(user.id)).position).toBe(9000);
+        const after = await row(user.id);
+        expect([after.currentIndex, after.trackId, after.position]).toEqual([2, `${S}s2`, 0]);
     });
 
     it("lets the songs it is shown fill the limit before the hidden ones take a place", async () => {

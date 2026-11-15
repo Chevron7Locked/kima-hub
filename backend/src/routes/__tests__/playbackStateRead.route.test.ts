@@ -87,13 +87,20 @@ describe("GET /api/playback-state", () => {
         expect(res.body.queueSource).toBe("album:x");
     });
 
-    it("when the current song is left out, the next playable one is current, and the track follows and the position is as saved", async () => {
+    it("when the current song is left out, the next playable one is current, and the track follows and starts from its beginning", async () => {
         await save([`${P}ok1`, `${P}gone`, `${P}ok2`], 1, { trackId: `${P}gone`, position: 7000 });
         const res = await get();
         expect(ids(res.body)).toEqual([`${P}ok1`, `${P}ok2`]);
         expect(res.body.currentIndex).toBe(1);
         expect(res.body.trackId).toBe(`${P}ok2`);
-        expect(res.body.position).toBe(7000);
+        expect(res.body.position).toBe(0);
+    });
+
+    it("keeps the offset on a repeated song, the place being the one saved and not the song's first place", async () => {
+        await save([`${P}ok1`, `${P}gone`, `${P}ok1`], 2, { trackId: `${P}ok1`, position: 7000 });
+        const res = await get();
+        expect(ids(res.body)).toEqual([`${P}ok1`, `${P}ok1`]);
+        expect([res.body.currentIndex, res.body.position]).toEqual([1, 7000]);
     });
 
     it("keeps the offset when the current song is playable", async () => {

@@ -16,7 +16,7 @@
  * - A client is shown only the playable songs of the stored queue (a song whose file went missing, or a Discover
  *   song, is left out). The stored queue itself is left as it is, so a song whose file comes back returns to it.
  *   When the current song is left out, the next playable one becomes current (else the last one before it), and the
- *   position is the one saved: it is shown whenever a current song is.
+ *   position is the saved current song's own, so the song standing in for it starts from 0.
  * - The index kept with the queue and the entries stay in one coordinate system: the stored one. A client counts what it
  *   was shown, so a save carries the index into the stored queue (`planQueue` for a queue sent as ids, whole or as
  *   entries, `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored
@@ -315,8 +315,9 @@ export async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEp
  * A client is shown only the playable songs, so the ids it sends back lack the hidden songs the person's stored queue
  * holds: those stay (`hiddenBehind`), and the index, which counts what the client was shown, is carried over to the
  * stored place of that song. They never push a song the client sent out of the limit. A hidden song that is gone from
- * the library is not brought back. `sameAsShown` is whether the client is shown the same queue and place as it already
- * was by the stored state, so a save that only sends back what it was shown changes nothing it can see.
+ * the library is not brought back. `sameAsShown` is whether the client is shown the same queue and place as the stored
+ * state shows it, with the stored current song itself shown (a position belongs to its song, so a stand-in is never
+ * "the same"), so a save that only sends back what it was shown changes nothing it can see.
  */
 export async function planQueue(
     tx: Pick<Prisma.TransactionClient, "track" | "playbackState">,
@@ -362,7 +363,7 @@ export async function planQueue(
     const isPlayable = (id: string) => playable.has(id);
     const before = shownPlace(storedIds, state?.currentIndex ?? 0, isPlayable);
     const after = shownPlace(queue.map((item) => item.id), currentIndex, isPlayable);
-    const sameAsShown = state !== null && before.index === after.index && before.ids.length === after.ids.length && before.ids.every((id, at) => id === after.ids[at]);
+    const sameAsShown = state !== null && before.onPlace && before.index === after.index && before.ids.length === after.ids.length && before.ids.every((id, at) => id === after.ids[at]);
     return { queue: queue.length > 0 ? queue : null, currentIndex, placeKept: place.placeKept, sameAsShown };
 }
 
@@ -399,11 +400,20 @@ function hiddenBehind(sent: readonly string[], stored: readonly string[], playab
  * What a client is shown of a queue: the songs it can play, in order, and the place it is on counted over those. A place
  * that is not a playable song is stood in for by the next playable one, the last one at most.
  */
-function shownPlace(ids: readonly string[], index: number, isPlayable: (id: string) => boolean): { ids: string[]; index: number } {
+function shownPlace(
+    ids: readonly string[],
+    index: number,
+    isPlayable: (id: string) => boolean,
+): { ids: string[]; index: number; onPlace: boolean } {
     const shown = ids.filter(isPlayable);
     const placeIn = Math.min(Math.max(index, 0), Math.max(ids.length - 1, 0));
     const before = ids.slice(0, placeIn).filter(isPlayable).length;
-    return { ids: shown, index: shown.length === 0 ? 0 : Math.min(before, shown.length - 1) };
+    return {
+        ids: shown,
+        index: shown.length === 0 ? 0 : Math.min(before, shown.length - 1),
+        // Whether the place itself is shown, and not a song standing in for it.
+        onPlace: ids.length > 0 && isPlayable(ids[placeIn]),
+    };
 }
 
 const INT32_MAX = 2_147_483_647;
@@ -418,8 +428,9 @@ export const SAVE_TIMEOUT_MS = 30_000;
  * stores what it took out, and a web save meeting this one leaves one whole save. What is left out, and how the queue is
  * cut and the index carried over, and which hidden songs of the stored queue stay (the app was shown the playable ones
  * only), is `planQueue`'s; when a save sends a current song that is left out, the song now in its place is current, from its
- * start (a read of the saved state shows the position as saved). The
- * position is kept when the current place itself is kept, not when another place holds its song. The queue limit is
+ * start. The position is kept when the current place itself is kept, not when another place holds its song; a current
+ * song that is hidden (missing or corrupt) keeps the position in the row, and a read shows the song standing in for it
+ * from 0 until the file returns. The queue limit is
  * read before the transaction opens. The index and the position are whole numbers of 0 or more, as the Subsonic reader
  * has checked them; anything else is a caller's mistake and throws before the database is touched.
  */
@@ -481,7 +492,7 @@ export async function playableQueue(
     );
     // Each song is shown as it is now (an edited title, a renamed artist, a new cover), not as it was when saved.
     const queue = saved.flatMap((item) => now.get(item.id) ?? []);
-    const { index: currentIndex } = shownPlace(saved.map((item) => item.id), state?.currentIndex ?? 0, (id) => now.has(id));
+    const { index: currentIndex, onPlace } = shownPlace(saved.map((item) => item.id), state?.currentIndex ?? 0, (id) => now.has(id));
     // A track state that names a track is shown the current song of the queue as shown (a stand-in when the stored one
     // is hidden), whatever the stored name says. With no queue shown, the name stays only while that song is playable.
     // No name stays none. A podcast or audiobook state is not music playback: it keeps the music queue underneath and
@@ -491,8 +502,8 @@ export async function playableQueue(
     return {
         queue,
         currentIndex,
-        // As saved whenever a current song is shown, the song standing in for a hidden current one included; none shown, none.
-        position: queue.length > 0 ? (state?.position ?? 0) : 0,
+        // The position is the saved current song's own: a song standing in for a hidden current one starts from 0.
+        position: onPlace ? (state?.position ?? 0) : 0,
         trackId,
     };
 }
