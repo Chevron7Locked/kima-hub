@@ -26,6 +26,9 @@ const server = vi.hoisted(() => ({
     savesInFlight: 0,
     mostSavesInFlight: 0,
     stateReads: 0,
+    /** Holds a read (after the first `readsToPass`) until it is let go; it answers what the server held when asked. */
+    readGate: null as Promise<void> | null,
+    readsToPass: 0,
     /** Runs as a save reaches the server, before it is written: another device saving in the meantime. */
     beforeSave: null as (() => void) | null,
     /** The saves the server refused for naming a time that was no longer its own. */
@@ -46,7 +49,10 @@ vi.mock("@/lib/api", () => {
         getQueueLimit: async () => ({ maxQueueLength: 1000 }),
         getPlaybackState: async () => {
             server.stateReads++;
-            return server.state;
+            const answer = server.state;
+            if (server.readsToPass > 0) server.readsToPass--;
+            else if (server.readGate) await server.readGate;
+            return answer;
         },
         getTrack: async (id: string) => {
             await new Promise((r) => setTimeout(r, server.trackDelay));
@@ -195,6 +201,8 @@ beforeEach(() => {
     server.savesInFlight = 0;
     server.mostSavesInFlight = 0;
     server.stateReads = 0;
+    server.readGate = null;
+    server.readsToPass = 0;
     server.beforeSave = null;
     server.refused = [];
     server.saveAnswers409 = false;
@@ -904,6 +912,67 @@ describe("a state another device cleared", () => {
         expect(server.saves).toHaveLength(saved + 1);
         expect(server.state).toMatchObject({ trackId: "c" });
     });
+});
+
+describe("a read that began before this device's own save landed", () => {
+    function holdReads(readsToPass = 0) {
+        let release: () => void = () => undefined;
+        server.readGate = new Promise<void>((resolve) => { release = resolve; });
+        server.readsToPass = readsToPass;
+        return () => { server.readGate = null; release(); };
+    }
+
+    it("does not make the server look empty to the poll, so the state it holds is still not sent again", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        // The server is empty when the poll asks; the answer is held on its way.
+        server.state = null;
+        const letGo = holdReads();
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        // This device saves meanwhile, so the server holds a state when the older answer reaches this page.
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => letGo());
+        await act(async () => polling);
+        // Away from that state and back within the wait: the server has it, so nothing is sent.
+        await act(async () => probe.controls.toggleShuffle());
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+    }, 15_000);
+
+    it("does not make the server look empty when the read that settles a gone item is the older one", async () => {
+        const tick = capturePoll();
+        await open();
+        await wait(1500);
+        server.state = {
+            playbackType: "audiobook", trackId: null, audiobookId: "book", podcastId: null, queue: null, currentIndex: 0,
+            isShuffle: false, updatedAt: new Date(Date.now() + 5000).toISOString(),
+        };
+        server.audiobookGone = true;
+        // The poll's own read answers at once; the one that settles the gone item is asked after the state was
+        // cleared, and its answer ("nothing") is held on its way.
+        const letGo = holdReads(1);
+        server.whileAsking = () => { server.whileAsking = null; server.state = null; };
+        let polling: Promise<void> = Promise.resolve();
+        await act(async () => {
+            polling = Promise.resolve(tick()()).then(() => undefined);
+        });
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+        await act(async () => letGo());
+        await act(async () => polling);
+        await act(async () => probe.controls.toggleShuffle());
+        await act(async () => probe.controls.toggleShuffle());
+        await wait(1500);
+        expect(server.saveAttempts).toBe(1);
+    }, 15_000);
 });
 
 describe("the wait after failed saves", () => {

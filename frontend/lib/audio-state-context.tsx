@@ -385,6 +385,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     // What the server is known to hold, as a playbackKey. Restoring or adopting the server's state is not a change,
     // so the save effect skips a state equal to it instead of writing it straight back.
     const serverKnownRef = useRef<string | null>(null);
+    // How many saves of this device have landed. A read of the server that began before one landed is older than it, so
+    // what it says of the server (here: that it holds nothing) is not believed over a save that came after.
+    const landedSavesRef = useRef(0);
     // A restore that failed left this page without what the server holds, so its first state is no listener's choice.
     const restoreFailedRef = useRef(false);
     const storedMediaRef = useRef<string | null>(currentAudiobook?.id ?? currentPodcast?.id ?? null);
@@ -443,6 +446,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         try {
             const result = await api.savePlaybackState(next.state, { keepalive: next.keepalive === true });
             serverKnownRef.current = next.key;
+            landedSavesRef.current += 1;
             markSynced(new Date(result.updatedAt));
             if (saveRunRef.current === next.run) {
                 savePendingRef.current = false;
@@ -916,10 +920,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     savePendingRef.current ||
                     (lastServerSyncRef.current !== null && lastServerSyncRef.current > polledAt);
                 if (settledElsewhere()) return;
+                const landedBefore = landedSavesRef.current;
                 const held = await api.getPlaybackState().catch(() => undefined);
                 // Cleared, or saved again by another device (a newer time than the one that was polled).
                 // `undefined` is a failed look, which says nothing of what the server holds; `null` is no state.
-                if (held === null && mounted) serverKnownRef.current = null;
+                if (held === null && mounted && landedSavesRef.current === landedBefore) serverKnownRef.current = null;
                 if (!held || new Date(held.updatedAt) > polledAt || settledElsewhere()) return;
                 if (liveRef.current.mediaId) {
                     // Something plays here: it replaces the gone item. Its save is not made yet only while the page
@@ -938,11 +943,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     // Another device saved, or cleared the state, since it was read. A clear is taken up as the poll
                     // takes one up, unless a newer change made here is owed (it then saves the state back, as any
                     // change does); a newer state is taken up by the check made at once.
+                    const landedBeforeLook = landedSavesRef.current;
                     const now = await api.getPlaybackState().catch(() => undefined);
-                    if (now === null && mounted && !changedHere() && !savePendingRef.current) adoptCleared(null);
+                    // A look that began before a save of this device landed is the older word: it is not acted on, and the
+                    // check made at once looks again.
+                    const olderThanASave = landedSavesRef.current !== landedBeforeLook;
+                    if (now === null && mounted && !olderThanASave && !changedHere() && !savePendingRef.current) adoptCleared(null);
                     else {
                         // The server holds nothing: what this device last saved is no longer there, whatever it was.
-                        if (now === null && mounted) serverKnownRef.current = null;
+                        if (now === null && mounted && !olderThanASave) serverKnownRef.current = null;
                         nowOwed = true;
                     }
                 } else {
@@ -957,10 +966,12 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 !mounted || changedHere() || (currentMediaId !== undefined && savePendingRef.current);
 
             try {
+                const landedBeforeRead = landedSavesRef.current;
                 const serverState = await api.getPlaybackState();
                 // No state at all: whatever this device last saved is gone from the server, so the same state saved
-                // again is not a repeat. A change still owed stays owed.
-                if (serverState === null && mounted) serverKnownRef.current = null;
+                // again is not a repeat. A change still owed stays owed. A read that began before a save of this
+                // device landed is older than it, and says nothing of what the server holds now.
+                if (serverState === null && mounted && landedSavesRef.current === landedBeforeRead) serverKnownRef.current = null;
                 if (!serverState || !mounted || changedHere()) return;
 
                 const serverUpdatedAt = new Date(serverState.updatedAt);
