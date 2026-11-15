@@ -9,7 +9,7 @@ import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
 import { sweepFailedDownloads } from "../services/lidarrFailures";
 import crypto from "crypto";
-import { safeError, UserFacingError } from "../utils/errors";
+import { refuseRequest, safeError, UserFacingError } from "../utils/errors";
 import { failureCause } from "../utils/outcome";
 import { isMbid } from "../services/artistIdentity";
 
@@ -27,19 +27,15 @@ router.post("/", requireAcquirePermission, async (req, res) => {
         const userId = req.user!.id;
 
         if (!type || !mbid || !subject) {
-            return res.status(400).json({
-                error: "Missing required fields: type, mbid, subject",
-            });
+            return refuseRequest(req, res, "type, mbid and subject required");
         }
 
         if (!isMbid(mbid)) {
-            return res.status(400).json({ error: "mbid must be a MusicBrainz id" });
+            return refuseRequest(req, res, "mbid: not a MusicBrainz id");
         }
 
         if (type !== "artist" && type !== "album") {
-            return res
-                .status(400)
-                .json({ error: "Type must be 'artist' or 'album'" });
+            return refuseRequest(req, res, "type: must be artist or album");
         }
 
         const lidarrEnabled = await lidarrService.isEnabled();
@@ -370,7 +366,7 @@ router.delete("/clear-all", async (req, res) => {
         const where: { userId: string; status?: string } = { userId };
         if (status !== undefined) {
             if (typeof status !== "string" || !downloadJobs.JOB_STATUSES.includes(status)) {
-                return res.status(400).json({ error: `status must be one of: ${downloadJobs.JOB_STATUSES.join(", ")}` });
+                return refuseRequest(req, res, "status: not a job status");
             }
             where.status = status;
         }

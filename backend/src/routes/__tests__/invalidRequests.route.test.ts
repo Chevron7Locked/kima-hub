@@ -1,6 +1,8 @@
 // A request that does not parse is answered with a plain 400 and nothing about the schema: no field names, no rules.
-// The issues go to the server log. Every route that parses a body, query or parameter with zod is listed here, mounted
-// as the server mounts it, on the real database with real tokens.
+// The issues go to the server log. Every route that parses a body, query or parameter with zod, and every route that
+// checks one by hand and refuses it as malformed, is listed here, mounted as the server mounts it, on the real
+// database with real tokens. A refusal a person reads and acts on (a code that expired, Lidarr not set up, a mix with
+// too few songs) is a domain answer, keeps its own words, and is not here.
 
 import express from "express";
 import request from "supertest";
@@ -8,6 +10,7 @@ import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+import { internalSecret } from "../../utils/internalSecret";
 import { mountApi } from "../mounts";
 
 jest.setTimeout(60_000);
@@ -23,6 +26,9 @@ const app = express();
 app.use(express.json());
 mountApi(app, { health, publicVibe: false });
 
+const CUID = "c" + "a".repeat(24);
+const MBID = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
+
 let playlistId = "";
 
 beforeAll(async () => {
@@ -35,7 +41,7 @@ afterAll(async () => {
     await closeEngineConnections();
 });
 
-type Row = [name: string, method: "get" | "post" | "put" | "patch", path: () => string, body?: unknown];
+type Row = [name: string, method: "get" | "post" | "put" | "patch" | "delete", path: () => string, body?: unknown];
 
 /** One bad request per place a route parses what it was sent with zod. */
 const ROUTES: Row[] = [
@@ -70,6 +76,62 @@ const ROUTES: Row[] = [
     ["podcasts: a chart with too long a page", "get", () => "/api/podcasts/charts?limit=999", undefined],
     ["podcasts: a chart for a category that is not a number", "get", () => "/api/podcasts/charts?category=abc", undefined],
     ["podcasts: a genre chart for a genre that is not a number", "get", () => "/api/podcasts/discover/genre/abc", undefined],
+    ["podcasts: a chart for an empty category", "get", () => "/api/podcasts/charts?category=", undefined],
+    ["podcasts: a chart for a blank category", "get", () => "/api/podcasts/charts?category=%20%20", undefined],
+    ["podcasts: subscribe with neither a feed nor an iTunes id", "post", () => "/api/podcasts/subscribe", {}],
+    ["podcasts: genres with none given", "get", () => "/api/podcasts/discover/genres", undefined],
+    ["podcasts: genres that are not numbers", "get", () => "/api/podcasts/discover/genres?genres=a,b", undefined],
+    ["stats: an hour on a day that does not exist", "get", () => "/api/stats/hour?dow=9&hour=1", undefined],
+    ["stats: tracks of a slice that does not exist", "get", () => "/api/stats/tracks?of=bogus", undefined],
+    ["stats: plays of a track with too long an id", "get", () => `/api/stats/track/${"x".repeat(65)}/plays`, undefined],
+    ["stats: a region off the grid", "get", () => "/api/stats/region?x=0&y=99", undefined],
+    ["vibe: a path with no tracks", "post", () => "/api/vibe/path", {}],
+    ["vibe: a path with ids that are not ids", "post", () => "/api/vibe/path", { startTrackId: "a", endTrackId: "b" }],
+    ["vibe: a path from a track to itself", "post", () => "/api/vibe/path", { startTrackId: CUID, endTrackId: CUID }],
+    ["vibe: a blend with nothing to add", "post", () => "/api/vibe/alchemy", {}],
+    ["vibe: a blend of too many", "post", () => "/api/vibe/alchemy", { add: Array.from({ length: 11 }, () => CUID) }],
+    ["vibe: a blend to subtract that is not a list", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: "x" }],
+    ["vibe: a blend to add that are not ids", "post", () => "/api/vibe/alchemy", { add: ["nope"] }],
+    ["vibe: a blend to subtract that are not ids", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: ["nope"] }],
+    ["vibe: a search that is one letter", "post", () => "/api/vibe/search", { query: "a" }],
+    ["vibe: a search that is far too long", "post", () => "/api/vibe/search", { query: "a".repeat(501) }],
+    ["mixes: a mood that does not exist", "get", () => "/api/mixes/mood/buckets/nope", undefined],
+    ["mixes: saving a mood that does not exist", "post", () => "/api/mixes/mood/buckets/nope/save", {}],
+    ["mixes: saving songs that are not a list", "post", () => "/api/mixes/mood/buckets/happy/save", { trackIds: "x" }],
+    ["mixes: saving songs that are not text", "post", () => "/api/mixes/mood/buckets/happy/save", { trackIds: [5] }],
+    ["mixes: saving too many songs", "post", () => "/api/mixes/mood/buckets/happy/save", { trackIds: Array.from({ length: 16 }, () => "x") }],
+    ["discover: liking with no album", "post", () => "/api/discover/like", {}],
+    ["discover: unliking with no album", "delete", () => "/api/discover/unlike", {}],
+    ["discover: a playlist size off the steps", "patch", () => "/api/discover/config", { playlistSize: 7 }],
+    ["discover: retry attempts out of range", "patch", () => "/api/discover/config", { maxRetryAttempts: 99 }],
+    ["discover: exclusion months out of range", "patch", () => "/api/discover/config", { exclusionMonths: 99 }],
+    ["discover: a download ratio out of range", "patch", () => "/api/discover/config", { downloadRatio: 9 }],
+    ["discover: an on-switch that is not a boolean", "patch", () => "/api/discover/config", { enabled: "yes" }],
+    ["analysis: a worker count that is not a number", "put", () => "/api/analysis/workers", { workers: "many" }],
+    ["analysis: a clap worker count out of range", "put", () => "/api/analysis/clap-workers", { workers: 0 }],
+    ["analysis: together that is not a boolean", "put", () => "/api/analysis/together", {}],
+    ["enrichment: a rerun of a step that does not exist", "post", () => "/api/enrichment/rerun", { step: "bogus" }],
+    ["enrichment: failures of a type that does not exist", "get", () => "/api/enrichment/failures?entityType=bogus", undefined],
+    ["enrichment: a retry with no ids", "post", () => "/api/enrichment/retry", {}],
+    ["enrichment: an album year that is not a number", "put", () => "/api/enrichment/albums/none/metadata", { year: "abc" }],
+    ["enrichment: a track number that is not a number", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: "abc" }],
+    ["enrichment: a concurrency that is not a number", "put", () => "/api/enrichment/concurrency", {}],
+    ["cover art: an id that is not a cover id", "get", () => "/api/library/cover-art/not-a-cover-id", undefined],
+    ["cover art: nothing to look up", "get", () => "/api/library/cover-art", undefined],
+    ["tracks: an album given twice", "get", () => "/api/library/tracks?albumId=a&albumId=b", undefined],
+    ["radio: a row of a scope that does not exist", "get", () => "/api/library/radio/row?scope=moon", undefined],
+    ["radio: a station of no type", "get", () => "/api/library/radio", undefined],
+    ["stream: a quality that does not exist", "get", () => "/api/library/tracks/none/stream?quality=loud", undefined],
+    ["prewarm: a quality that does not exist", "post", () => "/api/library/tracks/none/prewarm?quality=loud", {}],
+    ["downloads: a request with nothing in it", "post", () => "/api/downloads", {}],
+    ["downloads: a request with an id that is not a musicbrainz id", "post", () => "/api/downloads", { type: "album", mbid: "x", subject: "y" }],
+    ["downloads: a request for a type that does not exist", "post", () => "/api/downloads", { type: "song", mbid: MBID, subject: "y" }],
+    ["downloads: clearing jobs of a status that does not exist", "delete", () => "/api/downloads/clear-all?status=bogus", undefined],
+    ["browse: a search that is one letter", "get", () => "/api/browse/playlists/search?q=a", undefined],
+    ["browse: a link that is not given", "post", () => "/api/browse/playlists/parse", {}],
+    ["device link: a verify with no code", "post", () => "/api/device-link/verify", {}],
+    ["api keys: a key with no device name", "post", () => "/api/api-keys", {}],
+    ["api keys: a key with a device name that is a number", "post", () => "/api/api-keys", { deviceName: 5 }],
     ["auth: a sign-in with nothing", "post", () => "/api/auth/login", {}],
     ["auth: 2fa enable with no code", "post", () => "/api/auth/2fa/enable", {}],
     ["auth: 2fa disable with no code", "post", () => "/api/auth/2fa/disable", { password: "x" }],
@@ -93,6 +155,45 @@ describe("a request that does not parse", () => {
 
         const lines = logged.mock.calls.map((call) => String(call[0]));
         expect(lines.some((line) => line.includes("/plays") && line.includes("trackId"))).toBe(true);
+    });
+
+    it("is logged by a route that checks by hand, with the rule it broke", async () => {
+        const logged = expectLog("warn");
+
+        await request(app).get("/api/mixes/mood/buckets/hunter2-secret-mood").set("Authorization", bearer).expect(400);
+
+        const lines = logged.mock.calls.map((call) => String(call[0]));
+        expect(lines.some((line) => line.includes("[InvalidRequest]") && line.includes("/mixes/mood/buckets"))).toBe(true);
+        expect(lines.some((line) => line.includes("mood: not one of the known moods"))).toBe(true);
+    });
+
+    it("is answered the same by the analyzer's own report, which has no signed-in person", async () => {
+        const logged = expectLog("warn");
+
+        const res = await request(app)
+            .post("/api/analysis/vibe/failure")
+            .set("x-internal-secret", await internalSecret())
+            .send({});
+
+        expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
+        expect(logged.mock.calls.map((call) => String(call[0])).some((line) => line.includes("trackId"))).toBe(true);
+    });
+
+    it("leaves the answers a person reads and acts on in their own words", async () => {
+        const stays = await request(app).post("/api/vibe/alchemy").set("Authorization", bearer).send({ add: [CUID] });
+        // Unknown track: the similarity step has not seen it. The iOS app reads this text.
+        expect(stays.status).toBe(400);
+        expect(String(stays.body.error)).toContain("similarity step");
+
+        const link = await request(app)
+            .post("/api/browse/playlists/parse")
+            .set("Authorization", bearer)
+            .send({ url: "spotify:playlist:abc" });
+        expect(link.status).toBe(400);
+        expect(String(link.body.error)).not.toBe("Invalid request");
+
+        const expired = await request(app).post("/api/device-link/verify").set("Authorization", bearer).send({ code: "ZZZZZZ" });
+        expect(expired.body.error).not.toBe("Invalid request");
     });
 
     it("keeps what was sent out of the log: only the field and the rule", async () => {

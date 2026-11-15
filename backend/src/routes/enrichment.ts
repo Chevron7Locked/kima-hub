@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { logger } from "../utils/logger";
-import { safeError } from "../utils/errors";
+import { refuseRequest, safeError } from "../utils/errors";
 import { prisma } from "../utils/db";
 import {
   getEnrichmentProgress,
@@ -206,7 +206,7 @@ router.post("/rerun", async (req, res) => {
   try {
     const step = req.body?.step;
     if (!RERUN_STEPS.includes(step)) {
-      res.status(400).json({ error: `step must be one of: ${RERUN_STEPS.join(", ")}` });
+      refuseRequest(req, res, "step: not a step that can be rerun");
       return;
     }
     const wiped = await rerunEnrichment(step);
@@ -270,7 +270,7 @@ router.get("/failures", async (req, res) => {
       req.query;
 
     if (entityType && !isFailureType(entityType)) {
-      return res.status(400).json({ error: "Unknown failure type" });
+      return refuseRequest(req, res, "entityType: not a known failure type");
     }
 
     const options: GetFailuresOptions = {};
@@ -311,9 +311,7 @@ router.post("/retry", async (req, res) => {
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "Must provide array of failure IDs" });
+      return refuseRequest(req, res, "ids: a list of failure ids required");
     }
 
     // Reset retry count for these failures
@@ -524,7 +522,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
         // null) and removes the override.
         const parsedYear = year === null || year === "" ? null : parseInt(year, 10);
         if (parsedYear !== null && Number.isNaN(parsedYear)) {
-          return res.status(400).json({ error: "year must be a number" });
+          return refuseRequest(req, res, "year: must be a number");
         }
         updateData.displayYear = parsedYear;
         hasOverrides = true;
@@ -604,7 +602,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       // caller's mistake and gets a 400 rather than a 500.
       const parsedTrackNo = trackNo === null || trackNo === "" ? null : parseInt(trackNo, 10);
       if (parsedTrackNo !== null && Number.isNaN(parsedTrackNo)) {
-        return res.status(400).json({ error: "trackNo must be a number" });
+        return refuseRequest(req, res, "trackNo: must be a number");
       }
       updateData.displayTrackNo = parsedTrackNo;
       hasOverrides = true;
@@ -795,9 +793,7 @@ router.put("/concurrency", async (req, res) => {
     const { concurrency } = req.body;
 
     if (!concurrency || typeof concurrency !== "number") {
-      return res
-        .status(400)
-        .json({ error: "Missing or invalid 'concurrency' parameter" });
+      return refuseRequest(req, res, "concurrency: a number required");
     }
 
     // Clamp concurrency to 1-5

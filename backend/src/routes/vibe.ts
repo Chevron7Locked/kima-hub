@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { logger } from "../utils/logger";
-import { UserFacingError } from "../utils/errors";
+import { UserFacingError, refuseRequest } from "../utils/errors";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import { getMoodSummary, getVibeMap, type MapResponse } from "../services/vibeMap";
 import { currentMoodSnapshot, moodOutput } from "../services/moodBucketService";
@@ -97,15 +97,15 @@ router.post("/path", async (req, res) => {
         const { startTrackId, endTrackId, length, mode } = req.body;
 
         if (!startTrackId || !endTrackId || typeof startTrackId !== "string" || typeof endTrackId !== "string") {
-            return res.status(400).json({ error: "startTrackId and endTrackId are required strings" });
+            return refuseRequest(req, res, "startTrackId and endTrackId must be strings");
         }
 
         if (!CUID_RE.test(startTrackId) || !CUID_RE.test(endTrackId)) {
-            return res.status(400).json({ error: "Invalid track ID format" });
+            return refuseRequest(req, res, "startTrackId and endTrackId: not track ids");
         }
 
         if (startTrackId === endTrackId) {
-            return res.status(400).json({ error: "Start and end tracks must be different" });
+            return refuseRequest(req, res, "startTrackId and endTrackId are the same track");
         }
 
         const result = await generateSongPath(startTrackId, endTrackId, {
@@ -140,23 +140,23 @@ router.post("/alchemy", async (req, res) => {
         const { add, subtract, limit: requestedLimit } = req.body;
 
         if (!add || !Array.isArray(add) || add.length === 0) {
-            return res.status(400).json({ error: "At least one track ID in 'add' is required" });
+            return refuseRequest(req, res, "add: at least one track id required");
         }
 
         if (add.length > 10) {
-            return res.status(400).json({ error: "'add' may contain at most 10 tracks" });
+            return refuseRequest(req, res, "add: at most 10 tracks");
         }
 
         if (subtract && (!Array.isArray(subtract) || subtract.length > 10)) {
-            return res.status(400).json({ error: "'subtract' must be an array of at most 10 tracks" });
+            return refuseRequest(req, res, "subtract: must be a list of at most 10 tracks");
         }
 
         if (!add.every((id: unknown) => typeof id === "string" && CUID_RE.test(id))) {
-            return res.status(400).json({ error: "'add' must contain valid track IDs" });
+            return refuseRequest(req, res, "add: not all track ids");
         }
 
         if (subtract && !subtract.every((id: unknown) => typeof id === "string" && CUID_RE.test(id))) {
-            return res.status(400).json({ error: "'subtract' must contain valid track IDs" });
+            return refuseRequest(req, res, "subtract: not all track ids");
         }
 
         const limit = parseLimit(requestedLimit, 20, 100);
@@ -273,15 +273,11 @@ router.post("/search", async (req, res) => {
         const { query, limit: requestedLimit } = req.body;
 
         if (!query || typeof query !== "string" || query.trim().length < 2) {
-            return res.status(400).json({
-                error: "Query must be at least 2 characters",
-            });
+            return refuseRequest(req, res, "query: a string of at least 2 characters required");
         }
 
         if (query.length > 500) {
-            return res.status(400).json({
-                error: "Query must be at most 500 characters",
-            });
+            return refuseRequest(req, res, "query: over 500 characters");
         }
 
         const limit = parseLimit(requestedLimit, 20, 100);

@@ -7,7 +7,7 @@ import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { prisma, Prisma } from "../utils/db";
 import { FeedReadError, rssParserService, type RSSEpisode as FeedEpisode } from "../services/rss-parser";
 import { parseRangeHeader } from "../utils/rangeParser";
-import { invalidRequest, safeError } from "../utils/errors";
+import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 import { guardedAxios, validateUrlForFetch } from "../utils/ssrf";
 import axios from "axios";
 import { z } from "zod";
@@ -216,9 +216,12 @@ async function answerChart(req: Request, res: Response, category: number | null,
 }
 
 /** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
-router.get("/charts", (req, res) =>
-    answerChart(req, res, req.query.category === undefined ? null : Number(req.query.category), req.query, "Error fetching podcast chart"),
-);
+router.get("/charts", (req, res) => {
+    // An empty or blank category is malformed, not category 0: Number("") is 0, which would reach the 404.
+    const given = req.query.category;
+    const category = given === undefined ? null : typeof given === "string" && given.trim() !== "" ? Number(given) : NaN;
+    return answerChart(req, res, category, req.query, "Error fetching podcast chart");
+});
 
 /** GET /podcasts/for-you — rows from the categories of the shows this user follows. */
 router.get("/for-you", async (req, res) => {
@@ -302,7 +305,7 @@ router.get("/discover/top", (req, res) => answerChart(req, res, null, req.query,
 router.get("/discover/genres", async (req, res) => {
     const ids = typeof req.query.genres === "string" ? req.query.genres.split(",").map((g) => Number(g.trim())) : [];
     if (ids.length === 0 || ids.some((id) => !Number.isInteger(id))) {
-        return res.status(400).json({ error: "genres parameter required (comma-separated genre IDs)" });
+        return refuseRequest(req, res, "genres: comma-separated genre ids required");
     }
     try {
         const known = new Set((await categoryTree()).map((c) => c.id));
@@ -727,9 +730,7 @@ router.post("/subscribe", async (req, res) => {
         const { feedUrl, itunesId } = req.body;
 
         if (!feedUrl && !itunesId) {
-            return res
-                .status(400)
-                .json({ error: "feedUrl or itunesId is required" });
+            return refuseRequest(req, res, "feedUrl or itunesId: one required");
         }
 
         const appleId = itunesId === undefined || itunesId === null || itunesId === "" ? null : String(itunesId);

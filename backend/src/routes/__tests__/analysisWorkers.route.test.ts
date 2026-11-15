@@ -180,8 +180,9 @@ describe('analysis worker sliders', () => {
         }
     });
 
-    it('names the slider in its refusal', async () => {
-        expect((await request(app).put('/analysis/workers').send({ workers: 0 })).body.error).toBe('Workers must be a number between 1 and 16');
-        expect((await request(app).put('/analysis/clap-workers').send({ workers: 0 })).body.error).toBe('CLAP workers must be a number between 1 and 16');
+    it('refuses a slider value out of range in the plain answer', async () => {
+        expectLog('warn');
+        expect((await request(app).put('/analysis/workers').send({ workers: 0 })).body.error).toBe('Invalid request');
+        expect((await request(app).put('/analysis/clap-workers').send({ workers: 0 })).body.error).toBe('Invalid request');
     });
 });

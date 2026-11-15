@@ -27,6 +27,7 @@ import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import * as downloadJobs from "../services/downloads/jobs";
 import type { Prisma } from "@prisma/client";
 import { PLAYABLE_DISCOVER_SONG, PLAYABLE_SONG } from "../utils/playableSong";
+import { refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -569,7 +570,7 @@ router.post("/like", async (req, res) => {
         const { albumId } = req.body;
 
         if (!albumId) {
-            return res.status(400).json({ error: "albumId required" });
+            return refuseRequest(req, res, "albumId required");
         }
 
         const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
@@ -636,7 +637,7 @@ router.delete("/unlike", async (req, res) => {
         const { albumId } = req.body;
 
         if (!albumId) {
-            return res.status(400).json({ error: "albumId required" });
+            return refuseRequest(req, res, "albumId required");
         }
 
         const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
@@ -883,9 +884,7 @@ router.patch("/config", async (req, res) => {
         if (playlistSize !== undefined) {
             const size = parseInt(playlistSize, 10);
             if (isNaN(size) || size < 5 || size > 50 || size % 5 !== 0) {
-                return res.status(400).json({
-                    error: "Invalid playlist size. Must be between 5-50 in increments of 5.",
-                });
+                return refuseRequest(req, res, "playlistSize: 5-50 in steps of 5");
             }
             changes.playlistSize = size;
         }
@@ -893,9 +892,7 @@ router.patch("/config", async (req, res) => {
         if (maxRetryAttempts !== undefined) {
             const retries = parseInt(maxRetryAttempts, 10);
             if (isNaN(retries) || retries < 1 || retries > 10) {
-                return res.status(400).json({
-                    error: "Invalid retry attempts. Must be between 1-10.",
-                });
+                return refuseRequest(req, res, "maxRetryAttempts: 1-10");
             }
             changes.maxRetryAttempts = retries;
         }
@@ -903,9 +900,7 @@ router.patch("/config", async (req, res) => {
         if (exclusionMonths !== undefined) {
             const months = parseInt(exclusionMonths, 10);
             if (isNaN(months) || months < 0 || months > 12) {
-                return res.status(400).json({
-                    error: "Invalid exclusion months. Must be between 0-12.",
-                });
+                return refuseRequest(req, res, "exclusionMonths: 0-12");
             }
             changes.exclusionMonths = months;
         }
@@ -913,16 +908,14 @@ router.patch("/config", async (req, res) => {
         if (downloadRatio !== undefined) {
             const ratio = parseFloat(downloadRatio);
             if (isNaN(ratio) || ratio < 1.0 || ratio > 2.0) {
-                return res.status(400).json({
-                    error: "Invalid download ratio. Must be between 1.0-2.0.",
-                });
+                return refuseRequest(req, res, "downloadRatio: 1.0-2.0");
             }
             changes.downloadRatio = ratio;
         }
 
         if (enabled !== undefined) {
             if (typeof enabled !== "boolean") {
-                return res.status(400).json({ error: "Invalid enabled value. Must be true or false." });
+                return refuseRequest(req, res, "enabled: must be a boolean");
             }
             changes.enabled = enabled;
         }

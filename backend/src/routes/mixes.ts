@@ -13,6 +13,7 @@ import { MOOD_MIX_LIMIT, validateSaveTrackIds } from "./mixesValidation";
 import { rankForPosition } from "../utils/lexoRank";
 import { announcePlaylistChange } from "../services/playlistEvents";
 import { PLAYABLE_SONG } from "../utils/playableSong";
+import { refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -131,10 +132,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
         const mood = req.params.mood as MoodType;
 
         if (!VALID_MOODS.includes(mood)) {
-            return res.status(400).json({
-                error: `Invalid mood: ${mood}`,
-                validMoods: VALID_MOODS,
-            });
+            return refuseRequest(req, res, "mood: not one of the known moods");
         }
 
         // Skip what this user was already served and remember what this mix goes out with, as one step, so two
@@ -167,16 +165,13 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
         const mood = req.params.mood as MoodType;
 
         if (!VALID_MOODS.includes(mood)) {
-            return res.status(400).json({
-                error: `Invalid mood: ${mood}`,
-                validMoods: VALID_MOODS,
-            });
+            return refuseRequest(req, res, "mood: not one of the known moods");
         }
 
         // The listener's own picks, if sent.
         const validation = validateSaveTrackIds(req.body.trackIds, MOOD_MIX_LIMIT);
         if ("error" in validation) {
-            return res.status(400).json({ error: validation.error });
+            return refuseRequest(req, res, `trackIds: ${validation.error}`);
         }
         const trackIds = validation.trackIds;
 

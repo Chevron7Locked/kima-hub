@@ -22,6 +22,7 @@ import { sendStoredFile } from "../../utils/sendStoredFile";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { refuseRequest } from "../../utils/errors";
 
 /** A picture at another address never changes there, so it is kept for good. */
 const FIXED_PICTURE_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -73,7 +74,7 @@ async function serveAudiobookCover(
 ) {
   // The request carries Audiobookshelf's key, so nothing but a cover is ever asked for.
   if (!AUDIOBOOK_COVER_PATH.test(audiobookPath)) {
-    return res.status(400).json({ error: "Invalid audiobook cover path" });
+    return refuseRequest(req, res, "audiobook cover path: not an items/<id>/cover path");
   }
 
   const settings = await getSystemSettings();
@@ -130,7 +131,7 @@ async function serveStoredCover(address: string, size: string | undefined, req: 
   const { relativePath: nativePath, version } = parseStoredCover(address)!;
   const file = resolveInCoversDir(nativePath);
   if (!file) {
-    res.status(400).json({ error: "Invalid cover path" });
+    refuseRequest(req, res, "cover path: outside the covers folder");
     return null;
   }
   if (fs.existsSync(file)) {
@@ -225,7 +226,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     const queryUrl = typeof req.query.url === "string" ? req.query.url : undefined;
     const address = queryUrl || req.params.id;
     if (!address) {
-      return res.status(400).json({ error: "No cover ID or URL provided" });
+      return refuseRequest(req, res, "cover id or url required");
     }
 
     if (address.startsWith("audiobook__")) {
@@ -240,7 +241,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
       cacheControl = FALLBACK_CACHE_CONTROL;
     } else if (!queryUrl && !address.startsWith("http://") && !address.startsWith("https://")) {
       // A path id is a picture's address or nothing; a query url is fetched and checked by the address guard.
-      return res.status(400).json({ error: "Invalid cover ID format" });
+      return refuseRequest(req, res, "cover id: not an address or a stored cover");
     }
 
     // The width as stored covers read it, so sizes that are no width share the one entry for the whole picture.

@@ -68,7 +68,7 @@ describe("a playlist address on a supported site", () => {
     it("needs a url", async () => {
         const res = await parse({});
         expect(res.status).toBe(400);
-        expect(res.body).toEqual({ error: "URL is required" });
+        expect(res.body).toEqual({ error: "Invalid request" });
     });
 });
 

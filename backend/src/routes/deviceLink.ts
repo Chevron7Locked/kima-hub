@@ -4,6 +4,7 @@ import { prisma } from "../utils/db";
 import crypto from "crypto";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
 import { approve, deny, waitForAnswer, waitingDevice } from "../services/users/deviceLinkApproval";
+import { refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -84,7 +85,7 @@ router.post("/verify", async (req, res) => {
         const deviceName = cleanDeviceName(req.body.deviceName);
 
         if (!code || typeof code !== "string") {
-            return res.status(400).json({ error: "Code is required" });
+            return refuseRequest(req, res, "code: a string required");
         }
 
         // Find the code

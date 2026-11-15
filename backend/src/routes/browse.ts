@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { withRetry } from "../utils/async";
 import { logger } from "../utils/logger";
-import { safeError } from "../utils/errors";
+import { refuseRequest, safeError } from "../utils/errors";
 import { spotifyService } from "../services/spotify";
 import { deezerService, DeezerPlaylistPreview } from "../services/deezer";
 import { parseLimit } from "./library/paging";
@@ -49,7 +49,7 @@ router.get("/playlists/search", async (req, res) => {
     try {
         const query = req.query.q as string;
         if (!query || query.length < 2) {
-            return res.status(400).json({ error: "Search query must be at least 2 characters" });
+            return refuseRequest(req, res, "q: at least 2 characters required");
         }
 
         const limit = parseLimit(req.query.limit, 50, 100);
@@ -135,7 +135,7 @@ router.post("/playlists/parse", async (req, res) => {
     try {
         const { url } = req.body;
         if (!url) {
-            return res.status(400).json({ error: "URL is required" });
+            return refuseRequest(req, res, "url required");
         }
 
         const link = recogniseMusicLink(url);

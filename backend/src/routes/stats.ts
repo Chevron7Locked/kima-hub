@@ -8,7 +8,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { invalidRequest } from "../utils/errors";
+import { invalidRequest, refuseRequest } from "../utils/errors";
 import { hourDetail, listeningStats, regionDetail, trackPlayCount } from "../services/stats/listening";
 import { shelfStats } from "../services/stats/shelf";
 import { signature } from "../services/stats/signature";
@@ -69,7 +69,7 @@ router.get("/hour", async (req, res) => {
         const hour = Number(req.query.hour);
         if (!Number.isInteger(dow) || dow < 0 || dow > 6 ||
             !Number.isInteger(hour) || hour < 0 || hour > 23) {
-            return res.status(400).json({ error: "Bad request" });
+            return refuseRequest(req, res, "dow must be 0-6 and hour 0-23");
         }
         const tz = typeof req.query.tz === "string" ? req.query.tz : undefined;
         res.json(await hourDetail(req.user!.id, dow, hour, tz, asPeriod(req.query.period)));
@@ -90,7 +90,7 @@ const SLICES = new Set<Slice>(["top", "never", "core", "key", "decade"]);
 router.get("/tracks", async (req, res) => {
     try {
         const of = String(req.query.of ?? "") as Slice;
-        if (!SLICES.has(of)) return res.status(400).json({ error: "Bad request" });
+        if (!SLICES.has(of)) return refuseRequest(req, res, "of: not a known slice");
         const tracks = await playableSlice({
             userId: req.user!.id,
             slice: of,
@@ -119,7 +119,7 @@ router.get("/tracks", async (req, res) => {
 router.get("/track/:id/plays", async (req, res) => {
     try {
         const id = String(req.params.id ?? "");
-        if (!id || id.length > 64) return res.status(400).json({ error: "Bad request" });
+        if (!id || id.length > 64) return refuseRequest(req, res, "id: empty or over 64 characters");
         res.json({ plays: await trackPlayCount(req.user!.id, id) });
     } catch (error) {
         logger.error("[Stats] track play count failed:", error);
@@ -133,7 +133,7 @@ router.get("/region", async (req, res) => {
         const x = Number(req.query.x);
         const y = Number(req.query.y);
         if (!Number.isInteger(x) || x < 1 || x > 24 || !Number.isInteger(y) || y < 1 || y > 24) {
-            return res.status(400).json({ error: "Bad request" });
+            return refuseRequest(req, res, "x and y must be whole numbers 1-24");
         }
         res.json(await regionDetail(req.user!.id, x, y, undefined, asPeriod(req.query.period)));
     } catch (error) {

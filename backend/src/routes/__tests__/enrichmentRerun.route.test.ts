@@ -81,9 +81,9 @@ describe("POST /enrichment/rerun", () => {
         expect(res.body.message).toBe(message);
     });
 
-    it("names the six steps when refusing one", async () => {
+    it("refuses an unknown step in the plain answer", async () => {
         const res = await rerun("everything");
-        expect(res.body.error).toBe("step must be one of: identification, artists, analysis, vectors, moods, similarity");
+        expect(res.body.error).toBe("Invalid request");
     });
 
     it.each(["everything", "", null, 5, "toString", "constructor"])("rejects an unknown step %p", async (step) => {

@@ -4,7 +4,7 @@ import path from "path";
 import { createRateLimiter } from "../middleware/rateLimiter";
 import { logger } from "../utils/logger";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
-import { invalidRequest, safeError } from "../utils/errors";
+import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
 import { M3UNothingMatched, decodeM3U, parseM3U } from "../services/m3uParser";
@@ -20,10 +20,29 @@ const m3uUpload = multer({
         if ([".m3u", ".m3u8"].includes(ext)) {
             cb(null, true);
         } else {
-            cb(new Error("Only .m3u and .m3u8 files are accepted"));
+            cb(new WrongPlaylistFileType());
         }
     },
 });
+
+class WrongPlaylistFileType extends Error {
+    constructor() {
+        super("file extension is not .m3u or .m3u8");
+    }
+}
+
+function uploadAnswer(err: unknown): { answer: string; reason: string } {
+    if (err instanceof WrongPlaylistFileType) {
+        return { answer: "Only .m3u and .m3u8 files are accepted", reason: err.message };
+    }
+    if (err instanceof multer.MulterError) {
+        const reason = `${err.code}: ${err.message}`;
+        return err.code === "LIMIT_FILE_SIZE"
+            ? { answer: "That file is larger than 1 MB", reason }
+            : { answer: "The upload could not be read", reason };
+    }
+    return { answer: "The upload could not be read", reason: err instanceof Error ? err.message : "unknown upload error" };
+}
 
 const parseUrlSchema = z.object({
     // Not .url(): that refuses a link typed without https:// with a message that says nothing about the link.
@@ -308,7 +327,8 @@ const m3uImportLimiter = createRateLimiter({
 router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
     m3uUpload.single("file")(req, res, (err) => {
         if (err) {
-            return res.status(400).json({ error: err.message });
+            const { answer, reason } = uploadAnswer(err);
+            return refuseRequest(req, res, reason, answer);
         }
         next();
     });
@@ -339,8 +359,11 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
         if (error instanceof M3UNothingMatched) {
             return res.status(422).json({ error: error.message });
         }
-        if (error.message?.includes("exceeds maximum") || error.message?.includes("null bytes")) {
-            return res.status(400).json({ error: error.message });
+        if (error.message?.includes("exceeds maximum")) {
+            return refuseRequest(req, res, error.message, "That playlist has too many songs");
+        }
+        if (error.message?.includes("null bytes")) {
+            return refuseRequest(req, res, error.message, "That file is not a text playlist");
         }
         safeError(res, "M3U import", error);
     }

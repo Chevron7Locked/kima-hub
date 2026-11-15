@@ -9,6 +9,10 @@ jest.mock("../../middleware/auth", () => ({
         next();
     },
 }));
+// The M3U upload allows five a minute per address; this file makes more than that from one.
+jest.mock("../../middleware/rateLimiter", () => ({
+    createRateLimiter: () => (_req: any, _res: any, next: any) => next(),
+}));
 const mockService = {
     startPreviewJob: jest.fn(),
     getPreviewResult: jest.fn(),
@@ -31,6 +35,7 @@ import express from "express";
 import request from "supertest";
 import spotifyRoutes from "../spotify";
 import { mountAsServer } from "./helpers/serverMount";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const app = mountAsServer(express().use(express.json()), "/spotify", spotifyRoutes, "/api/spotify");
 const PREVIEW = { playlist: { id: "pl", name: "Mix" }, matches: [] };
@@ -256,5 +261,58 @@ describe("POST /spotify/import/m3u reads the file's bytes the way a playlist fil
         const res = await upload(Buffer.from("a\0b.flac\n"));
         expect(res.status).toBe(400);
         expect(mockService.importFromM3U).not.toHaveBeenCalled();
+    });
+});
+
+describe("POST /spotify/import/m3u refuses a file in words of its own, and keeps the parser's and uploader's text in the log", () => {
+    const upload = (bytes: Buffer, name = "mix.m3u") =>
+        request(app).post("/spotify/import/m3u").field("playlistName", "Mix").attach("file", bytes, name);
+
+    it("says only .m3u and .m3u8 files are accepted for another kind of file", async () => {
+        const logged = expectLog("warn");
+
+        const res = await upload(Buffer.from("x"), "mix.txt");
+
+        expect([res.status, res.body]).toEqual([400, { error: "Only .m3u and .m3u8 files are accepted" }]);
+        expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("[InvalidRequest]"))).toBe(true);
+    });
+
+    it("says a file over 1 MB is too large, without the uploader's own text", async () => {
+        const logged = expectLog("warn");
+
+        const res = await upload(Buffer.alloc(1024 * 1024 + 10, "a"));
+
+        expect([res.status, res.body]).toEqual([400, { error: "That file is larger than 1 MB" }]);
+        expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("File too large"))).toBe(true);
+    });
+
+    it("says an upload that cannot be read could not be read, whatever the uploader said", async () => {
+        const logged = expectLog("warn");
+
+        const res = await request(app)
+            .post("/spotify/import/m3u")
+            .field("playlistName", "Mix")
+            .attach("surprise-field-name", Buffer.from("#EXTM3U\n"), "mix.m3u");
+
+        expect([res.status, res.body]).toEqual([400, { error: "The upload could not be read" }]);
+        expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("LIMIT_UNEXPECTED_FILE"))).toBe(true);
+    });
+
+    it("gives a file with a null byte a fixed answer, and logs the parser's reason", async () => {
+        const logged = expectLog("warn");
+
+        const res = await upload(Buffer.from("a\0b.flac\n"));
+
+        expect([res.status, res.body]).toEqual([400, { error: "That file is not a text playlist" }]);
+        expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("null bytes"))).toBe(true);
+    });
+
+    it("gives a playlist with too many songs a fixed answer, and logs the parser's reason", async () => {
+        const logged = expectLog("warn");
+
+        const res = await upload(Buffer.from(Array.from({ length: 10001 }, (_v, i) => `a/b/${i}.flac`).join("\n")));
+
+        expect([res.status, res.body]).toEqual([400, { error: "That playlist has too many songs" }]);
+        expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("exceeds maximum"))).toBe(true);
     });
 });

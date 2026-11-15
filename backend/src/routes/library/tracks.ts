@@ -25,6 +25,7 @@ import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatu
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
 import { markLibraryChangedQuietly, songIsListed } from "../../services/libraryChanged";
+import { refuseRequest } from "../../utils/errors";
 import fs from "fs";
 
 const TRACK_SORT_MAP: Record<string, any> = {
@@ -246,7 +247,7 @@ router.get("/tracks", async (req, res) => {
   try {
     const { albumId, sortBy = "name" } = req.query;
     if (albumId !== undefined && typeof albumId !== "string") {
-      return res.status(400).json({ error: "albumId must be given once" });
+      return refuseRequest(req, res, "albumId: must be given once");
     }
     const limit = parseLimit(req.query.limit, 100);
     const offset = parseOffset(req.query.offset);
@@ -575,7 +576,7 @@ router.get("/radio/row", async (req, res) => {
   try {
     const scope = req.query.scope ?? "home";
     if (!RADIO_ROW_SCOPES.includes(scope as RadioRowScope)) {
-      return res.status(400).json({ error: "scope must be home or all" });
+      return refuseRequest(req, res, "scope: must be home or all");
     }
     res.json({ stations: await radioRow(req.user!.id, req.query.tz, scope as RadioRowScope) });
   } catch (error) {
@@ -589,7 +590,7 @@ router.get("/radio", async (req, res) => {
     const { type, value } = req.query;
     const limitNum = parseLimit(req.query.limit, 50, 100);
     if (!type) {
-      return res.status(400).json({ error: "Radio type is required" });
+      return refuseRequest(req, res, "type: radio type required");
     }
     const picked = await selectRadioTracks(type, value, req.query, limitNum, req.user?.id);
     if ("reply" in picked) return res.status(picked.reply.status).json(picked.reply.body);

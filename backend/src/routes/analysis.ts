@@ -8,6 +8,7 @@ import { startEnrichmentNow } from "../workers/unifiedEnrichment";
 import * as stageRecords from "../services/stages/stageRecords";
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
+import { refuseRequest } from "../utils/errors";
 import { featureDetection } from "../services/featureDetection";
 
 /**
@@ -68,7 +69,7 @@ async function analyzerReport(
     }
     const { trackId, jobId } = req.body;
     if (!trackId) {
-        res.status(400).json({ error: "trackId is required" });
+        refuseRequest(req, res, "trackId required");
         return null;
     }
     const claim = typeof jobId === "string" ? jobId : undefined;
@@ -166,9 +167,7 @@ function workerSlider(
             const cpuCores = os.cpus().length;
 
             if (typeof workers !== "number" || workers < 1 || workers > cpuCores) {
-                return res.status(400).json({
-                    error: `${slider.name[0].toUpperCase()}${slider.name.slice(1)}s must be a number between 1 and ${cpuCores}`,
-                });
+                return refuseRequest(req, res, `workers: a number from 1 to ${cpuCores}`);
             }
 
             await saveSystemSettings({ [slider.field]: workers });
@@ -356,7 +355,7 @@ router.get("/together", async (_req, res) => {
 router.put("/together", async (req, res) => {
     const together = req.body?.together;
     if (typeof together !== "boolean") {
-        return res.status(400).json({ error: "together (boolean) is required" });
+        return refuseRequest(req, res, "together: must be a boolean");
     }
     try {
         await saveSystemSettings({ analysisAndVectorsTogether: together });

@@ -38,10 +38,24 @@ export function invalidRequest(req: Request, res: Response, error: ZodError): Re
         .map((issue) => `${issue.path.join(".") || "(request)"}: ${issue.message}`)
         .join("; ");
     const more = error.issues.length > MAX_LOGGED_ISSUES ? ` (+${error.issues.length - MAX_LOGGED_ISSUES} more)` : "";
-    const line = `${shown}${more}`.replace(/[\r\n\t]+/g, " ");
+    logInvalid(req, `${shown}${more}`);
+    return res.status(400).json({ error: "Invalid request" });
+}
+
+/**
+ * The same answer for a route that checks what it was sent by hand: the plain 400, and the reason in the log. The
+ * reason is written by the route and names the field and the rule; it never carries a value the client sent. A form
+ * that shows the answer to a person passes its own `answer`; the reason still goes only to the log.
+ */
+export function refuseRequest(req: Request, res: Response, reason: string, answer = "Invalid request"): Response {
+    logInvalid(req, reason);
+    return res.status(400).json({ error: answer });
+}
+
+function logInvalid(req: Request, text: string): void {
+    const line = text.replace(/[\r\n\t]+/g, " ");
     const clipped = line.length > MAX_LOGGED_ISSUE_CHARS ? `${line.slice(0, MAX_LOGGED_ISSUE_CHARS)}...` : line;
     logger.warn(`[InvalidRequest] ${req.method} ${req.baseUrl}${req.path}: ${clipped}`);
-    return res.status(400).json({ error: "Invalid request" });
 }
 
 /**

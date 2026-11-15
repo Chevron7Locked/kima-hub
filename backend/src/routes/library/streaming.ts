@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { isFileGone } from "../../utils/errors";
+import { isFileGone, refuseRequest } from "../../utils/errors";
 import { config } from "../../config";
 import { getAudioStreamingService, isQuality } from "../../services/audioStreaming";
 import { resolveWithinMusicRoot } from "./trackPath";
@@ -60,7 +60,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
     const userId = req.user?.id;
 
     if (quality !== undefined && !isQuality(quality)) {
-      return res.status(400).json({ error: "quality must be original, high, medium or low" });
+      return refuseRequest(req, res, "quality: must be original, high, medium or low");
     }
 
     if (!userId) {
@@ -162,7 +162,7 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
     const userId = req.user?.id;
 
     if (quality !== undefined && !isQuality(quality)) {
-      return res.status(400).json({ error: "quality must be original, high, medium or low" });
+      return refuseRequest(req, res, "quality: must be original, high, medium or low");
     }
 
     if (!userId) {

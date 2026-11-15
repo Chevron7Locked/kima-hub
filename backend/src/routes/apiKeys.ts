@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
+import { refuseRequest } from "../utils/errors";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
 
 const router = Router();
@@ -8,8 +9,8 @@ router.post("/", async (req, res) => {
     try {
         const { deviceName } = req.body;
 
-        if (!deviceName || deviceName.trim().length === 0) {
-            return res.status(400).json({ error: "Device name is required" });
+        if (typeof deviceName !== "string" || deviceName.trim().length === 0) {
+            return refuseRequest(req, res, "deviceName: a non-empty string required");
         }
 
         const userId = req.user!.id;
