@@ -68,6 +68,15 @@ it("takes a recovery code once", async () => {
     expect((await login(code)).status).toBe(401);
 });
 
+it("takes a recovery code once even when two sign-ins send it together", async () => {
+    const code = recoveryCodes[1];
+    const results = await Promise.all([login(code), login(code)]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401]);
+    // And it is spent: a third try finds it gone, while the next code still works.
+    expect((await login(code)).status).toBe(401);
+    expect((await login(recoveryCodes[2]).expect(200)).body.token).toEqual(expect.any(String));
+});
+
 it("turning it off needs the password and a current code", async () => {
     await request(app).post("/auth/2fa/disable").set("Authorization", bearer()).send({ password: "wrong", token: codeNow() }).expect(400);
     await request(app).post("/auth/2fa/disable").set("Authorization", bearer()).send({ password: PASSWORD, token: "000000" }).expect(400);

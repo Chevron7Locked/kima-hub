@@ -90,14 +90,24 @@ router.post("/login", async (req, res) => {
                 }
 
                 hashedCodes.splice(codeIndex, 1);
-                await prisma.user.update({
-                    where: { id: user.id },
+                // Spent atomically: the write only lands if the list is still the one this code was found in,
+                // so of two sign-ins sending one code, one finds the list changed and is refused.
+                const spent = await prisma.user.updateMany({
+                    where: {
+                        id: user.id,
+                        twoFactorRecoveryCodes: encryptedCodes,
+                    },
                     data: {
                         twoFactorRecoveryCodes: encrypt(
                             hashedCodes.join(",")
                         ),
                     },
                 });
+                if (spent.count === 0) {
+                    return res
+                        .status(401)
+                        .json({ error: "Invalid recovery code" });
+                }
             } else {
                 if (!totpMatches(decrypt(user.twoFactorSecret), token)) {
                     return res.status(401).json({ error: "Invalid 2FA token" });
