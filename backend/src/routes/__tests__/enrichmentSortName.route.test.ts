@@ -76,7 +76,7 @@ describe('PUT /enrichment/artists/:id/metadata -- sortName follows displayName',
 
         await put(`/enrichment/artists/${ARTIST}/metadata`).send({ name: '' }).expect(200);
 
-        expect(await artistRow()).toMatchObject({ displayName: '', sortName: 'beatles' });
+        expect(await artistRow()).toMatchObject({ displayName: null, sortName: 'beatles' });
     });
 
     it('reverts sortName to the canonical name when the override is cleared to null', async () => {

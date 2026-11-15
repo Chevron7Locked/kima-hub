@@ -80,13 +80,54 @@ it("a changed genre list and a cleared year are sent, and nothing else", async (
     expect(api.updateAlbumMetadata).toHaveBeenCalledWith("x1", { year: null, genres: ["rock", "ambient"] });
 });
 
+it("a save with nothing changed sends nothing and closes the editor", async () => {
+    const onSave = vi.fn();
+    await act(async () => root.render(<MetadataEditor type="album" id="x1" currentData={ALBUM} onSave={onSave} />));
+    await act(async () => (container.querySelector("button") as HTMLButtonElement).click());
+    await save();
+
+    expect(api.updateAlbumMetadata).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(inputs()).toHaveLength(0);
+});
+
 it("a field changed and put back is not sent", async () => {
     await open("album", ALBUM);
     await type(inputs()[0], "something else");
     await type(inputs()[0], "old title");
     await save();
 
-    expect(api.updateAlbumMetadata).toHaveBeenCalledWith("x1", {});
+    expect(api.updateAlbumMetadata).not.toHaveBeenCalled();
+});
+
+it("a year that was never set is not sent as null when the person types in it and clears it again", async () => {
+    const { year: _year, ...noYear } = ALBUM;
+    await open("album", noYear);
+    await type(inputs()[1], "1999");
+    await type(inputs()[1], "");
+    await type(inputs()[0], "new title");
+    await save();
+
+    expect(api.updateAlbumMetadata).toHaveBeenCalledWith("x1", { title: "new title" });
+});
+
+it("a year the page shows as blank (0) is not sent as null when it is left blank", async () => {
+    await open("album", ALBUM);
+    await type(inputs()[1], "2001");
+    await type(inputs()[1], "");
+    await save();
+
+    expect(api.updateAlbumMetadata).not.toHaveBeenCalled();
+});
+
+it("a genre list or text field that was never set is not a change when it is left blank", async () => {
+    const { genres: _genres, rgMbid: _rg, ...bare } = ALBUM;
+    await open("album", bare);
+    await type(inputs()[2], "rock");
+    await type(inputs()[2], "");
+    await save();
+
+    expect(api.updateAlbumMetadata).not.toHaveBeenCalled();
 });
 
 it("an artist and a track send only what changed too", async () => {

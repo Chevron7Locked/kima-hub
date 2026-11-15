@@ -54,7 +54,7 @@ export function AlbumHero({
                         title: displayData.title,
                         year: displayData.year ?? undefined,
                         genres: displayData.genres,
-                        mbid: album.mbid,
+                        rgMbid: album.rgMbid,
                         coverUrl: displayData.coverUrl ?? undefined,
                         _originalTitle: album.title,
                         _originalYear: album.year,

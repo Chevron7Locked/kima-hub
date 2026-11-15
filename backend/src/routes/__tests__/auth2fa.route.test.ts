@@ -1235,6 +1235,35 @@ describe("an admin turning off someone's 2FA", () => {
         jest.mocked(logger.warn).mockRestore();
     });
 
+    it("replaces a secret the current key cannot open (a real sealed value that no longer authenticates), and the person turns 2FA on again with a new one", async () => {
+        const sealed = encrypt(secret);
+        // The last character of the sealed value changed: the right format, a secret the key no longer opens.
+        const cannotOpen = sealed.slice(0, -1) + (sealed.endsWith("A") ? "B" : "A");
+        jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+        expect(readTwoFactorSecret(USER, cannotOpen)).toBeNull();
+        await prisma.user.update({
+            where: { id: USER },
+            data: { twoFactorEnabled: true, twoFactorSecret: cannotOpen, twoFactorRecoveryCodes: cannotOpen, twoFactorLastStep: 5 },
+        });
+        // Until an admin resets it, the stored value is kept as it is: a sign-in, a disable and a new setup do not wipe it.
+        expect((await login()).status).toBe(401);
+        await disable("123456").expect(409);
+        await setup().expect(400);
+        expect((await stored()).twoFactorSecret).toBe(cannotOpen);
+
+        await reset(USER).expect(200);
+
+        expect(await stored()).toEqual({
+            twoFactorEnabled: false, twoFactorSecret: null, twoFactorRecoveryCodes: null, twoFactorLastStep: 0, twoFactorPendingSecret: null, twoFactorPendingAt: null,
+        });
+        const made = (await setup().expect(200)).body.secret as string;
+        await enable(codeFor(made)).expect(200);
+        const row = await stored();
+        expect(row.twoFactorEnabled).toBe(true);
+        expect(readTwoFactorSecret(USER, row.twoFactorSecret)).toBe(made);
+        jest.mocked(logger.warn).mockRestore();
+    });
+
     it("also works on an account whose secret reads fine, and the person can set it up again", async () => {
         await twoFactorOn();
 

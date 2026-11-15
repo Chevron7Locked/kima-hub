@@ -202,7 +202,20 @@ export async function reassignArtistMbid(
     artistId: string,
     newMbid: string
 ): Promise<void> {
-    await prisma.artist.update({
+    await moveArtistMbid(prisma, artistId, newMbid);
+    forgetOwnedIndex();
+}
+
+/**
+ * The artist's mbid change inside the caller's transaction (or on the plain client), so it commits with the rest of an
+ * edit. It does not forget the owned index: whoever commits does, once. A missing artist throws P2025, as any update does.
+ */
+export async function moveArtistMbid(
+    db: Pick<Prisma.TransactionClient, "artist">,
+    artistId: string,
+    newMbid: string
+): Promise<void> {
+    await db.artist.update({
         where: { id: artistId },
         data: { mbid: newMbid },
     }).catch((err: any) => {
@@ -211,5 +224,4 @@ export async function reassignArtistMbid(
         }
         throw err;
     });
-    forgetOwnedIndex();
 }

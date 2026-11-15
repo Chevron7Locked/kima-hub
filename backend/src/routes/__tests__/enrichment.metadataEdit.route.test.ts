@@ -7,6 +7,7 @@ import express from "express";
 import request from "supertest";
 import router from "../enrichment";
 import * as reassign from "../../services/mbidReassign";
+import * as ownedIndex from "../../services/discovery/ownedIndexVersion";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -21,6 +22,9 @@ const TRACK = `${P}trk`;
 const RG = "11111111-1111-4111-8111-111111111111";
 const RG_NEW = "22222222-2222-4222-8222-222222222222";
 const RG_OTHER = "33333333-3333-4333-8333-333333333333";
+const AR = "44444444-4444-4444-8444-444444444444";
+const AR_NEW = "55555555-5555-4555-8555-555555555555";
+const AR_OTHER = "66666666-6666-4666-8666-666666666666";
 
 const app = express();
 app.use(express.json());
@@ -28,6 +32,7 @@ mountAsServer(app, "/enrichment", router, "/api/enrichment");
 const asAdmin = `Bearer ${generateToken({ id: ADMIN, username: ADMIN, role: "admin", tokenVersion: 0 })}`;
 const put = (path: string, body: object) => request(app).put(path).set("Authorization", asAdmin).send(body);
 const album = () => prisma.album.findUniqueOrThrow({ where: { id: ALBUM } });
+const artist = () => prisma.artist.findUniqueOrThrow({ where: { id: ARTIST } });
 const track = () => prisma.track.findUniqueOrThrow({ where: { id: TRACK } });
 
 async function cleanup() {
@@ -38,7 +43,12 @@ async function cleanup() {
 
 /** An album and a song, both carrying an earlier edit that each test removes or replaces. */
 async function seed() {
-    await prisma.artist.create({ data: { id: ARTIST, name: "Artist", normalizedName: "artist", identityKey: `${P}ik` } });
+    await prisma.artist.create({
+        data: {
+            id: ARTIST, name: "The Canonical Artist", normalizedName: "the canonical artist", identityKey: `${P}ik`, mbid: AR,
+            displayName: "Earlier Edit", userSummary: "old bio", userHeroUrl: "https://old.example/h.jpg", userGenres: ["old"], hasUserOverrides: true,
+        },
+    });
     await prisma.album.create({
         data: {
             id: ALBUM, rgMbid: RG, rgMbidSource: "tag", artistId: ARTIST, identityKey: `${P}ak`, title: "Los Canonical", primaryType: "Album", location: "LIBRARY",
@@ -178,5 +188,108 @@ describe("an edit that is refused", () => {
 
         expect(res.status).toBe(400);
         expect(await album()).toMatchObject({ displayTitle: "Earlier Edit", rgMbid: RG });
+    });
+});
+
+describe("clearing an artist override", () => {
+    it.each([["an empty name", ""], ["a blank name", "   "], ["a null name", null]])("%s removes the name override and files the artist under its own name", async (_name, name) => {
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { name }).expect(200);
+
+        expect(await artist()).toMatchObject({ displayName: null, sortName: "canonical artist" });
+    });
+
+    it.each([["an empty address", ""], ["a blank address", " "], ["a null address", null]])("%s removes the hero override", async (_name, heroUrl) => {
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { heroUrl }).expect(200);
+        expect((await artist()).userHeroUrl).toBeNull();
+
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { heroUrl: "https://new.example/h.jpg" }).expect(200);
+        expect((await artist()).userHeroUrl).toBe("https://new.example/h.jpg");
+    });
+
+    it("an empty or null bio removes the bio override", async () => {
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { bio: "" }).expect(200);
+        expect((await artist()).userSummary).toBeNull();
+
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { bio: "A new bio" }).expect(200);
+        expect((await artist()).userSummary).toBe("A new bio");
+
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { bio: null }).expect(200);
+        expect((await artist()).userSummary).toBeNull();
+    });
+
+    it("a null genre list stores the empty list a reset writes, a list is stored with its blank entries dropped", async () => {
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { genres: ["rock", "", "ambient"] }).expect(200);
+        expect((await artist()).userGenres).toEqual(["rock", "ambient"]);
+
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { genres: null }).expect(200);
+        expect((await artist()).userGenres).toEqual([]);
+    });
+
+    it("an edit that sends one field leaves the others as they were", async () => {
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { bio: "Only the bio" }).expect(200);
+
+        expect(await artist()).toMatchObject({ displayName: "Earlier Edit", userHeroUrl: "https://old.example/h.jpg", userGenres: ["old"], mbid: AR });
+    });
+});
+
+describe("a new MusicBrainz id with the rest of an artist edit", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("moves the id and stores the edit together, and forgets the owned index once after the commit", async () => {
+        const forget = jest.spyOn(ownedIndex, "forgetOwnedIndex");
+
+        const res = await put(`/enrichment/artists/${ARTIST}/metadata`, { name: "Fresh", mbid: ` ${AR_NEW.toUpperCase()} ` }).expect(200);
+
+        expect(res.body).toMatchObject({ displayName: "Fresh", mbid: AR_NEW });
+        expect(await artist()).toMatchObject({ displayName: "Fresh", mbid: AR_NEW });
+        expect(forget).toHaveBeenCalledTimes(1);
+    });
+
+    it("an id of an empty or blank text, or null, is no change of id", async () => {
+        const forget = jest.spyOn(ownedIndex, "forgetOwnedIndex");
+
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { name: "Fresh", mbid: "  " }).expect(200);
+        await put(`/enrichment/artists/${ARTIST}/metadata`, { mbid: null }).expect(200);
+
+        expect(await artist()).toMatchObject({ displayName: "Fresh", mbid: AR });
+        expect(forget).not.toHaveBeenCalled();
+    });
+
+    it("an id another artist holds answers 409, stores none of the edit and forgets nothing", async () => {
+        await prisma.artist.create({ data: { id: `${P}other`, name: "Other", normalizedName: "other", identityKey: `${P}oik`, mbid: AR_OTHER } });
+        const forget = jest.spyOn(ownedIndex, "forgetOwnedIndex");
+
+        const res = await put(`/enrichment/artists/${ARTIST}/metadata`, { name: "Fresh", mbid: AR_OTHER });
+
+        expect(res.status).toBe(409);
+        expect(await artist()).toMatchObject({ displayName: "Earlier Edit", mbid: AR });
+        expect(forget).not.toHaveBeenCalled();
+    });
+
+    it("an edit that fails after the id moved gives the old id back", async () => {
+        const real = reassign.moveArtistMbid;
+        // The artist goes (as if deleted by someone else) once the id has moved, so the edit that follows has no row.
+        jest.spyOn(reassign, "moveArtistMbid").mockImplementation(async (tx, id, newId) => {
+            await real(tx, id, newId);
+            await tx.artist.delete({ where: { id } });
+        });
+        const forget = jest.spyOn(ownedIndex, "forgetOwnedIndex");
+
+        const res = await put(`/enrichment/artists/${ARTIST}/metadata`, { name: "Fresh", mbid: AR_NEW });
+
+        expect(res.status).toBe(404);
+        expect(await artist()).toMatchObject({ displayName: "Earlier Edit", mbid: AR });
+        expect(forget).not.toHaveBeenCalled();
+    });
+
+    it("stores nothing, the id included, when another field is refused, and reads nothing first", async () => {
+        expectLog("warn");
+        const read = jest.spyOn(prisma.artist, "findUnique");
+
+        const res = await put(`/enrichment/artists/${ARTIST}/metadata`, { name: "Fresh", mbid: AR_NEW, genres: "rock" });
+
+        expect(res.status).toBe(400);
+        expect(read).not.toHaveBeenCalled();
+        expect(await artist()).toMatchObject({ displayName: "Earlier Edit", mbid: AR });
     });
 });

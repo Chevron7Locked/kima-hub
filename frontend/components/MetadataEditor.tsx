@@ -45,9 +45,19 @@ const EDITABLE: Record<MetadataEditorProps["type"], readonly string[]> = {
 };
 
 /**
+ * A field as the form shows it, so that leaving a box as blank as it was is no change: a year that is unset, 0 or
+ * cleared (NaN) is an empty year box (null, which removes the override when sent), an unset genre list is the empty
+ * list, and an unset text is empty text.
+ */
+function shown(field: string, value: unknown): unknown {
+    if (field === "year") return typeof value === "number" && Number.isFinite(value) && value !== 0 ? value : null;
+    if (field === "genres") return Array.isArray(value) ? value : [];
+    return value ?? "";
+}
+
+/**
  * What the person changed. The form starts from what the page shows, so sending all of it would make every shown value
- * (canonical ones too) an edit, and a stored value the server refuses could never be left alone. A cleared number
- * (NaN) is sent as null, which removes the override.
+ * (canonical ones too) an edit, and a stored value the server refuses could never be left alone.
  */
 function changedFields(
     type: MetadataEditorProps["type"],
@@ -58,10 +68,10 @@ function changedFields(
     const now = after as Record<string, unknown>;
     const changes: Record<string, unknown> = {};
     for (const field of EDITABLE[type]) {
-        const a = was[field];
-        const b = now[field];
+        const a = shown(field, was[field]);
+        const b = shown(field, now[field]);
         const same = Array.isArray(a) && Array.isArray(b) ? JSON.stringify(a) === JSON.stringify(b) : Object.is(a, b);
-        if (!same) changes[field] = typeof b === "number" && Number.isNaN(b) ? null : b;
+        if (!same) changes[field] = b;
     }
     return changes;
 }
@@ -119,6 +129,10 @@ export function MetadataEditor({
         setIsSaving(true);
         try {
             const changes = changedFields(type, currentData, formData);
+            if (Object.keys(changes).length === 0) {
+                setIsOpen(false);
+                return;
+            }
             let response;
             if (type === "artist") {
                 response = await api.updateArtistMetadata(id, changes);

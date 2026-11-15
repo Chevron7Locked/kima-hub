@@ -21,7 +21,7 @@ import { redisClient } from "../utils/redis";
 import {
   DuplicateMbidError,
   moveAlbumRgMbid,
-  reassignArtistMbid,
+  moveArtistMbid,
 } from "../services/mbidReassign";
 import { forgetOwnedIndex } from "../services/discovery/ownedIndexVersion";
 import { artistSortName, isMbid } from "../services/artistIdentity";
@@ -448,8 +448,28 @@ router.put("/artists/:id/metadata", async (req, res) => {
     try {
       const { name, bio, genres, heroUrl, mbid } = req.body;
 
+      // Every field is read before anything is read from or written to the database.
       const updateData: any = {};
       let hasOverrides = false;
+      let newName: string | null | undefined;
+      if (name !== undefined) {
+        newName = textOverride("name", name);
+        updateData.displayName = newName;
+        hasOverrides = true;
+      }
+      if (bio !== undefined) {
+        updateData.userSummary = textOverride("bio", bio);
+        hasOverrides = true;
+      }
+      if (heroUrl !== undefined) {
+        updateData.userHeroUrl = textOverride("heroUrl", heroUrl);
+        hasOverrides = true;
+      }
+      if (genres !== undefined) {
+        updateData.userGenres = genresOverride(genres);
+        hasOverrides = true;
+      }
+      const newMbid = mbidInput("mbid", mbid);
 
       // The name shown before the edit, to tell afterwards whether the edit changed it.
       const before = await prisma.artist.findUnique({
@@ -457,57 +477,29 @@ router.put("/artists/:id/metadata", async (req, res) => {
         select: { name: true, displayName: true },
       });
 
-      // Map user edits to override fields (non-destructive)
-      if (name !== undefined) {
-        updateData.displayName = name;
-        hasOverrides = true;
+      // sortName follows displayName. Clearing the override files the artist under
+      // its canonical name.
+      if (newName !== undefined) {
+        updateData.sortName = artistSortName(newName ?? before?.name ?? "");
+      }
 
-        // sortName follows displayName. Clearing the override files the artist under
-        // its canonical name.
-        const effectiveName =
-          typeof name === "string" && name.trim() !== "" ? name : (before?.name ?? "");
-        updateData.sortName = artistSortName(effectiveName);
-      }
-      if (bio !== undefined) {
-        updateData.userSummary = bio;
-        hasOverrides = true;
-      }
-      if (heroUrl !== undefined) {
-        updateData.userHeroUrl = heroUrl;
-        hasOverrides = true;
-      }
-      if (genres !== undefined) {
-        updateData.userGenres = genres;
-        hasOverrides = true;
-      }
-  
       // Set override flag
       if (hasOverrides) {
         updateData.hasUserOverrides = true;
       }
-  
-      // Reassign canonical MBID if provided (trim once; skip empty/whitespace/non-string)
-      const trimmedMbid = typeof mbid === "string" ? mbid.trim() : "";
-      if (trimmedMbid !== "") {
-        try {
-          await reassignArtistMbid(req.params.id, trimmedMbid);
-        } catch (err) {
-          if (err instanceof DuplicateMbidError) {
-            return res.status(409).json({
-              error: `MBID ${trimmedMbid} is already in use by another artist`,
-            });
-          }
-          throw err;
-        }
-      }
-  
-      const artist = await prisma.artist.update({
-        where: { id: req.params.id },
-        data: updateData,
-        include: ARTIST_EDIT_REPLY,
+
+      // A new id and the rest of the edit are stored together or not at all.
+      const artist = await prisma.$transaction(async (tx) => {
+        if (newMbid !== null) await moveArtistMbid(tx, req.params.id, newMbid);
+        return tx.artist.update({
+          where: { id: req.params.id },
+          data: updateData,
+          include: ARTIST_EDIT_REPLY,
+        });
       });
+      if (newMbid !== null) forgetOwnedIndex();
       await forgetArtistHero(req.params.id);
-  
+
       // A shown name is what a Subsonic client lists, so an edit that changes it moves the library's change marker. An
       // edit that sends the name already shown, a new MBID (it renames nothing), or an artist no client lists (Discover's,
       // or one whose songs are missing or corrupt) moves nothing.
@@ -516,6 +508,12 @@ router.put("/artists/:id/metadata", async (req, res) => {
       }
       res.json(artist);
     } catch (error) {
+      if (error instanceof BadField) return refuseRequest(req, res, error.message);
+      if (error instanceof DuplicateMbidError) {
+        return res.status(409).json({
+          error: `MBID ${error.mbidValue} is already in use by another artist`,
+        });
+      }
       if (!respondIfDeleted(res, error, "artist")) {
         safeError(res, "Update artist metadata", error);
       }
