@@ -916,17 +916,27 @@ describe("a secret the client still sends to enable", () => {
 });
 
 describe("a transaction that cannot start or finish in time", () => {
-    const timedOut = (code: string) =>
-        jest.spyOn(prisma, "$transaction").mockRejectedValue(
-            new Prisma.PrismaClientKnownRequestError("Transaction API error: the transaction took too long", { code, clientVersion: "test" }),
-        );
+    const busyError = (code: string) =>
+        new Prisma.PrismaClientKnownRequestError("Transaction API error: the transaction took too long", { code, clientVersion: "test" });
+    const timedOut = (code: string) => jest.spyOn(prisma, "$transaction").mockRejectedValue(busyError(code));
+    /** The real transaction runs the code check and the change, then runs out of time before it can commit. */
+    const timesOutAfterTheWork = (code: string) => {
+        const real = prisma.$transaction.bind(prisma) as (fn: (tx: unknown) => Promise<unknown>, options?: unknown) => Promise<unknown>;
+        return jest.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: unknown) => Promise<unknown>, options?: unknown) =>
+            real(async (tx) => {
+                await fn(tx);
+                throw busyError(code);
+            }, options)) as never);
+    };
+    const saidSo = (logged: jest.SpyInstance, code: string) =>
+        logged.mock.calls.some((call) => String(call[0]).includes(code));
 
     it.each([["P2028", "the transaction ran out of time"], ["P2024", "no connection came free in time"]])(
-        "answers 503 try again to a disable, and spends nothing (%s: %s)",
+        "answers 503 try again to a disable, and logs it (%s: %s)",
         async (code) => {
             const [recovery] = await twoFactorOn();
             const before = await stored();
-            expectLog("error");
+            const logged = expectLog("warn");
             const spy = timedOut(code);
 
             const res = await disable(recovery);
@@ -934,14 +944,44 @@ describe("a transaction that cannot start or finish in time", () => {
 
             expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
             expect(await stored()).toEqual(before);
+            expect(saidSo(logged, code)).toBe(true);
         },
     );
 
-    it("answers 503 try again to new recovery codes, and spends nothing", async () => {
+    it("spends nothing when a disable runs out of time after the code was taken and 2FA turned off", async () => {
+        const [recovery] = await twoFactorOn();
+        const before = await stored();
+        expectLog("warn");
+        const spy = timesOutAfterTheWork("P2028");
+
+        const res = await disable(recovery);
+        spy.mockRestore();
+
+        expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+        expect(await stored()).toEqual(before);
+        // The code is still good: the same request, sent again, turns 2FA off.
+        expect((await disable(recovery)).status).toBe(200);
+    });
+
+    it("answers 503 try again to new recovery codes, and logs it", async () => {
         await twoFactorOn();
         const before = await stored();
-        expectLog("error");
+        const logged = expectLog("warn");
         const spy = timedOut("P2028");
+
+        const res = await newCodes(codeNow());
+        spy.mockRestore();
+
+        expect([res.status, res.body]).toEqual([503, { error: "Try again" }]);
+        expect(await stored()).toEqual(before);
+        expect(saidSo(logged, "P2028")).toBe(true);
+    });
+
+    it("keeps the old recovery codes when the new list runs out of time before it commits", async () => {
+        await twoFactorOn();
+        const before = await stored();
+        expectLog("warn");
+        const spy = timesOutAfterTheWork("P2028");
 
         const res = await newCodes(codeNow());
         spy.mockRestore();

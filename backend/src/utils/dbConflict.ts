@@ -40,6 +40,16 @@ export function isTransactionConflict(err: unknown): boolean {
     return isDeadlock(err) || isSerializationFailure(err);
 }
 
+/**
+ * The database had no time or no connection to give this transaction, so nothing was written and the same request
+ * can be sent again: Prisma's transaction timeout or already-closed transaction (`P2028`), or a connection pool with
+ * none free in time (`P2024`).
+ */
+export function isDatabaseBusy(err: unknown): err is { code: "P2028" | "P2024" } {
+    const code = (err as PrismaLikeError | null)?.code;
+    return code === "P2028" || code === "P2024";
+}
+
 /** The shortest and longest wait before a lost transaction runs again. */
 const WAIT_MIN_MS = 50;
 const WAIT_MAX_MS = 200;

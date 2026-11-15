@@ -1,9 +1,10 @@
 import crypto from "crypto";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { decrypt, encrypt } from "../../utils/encryption";
 import { logger } from "../../utils/logger";
+import { isDatabaseBusy } from "../../utils/dbConflict";
 
 /** The database, or the transaction a spend and its change share. */
 type Db = Pick<Prisma.TransactionClient, "user">;
@@ -137,10 +138,6 @@ export type SpendAndChange<T> =
     | { outcome: "busy" }
     | { outcome: "changed"; value: T };
 
-/** Prisma's transaction timeout or already-closed transaction (P2028), and a pool with no connection free in time (P2024). */
-function isOutOfTime(error: unknown): boolean {
-    return error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2028" || error.code === "P2024");
-}
 
 /**
  * Spends a person's second-factor code and makes the change it allows, in one transaction: the code is used up only if
@@ -163,8 +160,8 @@ export async function spendAndChange<T>(
         });
     } catch (error) {
         if (error instanceof ChangeNotMade) return { outcome: "not-changed" };
-        if (isOutOfTime(error)) {
-            logger.warn(`[2FA] ${user.id}: the database could not run the code check in time (${(error as Prisma.PrismaClientKnownRequestError).code})`);
+        if (isDatabaseBusy(error)) {
+            logger.warn(`[2FA] ${user.id}: the database could not run the code check in time (${error.code})`);
             return { outcome: "busy" };
         }
         throw error;

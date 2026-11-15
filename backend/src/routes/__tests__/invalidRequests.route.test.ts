@@ -58,6 +58,10 @@ const ROUTES: Row[] = [
     ["whats new: a mood mix decision that does not exist", "post", () => "/api/whats-new/mood-mixes/decision", { decision: "burn" }],
     ["whats new: saving a mix with no id", "post", () => "/api/whats-new/mood-mixes/save", {}],
     ["whats new: a choice with no answer", "post", () => "/api/whats-new/1.11.0/choice", { key: "x" }],
+    ["auth: a sign-in with nothing", "post", () => "/api/auth/login", {}],
+    ["auth: 2fa enable with no code", "post", () => "/api/auth/2fa/enable", {}],
+    ["auth: 2fa disable with no code", "post", () => "/api/auth/2fa/disable", { password: "x" }],
+    ["auth: new recovery codes with no password", "post", () => "/api/auth/2fa/recovery-codes", { token: "123456" }],
 ];
 
 describe("a request that does not parse", () => {
@@ -77,5 +81,34 @@ describe("a request that does not parse", () => {
 
         const lines = logged.mock.calls.map((call) => String(call[0]));
         expect(lines.some((line) => line.includes("/plays") && line.includes("trackId"))).toBe(true);
+    });
+
+    it("keeps what was sent out of the log: only the field and the rule", async () => {
+        const logged = expectLog("warn");
+
+        await request(app)
+            .post("/api/onboarding/audiobookshelf")
+            .set("Authorization", bearer)
+            .send({ enabled: true, url: "not a url hunter2-secret-value" })
+            .expect(400);
+
+        const lines = logged.mock.calls.map((call) => String(call[0]));
+        expect(lines.some((line) => line.includes("url"))).toBe(true);
+        expect(lines.some((line) => line.includes("hunter2-secret-value"))).toBe(false);
+    });
+
+    it("cuts a long list of issues to a few, on one line", async () => {
+        const logged = expectLog("warn");
+
+        await request(app)
+            .post("/api/playlists/" + playlistId + "/items")
+            .set("Authorization", bearer)
+            .send({ trackIds: Array.from({ length: 400 }, () => 7) })
+            .expect(400);
+
+        const line = logged.mock.calls.map((call) => String(call[0])).find((l) => l.includes("[InvalidRequest]"))!;
+        expect(line).toContain("more)");
+        expect(line.length).toBeLessThan(700);
+        expect(line).not.toContain("\n");
     });
 });

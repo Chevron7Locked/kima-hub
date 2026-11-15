@@ -23,15 +23,24 @@ export function safeError(res: Response, context: string, error: unknown, status
     res.status(statusCode).json({ error: "Internal server error" });
 }
 
+const MAX_LOGGED_ISSUES = 5;
+const MAX_LOGGED_ISSUE_CHARS = 500;
+
 /**
  * Answer a request that did not parse: a plain 400 that says nothing of the schema, and the issues in the log for
  * whoever runs the server. The path is baseUrl + path, never originalUrl, which can carry a token in its query.
  */
 export function invalidRequest(req: Request, res: Response, error: ZodError): Response {
-    const issues = error.issues
+    // A client picks the keys in an issue's path and can send thousands of bad items: the line shows the first few,
+    // on one line, and stops at a fixed length.
+    const shown = error.issues
+        .slice(0, MAX_LOGGED_ISSUES)
         .map((issue) => `${issue.path.join(".") || "(body)"}: ${issue.message}`)
         .join("; ");
-    logger.warn(`[InvalidRequest] ${req.method} ${req.baseUrl}${req.path}: ${issues}`);
+    const more = error.issues.length > MAX_LOGGED_ISSUES ? ` (+${error.issues.length - MAX_LOGGED_ISSUES} more)` : "";
+    const line = `${shown}${more}`.replace(/[\r\n\t]+/g, " ");
+    const clipped = line.length > MAX_LOGGED_ISSUE_CHARS ? `${line.slice(0, MAX_LOGGED_ISSUE_CHARS)}...` : line;
+    logger.warn(`[InvalidRequest] ${req.method} ${req.baseUrl}${req.path}: ${clipped}`);
     return res.status(400).json({ error: "Invalid request" });
 }
 
