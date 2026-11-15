@@ -183,6 +183,9 @@ export async function indexIntoStoredQueue(
     return pointIntoStored(stored, clientIndex, trackId, playable);
 }
 
+/** A playback state row as stored. */
+export type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
+
 /** The saved queue as a client is shown it. */
 export interface PlayableQueue {
     queue: QueueEntry[];
@@ -229,7 +232,7 @@ export async function playableQueue(
  * songs, the index into those, and the song now current when the one named is not playable. What is stored stays as it
  * is. No row stays no row.
  */
-export async function shownState(state: Prisma.PlaybackStateGetPayload<object> | null) {
+export async function shownState(state: PlaybackStateRow | null) {
     if (!state) return state;
     const shown = await playableQueue(state);
     if (!Array.isArray(state.queue)) return { ...state, trackId: shown.trackId };

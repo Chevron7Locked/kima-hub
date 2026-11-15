@@ -3,11 +3,9 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
 import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, shownState } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, shownState, type PlaybackStateRow } from "../services/savedQueue";
 
 const router = express.Router();
-
-type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
 
 // A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
 const MAX_QUEUE_SOURCE_LENGTH = 200;
@@ -70,7 +68,7 @@ router.post("/", async (req, res) => {
         // only while that is still the stored time, so a state another device saved since is never overwritten by
         // one decided on older word. Omitted, the save writes whatever is stored, as every client has until now.
         let expectedAt: Date | null = null;
-        if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
+        if (expectedUpdatedAt !== undefined) {
             expectedAt = typeof expectedUpdatedAt === "string" ? new Date(expectedUpdatedAt) : null;
             if (!expectedAt || Number.isNaN(expectedAt.getTime())) {
                 return res.status(400).json({ error: "expectedUpdatedAt must be a date" });
@@ -141,10 +139,16 @@ router.post("/", async (req, res) => {
 
         // The index points into a queue: the one sent, or for a save without one the queue as it stands, which stays
         // locked until this save is written (see `indexIntoStoredQueue`). A time the save names is checked by that write,
-        // so inside the same lock.
+        // so inside the same lock; a save that names one and carries its own queue takes the lock too, so the row it
+        // answers with is the one it wrote and not one a later save made.
         const playbackState = indexOnly
             ? await prisma.$transaction(async (tx) => write(tx, await indexIntoStoredQueue(tx, userId, currentIndex, trackId)))
-            : await write(prisma, accepted?.currentIndex ?? 0);
+            : expectedAt
+              ? await prisma.$transaction(async (tx) => {
+                    await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+                    return write(tx, accepted?.currentIndex ?? 0);
+                })
+              : await write(prisma, accepted?.currentIndex ?? 0);
 
         if (!playbackState) {
             // What is stored now, as a client is shown it, so the client can take it up without asking again.

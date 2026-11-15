@@ -436,7 +436,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             // owed, and whoever sent it takes the other state up. Only a save that named a time can be refused so; any
             // other 409 is a failure like the rest.
             if (next.state.expectedUpdatedAt !== undefined && hasStatus(err, 409)) {
-                if (saveRunRef.current === next.run) savePendingRef.current = false;
+                if (saveRunRef.current === next.run) {
+                    savePendingRef.current = false;
+                    s.failures = 0;
+                    s.checksToSkip = 0;
+                }
                 return "conflict";
             }
             // The flag stays set: the change is still only here, and another device's state must not
@@ -780,8 +784,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     ]);
 
     // A page that is closing, or going to the background (where the browser may end it without notice), sends a change
-    // whose wait has not run out, at once. Saves are sent kept alive (see the api), so the browser finishes one that is
-    // on its way as the page goes. One that failed is sent again too, the poll being unlikely to get another turn.
+    // whose wait has not run out, at once. Saves are sent kept alive (see the client contract module, `api.ts`), so the
+    // browser finishes one that is on its way as the page goes. One that failed is sent again too, the poll being unlikely to get another turn.
     useEffect(() => {
         const flush = () => {
             const s = saveRef.current;

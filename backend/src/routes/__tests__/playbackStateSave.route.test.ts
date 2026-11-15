@@ -449,6 +449,15 @@ describe("POST /api/playback-state: a save that names the time it saw (expectedU
         expect(await stored(user.id)).toBeNull();
     });
 
+    it("answers 400 for a time that is null or not a string, rather than saving without the check", async () => {
+        const user = await newUser("cond-nonstring");
+        for (const expectedUpdatedAt of [null, 1_700_000_000_000, true, {}]) {
+            const res = await save(user.id, { playbackType: "track", trackId: `${S}s1`, expectedUpdatedAt });
+            expect(res.status).toBe(400);
+        }
+        expect(await stored(user.id)).toBeNull();
+    });
+
     it("leaves a save that names no time as it was: it writes whatever is stored", async () => {
         const user = await newUser("cond-none");
         await save(user.id, { playbackType: "track", trackId: `${S}s1` }).expect(200);
