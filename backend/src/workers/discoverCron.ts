@@ -8,8 +8,7 @@
 import { logger } from "../utils/logger";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
-import { discoverQueue } from "./queues";
-import { resolveGenerationWeekStart, weekStartKey } from "../lib/discoveryWeek";
+import { queueWeeklyJob } from "../services/discovery/weeklyJob";
 import { distributedLock } from "../utils/distributedLock";
 import { LockUnavailableError } from "../utils/lockErrors";
 
@@ -45,22 +44,8 @@ export function startDiscoverWeeklyCron() {
             for (const config of configs) {
                 logger.debug(`   Queueing job for user ${config.userId}...`);
 
-                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date()));
-                const jobId = `discover-weekly-${config.userId}-${weekKey}`;
-                const enqueue = async (signal?: AbortSignal) => {
-                    const existing = await discoverQueue.getJob(jobId);
-                    if (existing) {
-                        const state = await existing.getState();
-                        if (state === "completed" || state === "failed") {
-                            await existing.remove();
-                        }
-                    }
-                    // Past a lost lock another enqueue may have run; this one is skipped, as a held lock skips it.
-                    signal?.throwIfAborted();
-                    await discoverQueue.add("discover-weekly", {
-                        userId: config.userId,
-                    }, { jobId });
-                };
+                // Past a lost lock another enqueue may have run; this one is skipped, as a held lock skips it.
+                const enqueue = (signal?: AbortSignal) => queueWeeklyJob(config.userId, signal);
                 try {
                     try {
                         await distributedLock.withLock(`discover:generate:${config.userId}`, 30000, enqueue);

@@ -4,7 +4,8 @@ import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { listenBrainzService } from "../services/listenBrainz";
 import { startOfWeek, endOfWeek } from "date-fns";
-import { resolveViewWeek, resolveGenerationWeekStart, weekStartKey, weekBoundaryIso, WEEK_STARTS_ON } from "../lib/discoveryWeek";
+import { resolveViewWeek, weekBoundaryIso, WEEK_STARTS_ON } from "../lib/discoveryWeek";
+import { queueWeeklyJob } from "../services/discovery/weeklyJob";
 import { isLidarrConfigured } from "../services/lidarrClient";
 
 import { discoverQueue } from "../workers/queues";
@@ -223,20 +224,9 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
 
                 logger.debug(`[Discover] Queuing generation for user ${userId}`);
 
-                const weekKey = weekStartKey(resolveGenerationWeekStart(new Date()));
-                const jobId = `discover-weekly-${userId}-${weekKey}`;
-                const existing = await discoverQueue.getJob(jobId);
-                if (existing) {
-                    const state = await existing.getState();
-                    if (state === "completed" || state === "failed") {
-                        await existing.remove();
-                    }
-                }
-                // The check above is only good while the lock is: past a lost one, another request may have queued.
+                // The batch check above is only good while the lock is: past a lost one, another request may have queued.
                 signal.throwIfAborted();
-                const job = await discoverQueue.add("discover-weekly", { userId }, { jobId });
-
-                return { conflict: false as const, jobId: job.id };
+                return { conflict: false as const, jobId: await queueWeeklyJob(userId, signal) };
             },
         );
 

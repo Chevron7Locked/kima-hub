@@ -1,7 +1,7 @@
 /**
  * The weekly cron enqueues each user's discover job under the same lock as the
- * manual /generate path (`discover:generate:<userId>`), and removes a finished
- * job with the same id first, since BullMQ silently ignores a re-add. The cron
+ * manual /generate path (`discover:generate:<userId>`), and puts a finished
+ * job with the same id back to waiting, since BullMQ silently ignores a re-add. The cron
  * callback is captured from a node-cron mock and fired directly. Real database
  * for the users whose Discover is enabled; the calls of other files' users are ignored.
  */
@@ -85,6 +85,7 @@ function fakeJob(state: string) {
         id: `job-${state}`,
         getState: jest.fn().mockResolvedValue(state),
         remove: jest.fn().mockResolvedValue(undefined),
+        retry: jest.fn().mockResolvedValue(undefined),
     };
 }
 
@@ -108,10 +109,12 @@ async function tickWithStaleJob(state: string) {
     return stale;
 }
 
-/** remove() must beat add(): a re-add on a live hash is a silent no-op. */
-function expectRemoveBeforeAdd(stale: { remove: jest.Mock }) {
-    const removeOrder = stale.remove.mock.invocationCallOrder[0];
-    expect(removeOrder).toBeLessThan(addOrder());
+/** A finished job is put back to waiting: a re-add on its hash is a silent no-op, and removing it first could leave the week with none. */
+function expectPutBack(stale: { remove: jest.Mock; retry: jest.Mock }, state: string) {
+    expect(stale.retry).toHaveBeenCalledTimes(1);
+    expect(stale.retry).toHaveBeenCalledWith(state, { resetAttemptsMade: true, resetAttemptsStarted: true });
+    expect(stale.remove).not.toHaveBeenCalled();
+    expect(addCalls()).toHaveLength(0);
 }
 
 describe('discoverCron enqueue -- lock + stale-hash guard', () => {
@@ -142,15 +145,12 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         expect(lockOrder()).toBeLessThan(addOrder());
     });
 
-    // A retained COMPLETED hash for this user's current week must be removed
-    // before re-adding, otherwise add() is a no-op and the cron silently
-    // skips the user.
-    it('removes a stale completed job hash inside the lock before re-enqueuing', async () => {
+    // A retained COMPLETED hash for this user's current week is put back to
+    // waiting, otherwise add() is a no-op and the cron silently skips the user.
+    it('puts a stale completed job hash back to waiting inside the lock, without removing it', async () => {
         const stale = await tickWithStaleJob('completed');
 
-        expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(addCalls()).toHaveLength(1);
-        expectRemoveBeforeAdd(stale);
+        expectPutBack(stale, 'completed');
     });
 
     // A non-terminal (active) hash means a generation is already running for
@@ -245,27 +245,38 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         expect(Number(queuedCount)).toBeLessThan(Number(foundCount));
     });
 
-    // The lock is taken before getJob and remove, not only around add.
-    it('looks up and removes the old job inside the lock, not before it', async () => {
+    // The lock is taken before getJob and the put-back, not only around add.
+    it('looks up and puts back the old job inside the lock, not before it', async () => {
         const stale = await tickWithStaleJob('completed');
 
-        const removeOrder = stale.remove.mock.invocationCallOrder[0];
+        const retryOrder = stale.retry.mock.invocationCallOrder[0];
         expect(lockOrder()).toBeLessThan(getJobOrder());
-        expect(lockOrder()).toBeLessThan(removeOrder);
+        expect(lockOrder()).toBeLessThan(retryOrder);
     });
 
     // A failed job blocks a re-add just as a completed one does.
-    it('removes a stale failed job before enqueuing again, inside the lock', async () => {
+    it('puts a stale failed job back to waiting, inside the lock', async () => {
         const stale = await tickWithStaleJob('failed');
 
-        expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(addCalls()).toHaveLength(1);
-        expectRemoveBeforeAdd(stale);
+        expectPutBack(stale, 'failed');
+    });
+
+    // A finished job that cannot be put back stays: the week keeps its job, and the user is skipped with a warning.
+    it('keeps the finished job, and skips the user with a warning, when putting it back fails', async () => {
+        const stale = fakeJob('failed');
+        stale.retry.mockRejectedValue(new Error('redis down'));
+        getJob.mockResolvedValue(stale);
+        await seedUsers([{ id: USER_A, playlistSize: 25 }]);
+
+        await tickCron()();
+
+        expect(stale.remove).not.toHaveBeenCalled();
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`enqueue skipped for ${USER_A}`));
     });
 
     // getJob looks up the same id add() enqueues.
     it('looks the job up by the same id that add() enqueues', async () => {
-        await tickWithStaleJob('completed');
+        await tickWithStaleJob('waiting');
 
         const lookedUpId = getJob.mock.calls.find((c) => String(c[0]).includes(USER_A))![0];
         const enqueuedId = addCalls()[0][2].jobId;

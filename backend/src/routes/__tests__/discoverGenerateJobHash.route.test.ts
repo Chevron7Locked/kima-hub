@@ -1,6 +1,7 @@
 /**
- * POST /discover/generate removes a finished job with the same id before
- * re-adding, since BullMQ silently ignores a re-add. A running job is left alone.
+ * POST /discover/generate puts a finished job with the same id back to waiting
+ * (a re-add is silently ignored by BullMQ, and removing first could leave the week
+ * with no job). A running job is left alone.
  * Real router and database; auth, the queue, the lock and Lidarr are stood in.
  */
 
@@ -63,6 +64,7 @@ function fakeJob(state: string) {
         id: `discover-weekly-dgj_user-${state}`,
         getState: jest.fn().mockResolvedValue(state),
         remove: jest.fn().mockResolvedValue(undefined),
+        retry: jest.fn().mockResolvedValue(undefined),
     };
 }
 
@@ -82,30 +84,39 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
         (discoverQueue.add as jest.Mock).mockResolvedValue({ id: 'new-job-id' });
     });
 
-    it('removes a finished job hash before enqueuing again', async () => {
+    it('puts a finished job back to waiting, without removing it', async () => {
         const stale = fakeJob('completed');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
         const res = await request(app).post('/discover/generate');
 
         expect(res.status).toBe(200);
-        expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
-        const removeOrder = stale.remove.mock.invocationCallOrder[0];
-        const addOrder = (discoverQueue.add as jest.Mock).mock.invocationCallOrder[0];
-        expect(removeOrder).toBeLessThan(addOrder);
+        expect(res.body.jobId).toBe(stale.id);
+        expect(stale.retry).toHaveBeenCalledWith('completed', { resetAttemptsMade: true, resetAttemptsStarted: true });
+        expect(stale.remove).not.toHaveBeenCalled();
     });
 
     // A failed run leaves a failed hash; re-adding the same id would otherwise do nothing.
-    it('removes a failed job hash before enqueuing again', async () => {
+    it('puts a failed job back to waiting, without removing it', async () => {
         const stale = fakeJob('failed');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
         const res = await request(app).post('/discover/generate');
 
         expect(res.status).toBe(200);
-        expect(stale.remove).toHaveBeenCalledTimes(1);
-        expect(discoverQueue.add).toHaveBeenCalledTimes(1);
+        expect(stale.retry).toHaveBeenCalledWith('failed', { resetAttemptsMade: true, resetAttemptsStarted: true });
+        expect(stale.remove).not.toHaveBeenCalled();
+    });
+
+    it('answers 500 and keeps the finished job when putting it back fails', async () => {
+        const stale = fakeJob('failed');
+        stale.retry.mockRejectedValue(new Error('redis down'));
+        (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
+
+        const res = await request(app).post('/discover/generate');
+
+        expect(res.status).toBe(500);
+        expect(stale.remove).not.toHaveBeenCalled();
     });
 
     it('leaves an active job in place', async () => {
@@ -127,7 +138,7 @@ describe('POST /discover/generate -- drop stale job hash before re-enqueue', () 
     });
 
     it('looks the job up by the same id it enqueues', async () => {
-        const stale = fakeJob('completed');
+        const stale = fakeJob('waiting');
         (discoverQueue.getJob as jest.Mock).mockResolvedValue(stale);
 
         const res = await request(app).post('/discover/generate');
