@@ -199,6 +199,10 @@ async function saveImportJob(job: ImportJob): Promise<void> {
     // Continue - Redis is optional, DB is source of truth
   }
 
+  announceImportProgress(job);
+}
+
+function announceImportProgress(job: ImportJob): void {
   eventBus.emit({
     type: "import:progress",
     userId: job.userId,
@@ -2422,18 +2426,20 @@ class SpotifyImportService {
     const added = placed.length;
     if (added > 0) announcePlaylistChange(job.userId, job.createdPlaylistId);
 
-    job.tracksMatched += added;
-    job.updatedAt = new Date();
-    await saveImportJob(job);
+    // The songs were counted by placeFoundSongs, in the same locked step that placed them. The job loaded above may
+    // be older than a dismissal or another refresh that ran meanwhile, so it is never written back: the counts are read
+    // again and announced as they now stand.
+    const current = (await getImportJob(jobId)) ?? job;
+    if (added > 0) announceImportProgress(current);
 
     jobLogger?.debug(
       `[Spotify Import] Refresh job ${jobId}: added ${added} newly downloaded tracks`,
     );
     jobLogger?.info(
-      `Refresh: added ${added} newly downloaded track(s), totalMatchedNow=${job.tracksMatched}`,
+      `Refresh: added ${added} newly downloaded track(s), totalMatchedNow=${current.tracksMatched}`,
     );
 
-    return { added, total: job.tracksMatched };
+    return { added, total: current.tracksMatched };
   }
 
   async getUserJobs(userId: string): Promise<ImportJob[]> {

@@ -225,7 +225,7 @@ export async function addTracks(
 async function settleImportCounts(
     tx: Pick<typeof prisma, "spotifyImportJob">,
     playlistId: string,
-    change: { dismissed: { spotifyArtist: string; spotifyTitle: string; spotifyAlbum: string } }
+    change: { dismissed?: { spotifyArtist: string; spotifyTitle: string; spotifyAlbum: string }; matched?: number }
 ): Promise<void> {
     const job = await tx.spotifyImportJob.findFirst({
         where: { createdPlaylistId: playlistId },
@@ -235,19 +235,22 @@ async function settleImportCounts(
     if (!job) return;
 
     const data: Prisma.SpotifyImportJobUpdateInput = {};
+    if (change.matched) data.tracksMatched = { increment: change.matched };
     const gone = change.dismissed;
-    // The saved listing is the import's own list of what it was asked for: the dismissed entry leaves it, one copy of a
-    // listing the source held twice at a time, preferring one the import never matched on its own.
-    const saved = Array.isArray(job.pendingTracks) ? [...(job.pendingTracks as Array<Record<string, unknown>>)] : [];
-    const same = (l: Record<string, unknown>) =>
-        l.artist === gone.spotifyArtist && l.title === gone.spotifyTitle && l.album === gone.spotifyAlbum;
-    const at = saved.findIndex((l) => same(l) && !l.preMatchedTrackId);
-    const index = at >= 0 ? at : saved.findIndex(same);
-    if (index >= 0) {
-        saved.splice(index, 1);
-        data.pendingTracks = saved as Prisma.InputJsonValue;
+    if (gone) {
+        // The saved listing is the import's own list of what it was asked for: the dismissed entry leaves it, one copy of a
+        // listing the source held twice at a time, preferring one the import never matched on its own.
+        const saved = Array.isArray(job.pendingTracks) ? [...(job.pendingTracks as Array<Record<string, unknown>>)] : [];
+        const same = (l: Record<string, unknown>) =>
+            l.artist === gone.spotifyArtist && l.title === gone.spotifyTitle && l.album === gone.spotifyAlbum;
+        const at = saved.findIndex((l) => same(l) && !l.preMatchedTrackId);
+        const index = at >= 0 ? at : saved.findIndex(same);
+        if (index >= 0) {
+            saved.splice(index, 1);
+            data.pendingTracks = saved as Prisma.InputJsonValue;
+        }
+        if (job.tracksTotal > 0) data.tracksTotal = { decrement: 1 };
     }
-    if (job.tracksTotal > 0) data.tracksTotal = { decrement: 1 };
     if (Object.keys(data).length > 0) await tx.spotifyImportJob.update({ where: { id: job.id }, data });
 }
 
@@ -278,7 +281,8 @@ export interface FoundSong {
  * song that answers a waiting entry takes that entry's rank and lands exactly where the page showed it, between the
  * same neighbours, whatever a person has moved since. A song with no waiting entry is appended. Moving the entry into
  * the items is one transaction under the playlist lock: a waiting entry another writer already answered is skipped,
- * so two scans finding the same song add it once. Returns the songs it placed.
+ * so two scans finding the same song add it once. The import the playlist came from counts each answered entry as
+ * matched in the same transaction. Returns the songs it placed.
  */
 export async function placeFoundSongs(playlistId: string, found: FoundSong[]): Promise<FoundSong[]> {
     if (found.length === 0) return [];
@@ -317,7 +321,11 @@ export async function placeFoundSongs(playlistId: string, found: FoundSong[]): P
         // Allocated while the answered entries still hold their ranks, so an appended song cannot land on one.
         const appendRanks = await allocateAppendRanks(tx, playlistId, toAppend.length);
         const answered = placed.flatMap((s) => (s.pendingId ? [s.pendingId] : []));
-        if (answered.length > 0) await tx.playlistPendingTrack.deleteMany({ where: { id: { in: answered } } });
+        if (answered.length > 0) {
+            await tx.playlistPendingTrack.deleteMany({ where: { id: { in: answered } } });
+            // Each answered entry is a listing the import now has a song for.
+            await settleImportCounts(tx, playlistId, { matched: answered.length });
+        }
 
         const rows = [...inPlace, ...toAppend.map((trackId, i) => ({ trackId, rank: appendRanks[i] }))];
         if (rows.length === 0) return placed;
