@@ -1,6 +1,14 @@
 /**
  * Guess limits: caps on wrong tries at a secret, counted per thing being guessed and never per address, which a client
  * can forge. Counters live in memory: one backend process, and a restart resets them.
+ *
+ * The memory is bounded. A made-up name gets a counter like any other, so a flood of random names would otherwise grow
+ * the map until its windows end. At most MAX_COUNTERS are held: when a new subject arrives and the map is full, finished
+ * counters go first, then the oldest live one. Dropping the oldest live counter forgets that subject's wrong tries, which
+ * is acceptable: a client sending enough new names to fill the map is a client in a loop, and the runaway limit on its
+ * address still stops it. An account under attack keeps its count unless that many other subjects arrive after it within
+ * one window. That holds where the address is trustworthy (behind a reverse proxy that sets it); on a direct LAN address
+ * a client can forge it, and docs/security.md already says such access gets no per-person address limits.
  */
 
 import { createHash } from "crypto";
@@ -12,16 +20,23 @@ interface Counter {
     endsAt: number;
 }
 
+/** Counters held per limit: far above the accounts a Kima server has, small enough to cost little memory. */
+const MAX_COUNTERS = 10_000;
+
 /** A fixed-size stand-in for a subject, so a counter's memory does not depend on how long a made-up username is. */
 const fingerprint = (subject: string) => createHash("sha256").update(subject).digest("hex");
 
 export class GuessLimit {
+    /**
+     * Kept in the order the windows began, which is the order they end, because every window is the same length and a
+     * counter whose window restarts is moved to the back. So the front is always the oldest and the first to finish.
+     */
     private readonly windows = new Map<string, Counter>();
-    private nextSweepAt = 0;
 
     constructor(
         private readonly max: number,
         private readonly windowMs: number,
+        private readonly maxCounters: number = MAX_COUNTERS,
     ) {}
 
     /** How many counters are held. */
@@ -33,23 +48,28 @@ export class GuessLimit {
     take(rawSubject: string): boolean {
         const subject = fingerprint(rawSubject);
         const now = Date.now();
-        this.dropFinished(now);
         const current = this.windows.get(subject);
-        if (!current || current.endsAt <= now) {
-            this.windows.set(subject, { tries: 1, endsAt: now + this.windowMs });
+        if (current && current.endsAt > now) {
+            if (current.tries >= this.max) return false;
+            current.tries++;
             return true;
         }
-        if (current.tries >= this.max) return false;
-        current.tries++;
+        this.windows.delete(subject);
+        this.makeRoom(now);
+        this.windows.set(subject, { tries: 1, endsAt: now + this.windowMs });
         return true;
     }
 
-    /** Forgets counters whose window has ended, at most once per window, so the work stays small. */
-    private dropFinished(now: number): void {
-        if (now < this.nextSweepAt) return;
-        this.nextSweepAt = now + this.windowMs;
+    /** Drops finished counters from the front, then the oldest live ones, until one more subject fits. */
+    private makeRoom(now: number): void {
         for (const [subject, counter] of this.windows) {
-            if (counter.endsAt <= now) this.windows.delete(subject);
+            if (counter.endsAt > now) break;
+            this.windows.delete(subject);
+        }
+        while (this.windows.size >= this.maxCounters) {
+            const oldest = this.windows.keys().next();
+            if (oldest.done) return;
+            this.windows.delete(oldest.value);
         }
     }
 

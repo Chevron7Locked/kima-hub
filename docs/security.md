@@ -21,7 +21,7 @@ Credentials saved in Settings are encrypted with XChaCha20-Poly1305. API keys yo
 - The session cookie is `httpOnly` and `sameSite=lax`. It is marked `secure` only when `SECURE_COOKIES=true`, so set that when you serve Kima over HTTPS. A session lasts 7 days.
 - Changing a password signs that account out everywhere else.
 - Failed logins are limited to 20 per 15 minutes per address. Successful logins are not counted.
-- Wrong passwords are also capped per username: 20 per 15 minutes, counted separately for web login and Subsonic.
+- Wrong passwords are also capped per username: 20 per 15 minutes, counted separately for web login and Subsonic. These counts are kept in memory, so restarting Kima resets them.
 - An account can turn on two-factor authentication with an authenticator app. Kima shows 10 recovery codes once, when it is turned on.
 - An administrator who is locked out can set `ADMIN_RESET_PASSWORD` and restart. See [configuration.md](configuration.md#common-options).
 
