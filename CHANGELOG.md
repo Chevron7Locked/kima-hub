@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Subsonic apps pick up an artist's genre edit or reset.
+- Subsonic apps pick up artist pictures and album covers Kima finds or replaces on its own.
+- Subsonic podcast image addresses are given only when they are real web addresses.
 - Setting, clearing or resetting an artist picture or album cover makes Subsonic apps fetch their lists again.
 - Subsonic apps get an artist image address only when the picture is a real web address, so they no longer receive one they cannot open.
 - An artist picture you set now shows in Subsonic apps too: in artist lists, the artist page, search, artist info and cover art.
