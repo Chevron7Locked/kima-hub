@@ -13,6 +13,7 @@ import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
+import { usePlayRow } from "@/hooks/usePlayRow";
 import { CoverArt } from "@/components/cards/MediaCard";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -42,6 +43,7 @@ export default function MixPage() {
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
+    const { playRow } = usePlayRow();
 
     const { data: mix, isLoading, error, refetch } = useMixQuery(mixId);
     const [isSaving, setIsSaving] = useState(false);
@@ -105,8 +107,10 @@ export default function MixPage() {
 
     const handlePlayTrack = (index: number) => {
         if (!mix?.tracks || mix.tracks.length === 0) return;
-        const tracks = formatTracksForPlayback(mix.tracks);
-        playTracks(tracks, index);
+        // The song that is current pauses or resumes; any other starts the mix from it.
+        playRow(currentTrack?.id === mix.tracks[index]?.id, () =>
+            playTracks(formatTracksForPlayback(mix.tracks), index)
+        );
     };
 
     const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);

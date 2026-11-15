@@ -48,6 +48,7 @@ import {
 import { useTrackFormat } from "@/hooks/useTrackFormat";
 import { formatTrackDisplay } from "@/lib/track-format";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
+import { usePlayRow } from "@/hooks/usePlayRow";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -146,6 +147,7 @@ export default function PlaylistDetailPage() {
     const { format: trackFormat } = useTrackFormat();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
+    const { playRow } = usePlayRow();
     const playlistId = params.id as string;
 
     const { mutateAsync: removeItem } = useRemoveFromPlaylistMutation();
@@ -418,8 +420,11 @@ export default function PlaylistDetailPage() {
     const handlePlayTrack = (index: number) => {
         if (!playlist?.items || playlist.items.length === 0) return;
 
-        const queue = playablePlaylist(playlist.items, index);
-        if (queue) playTracks(queue.tracks, queue.start);
+        // On the row that is playing the button pauses or resumes it; on another row it starts the queue there.
+        playRow(playlist.items[index]?.id === playingItem, () => {
+            const queue = playablePlaylist(playlist.items, index);
+            if (queue) playTracks(queue.tracks, queue.start);
+        });
     };
 
     const handleRowTouchEnd = useDoubleTapList(handlePlayTrack);

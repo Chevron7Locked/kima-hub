@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
 import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
+import { usePlayRow } from "@/hooks/usePlayRow";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
 import { shownTitle } from "@/lib/track-title";
@@ -27,6 +28,7 @@ interface TrackRowProps {
     track: Track;
     index: number;
     isCurrentlyPlaying: boolean;
+    isSounding: boolean;
     onPlayTrack: () => void;
     onAddToQueue: (track: Track) => void;
     onShowAddToPlaylist: (trackId: string) => void;
@@ -38,6 +40,7 @@ const TrackRow = memo(
         track,
         index,
         isCurrentlyPlaying,
+        isSounding,
         onPlayTrack,
         onAddToQueue,
         onShowAddToPlaylist,
@@ -76,7 +79,7 @@ const TrackRow = memo(
                             onPlayTrack();
                         }}
                         className="group/play w-10 h-10 flex items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                        aria-label={isCurrentlyPlaying ? "Pause" : "Play"}
+                        aria-label={isSounding ? "Pause" : "Play"}
                     >
                         <span
                             className={cn(
@@ -172,6 +175,7 @@ const TrackRow = memo(
         return (
             prevProps.track.id === nextProps.track.id &&
             prevProps.isCurrentlyPlaying === nextProps.isCurrentlyPlaying &&
+            prevProps.isSounding === nextProps.isSounding &&
             prevProps.index === nextProps.index
         );
     },
@@ -187,6 +191,7 @@ export function TracksList({
 }: TracksListProps) {
     const { currentTrack } = useAudioState();
     const currentTrackId = currentTrack?.id;
+    const { isPlaying, playRow } = usePlayRow();
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
 
@@ -228,7 +233,9 @@ export function TracksList({
                             track={track}
                             index={index}
                             isCurrentlyPlaying={isCurrentlyPlaying}
-                            onPlayTrack={() => onPlay(tracks, index)}
+                            isSounding={isCurrentlyPlaying && isPlaying}
+                            // The song that is current pauses or resumes; any other starts the list from it.
+                            onPlayTrack={() => playRow(isCurrentlyPlaying, () => onPlay(tracks, index))}
                             onAddToQueue={onAddToQueue}
                             onShowAddToPlaylist={handleShowAddToPlaylist}
                             onDelete={onDelete}

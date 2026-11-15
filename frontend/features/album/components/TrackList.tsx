@@ -7,6 +7,7 @@ import { formatNumber, formatTime } from "@/lib/format";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
 import { cascadeStyle } from "@/lib/motion";
 import { shownTitle } from "@/lib/track-title";
+import { usePlayRow } from "@/hooks/usePlayRow";
 
 interface TrackListProps {
     tracks: Track[];
@@ -28,6 +29,7 @@ interface TrackRowProps {
     album: Album;
     isOwned: boolean;
     isPlaying: boolean;
+    isSounding: boolean;
     isPreviewPlaying: boolean;
     colors: ColorPalette | null;
     onPlayTrack: (track: Track, index: number) => void;
@@ -43,6 +45,7 @@ const TrackRow = memo(
         album,
         isOwned,
         isPlaying,
+        isSounding,
         isPreviewPlaying,
         colors,
         onPlayTrack,
@@ -121,7 +124,7 @@ const TrackRow = memo(
                             handleRowClick();
                         }}
                         className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/5 transition-colors"
-                        aria-label={isPlaying ? "Pause" : "Play"}
+                        aria-label={isSounding ? "Pause" : "Play"}
                     >
                         <span
                             className={cn(
@@ -236,6 +239,7 @@ const TrackRow = memo(
         return (
             prevProps.track.id === nextProps.track.id &&
             prevProps.isPlaying === nextProps.isPlaying &&
+            prevProps.isSounding === nextProps.isSounding &&
             prevProps.isPreviewPlaying === nextProps.isPreviewPlaying &&
             prevProps.index === nextProps.index &&
             prevProps.isOwned === nextProps.isOwned
@@ -262,6 +266,7 @@ export const TrackList = memo(function TrackList({
         [tracks]
     );
     const shouldGroupByDisc = discNumbers.length > 1;
+    const { isPlaying: audioPlaying, playRow } = usePlayRow();
 
     return (
         <section>
@@ -295,9 +300,11 @@ export const TrackList = memo(function TrackList({
                                 album={album}
                                 isOwned={isOwned}
                                 isPlaying={isPlaying}
+                                isSounding={isPlaying && audioPlaying}
                                 isPreviewPlaying={isPreviewPlaying}
                                 colors={colors}
-                                onPlayTrack={onPlayTrack}
+                                // The song that is current pauses or resumes; any other starts the album from it.
+                                onPlayTrack={(t, i) => playRow(isPlaying, () => onPlayTrack(t, i))}
                                 onAddToQueue={onAddToQueue}
                                 onAddToPlaylist={onAddToPlaylist}
                                 onPreview={onPreview}

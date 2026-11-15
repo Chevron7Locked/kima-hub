@@ -8,6 +8,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { cascadeStyle } from "@/lib/motion";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
 import { shownTitle } from "@/lib/track-title";
+import { usePlayRow } from "@/hooks/usePlayRow";
 
 // A top track without a library album is not owned, so it can only be previewed.
 const isUnownedTrack = (track: Track) =>
@@ -32,9 +33,11 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
     previewPlaying,
     onPreview,
 }) => {
+    const { isPlaying: audioPlaying, playRow } = usePlayRow();
+    // A song the library has plays or pauses; one it has not toggles its preview.
     const activate = (track: Track) => {
         if (isUnownedTrack(track)) onPreview(track);
-        else onPlayTrack(track);
+        else playRow(currentTrackId === track.id, () => onPlayTrack(track));
     };
     const onTouchEnd = useDoubleTapList((index) => {
         if (tracks[index]) activate(tracks[index]);
@@ -45,7 +48,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
             <SectionHeader type="track" title="Popular" />
             <div data-tv-section="tracks" style={cascadeStyle(Math.min(tracks.length, 10))}>
                 {tracks.slice(0, 10).map((track, index) => {
-                    const isPlaying = currentTrackId === track.id;
+                    const isCurrent = currentTrackId === track.id;
                     const isPreviewPlaying =
                         previewTrack === track.id && previewPlaying;
                     const isUnowned = isUnownedTrack(track);
@@ -70,8 +73,8 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                             columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(80px,1fr)_80px]"
                             index={index}
                             // A preview playing shows like a library song playing (#228): touch screens have no hover to show it.
-                            current={isPlaying || isPreviewPlaying}
-                            playing={isPlaying || isPreviewPlaying}
+                            current={isCurrent || isPreviewPlaying}
+                            playing={(isCurrent && audioPlaying) || isPreviewPlaying}
                             onPlay={() => activate(track)}
                             title={shownTitle(track)}
                             subtitle={artist.name}

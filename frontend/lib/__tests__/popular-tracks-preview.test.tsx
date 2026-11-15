@@ -9,6 +9,8 @@ import { mountHost } from "./helpers/dom";
 
 vi.mock("@/lib/api", () => ({ api: { getCoverArtUrl: (id: string) => `/cover/${id}` } }));
 vi.mock("@/hooks/useDoubleTap", () => ({ useDoubleTapList: () => () => {} }));
+vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: false }) }));
+vi.mock("@/lib/audio-controls-context", () => ({ useAudioControls: () => ({ pause: () => {}, resumeWithGesture: async () => {} }) }));
 
 import { PopularTracks } from "@/features/artist/components/PopularTracks";
 

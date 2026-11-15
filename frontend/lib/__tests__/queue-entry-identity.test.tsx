@@ -80,15 +80,24 @@ import { AudioControlsProvider, useAudioControls } from "@/lib/audio-controls-co
 /** An engine that plays nothing; the test sends it the events a real one would (time passing, a gapless swap). */
 function fakeController() {
     const handlers = new Map<string, Set<(data?: unknown) => void>>();
+    const watchers = new Set<(snap: { status: string }) => void>();
+    let src: string | null = null;
     const engine = {
+        /** Tells the audio providers what the engine is doing now, as a real one does. */
+        setStatus: (status: string) => watchers.forEach((watch) => watch({ status })),
         on: (event: string, fn: (data?: unknown) => void) => {
             if (!handlers.has(event)) handlers.set(event, new Set());
             handlers.get(event)!.add(fn);
         },
         off: (event: string, fn: (data?: unknown) => void) => void handlers.get(event)?.delete(fn),
         emit: (event: string, data?: unknown) => handlers.get(event)?.forEach((fn) => fn(data)),
-        subscribe: () => () => undefined,
-        load: vi.fn(),
+        subscribe: (watch: (snap: { status: string }) => void) => {
+            watchers.add(watch);
+            return () => void watchers.delete(watch);
+        },
+        load: vi.fn((url: string) => {
+            src = url;
+        }),
         play: vi.fn(),
         pause: vi.fn(),
         seek: vi.fn(),
@@ -98,7 +107,7 @@ function fakeController() {
         setExpectedNext: vi.fn(),
         preloadNext: preload,
         clearExpectedNext: vi.fn(),
-        getState: () => ({ currentSrc: null, volume: 1, isMuted: false }),
+        getState: () => ({ currentSrc: src, volume: 1, isMuted: false }),
         isPlaying: () => false,
         hasEnded: () => false,
         isTransitioning: () => false,
@@ -236,5 +245,67 @@ describe("a playlist that lists a song twice, [A, B, A]", () => {
         const keys = probe.state.queue.map((t) => t.queueKey);
         expect(new Set(keys).size).toBe(3);
         expect(keys.every(Boolean)).toBe(true);
+    });
+});
+
+describe("the button on a playlist row", () => {
+    const rowButton = (place: number) => rows()[place].querySelector<HTMLButtonElement>("button")!;
+    const press = (place: number) => act(async () => rowButton(place).click());
+    const status = (value: string) => act(async () => engine.setStatus(value));
+
+    it("says pause on the row that is playing, and pauses without restarting the queue", async () => {
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        expect(rowButton(1).getAttribute("aria-label")).toBe("Pause");
+        engine.load.mockClear();
+
+        await press(1);
+
+        expect(engine.pause).toHaveBeenCalledTimes(1);
+        expect(engine.load).not.toHaveBeenCalled();
+        expect(probe.state.currentIndex).toBe(1);
+    });
+
+    it("resumes the paused row from where it stopped, not from the start", async () => {
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        await press(1);
+        await status("paused");
+        expect(rowButton(1).getAttribute("aria-label")).toBe("Play");
+        engine.load.mockClear();
+
+        await press(1);
+
+        expect(engine.play).toHaveBeenCalledTimes(1);
+        expect(engine.load).not.toHaveBeenCalled();
+        expect(probe.state.currentIndex).toBe(1);
+    });
+
+    it("starts the queue from another row, as before", async () => {
+        await mountPage();
+        await startRow(1);
+        await status("playing");
+        engine.load.mockClear();
+
+        await press(0);
+
+        expect(engine.pause).not.toHaveBeenCalled();
+        expect(engine.load).toHaveBeenCalledTimes(1);
+        expect(probe.state.currentIndex).toBe(0);
+    });
+
+    it("pauses only the row that is playing when a song is listed twice", async () => {
+        await mountPage();
+        await startRow(2); // the second A
+        await status("playing");
+        engine.load.mockClear();
+
+        await press(0); // the first A is another row: it starts, it does not pause
+
+        expect(engine.pause).not.toHaveBeenCalled();
+        expect(engine.load).toHaveBeenCalledTimes(1);
+        expect(probe.state.currentIndex).toBe(0);
     });
 });
