@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A playlist's songs no longer carry their file paths or analysis details** to people viewing it; only what is needed to list and play them.
+- **Retrying a new playlist with a different name or visibility makes that playlist** instead of returning the earlier one.
+- **Following playback from another device no longer depends on this device's clock**, and a song you just started here is no longer replaced by another device's older state, even if saving it failed. A podcast episode or audiobook that failed to restore is tried again on the next check.
 - **A shared song that fails to start no longer keeps the listener waiting** when the server's database is slow.
 - **The artist recount's progress reaches 100%** even when some artists could not be updated; the log says how many failed.
 - **Two-factor sign-in setup keeps its secret on the server**, so turning it on always uses the secret your authenticator scanned. Setup expires after 10 minutes; start again if it does.
