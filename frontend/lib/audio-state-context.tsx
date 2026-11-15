@@ -770,7 +770,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
                 if (!mounted) return;
                 // Another device changed the queue, or the page it came from, while the same song plays here too.
-                if (!adopted && serverIsNewer && queueDiffers()) {
+                // Audiobooks and podcasts keep no queue, so only a song's queue is compared.
+                if (!adopted && serverIsNewer && serverState.playbackType === "track" && playbackType === "track" && queueDiffers()) {
                     adoptQueue(serverState.queue || [], serverState.queueSource);
                     setCurrentIndex(serverState.currentIndex || 0);
                     setIsShuffle(serverState.isShuffle || false);
