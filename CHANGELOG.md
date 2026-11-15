@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A slow reply from the server no longer makes the player forget what it last saved, so it stops saving the same state twice.
 - A Subsonic app that sends a queue position or current index that isn't a whole number now gets an error instead of a wrong save.
 - A Subsonic queue with a repeated song keeps the playback position only when the current place is the right copy.
 - A queue save can no longer store a song the library scan is removing, including a person's very first save.
