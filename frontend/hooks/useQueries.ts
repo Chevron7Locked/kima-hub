@@ -531,19 +531,21 @@ export function useRemoveFromPlaylistMutation() {
         mutationKey: PLAYLIST_EDIT,
         mutationFn: ({
             playlistId,
-            trackId,
+            itemId,
         }: {
             playlistId: string;
-            trackId: string;
-        }) => api.removeTrackFromPlaylist(playlistId, trackId),
+            itemId: string;
+        }) => api.removeItemFromPlaylist(playlistId, itemId),
         onMutate: (variables) =>
             applyOptimisticPlaylistEdit(queryClient, variables.playlistId, (old) => {
                 if (!old || !Array.isArray(old.items)) return old;
+                const keep = (item: { id?: string }) => item.id !== variables.itemId;
                 return {
                     ...old,
-                    items: (old.items as Array<{ track?: { id?: string } }>).filter(
-                        (item) => item.track?.id !== variables.trackId
-                    ),
+                    items: (old.items as Array<{ id?: string }>).filter(keep),
+                    ...(Array.isArray(old.mergedItems) && {
+                        mergedItems: (old.mergedItems as Array<{ id?: string }>).filter(keep),
+                    }),
                 };
             }),
         onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),

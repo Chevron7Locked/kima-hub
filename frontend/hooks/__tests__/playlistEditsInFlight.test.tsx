@@ -36,8 +36,8 @@ vi.mock("@/lib/api", () => ({
             if (holdFetches) await later("fetch", () => undefined);
             return { id: "p-1", name: server.name, items: server.items.map((i) => ({ ...i })) };
         },
-        removeTrackFromPlaylist: (_p: string, trackId: string) =>
-            later(`remove ${trackId}`, () => (server.items = server.items.filter((i) => i.track.id !== trackId))),
+        removeItemFromPlaylist: (_p: string, itemId: string) =>
+            later(`remove ${itemId}`, () => (server.items = server.items.filter((i) => i.id !== itemId))),
         updatePlaylist: (_p: string, data: { name?: string }) =>
             later("rename", () => (server.name = data.name ?? server.name)),
         getSSETicket: async () => "ticket-1",
@@ -64,7 +64,7 @@ class FakeEventSource {
 
 let client: QueryClient;
 let root: Root;
-const probe = {} as { remove: (trackId: string) => Promise<unknown>; rename: (name: string) => Promise<unknown> };
+const probe = {} as { remove: (itemId: string) => Promise<unknown>; rename: (name: string) => Promise<unknown> };
 
 function Page() {
     usePlaylistQuery("p-1");
@@ -72,7 +72,7 @@ function Page() {
     const { mutateAsync } = useRemoveFromPlaylistMutation();
     const { mutateAsync: update } = useUpdatePlaylistMutation();
     useEffect(() => {
-        probe.remove = (trackId) => mutateAsync({ playlistId: "p-1", trackId }).catch(() => undefined);
+        probe.remove = (itemId) => mutateAsync({ playlistId: "p-1", itemId }).catch(() => undefined);
         probe.rename = (name) => update({ playlistId: "p-1", data: { name } }).catch(() => undefined);
     });
     return null;
@@ -106,24 +106,24 @@ afterEach(() => {
 
 describe("two quick edits to one playlist", () => {
     it("the first settling leaves the second on screen; the last one fetches the server's truth", async () => {
-        void probe.remove("a");
-        void probe.remove("b");
+        void probe.remove("i-a");
+        void probe.remove("i-b");
         await settle();
         expect(shown()).toEqual(["c"]);
 
-        await act(async () => request("remove a").release());
+        await act(async () => request("remove i-a").release());
         await settle();
         expect(shown(), "the first edit's refetch undid the second on screen").toEqual(["c"]);
         expect(fetches).not.toHaveBeenCalled();
 
-        await act(async () => request("remove b").release());
+        await act(async () => request("remove i-b").release());
         await settle();
         expect(fetches).toHaveBeenCalledTimes(1);
         expect(shown()).toEqual(["c"]);
     });
 
     it("hearing its own change back while an edit is on its way asks nothing", async () => {
-        void probe.remove("a");
+        void probe.remove("i-a");
         await settle();
 
         await act(async () => FakeEventSource.last!.onmessage!({ data: JSON.stringify({ type: "playlist:updated", playlistId: "p-1", deleted: false }) }));
@@ -131,17 +131,17 @@ describe("two quick edits to one playlist", () => {
         expect(fetches).not.toHaveBeenCalled();
         expect(shown()).toEqual(["b", "c"]);
 
-        await act(async () => request("remove a").release());
+        await act(async () => request("remove i-a").release());
         await settle();
         expect(fetches).toHaveBeenCalledTimes(1);
     });
 
     it("the first failing keeps the second on screen; the last one fetches the server's truth", async () => {
-        void probe.remove("a");
-        void probe.remove("b");
+        void probe.remove("i-a");
+        void probe.remove("i-b");
         await settle();
 
-        await act(async () => request("remove a").fail());
+        await act(async () => request("remove i-a").fail());
         await settle();
         // Not undone yet: its snapshot would also undo the second edit. The failure is reported, and the second
         // edit's settling brings the server's truth.
@@ -149,7 +149,7 @@ describe("two quick edits to one playlist", () => {
         expect(fetches).not.toHaveBeenCalled();
 
         holdFetches = true;
-        await act(async () => request("remove b").release());
+        await act(async () => request("remove i-b").release());
         await settle();
         expect(fetches).toHaveBeenCalledTimes(1);
         expect(shown(), "an accepted edit was undone on screen while the server's truth was on its way").toEqual(["c"]);
@@ -160,7 +160,7 @@ describe("two quick edits to one playlist", () => {
     });
 
     it("a reconnect while an edit is on its way asks nothing for that playlist", async () => {
-        void probe.remove("a");
+        void probe.remove("i-a");
         await settle();
 
         // The stream drops; the hook opens a new one after its backoff (1 s on the first retry) and says connected.
@@ -173,17 +173,17 @@ describe("two quick edits to one playlist", () => {
         expect(fetches, "the reconnect fetched a playlist with an edit on its way").not.toHaveBeenCalled();
         expect(shown()).toEqual(["b", "c"]);
 
-        await act(async () => request("remove a").release());
+        await act(async () => request("remove i-a").release());
         await settle();
         expect(fetches).toHaveBeenCalledTimes(1);
     });
 
     it("a rename failing after a remove settled still fetches the server's truth", async () => {
-        void probe.remove("a");
+        void probe.remove("i-a");
         void probe.rename("Renamed");
         await settle();
 
-        await act(async () => request("remove a").release());
+        await act(async () => request("remove i-a").release());
         await settle();
         expect(fetches, "the remove asked while the rename was on its way").not.toHaveBeenCalled();
 
@@ -199,23 +199,56 @@ describe("two quick edits to one playlist", () => {
     });
 
     it("two edits that both fail while offline leave the playlist as it was before either", async () => {
-        void probe.remove("a");
-        void probe.remove("b");
+        void probe.remove("i-a");
+        void probe.remove("i-b");
         await settle();
         offline = true;
 
-        await act(async () => request("remove a").fail());
-        await act(async () => request("remove b").fail());
+        await act(async () => request("remove i-a").fail());
+        await act(async () => request("remove i-b").fail());
         await settle();
 
         expect(shown(), "a failed edit is still shown").toEqual(["a", "b", "c"]);
     });
 
     it("a lone edit that fails is undone at once", async () => {
-        void probe.remove("a");
+        void probe.remove("i-a");
         await settle();
-        await act(async () => request("remove a").fail());
+        await act(async () => request("remove i-a").fail());
         await settle();
         expect(shown()).toEqual(["a", "b", "c"]);
+    });
+});
+
+describe("a song the playlist holds twice", () => {
+    it("removing one copy shows only that copy gone, and the server's truth keeps the other", async () => {
+        server.items = [{ id: "i-a1", track: { id: "a" } }, item("b"), { id: "i-a2", track: { id: "a" } }];
+        await act(async () => void client.invalidateQueries({ queryKey: ["playlist", "p-1"] }));
+        await settle();
+        expect(shown()).toEqual(["a", "b", "a"]);
+
+        void probe.remove("i-a2");
+        await settle();
+        expect(shown()).toEqual(["a", "b"]);
+        expect((client.getQueryData(["playlist", "p-1"]) as { items: Item[] }).items.map((i) => i.id)).toEqual(["i-a1", "i-b"]);
+
+        await act(async () => request("remove i-a2").release());
+        await settle();
+        expect(shown()).toEqual(["a", "b"]);
+    });
+
+    it("takes the copy out of the merged list the page draws, and leaves a waiting entry in it", async () => {
+        server.items = [{ id: "i-a1", track: { id: "a" } }, { id: "i-a2", track: { id: "a" } }];
+        await act(async () => void client.invalidateQueries({ queryKey: ["playlist", "p-1"] }));
+        await settle();
+        const cached = client.getQueryData(["playlist", "p-1"]) as { items: Item[] };
+        client.setQueryData(["playlist", "p-1"], { ...cached, mergedItems: [...cached.items, { id: "waiting-1", isPending: true }] });
+
+        void probe.remove("i-a1");
+        await settle();
+        const after = client.getQueryData(["playlist", "p-1"]) as { mergedItems: Array<{ id: string }> };
+        expect(after.mergedItems.map((i) => i.id)).toEqual(["i-a2", "waiting-1"]);
+        await act(async () => request("remove i-a1").release());
+        await settle();
     });
 });

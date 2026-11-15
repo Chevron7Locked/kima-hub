@@ -984,8 +984,9 @@ class ApiClient {
         });
     }
 
-    async removeTrackFromPlaylist(playlistId: string, trackId: string) {
-        return this.request<void>(`/playlists/${playlistId}/items/${trackId}`, {
+    /** Removes one entry of a playlist by its item id: a song the playlist holds twice loses only that copy. */
+    async removeItemFromPlaylist(playlistId: string, itemId: string) {
+        return this.request<void>(`/playlists/${playlistId}/items/${itemId}`, {
             method: "DELETE",
         });
     }

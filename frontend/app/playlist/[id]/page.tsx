@@ -148,7 +148,7 @@ export default function PlaylistDetailPage() {
     const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
     const playlistId = params.id as string;
 
-    const { mutateAsync: removeTrack } = useRemoveFromPlaylistMutation();
+    const { mutateAsync: removeItem } = useRemoveFromPlaylistMutation();
     const { mutateAsync: deletePlaylistMut } = useDeletePlaylistMutation();
     const { mutateAsync: updatePlaylist, isPending: isUpdatingPlaylist } = useUpdatePlaylistMutation();
     const { mutateAsync: setReverseOrder, isPending: isReordering } = useSetPlaylistReverseMutation();
@@ -331,9 +331,9 @@ export default function PlaylistDetailPage() {
         [playlist],
     );
 
-    const handleRemoveTrack = async (trackId: string) => {
+    const handleRemoveItem = async (itemId: string) => {
         try {
-            await removeTrack({ playlistId, trackId });
+            await removeItem({ playlistId, itemId });
         } catch (error) {
             console.error("Failed to remove track:", error);
             notify.error("Failed to remove track");
@@ -778,7 +778,7 @@ export default function PlaylistDetailPage() {
                             <RowIconButton label="Move down" desktopOnly onClick={() => handleMoveTrackDown(playlistItem.id)}>
                                 <ChevronDown className="w-4 h-4" />
                             </RowIconButton>
-                            <RowIconButton label="Remove from playlist" danger onClick={() => handleRemoveTrack(playlistItem.track.id)}>
+                            <RowIconButton label="Remove from playlist" danger onClick={() => handleRemoveItem(playlistItem.id)}>
                                 <X className="w-4 h-4" />
                             </RowIconButton>
                         </>
