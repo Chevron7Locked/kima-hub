@@ -8,14 +8,12 @@ import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { z } from "zod";
 import { QUEUE_LENGTH, getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
-import { resolveEncryptedSettings } from "../utils/encryptedFields";
 import {
     getGpuStatus,
     setGpuToggles,
     gpuSupported,
 } from "../services/gpuRuntime";
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
-import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 import { config, musicFolderProblem, musicPathFixedByEnv, useMusicFolder } from "../config";
 import { createLidarrClient } from "../services/lidarrClient";
 import { safeError } from "../utils/errors";
@@ -120,19 +118,16 @@ async function libraryFoundIn(folder: string): Promise<boolean> {
 // GET /system-settings
 router.get("/", async (_req, res) => {
   try {
-    let settings = await prisma.systemSettings.findUnique({
-      where: { id: "default" },
-    });
-
     // A new server's row takes the schema's defaults (saving no fields creates it).
+    let settings = await getSystemSettings();
     if (!settings) {
       await saveSystemSettings({});
-      settings = await prisma.systemSettings.findUnique({ where: { id: "default" } });
+      settings = await getSystemSettings();
     }
     if (!settings) throw new Error("the settings row could not be created");
 
-    // Decrypt every field in ENCRYPTED_FIELDS before sending to the client.
-    const { unreadableFields: _unreadable, ...resolved } = await resolveEncryptedSettings({ ...settings }, lidarrSelfRepairingFields);
+    // Credentials arrive decrypted (null when unset or unreadable); the page is not told which fields are unreadable.
+    const { unreadableFields: _unreadable, ...resolved } = settings;
 
     // The folder actually in use, which MUSIC_PATH can fix whatever the row says.
     res.json({ ...resolved, musicPath: config.music.musicPath, musicPathFixedByEnv: musicPathFixedByEnv() });
