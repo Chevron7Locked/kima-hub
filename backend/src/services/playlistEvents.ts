@@ -33,6 +33,23 @@ export async function playlistsHoldingTracks(
     return held.map(({ playlistId, playlist }) => ({ userId: playlist.userId, playlistId }));
 }
 
+/**
+ * `playlistsHoldingTracks` for songs named by id, in one statement however many there are (a statement takes at most
+ * 32767 bind parameters, and a library scan can retire more songs than that).
+ */
+export async function playlistsHoldingTrackIds(
+    client: Pick<Prisma.TransactionClient, "$queryRaw">,
+    trackIds: string[],
+): Promise<HeldPlaylist[]> {
+    if (trackIds.length === 0) return [];
+    return client.$queryRaw<HeldPlaylist[]>`
+        SELECT DISTINCT p."userId", i."playlistId"
+          FROM "PlaylistItem" i
+          JOIN "Playlist" p ON p.id = i."playlistId"
+         WHERE i."trackId" = ANY(${trackIds}::text[])
+         ORDER BY i."playlistId"`;
+}
+
 export function announcePlaylistsChanged(playlists: HeldPlaylist[]): void {
     for (const { userId, playlistId } of playlists) announcePlaylistChange(userId, playlistId);
 }
