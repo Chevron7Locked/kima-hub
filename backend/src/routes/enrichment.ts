@@ -20,15 +20,48 @@ import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
 import {
   DuplicateMbidError,
-  reassignAlbumRgMbid,
+  moveAlbumRgMbid,
   reassignArtistMbid,
 } from "../services/mbidReassign";
-import { artistSortName } from "../services/artistIdentity";
+import { forgetOwnedIndex } from "../services/discovery/ownedIndexVersion";
+import { artistSortName, isMbid } from "../services/artistIdentity";
 import { albumIsListed, artistIsListed, markLibraryChanged, songIsListed } from "../services/libraryChanged";
 import { parseLimit, parseOffset } from "./library/paging";
 import { wholeNumber } from "../utils/wholeNumber";
 
 const router = Router();
+
+/** A field of a metadata edit that is not what it should be; the reason names the field and the rule, never the value. */
+class BadField extends Error {}
+
+/** Text cannot hold a null character (the database refuses it), so one is the caller's mistake, not a server fault. */
+const hasNull = (text: string) => text.includes("\u0000");
+
+/** A text override: text, or null (or blank text) to remove the override. */
+function textOverride(field: string, raw: unknown): string | null {
+  if (raw === null) return null;
+  if (typeof raw !== "string" || hasNull(raw)) throw new BadField(`${field}: text, or null to clear`);
+  return raw.trim() === "" ? null : raw;
+}
+
+/** A genre override: a list of text, or null for the empty list a reset writes. */
+function genresOverride(raw: unknown): string[] {
+  if (raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((g) => typeof g !== "string" || hasNull(g))) {
+    throw new BadField("genres: a list of text, or null to clear");
+  }
+  return raw.filter((g) => g.trim() !== "");
+}
+
+/** A new MusicBrainz id: an id, or nothing (null or blank text) when the id stays. */
+function mbidInput(field: string, raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") throw new BadField(`${field}: a MusicBrainz id`);
+  const id = raw.trim();
+  if (id === "") return null;
+  if (!isMbid(id)) throw new BadField(`${field}: a MusicBrainz id`);
+  return id.toLowerCase();
+}
 
 /** Answer 404 when a Prisma update hit a row that was deleted meanwhile (P2025). */
 function respondIfDeleted(res: Response, error: unknown, entity: string): boolean {
@@ -497,26 +530,15 @@ router.put("/artists/:id/metadata", async (req, res) => {
 router.put("/albums/:id/metadata", async (req, res) => {
     try {
       const { title, year, genres, coverUrl, rgMbid } = req.body;
-  
+
+      // Every field is read before anything is read from or written to the database.
       const updateData: any = {};
       let hasOverrides = false;
-
-      // The title shown before the edit, to tell afterwards whether the edit changed it.
-      const before = await prisma.album.findUnique({
-        where: { id: req.params.id },
-        select: { title: true, displayTitle: true },
-      });
-
-      // Map user edits to override fields (non-destructive)
+      let newTitle: string | null | undefined;
       if (title !== undefined) {
-        updateData.displayTitle = title;
+        newTitle = textOverride("title", title);
+        updateData.displayTitle = newTitle;
         hasOverrides = true;
-
-        // sortName follows displayTitle, like the artist override. artistSortName is
-        // text-generic, so it serves albums too.
-        const effectiveTitle =
-          typeof title === "string" && title.trim() !== "" ? title : (before?.title ?? "");
-        updateData.sortName = artistSortName(effectiveTitle);
       }
       if (year !== undefined) {
         // An emptied field arrives as null (or an empty string) and removes the override.
@@ -528,46 +550,57 @@ router.put("/albums/:id/metadata", async (req, res) => {
         hasOverrides = true;
       }
       if (coverUrl !== undefined) {
-        updateData.userCoverUrl = coverUrl;
+        updateData.userCoverUrl = textOverride("coverUrl", coverUrl);
         hasOverrides = true;
       }
       if (genres !== undefined) {
-        updateData.userGenres = genres;
+        updateData.userGenres = genresOverride(genres);
         hasOverrides = true;
       }
-  
+      const newRgMbid = mbidInput("rgMbid", rgMbid);
+
+      // The title shown before the edit, to tell afterwards whether the edit changed it.
+      const before = await prisma.album.findUnique({
+        where: { id: req.params.id },
+        select: { title: true, displayTitle: true },
+      });
+
+      // sortName follows displayTitle, like the artist override. artistSortName is
+      // text-generic, so it serves albums too. Clearing the override files the album
+      // under its canonical title.
+      if (newTitle !== undefined) {
+        updateData.sortName = artistSortName(newTitle ?? before?.title ?? "");
+      }
+
       // Set override flag
       if (hasOverrides) {
         updateData.hasUserOverrides = true;
       }
-  
-      // Reassign canonical rgMbid if provided (trim once; skip empty/whitespace/non-string)
-      const trimmedRgMbid = typeof rgMbid === "string" ? rgMbid.trim() : "";
-      if (trimmedRgMbid !== "") {
-        try {
-          await reassignAlbumRgMbid(req.params.id, trimmedRgMbid, { source: "editor" });
-        } catch (err) {
-          if (err instanceof DuplicateMbidError) {
-            return res.status(409).json({
-              error: `rgMbid ${trimmedRgMbid} is already in use by another album`,
-            });
-          }
-          throw err;
-        }
-      }
-  
-      const album = await prisma.album.update({
-        where: { id: req.params.id },
-        data: updateData,
-        include: ALBUM_EDIT_REPLY,
+
+      // A new id and the rest of the edit are stored together or not at all.
+      const { album, moved } = await prisma.$transaction(async (tx) => {
+        const moved = newRgMbid !== null && (await moveAlbumRgMbid(tx, req.params.id, newRgMbid, { source: "editor" }));
+        const album = await tx.album.update({
+          where: { id: req.params.id },
+          data: updateData,
+          include: ALBUM_EDIT_REPLY,
+        });
+        return { album, moved };
       });
-  
+      if (moved) forgetOwnedIndex();
+
       // Only a shown title that changed is a change to what a client lists.
       if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title) && (await albumIsListed(req.params.id))) {
         await markLibraryChanged();
       }
       res.json(album);
     } catch (error) {
+      if (error instanceof BadField) return refuseRequest(req, res, error.message);
+      if (error instanceof DuplicateMbidError) {
+        return res.status(409).json({
+          error: `rgMbid ${error.mbidValue} is already in use by another album`,
+        });
+      }
       if (!respondIfDeleted(res, error, "album")) {
         safeError(res, "Update album metadata", error);
       }
@@ -586,15 +619,9 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     const updateData: any = {};
     let hasOverrides = false;
 
-    // The title shown before the edit, to tell afterwards whether the edit changed it.
-    const before = await prisma.track.findUnique({
-      where: { id: req.params.id },
-      select: { title: true, displayTitle: true },
-    });
-
     // Map user edits to override fields (non-destructive)
     if (title !== undefined) {
-      updateData.displayTitle = title;
+      updateData.displayTitle = textOverride("title", title);
       hasOverrides = true;
     }
     if (trackNo !== undefined) {
@@ -613,6 +640,12 @@ router.put("/tracks/:id/metadata", async (req, res) => {
       updateData.hasUserOverrides = true;
     }
 
+    // The title shown before the edit, to tell afterwards whether the edit changed it.
+    const before = await prisma.track.findUnique({
+      where: { id: req.params.id },
+      select: { title: true, displayTitle: true },
+    });
+
     const track = await prisma.track.update({
       where: { id: req.params.id },
       data: updateData,
@@ -625,6 +658,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     }
     res.json(track);
   } catch (error) {
+    if (error instanceof BadField) return refuseRequest(req, res, error.message);
     if (!respondIfDeleted(res, error, "track")) {
       safeError(res, "Update track metadata", error);
     }

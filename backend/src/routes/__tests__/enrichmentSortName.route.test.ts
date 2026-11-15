@@ -135,7 +135,7 @@ describe('PUT /enrichment/albums/:id/metadata -- sortName follows displayTitle',
 
         await put(`/enrichment/albums/${ALBUM}/metadata`).send({ title: '' }).expect(200);
 
-        expect(await albumRow()).toMatchObject({ displayTitle: '', sortName: 'angeles' });
+        expect(await albumRow()).toMatchObject({ displayTitle: null, sortName: 'angeles' });
     });
 
     it('reverts sortName to the canonical title when the override is cleared to null', async () => {

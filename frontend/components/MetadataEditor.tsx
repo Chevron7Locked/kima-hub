@@ -37,6 +37,35 @@ interface MetadataEditorProps {
     onSave?: (updatedData: Record<string, unknown> | null) => void;
 }
 
+/** The fields a save of each kind may send (an artist's id is `mbid`, an album's its release group's `rgMbid`). */
+const EDITABLE: Record<MetadataEditorProps["type"], readonly string[]> = {
+    artist: ["name", "bio", "genres", "heroUrl", "mbid"],
+    album: ["title", "year", "genres", "coverUrl", "rgMbid"],
+    track: ["title"],
+};
+
+/**
+ * What the person changed. The form starts from what the page shows, so sending all of it would make every shown value
+ * (canonical ones too) an edit, and a stored value the server refuses could never be left alone. A cleared number
+ * (NaN) is sent as null, which removes the override.
+ */
+function changedFields(
+    type: MetadataEditorProps["type"],
+    before: MetadataEditorProps["currentData"],
+    after: MetadataEditorProps["currentData"],
+): Record<string, unknown> {
+    const was = before as Record<string, unknown>;
+    const now = after as Record<string, unknown>;
+    const changes: Record<string, unknown> = {};
+    for (const field of EDITABLE[type]) {
+        const a = was[field];
+        const b = now[field];
+        const same = Array.isArray(a) && Array.isArray(b) ? JSON.stringify(a) === JSON.stringify(b) : Object.is(a, b);
+        if (!same) changes[field] = typeof b === "number" && Number.isNaN(b) ? null : b;
+    }
+    return changes;
+}
+
 /** A pencil button that opens a dialog for editing artist, album or track metadata. */
 export function MetadataEditor({
     type,
@@ -89,13 +118,14 @@ export function MetadataEditor({
     const handleSave = async () => {
         setIsSaving(true);
         try {
+            const changes = changedFields(type, currentData, formData);
             let response;
             if (type === "artist") {
-                response = await api.updateArtistMetadata(id, formData);
+                response = await api.updateArtistMetadata(id, changes);
             } else if (type === "album") {
-                response = await api.updateAlbumMetadata(id, formData);
+                response = await api.updateAlbumMetadata(id, changes);
             } else {
-                response = await api.updateTrackMetadata(id, formData);
+                response = await api.updateTrackMetadata(id, changes);
             }
 
             onSave?.(response);

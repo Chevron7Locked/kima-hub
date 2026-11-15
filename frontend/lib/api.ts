@@ -2034,7 +2034,7 @@ class ApiClient {
         albumId: string,
         data: {
             title?: string;
-            year?: number;
+            year?: number | null;
             genres?: string[];
             rgMbid?: string;
             coverUrl?: string;
