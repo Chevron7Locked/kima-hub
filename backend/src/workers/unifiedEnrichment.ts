@@ -915,13 +915,13 @@ async function runEnrichmentCycle(): Promise<{
         await syncWaitingAlerts();
 
         // Run phases sequentially, halting if stopped/paused
-        const artistResult = await runPhase("artists", queueOwedArtists);
+        const artistResult = await runPhase(lease.signal, "artists", queueOwedArtists);
         if (artistResult === null) {
             return { artists: 0, tracks: 0, audioQueued: 0 };
         }
         artistsProcessed = artistResult;
 
-        const trackResult = await runPhase("tracks", executeIdentificationPhase);
+        const trackResult = await runPhase(lease.signal, "tracks", executeIdentificationPhase);
         if (trackResult === null) {
             return { artists: artistsProcessed, tracks: 0, audioQueued: 0 };
         }
@@ -931,28 +931,33 @@ async function runEnrichmentCycle(): Promise<{
         // gets its fingerprint stored,
         // independent of where its identity or analysis stand. A paused
         // 'acoustid' source gates only the network lookup, never this.
-        const fingerprintResult = await runPhase("fingerprint", executeFingerprintPhase);
+        const fingerprintResult = await runPhase(lease.signal, "fingerprint", executeFingerprintPhase);
         if (fingerprintResult === null) {
             return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued: 0 };
         }
         fingerprintsQueued = fingerprintResult;
 
-        const audioResult = await runPhase("audio", executeAudioPhase);
+        const audioResult = await runPhase(lease.signal, "audio", executeAudioPhase);
         if (audioResult === null) {
             return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued: 0 };
         }
         audioQueued = audioResult;
 
         // Podcast refresh phase -- only runs if subscriptions exist
-        await runPhase("podcasts", queueStalePodcasts);
+        await runPhase(lease.signal, "podcasts", queueStalePodcasts);
 
         // Vibe embedding sweep — catches tracks missed by the event-driven subscriber
-        const vibeResult = await runPhase("vibe", executeVibePhase);
+        const vibeResult = await runPhase(lease.signal, "vibe", executeVibePhase);
         vibeQueued = vibeResult ?? 0;
 
-        await runPhase("mood", moodStep);
+        await runPhase(lease.signal, "mood", moodStep);
 
-        await runPhase("similarity", () => runSimilarityStep(getEnrichmentProgress));
+        await runPhase(lease.signal, "similarity", () => runSimilarityStep(getEnrichmentProgress));
+
+        // Without the lock the housekeeping and the progress below are left to the cycle that holds it.
+        if (cycleLockLost(lease.signal)) {
+            return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued, vibeQueued, fingerprintsQueued };
+        }
 
         // Orphaned failure cleanup -- runs at most once per hour, never during stop/pause
         const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -1116,13 +1121,30 @@ async function shouldHaltCycle(): Promise<boolean> {
     return run.haltRequested();
 }
 
+const lockLossSaid = new WeakSet<AbortSignal>();
+
 /**
- * Run a phase and return result. Returns null if cycle should halt.
+ * Whether the cycle lock is gone: another holder may be offering the same records, so this cycle starts nothing more.
+ * It says so once.
+ */
+function cycleLockLost(lock: AbortSignal): boolean {
+    if (!lock.aborted) return false;
+    if (!lockLossSaid.has(lock)) {
+        lockLossSaid.add(lock);
+        logger.warn("[Enrichment] The cycle lock was lost while the cycle ran: it stops at the end of this step");
+    }
+    return true;
+}
+
+/**
+ * Run a phase and return result. Returns null if cycle should halt: stopped, paused, or its lock `lock` was lost.
  */
 async function runPhase(
+    lock: AbortSignal,
     phaseName: NonNullable<EnrichmentPhase>,
     executor: () => Promise<number>,
 ): Promise<number | null> {
+    if (cycleLockLost(lock)) return null;
     run.enterPhase(phaseName);
     let result: number;
     try {
@@ -1138,6 +1160,9 @@ async function runPhase(
     if (await shouldHaltCycle()) {
         return null;
     }
+    // A phase that ran past the loss did its work under no lock; what it queued is claimed in the stage records, which
+    // the holder's cycle reads, so nothing more is started here.
+    if (cycleLockLost(lock)) return null;
 
     return result;
 }

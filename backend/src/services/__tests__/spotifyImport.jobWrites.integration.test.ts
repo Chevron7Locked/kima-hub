@@ -17,6 +17,8 @@ import { artistIdentityKey } from "../artistIdentity";
 import { spotifyImportService, getImportJob } from "../spotifyImport";
 import { deezerService } from "../deezer";
 import { distributedLock } from "../../utils/distributedLock";
+import { LockLostError } from "../../utils/lockErrors";
+import { logger } from "../../utils/logger";
 import { dismissWaitingEntry } from "../playlistService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -281,6 +283,30 @@ describe("one build per import", () => {
         }
 
         expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(0);
+    });
+
+    it("stops at its next step when the import's lock is lost mid-build, leaving the job to be built again", async () => {
+        const lost = new AbortController();
+        const acquire = jest.spyOn(distributedLock, "acquire").mockResolvedValue({
+            outcome: "acquired",
+            lease: { signal: lost.signal, release: async () => "lost" as const, keepAlive: () => () => undefined },
+        });
+        // The lock goes while the previews of the waiting songs are fetched.
+        (deezerService.getTrackPreview as jest.Mock).mockImplementation(async () => {
+            lost.abort(new LockLostError(`import-build:${JOB}`));
+            return null;
+        });
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        try {
+            await build(importJob([matched(), waiting(1)]));
+        } finally {
+            acquire.mockRestore();
+        }
+
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(0);
+        // Still waiting for its playlist, so the build that holds the lock now (or the next scan's) makes it.
+        expect(await row()).toMatchObject({ status: "creating_playlist", createdPlaylistId: null });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("was lost: this build stopped"));
     });
 
     it("takes the lock for an import only while it builds", async () => {

@@ -23,6 +23,7 @@ import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 import { redisClient } from "../utils/redis";
 import { distributedLock } from "../utils/distributedLock";
+import { LockLostError } from "../utils/lockErrors";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import * as jobMoves from "./downloads/jobs";
@@ -2070,14 +2071,20 @@ class SpotifyImportService {
     // within its ttl if the process dies.
     const stopRenewal = taken.lease.keepAlive();
     try {
-      await this.buildPlaylistLocked(job);
+      await this.buildPlaylistLocked(job, taken.lease.signal);
+    } catch (error) {
+      if (!(error instanceof LockLostError)) throw error;
+      // Another build may hold the lock now. This one stops at its next step; the import is still waiting for its
+      // playlist, so that build or the next scan's makes it (the transaction links one playlist only).
+      logger.warn(`[Import] The lock of job ${job.id} was lost: this build stopped before making its playlist`);
     } finally {
       stopRenewal();
       await taken.lease.release();
     }
   }
 
-  private async buildPlaylistLocked(job: ImportJob): Promise<void> {
+  /** `lock` aborts when the build's lock is lost (none when Redis was down): the steps below stop at their next check. */
+  private async buildPlaylistLocked(job: ImportJob, lock?: AbortSignal): Promise<void> {
     const jobLogger = jobLoggers.get(job.id);
 
     // Guard: playlist already created for this job
@@ -2093,6 +2100,7 @@ class SpotifyImportService {
       return;
     }
 
+    lock?.throwIfAborted();
     jobLogger?.logPlaylistCreationStart();
     jobLogger?.logTrackMatchingStart();
 
@@ -2306,6 +2314,8 @@ class SpotifyImportService {
         );
       });
 
+    // The preview lookups below are the long step: not started for a build that lost its lock.
+    lock?.throwIfAborted();
     let waitingEntries: Array<Omit<Prisma.PlaylistPendingTrackCreateManyInput, "playlistId">> = [];
     if (pendingTracksToSave.length > 0) {
       jobLogger?.debug(
@@ -2360,6 +2370,7 @@ class SpotifyImportService {
       }));
     }
 
+    lock?.throwIfAborted();
     // The playlist, its songs, its waiting entries and the job's link to it commit together. A scan or a dismissal that
     // finds the playlist finds its job, with counts that match the entries, and nothing here writes over them afterwards.
     const playlist = await prisma.$transaction(

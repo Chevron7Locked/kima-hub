@@ -343,6 +343,28 @@ describe("a cycle that loses the lock", () => {
     });
 });
 
+describe("a cycle whose lock is lost while it runs", () => {
+    it("stops at its next phase and says why, so it never offers records beside the cycle that took the lock", async () => {
+        // Another holder took the lock: the renewal (a script on the cycle's token) is refused from now on.
+        mockRedis.eval.mockResolvedValue(0);
+        // The artists phase runs past the first renewal, which finds the lock gone.
+        queueOwedArtists.mockImplementationOnce(async () => {
+            await jest.advanceTimersByTimeAsync(31_000);
+            return 0;
+        });
+        loggerMock.logger.warn.mockClear();
+        try {
+            await triggerEnrichmentNow();
+        } finally {
+            mockRedis.eval.mockResolvedValue(1);
+        }
+
+        expect(queueOwedArtists).toHaveBeenCalledTimes(1);
+        expect(state.updateState).not.toHaveBeenCalledWith(expect.objectContaining({ currentPhase: "tracks" }));
+        expect(loggerMock.logger.warn).toHaveBeenCalledWith(expect.stringContaining("[Enrichment] The cycle lock was lost"));
+    });
+});
+
 describe("a cycle that cannot reach Redis for the lock", () => {
     it("declines for it, not as a held lock, and offers nothing", async () => {
         mockRedis.set.mockImplementation(async (key: string) => {
