@@ -273,18 +273,22 @@ export async function placeFoundSongs(playlistId: string, found: FoundSong[]): P
 }
 
 /**
- * Replace every item of a playlist with `trackIds`, in that order, inside the caller's transaction (which holds
- * the playlist lock). Waiting entries are not the caller's to see or move: each keeps its rank, and the new items
- * are ranked around them. A waiting entry stays after the song that came before it in the old order, at that song's
- * first place in the new list; when that song is gone, after the nearest earlier old song that is still there, or
- * first when none is. Waiting entries keep their order among themselves, so one never passes the one that was ahead
- * of it. Returns whether anything was removed or written.
+ * Replace every item of a playlist with the songs `shown`, in that order, then the songs `hidden` (kept but never
+ * shown to the caller), inside the caller's transaction (which holds the playlist lock). Waiting entries are not the
+ * caller's to see or move: each keeps its rank, and the new items are ranked around them. A waiting entry stays after
+ * the shown song that came before it in the old order, at that song's first place in the new list; when that song is
+ * gone, after the nearest earlier old song that is still shown, or first when none is. A hidden song is never an anchor:
+ * it moves to the end, and an entry that followed it stays with the shown song before it. Waiting entries keep their
+ * order among themselves, so one never passes the one that was ahead of it. Returns whether anything was removed or
+ * written.
  */
 export async function replaceItems(
     tx: Pick<typeof prisma, "playlistItem" | "playlistPendingTrack">,
     playlistId: string,
-    trackIds: string[]
+    shown: string[],
+    hidden: string[] = []
 ): Promise<boolean> {
+    const trackIds = [...shown, ...hidden];
     const [oldItems, waiting] = await Promise.all([
         tx.playlistItem.findMany({ where: { playlistId }, orderBy: { rank: "asc" }, select: { trackId: true, rank: true } }),
         tx.playlistPendingTrack.findMany({
@@ -295,7 +299,7 @@ export async function replaceItems(
     ]);
 
     const firstPlace = new Map<string, number>();
-    trackIds.forEach((trackId, index) => {
+    shown.forEach((trackId, index) => {
         if (!firstPlace.has(trackId)) firstPlace.set(trackId, index);
     });
 

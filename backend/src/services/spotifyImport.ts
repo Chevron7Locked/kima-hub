@@ -2599,8 +2599,8 @@ class SpotifyImportService {
       playlistsUpdated++;
 
       const { playlist } = pendingTracks[0];
-      announcePlaylistChange(playlist.userId, playlist.id);
       try {
+        announcePlaylistChange(playlist.userId, playlist.id);
         await notificationService.create({
           userId: playlist.userId,
           type: "playlist_ready",
@@ -2612,7 +2612,7 @@ class SpotifyImportService {
           },
         });
       } catch (err) {
-        logger.error(`   Could not notify about playlist ${playlist.id}:`, err);
+        logger.error(`   Could not announce or notify about playlist ${playlist.id}:`, err);
       }
     }
 

@@ -138,7 +138,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             ).map((item) => item.trackId);
             // rank is the playlist order and must be unique per playlist; a song named twice is two entries. The
             // entries an import still waits for keep their ranks, which the client never saw, and the songs go around them.
-            return replaceItems(tx, playlistId, [...songIds, ...hidden]);
+            return replaceItems(tx, playlistId, songIds, hidden);
         });
         resolvedPlaylistId = playlistId;
         changed = written;

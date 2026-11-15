@@ -24,7 +24,7 @@ const app = express()
 const replace = (playlistId: string, songId: string[]) =>
     request(app).get("/createPlaylist.view").query({ u: USER, f: "json", playlistId, songId }).expect(200);
 
-let songs: Record<"a" | "b" | "c", string>;
+let songs: Record<"a" | "b" | "c" | "h", string>;
 const letter = (trackId: string) => Object.entries(songs).find(([, id]) => id === trackId)![0];
 
 async function cleanup() {
@@ -71,13 +71,14 @@ beforeAll(async () => {
         data: { rgMbid: `${MARK}-rg`, identityKey: `${MARK}-album`, primaryType: "Album", title: `${MARK} Album`, artistId: artist.id, location: "LIBRARY" },
     });
     const made: string[] = [];
-    for (const n of [1, 2, 3]) {
+    for (const n of [1, 2, 3, 4]) {
         const t = await prisma.track.create({
-            data: { title: `${MARK} song ${n}`, albumId: album.id, trackNo: n, duration: 100, mime: "FLAC", filePath: `/${MARK}/${n}.flac`, fileModified: new Date(), fileSize: 1 },
+            // Song 4 is missing: not a playable song, so a Subsonic client is never shown it.
+            data: { title: `${MARK} song ${n}`, albumId: album.id, trackNo: n, duration: 100, mime: "FLAC", filePath: `/${MARK}/${n}.flac`, fileModified: new Date(), fileSize: 1, ...(n === 4 ? { missingSince: new Date() } : {}) },
         });
         made.push(t.id);
     }
-    songs = { a: made[0], b: made[1], c: made[2] };
+    songs = { a: made[0], b: made[1], c: made[2], h: made[3] };
 });
 
 afterEach(async () => {
@@ -131,6 +132,13 @@ describe("replacing a playlist's songs", () => {
         const ranks = (await prisma.playlistItem.findMany({ where: { playlistId } })).map((i) => i.rank);
         expect(new Set(ranks).size).toBe(400);
         expect(Math.max(...ranks.map((r) => r.length))).toBeLessThanOrEqual(8);
+    });
+
+    it("keeps a song the client was never shown at the end, and never anchors a waiting entry to it", async () => {
+        const playlistId = await playlistOf(["a", "h", "W1", "b", "W2"]);
+        await replace(playlistId, [songs.b, songs.a]);
+        // W1 followed the hidden song, so it stays with "a" (the shown song before it); W2 followed "b".
+        expect(await pageOrder(playlistId)).toEqual(["b", "a", "W1", "W2", "h"]);
     });
 
     it("leaves a playlist with no waiting entries ranked as before", async () => {
