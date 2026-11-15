@@ -198,17 +198,34 @@ describe("reopening the dialog", () => {
 });
 
 describe("a failed first add to a new playlist", () => {
-    it("tells the page the playlist changed, as a partial add may have reached it", async () => {
+    it("tells the page about the new playlist once, and leaves the refresh after the add to the add itself", async () => {
         createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
         mutateAsync.mockRejectedValueOnce(new Error("offline"));
-        const updated = vi.fn();
-        window.addEventListener("playlist-updated", updated);
+        const heard = vi.fn();
+        window.addEventListener("playlist-created", heard);
+        window.addEventListener("playlist-updated", heard);
         try {
             await render(["a", "b"]);
             await typeName("late night");
             await click("create");
-            expect(updated).toHaveBeenCalledTimes(1);
-            expect((updated.mock.calls[0][0] as CustomEvent).detail).toEqual({ playlistId: "new-1" });
+            // The mutation's own settle refreshes the page (playlist-add-settles.test.tsx): a second signal would refresh twice.
+            expect(heard.mock.calls.map(([e]) => (e as CustomEvent).type)).toEqual(["playlist-created"]);
+            expect((heard.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ id: "new-1" });
+        } finally {
+            window.removeEventListener("playlist-created", heard);
+            window.removeEventListener("playlist-updated", heard);
+        }
+    });
+
+    it("sends no playlist-updated after a successful add either", async () => {
+        const updated = vi.fn();
+        window.addEventListener("playlist-updated", updated);
+        try {
+            getPlaylist.mockResolvedValue(held("z"));
+            await render(["a"]);
+            await click("road trip");
+            expect(mutateAsync).toHaveBeenCalledTimes(1);
+            expect(updated).not.toHaveBeenCalled();
         } finally {
             window.removeEventListener("playlist-updated", updated);
         }
@@ -342,5 +359,125 @@ describe("retrying a create-then-add into the playlist this dialog made", () => 
         await render(["a"]);
         await click("road trip");
         expect(text()).toContain("already in this playlist");
+    });
+});
+
+describe("a create that is retried", () => {
+    const keyOf = (call: number) => createPlaylist.mock.calls[call][2] as string;
+
+    it("sends a random key with the create", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        expect(keyOf(0)).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("sends the same key on the retry of a create whose answer was lost", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(keyOf(1)).toBe(keyOf(0));
+    });
+
+    it("sends a new key once the dialog is reopened", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a"], false);
+        await render(["a"], true);
+        await typeName("late night");
+        await click("create");
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+
+    it("sends a new key for a different set of songs", async () => {
+        createPlaylist.mockRejectedValueOnce(new Error("timed out")).mockResolvedValueOnce({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["b"]);
+        await click("create");
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+});
+
+describe("the list refresh after a failed create-then-add", () => {
+    it("keeps the list on screen while it refreshes", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        getPlaylists.mockReturnValueOnce(new Promise(() => {}));
+        await typeName("late night");
+        await click("create");
+        expect(text()).toContain("road trip");
+    });
+
+    it("ignores an answer that arrives after the dialog was reopened and loaded a newer list", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        let late!: (list: unknown) => void;
+        getPlaylists.mockReturnValueOnce(new Promise((resolve) => (late = resolve)));
+        await typeName("late night");
+        await click("create");
+        await render(["a"], false);
+        getPlaylists.mockResolvedValueOnce([{ id: "pl-9", name: "fresh one", trackCount: 0 }]);
+        await render(["a"], true);
+        await act(async () => late([{ id: "pl-8", name: "stale one", trackCount: 0 }]));
+        expect(text()).toContain("fresh one");
+        expect(text()).not.toContain("stale one");
+    });
+});
+
+describe("reopening while an add is still in flight", () => {
+    it("lets the new session create a playlist, and the old add's late answer does not close or report for it", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        let finishOld!: (result: unknown) => void;
+        mutateAsync.mockReturnValueOnce(new Promise((resolve) => (finishOld = resolve)));
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await click("road trip");
+        await render(["a"], false);
+        await render(["a"], true);
+        await typeName("late night");
+        await act(async () => enter());
+        expect(createPlaylist).toHaveBeenCalledTimes(1);
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(onAdded).toHaveBeenCalledTimes(1);
+
+        await act(async () => finishOld({ added: 1, duplicates: 0, rejected: [] }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(onAdded).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not let the old add's late failure put its error in the new session", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        let failOld!: (error: Error) => void;
+        mutateAsync.mockReturnValueOnce(new Promise((_resolve, reject) => (failOld = reject)));
+        await render(["a"]);
+        await click("road trip");
+        await render(["a"], false);
+        await render(["a"], true);
+        await act(async () => failOld(new Error("late")));
+        expect(document.querySelector('[role="alert"]')).toBeNull();
+    });
+});
+
+describe("songs that change under the dialog", () => {
+    it("makes a new playlist for the new songs, not an add into the one made for the old", async () => {
+        createPlaylist.mockResolvedValueOnce({ id: "new-1", name: "late night" }).mockResolvedValueOnce({ id: "new-2", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["b"]);
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-2", trackIds: ["b"] });
     });
 });

@@ -5,6 +5,7 @@ import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { searchResultStore } from "@/lib/search-result-store";
 import { api, getApiBaseUrl } from "@/lib/api";
+import { announcePlaylistEvent } from "@/lib/playlist-events";
 import { playlistEditsInFlight } from "@/hooks/useQueries";
 
 /**
@@ -155,7 +156,7 @@ export function useEventSource() {
                                     // Gone: drop it where no page is using it, never ask the server for it again, and tell
                                     // a page still showing it (the same signal a delete on this device sends).
                                     queryClient.removeQueries({ queryKey: ["playlist", data.playlistId], type: "inactive" });
-                                    window.dispatchEvent(new CustomEvent("playlist-deleted", { detail: { playlistId: data.playlistId } }));
+                                    announcePlaylistEvent("playlist-deleted", { playlistId: data.playlistId });
                                 } else if (playlistEditsInFlight(queryClient, data.playlistId) === 0) {
                                     // With this device's own edits on their way, the last of them asks instead.
                                     queryClient.invalidateQueries({ queryKey: ["playlist", data.playlistId] });

@@ -39,6 +39,26 @@ it.each([
     await expect(result).rejects.toMatchObject({ name: "TimeoutError" });
 });
 
+// An Idempotency-Key lets the server hand back the playlist a lost first try made, instead of making a second one.
+it.each([
+    ["sends the key it is given", "key-abc-123", "key-abc-123"],
+    ["sends no header when it has no key", undefined, null],
+])("createPlaylist %s", async (_name, key, header) => {
+    const timer = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(timer.signal);
+    const fetchStub = hangingFetch();
+    vi.stubGlobal("fetch", fetchStub);
+
+    const result = api.createPlaylist("late night", false, key);
+    result.catch(() => {});
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalled());
+
+    const headers = new Headers(fetchStub.mock.calls[0][1].headers);
+    expect(headers.get("Idempotency-Key")).toBe(header);
+    timer.abort();
+    await expect(result).rejects.toBeDefined();
+});
+
 it("a token refresh that never answers is cut off too, so an add behind it still ends", async () => {
     const store: Record<string, string> = { auth_token: "expired", refresh_token: "refresh-abc" };
     vi.stubGlobal("window", {});

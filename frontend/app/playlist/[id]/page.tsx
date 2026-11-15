@@ -16,6 +16,7 @@ import { usePreview } from "@/hooks/usePreview";
 import { useLeaveDeletedPlaylist } from "@/hooks/useLeaveDeletedPlaylist";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
+import { announcePlaylistEvent } from "@/lib/playlist-events";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
@@ -287,9 +288,7 @@ export default function PlaylistDetailPage() {
             }));
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
 
-            window.dispatchEvent(
-                new CustomEvent("playlist-updated", { detail: { playlistId } })
-            );
+            announcePlaylistEvent("playlist-updated", { playlistId });
 
             if (!playlist.isHidden) {
                 router.push("/playlists");
@@ -348,9 +347,7 @@ export default function PlaylistDetailPage() {
             await deletePlaylistMut(playlistId);
 
             // Every page showing this playlist, this one included, leaves for the list on this signal.
-            window.dispatchEvent(
-                new CustomEvent("playlist-deleted", { detail: { playlistId } })
-            );
+            announcePlaylistEvent("playlist-deleted", { playlistId });
         } catch (error) {
             console.error("Failed to delete playlist:", error);
             notify.error("Failed to delete playlist");

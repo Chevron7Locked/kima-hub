@@ -940,9 +940,11 @@ class ApiClient {
         return this.request<ApiData>(`/playlists/${id}`);
     }
 
-    async createPlaylist(name: string, isPublic = false) {
+    /** With a `key`, the server returns the playlist an earlier try with the same key made (kept 24 hours), not a second one. */
+    async createPlaylist(name: string, isPublic = false, key?: string) {
         return this.request<ApiData>("/playlists", {
             method: "POST",
+            ...(key && { headers: { "Idempotency-Key": key } }),
             body: JSON.stringify({ name, isPublic }),
         });
     }

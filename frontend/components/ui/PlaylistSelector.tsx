@@ -7,6 +7,8 @@ import { GradientSpinner } from "./GradientSpinner";
 import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
 import { useAddToPlaylistMutation } from "@/hooks/useQueries";
+import { announcePlaylistEvent } from "@/lib/playlist-events";
+import { newRequestKey } from "@/lib/request-key";
 
 interface PlaylistSelectorProps {
     isOpen: boolean;
@@ -92,6 +94,9 @@ export function PlaylistSelector({
     const tally = useRef<AddOutcome>({ added: 0, rejected: 0 });
     // The id of the playlist this dialog made for these songs and could not finish adding to: a retry adds to it, whatever the form says now.
     const createdId = useRef<string | null>(null);
+    // The key a create goes out with. A retry of a create whose answer was lost sends the same key, so the server returns
+    // the playlist the first try made. Fresh for each set of songs and each time the dialog opens.
+    const createKey = useRef<string | null>(null);
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     // Reset dialog state when `isOpen` flips. Done during render (the
@@ -109,23 +114,33 @@ export function PlaylistSelector({
             setError(null);
             setQuestion(null);
             setOutcome(null);
+            // Whatever was in flight when it closed no longer holds the buttons.
+            setIsAdding(false);
+            setIsCreating(false);
         }
     }
 
-    const loadPlaylists = async () => {
-        try {
-            setIsLoading(true);
-            const data = await api.getPlaylists();
-            setPlaylists(Array.isArray(data) ? data : []);
-        } catch (error) {
-            console.error("Failed to load playlists:", error);
-        } finally {
-            setIsLoading(false);
-        }
+    // Each load takes a number; only the newest load's answer is used, so an older answer never replaces a newer list.
+    const loads = useRef(0);
+    // Shows the list. The first load of a session shows a spinner (set when the dialog opens); a refresh keeps the list on screen.
+    const loadPlaylists = () => {
+        const load = ++loads.current;
+        return api
+            .getPlaylists()
+            .then((data) => {
+                if (load === loads.current) setPlaylists(Array.isArray(data) ? data : []);
+            })
+            .catch((error) => console.error("Failed to load playlists:", error))
+            .finally(() => {
+                if (load === loads.current) setIsLoading(false);
+            });
     };
     const dialogRef = useRef<HTMLDivElement>(null);
     const adding = useRef(false);
     const creating = useRef(false);
+    // Counts the times the dialog has opened. A create or add still in flight from an earlier opening finishes quietly:
+    // it neither closes the new opening nor reports into it nor lifts its guards.
+    const session = useRef(0);
     // Nothing closes the dialog while an add or create is in flight: its late result would still call onAdded and onClose.
     const requestClose = () => {
         if (adding.current || creating.current) return;
@@ -135,34 +150,38 @@ export function PlaylistSelector({
 
     useEffect(() => {
         if (!isOpen) return;
-        createdId.current = null;
-        let cancelled = false;
-        api.getPlaylists()
-            .then((data) => {
-                if (!cancelled) setPlaylists(Array.isArray(data) ? data : []);
-            })
-            .catch((error) => console.error("Failed to load playlists:", error))
-            .finally(() => {
-                if (!cancelled) setIsLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
+        session.current++;
+        adding.current = false;
+        creating.current = false;
+        void loadPlaylists();
     }, [isOpen]);
+
+    // A playlist made, and a create key used, are for one set of songs in one opening.
+    const songsKey = trackIds.join(",");
+    useEffect(() => {
+        createdId.current = null;
+        createKey.current = null;
+    }, [isOpen, songsKey]);
 
     const handleCreatePlaylist = async () => {
         const name = newPlaylistName.trim();
         // The create button's own rule, for Enter in the name box too: one create at a time, never nameless.
         if (!name || creating.current || adding.current) return;
         creating.current = true;
+        const mine = session.current;
         try {
             setIsCreating(true);
             setError(null);
             // After a failed add the playlist is already made: the retry adds to it, one playlist per attempt.
             const pending = createdId.current;
-            const playlist = pending ? { id: pending } : await api.createPlaylist(name, isPublic);
-            if (!pending) {
-                window.dispatchEvent(new CustomEvent("playlist-created", { detail: playlist }));
+            let playlist: { id: string };
+            if (pending) {
+                playlist = { id: pending };
+            } else {
+                createKey.current ??= newRequestKey();
+                playlist = await api.createPlaylist(name, isPublic, createKey.current);
+                announcePlaylistEvent("playlist-created", playlist);
+                if (session.current !== mine) return;
             }
 
             if (trackIds.length === 0) {
@@ -175,6 +194,7 @@ export function PlaylistSelector({
                     tally.current = { added: 0, rejected: 0 };
                     return addSongs(playlist.id, trackIds, false, true);
                 });
+                if (session.current !== mine) return;
                 if (!done) {
                     void loadPlaylists();
                     return;
@@ -186,10 +206,12 @@ export function PlaylistSelector({
             setIsPublic(false);
         } catch (error) {
             console.error("Failed to create playlist:", error);
-            setError("couldn't create that playlist — try again.");
+            if (session.current === mine) setError("couldn't create that playlist — try again.");
         } finally {
-            creating.current = false;
-            setIsCreating(false);
+            if (session.current === mine) {
+                creating.current = false;
+                setIsCreating(false);
+            }
         }
     };
 
@@ -218,6 +240,7 @@ export function PlaylistSelector({
     const whileAdding = async (work: () => Promise<void>): Promise<boolean> => {
         if (adding.current) return false;
         adding.current = true;
+        const mine = session.current;
         try {
             setError(null);
             setIsAdding(true);
@@ -225,11 +248,13 @@ export function PlaylistSelector({
             return true;
         } catch (error) {
             console.error("Failed to add to playlist:", error);
-            setError("couldn't add to that playlist — try again.");
+            if (session.current === mine) setError("couldn't add to that playlist — try again.");
             return false;
         } finally {
-            adding.current = false;
-            setIsAdding(false);
+            if (session.current === mine) {
+                adding.current = false;
+                setIsAdding(false);
+            }
         }
     };
 
@@ -253,6 +278,7 @@ export function PlaylistSelector({
      */
     const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean, ownPlaylist = false) => {
         let result: { added: number; duplicateIds?: string[]; rejected: string[] };
+        const mine = session.current;
         try {
             result = await addToPlaylist(
                 allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids },
@@ -261,16 +287,12 @@ export function PlaylistSelector({
             // When every song is refused the server answers 404 and names them: that is not a failure to retry.
             const failure = error as ApiError;
             const refused = failure.data?.rejected;
-            if (failure.status !== 404 || !Array.isArray(refused)) {
-                // The request may have reached the server before it failed: the page asks it again.
-                window.dispatchEvent(new CustomEvent("playlist-updated", { detail: { playlistId } }));
-                throw error;
-            }
+            if (failure.status !== 404 || !Array.isArray(refused)) throw error;
             result = { added: 0, rejected: refused as string[] };
         }
-        window.dispatchEvent(
-            new CustomEvent("playlist-updated", { detail: { playlistId } })
-        );
+        // The dialog was reopened while this add was in flight: its answer is not for this opening.
+        if (session.current !== mine) return;
+        // The add's own settle (useAddToPlaylistMutation) refreshes the playlist pages, whatever way it ended.
         tally.current.added += result.added;
         tally.current.rejected += result.rejected.length;
         const skipped = result.duplicateIds ?? [];

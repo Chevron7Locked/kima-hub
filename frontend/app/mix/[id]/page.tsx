@@ -11,6 +11,7 @@ import { Music, Shuffle, Save, ListPlus } from "lucide-react";
 import { plural } from "@/lib/format";
 import { shuffleArray } from "@/lib/shuffle";
 import { notify } from "@/lib/notify";
+import { announcePlaylistEvent } from "@/lib/playlist-events";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
 import { usePlayRow } from "@/hooks/usePlayRow";
@@ -117,7 +118,7 @@ export default function MixPage() {
         setIsSaving(true);
         try {
             const result = await api.saveMixAsPlaylist(mixId);
-            window.dispatchEvent(new Event("playlist-created"));
+            announcePlaylistEvent("playlist-created");
             setTimeout(() => {
                 router.push(`/playlist/${result.id}`);
             }, 1000);

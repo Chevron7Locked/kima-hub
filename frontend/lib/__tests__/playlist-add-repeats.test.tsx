@@ -228,7 +228,7 @@ describe("creating a playlist to add to", () => {
         createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
         await render(["a"]);
         await create("late night");
-        expect(createPlaylist).toHaveBeenCalledWith("late night", false);
+        expect(createPlaylist).toHaveBeenCalledWith("late night", false, expect.any(String));
         expect(mutateAsync).toHaveBeenCalledWith({ playlistId: "new-1", trackIds: ["a"] });
         expect(onClose).toHaveBeenCalled();
     });
