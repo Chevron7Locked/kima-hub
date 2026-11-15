@@ -22,6 +22,7 @@ import { isLidarrConfigured } from "./lidarrClient";
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 import { redisClient } from "../utils/redis";
+import { distributedLock } from "../utils/distributedLock";
 import PQueue from "p-queue";
 import { acquisitionService } from "./acquisitionService";
 import * as jobMoves from "./downloads/jobs";
@@ -135,6 +136,9 @@ class PlaylistNotWanted extends Error {}
 
 const IMPORT_JOB_KEY = (id: string) => `import:job:${id}`;
 const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
+/** One build of an import at a time, whichever process runs it. */
+const IMPORT_BUILD_LOCK_KEY = (id: string) => `import-build:${id}`;
+const IMPORT_BUILD_LOCK_TTL_MS = 2 * 60 * 1000;
 
 const PREVIEW_JOB_KEY = (id: string) => `preview:job:${id}`;
 const PREVIEW_JOB_TTL = 2 * 60 * 60; // 2 hours
@@ -223,6 +227,33 @@ async function updateImportJobFields(
     data: { ...data, updatedAt: new Date() },
   });
   await publishImportJob(importJobId);
+}
+
+const CLOSED_IMPORT_STATES = ["completed", "failed", "cancelled"];
+
+/**
+ * Marks an import as building its playlist: its status and progress, and its listing only when the row has none yet
+ * (a row made before the listing was known). The link to a playlist, the counts and a listing a dismissal changed are
+ * the row's own and are left alone. A job with no row yet gets one. False when the row is already linked to a playlist
+ * or closed, so there is nothing to build.
+ */
+async function markBuilding(job: ImportJob): Promise<boolean> {
+  const row = await prisma.spotifyImportJob.findUnique({ where: { id: job.id } });
+  if (!row) {
+    await saveImportJob({ ...job, status: "creating_playlist", progress: 90 });
+  } else {
+    if (row.createdPlaylistId || CLOSED_IMPORT_STATES.includes(row.status)) return false;
+    const listingEmpty = !Array.isArray(row.pendingTracks) || row.pendingTracks.length === 0;
+    await updateImportJobFields(
+      job.id,
+      { status: "creating_playlist", progress: 90, ...(listingEmpty ? { pendingTracks: job.pendingTracks as any } : {}) },
+      CLOSED_IMPORT_STATES,
+    );
+  }
+  job.status = "creating_playlist";
+  job.progress = 90;
+  job.updatedAt = new Date();
+  return true;
 }
 
 /** Cache an import's row as the database holds it and tell the person's open import page. */
@@ -2018,7 +2049,25 @@ class SpotifyImportService {
     await this.buildPlaylist(job);
   }
 
+  /** One build per import at a time, across processes: a second one that finds the first running leaves it to finish. */
   private async buildPlaylist(job: ImportJob): Promise<void> {
+    const lockKey = IMPORT_BUILD_LOCK_KEY(job.id);
+    if (!(await distributedLock.acquire(lockKey, IMPORT_BUILD_LOCK_TTL_MS))) {
+      jobLoggers.get(job.id)?.debug(`   Another build of job ${job.id} is running, skipping`);
+      return;
+    }
+    // A build is thousands of rows and a preview lookup per waiting song: the lock is renewed while it runs, and frees
+    // within its ttl if the process dies.
+    const stopRenewal = distributedLock.keepAlive(lockKey, IMPORT_BUILD_LOCK_TTL_MS);
+    try {
+      await this.buildPlaylistLocked(job);
+    } finally {
+      stopRenewal();
+      await distributedLock.release(lockKey);
+    }
+  }
+
+  private async buildPlaylistLocked(job: ImportJob): Promise<void> {
     const jobLogger = jobLoggers.get(job.id);
 
     // Guard: playlist already created for this job
@@ -2027,10 +2076,11 @@ class SpotifyImportService {
       return;
     }
 
-    job.status = "creating_playlist";
-    job.progress = 90;
-    job.updatedAt = new Date();
-    await saveImportJob(job);
+    if (!(await markBuilding(job))) {
+      jobLogger?.debug(`   Job ${job.id} is linked to a playlist or closed, skipping`);
+      jobLoggers.delete(job.id);
+      return;
+    }
 
     jobLogger?.logPlaylistCreationStart();
     jobLogger?.logTrackMatchingStart();

@@ -189,3 +189,63 @@ describe("failing an import", () => {
         expect(titles(saved)).toEqual([entries[0].title, entries[2].title]);
     });
 });
+
+describe("one build per import", () => {
+    const build = (job: ReturnType<typeof importJob>) => (spotifyImportService as any).buildPlaylist(job);
+
+    it("makes one playlist when two builds of the same import run together", async () => {
+        const entries = [matched(), waiting(1)];
+        // Both builds are held at the same point, after they have read the job and before either has committed.
+        let arrived = 0;
+        let release!: () => void;
+        const together = new Promise<void>((resolve) => { release = resolve; });
+        (deezerService.getTrackPreview as jest.Mock).mockImplementation(async () => {
+            arrived++;
+            if (arrived >= 2) release();
+            await Promise.race([together, new Promise((resolve) => setTimeout(resolve, 400))]);
+            return null;
+        });
+
+        await Promise.all([build(importJob(entries)), build(importJob(entries))]);
+
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(1);
+        const saved = await row();
+        const playlist = await prisma.playlist.findFirstOrThrow({ where: { userId: USER } });
+        expect(saved).toMatchObject({ status: "completed", createdPlaylistId: playlist.id });
+    });
+
+    it("leaves the link of an import another build already finished, though this build still holds the old copy", async () => {
+        const entries = [matched(), waiting(1)];
+        const first = importJob(entries);
+        await build(first);
+        const linked = first.createdPlaylistId!;
+        // The row is back at "scanning" for a late step, still linked; a build holding a copy from before the link runs now.
+        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "scanning" } });
+
+        await build(importJob(entries));
+
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(1);
+        expect((await row()).createdPlaylistId).toBe(linked);
+    });
+
+    it("keeps the listing the row holds when the build's copy of the job is older", async () => {
+        const entries = [matched(), waiting(1), waiting(2)];
+        // A dismissal already took an entry out of the row; this build's copy still lists all three.
+        await prisma.spotifyImportJob.create({
+            data: {
+                id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", progress: 80,
+                albumsTotal: 0, albumsCompleted: 0, tracksMatched: 0, tracksDownloadable: 0, tracksTotal: 2, pendingTracks: [entries[0], entries[2]] as any,
+            },
+        });
+
+        await build(importJob(entries));
+
+        expect(titles(await row())).toEqual([entries[0].title, entries[2].title]);
+    });
+
+    it("takes the lock for an import only while it builds", async () => {
+        await build(importJob([matched()]));
+
+        expect(await redisClient.get(`lock:import-build:${JOB}`)).toBeNull();
+    });
+});

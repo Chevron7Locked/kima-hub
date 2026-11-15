@@ -78,9 +78,9 @@ const listing = (artist: string, title: string) => ({ artist, title, album: "x",
 const entry = (i: number) => listing(`${P} band`, `${P} ${WORDS[i]}`);
 const waiting = () => listing(GHOST, GHOST_TITLE);
 
-async function importOf(entries: ReturnType<typeof listing>[]) {
+async function importOf(entries: ReturnType<typeof listing>[], id = JOB) {
     const job = {
-        id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", progress: 80,
+        id, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", progress: 80,
         albumsTotal: 0, albumsCompleted: 0, tracksMatched: 0, tracksTotal: entries.length, tracksDownloadable: 0, createdPlaylistId: null as string | null,
         error: null, sourceUrl: null, createdAt: new Date(), updatedAt: new Date(), pendingTracks: entries,
     };
@@ -242,7 +242,8 @@ describe("a refresh that finds a waiting song", () => {
 describe("a scan over every playlist", () => {
     it("finishes the playlists after one that fails, and tells their owners", async () => {
         const first = await importOf([entry(0), waiting()]);
-        const second = await importOf([entry(1), waiting()]);
+        // Two imports, so two jobs: one build makes one playlist per job.
+        const second = await importOf([entry(1), waiting()], `${JOB}-2`);
         const [broken, sound] = [first, second].sort();
         const x = await libraryGains();
         const place = playlistService.placeFoundSongs;
