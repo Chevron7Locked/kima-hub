@@ -8,7 +8,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { lockPlayHistory, requiredListenSeconds } from "./playRecording";
+import { lockPlayHistory, PLAY_HISTORY_REPAIR_MAX_MS, requiredListenSeconds } from "./playRecording";
 import { MIN_LISTEN_WINDOW_SECONDS, playHistoryPages, type PlayHistoryRow } from "./stats/listens";
 
 /*
@@ -50,8 +50,11 @@ interface HistoryRead {
     db?: Prisma.TransactionClient;
 }
 
+/** What the audit and the repairs let a caller choose: how big a page is (tests use small ones). */
+type AuditRead = Pick<HistoryRead, "pageSize">;
+
 /** What a repair holds in one go: the read of the whole history and the delete of what it judged. */
-const REPAIR_TRANSACTION = { timeout: 5 * 60_000, maxWait: 60_000 } as const;
+const REPAIR_TRANSACTION = { timeout: PLAY_HISTORY_REPAIR_MAX_MS, maxWait: 60_000 } as const;
 
 function judge(span: number, gapAfter: number | null, required: number | null): ListenVerdict {
     if (required === null) return "never-counts";
@@ -208,7 +211,7 @@ export interface FalseStartAudit {
 }
 
 /** Everything the review screen shows, in one read. Touches nothing. */
-export async function auditFalseStarts(userId: string, read: { pageSize?: number } = {}): Promise<FalseStartAudit> {
+export async function auditFalseStarts(userId: string, read: AuditRead = {}): Promise<FalseStartAudit> {
     const byTrack = new Map<string, FalseStartTrack>();
     // Where each track's first listen began, which keeps tracks with equal counts in the order they first appeared.
     const firstListen = new Map<string, number>();
@@ -314,17 +317,17 @@ export async function auditFalseStarts(userId: string, read: { pageSize?: number
 }
 
 /**
- * Reads the history and deletes what `judge` picks in one transaction holding the person's play-history lock, so a play
+ * Reads the history and deletes what `pick` chooses in one transaction holding the person's play-history lock, so a play
  * recorded meanwhile (a late sync, say) waits for the delete instead of landing between it and the read it would
- * have changed. `judge` gets the walk and returns the play ids to delete, and nothing else is ever deleted.
+ * have changed. `pick` walks the history through the transaction it is given and returns the play ids to delete, and nothing else is ever deleted.
  */
 async function repair(
     userId: string,
-    judgeRows: (tx: Prisma.TransactionClient) => Promise<{ ids: string[]; tracks: number }>,
+    pick: (tx: Prisma.TransactionClient) => Promise<{ ids: string[]; tracks: number }>,
 ): Promise<{ removed: number; tracks: number }> {
     return prisma.$transaction(async (tx) => {
         await lockPlayHistory(tx, userId, { exclusive: true });
-        const { ids, tracks } = await judgeRows(tx);
+        const { ids, tracks } = await pick(tx);
         return { removed: await deletePlayIdsInChunks(tx, userId, ids), tracks };
     }, REPAIR_TRANSACTION);
 }
@@ -333,10 +336,11 @@ async function repair(
  * Collapse duplicate records of one listen. Nothing is judged, so it is safe
  * over the whole history and takes no track list.
  */
-export async function collapseDuplicateRows(userId: string, read: { pageSize?: number } = {}): Promise<{ removed: number }> {
+export async function collapseDuplicateRows(userId: string, read: AuditRead = {}): Promise<{ removed: number }> {
     const { removed } = await repair(userId, async (tx) => {
         const ids: string[] = [];
         await walkListens(userId, (l) => ids.push(...collapseCandidates([l])), { ...read, db: tx });
+        // A collapse judges no track, so it reports none.
         return { ids, tracks: 0 };
     });
     if (removed > 0) logger.info(`[PlayAudit] ${userId} collapsed ${removed} duplicate rows`);
@@ -372,7 +376,7 @@ async function deletePlayIdsInChunks(tx: Prisma.TransactionClient, userId: strin
 export async function removeFalseStarts(
     userId: string,
     trackIds: string[],
-    read: { pageSize?: number } = {},
+    read: AuditRead = {},
 ): Promise<{ removed: number; tracks: number }> {
     if (trackIds.length === 0) return { removed: 0, tracks: 0 };
     const wanted = new Set(trackIds);
@@ -403,8 +407,11 @@ export async function removeFalseStarts(
 /** Stop raising these tracks. Deletes nothing; counting is unaffected. */
 export async function ignoreTracks(userId: string, trackIds: string[]): Promise<{ ignored: number }> {
     if (trackIds.length === 0) return { ignored: 0 };
-    // An id that is no track (deleted since the audit listed it, or made up) is skipped, not a failure.
-    const tracks = await prisma.track.findMany({ where: { id: { in: trackIds } }, select: { id: true } });
+    // An id that is no library song (deleted since the audit listed it, made up, or a Discover song) is skipped, not a failure.
+    const tracks = await prisma.track.findMany({
+        where: { id: { in: trackIds }, album: { location: "LIBRARY" } },
+        select: { id: true },
+    });
     const { count } = await prisma.playAuditIgnore.createMany({
         data: tracks.map((t) => ({ userId, trackId: t.id })),
         skipDuplicates: true,

@@ -118,6 +118,12 @@ async function lockPlayDedupe(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PLAY_DEDUP_LOCK_NAMESPACE}::int, hashtext(${`${userId}:${trackId}`}))`;
 }
 
+/**
+ * The longest a repair of one listener's history may hold their exclusive history lock. A recording waits on that lock
+ * inside its own transaction, so its timeout is this plus a margin: a play reported mid-repair is recorded after it, not lost.
+ */
+export const PLAY_HISTORY_REPAIR_MAX_MS = 5 * 60_000;
+
 /** A second namespace, for the lock on one listener's whole play history (see `lockPlayHistory`). */
 const PLAY_HISTORY_LOCK_NAMESPACE = 7002;
 
@@ -204,7 +210,7 @@ export async function recordPlay(
             select: { id: true },
         });
         return { recorded: true, playId: play.id } as const;
-    });
+    }, { timeout: PLAY_HISTORY_REPAIR_MAX_MS + 30_000, maxWait: 60_000 });
 
     // Past this point the row is committed (or the duplicate call is over), so
     // nothing below may change `outcome` — the mirror is fire-and-forget.

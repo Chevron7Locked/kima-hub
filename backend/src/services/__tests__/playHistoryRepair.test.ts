@@ -2,7 +2,7 @@
  * listensOf groups play rows into listens. Every case has an unambiguous answer.
  */
 
-import { listensOf, collapseCandidates, auditFalseStarts, collapseDuplicateRows, removeFalseStarts } from "../playHistoryRepair";
+import { listensOf, collapseCandidates, auditFalseStarts, collapseDuplicateRows, removeFalseStarts, ignoreTracks } from "../playHistoryRepair";
 import { prisma } from "../../utils/db";
 import { lockPlayHistory, recordPlay } from "../playRecording";
 
@@ -212,6 +212,12 @@ describe("the ignored list", () => {
         });
         const audit = await auditFalseStarts(USER);
         expect(audit.ignored.map((r) => r.trackId)).toEqual([`${P}lib1`]);
+    });
+
+    it("ignores library songs only: a Discover song id is skipped like an id that is no song", async () => {
+        await given([play("l1", 0, 200, "lib1"), play("d1", 10, 200, "disc1", false, "disc")]);
+        expect(await ignoreTracks(USER, [`${P}lib1`, `${P}disc1`])).toEqual({ ignored: 1 });
+        expect((await prisma.playAuditIgnore.findMany({ where: { userId: USER } })).map((r) => r.trackId)).toEqual([`${P}lib1`]);
     });
 });
 
