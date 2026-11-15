@@ -87,8 +87,9 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
 
     const ids = many(req, "id");
 
-    // A blank `current` is no current song: apps send the parameter empty when nothing is playing.
-    const current = one(req, "current") || undefined;
+    // A blank `current` is no current song: apps send the parameter empty when nothing is playing. With no songs
+    // there is no song for it to name, so it is no current song either.
+    const current = ids.length === 0 ? undefined : one(req, "current") || undefined;
     const position = positionOf(one(req, "position"));
     if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 
@@ -113,7 +114,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
 
     const ids = many(req, "id");
 
-    const currentIndexRaw = one(req, "currentIndex");
+    // A blank `currentIndex` is no index, as a blank `current` is no current song.
+    const currentIndexRaw = one(req, "currentIndex") || undefined;
     const position = positionOf(one(req, "position"));
     if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 

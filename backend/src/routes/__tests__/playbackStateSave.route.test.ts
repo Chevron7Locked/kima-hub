@@ -558,7 +558,7 @@ describe("POST /api/playback-state: the songs of a saved queue are Kima's own", 
         expect(res.body.currentIndex).toBe(1);
     });
 
-    it("names the song now current when the one a track save names was left out or cut, and keeps the named song otherwise", async () => {
+    it("stores the queue's current entry as the song, whatever the save names (left out, cut, another, none) and none when no entry is left", async () => {
         const user = await newUser("own-named");
         const stored = async () => (await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).trackId;
 
@@ -571,8 +571,21 @@ describe("POST /api/playback-state: the songs of a saved queue are Kima's own", 
         await save(user.id, { playbackType: "track", trackId: `${S}s2`, queue: [entry("s1"), entry("s2")], currentIndex: 1 }).expect(200);
         expect(await stored()).toBe(`${S}s2`);
 
-        await save(user.id, { playbackType: "track", queue: [entry("s1"), entry("s2")], currentIndex: 0 }).expect(200);
+        // The current song is the queue's current entry, whether the save names that song, another, none or leaves it out.
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [entry("s1"), entry("s2")], currentIndex: 1 }).expect(200);
         expect(await stored()).toBe(`${S}s2`);
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [entry("d1"), entry("nosuch")], currentIndex: 0 }).expect(200);
+        expect(await stored()).toBeNull();
+
+        await save(user.id, { playbackType: "track", queue: [entry("s1"), entry("s2")], currentIndex: 0 }).expect(200);
+        expect(await stored()).toBe(`${S}s1`);
+
+        await save(user.id, { playbackType: "track", trackId: null, queue: [entry("s1"), entry("s2")], currentIndex: 1 }).expect(200);
+        expect(await stored()).toBe(`${S}s2`);
+
+        await save(user.id, { playbackType: "track", trackId: `${S}s1`, queue: [], currentIndex: 0 }).expect(200);
+        expect(await stored()).toBeNull();
     });
 
     it("cuts the queue to the limit after the ids left out", async () => {

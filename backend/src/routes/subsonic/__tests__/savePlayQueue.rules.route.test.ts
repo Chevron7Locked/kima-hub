@@ -153,7 +153,6 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "2" }, "an index past the end"],
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "-1" }, "a negative index"],
         ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "abc" }, "an index that is no number"],
-        ["savePlayQueueByIndex", { id: [song(0), song(1)], currentIndex: "" }, "a blank index"],
         ["savePlayQueueByIndex", { currentIndex: "0" }, "an index and no songs"],
     ])("%s answers code 0 for %#, and saves nothing", async (name, query, _why) => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "kept" }], currentIndex: 0 } });
@@ -166,7 +165,7 @@ describe("a Subsonic queue save with a current song or index that is sent but is
     });
 
     // OpenSubsonic: `current` is optional, and so is the index of the by-index form. With songs and no current song (a
-    // blank `current` is none) the queue is stored from its first song.
+    // blank `current` or `currentIndex` is none) the queue is stored from its first song.
     it.each([
         ["savePlayQueue", "no current song", "/savePlayQueue.view", {}],
         ["savePlayQueue", "no current song and a position", "/savePlayQueue.view", { position: "7000" }],
@@ -174,6 +173,8 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         ["savePlayQueue", "a blank current song and a position", "/savePlayQueue.view", { current: "", position: "7000" }],
         ["savePlayQueueByIndex", "no index", "/savePlayQueueByIndex.view", {}],
         ["savePlayQueueByIndex", "no index and a position", "/savePlayQueueByIndex.view", { position: "7000" }],
+        ["savePlayQueueByIndex", "a blank index", "/savePlayQueueByIndex.view", { currentIndex: "" }],
+        ["savePlayQueueByIndex", "a blank index and a position", "/savePlayQueueByIndex.view", { currentIndex: "", position: "7000" }],
     ])("%s with songs and %s stores the queue at index 0, position 0, whatever position is sent", async (_name, _what, path, extra: Record<string, string>) => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "old" }], currentIndex: 0, position: 9000 } });
 
@@ -242,11 +243,14 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         expect((await stored())!.queue).toBeNull();
     });
 
-    // `current` is not sent: with no songs there is no current song, and the place is 0 whatever the state held.
+    // No current song, or one that names nothing (a `current` with no songs, a blank index): with no songs there is no
+    // current song, and the place is 0 whatever the state held.
     it.each([
         ["savePlayQueue", { position: "5000" }],
         ["savePlayQueueByIndex", { position: "5000" }],
-    ])("%s with no songs and no current song stores index 0, no current song and position 0", async (name, query) => {
+        ["savePlayQueue", { current: song(1), position: "5000" }],
+        ["savePlayQueueByIndex", { currentIndex: "", position: "5000" }],
+    ])("%s with no songs and no usable current song stores index 0, no current song and position 0", async (name, query) => {
         await prisma.playbackState.create({
             data: { userId: USER, playbackType: "track", queue: [song(5), song(6), song(7), song(8)].map((id) => ({ id, title: id })), currentIndex: 3, trackId: song(8), position: 9000 },
         });

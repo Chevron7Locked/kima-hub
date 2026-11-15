@@ -102,13 +102,12 @@ router.post("/", async (req, res) => {
         // The queue as it will be stored: the songs of the ids sent, as Kima describes them, cut to the limit.
         const replacementFor = async (tx: Prisma.TransactionClient, ids: string[], clientIndex: number, held: ReadonlySet<string>) => {
             const planned = await planQueue(tx, ids, clientIndex, limit, held);
-            // The song a track save names is the one the stored queue holds at the stored index: when the plan left
-            // the named song out (unknown, on a Discover album) or cut it at the limit, the state names the song now
-            // current instead, so the two never disagree.
-            const heldId = planned.queue?.[planned.currentIndex]?.id ?? null;
             return {
                 currentIndex: planned.currentIndex,
-                trackId: trackId === undefined ? undefined : namesSong(trackId) ? heldId : null,
+                // The current song is the stored queue's current entry, whatever `trackId` the save sent or left out: a
+                // named song the plan left out (unknown, on a Discover album) or cut at the limit never stays beside
+                // a queue that does not hold it, so the two never disagree.
+                trackId: planned.queue?.[planned.currentIndex]?.id ?? null,
                 storedQueue: planned.queue === null ? Prisma.DbNull : (planned.queue as unknown as Prisma.InputJsonValue),
                 // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and
                 // sends no source (an older client, the iOS app) clears it, and a save without a queue leaves it.
@@ -124,7 +123,8 @@ router.post("/", async (req, res) => {
         // Returns null when the save named a time and the stored state is no longer the one saved at it (or is gone):
         // nothing was written.
         // `named`: the song and the episode the save names, as they are stored, which is null for an id that names
-        // nothing Kima holds; undefined where the save names none, and the stored one is left alone.
+        // nothing Kima holds; undefined where the save names none and sends no queue, and the stored one is left alone. A
+        // save that replaces the queue always names its current entry as the song.
         const write = async (
             db: Pick<Prisma.TransactionClient, "playbackState">,
             replacement: Replacement | null,
@@ -142,7 +142,7 @@ router.post("/", async (req, res) => {
                   : {};
             const update = {
                 playbackType,
-                // Omitted fields are left alone: native clients send partial updates.
+                // Omitted fields are left alone: native clients send partial updates (a queue save names its own song).
                 ...(named.trackId !== undefined ? { trackId: named.trackId } : {}),
                 // A book is Audiobookshelf's, which Kima does not hold: its id is stored as sent.
                 ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
