@@ -12,18 +12,24 @@ import { coverCacheControl, coverFileForSize, getLocalImagePath, parseStoredCove
 import { sendStoredFile } from "../utils/sendStoredFile";
 import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
+import { redisClient } from "../utils/redis";
 
 const router = Router();
 
-const recentPlays = new Map<string, number>();
-const PLAY_DEDUP_MS = 30_000;
+// An answer that refuses (not found, ended, not in the share) is never cached, so a link that is dead stays dead for the
+// browser and a proxy, and one that comes back is seen at once. Answers that serve keep the headers they set.
+router.use((_req: Request, res: Response, next) => {
+    const json = res.json.bind(res);
+    res.json = (body?: unknown) => {
+        if (res.statusCode >= 400) res.setHeader("Cache-Control", "no-store");
+        return json(body);
+    };
+    next();
+});
 
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, ts] of recentPlays) {
-        if (now - ts > PLAY_DEDUP_MS * 2) recentPlays.delete(key);
-    }
-}, 60_000).unref();
+// One play is every request a listener makes for a song within this window: the browser asks again for each seek.
+const PLAY_WINDOW_SECONDS = 30;
+const playKeyFor = (shareId: string, trackId: string) => `share:play:${shareId}:${trackId}`;
 
 const shareResolveLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
@@ -60,8 +66,8 @@ function sendEnded(res: Response, reason: EndedReason): void {
     });
 }
 
-/** The share link for `token`, or null once the response has gone out: 404 unknown, 410 expired or out of plays. */
-async function loadUsableShareLink(token: string, res: Response) {
+/** The share link for `token`, or null once the response has gone out: 404 unknown, 410 expired. */
+async function loadLiveShareLink(token: string, res: Response) {
     const shareLink = await prisma.shareLink.findUnique({ where: { token } });
 
     if (!shareLink) {
@@ -74,12 +80,100 @@ async function loadUsableShareLink(token: string, res: Response) {
         return null;
     }
 
-    if (shareLink.maxPlays && shareLink.playCount >= shareLink.maxPlays) {
+    return shareLink;
+}
+
+/** A limit of 0 plays is a limit: only no limit at all (null) is unlimited. */
+const outOfPlays = (link: { maxPlays: number | null; playCount: number }) =>
+    link.maxPlays != null && link.playCount >= link.maxPlays;
+
+/** The share link for `token`, or null once the response has gone out: 404 unknown, 410 expired or out of plays. */
+async function loadUsableShareLink(token: string, res: Response) {
+    const shareLink = await loadLiveShareLink(token, res);
+    if (!shareLink) return null;
+
+    if (outOfPlays(shareLink)) {
         sendEnded(res, "play-limit");
         return null;
     }
 
     return shareLink;
+}
+
+/** Whether a play of this song is already counted for the share. With Redis down no play is known: each request counts. */
+async function playAlreadyCounted(key: string): Promise<boolean> {
+    try {
+        return (await redisClient.exists(key)) === 1;
+    } catch (error) {
+        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
+        return false;
+    }
+}
+
+/** Takes the window for this play. False when a request of the same play took it first; true too when Redis is down. */
+async function claimPlayWindow(key: string): Promise<boolean> {
+    try {
+        return (await redisClient.set(key, "1", "EX", PLAY_WINDOW_SECONDS, "NX")) === "OK";
+    } catch (error) {
+        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
+        return true;
+    }
+}
+
+async function releasePlayWindow(key: string): Promise<void> {
+    try {
+        await redisClient.del(key);
+    } catch (error) {
+        logger.warn(`[Share] Could not release a play window: ${(error as Error).message}`);
+    }
+}
+
+/** Counts one play if the share has one left, as one statement so two listeners cannot both take the last. */
+async function countPlay(shareId: string): Promise<boolean> {
+    const updated = await prisma.$executeRaw`
+        UPDATE "share_links"
+        SET "playCount" = "playCount" + 1
+        WHERE "id" = ${shareId}
+          AND ("maxPlays" IS NULL OR "playCount" < "maxPlays")
+    `;
+    return updated > 0;
+}
+
+/**
+ * Whether the audio stream began. The streaming module sets 200 or 206 with the file's headers (`Accept-Ranges`) just before
+ * it pipes; every other end (304, 404, 416, 500, a listener who left first) leaves another status or no such header.
+ */
+const streamStarted = (res: Response) =>
+    (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined;
+
+/**
+ * Keeps a counted play only if the stream starts. A play whose response ends without one (304, 404, 416, 500, or a listener
+ * who left first) is taken back and its window freed, so the next request counts. The take-back runs before the response
+ * ends: a client cannot follow up in between and slip into a window that is about to be freed.
+ */
+function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string): void {
+    let undone: Promise<void> | null = null;
+    const undo = () =>
+        (undone ??= (async () => {
+            try {
+                await prisma.$executeRaw`
+                    UPDATE "share_links" SET "playCount" = GREATEST("playCount" - 1, 0) WHERE "id" = ${shareId}
+                `;
+            } catch (error) {
+                logger.error(`[Share] Could not give back a play: ${(error as Error).message}`);
+            }
+            await releasePlayWindow(key);
+        })());
+
+    const end = res.end.bind(res) as (...args: unknown[]) => Response;
+    res.end = ((...args: unknown[]) => {
+        if (streamStarted(res)) return end(...args);
+        void undo().finally(() => end(...args));
+        return res;
+    }) as Response["end"];
+    res.once("close", () => {
+        if (!streamStarted(res)) void undo();
+    });
 }
 
 /**
@@ -196,10 +290,19 @@ router.get("/:token/cover-art/:coverArtId", shareCoverLimiter, async (req: Reque
  */
 router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, res: Response) => {
     try {
-        const shareLink = await loadUsableShareLink(req.params.token, res);
+        const shareLink = await loadLiveShareLink(req.params.token, res);
         if (!shareLink) return;
 
         const trackId = req.params.trackId;
+        const playKey = playKeyFor(shareLink.id, trackId);
+
+        // A listener's follow-up requests (a seek, the next range) belong to a play already counted: they are not a new
+        // play, and the limit, which that play may just have reached, does not apply to them. Expiry still does.
+        const followUp = await playAlreadyCounted(playKey);
+        if (!followUp && outOfPlays(shareLink)) {
+            return sendEnded(res, "play-limit");
+        }
+
         let authorized = false;
 
         if (shareLink.entityType === "track" && shareLink.entityId === trackId) {
@@ -244,32 +347,14 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             return res.status(404).json({ error: "Audio file not found" });
         }
 
-        // Deduplicate play count: only increment once per share+track within time window
-        const playKey = `${shareLink.id}:${trackId}`;
-        const lastPlay = recentPlays.get(playKey);
-        const now = Date.now();
-
-        if (!lastPlay || now - lastPlay > PLAY_DEDUP_MS) {
-            recentPlays.set(playKey, now);
-
-            if (shareLink.maxPlays) {
-                // Atomic check-and-increment: only succeeds if under the limit
-                const updated = await prisma.$executeRaw`
-                    UPDATE "share_links"
-                    SET "playCount" = "playCount" + 1
-                    WHERE "id" = ${shareLink.id}
-                      AND ("maxPlays" IS NULL OR "playCount" < "maxPlays")
-                `;
-                if (updated === 0) {
-                    recentPlays.delete(playKey);
-                    return sendEnded(res, "play-limit");
-                }
-            } else {
-                await prisma.shareLink.update({
-                    where: { id: shareLink.id },
-                    data: { playCount: { increment: 1 } },
-                });
+        // The first request of a play takes the window and counts it. A request that finds the window taken belongs to
+        // that play: two requests arriving together are one play.
+        if (!followUp && (await claimPlayWindow(playKey))) {
+            if (!(await countPlay(shareLink.id))) {
+                await releasePlayWindow(playKey);
+                return sendEnded(res, "play-limit");
             }
+            keepPlayOnlyIfStreamStarts(res, shareLink.id, playKey);
         }
 
         const mimeType = getMimeType(track.filePath);

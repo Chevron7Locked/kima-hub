@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import shareRoutes from '../../routes/share';
 import { prisma } from '../../utils/db';
+import { redisClient } from '../../utils/redis';
 import { coversBasePath } from '../../services/imageStorage';
 import { config } from '../../config';
 import { mountAsServer } from "./helpers/serverMount";
@@ -585,5 +586,190 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         const token = await covering('track', songs.corrupt);
         await stream(token, songs.corrupt);
         expect((await prisma.shareLink.findUniqueOrThrow({ where: { token } })).playCount).toBe(0);
+    });
+
+    /** A link of its own to one song, so a test starts from no plays and no window. */
+    let linkN = 0;
+    const own = async (data: object = {}, entityId = songs.playable) => {
+        const token = `${TAG}-own-${linkN++}`;
+        const link = await prisma.shareLink.create({ data: { token, entityType: 'track', entityId, createdBy: OWNER, ...data } });
+        return { token, id: link.id };
+    };
+    const playsOf = async (token: string) => (await prisma.shareLink.findUniqueOrThrow({ where: { token } })).playCount;
+    const get = (token: string, id: string, headers: Record<string, string> = {}) =>
+        request(app).get(`/share/${token}/stream/${id}`).set(headers).buffer(true).parse((r, cb) => {
+            r.on('data', () => undefined);
+            r.on('end', () => cb(null, undefined));
+        });
+    /** The listener's next play: the 30 s window has passed. */
+    const windowPasses = async (shareId: string) => {
+        const keys = await redisClient.keys(`*${shareId}*`);
+        if (keys.length) await redisClient.del(...keys);
+    };
+
+    describe('counting plays', () => {
+        it("serves a listener's follow-up requests for a play already counted, though the play limit is now reached", async () => {
+            const { token } = await own({ maxPlays: 1 });
+
+            expect((await get(token, songs.playable)).status).toBe(200);
+            expect(await playsOf(token)).toBe(1);
+
+            for (const range of ['bytes=0-1', 'bytes=2-', 'bytes=0-']) {
+                const res = await get(token, songs.playable, { Range: range });
+                expect([range, res.status]).toEqual([range, 206]);
+            }
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('still refuses a follow-up request once the link has expired', async () => {
+            const { token } = await own({ maxPlays: 1 });
+            await get(token, songs.playable);
+            await prisma.shareLink.update({ where: { token }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+            const res = await request(app).get(`/share/${token}/stream/${songs.playable}`).set('Range', 'bytes=0-1');
+
+            expect([res.status, res.body]).toEqual([410, { error: 'Share link has expired', reason: 'expired' }]);
+        });
+
+        it('refuses the next play, after the window, when the limit is reached', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            await get(token, songs.playable);
+            await windowPasses(id);
+
+            const res = await request(app).get(`/share/${token}/stream/${songs.playable}`);
+
+            expect([res.status, res.body]).toEqual([410, { error: 'Share link play limit reached', reason: 'play-limit' }]);
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('counts requests that arrive together as one play', async () => {
+            const { token } = await own();
+
+            const replies = await Promise.all([get(token, songs.playable), get(token, songs.playable, { Range: 'bytes=0-1' }), get(token, songs.playable, { Range: 'bytes=2-' })]);
+
+            expect(replies.map((r) => r.status).sort()).toEqual([200, 206, 206]);
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('counts a play again after the window, and not within it', async () => {
+            const { token, id } = await own();
+
+            await get(token, songs.playable);
+            await get(token, songs.playable);
+            expect(await playsOf(token)).toBe(1);
+
+            await windowPasses(id);
+            await get(token, songs.playable);
+            expect(await playsOf(token)).toBe(2);
+        });
+
+        it('keeps the window at 30 seconds, in Redis', async () => {
+            const { token, id } = await own();
+            await get(token, songs.playable);
+
+            const [key] = await redisClient.keys(`*${id}*`);
+
+            expect(key).toContain(songs.playable);
+            const ttl = await redisClient.ttl(key);
+            expect(ttl).toBeGreaterThan(25);
+            expect(ttl).toBeLessThanOrEqual(30);
+        });
+
+        it('does not count a play whose stream did not start, and leaves the next request to count', async () => {
+            const { token } = await own({ maxPlays: 1 });
+            // A conditional request for a file the listener already holds is answered 304: nothing is played.
+            const notModified = await get(token, songs.playable, { 'If-None-Match': '*' });
+            expect(notModified.status).toBe(304);
+            expect(await playsOf(token)).toBe(0);
+
+            expect((await get(token, songs.playable)).status).toBe(200);
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('does not count a play for a file with nothing in it', async () => {
+            const full = path.join(config.music.musicPath, DIR, 'empty.flac');
+            fs.writeFileSync(full, '');
+            const empty = await prisma.track.create({ data: { albumId, title: 'empty', duration: 100, trackNo: 9, filePath: `${DIR}/empty.flac`, fileModified: new Date(), fileSize: 1 } });
+            const { token } = await own({ maxPlays: 1 }, empty.id);
+
+            const res = await get(token, empty.id);
+
+            expect(res.status).toBe(404);
+            expect(await playsOf(token)).toBe(0);
+        });
+
+        it('gives the play back when the last one was taken between the check and the count, so the window is not held', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            const raw = jest.spyOn(prisma, '$executeRaw').mockResolvedValueOnce(0);
+            const refused = await request(app).get(`/share/${token}/stream/${songs.playable}`);
+            raw.mockRestore();
+
+            expect(refused.status).toBe(410);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+            // The refusal left no mark: the next request is a first play.
+            expect((await get(token, songs.playable)).status).toBe(200);
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('counts every request, as a first play, while Redis is down', async () => {
+            const { token } = await own();
+            const exists = jest.spyOn(redisClient, 'exists').mockRejectedValue(new Error('down'));
+            const set = jest.spyOn(redisClient, 'set').mockRejectedValue(new Error('down'));
+            try {
+                expect((await get(token, songs.playable)).status).toBe(200);
+                expect((await get(token, songs.playable, { Range: 'bytes=0-1' })).status).toBe(206);
+            } finally {
+                exists.mockRestore();
+                set.mockRestore();
+            }
+
+            expect(await playsOf(token)).toBe(2);
+        });
+
+        it('a link with 0 plays allowed plays nothing: it is not unlimited', async () => {
+            const { token } = await own({ maxPlays: 0 });
+
+            const opened = await request(app).get(`/share/${token}`);
+            const streamed = await request(app).get(`/share/${token}/stream/${songs.playable}`);
+
+            for (const res of [opened, streamed]) {
+                expect([res.status, res.body]).toEqual([410, { error: 'Share link play limit reached', reason: 'play-limit' }]);
+            }
+            expect(await playsOf(token)).toBe(0);
+        });
+    });
+
+    describe('answers that must not be cached', () => {
+        it.each([
+            ['opening an unknown link', '/share/zz-no-such-link'],
+            ['streaming from an unknown link', '/share/zz-no-such-link/stream/x'],
+            ['a cover from an unknown link', '/share/zz-no-such-link/cover-art/native:albums%2Fx.jpg'],
+        ])('%s answers 404 with no-store', async (_name, address) => {
+            const res = await request(app).get(address);
+            expect([res.status, res.headers['cache-control']]).toEqual([404, 'no-store']);
+        });
+
+        it.each([
+            ['expired', { expiresAt: new Date(Date.now() - 1000) }],
+            ['play-limit', { maxPlays: 1, playCount: 1 }],
+        ])('a link that is %s answers 410 with no-store, on every address', async (_reason, data) => {
+            const { token } = await own(data);
+            for (const address of [`/share/${token}`, `/share/${token}/stream/${songs.playable}`, `/share/${token}/cover-art/native:albums%2Fx.jpg`]) {
+                const res = await request(app).get(address);
+                expect([address, res.status, res.headers['cache-control']]).toEqual([address, 410, 'no-store']);
+            }
+        });
+
+        it('a song with no file, and a song outside the link, are not cached either', async () => {
+            const missing = await request(app).get(`/share/${(await own({}, songs.missing)).token}/stream/${songs.missing}`);
+            expect([missing.status, missing.headers['cache-control']]).toEqual([404, 'no-store']);
+            const outside = await request(app).get(`/share/${(await own()).token}/stream/${songs.corrupt}`);
+            expect([outside.status, outside.headers['cache-control']]).toEqual([403, 'no-store']);
+        });
+
+        it('a song that streams is not marked no-store by this', async () => {
+            const res = await get((await own()).token, songs.playable);
+            expect(res.headers['cache-control']).not.toBe('no-store');
+        });
     });
 });

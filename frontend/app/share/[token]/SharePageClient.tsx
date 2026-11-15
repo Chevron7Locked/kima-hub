@@ -328,7 +328,8 @@ function SharePage({ token }: { token: string }) {
                 if (res.ok) return say("Playback error occurred.");
                 sayFailure({ status: res.status, reason: await refusalReason(res) });
             })
-            .catch(() => sayFailure({ status: null }));
+            // No answer at all: the connection is the likely cause, and the share's own wording for it is about opening.
+            .catch(() => say("Playback failed. Check your connection."));
     }, [token]);
 
     const totalDuration = tracks.reduce((sum, t) => sum + (t.duration || 0), 0);

@@ -274,12 +274,13 @@ describe("SharePageClient", () => {
             await act(async () => root.unmount());
         });
 
-        it("says the share could not be opened when the second request got no answer at all", async () => {
+        it("says playback failed and to check the connection when the second request got no answer at all", async () => {
             await open();
             vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
             await audioError();
 
-            expect(host.textContent).toContain("Couldn't open this share");
+            expect(host.textContent).toContain("Playback failed. Check your connection.");
+            expect(host.textContent).not.toContain("Couldn't open this share");
             expect(host.textContent).not.toContain("Playback error");
             await act(async () => root.unmount());
         });
