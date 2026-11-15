@@ -35,6 +35,8 @@ async function idle() {
     while ((isBackfillInProgress() || getImageBackfillProgress().inProgress) && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 25));
     }
+    // A backfill that never ends fails here, as itself, and not as a later test's leftover.
+    expect(isBackfillInProgress() || getImageBackfillProgress().inProgress).toBe(false);
 }
 
 beforeAll(async () => {
@@ -120,6 +122,7 @@ describe("the shutdown's drain and a backfill an admin started", () => {
 
     it("holds the drain while the artist recount's batch is under way", async () => {
         const count = held();
+        // Bound after beforeEach's scopeArtists, so this is the scoped count: the recount's own query stays scoped to P.
         const realCount = prisma.artist.count.bind(prisma.artist) as (...args: unknown[]) => Promise<number>;
         jest.spyOn(prisma.artist, "count").mockImplementationOnce((async (...args: unknown[]) => {
             count.reach();
