@@ -82,13 +82,13 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     const position = positionRaw ? parseInt(positionRaw, 10) : 0;
     const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
 
-    if (ids.length > 0 && (!current || !ids.includes(current))) {
-        return subsonicError(
-            req,
-            res,
-            SubsonicError.MISSING_PARAM,
-            "current must be present and included in id list"
-        );
+    // A parameter that is not sent is missing (code 10); one that is sent but names no song of the list is a wrong
+    // value (code 0, what the spec's generic error is for).
+    if (ids.length > 0 && current === undefined) {
+        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: current");
+    }
+    if (ids.length > 0 && !ids.includes(current!)) {
+        return subsonicError(req, res, SubsonicError.GENERIC, "current must be included in id list");
     }
 
     await saveQueueOfIds(userId, {
@@ -114,12 +114,7 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
     const safePosition = Number.isFinite(position) && position >= 0 ? position : 0;
 
     if (ids.length === 0 && currentIndexRaw !== undefined) {
-        return subsonicError(
-            req,
-            res,
-            SubsonicError.MISSING_PARAM,
-            "currentIndex must not be set when id is not provided"
-        );
+        return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must not be set when id is not provided");
     }
 
     if (ids.length > 0 && currentIndexRaw === undefined) {
@@ -133,12 +128,7 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
 
     const parsedIndex = currentIndexRaw !== undefined ? parseInt(currentIndexRaw, 10) : 0;
     if (ids.length > 0 && (!Number.isInteger(parsedIndex) || parsedIndex < 0 || parsedIndex >= ids.length)) {
-        return subsonicError(
-            req,
-            res,
-            SubsonicError.MISSING_PARAM,
-            "currentIndex must be between 0 and queue length - 1"
-        );
+        return subsonicError(req, res, SubsonicError.GENERIC, "currentIndex must be between 0 and queue length - 1");
     }
 
     await saveQueueOfIds(userId, {

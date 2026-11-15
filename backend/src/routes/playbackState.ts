@@ -2,31 +2,15 @@ import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { LiveQueueEntry, isPublicListener, reportLive } from "../services/liveListening";
-import { QUEUE_LENGTH } from "../utils/systemSettings";
-import { acceptQueue, indexIntoStoredQueue, namesCurrentSong, shownState, type PlaybackStateRow } from "../services/savedQueue";
+import { acceptQueue, indexIntoStoredQueue, lockPlaybackState, namesCurrentSong, queueLimit, shownState, type PlaybackStateRow } from "../services/savedQueue";
 
 const router = express.Router();
 
 // A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
 const MAX_QUEUE_SOURCE_LENGTH = 200;
 
-/**
- * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read on every queue
- * write (one row by primary key), so a saved limit applies at once.
- */
-async function queueLimit(): Promise<number> {
-    let value: number = QUEUE_LENGTH.default;
-    try {
-        const settings = await prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { maxQueueLength: true },
-        });
-        if (settings?.maxQueueLength) value = settings.maxQueueLength;
-    } catch {
-        // A settings read that fails must not stop somebody's queue saving.
-    }
-    return Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
-}
+/** Who saved the queue, as a Subsonic app reads it (`changedBy`): a save from the web is Kima's. */
+const CHANGED_BY = "Kima";
 
 /** The limit, for the client, so it does not have to guess. */
 router.get("/limit", async (_req, res) => {
@@ -113,6 +97,7 @@ router.post("/", async (req, res) => {
                 ...(podcastId !== undefined ? { podcastId: podcastId || null } : {}),
                 ...queueUpdate,
                 ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
+                changedBy: CHANGED_BY,
             };
             // One statement matches the time and writes, so two saves naming the same time cannot both write; a
             // state that is gone is never brought back by it.
@@ -133,6 +118,7 @@ router.post("/", async (req, res) => {
                     queueSource: safeQueueSource,
                     currentIndex: safeCurrentIndex ?? 0,
                     isShuffle: isShuffle || false,
+                    changedBy: CHANGED_BY,
                 },
             });
         };
@@ -145,7 +131,7 @@ router.post("/", async (req, res) => {
             ? await prisma.$transaction(async (tx) => write(tx, await indexIntoStoredQueue(tx, userId, currentIndex, trackId)))
             : expectedAt
               ? await prisma.$transaction(async (tx) => {
-                    await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+                    await lockPlaybackState(tx, userId);
                     return write(tx, accepted?.currentIndex ?? 0);
                 })
               : await write(prisma, accepted?.currentIndex ?? 0);

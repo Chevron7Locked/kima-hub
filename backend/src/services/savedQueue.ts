@@ -19,6 +19,7 @@
  */
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
+import { QUEUE_LENGTH } from "../utils/systemSettings";
 
 export type QueueEntry = {
     id: string;
@@ -76,6 +77,24 @@ export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionCli
     const tracks = await db.track.findMany({ where: { id: { in: ids } }, select: DESCRIBED });
     const byId = new Map(tracks.map((t) => [t.id, describeSong(t)]));
     return ids.map((id) => byId.get(id)).filter((entry): entry is QueueEntry => entry != null);
+}
+
+/**
+ * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read on every queue
+ * write (one row by primary key), so a saved limit applies at once. Every save cuts to it, web or Subsonic.
+ */
+export async function queueLimit(): Promise<number> {
+    let value: number = QUEUE_LENGTH.default;
+    try {
+        const settings = await prisma.systemSettings.findUnique({
+            where: { id: "default" },
+            select: { maxQueueLength: true },
+        });
+        if (settings?.maxQueueLength) value = settings.maxQueueLength;
+    } catch {
+        // A settings read that fails must not stop somebody's queue saving.
+    }
+    return Math.min(QUEUE_LENGTH.max, Math.max(QUEUE_LENGTH.min, Math.floor(value)));
 }
 
 /** A whole, non-negative index from whatever a client sent. */
@@ -149,8 +168,11 @@ export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolea
     return typeof clientIndex === "number" || namesSong(trackId);
 }
 
-/** Takes the person's state row until the transaction ends, so a save and the library sweep rewriting it go one at a time. */
-async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw">, userId: string): Promise<void> {
+/**
+ * Takes the person's state row until the transaction ends, so a save and the library sweep rewriting it go one at a
+ * time. The one lock every save takes, web or Subsonic.
+ */
+export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw">, userId: string): Promise<void> {
     await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
 }
 
@@ -203,15 +225,18 @@ const SAVE_TIMEOUT_MS = 30_000;
  * locked first and the songs are read, the index worked out and the queue written in the same transaction, so a library
  * sweep retiring a song at the same moment finishes first and the queue never stores what it took out, and a web save
  * meeting this one leaves one whole save. Ids Kima does not know are left out; when the current song is among them the
- * song now in its place is current, from its start. (A person's first save has no row to lock yet.)
+ * song now in its place is current, from its start. The queue is cut to the operator's limit (`queueLimit`) after those
+ * are left out, as a web save cuts it; a current song past the cut leaves the last song kept as current, from its
+ * start. (A person's first save has no row to lock yet.)
  */
 export async function saveQueueOfIds(
     userId: string,
     save: { ids: string[]; clientIndex: number; position: number; changedBy: string },
 ): Promise<void> {
+    const limit = await queueLimit();
     await prisma.$transaction(async (tx) => {
         await lockPlaybackState(tx, userId);
-        const queue = await hydrateQueue(save.ids, tx);
+        const queue = (await hydrateQueue(save.ids, tx)).slice(0, limit);
         const currentIndex = storedIndexOf(save.ids, queue, save.clientIndex);
         const trackId = queue[currentIndex]?.id ?? null;
         const data = {

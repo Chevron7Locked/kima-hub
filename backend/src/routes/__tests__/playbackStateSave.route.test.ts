@@ -129,6 +129,26 @@ describe("POST /api/playback-state", () => {
         ]);
     });
 
+    // A Subsonic app reads who changed the queue last. A save from the web is Kima's, and takes the place of the name
+    // an app saved before it, whether it sends a queue or only moves the index.
+    it.each([
+        ["a first save", null, { queue: [{ id: `${S}s1`, title: "s1" }] }],
+        ["a save that replaces the queue", "Symfonium", { queue: [{ id: `${S}s1`, title: "s1" }] }],
+        ["a save that moves the index only", "Symfonium", { currentIndex: 0 }],
+        ["a save that toggles shuffle", "Symfonium", { isShuffle: true }],
+    ])("records Kima as the one who changed it: %s", async (name, before, body) => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-by-${name.replace(/\W+/g, "")}`, passwordHash: "x", role: "user" } });
+        if (before) {
+            await prisma.playbackState.create({
+                data: { userId: user.id, playbackType: "track", queue: [{ id: `${S}s1`, title: "s1" }], currentIndex: 0, changedBy: before },
+            });
+        }
+
+        await request(app).post("/api/playback-state").set("x-user", user.id).send({ playbackType: "track", ...body }).expect(200);
+
+        expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: user.id } })).changedBy).toBe("Kima");
+    });
+
     it("answers 500 with only the generic message when the database refuses the save", async () => {
         const logged = expectLog("error");
         const res = await request(app)
