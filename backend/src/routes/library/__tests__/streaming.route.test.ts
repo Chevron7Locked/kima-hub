@@ -26,6 +26,7 @@ import fs from 'fs';
 import streamingRoutes from '../streaming';
 import { prisma } from '../../../utils/db';
 import { config } from '../../../config';
+import { logger } from '../../../utils/logger';
 import { getAudioStreamingService } from '../../../services/audioStreaming';
 import { expectLog } from '../../../__tests__/helpers/expectedLogs';
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
@@ -188,6 +189,44 @@ describe('a file gone from disk before a scan has flagged it', () => {
         }));
         const res = await request(app).get(`/tracks/${id}/stream`);
         expect(res.status).toBe(500);
+    });
+});
+
+// The tier a stream or prewarm is served at: the one it names, else the person's saved one, else the original.
+describe('the quality a stream is served at', () => {
+    const tierAsked = () => (getAudioStreamingService as jest.Mock).mock.results[0].value.getStreamFilePath.mock.calls[0][1];
+
+    afterEach(() => prisma.userSettings.deleteMany({ where: { userId: USER } }));
+
+    it.each([
+        ['names none and has no saved one', undefined, null, 'original'],
+        ['names none and has one saved', undefined, 'medium', 'medium'],
+        ['names one over the one saved', 'low', 'high', 'low'],
+        ['names none and has a saved value that is no tier', undefined, 'ultra', 'original'],
+    ])('a request that %s is served at %s', async (_why, asked, saved, expected) => {
+        const id = await seedTrack(`tier${String(asked)}${String(saved)}`, `Artist/Album/tier-${String(asked)}-${String(saved)}.mp3`);
+        if (saved) await prisma.userSettings.create({ data: { userId: USER, playbackQuality: saved } });
+
+        await request(app).get(`/tracks/${id}/stream${asked ? `?quality=${asked}` : ''}`).expect(200);
+        expect(tierAsked()).toBe(expected);
+    });
+});
+
+describe('a prewarm that fails', () => {
+    it('is still answered 202, and is logged at debug, not swallowed', async () => {
+        const id = await seedTrack('prewarmfail', 'Artist/Album/prewarmfail.mp3');
+        const failure = new Error('transcode failed');
+        (getAudioStreamingService as jest.Mock).mockReturnValue(fakeStreamingService({ getStreamFilePath: jest.fn().mockRejectedValue(failure) }));
+        const debug = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+
+        try {
+            expect((await request(app).post(`/tracks/${id}/prewarm`)).status).toBe(202);
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug.mock.calls.some((call) => call.includes(failure))).toBe(true);
+        } finally {
+            debug.mockRestore();
+        }
     });
 });
 

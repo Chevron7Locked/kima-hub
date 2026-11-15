@@ -3,19 +3,29 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { isFileGone, refuseRequest } from "../../utils/errors";
 import { config } from "../../config";
-import { getAudioStreamingService, isQuality } from "../../services/audioStreaming";
+import { getAudioStreamingService, isQuality, type Quality } from "../../services/audioStreaming";
 import { resolveWithinMusicRoot } from "./trackPath";
 import path from "path";
 
 
 type StreamableTrack = { id: string; filePath: string; fileModified: Date; bitrate: number | null };
 
+/**
+ * The tier a request is served at: the one it names, else the person's saved one, else the original (no transcode, to
+ * match the schema default and avoid a pointless first-play transcode). A saved value that is no tier (the column is
+ * free text) is the original too.
+ */
+function tierFor(asked: Quality | undefined, saved: string | null | undefined): Quality {
+  if (asked) return asked;
+  return isQuality(saved) ? saved : "original";
+}
+
 // Shared by the primary quality attempt and the FFMPEG_NOT_FOUND fallback:
 // resolves the track's on-disk path (rejecting any escape from the music
 // root) and streams it at the given quality.
 async function resolveAndStream(
   track: StreamableTrack,
-  quality: string,
+  quality: Quality,
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -37,7 +47,7 @@ async function resolveAndStream(
 
   const { filePath, mimeType } = await streamingService.getStreamFilePath(
     track.id,
-    quality as any,
+    quality,
     track.fileModified,
     absolutePath,
     0,
@@ -103,11 +113,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
     // Streaming bytes is not listening: plays are recorded through POST /plays and
     // Subsonic's scrobble.view, judged in services/playRecording.ts.
 
-    // Default to original (no transcode) to match the schema default and avoid a
-    // pointless first-play transcode for users with no settings row.
-    const requestedQuality: string = quality
-      ? (quality as string)
-      : settings?.playbackQuality || "original";
+    const requestedQuality = tierFor(quality, settings?.playbackQuality);
 
     const ext = track.filePath
       ? path.extname(track.filePath).toLowerCase()
@@ -184,9 +190,7 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
       return res.status(202).json({ ok: true });
     }
 
-    const requestedQuality: string = quality
-      ? (quality as string)
-      : settings?.playbackQuality || "original";
+    const requestedQuality = tierFor(quality, settings?.playbackQuality);
 
     const absolutePath = resolveWithinMusicRoot(track.filePath);
     if (!absolutePath) {
@@ -202,12 +206,15 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
     // Fire-and-forget at low priority so on-demand streams always preempt.
     void streamingService.getStreamFilePath(
       track.id,
-      requestedQuality as any,
+      requestedQuality,
       track.fileModified,
       absolutePath,
       -1,
       { storedKbps: track.bitrate },
-    ).catch(() => {});
+    ).catch((error) => {
+      // Nobody waits on a prewarm; the stream that follows does its own work and reports its own failure.
+      logger.debug(`[STREAM] Prewarm of track ${track.id} failed:`, error);
+    });
 
     return res.status(202).json({ ok: true });
   } catch (error) {
