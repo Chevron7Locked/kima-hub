@@ -222,10 +222,18 @@ describe("the ignored list", () => {
 });
 
 describe("reading the history in pages", () => {
+    // Every page is a query and the cases read the history once per page size, down to a page of one row, so the time
+    // is the number of rows times the database's round trip: on a loaded machine (a full run's other suites) a long
+    // history took five seconds. Six rounds still give both Discover shapes, all four songs and rows that span pages.
+    const ROUNDS = 6;
+    // What is left of those round trips (a page of one row is a query per row) can still pass the 5 s default when the
+    // database is starved of CPU (measured 4.4 s with the machine's every core busy, against 0.3 s idle), so the cases that read
+    // a history in small pages have room for that.
+    const CHATTY = 20_000;
     /** A history with listens that span pages, Discover plays between library ones, and rows sharing one instant. */
     const mixed = () => {
         const rows: ReturnType<typeof play>[] = [];
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < ROUNDS; i++) {
             const t = i * 400;
             const song = `s${i % 4}`;
             rows.push(play(`a${i}`, t, 200, song), play(`b${i}`, t + 10, 200, song), play(`c${i}`, t + 20, 200, song));
@@ -248,17 +256,18 @@ describe("reading the history in pages", () => {
         expect(whole.totalListens).toBeGreaterThan(5);
         expect(whole.collapsibleRows).toBeGreaterThan(0);
         expect(whole.skipped).toBeGreaterThan(0);
-        for (const pageSize of [1, 2, 3, 5, 7, 11]) {
-            expect(await auditFalseStarts(USER, { pageSize })).toEqual(whole);
-        }
-    });
+        // Reads only, so the page sizes are read side by side: one after another, the time is every page of every size.
+        const sizes = [1, 2, 3, 5, 7, 11];
+        const audits = await Promise.all(sizes.map((pageSize) => auditFalseStarts(USER, { pageSize })));
+        for (const audit of audits) expect(audit).toEqual(whole);
+    }, CHATTY);
 
     it("gives the same listens whatever the page size, in the order they began", async () => {
         await given(mixed());
         const whole = await listensOf(USER, { pageSize: 10_000 });
         expect(await listensOf(USER, { pageSize: 3 })).toEqual(whole);
         expect(whole.map((l) => l.startedAt.getTime())).toEqual([...whole.map((l) => l.startedAt.getTime())].sort((x, y) => x - y));
-    });
+    }, CHATTY);
 
     it("collapses and removes the same rows whatever the page size", async () => {
         await given(mixed());
@@ -271,8 +280,8 @@ describe("reading the history in pages", () => {
         expect(await removeFalseStarts(USER, tracks, { pageSize: 3 })).toEqual({ removed: audit.skipped * 2, tracks: audit.tracks.length });
         expect(await collapseDuplicateRows(USER, { pageSize: 3 })).toEqual({ removed: 0 });
         // Discover rows were never touched.
-        expect(await prisma.play.count({ where: { userId: USER, id: { startsWith: `${P}d` } } })).toBe(12);
-    });
+        expect(await prisma.play.count({ where: { userId: USER, id: { startsWith: `${P}d` } } })).toBe(ROUNDS);
+    }, CHATTY);
 
     it("never asks for more than a page at a time, and takes several to read a longer history", async () => {
         await given(mixed());
