@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { callSettingsListeners, type SystemSettingsChanges, type SystemSettingsField } from "./systemSettingsListeners";
-import { decryptOrNull, ENCRYPTED_FIELDS, encryptSettings, resolveEncryptedSettings, type EncryptedField } from "./encryptedFields";
+import { decryptOrNull, decryptSettings, ENCRYPTED_FIELDS, encryptSettings, noteUnreadableCredentials, type EncryptedField } from "./encryptedFields";
 import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 
 // Other processes see a save up to this late, by design: no pub/sub (ruled 2026-11-11).
@@ -11,7 +11,10 @@ async function buildSettings() {
         where: { id: "default" },
     });
     if (!settings) return null;
-    return resolveEncryptedSettings(settings, lidarrSelfRepairingFields);
+    const resolved = decryptSettings(settings);
+    // The admin notices go out in the background: a slow notification store never holds a settings read.
+    void noteUnreadableCredentials(resolved, lidarrSelfRepairingFields);
+    return resolved;
 }
 
 type Settings = Awaited<ReturnType<typeof buildSettings>>;

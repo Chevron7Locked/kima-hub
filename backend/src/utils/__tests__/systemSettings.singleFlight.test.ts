@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     // transcodeCacheMaxGb is just a plain numeric column to tell one saved row from another
-    const start = { transcodeCacheMaxGb: 10, fanartApiKey: null, acoustidApiKey: null, discoverAlbumsSortedAt: null };
+    const start = { transcodeCacheMaxGb: 10, fanartApiKey: null, acoustidApiKey: null, slskdApiKey: null, discoverAlbumsSortedAt: null };
     await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...start }, update: start });
     invalidateSystemSettingsCache();
 });
@@ -169,7 +169,7 @@ describe("saveSystemSettings and a read in flight", () => {
 // 'xc1.' marks the current format, and the rest is no valid ciphertext: stored, but the key cannot read it.
 const unreadable = "xc1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-async function storeUnreadable(field: "fanartApiKey" | "acoustidApiKey", more: Record<string, unknown> = {}) {
+async function storeUnreadable(field: "fanartApiKey" | "acoustidApiKey" | "slskdApiKey", more: Record<string, unknown> = {}) {
     await prisma.systemSettings.update({ where: { id: "default" }, data: { [field]: unreadable, ...more } });
     invalidateSystemSettingsCache();
 }
@@ -205,6 +205,15 @@ describe("what getSystemSettings hands out", () => {
     });
 });
 
+/** The notices go out in the background, after the read has answered. */
+async function until(done: () => boolean) {
+    const deadline = Date.now() + 3000;
+    while (!done()) {
+        if (Date.now() > deadline) throw new Error("the notice was never sent");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}
+
 describe("an unreadable credential", () => {
     it("still answers when the admin notice about an unreadable credential cannot be sent", async () => {
         await storeUnreadable("acoustidApiKey");
@@ -214,6 +223,20 @@ describe("an unreadable credential", () => {
 
         expect(settings?.acoustidApiKey).toBeNull();
         expect(settings?.unreadableFields).toContain("acoustidApiKey");
-        expect(notify).toHaveBeenCalled();
+        await until(() => notify.mock.calls.length > 0);
+    });
+
+    it("does not wait for the notice: a notice that never finishes does not hold the read", async () => {
+        await storeUnreadable("slskdApiKey");
+        const notify = jest.spyOn(notificationService, "notifyAdmins").mockReturnValue(new Promise(() => {}));
+
+        const outcome = await Promise.race([
+            getSystemSettings().then(() => "answered"),
+            new Promise((resolve) => setTimeout(() => resolve("held by the notice"), 1000)),
+        ]);
+
+        expect(outcome).toBe("answered");
+        // the notice is still sent, in the background
+        await until(() => notify.mock.calls.length > 0);
     });
 });

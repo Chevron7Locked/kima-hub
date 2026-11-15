@@ -194,6 +194,8 @@ it("with the API key unreadable too, Lidarr counts as off: no repair, and admins
     expect(askedToSave()).toHaveLength(0);
     expect(await storedSecret()).toBe(UNREADABLE);
     expect((await event()).status).toBe(202);
+    // the settings read sends this notice in the background, after it has answered
+    for (let i = 0; i < 100 && (await secretNotices()) === 0; i++) await new Promise((r) => setTimeout(r, 20));
     expect(await secretNotices()).toBe(1);
 });
 

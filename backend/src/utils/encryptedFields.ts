@@ -63,13 +63,8 @@ export function decryptOrNull(
 /**
  * Read a settings row into usable values: every `ENCRYPTED_FIELDS` entry
  * decrypted, or `null` when it is unset or unreadable. Never writes to the row.
- * Admins hear about every unreadable field, except those `selfRepairing` names for
- * these settings: the integration that owns such a field replaces it itself.
  */
-export async function resolveEncryptedSettings<S extends Record<string, unknown>>(
-    settings: S,
-    selfRepairing: (resolved: ResolvedSystemSettings<S>) => EncryptedField[],
-): Promise<ResolvedSystemSettings<S>> {
+export function decryptSettings<S extends Record<string, unknown>>(settings: S): ResolvedSystemSettings<S> {
     const resolved = { ...settings } as Record<string, unknown>;
     const unreadableFields: EncryptedField[] = [];
     for (const field of encryptedFields()) {
@@ -80,12 +75,35 @@ export async function resolveEncryptedSettings<S extends Record<string, unknown>
         if (held && plain === null) unreadableFields.push(field);
     }
     resolved.unreadableFields = unreadableFields;
-    const result = resolved as ResolvedSystemSettings<S>;
-    const repairing = selfRepairing(result);
-    for (const field of encryptedFields()) {
-        await noteReadability(field, !unreadableFields.includes(field) || repairing.includes(field));
+    return resolved as ResolvedSystemSettings<S>;
+}
+
+/**
+ * Tell admins about every unreadable field of `resolved`, except those `selfRepairing` names for these settings: the
+ * integration that owns such a field replaces it itself. A field that reads again takes its notice away. Never rejects.
+ */
+export async function noteUnreadableCredentials<S extends Record<string, unknown>>(
+    resolved: ResolvedSystemSettings<S>,
+    selfRepairing: (resolved: ResolvedSystemSettings<S>) => EncryptedField[],
+): Promise<void> {
+    try {
+        const repairing = selfRepairing(resolved);
+        for (const field of encryptedFields()) {
+            await noteReadability(field, !resolved.unreadableFields.includes(field) || repairing.includes(field));
+        }
+    } catch (error) {
+        logger.warn("[Settings] Could not update the admin notices about unreadable credentials:", error);
     }
-    return result;
+}
+
+/** `decryptSettings`, then the notices, waited for: for the places that answer a person and not a cache fill. */
+export async function resolveEncryptedSettings<S extends Record<string, unknown>>(
+    settings: S,
+    selfRepairing: (resolved: ResolvedSystemSettings<S>) => EncryptedField[],
+): Promise<ResolvedSystemSettings<S>> {
+    const resolved = decryptSettings(settings);
+    await noteUnreadableCredentials(resolved, selfRepairing);
+    return resolved;
 }
 
 /**
@@ -137,6 +155,8 @@ async function noteReadability(field: EncryptedField, readable: boolean): Promis
             renotify: true,
         });
     } catch (error) {
+        // Not delivered, so not noted: the next read tries again.
+        lastReadable.delete(field);
         logger.warn(`[Settings] Could not update the admin notice about ${field}:`, error);
     }
 }
