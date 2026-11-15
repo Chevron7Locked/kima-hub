@@ -28,7 +28,7 @@ import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
 import { announcePlaylistsChanged, playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { songsWithBusyPlayHistory } from "./playRecording";
-import { entriesOf, hydrateQueue, type QueueEntry } from "./savedQueue";
+import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM, type QueueEntry } from "./savedQueue";
 
 interface ReconcileResult {
     /**
@@ -207,7 +207,12 @@ async function holdSongs<T extends { id: string }>(tx: Prisma.TransactionClient,
 async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: string[], movedTo: Map<string, string>): Promise<void> {
     await updateSavedQueues(tx, retired, movedTo);
     const at = new Date();
-    const gone = [...movedTo.keys()];
+    // A copy whose album went to Discover since it was chosen is no copy ("Discover is only Discover"): the state
+    // naming the retired song then names nothing, as the saved queue does (`updateSavedQueues`).
+    const onLibrary = new Set(
+        (await tx.track.findMany({ where: { id: { in: [...movedTo.values()] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id),
+    );
+    const gone = [...movedTo.keys()].filter((id) => onLibrary.has(movedTo.get(id)!));
     const kept = gone.map((id) => movedTo.get(id)!);
     if (gone.length > 0) {
         await tx.$executeRaw`
@@ -282,7 +287,9 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
             if (copy) copyIds.add(copy);
         }
     }
-    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds], tx)).map((e) => [e.id, e]));
+    // Read again with the check a save makes: a copy chosen as a library song whose album went to Discover since is no
+    // copy, and a queue is never pointed at a Discover song.
+    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds], tx, ON_LIBRARY_ALBUM)).map((e) => [e.id, e]));
     // What an entry becomes: itself, or for a retired one its copy, or nothing.
     const becomes = (entry: unknown): unknown[] => {
         if (!retiredEntry(entry)) return [entry];

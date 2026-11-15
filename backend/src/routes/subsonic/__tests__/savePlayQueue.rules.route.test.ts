@@ -167,14 +167,26 @@ describe("a Subsonic queue save with a current song or index that is sent but is
         expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual([song(5)]);
     });
 
-    it.each([
-        ["savePlayQueue", { id: [song(0), song(1)] }, "songs and no current song"],
-        ["savePlayQueueByIndex", { id: [song(0), song(1)] }, "songs and no index"],
-    ])("%s still answers code 10 for %#: the parameter is missing", async (name, query, _why) => {
-        const reply = await send(`/${name}.view`, query);
+    it("savePlayQueueByIndex still answers code 10 for songs and no index: the parameter is missing", async () => {
+        const reply = await send("/savePlayQueueByIndex.view", { id: [song(0), song(1)] });
 
         expect(reply.status).toBe("failed");
         expect(reply.error.code).toBe(MISSING);
+    });
+
+    // OpenSubsonic: `current` is optional. With songs and no current song the queue is stored from its first song.
+    it("savePlayQueue with songs and no current song stores the queue at index 0, position 0, whatever position is sent", async () => {
+        await prisma.playbackState.create({ data: { userId: USER, playbackType: "track", queue: [{ id: song(5), title: "old" }], currentIndex: 0, position: 9000 } });
+
+        const queries: Array<Record<string, string | string[]>> = [{ id: [song(2), song(1), song(0)] }, { id: [song(2), song(1), song(0)], position: "7000" }];
+        for (const query of queries) {
+            const reply = await send("/savePlayQueue.view", query);
+
+            expect(reply.status).toBe("ok");
+            const state = await stored();
+            expect(entriesOf(state!.queue).map((e) => e.id)).toEqual([song(2), song(1), song(0)]);
+            expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([0, song(2), 0]);
+        }
     });
 
     it.each([
@@ -271,6 +283,56 @@ describe("a Subsonic queue save and the songs a queue may hold", () => {
         expect(reply.status).toBe("ok");
         const state = await stored();
         expect([state!.currentIndex, state!.trackId, state!.position]).toEqual([1, song(1), 0]);
+    });
+});
+
+describe("a Subsonic queue save holds only the songs it stores", () => {
+    // The library sweep holds the rows of the songs it retires until it commits; a save holding a song waits for it.
+    // Here another transaction holds the rows of `lockedIds` the same way, and the save either waits or does not.
+    async function finishesWhileHeld(lockedIds: string[], query: Record<string, string | string[]>): Promise<boolean> {
+        let finished = false;
+        let answer!: Promise<{ status: string }>;
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${lockedIds}::text[]) ORDER BY id FOR UPDATE`;
+            answer = send("/savePlayQueueByIndex.view", query);
+            finished = await Promise.race([answer.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_500))]);
+        });
+        expect((await answer).status).toBe("ok");
+        return finished;
+    }
+
+    it("does not wait for a song it leaves out: a Discover song or an id Kima does not know", async () => {
+        const ids = [song(0), DISCOVER_SONG, `${P}-unknown`, song(1)];
+
+        expect(await finishesWhileHeld([DISCOVER_SONG], { id: ids, currentIndex: "0" })).toBe(true);
+        expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual([song(0), song(1)]);
+    });
+
+    it("does not wait for a song the limit cuts off, nor for one left out before the cut", async () => {
+        const ids = [DISCOVER_SONG, ...all];
+
+        expect(await finishesWhileHeld([song(QUEUE_LENGTH.min), song(SONGS - 1), DISCOVER_SONG], { id: ids, currentIndex: "1" })).toBe(true);
+        expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual(all.slice(0, QUEUE_LENGTH.min));
+    });
+
+    it("fills the places of a song the sweep deletes while the save waits for it, from the songs after the cut", async () => {
+        const gone = `${P}-gone`;
+        await prisma.track.create({ data: { id: gone, albumId: `${P}-al`, title: gone, trackNo: 950, duration: 100, filePath: `/tmp/${gone}.flac`, fileModified: new Date(), fileSize: 1 } });
+        let answer!: Promise<{ status: string }>;
+        await prisma.$transaction(async (tx) => {
+            // The delete is not committed, so the save's first read still sees the song and counts it among the stored.
+            await tx.track.delete({ where: { id: gone } });
+            answer = send("/savePlayQueueByIndex.view", { id: [gone, ...all], currentIndex: "1" });
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        });
+
+        expect((await answer).status).toBe("ok");
+        expect(entriesOf((await stored())!.queue).map((e) => e.id)).toEqual(all.slice(0, QUEUE_LENGTH.min));
+    });
+
+    it("still waits for a song it stores, even a missing one", async () => {
+        expect(await finishesWhileHeld([song(1)], { id: [song(0), song(1)], currentIndex: "0" })).toBe(false);
+        expect(await finishesWhileHeld([MISSING_SONG], { id: [song(0), MISSING_SONG], currentIndex: "0" })).toBe(false);
     });
 });
 

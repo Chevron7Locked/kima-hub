@@ -9,6 +9,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
+import * as savedQueueModule from "../savedQueue";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { lockPlayHistory, recordPlay } from "../playRecording";
 import * as stageRecords from "../stages/stageRecords";
@@ -784,6 +785,47 @@ describe("reconcileDeletedTracks", () => {
                 await seedQueue(`${P}user`, [`${P}qa`, `${P}qdgone`], 0);
                 await sweep();
                 expect((await savedQueue(`${P}user`)).ids).toEqual([`${P}qa`]);
+            });
+
+            // The copy was a library song when it was chosen. If its album goes to Discover before the queues are
+            // rewritten, no queue is pointed at it: it is read again with the album-location check, as a save reads it.
+            it("never puts a copy into a queue once its album is Discover, though it was a library copy when chosen", async () => {
+                await seedQueue(`${P}user`, q("a", "b", "c"), 2);
+                const real = savedQueueModule.hydrateQueue;
+                const hydrate = jest.spyOn(savedQueueModule, "hydrateQueue").mockImplementation(async (...args) => {
+                    await prisma.album.update({ where: { id: `${P}alb` }, data: { location: "DISCOVER" } });
+                    return real(...args);
+                });
+                try {
+                    await sweep();
+                } finally {
+                    hydrate.mockRestore();
+                    await prisma.album.update({ where: { id: `${P}alb` }, data: { location: "LIBRARY" } });
+                }
+                const saved = await savedQueue(`${P}user`);
+                expect(saved.ids).toEqual([`${P}qa`, `${P}qc`]);
+                expect(saved.index).toBe(1);
+            });
+
+            it("never makes a Discover copy the track a state names, though it was a library copy when chosen", async () => {
+                // One person's queue holds the retiring song (its rewrite is where the album goes to Discover), another's
+                // state names it with no queue at all.
+                await prisma.user.create({ data: { id: OTHER_Q, username: OTHER_Q, passwordHash: "x", role: "user", tokenVersion: 0 } });
+                await seedQueue(`${P}user`, q("a", "b", "c"), 1);
+                await prisma.playbackState.create({ data: { userId: OTHER_Q, playbackType: "track", trackId: `${P}qb` } });
+                const real = savedQueueModule.hydrateQueue;
+                const hydrate = jest.spyOn(savedQueueModule, "hydrateQueue").mockImplementation(async (...args) => {
+                    await prisma.album.update({ where: { id: `${P}alb` }, data: { location: "DISCOVER" } });
+                    return real(...args);
+                });
+                try {
+                    await sweep();
+                } finally {
+                    hydrate.mockRestore();
+                    await prisma.album.update({ where: { id: `${P}alb` }, data: { location: "LIBRARY" } });
+                }
+                expect((await prisma.playbackState.findUnique({ where: { userId: OTHER_Q } }))!.trackId).toBeNull();
+                expect((await savedQueue(`${P}user`)).ids).not.toContain(`${P}qbcopy`);
             });
 
             it("a state naming a song with no copy and holding no queue names nothing", async () => {

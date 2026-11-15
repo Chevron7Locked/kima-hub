@@ -91,19 +91,16 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
     const position = positionOf(one(req, "position"));
     if (position === null) return subsonicError(req, res, SubsonicError.GENERIC, "position must be a whole number, 0 or more");
 
-    // A parameter that is not sent is missing (code 10); one that is sent but names no song of the list is a wrong
-    // value (code 0, what the spec's generic error is for).
-    if (ids.length > 0 && current === undefined) {
-        return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: current");
-    }
-    if (ids.length > 0 && !ids.includes(current!)) {
+    // `current` is optional (OpenSubsonic): songs and no current song store the queue from its first song, position 0.
+    // One that is sent but names no song of the list is a wrong value (code 0, what the spec's generic error is for).
+    if (current !== undefined && ids.length > 0 && !ids.includes(current)) {
         return subsonicError(req, res, SubsonicError.GENERIC, "current must be included in id list");
     }
 
     await saveQueueOfIds(userId, {
         ids,
         clientIndex: current ? ids.indexOf(current) : 0,
-        position,
+        position: current === undefined ? 0 : position,
         changedBy: clientName(req),
     });
 

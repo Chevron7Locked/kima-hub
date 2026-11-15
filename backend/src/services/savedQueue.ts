@@ -6,7 +6,8 @@
  *   without asking for every song. Kima is the source of truth for those details: a save, web or Subsonic, sends song
  *   ids (a web save sends entries, of which only the id is read), and the entry stored is Kima's own description of the
  *   song. An id Kima does not know is left out.
- * - A Discover song is never stored in a queue ("Discover is only Discover"): a save leaves it out like an unknown id.
+ * - A Discover song is never stored in a queue ("Discover is only Discover"): a save leaves it out like an unknown id
+ *   (`ON_LIBRARY_ALBUM`, which the library sweep also reads a replacing copy with).
  *   A song whose file went missing, or that was read as corrupt, is stored (it may come back) and hidden on read.
  * - A client is shown each song as it is now (an edited title, a renamed artist, a new cover), not as the entry was
  *   saved; the stored entries stay as saved.
@@ -21,8 +22,9 @@
  * - Every save takes the person's turn (`lockPlaybackState`) in the transaction that writes: an advisory lock on the
  *   person, then their state row, which is what the library sweep waits on when it rewrites a queue that holds a song it
  *   retires. A save that sends song ids reads songs, and the sweep waits on no row of a person whose queue lacks the
- *   song it retires (or who has no row yet), so that save first holds the songs it reads until it commits
- *   (`lockForQueueSave`). The order is the sweep's: songs, then the state row.
+ *   song it retires (or who has no row yet), so that save first holds the songs it stores until it commits
+ *   (`lockForQueueSave`: only the ones that will be stored, so a song left out or cut is not waited for). The order is
+ *   the sweep's: the person's turn, the songs, then the state row.
  * - A save reads the queue limit (`queueLimit`) before it opens its transaction, never inside it: the read may take its
  *   own connection from the pool, and a save must not hold one connection while it waits for a second.
  */
@@ -169,7 +171,15 @@ export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolea
  * queue waits on. The one lock every save takes, web or Subsonic.
  */
 export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">, userId: string): Promise<void> {
+    await takeTurn(tx, userId);
+    await lockStateRow(tx, userId);
+}
+
+async function takeTurn(tx: Pick<Prisma.TransactionClient, "$executeRaw">, userId: string): Promise<void> {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`playback-state:${userId}`}, 0))`;
+}
+
+async function lockStateRow(tx: Pick<Prisma.TransactionClient, "$queryRaw">, userId: string): Promise<void> {
     await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
 }
 
@@ -226,27 +236,56 @@ function storedPlaceOf(
  * time: a song retired first is not read, and one read first is not retired. A key lock, which only a retiring or
  * deleting transaction conflicts with, so ordinary edits to the songs go on.
  */
-async function holdSongs(tx: Pick<Prisma.TransactionClient, "$queryRaw">, ids: readonly string[]): Promise<void> {
-    if (ids.length === 0) return;
-    await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${[...new Set(ids)]}::text[]) ORDER BY id FOR KEY SHARE`;
+async function holdSongs(tx: Pick<Prisma.TransactionClient, "$queryRaw">, ids: readonly string[]): Promise<ReadonlySet<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Track" WHERE id = ANY(${[...new Set(ids)]}::text[]) ORDER BY id FOR KEY SHARE`;
+    return new Set(rows.map((row) => row.id));
 }
 
 /**
- * What a save that sends song ids takes before it reads them: the songs (`holdSongs`), then the person's turn and state
- * row (`lockPlaybackState`), the order the sweep takes them in, so the two never wait on each other. Held until the
+ * What a stored queue holds songs to: a song on a library album (the same check the listens module makes of a play's
+ * album), which is a Discover song's only exclusion. It is not the playable-song rule: a song whose file is missing or
+ * corrupt is stored (it may come back) and hidden when the queue is read.
+ */
+export const ON_LIBRARY_ALBUM = { album: { location: "LIBRARY" } } satisfies Prisma.TrackWhereInput;
+
+/**
+ * What a save that sends song ids takes before it reads them, the order the sweep takes them in so the two never wait
+ * on each other: the person's turn, then the songs (`holdSongs`), then the person's state row. Held until the
  * transaction ends. A save that sends no ids takes `lockPlaybackState` alone.
+ *
+ * Given the queue `limit`, only the songs the queue will store are held: the ids that are a library song, cut to the
+ * first `limit` of them, in id order. Those are returned, and `planQueue` reads only those. A song left out or cut is
+ * not stored, so it is not waited for. Without a `limit` every id is held and returned. The limit is read before the
+ * transaction opens (`queueLimit`), never here.
  */
 export async function lockForQueueSave(
-    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+    tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "track">,
     userId: string,
     ids: readonly string[],
-): Promise<void> {
-    await holdSongs(tx, ids);
-    await lockPlaybackState(tx, userId);
+    limit?: number,
+): Promise<ReadonlySet<string>> {
+    await takeTurn(tx, userId);
+    let held: ReadonlySet<string>;
+    if (limit === undefined) {
+        held = await holdSongs(tx, ids);
+    } else {
+        const storable = new Set((await tx.track.findMany({ where: { id: { in: [...new Set(ids)] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id));
+        const candidates = ids.filter((id) => storable.has(id));
+        const taken = new Set<string>();
+        // That read takes no lock, so a song it saw may be gone once the hold gets its turn (the sweep retired it): the
+        // hold comes back short, and the next songs in line are held to fill the places it left, until the queue is full.
+        for (let start = 0, end = Math.min(limit, candidates.length); start < end; ) {
+            for (const id of await holdSongs(tx, candidates.slice(start, end))) taken.add(id);
+            start = end;
+            const stored = candidates.filter((id) => taken.has(id)).length;
+            end = Math.min(candidates.length, end + Math.max(0, limit - stored));
+        }
+        held = taken;
+    }
+    await lockStateRow(tx, userId);
+    return held;
 }
-
-/** The part of the playable-song rule a stored queue holds songs to: a library album's song. */
-const STORABLE_SONG = { album: PLAYABLE_SONG.album } satisfies Prisma.TrackWhereInput;
 
 /**
  * A queue sent as song ids, made into what is stored, read under the locks `lockForQueueSave` took: the entries are
@@ -255,15 +294,16 @@ const STORABLE_SONG = { album: PLAYABLE_SONG.album } satisfies Prisma.TrackWhere
  * left out, and `clientIndex` (counting `ids`) is carried over to where its place now sits: the places before it that
  * were left out no longer count, and an index whose own place was left out or cut points at the place standing in for
  * it, the last one at most. `placeKept` is whether the place itself is in the stored queue. No song kept stores no
- * queue, index 0.
+ * queue, index 0. Given the `held` songs `lockForQueueSave` returned, only those are read.
  */
 export async function planQueue(
     tx: Pick<Prisma.TransactionClient, "track">,
     ids: string[],
     clientIndex: number,
     limit: number,
+    held?: ReadonlySet<string>,
 ): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean }> {
-    const known = await hydrateQueue(ids, tx, STORABLE_SONG);
+    const known = await hydrateQueue(held ? ids.filter((id) => held.has(id)) : ids, tx, ON_LIBRARY_ALBUM);
     const queue = known.slice(0, limit);
     const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), queue.length, clientIndex);
     return { queue: queue.length > 0 ? queue : null, currentIndex: place.index, placeKept: place.placeKept };
@@ -289,8 +329,8 @@ export async function saveQueueOfIds(
 ): Promise<void> {
     const limit = await queueLimit();
     await prisma.$transaction(async (tx) => {
-        await lockForQueueSave(tx, userId, save.ids);
-        const plan = await planQueue(tx, save.ids, save.clientIndex, limit);
+        const held = await lockForQueueSave(tx, userId, save.ids, limit);
+        const plan = await planQueue(tx, save.ids, save.clientIndex, limit, held);
         const data = {
             playbackType: "track",
             trackId: plan.queue?.[plan.currentIndex]?.id ?? null,
