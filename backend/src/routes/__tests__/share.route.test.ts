@@ -668,6 +668,91 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect(await playsOf(token)).toBe(1);
         });
 
+        describe('two listeners of one shared song', () => {
+            const listener = (name: string) => ({ 'User-Agent': name });
+
+            it('each count a play: the second is no follow-up of the first', async () => {
+                const { token } = await own();
+
+                expect((await get(token, songs.playable, listener('listener-a'))).status).toBe(200);
+                expect((await get(token, songs.playable, listener('listener-b'))).status).toBe(200);
+
+                expect(await playsOf(token)).toBe(2);
+            });
+
+            it('are told apart by the limit: the second is refused when the first took the last play', async () => {
+                const { token } = await own({ maxPlays: 1 });
+                await get(token, songs.playable, listener('listener-a'));
+
+                const second = await get(token, songs.playable, listener('listener-b'));
+
+                expect(second.status).toBe(410);
+                expect(await playsOf(token)).toBe(1);
+            });
+
+            it("a listener's own follow-ups stay one play while the other listens", async () => {
+                const { token } = await own();
+
+                await get(token, songs.playable, listener('listener-a'));
+                await get(token, songs.playable, listener('listener-b'));
+                await get(token, songs.playable, { ...listener('listener-a'), Range: 'bytes=0-1' });
+                await get(token, songs.playable, { ...listener('listener-b'), Range: 'bytes=2-' });
+
+                expect(await playsOf(token)).toBe(2);
+            });
+
+            it("one's requests do not renew the other's window", async () => {
+                const { token, id } = await own();
+                await get(token, songs.playable, listener('listener-a'));
+                await settleShareBackgroundWork();
+                const [keyA] = await redisClient.keys(`*${id}*`);
+                await redisClient.expire(keyA, 3);
+
+                await get(token, songs.playable, listener('listener-b'));
+                await settleShareBackgroundWork();
+
+                expect(await redisClient.ttl(keyA)).toBeLessThanOrEqual(3);
+                expect((await redisClient.keys(`*${id}*`)).length).toBe(2);
+            });
+
+            it('keeps the listener out of the window key in the clear', async () => {
+                const { token, id } = await own();
+                await get(token, songs.playable, listener('a-very-recognisable-agent'));
+
+                const keys = await redisClient.keys(`*${id}*`);
+
+                expect(keys).toHaveLength(1);
+                expect(keys[0]).not.toContain('a-very-recognisable-agent');
+                expect(keys[0]).not.toContain('127.0.0.1');
+            });
+
+            it('are told by their sign-in when they have one, whatever their browser says', async () => {
+                const { token, id } = await own();
+                const asUser = (userId: string) => {
+                    const signedIn = express();
+                    signedIn.use((req, _res, next) => {
+                        (req as any).session = { userId };
+                        next();
+                    });
+                    mountAsServer(signedIn, '/share', shareRoutes, '/api/share');
+                    return signedIn;
+                };
+                const play = (userId: string, agent: string) =>
+                    request(asUser(userId)).get(`/share/${token}/stream/${songs.playable}`).set('User-Agent', agent).buffer(true).parse((r, cb) => {
+                        r.on('data', () => undefined);
+                        r.on('end', () => cb(null, undefined));
+                    });
+
+                await play('user-one', 'same-agent');
+                await play('user-two', 'same-agent');
+                expect(await playsOf(token)).toBe(2);
+
+                await play('user-one', 'another-agent');
+                expect(await playsOf(token)).toBe(2);
+                expect((await redisClient.keys(`*${id}*`)).length).toBe(2);
+            });
+        });
+
         it('counts a play again after the window, and not within it', async () => {
             const { token, id } = await own();
 

@@ -7,7 +7,7 @@ import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createCoverLimiter, createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import fs from "fs";
 import { coverCacheControl, coverFileForSize, getLocalImagePath, parseStoredCover } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
@@ -31,7 +31,19 @@ router.use((_req: Request, res: Response, next) => {
 // One play is every request a listener makes for a song while it goes on: the browser asks again for each seek. The play
 // ends this long after the last of them.
 const PLAY_WINDOW_SECONDS = 30;
-const playKeyFor = (shareId: string, trackId: string) => `share:play:${shareId}:${trackId}`;
+
+/**
+ * Who is listening: the signed-in person when there is one, else the address and browser of the request. It is hashed, so
+ * the window key in Redis holds neither. Two people playing one song are two listeners and each count a play; one
+ * listener's seeks, wherever they come from in the same browser, are one.
+ */
+function listenerOf(req: Request): string {
+    const userId = (req as Request & { session?: { userId?: string } }).session?.userId;
+    const who = userId ? `user:${userId}` : `anon:${req.ip ?? ""}|${req.get("user-agent") ?? ""}`;
+    return createHash("sha256").update(who).digest("hex").slice(0, 24);
+}
+
+const playKeyFor = (shareId: string, trackId: string, listener: string) => `share:play:${shareId}:${trackId}:${listener}`;
 
 const shareResolveLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
@@ -124,24 +136,29 @@ export async function settleShareBackgroundWork(): Promise<void> {
     while (backgroundWork.size > 0) await Promise.all([...backgroundWork]);
 }
 
-/**
- * Whether a play of this song is already counted for the share, and if so renews its window: a listener's requests keep one
- * play going however long the song is, and it ends 30 s after the last of them. With Redis down no play is known: each
- * request counts.
- */
-async function renewPlayIfCounted(key: string): Promise<boolean> {
-    try {
-        return (await redisClient.expire(key, PLAY_WINDOW_SECONDS)) === 1;
-    } catch (error) {
-        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
-        return false;
-    }
-}
-
 /** Deletes the window only while it holds this claim's token: a window that ended and was taken again is another play's. */
 const RELEASE_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
 /** Renews the window only while it holds this claim's token. */
 const RENEW_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`;
+
+/**
+ * The window this listener's play of the song holds, as a claim, or null when there is none: a listener's requests keep one
+ * play going however long the song is, and it ends 30 s after the last of them. The window is the listener's own, so it
+ * is the token it holds that is renewed, and only while it is still that token. With Redis down no play is known: each
+ * request counts.
+ */
+async function joinCountedPlay(key: string): Promise<PlayClaim | null> {
+    try {
+        const token = await redisClient.get(key);
+        if (token === null) return null;
+        const claim = { token };
+        await renewClaim(key, claim);
+        return claim;
+    } catch (error) {
+        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
+        return null;
+    }
+}
 
 /**
  * The window a request took for its play. `token` is what the window holds, so the claim renews or gives back only its
@@ -162,16 +179,15 @@ async function renewClaim(key: string, claim: PlayClaim): Promise<void> {
 
 /**
  * A listener who pauses holds one response open and may seek later, past the window. While a response of the play is
- * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play. The request that
- * took the window renews only its own claim; a follow-up renews whichever window of the play is there.
+ * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play. A request renews
+ * only the token it holds: the one it took the window with, or the one it found in the listener's window.
  */
-function keepWindowWhileOpen(res: Response, key: string, claim: PlayClaim | null): void {
-    const renew = (): Promise<unknown> => (claim ? renewClaim(key, claim) : renewPlayIfCounted(key));
-    const timer = setInterval(() => void track(renew()), PLAY_WINDOW_SECONDS * 1000 / 3);
+function keepWindowWhileOpen(res: Response, key: string, claim: PlayClaim): void {
+    const timer = setInterval(() => void track(renewClaim(key, claim)), PLAY_WINDOW_SECONDS * 1000 / 3);
     timer.unref();
     res.once("close", () => {
         clearInterval(timer);
-        void track(renew());
+        void track(renewClaim(key, claim));
     });
 }
 
@@ -386,11 +402,12 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         if (!shareLink) return;
 
         const trackId = req.params.trackId;
-        const playKey = playKeyFor(shareLink.id, trackId);
+        const playKey = playKeyFor(shareLink.id, trackId, listenerOf(req));
 
-        // A listener's follow-up requests (a seek, the next range) belong to a play already counted: they are not a new
-        // play, and the limit, which that play may just have reached, does not apply to them. Expiry still does.
-        const followUp = await renewPlayIfCounted(playKey);
+        // A listener's follow-up requests (a seek, the next range) belong to a play already counted for that listener: they
+        // are not a new play, and the limit, which that play may just have reached, does not apply to them. Expiry still
+        // does. Another listener's play is not this one's: it has its own window.
+        const followUp = await joinCountedPlay(playKey);
         if (!followUp && outOfPlays(shareLink)) {
             return sendEnded(res, "play-limit");
         }
@@ -439,9 +456,9 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             return res.status(404).json({ error: "Audio file not found" });
         }
 
-        // The first request of a play takes the window and counts it. A request that finds the window taken belongs to
-        // that play: two requests arriving together are one play.
-        let claim: PlayClaim | null = null;
+        // The first request of a listener's play takes the window and counts it. A request that finds the window taken
+        // belongs to that play: two requests of one listener arriving together are one play.
+        let claim: PlayClaim | null = followUp;
         if (!followUp) {
             claim = await claimPlayWindow(playKey);
             if (claim) {
@@ -452,7 +469,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
                 keepPlayOnlyIfStreamStarts(res, shareLink.id, playKey, claim);
             }
         }
-        if (followUp || claim) {
+        if (claim) {
             keepWindowWhileOpen(res, playKey, claim);
         }
 
