@@ -508,18 +508,22 @@ export function useAddToPlaylistMutation() {
         mutationKey: PLAYLIST_EDIT,
         // Accepts a single trackId or many; pass trackIds to add a whole mix in
         // one request.
+        // `allowRepeats` is the person's answer to "already in this playlist": without it the server skips songs
+        // the playlist holds.
         mutationFn: ({
             playlistId,
             trackId,
             trackIds,
+            allowRepeats,
         }: {
             playlistId: string;
             trackId?: string;
             trackIds?: string[];
+            allowRepeats?: boolean;
         }) =>
             trackIds?.length
-                ? api.addTracksToPlaylist(playlistId, trackIds)
-                : api.addTrackToPlaylist(playlistId, trackId!),
+                ? api.addTracksToPlaylist(playlistId, trackIds, allowRepeats)
+                : api.addTrackToPlaylist(playlistId, trackId!, allowRepeats),
         onSettled: (_, error, variables) => settlePlaylistEdit(queryClient, variables.playlistId, !error),
     });
 }

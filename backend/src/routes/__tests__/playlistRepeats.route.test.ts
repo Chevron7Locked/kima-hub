@@ -151,6 +151,58 @@ describe("moving one copy of a repeated song", () => {
     });
 });
 
+describe("adding a song again on purpose (allowRepeats)", () => {
+    const add = (id: string, body: object) =>
+        request(app).post(`/playlists/${id}/items`).set("Authorization", as(owner)).send(body);
+
+    it("adds a second copy of one song at the end, and says nothing was skipped", async () => {
+        const [a, b] = songs;
+        const id = await playlistWith("again-one", [a, b]);
+        const res = await add(id, { trackId: a, allowRepeats: true });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ added: 1, duplicated: false, duplicates: 0 });
+        expect(await held(id)).toEqual([a, b, a]);
+        expect(playlistAnnouncements(heard)).not.toHaveLength(0);
+    });
+
+    it("adds every song asked for, the ones already there and the new ones, in the order sent", async () => {
+        const [a, b, c] = songs;
+        const id = await playlistWith("again-many", [a, b]);
+        const res = await add(id, { trackIds: [c, a], allowRepeats: true });
+        expect(res.body).toMatchObject({ added: 2, duplicates: 0 });
+        expect(await held(id)).toEqual([a, b, c, a]);
+    });
+
+    it("still skips by default, and allowRepeats: false is the default", async () => {
+        const [a, b] = songs;
+        const id = await playlistWith("again-off", [a, b]);
+        expect((await add(id, { trackId: a })).body).toMatchObject({ added: 0, duplicated: true, duplicates: 1 });
+        expect((await add(id, { trackId: a, allowRepeats: false })).body).toMatchObject({ added: 0, duplicates: 1 });
+        expect(await held(id)).toEqual([a, b]);
+    });
+
+    it("still turns away a song that is not playable", async () => {
+        const [a, b] = songs;
+        const id = await playlistWith("again-gone", [a, b]);
+        await prisma.track.update({ where: { id: a }, data: { missingSince: new Date() } });
+        try {
+            const res = await add(id, { trackIds: [a, b], allowRepeats: true });
+            expect(res.body).toMatchObject({ added: 1, rejected: [a] });
+            expect(await held(id)).toEqual([a, b, b]);
+        } finally {
+            await prisma.track.update({ where: { id: a }, data: { missingSince: null } });
+        }
+    });
+
+    it("refuses an allowRepeats that is not true or false", async () => {
+        const [a] = songs;
+        const id = await playlistWith("again-bad", [a]);
+        const res = await add(id, { trackId: a, allowRepeats: "yes" });
+        expect(res.status).toBe(400);
+        expect(await held(id)).toEqual([a]);
+    });
+});
+
 describe("adding a song the playlist already holds", () => {
     it("is skipped and reported as a duplicate, as before", async () => {
         const [a, b] = songs;

@@ -965,22 +965,23 @@ class ApiClient {
         });
     }
 
-    async addTrackToPlaylist(playlistId: string, trackId: string) {
+    /** A song the playlist already holds is skipped, unless the person chose to add it again (`allowRepeats`). */
+    async addTrackToPlaylist(playlistId: string, trackId: string, allowRepeats = false) {
         return this.request<ApiData>(`/playlists/${playlistId}/items`, {
             method: "POST",
-            body: JSON.stringify({ trackId }),
+            body: JSON.stringify(allowRepeats ? { trackId, allowRepeats } : { trackId }),
         });
     }
 
-    /** Adds many tracks in one request. */
-    async addTracksToPlaylist(playlistId: string, trackIds: string[]) {
+    /** Adds many tracks in one request; songs the playlist already holds are skipped unless `allowRepeats`. */
+    async addTracksToPlaylist(playlistId: string, trackIds: string[], allowRepeats = false) {
         return this.request<{
             added: number;
             duplicates: number;
             rejected: string[];
         }>(`/playlists/${playlistId}/items`, {
             method: "POST",
-            body: JSON.stringify({ trackIds }),
+            body: JSON.stringify(allowRepeats ? { trackIds, allowRepeats } : { trackIds }),
         });
     }
 

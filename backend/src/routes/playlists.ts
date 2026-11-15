@@ -46,8 +46,8 @@ async function ownedPendingTrack(req: Request, res: Response) {
 }
 
 /** Adds songs through the rank allocator, and tells the owner's devices when any were added. */
-async function addSongs(req: Request, trackIds: string[]) {
-    const result = await playlistService.addTracks(req.params.id, trackIds);
+async function addSongs(req: Request, trackIds: string[], options?: { allowRepeats?: boolean }) {
+    const result = await playlistService.addTracks(req.params.id, trackIds, options);
     if (result.added > 0) announcePlaylistChange(req.user!.id, req.params.id);
     return result;
 }
@@ -69,6 +69,8 @@ const addTracksSchema = z
     .object({
         trackId: z.string().optional(),
         trackIds: z.array(z.string()).min(1).max(1000).optional(),
+        // The person was asked and chose to add a song the playlist already holds; without it, those are skipped.
+        allowRepeats: z.boolean().optional(),
     })
     .refine((d) => Boolean(d.trackId) !== Boolean(d.trackIds), {
         message: "Provide exactly one of trackId or trackIds",
@@ -368,7 +370,8 @@ router.delete("/:id", requirePlaylistOwner, async (req, res) => {
 });
 
 // POST /playlists/:id/items
-// Takes { trackId } or { trackIds: [...] }; adding an album should send one bulk request.
+// Takes { trackId } or { trackIds: [...] }; adding an album should send one bulk request. A song the playlist already
+// holds is skipped and counted in `duplicates` unless the body says { allowRepeats: true }.
 router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
     try {
         const parsed = addTracksSchema.safeParse(req.body);
@@ -379,7 +382,9 @@ router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
             });
         }
 
-        const result = await addSongs(req, parsed.data.trackIds ?? [parsed.data.trackId!]);
+        const result = await addSongs(req, parsed.data.trackIds ?? [parsed.data.trackId!], {
+            allowRepeats: parsed.data.allowRepeats,
+        });
 
         if (result.added === 0 && result.duplicates === 0) {
             return res.status(404).json({

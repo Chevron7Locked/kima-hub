@@ -19,7 +19,6 @@ interface TracksListProps {
     tracks: Track[];
     onPlay: (tracks: Track[], startIndex?: number) => void;
     onAddToQueue: (track: Track) => void;
-    onAddToPlaylist: (playlistId: string, trackId: string) => void;
     onDelete?: (trackId: string, trackTitle: string) => void;
     isLoading?: boolean;
 }
@@ -188,7 +187,6 @@ export function TracksList({
     tracks,
     onPlay,
     onAddToQueue,
-    onAddToPlaylist,
     onDelete,
     isLoading = false,
 }: TracksListProps) {
@@ -202,17 +200,6 @@ export function TracksList({
         setSelectedTrackId(trackId);
         setShowPlaylistSelector(true);
     }, []);
-
-    const handleAddToPlaylist = useCallback(
-        // async: the playlist picker waits on what it is handed.
-        async (playlistId: string) => {
-            if (!selectedTrackId) return;
-            onAddToPlaylist(playlistId, selectedTrackId);
-            setShowPlaylistSelector(false);
-            setSelectedTrackId(null);
-        },
-        [selectedTrackId, onAddToPlaylist],
-    );
 
     if (isLoading || tracks.length === 0) {
         return <LibraryListStatus isLoading={isLoading} icon={<AudioLines className="w-12 h-12" />} emptyTitle="No songs yet" />;
@@ -253,7 +240,8 @@ export function TracksList({
                     setShowPlaylistSelector(false);
                     setSelectedTrackId(null);
                 }}
-                onSelectPlaylist={handleAddToPlaylist}
+                trackIds={selectedTrackId ? [selectedTrackId] : []}
+                onAdded={() => setSelectedTrackId(null)}
             />
         </>
     );

@@ -58,4 +58,13 @@ describe("playlistService.addTracks across album locations", () => {
             rejected: ["nonexistent-track-id"],
         });
     });
+
+    it("adds a song the playlist already holds only when told to allow repeats", async () => {
+        const { track, playlist } = await fixture("LIBRARY");
+        await addTracks(playlist.id, [track.id]);
+
+        expect(await addTracks(playlist.id, [track.id])).toEqual({ added: 0, duplicates: 1, rejected: [] });
+        expect(await addTracks(playlist.id, [track.id], { allowRepeats: true })).toEqual({ added: 1, duplicates: 0, rejected: [] });
+        expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id, trackId: track.id } })).toBe(2);
+    });
 });

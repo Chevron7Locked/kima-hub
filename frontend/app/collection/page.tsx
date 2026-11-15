@@ -202,7 +202,6 @@ export default function LibraryPage() {
         playArtist,
         playAlbum,
         addTrackToQueue,
-        addTrackToPlaylist,
     } = useLibraryActions();
 
     // Increments on tab/filter/sort change to remount grids and replay the
@@ -428,7 +427,6 @@ export default function LibraryPage() {
                             isLoading={isLoading}
                             onPlay={handlePlayTracks}
                             onAddToQueue={addTrackToQueue}
-                            onAddToPlaylist={addTrackToPlaylist}
                             onDelete={isAdmin ? handleDeleteTrack : undefined}
                         />
                     )}

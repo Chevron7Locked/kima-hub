@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 import { Track } from "../types";
 
 const formatTrackForAudio = (track: Track) => ({
@@ -22,7 +21,6 @@ const formatTrackForAudio = (track: Track) => ({
 
 export function useLibraryActions() {
     const { playTracks, addToQueue } = useAudioControls();
-    const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     const playArtist = useCallback(async (artistId: string) => {
         try {
@@ -89,25 +87,13 @@ export function useLibraryActions() {
         addToQueue(formatTrackForAudio(track));
     }, [addToQueue]);
 
-    const addTrackToPlaylist = useCallback(
-        async (playlistId: string, trackId: string) => {
-            // The shared mutation owns the request and the cache refresh;
-            // it rejects on failure so the selector dialog stays open and
-            // reports the error.
-            await addToPlaylist({ playlistId, trackId });
-        },
-        [addToPlaylist],
-    );
-
     return useMemo(() => ({
         playArtist,
         playAlbum,
         addTrackToQueue,
-        addTrackToPlaylist,
     }), [
         playArtist,
         playAlbum,
         addTrackToQueue,
-        addTrackToPlaylist,
     ]);
 }

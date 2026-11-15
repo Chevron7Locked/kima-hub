@@ -137,12 +137,15 @@ export async function markUnavailable<T extends { trackId: string }>(
 
 /**
  * Append tracks in the given order. A playlist can hold a song more than once (an import or a Subsonic client puts
- * one there), but adding is by song: one the playlist already holds is reported as a duplicate, not added again and
- * not an error; ids that are not playable songs are rejected.
+ * one there). By default adding is by song: one the playlist already holds is reported as a duplicate, not added
+ * again and not an error. With `allowRepeats` the caller has chosen to add it again, so every playable song asked
+ * for is appended whether the playlist holds it or not (a song named twice in one request is still one copy). Ids
+ * that are not playable songs are rejected either way.
  */
 export async function addTracks(
     playlistId: string,
-    trackIds: string[]
+    trackIds: string[],
+    { allowRepeats = false }: { allowRepeats?: boolean } = {}
 ): Promise<AddTracksResult> {
     const requested = [...new Set(trackIds)].filter(Boolean);
     if (requested.length === 0) {
@@ -170,10 +173,12 @@ export async function addTracks(
     return prisma.$transaction(async (tx) => {
         await lockPlaylist(tx, playlistId);
 
-        const existing = await tx.playlistItem.findMany({
-            where: { playlistId, trackId: { in: toAdd } },
-            select: { trackId: true },
-        });
+        const existing = allowRepeats
+            ? []
+            : await tx.playlistItem.findMany({
+                where: { playlistId, trackId: { in: toAdd } },
+                select: { trackId: true },
+            });
         const alreadyThere = new Set(existing.map((e) => e.trackId));
         const fresh = toAdd.filter((id) => !alreadyThere.has(id));
 

@@ -6,21 +6,72 @@ import { X, Plus, Music2, Check } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
 import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
+import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 
 interface PlaylistSelectorProps {
     isOpen: boolean;
     onClose: () => void;
-    onSelectPlaylist?: (playlistId: string) => Promise<void>;
+    /** Single mode: the songs to add to the playlist that is picked. The selector asks before it adds a repeat. */
+    trackIds?: string[];
+    /** Called once the songs are added (not when the person skips). */
+    onAdded?: () => void;
     onSelectPlaylists?: (playlistIds: string[]) => Promise<void>;
     mode?: "single" | "multi";
     isLoading?: boolean;
     loadingMessage?: string;
 }
 
+/** An entry of a playlist as the playlist page's request returns it. */
+interface PlaylistEntry {
+    trackId?: string;
+    track?: { id?: string };
+}
+
+/** Songs the chosen playlist already holds, put to the person before any copy is added. */
+interface RepeatQuestion {
+    playlistId: string;
+    trackIds: string[];
+    repeated: string[];
+}
+
+/** Asks what to do with songs the playlist already holds: one song or all of them get add again / skip, a mix gets add all / add new ones. */
+function RepeatPrompt({
+    question,
+    busy,
+    onAnswer,
+}: {
+    question: RepeatQuestion;
+    busy: boolean;
+    onAnswer: (choice: "again" | "new" | "skip") => void;
+}) {
+    const total = question.trackIds.length;
+    const some = question.repeated.length < total;
+    const message =
+        total === 1
+            ? "already in this playlist. add again?"
+            : some
+              ? `${question.repeated.length} of ${total} songs are already in this playlist. add them again?`
+              : `all ${total} songs are already in this playlist. add them again?`;
+    return (
+        <div className="p-6 space-y-4">
+            <p className="text-white">{message}</p>
+            <div className="flex gap-2 justify-end">
+                <Button variant="secondary" onClick={() => onAnswer(some ? "new" : "skip")} disabled={busy}>
+                    {some ? "add new ones" : "skip"}
+                </Button>
+                <Button variant="primary" onClick={() => onAnswer("again")} disabled={busy}>
+                    {some ? "add all" : "add again"}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
 export function PlaylistSelector({
     isOpen,
     onClose,
-    onSelectPlaylist,
+    trackIds = [],
+    onAdded,
     onSelectPlaylists,
     mode = "single",
     isLoading: isSaving,
@@ -34,6 +85,9 @@ export function PlaylistSelector({
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [error, setError] = useState<string | null>(null);
     const [isConfirming, setIsConfirming] = useState(false);
+    // Set while the person is being asked about songs the chosen playlist already holds.
+    const [question, setQuestion] = useState<RepeatQuestion | null>(null);
+    const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     const isMulti = mode === "multi";
 
@@ -46,6 +100,7 @@ export function PlaylistSelector({
         if (isOpen) {
             setSelected(new Set());
             setError(null);
+            setQuestion(null);
         }
     }
 
@@ -89,8 +144,9 @@ export function PlaylistSelector({
                 setSelected((prev) => new Set(prev).add(playlist.id));
                 await loadPlaylists();
             } else {
-                await onSelectPlaylist?.(playlist.id);
-                onClose();
+                // A new playlist holds nothing yet, so there is nothing to ask.
+                if (trackIds.length > 0) await addSongs(playlist.id, trackIds, false);
+                else onClose();
             }
 
             setNewPlaylistName("");
@@ -121,17 +177,68 @@ export function PlaylistSelector({
             return;
         }
 
+        if (trackIds.length === 0) return;
+
         try {
             setError(null);
-            await onSelectPlaylist?.(playlistId);
-            window.dispatchEvent(
-                new CustomEvent("playlist-updated", { detail: { playlistId } })
-            );
-            await loadPlaylists();
-            onClose();
+            setIsConfirming(true);
+            const held = await heldSongs(playlistId);
+            const repeated = trackIds.filter((id) => held.has(id));
+            if (repeated.length > 0) {
+                setQuestion({ playlistId, trackIds, repeated });
+                return;
+            }
+            await addSongs(playlistId, trackIds, false);
         } catch (error) {
             console.error("Failed to add to playlist:", error);
             setError("Couldn't add to that playlist — try again.");
+        } finally {
+            setIsConfirming(false);
+        }
+    };
+
+    /** The songs a playlist holds. When it can't be read the add goes ahead and the server skips repeats itself. */
+    const heldSongs = async (playlistId: string): Promise<Set<string>> => {
+        try {
+            const playlist = await api.getPlaylist(playlistId);
+            const items = Array.isArray(playlist?.items) ? (playlist.items as PlaylistEntry[]) : [];
+            return new Set(items.flatMap((item) => item.trackId ?? item.track?.id ?? []));
+        } catch (error) {
+            console.error("Failed to read the playlist before adding:", error);
+            return new Set();
+        }
+    };
+
+    const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean) => {
+        await addToPlaylist(allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids });
+        window.dispatchEvent(
+            new CustomEvent("playlist-updated", { detail: { playlistId } })
+        );
+        onAdded?.();
+        onClose();
+    };
+
+    /** The person's answer: add the repeats too (`again`), only the songs that are new (`new`), or nothing (`skip`). */
+    const answer = async (choice: "again" | "new" | "skip") => {
+        if (!question) return;
+        if (choice === "skip") {
+            onClose();
+            return;
+        }
+        try {
+            setError(null);
+            setIsConfirming(true);
+            if (choice === "again") {
+                await addSongs(question.playlistId, question.trackIds, true);
+            } else {
+                const fresh = question.trackIds.filter((id) => !question.repeated.includes(id));
+                await addSongs(question.playlistId, fresh, false);
+            }
+        } catch (error) {
+            console.error("Failed to add to playlist:", error);
+            setError("Couldn't add to that playlist — try again.");
+        } finally {
+            setIsConfirming(false);
         }
     };
 
@@ -200,6 +307,9 @@ export function PlaylistSelector({
                     </div>
                 )}
 
+                {question ? (
+                    <RepeatPrompt question={question} busy={isConfirming} onAnswer={answer} />
+                ) : (<>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
                     {isLoading ? (
                         <div className="flex items-center justify-center py-12">
@@ -333,6 +443,7 @@ export function PlaylistSelector({
                         </span>
                     </label>
                 </div>
+                </>)}
             </div>
         </div>
     );

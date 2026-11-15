@@ -5,7 +5,7 @@ import { useAudioState } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
-import { useAddToPlaylistMutation, usePublicConfig } from "@/hooks/useQueries";
+import { usePublicConfig } from "@/hooks/useQueries";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { useDownloadContext } from "@/lib/download-context";
 
@@ -30,7 +30,6 @@ interface AlbumPageProps {
 
 export default function AlbumPage({ params }: AlbumPageProps) {
     const { id } = use(params);
-    const addToPlaylist = useAddToPlaylistMutation();
     const { canAcquire } = usePublicConfig();
     // Split hooks avoid re-renders from currentTime updates.
     const { currentTrack } = useAudioState();
@@ -169,15 +168,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         openPlaylistSelector([trackId]);
     };
 
-    const handlePlaylistSelected = async (playlistId: string) => {
-        if (!pendingTrackIds.length) return;
-
-        // Errors propagate to the selector, which reports them and stays open.
-        await addToPlaylist.mutateAsync({ playlistId, trackIds: pendingTrackIds });
-        setPendingTrackIds([]);
-        setShowPlaylistSelector(false);
-    };
-
     return (
         <div className="min-h-screen flex flex-col">
             <AlbumHero
@@ -255,7 +245,8 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     setShowPlaylistSelector(false);
                     setPendingTrackIds([]);
                 }}
-                onSelectPlaylist={handlePlaylistSelected}
+                trackIds={pendingTrackIds}
+                onAdded={() => setPendingTrackIds([])}
             />
         </div>
     );

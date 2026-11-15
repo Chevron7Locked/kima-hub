@@ -170,7 +170,6 @@ describe("the library songs list", () => {
                         tracks={[song("a"), song("b")] as never}
                         onPlay={onPlay}
                         onAddToQueue={() => {}}
-                        onAddToPlaylist={() => {}}
                     />,
                 ),
             );
