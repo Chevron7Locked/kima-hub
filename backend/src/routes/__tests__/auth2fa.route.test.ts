@@ -19,6 +19,7 @@ import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { encrypt } from "../../utils/encryption";
+import { readTwoFactorSecret, spendAndChange } from "../../services/users/credentials";
 import { generateToken, clearUserCache } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import authRoutes from "../auth";
@@ -900,6 +901,18 @@ describe("new recovery codes and the code they spend", () => {
     });
 });
 
+describe("a secret the client still sends to enable", () => {
+    it("is ignored, even as a list: a body that parses is refused for 2FA already on, not as malformed", async () => {
+        await twoFactorOn();
+        const before = await stored();
+
+        const res = await request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ secret: ["x"], token: "123456" });
+
+        expect([res.status, res.body]).toEqual([400, { error: "2FA is already enabled" }]);
+        expect(await stored()).toEqual(before);
+    });
+});
+
 describe("bodies that are not what the route wants", () => {
     const post = (path: string, body: unknown) => request(app).post(path).set("Authorization", bearer()).send(body as object);
 
@@ -907,7 +920,6 @@ describe("bodies that are not what the route wants", () => {
         ["enable, a number for the code", "/auth/2fa/enable", { token: 123456 }],
         ["enable, an object for the code", "/auth/2fa/enable", { token: { a: 1 } }],
         ["enable, no code", "/auth/2fa/enable", {}],
-        ["enable, a list for the secret it ignores", "/auth/2fa/enable", { secret: ["x"], token: "123456" }],
         ["disable, a number for the code", "/auth/2fa/disable", { password: PASSWORD, token: 123456 }],
         ["disable, an object for the password", "/auth/2fa/disable", { password: { $ne: "" }, token: "123456" }],
         ["disable, nothing", "/auth/2fa/disable", {}],
@@ -921,8 +933,7 @@ describe("bodies that are not what the route wants", () => {
         const res = await post(path, body);
 
         expect(res.status).toBe(400);
-        // A body that parses but meets 2FA already on is refused for that, not as malformed.
-        expect(res.body).toEqual({ error: path.endsWith("/enable") && "secret" in body ? "2FA is already enabled" : "Invalid request" });
+        expect(res.body).toEqual({ error: "Invalid request" });
         expect(await stored()).toEqual(before);
     });
 
@@ -1014,6 +1025,27 @@ describe("turning it off when it is already off, or when another request just di
         expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
         const now = await stored();
         expect([now.twoFactorEnabled, now.twoFactorLastStep]).toEqual([false, 0]);
+    });
+
+    it("lets two disables with the same recovery code end with 2FA off, one 200 and one 400", async () => {
+        const [code] = await twoFactorOn();
+
+        const results = await Promise.all([disable(code), disable(code)]);
+
+        expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+        expect((await stored()).twoFactorEnabled).toBe(false);
+    });
+
+    it("gives the spend back when the change throws, whatever kind of code it spent", async () => {
+        const [recovery] = await twoFactorOn();
+        const before = await stored();
+        const user = { id: USER, recoveryCodes: before.twoFactorRecoveryCodes };
+        const secret = readTwoFactorSecret(USER, before.twoFactorSecret)!;
+
+        await expect(spendAndChange(user, secret, codeNow(), async () => { throw new Error("the write failed"); })).rejects.toThrow("the write failed");
+        await expect(spendAndChange(user, secret, recovery, async () => { throw new Error("the write failed"); })).rejects.toThrow("the write failed");
+
+        expect(await stored()).toEqual(before);
     });
 
     it("logs the turning off once, from the request that did it", async () => {

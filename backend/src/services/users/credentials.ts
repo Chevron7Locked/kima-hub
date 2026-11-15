@@ -181,6 +181,25 @@ export async function replaceRecoveryCodes(userId: string, db: Db = prisma): Pro
     return written.count === 1 ? fresh.codes : null;
 }
 
+/**
+ * Turns 2FA off for a person if it is still on: the secret, the recovery list and any setup waiting are cleared, and no
+ * step stays spent, so a later setup starts clean. Returns false when 2FA was already off and nothing was written.
+ */
+export async function turnOffTwoFactor(userId: string, db: Db = prisma): Promise<boolean> {
+    const written = await db.user.updateMany({
+        where: { id: userId, twoFactorEnabled: true },
+        data: {
+            twoFactorEnabled: false,
+            twoFactorSecret: null,
+            twoFactorRecoveryCodes: null,
+            twoFactorPendingSecret: null,
+            twoFactorPendingAt: null,
+            twoFactorLastStep: 0,
+        },
+    });
+    return written.count === 1;
+}
+
 /** The most tries to spend a code while other sign-ins keep changing the list: each lost try means another spent one of ten. */
 const MAX_SPEND_TRIES = 10;
 

@@ -6,7 +6,7 @@ import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import jwt from "jsonwebtoken";
-import { isRecoveryCodeShaped, newRecoveryCodes, NO_ACCOUNT_PASSWORD_HASH, normalizeSecondFactor, readPendingTwoFactorSecret, readTwoFactorSecret, replaceRecoveryCodes, spendAndChange, spendSecondFactor, totpStep, warnIfRecoveryListUnreadable } from "../services/users/credentials";
+import { isRecoveryCodeShaped, newRecoveryCodes, NO_ACCOUNT_PASSWORD_HASH, normalizeSecondFactor, readPendingTwoFactorSecret, readTwoFactorSecret, replaceRecoveryCodes, spendAndChange, spendSecondFactor, totpStep, turnOffTwoFactor, warnIfRecoveryListUnreadable } from "../services/users/credentials";
 import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
@@ -511,21 +511,7 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
             { id: user.id, recoveryCodes: user.twoFactorRecoveryCodes },
             secret,
             token,
-            async (tx) => {
-                const written = await tx.user.updateMany({
-                    where: { id: user.id, twoFactorEnabled: true },
-                    data: {
-                        twoFactorEnabled: false,
-                        twoFactorSecret: null,
-                        twoFactorRecoveryCodes: null,
-                        twoFactorPendingSecret: null,
-                        twoFactorPendingAt: null,
-                        // Nothing is spent once there is no secret: a later setup starts from no spent step.
-                        twoFactorLastStep: 0,
-                    },
-                });
-                return written.count === 1 ? true : null;
-            },
+            async (tx) => ((await turnOffTwoFactor(user.id, tx)) ? true : null),
         );
         if (off.outcome === "wrong-code") {
             return res.status(400).json({ error: "Invalid 2FA token" });
