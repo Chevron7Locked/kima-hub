@@ -85,7 +85,8 @@ router.post("/", async (req, res) => {
         const queueProvided = Array.isArray(queue);
         const accepted = queueProvided ? acceptQueue(queue, currentIndex, await queueLimit()) : null;
         const safeQueue = accepted?.queue ?? null;
-        const indexOnly = !queueProvided && typeof currentIndex === "number";
+        const storedQueue = safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue);
+        const indexOnly =!queueProvided && typeof currentIndex === "number";
 
         // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
         // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
@@ -97,7 +98,7 @@ router.post("/", async (req, res) => {
         const write = (db: Pick<Prisma.TransactionClient, "playbackState">, safeCurrentIndex: number) => {
             const queueUpdate = queueProvided
                 ? {
-                      queue: safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue),
+                      queue: storedQueue,
                       queueSource: safeQueueSource,
                       currentIndex: safeCurrentIndex,
                   }
@@ -121,7 +122,7 @@ router.post("/", async (req, res) => {
                     trackId: trackId || null,
                     audiobookId: audiobookId || null,
                     podcastId: podcastId || null,
-                    queue: safeQueue === null ? Prisma.DbNull : (safeQueue as unknown as Prisma.InputJsonValue),
+                    queue: storedQueue,
                     queueSource: safeQueueSource,
                     currentIndex: safeCurrentIndex,
                     isShuffle: isShuffle || false,

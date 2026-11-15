@@ -23,6 +23,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { retryOnDeadlock } from "../utils/dbConflict";
 import { nodeClock } from "../utils/nodeClock";
+import { playableSongSql } from "../utils/playableSong";
 import { announcePlaylistsChanged, playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { songsWithBusyPlayHistory } from "./playRecording";
 import { entriesOf, hydrateQueue, type QueueEntry } from "./savedQueue";
@@ -294,7 +295,7 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
     const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; playable: boolean; goneTitle: string; keptTitle: string }>>`
-        SELECT g.id AS gone, k.id AS kept, NOT k.corrupt AS playable, g.title AS "goneTitle", k.title AS "keptTitle"
+        SELECT g.id AS gone, k.id AS kept, (${playableSongSql("k", "ka")}) AS playable, g.title AS "goneTitle", k.title AS "keptTitle"
           FROM "Track" g
           JOIN "Track" k
             ON k."albumId" = g."albumId"
@@ -305,7 +306,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
          WHERE g.id = ANY(${ids}::text[])
            AND k."missingSince" IS NULL
          ORDER BY g.id,
-                  NOT k.corrupt DESC,
+                  (${playableSongSql("k", "ka")}) DESC,
                   COALESCE(k.mime ~* '(^|[^a-z])(flac|alac|pcm|wavpack|ape|monkey|tta|dsd|lossless|wav|aiff)([^a-z]|$)', false) DESC,
                   k."fileSize"::float8 / NULLIF(k.duration, 0) DESC NULLS LAST,
                   k.id
@@ -329,12 +330,21 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
 async function holdCopies(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Replacement[]> {
     if (pairs.length === 0) return pairs;
     const wanted = [...new Set(pairs.flatMap((p) => (p.queue ? [p.history, p.queue] : [p.history])))].sort();
-    const held = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM "Track" WHERE id = ANY(${wanted}::text[]) ORDER BY id FOR KEY SHARE`;
-    const heldIds = new Set(held.map((r) => r.id));
+    // What the copy is now, not what the candidate query saw: a copy whose file went missing or corrupt, or whose album
+    // left the library, in between is judged on the row as the lock finds it.
+    const held = await tx.$queryRaw<Array<{ id: string; playable: boolean; usable: boolean }>>`
+        SELECT t.id, (${playableSongSql("t", "al")}) AS playable,
+               (t."missingSince" IS NULL AND al.location = 'LIBRARY') AS usable
+          FROM "Track" t
+          JOIN "Album" al ON al.id = t."albumId"
+         WHERE t.id = ANY(${wanted}::text[])
+         ORDER BY t.id
+           FOR KEY SHARE OF t`;
+    const usable = new Set(held.filter((r) => r.usable).map((r) => r.id));
+    const playable = new Set(held.filter((r) => r.playable).map((r) => r.id));
     return pairs
-        .filter((p) => heldIds.has(p.history))
-        .map((p) => ({ ...p, queue: p.queue !== null && heldIds.has(p.queue) ? p.queue : null }));
+        .filter((p) => usable.has(p.history))
+        .map((p) => ({ ...p, queue: p.queue !== null && playable.has(p.queue) ? p.queue : null }));
 }
 
 /**
@@ -391,7 +401,7 @@ export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult
     // the sweep back and fail every scan after it. The enrichment re-run allows the same for its wipe.
     // A deadlock with another job's transaction (the sweep takes its locks without waiting, but the cascade of a delete
     // reaches rows other jobs write) rolls the whole sweep back, so it runs once more.
-    const res = await retryOnDeadlock("the library sweep",() =>
+    const res = await retryOnDeadlock("the library sweep", () =>
         prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 }),
     );
     await unlinkArtifacts(res.artifacts);
