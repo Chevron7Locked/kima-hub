@@ -18,11 +18,11 @@ export interface SeedArtist {
 
 /**
  * Owned-album snapshot, rebuilt once per TTL instead of queried per candidate.
- * `albums` holds every Album row regardless of location; callers that need
- * LIBRARY only filter on it.
+ * Only an album that is in the library counts as owned: `albums` holds LIBRARY rows alone, and `ownedAlbumArtists`
+ * leaves out a record whose release group is only a Discover album ("Discover is only Discover").
  */
 interface OwnedAlbumIndex {
-    albums: Array<{ artistName: string; artistMbid: string | null; title: string; location: string; rgMbid: string }>;
+    albums: Array<{ artistName: string; artistMbid: string | null; title: string; rgMbid: string }>;
     ownedAlbumArtists: Array<{ artistName: string; artistMbid: string | null; rgMbid: string }>;
     albumTitleByRgMbid: Map<string, string>;
 }
@@ -156,10 +156,18 @@ export class DiscoverySeeding {
             }),
         ]);
 
-        // An OwnedAlbum names no title of its own. Its album row has one; with that row gone, a suggestion's record of the
-        // same release group still does.
-        const albumTitles = new Map(albumRows.map((a) => [a.rgMbid, a.title]));
-        const untitled = ownedAlbumRows.map((o) => o.rgMbid).filter((rg) => !albumTitles.has(rg));
+        // A release group that is only a Discover album is not owned, even where an ownership record names it.
+        const libraryRows = albumRows.filter((a) => a.location === LIBRARY_LOCATION);
+        const libraryRgs = new Set(libraryRows.map((a) => a.rgMbid));
+        const discoverOnlyRgs = new Set(
+            albumRows.filter((a) => a.location !== LIBRARY_LOCATION && !libraryRgs.has(a.rgMbid)).map((a) => a.rgMbid)
+        );
+        const ownedRows = ownedAlbumRows.filter((o) => !discoverOnlyRgs.has(o.rgMbid));
+
+        // An OwnedAlbum names no title of its own. Its library album row has one; with that row gone, a suggestion's
+        // record of the same release group still does.
+        const albumTitles = new Map(libraryRows.map((a) => [a.rgMbid, a.title]));
+        const untitled = ownedRows.map((o) => o.rgMbid).filter((rg) => !albumTitles.has(rg));
         const suggested = untitled.length > 0
             ? await prisma.discoveryAlbum.findMany({
                 where: { rgMbid: { in: untitled } },
@@ -170,17 +178,16 @@ export class DiscoverySeeding {
             if (!albumTitles.has(record.rgMbid)) albumTitles.set(record.rgMbid, record.albumTitle);
         }
 
-        const albums = albumRows.map((a) => ({
+        const albums = libraryRows.map((a) => ({
             artistName: a.artist.name,
             artistMbid: a.artist.mbid,
             title: a.title,
-            location: a.location as string,
             rgMbid: a.rgMbid,
         }));
 
         return {
             albums,
-            ownedAlbumArtists: ownedAlbumRows.map((o) => ({
+            ownedAlbumArtists: ownedRows.map((o) => ({
                 artistName: o.artist.name,
                 artistMbid: o.artist.mbid,
                 rgMbid: o.rgMbid,
@@ -201,16 +208,20 @@ export class DiscoverySeeding {
         albumTitle?: string,
         artistMbid?: string | null
     ): Promise<boolean> {
-        // Exact MBID checks
-        const ownedAlbum = await prisma.ownedAlbum.findFirst({
+        // Exact MBID checks. Only a library album is owned: a Discover album is not, and an ownership record counts
+        // unless the album it names is in Discover (a record whose album row is gone still counts).
+        const albumsOfRelease = await prisma.album.findMany({
             where: { rgMbid: albumMbid },
+            select: { location: true },
         });
-        if (ownedAlbum) return true;
+        if (albumsOfRelease.some((a) => a.location === LIBRARY_LOCATION)) return true;
 
-        const existingAlbum = await prisma.album.findFirst({
-            where: { rgMbid: albumMbid },
-        });
-        if (existingAlbum) return true;
+        if (albumsOfRelease.length === 0) {
+            const ownedAlbum = await prisma.ownedAlbum.findFirst({
+                where: { rgMbid: albumMbid },
+            });
+            if (ownedAlbum) return true;
+        }
 
         const previousDiscovery = await prisma.discoveryAlbum.findFirst({
             where: { rgMbid: albumMbid, userId },
@@ -246,9 +257,7 @@ export class DiscoverySeeding {
                 const { albums, ownedAlbumArtists, albumTitleByRgMbid } = await this.getOwnedAlbumIndex();
                 // Both sides normalised the same way: no leading article, no edition suffix.
                 const normTitle = normalizeForMatching(albumTitle);
-                const candidates: Array<{ artistName: string; artistMbid: string | null; title: string }> = albums.filter(
-                    (a) => a.location === LIBRARY_LOCATION
-                );
+                const candidates: Array<{ artistName: string; artistMbid: string | null; title: string }> = [...albums];
                 for (const owned of ownedAlbumArtists) {
                     const title = albumTitleByRgMbid.get(owned.rgMbid);
                     if (title) candidates.push({ artistName: owned.artistName, artistMbid: owned.artistMbid, title });

@@ -184,8 +184,6 @@ async function deleteAlbumRows(albumId: string | null, suggestionId: string | nu
         return { playlists: holding, artistId: album.artistId };
     });
     announcePlaylistsChanged(playlists);
-    // A cleared album leaves the owned-album snapshot, which reads its title and artist from the album rows.
-    if (artistId) forgetOwnedIndex();
     if (artistId) {
         // The album is gone either way; a recount that fails is caught up by the next scan's.
         await updateArtistCounts(artistId).catch((error) =>

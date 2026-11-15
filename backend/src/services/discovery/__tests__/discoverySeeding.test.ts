@@ -237,14 +237,14 @@ describe('DiscoverySeeding', () => {
             expect(await owned()).toBe(true);
         });
 
-        it('is true for an album in the library, and for one on Discover', async () => {
+        it('is true for an album in the library, but not for one on Discover', async () => {
             await artist('o', 'Owner', null);
             await song('asked', 'o', 0);
             await prisma.album.update({ where: { id: `${P}al_asked` }, data: { rgMbid: MBID } });
             expect(await owned()).toBe(true);
 
             await prisma.album.update({ where: { id: `${P}al_asked` }, data: { location: 'DISCOVER' } });
-            expect(await owned()).toBe(true);
+            expect(await owned()).toBe(false);
         });
 
         it('is true for an album already suggested to this listener, but not for one suggested to another', async () => {
