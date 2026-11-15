@@ -287,9 +287,9 @@ router.post("/artist-counts/backfill", async (_req, res) => {
 
     // Request-started work: the shutdown waits for the batch under way, and the recount stops after it.
     runAsRequestWork((stop) =>
-      backfillAllArtistCounts((processed, total) => {
-        if (processed % 100 === 0) {
-          logger.debug(`[ArtistCounts] Progress: ${processed}/${total}`);
+      backfillAllArtistCounts((attempted, total) => {
+        if (attempted % 100 === 0) {
+          logger.debug(`[ArtistCounts] Progress: ${attempted}/${total}`);
         }
       }, stop),
     ).catch((error) => {

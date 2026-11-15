@@ -19,6 +19,7 @@ import { coversBasePath } from '../../services/imageStorage';
 import os from 'os';
 import { config, useMusicFolder } from '../../config';
 import { mountAsServer } from "./helpers/serverMount";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const TAG = 'zz-share-route';
@@ -701,6 +702,32 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect((await get(token, songs.playable)).status).toBe(200);
             expect(await playsOf(token)).toBe(1);
         });
+
+        it('ends the response of a play that did not start though giving the play back stalls, and finishes giving it back afterwards', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            const logged = expectLog('warn');
+            const realExecute: any = prisma.$executeRaw.bind(prisma);
+            let release!: (rows: number) => void;
+            const held = new Promise<number>((resolve) => (release = resolve));
+            let calls = 0;
+            // The first statement is the count; the second is the take-back, which stalls.
+            const execute = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
+                calls++ === 0 ? realExecute(...args) : held) as never);
+            try {
+                const res = await get(token, songs.playable, { 'If-None-Match': '*' });
+                expect(res.status).toBe(304);
+                expect(logged).toHaveBeenCalledWith(expect.stringContaining('Giving back a play'));
+                // The window is still held while the take-back has not finished.
+                expect(await redisClient.keys(`*${id}*`)).not.toEqual([]);
+
+                release(1);
+                await settleShareBackgroundWork();
+                expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+            } finally {
+                release(1);
+                execute.mockRestore();
+            }
+        }, 15_000);
 
         it('does not count a play for a file with nothing in it', async () => {
             const full = path.join(config.music.musicPath, DIR, 'empty.flac');

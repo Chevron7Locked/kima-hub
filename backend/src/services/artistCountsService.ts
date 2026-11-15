@@ -15,9 +15,14 @@ const BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 50;
 const PROGRESS_EVERY = 500;
 
-/** Whether counting from `before` to `after` artists passed a multiple of 500: a progress line is due once per mark, however the batches fall. */
+/** Whether going from `before` to `after` artists attempted passed a multiple of 500: a progress line is due once per mark, however the batches fall. */
 export function crossedProgressMark(before: number, after: number): boolean {
   return Math.floor(after / PROGRESS_EVERY) > Math.floor(before / PROGRESS_EVERY);
+}
+
+/** How far a recount is, as a percent: artists attempted (counted or failed) of the total read at the start, never past 100 (artists can arrive mid-run). */
+function percentAttempted(attempted: number, total: number): number {
+  return total > 0 ? Math.min(100, Math.round((attempted / total) * 100)) : 0;
 }
 
 interface ArtistCounts {
@@ -90,10 +95,10 @@ export function isBackfillInProgress(): boolean {
  * Recounts every artist in small batches with pauses, so it is safe on a running server. Asked for while a recount
  * runs, it waits for that run and answers what it answers (processed, errors, over every pass): the running one goes
  * over the artists once more when it finishes, and any number of asks cost one more pass. The running call keeps its
- * own `onProgress` and stop check.
+ * own `onProgress` (artists attempted, failures included, of the total) and stop check.
  */
 export function backfillAllArtistCounts(
-  onProgress?: (processed: number, total: number) => void,
+  onProgress?: (attempted: number, total: number) => void,
   { shouldStop = () => false }: StopCheck = {}
 ): Promise<{ processed: number; errors: number }> {
   if (currentRun) {
@@ -107,7 +112,7 @@ export function backfillAllArtistCounts(
 }
 
 async function runPasses(
-  onProgress: ((processed: number, total: number) => void) | undefined,
+  onProgress: ((attempted: number, total: number) => void) | undefined,
   shouldStop: () => boolean
 ): Promise<{ processed: number; errors: number }> {
   // Yield first, so `currentRun` is set before anything here can end the run and clear it.
@@ -134,7 +139,7 @@ async function runPasses(
 
 async function recountEveryArtist(
   pass: number,
-  onProgress: ((processed: number, total: number) => void) | undefined,
+  onProgress: ((attempted: number, total: number) => void) | undefined,
   shouldStop: () => boolean
 ): Promise<{ processed: number; errors: number }> {
   backfillProgress = { pass, processed: 0, total: 0, errors: 0 };
@@ -142,7 +147,7 @@ async function recountEveryArtist(
   const total = await prisma.artist.count();
   backfillProgress.total = total;
   let cursor: string | undefined;
-  let countedAtLastBatch = 0;
+  let attemptedAtLastBatch = 0;
 
   logger.info(`[ArtistCounts] Starting backfill for ${total} artists`);
 
@@ -177,15 +182,17 @@ async function recountEveryArtist(
     }
 
     cursor = artists[artists.length - 1].id;
+    // Failed artists were looked at too: progress is every artist attempted, and the failures are reported beside it.
+    const attempted = backfillProgress.processed + backfillProgress.errors;
     if (onProgress) {
-      onProgress(backfillProgress.processed, total);
+      onProgress(attempted, total);
     }
 
-    if (crossedProgressMark(countedAtLastBatch, backfillProgress.processed)) {
-      const percent = total > 0 ? ` (${Math.round((backfillProgress.processed / total) * 100)}%)` : "";
-      logger.info(`[ArtistCounts] Progress: ${backfillProgress.processed}/${total}${percent}`);
+    if (crossedProgressMark(attemptedAtLastBatch, attempted)) {
+      const percent = total > 0 ? ` (${percentAttempted(attempted, total)}%)` : "";
+      logger.info(`[ArtistCounts] Progress: ${attempted}/${total}${percent}, ${backfillProgress.errors} failed`);
     }
-    countedAtLastBatch = backfillProgress.processed;
+    attemptedAtLastBatch = attempted;
 
     // Small delay to avoid overwhelming the database
     await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -219,12 +226,10 @@ export async function getBackfillProgress(): Promise<{
     return {
       processed: backfillProgress.processed,
       total: backfillProgress.total,
-      percent:
-        backfillProgress.total > 0
-          ? Math.round(
-              (backfillProgress.processed / backfillProgress.total) * 100
-            )
-          : 0,
+      percent: percentAttempted(
+        backfillProgress.processed + backfillProgress.errors,
+        backfillProgress.total
+      ),
       isRunning: true,
       errors: backfillProgress.errors,
       pass: backfillProgress.pass,

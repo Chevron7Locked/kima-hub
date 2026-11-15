@@ -187,10 +187,30 @@ async function countPlay(shareId: string): Promise<boolean> {
 const streamStarted = (res: Response) =>
     (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined && res.headersSent;
 
+/** The longest a response waits for its play to be given back before it ends: a stalled database must not hold a listener's connection open. */
+const TAKE_BACK_WAIT_MS = 3000;
+
+/** Waits for the take-back, but not past TAKE_BACK_WAIT_MS: it then finishes in the background (it is tracked) and a warning is logged. */
+async function undoWithinReason(undo: () => Promise<void>, shareId: string): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<"late">((resolve) => {
+        timer = setTimeout(() => resolve("late"), TAKE_BACK_WAIT_MS);
+        timer.unref();
+    });
+    try {
+        if ((await Promise.race([undo(), waited])) === "late") {
+            logger.warn(`[Share] Giving back a play of share ${shareId} is taking over ${TAKE_BACK_WAIT_MS} ms; ending the response without waiting`);
+        }
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /**
  * Keeps a counted play only if the stream starts. A play whose response ends without one (304, 404, 416, 500, or a listener
  * who left first) is taken back and its window freed, so the next request counts. The take-back runs before the response
- * ends: a client cannot follow up in between and slip into a window that is about to be freed.
+ * ends: a client cannot follow up in between and slip into a window that is about to be freed. The response waits for it
+ * only up to TAKE_BACK_WAIT_MS, so a stalled database cannot hold the connection open.
  */
 function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string): void {
     let undone: Promise<void> | null = null;
@@ -209,7 +229,7 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string)
     const end = res.end.bind(res) as (...args: unknown[]) => Response;
     res.end = ((...args: unknown[]) => {
         if (streamStarted(res)) return end(...args);
-        void undo().finally(() => end(...args));
+        void undoWithinReason(undo, shareId).finally(() => end(...args));
         return res;
     }) as Response["end"];
     res.once("close", () => {

@@ -35,6 +35,13 @@ const counted = async () => (await prisma.artist.findUniqueOrThrow({ where: { id
 it("counts again an artist that changed after the running recount passed it, and asks only once more for any number of requests", async () => {
     let change: Promise<unknown> | undefined;
     const asked: Promise<{ processed: number; errors: number }>[] = [];
+    // The song's insert is not part of what the recount waits for, so on a slow machine the next pass could start before
+    // the song is in. The recount's next read waits for it: the artist changes while the first pass is still running.
+    const realFindMany: any = prisma.artist.findMany.bind(prisma.artist);
+    const findMany = jest.spyOn(prisma.artist, "findMany").mockImplementation((async (args: any) => {
+        await change;
+        return realFindMany(args);
+    }) as any);
     const running = backfillAllArtistCounts(() => {
         // The first batch is done, so the artist is counted. A song arrives, and the scan asks for a recount three times.
         if (change) return;
@@ -46,6 +53,7 @@ it("counts again an artist that changed after the running recount passed it, and
     const result = await running;
     await change;
     await Promise.all(asked);
+    findMany.mockRestore();
 
     expect(await counted()).toBe(2);
     expect(isBackfillInProgress()).toBe(false);
