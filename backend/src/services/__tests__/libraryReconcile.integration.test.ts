@@ -116,6 +116,35 @@ describe("reconcileDeletedTracks", () => {
         expect(log.map((l) => l.reason)).toEqual(["replaced-by-another-file", "file-missing-confirmed"]);
     });
 
+    it("moves every playlist entry of a replaced file to the copy, repeats and entries beside the copy's own included", async () => {
+        await prisma.track.create({
+            data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.track.create({
+            data: { id: `${P}flac`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
+                fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.track.create({
+            data: { id: `${P}other`, albumId: `${P}alb`, title: "Other", trackNo: 2, duration: 200, filePath: `/tmp/${P}other.flac`,
+                fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.playlist.create({
+            data: {
+                id: `${P}pl`, userId: `${P}user`, name: "Recon",
+                items: { create: [
+                    { trackId: `${P}mp3`, rank: "a", sort: 0 }, { trackId: `${P}other`, rank: "b", sort: 1 },
+                    { trackId: `${P}mp3`, rank: "c", sort: 2 }, { trackId: `${P}flac`, rank: "d", sort: 3 },
+                ] },
+            },
+        });
+
+        await reconcileDeletedTracks(prisma, scanStartedAt());
+
+        const held = await prisma.playlistItem.findMany({ where: { playlistId: `${P}pl` }, orderBy: { rank: "asc" } });
+        expect(held.map((i) => i.trackId)).toEqual([`${P}flac`, `${P}other`, `${P}flac`, `${P}flac`]);
+    });
+
     it("a flag set by this scan waits for the next one", async () => {
         await seedTrack(`${P}new`, { missingMinutesAgo: 0 });
         const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));

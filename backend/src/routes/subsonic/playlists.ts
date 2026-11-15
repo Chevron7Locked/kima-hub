@@ -131,13 +131,13 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
             await lockPlaylist(tx, playlistId);
             const hidden = (
                 await tx.playlistItem.findMany({
-                    where: { playlistId, NOT: SHOWN, trackId: { notIn: songIds } },
+                    where: { playlistId, NOT: SHOWN },
                     orderBy: { rank: "asc" },
                     select: { trackId: true },
                 })
             ).map((item) => item.trackId);
             const removed = await tx.playlistItem.deleteMany({ where: { playlistId } });
-            // rank is the playlist order and must be unique per playlist.
+            // rank is the playlist order and must be unique per playlist; a song named twice is two entries.
             const created = await tx.playlistItem.createMany({
                 data: [...songIds, ...hidden].map((trackId, index) => ({
                     playlistId,
@@ -145,21 +145,20 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
                     sort: index,
                     rank: rankForPosition(index),
                 })),
-                skipDuplicates: true,
             });
             return removed.count > 0 || created.count > 0;
         });
         resolvedPlaylistId = playlistId;
         changed = written;
     } else if (name) {
-        // One write: the playlist exists with all its songs or not at all. A song named twice is kept once, first.
+        // One write: the playlist exists with all its songs or not at all. A song named twice is kept twice, in the order given.
         const playlist = await prisma.playlist.create({
             data: {
                 userId,
                 name,
                 isPublic: false,
                 items: {
-                    create: [...new Set(songIds)].map((trackId, index) => ({
+                    create: songIds.map((trackId, index) => ({
                         trackId,
                         sort: index,
                         rank: rankForPosition(index),
@@ -263,7 +262,7 @@ playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {
                 rank: ranks[index],
             }));
 
-            count += (await tx.playlistItem.createMany({ data: rows, skipDuplicates: true })).count;
+            count += (await tx.playlistItem.createMany({ data: rows })).count;
         }
         return count;
     });

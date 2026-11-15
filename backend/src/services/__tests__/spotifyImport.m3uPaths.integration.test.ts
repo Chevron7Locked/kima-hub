@@ -196,7 +196,8 @@ describe("one import reads what it has already read once", () => {
     it("a file name is looked up once however many entries name it", async () => {
         await seedSongs("fn", [["a-real", `${P} fn real`, `${P}/fn/album/zzrepeat song.flac`]]);
         const ids = await counted(Array.from({ length: 20 }, (_, n) => bare(`/folder${n}/zzrepeat song.flac`)));
-        expect(ids).toEqual([`${P}-fn-a-real`]);
+        // Each of the 20 lines is a listing, so the one song is held 20 times.
+        expect(ids).toEqual(Array(20).fill(`${P}-fn-a-real`));
         expect(fileNameReads).toBe(1);
     });
 

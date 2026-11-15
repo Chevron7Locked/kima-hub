@@ -207,7 +207,8 @@ describe("one import still reads what it has already read once", () => {
         try {
             const cases = ["zzmemo song.flac", "ZZMEMO SONG.FLAC", "Zzmemo Song.flac", "zzmemo song.FLAC"];
             const ids = await matches(Array.from({ length: 20 }, (_, n) => entry(`/folder${n}/${cases[n % cases.length]}`)));
-            expect(ids).toEqual([`${P}-memo-a-real`]);
+            // Each of the 20 lines is a listing, so the one song is held 20 times.
+            expect(ids).toEqual(Array(20).fill(`${P}-memo-a-real`));
             const wheres = findMany.mock.calls.map(([args]) => JSON.stringify(args?.where ?? {}));
             expect(wheres.filter((w) => w.includes('"endsWith"')).length).toBe(1);
             const rawSql = raw.mock.calls.map(([sql]) => (sql as unknown as { join(s: string): string }).join("?"));

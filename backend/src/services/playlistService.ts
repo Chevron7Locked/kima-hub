@@ -130,8 +130,9 @@ export async function markUnavailable<T extends { trackId: string }>(
 }
 
 /**
- * Append tracks in the given order. Tracks already present are reported as
- * duplicates, not errors; ids that are not playable songs are rejected.
+ * Append tracks in the given order. A playlist can hold a song more than once (an import or a Subsonic client puts
+ * one there), but adding is by song: one the playlist already holds is reported as a duplicate, not added again and
+ * not an error; ids that are not playable songs are rejected.
  */
 export async function addTracks(
     playlistId: string,
@@ -206,17 +207,16 @@ export async function addTracks(
     });
 }
 
-/** Remove tracks from a playlist; returns how many were actually removed, so
- * removing something already gone is not an error. */
-export async function removeTracks(
-    playlistId: string,
-    trackIds: string[]
-): Promise<number> {
-    const ids = [...new Set(trackIds)].filter(Boolean);
-    if (ids.length === 0) return 0;
-
+/**
+ * Remove one entry of a playlist, or every entry of a song. `ref` is an item id (one copy of a repeated song goes) or,
+ * for a client that names the song, a song id (all its copies go). An item id wins: ids of the two kinds never
+ * collide. Returns how many entries were removed, so removing something already gone is not an error.
+ */
+export async function removeEntry(playlistId: string, ref: string): Promise<number> {
+    if (!ref) return 0;
+    const item = await prisma.playlistItem.findFirst({ where: { id: ref, playlistId }, select: { id: true } });
     const { count } = await prisma.playlistItem.deleteMany({
-        where: { playlistId, trackId: { in: ids } },
+        where: item ? { id: item.id } : { playlistId, trackId: ref },
     });
 
     if (count > 0) {
@@ -228,7 +228,7 @@ export async function removeTracks(
             });
         } catch (error) {
             logger.warn(
-                `[playlistService] removeTracks: could not touch updatedAt for ${playlistId}`,
+                `[playlistService] removeEntry: could not touch updatedAt for ${playlistId}`,
                 error
             );
         }

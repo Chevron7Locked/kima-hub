@@ -441,13 +441,12 @@ router.post("/:id/items/batch", requirePlaylistOwner, async (req, res) => {
     }
 });
 
-// DELETE /playlists/:id/items/:trackId
-// 404 when the item is already gone.
-router.delete("/:id/items/:trackId", requirePlaylistOwner, async (req, res) => {
+// DELETE /playlists/:id/items/:ref
+// `ref` is an item id (removes that one entry) or a song id (removes every entry of the song, which is what the iOS
+// app sends). 404 when nothing is left to remove.
+router.delete("/:id/items/:ref", requirePlaylistOwner, async (req, res) => {
     try {
-        const removed = await playlistService.removeTracks(req.params.id, [
-            req.params.trackId,
-        ]);
+        const removed = await playlistService.removeEntry(req.params.id, req.params.ref);
         if (removed === 0) {
             return res.status(404).json({ error: "Track not in playlist" });
         }

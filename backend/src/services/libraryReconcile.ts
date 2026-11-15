@@ -121,7 +121,8 @@ export async function reconcileDeletedTracks(
 /**
  * For each retiring track, the live track that is the same song on the same album (same disc and track number,
  * same title ignoring case), and the history moved onto it. A user's like, bookmark or audit choice already on the
- * copy, or a playlist already holding it, stays as it is; the retiring row's duplicate goes with it.
+ * copy stays as it is, and the retiring row's duplicate goes with it. Every playlist entry moves, a playlist holding
+ * the copy as well now holding it twice.
  */
 async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Map<string, string>> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
@@ -149,9 +150,7 @@ async function carryHistoryToReplacements(tx: Prisma.TransactionClient, ids: str
              WHERE l."trackId" = ${gone}
                AND NOT EXISTS (SELECT 1 FROM "LikedTrack" o WHERE o."userId" = l."userId" AND o."trackId" = ${kept})`;
         await tx.$executeRaw`
-            UPDATE "PlaylistItem" i SET "trackId" = ${kept}
-             WHERE i."trackId" = ${gone}
-               AND NOT EXISTS (SELECT 1 FROM "PlaylistItem" o WHERE o."playlistId" = i."playlistId" AND o."trackId" = ${kept})`;
+            UPDATE "PlaylistItem" SET "trackId" = ${kept} WHERE "trackId" = ${gone}`;
         await tx.$executeRaw`
             UPDATE subsonic_bookmarks b SET "trackId" = ${kept}
              WHERE b."trackId" = ${gone}

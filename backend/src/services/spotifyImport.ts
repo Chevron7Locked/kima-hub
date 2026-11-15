@@ -1953,10 +1953,9 @@ class SpotifyImportService {
       : new Map<string, { id: string; isrc: string; title: string }>();
 
     // Match all pending tracks against the pre-loaded library
-    const matchedTrackIds: string[] = [];
-    // Position of each matched track in the original Spotify order, the same
-    // scale the pending tracks use.
-    const matchedPositions = new Map<string, number>();
+    // One entry per listing that matched, with its place (1-based) in the original Spotify order. A song the source
+    // lists twice matches twice and the playlist holds it twice.
+    const matchedEntries: Array<{ trackId: string; position: number }> = [];
     let trackIndex = 0;
     const unmatchedForTitleOnly: Array<{
       pendingTrack: typeof job.pendingTracks[number];
@@ -1976,8 +1975,7 @@ class SpotifyImportService {
       if (pendingTrack.preMatchedTrackId) {
         const existingTrack = verifiedPreMatched.get(pendingTrack.preMatchedTrackId);
         if (existingTrack) {
-          matchedTrackIds.push(existingTrack.id);
-          if (!matchedPositions.has(existingTrack.id)) matchedPositions.set(existingTrack.id, trackIndex);
+          matchedEntries.push({ trackId: existingTrack.id, position: trackIndex });
           jobLogger?.debug(
             `   ✓ Pre-matched: "${pendingTrack.title}" -> track ${existingTrack.id}`,
           );
@@ -1992,8 +1990,7 @@ class SpotifyImportService {
       if (pendingTrack.isrc) {
         const isrcMatch = isrcMatches.get(pendingTrack.isrc);
         if (isrcMatch) {
-          matchedTrackIds.push(isrcMatch.id);
-          if (!matchedPositions.has(isrcMatch.id)) matchedPositions.set(isrcMatch.id, trackIndex);
+          matchedEntries.push({ trackId: isrcMatch.id, position: trackIndex });
           jobLogger?.debug(`   ISRC match: "${pendingTrack.title}" -> ${isrcMatch.id}`);
           jobLogger?.logTrackMatch(trackIndex, job.tracksTotal, pendingTrack.title, pendingTrack.artist, true, isrcMatch.id);
           continue;
@@ -2017,8 +2014,7 @@ class SpotifyImportService {
       );
 
       if (match) {
-        matchedTrackIds.push(match.candidate.id);
-        if (!matchedPositions.has(match.candidate.id)) matchedPositions.set(match.candidate.id, trackIndex);
+        matchedEntries.push({ trackId: match.candidate.id, position: trackIndex });
         jobLogger?.debug(
           `   ✓ Matched: "${pendingTrack.title}" -> track ${match.candidate.id} (${match.matchType} ${match.confidence}%)`,
         );
@@ -2050,8 +2046,7 @@ class SpotifyImportService {
           { requireArtistMatch: false },
         );
         if (match) {
-          matchedTrackIds.push(match.candidate.id);
-          if (!matchedPositions.has(match.candidate.id)) matchedPositions.set(match.candidate.id, tIdx);
+          matchedEntries.push({ trackId: match.candidate.id, position: tIdx });
           jobLogger?.info(
             `      Found via title-only match (${match.confidence}%): "${match.candidate.title}" by ${match.candidate.artistName}`,
           );
@@ -2062,22 +2057,14 @@ class SpotifyImportService {
       }
     }
 
-    const uniqueTrackIds = Array.from(new Set(matchedTrackIds));
-    if (uniqueTrackIds.length < matchedTrackIds.length) {
-      const removed = matchedTrackIds.length - uniqueTrackIds.length;
-      jobLogger?.debug(
-        `   Removed ${removed} duplicate track references before playlist creation`,
-      );
-      jobLogger?.info(
-        `Removed ${removed} duplicate track references before playlist creation`,
-      );
-    }
-
+    // The playlist's order is the source's order, whichever step matched the listing.
+    matchedEntries.sort((x, y) => x.position - y.position);
+    const uniqueTrackIds = Array.from(new Set(matchedEntries.map((e) => e.trackId)));
     jobLogger?.debug(
-      `   Matched ${uniqueTrackIds.length}/${job.tracksTotal} tracks`,
+      `   Matched ${matchedEntries.length}/${job.tracksTotal} tracks`,
     );
     jobLogger?.info(
-      `Matched tracks after scan: ${uniqueTrackIds.length}/${job.tracksTotal}`,
+      `Matched tracks after scan: ${matchedEntries.length}/${job.tracksTotal}`,
     );
     const playlist = await prisma.playlist.create({
       data: {
@@ -2086,15 +2073,15 @@ class SpotifyImportService {
         isPublic: false,
         spotifyPlaylistId: job.spotifyPlaylistId,
         items:
-          uniqueTrackIds.length > 0
+          matchedEntries.length > 0
             ? {
-                create: uniqueTrackIds.map((trackId, index) => ({
+                create: matchedEntries.map(({ trackId, position }, index) => ({
                   trackId,
                   sort: index,
-                  // Rank from the track's ORIGINAL Spotify position, the same
-                  // scale the pending tracks use, so the two interleave into the
+                  // Rank from the listing's ORIGINAL Spotify position (0-based), the
+                  // same scale the pending tracks use, so the two interleave into the
                   // playlist's real order rather than forming two sequences.
-                  rank: rankForPosition(matchedPositions.get(trackId) ?? index),
+                  rank: rankForPosition(position - 1),
                 })),
               }
             : undefined,
@@ -2199,7 +2186,7 @@ class SpotifyImportService {
 
     job.createdPlaylistId = playlist.id;
     announcePlaylistChange(job.userId, playlist.id);
-    job.tracksMatched = uniqueTrackIds.length;
+    job.tracksMatched = matchedEntries.length;
     job.status = "completed";
     job.progress = 100;
     job.updatedAt = new Date();
@@ -2208,11 +2195,11 @@ class SpotifyImportService {
 
     jobLogger?.logPlaylistCreated(
       playlist.id,
-      matchedTrackIds.length,
+      matchedEntries.length,
       job.tracksTotal,
     );
     jobLogger?.logJobComplete(
-      matchedTrackIds.length,
+      matchedEntries.length,
       job.tracksTotal,
       playlist.id,
     );
@@ -2222,7 +2209,7 @@ class SpotifyImportService {
         job.userId,
         job.playlistName,
         playlist.id,
-        matchedTrackIds.length,
+        matchedEntries.length,
         job.tracksTotal,
       );
     } catch (notifError) {
@@ -2354,7 +2341,9 @@ class SpotifyImportService {
       where: { playlistId: job.createdPlaylistId },
       select: { trackId: true },
     });
-    const existingTrackIds = new Set(existingItems.map((item) => item.trackId));
+    // Entries the playlist already covers, per song: a song the source lists twice is covered once it is held twice.
+    const covered = new Map<string, number>();
+    for (const item of existingItems) covered.set(item.trackId, (covered.get(item.trackId) ?? 0) + 1);
 
     const maxPosition = existingItems.length;
     let nextPosition = maxPosition;
@@ -2390,7 +2379,11 @@ class SpotifyImportService {
         (c) => c.title.toLowerCase() === pendingTrack.title.toLowerCase(),
       );
 
-      if (localTrack && !existingTrackIds.has(localTrack.id)) {
+      if (!localTrack) continue;
+      const have = covered.get(localTrack.id) ?? 0;
+      if (have > 0) {
+        covered.set(localTrack.id, have - 1);
+      } else {
         newPlaylistItems.push({
           playlistId: job.createdPlaylistId,
           trackId: localTrack.id,
@@ -2398,7 +2391,6 @@ class SpotifyImportService {
           // rank is assigned below, once the count is known
           rank: "",
         });
-        existingTrackIds.add(localTrack.id);
         added++;
       }
     }
@@ -2595,14 +2587,6 @@ class SpotifyImportService {
         await allocateAppendRanks(prisma, playlistId, 1)
       )[0];
 
-      const existingItems = await prisma.playlistItem.findMany({
-        where: { playlistId },
-        select: { trackId: true },
-      });
-      const existingTrackIds = new Set(
-        existingItems.map((item) => item.trackId),
-      );
-
       for (const pendingTrack of pendingTracks) {
         const dbArtist = normalizeArtistName(pendingTrack.spotifyArtist);
         const artistFirstWord = dbArtist.split(" ")[0];
@@ -2644,7 +2628,8 @@ class SpotifyImportService {
           ? { id: match.candidate.id, title: match.candidate.title }
           : null;
 
-        if (localTrack && !existingTrackIds.has(localTrack.id)) {
+        // A waiting entry is its own listing: a song the playlist already holds joins as another copy.
+        if (localTrack) {
           await prisma.playlistItem.create({
             data: {
               playlistId,
@@ -2655,7 +2640,6 @@ class SpotifyImportService {
           });
           nextRank = rankAfter(nextRank);
 
-          existingTrackIds.add(localTrack.id);
           matchedPendingTrackIds.push(pendingTrack.id);
           totalTracksAdded++;
           playlistsWithAdditions.add(playlistId);
@@ -2950,16 +2934,14 @@ class SpotifyImportService {
       throw failure;
     }
 
-    // A playlist holds a song once (PlaylistItem is unique on playlist and song), so a song listed twice keeps its first place.
-    const uniqueTrackIds = [...new Set(matchedTrackIds)];
-
+    // One item per matched line, in file order: a song the file lists twice is held twice.
     const playlist = await prisma.playlist.create({
       data: {
         userId,
         name: playlistName,
         isPublic: false,
         items: {
-          create: uniqueTrackIds.map((trackId, index) => ({
+          create: matchedTrackIds.map((trackId, index) => ({
             trackId,
             sort: index,
             rank: rankForPosition(index),
@@ -2969,13 +2951,13 @@ class SpotifyImportService {
     });
 
     logger.info(
-      `[M3U Import] Created playlist "${playlistName}" (${playlist.id}): ${uniqueTrackIds.length}/${entries.length} matched`,
+      `[M3U Import] Created playlist "${playlistName}" (${playlist.id}): ${matchedTrackIds.length}/${entries.length} matched`,
     );
     announcePlaylistChange(userId, playlist.id);
 
     return {
       playlistId: playlist.id,
-      matched: uniqueTrackIds.length,
+      matched: matchedTrackIds.length,
       unmatched: unmatchedEntries.length,
       total: entries.length,
     };

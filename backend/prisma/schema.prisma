@@ -443,9 +443,9 @@ model PlaylistItem {
   playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
-  @@unique([playlistId, trackId])
   @@unique([playlistId, rank])
   @@index([playlistId, rank])
+  @@index([playlistId, trackId])
 }
 
 model PlaylistPendingTrack {
