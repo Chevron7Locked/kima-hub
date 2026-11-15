@@ -6,6 +6,9 @@ import { QUEUE_LENGTH } from "../utils/systemSettings";
 
 const router = express.Router();
 
+// A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
+const MAX_QUEUE_SOURCE_LENGTH = 200;
+
 /**
  * The operator's queue length limit, clamped on read in case the stored value was edited by hand. Read on every queue
  * write (one row by primary key), so a saved limit applies at once.
@@ -103,7 +106,7 @@ router.post("/", async (req, res) => {
         // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
         // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
         const safeQueueSource =
-            safeQueue !== null && typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= 200
+            safeQueue !== null && typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= MAX_QUEUE_SOURCE_LENGTH
                 ? queueSource
                 : null;
 

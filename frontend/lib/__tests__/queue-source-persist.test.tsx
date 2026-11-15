@@ -231,6 +231,19 @@ describe("songs added to a queue that came from a page", () => {
     });
 });
 
+describe("a queue that was cleared", () => {
+    it("takes nothing of the page it came from when songs are added to it afterwards", async () => {
+        await open();
+        await wait(50);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], 0, { source: "album:al-2" }));
+        await act(async () => probe.controls.clearQueue());
+        await act(async () => probe.controls.addToQueue(t("z") as never));
+        await wait(1500);
+        expect(probe.state.currentQueueSource).toBeNull();
+        expect(server.saves.at(-1)?.queueSource ?? null).toBeNull();
+    });
+});
+
 describe("jumping to another place in the queue", () => {
     it("keeps the queue, its shuffle order and the page it came from", async () => {
         await open();
