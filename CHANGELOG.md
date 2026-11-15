@@ -24,11 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Setting, clearing or resetting an artist picture or album cover makes Subsonic apps fetch their lists again.
+- Subsonic apps get an artist image address only when the picture is a real web address, so they no longer receive one they cannot open.
 - An artist picture you set now shows in Subsonic apps too: in artist lists, the artist page, search, artist info and cover art.
 - When you reopen the web player, the current song it shows always matches your place in the saved queue.
 - A queue that holds the same song twice is no longer saved one song short when the library removes a song at the same moment.
 - Saving your queue from the web player, the iOS app or a Subsonic app no longer drops songs whose file is missing or unreadable. They stay in the saved queue, hidden, and come back when the file is fixed.
-- When the current song is hidden because its file is missing, your place in the song is kept instead of reset to the start.
+- When the current song is hidden because its file is missing, the song shown in its place starts from the beginning, and your place in the hidden song is kept for when its file comes back.
 - An artist picture or album cover address you type in the editor must be a full http or https address. Anything else is refused.
 - A saved name edit or reset no longer shows an error when a follow-up library update fails.
 - An admin turning off someone's two-factor sign-in now signs that person out on every device.
