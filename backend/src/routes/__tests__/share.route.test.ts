@@ -977,6 +977,104 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             }
         });
 
+        describe('a first request that fails while a seek of the same play is open', () => {
+            /** A song long enough that a paused reply stays open. */
+            const longSong = async (name: string, trackNo: number) => {
+                fs.writeFileSync(path.join(config.music.musicPath, DIR, `${name}.flac`), Buffer.alloc(24 * 1024 * 1024));
+                return prisma.track.create({ data: { albumId, title: name, duration: 100, trackNo, filePath: `${DIR}/${name}.flac`, fileModified: new Date(), fileSize: 24 * 1024 * 1024 } });
+            };
+            /** A request to the running server from one address and browser, so every request is the same listener's. */
+            const over = (port: number, requestPath: string, headers: Record<string, string>) =>
+                new Promise<http.IncomingMessage>((resolve, reject) =>
+                    http.get({ host: '127.0.0.1', port, path: requestPath, headers: { 'User-Agent': 'one-listener', ...headers } }, resolve).on('error', reject));
+            /** Reads a reply to its end and answers its status. */
+            const drain = (reply: http.IncomingMessage) =>
+                new Promise<number | undefined>((resolve, reject) => {
+                    reply.on('error', reject).on('end', () => resolve(reply.statusCode)).resume();
+                });
+            /** Holds the statement that counts a play until `release`, and says when it is held. */
+            const stallCounting = () => {
+                const realExecute: any = prisma.$executeRaw.bind(prisma);
+                let release!: () => void;
+                let markStalled!: () => void;
+                const held = new Promise<void>((resolve) => (release = resolve));
+                const stalled = new Promise<void>((resolve) => (markStalled = resolve));
+                const spy = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
+                    String((args[0] as TemplateStringsArray)?.join?.(' ')).includes('+ 1')
+                        ? (markStalled(), held.then(() => realExecute(...args)))
+                        : realExecute(...args)) as never);
+                return { release, stalled, restore: () => spy.mockRestore() };
+            };
+
+            it('leaves the window and the play to the seek that is using them', async () => {
+                const long = await longSong('long3', 12);
+                const { token, id } = await own({}, long.id);
+                const stall = stallCounting();
+                const server = http.createServer(app).listen(0);
+                let seek: http.IncomingMessage | undefined;
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (path: string, headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${path}`, headers);
+                    // The first request takes the window and waits to count its play.
+                    const first = listen(long.id, { 'If-None-Match': '*' }).then(drain);
+                    await stall.stalled;
+                    const [key] = await redisClient.keys(`*${id}*`);
+                    const window = await redisClient.get(key);
+                    // The listener's seek finds the window and plays on, held open.
+                    seek = await listen(long.id, { Range: 'bytes=5-' });
+                    seek.pause();
+
+                    stall.release();
+                    // Nothing plays for the first request (304), and its play is given back, unless a seek is playing.
+                    expect(await first).toBe(304);
+                    await settleShareBackgroundWork();
+
+                    expect(await redisClient.get(key)).toBe(window);
+                    expect(await playsOf(token)).toBe(1);
+
+                    // The next seek is still a follow-up of that play.
+                    expect(await listen(long.id, { Range: 'bytes=9-' }).then(drain)).toBe(206);
+                    expect(await playsOf(token)).toBe(1);
+                } finally {
+                    stall.release();
+                    stall.restore();
+                    seek?.destroy();
+                    server.closeAllConnections();
+                    server.close();
+                }
+            }, 15_000);
+
+            it('frees the window and gives the play back once no response of it is open', async () => {
+                const long = await longSong('long4', 13);
+                const { token, id } = await own({}, long.id);
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${long.id}`, headers);
+                    const seek = await listen();
+                    seek.pause();
+                    const [key] = await redisClient.keys(`*${id}*`);
+                    const window = await redisClient.get(key);
+                    seek.destroy();
+                    await new Promise((resolve) => setTimeout(resolve, 150));
+                    await settleShareBackgroundWork();
+                    // The only response left its window to run out, and left no count behind.
+                    expect(await redisClient.exists(`share:open:${window}`)).toBe(0);
+                    expect(await playsOf(token)).toBe(1);
+
+                    // A first request that fails now, with nothing open, takes its play back and frees the window.
+                    await windowPasses(id);
+                    expect(await listen({ 'If-None-Match': '*' }).then(drain)).toBe(304);
+                    await settleShareBackgroundWork();
+                    expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+                    expect(await playsOf(token)).toBe(1);
+                } finally {
+                    server.closeAllConnections();
+                    server.close();
+                }
+            }, 15_000);
+        });
+
         it('a request that is not a follow-up does not leave a window behind when it is refused', async () => {
             const { token, id } = await own({ maxPlays: 0 });
             await request(app).get(`/share/${token}/stream/${songs.playable}`);
@@ -1018,7 +1116,9 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             const held = new Promise<number>((resolve) => (release = resolve));
             const reached = new Promise<void>((resolve) => (markReached = resolve));
             // The request's own claim of the window is renewed as the response closes (a script on the claim's token); that is held.
-            const expire = jest.spyOn(redisClient, 'eval').mockImplementation((() => (markReached(), held)) as never);
+            const realEval: any = redisClient.eval.bind(redisClient);
+            const expire = jest.spyOn(redisClient, 'eval').mockImplementation(((...args: unknown[]) =>
+                String(args[0]).includes('"pexpire"') && !String(args[0]).includes('"incr"') ? (markReached(), held) : realEval(...args)) as never);
             try {
                 expect((await get(token, songs.playable)).status).toBe(200);
                 await reached;
