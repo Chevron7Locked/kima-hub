@@ -18,8 +18,9 @@
  * Every question is scoped to one listener, except `albumsPlayedAtLeast`, which
  * asks of albums whoever played them. Which songs count is the caller's rule
  * (the playable-song rule, usually), passed in or composed in its own SQL.
- * The stats page and the play-history audit are the readers that leave out plays of Discover songs (`libraryOnly`, which
- * `withListens` and the audit's `playHistory` set): a Discover play is in no statistic. Every other reader keeps its own meaning.
+ * The stats page (`libraryOnly`, which `withListens` sets) and the play-history audit (which reports library plays only, though
+ * its `playHistory` carries every play, so a Discover play still ends the gap after a library one) leave Discover plays out of
+ * their statistics. Every other reader keeps its own meaning.
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  */
 
@@ -273,13 +274,13 @@ export async function albumsPlayedAtLeast(
 
 /**
  * Every Play row of this listener's, oldest first (the row id breaks a tie), with the song's title, length and artist: the
- * whole history, for the audit that looks for skips. Nothing calls it on a page load. `libraryOnly` leaves out the plays of
- * songs on a Discover album, told by the album's location, as the stats page does: the audit is a statistic, so it
- * counts and judges library plays only.
+ * whole history, for the audit that looks for skips. Nothing calls it on a page load. `library` says whether the song is on a
+ * library album (told by the album's location): the audit sequences every play but reports, collapses and removes library
+ * plays only.
  */
-export function playHistory(userId: string, options: { libraryOnly?: true } = {}) {
-    return prisma.play.findMany({
-        where: { userId, ...(options.libraryOnly ? { track: { album: { location: "LIBRARY" as const } } } : {}) },
+export async function playHistory(userId: string) {
+    const rows = await prisma.play.findMany({
+        where: { userId },
         orderBy: [{ playedAt: "asc" }, { id: "asc" }],
         select: {
             id: true,
@@ -291,11 +292,16 @@ export function playHistory(userId: string, options: { libraryOnly?: true } = {}
                     title: true,
                     displayTitle: true,
                     duration: true,
-                    album: { select: { artist: { select: { name: true, displayName: true } } } },
+                    album: { select: { location: true, artist: { select: { name: true, displayName: true } } } },
                 },
             },
         },
     });
+    return rows.map(({ track: { album: { location, artist }, ...track }, ...play }) => ({
+        ...play,
+        library: location === "LIBRARY",
+        track: { ...track, album: { artist } },
+    }));
 }
 
 /** How many Play rows this listener has from before `moment`. */

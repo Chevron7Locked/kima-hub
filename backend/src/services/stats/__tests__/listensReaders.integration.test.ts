@@ -165,12 +165,10 @@ describe("play history", () => {
         });
     });
 
-    it("leaves out the plays of Discover songs when asked for library plays only", async () => {
+    it("keeps the plays of Discover songs, and says which songs are on a library album", async () => {
         const all = await playHistory(A);
-        const library = await playHistory(A, { libraryOnly: true });
-        expect(all.some((r) => r.trackId === id("q1"))).toBe(true); // alb_q is the Discover album
-        expect(library.some((r) => r.trackId === id("q1"))).toBe(false);
-        expect(library).toHaveLength(all.filter((r) => r.trackId !== id("q1")).length);
+        expect(all.find((r) => r.trackId === id("q1"))?.library).toBe(false); // alb_q is the Discover album
+        expect(all.find((r) => r.trackId === id("p1"))?.library).toBe(true);
     });
 
     it("breaks a tie on the row id", async () => {

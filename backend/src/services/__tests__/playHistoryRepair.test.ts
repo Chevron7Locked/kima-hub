@@ -162,20 +162,26 @@ describe("Discover plays", () => {
         play("l3", 1000, 200, "lib3", true),
     ];
 
-    it("are in no part of the false-start audit", async () => {
+    it("are never reported by the false-start audit, nor counted in its totals", async () => {
         await given(history());
         const audit = await auditFalseStarts(USER);
-        expect(audit.tracks.map((t) => t.trackId)).toEqual([`${P}lib1`]);
+        expect(audit.tracks.map((t) => t.trackId).sort()).toEqual([`${P}lib1`, `${P}lib2`]);
         expect(audit.totalRows).toBe(3);
         expect(audit.totalListens).toBe(3);
     });
 
-    it("do not bound a library listen from above: with them out of the sequence, only the next library play does", async () => {
+    it("still end the gap after a library play: a Discover play after a library skip proves the skip", async () => {
         await given(history());
-        // lib2's next library play is 990 seconds away, so nothing proves it was left; the Discover play 90 seconds
-        // after it would have.
+        // lib2 was left 90 seconds before the Discover play started; that is under the 100 seconds it needed.
         const lib2 = (await listensOf(USER)).find((l) => l.trackId === `${P}lib2`);
-        expect(lib2?.verdict).toBe("unclear");
+        expect(lib2).toMatchObject({ gapAfterSeconds: 90, verdict: "skipped" });
+    });
+
+    it("proves a skip removed with the library plays only, and leaves the Discover rows alone", async () => {
+        await given(history());
+        expect(await removeFalseStarts(USER, [`${P}lib1`, `${P}lib2`, `${P}disc1`, `${P}disc2`])).toEqual({ removed: 2, tracks: 2 });
+        const left = await prisma.play.findMany({ where: { userId: USER }, select: { id: true }, orderBy: { playedAt: "asc" } });
+        expect(bare(left.map((r) => r.id))).toEqual(["d1", "d2", "l3"]);
     });
 
     it("are never collapsed or removed by the audit's actions", async () => {

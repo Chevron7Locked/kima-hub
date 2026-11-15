@@ -51,12 +51,13 @@ function judge(span: number, gapAfter: number | null, required: number | null): 
  * Reads the whole history. That is why nothing calls it on a page load.
  */
 export async function listensOf(userId: string): Promise<Listen[]> {
-    // A statistic, so Discover plays are in none of it: not in the report, nor in what the actions collapse or remove.
-    const plays = await playHistory(userId, { libraryOnly: true });
+    const plays = await playHistory(userId);
 
     // The gap to the next play of anything, in the order they happened. This is
     // the only thing that can bound a listen from above, so it is measured on
-    // the global sequence rather than per track.
+    // the global sequence rather than per track. Discover plays are in that
+    // sequence (a Discover song started right after a library one still ended
+    // it), but they are not listens here: nothing reports, collapses or removes one.
     const gapAfterRow = plays.map((p, i) => {
         const next = plays[i + 1];
         return next ? (next.playedAt.getTime() - p.playedAt.getTime()) / 1000 : null;
@@ -72,6 +73,7 @@ export async function listensOf(userId: string): Promise<Listen[]> {
     const recordedHeard = new Set<Listen>();
 
     plays.forEach((p, i) => {
+        if (!p.library) return;
         const window = Math.max(MIN_LISTEN_WINDOW_SECONDS, p.track.duration);
         const startedAt = listenStartedAt.get(p.trackId);
         // `<`: a row exactly one duration after the listen began starts a new listen,
