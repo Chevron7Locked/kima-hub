@@ -148,6 +148,8 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
     if (kept) return kept.boost;
 
     const lock = await takeLock(userId);
+    // A scan can outlast the lock's ttl; renewed while it runs, a second scanner does not start beside it.
+    const stopRenewal = lock.state === "mine" ? lock.lease.keepAlive() : () => {};
     try {
         if (lock.state === "busy") {
             const waited = await waitForKept(userId, signature);
@@ -163,6 +165,7 @@ async function resolveBoost(userId: string, now: Date): Promise<FamiliarBoost | 
         }
         return await writeKept(userId, { signature, boost });
     } finally {
+        stopRenewal();
         if (lock.state === "mine") {
             await lock.lease.release();
         }

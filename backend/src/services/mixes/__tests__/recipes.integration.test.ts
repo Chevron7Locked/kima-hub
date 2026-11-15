@@ -992,6 +992,25 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
         expect(await redisClient.get(lockKey)).toBe("someone-else");
     });
 
+    it("keeps the scan lock for a scan that runs longer than the lock lasts, and frees it after", async () => {
+        await heard("bg0", 5);
+        familiarTiming.lockSeconds = 0.6;
+        let tokenAtStart = "";
+        let tokenAfterTtl = "";
+        jest.spyOn(matchingRank, "topScores").mockImplementationOnce(async () => {
+            tokenAtStart = (await redisClient.get(lockKey)) ?? "";
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            tokenAfterTtl = (await redisClient.get(lockKey)) ?? "";
+            return [];
+        });
+
+        await familiarBoost(USER_ID);
+
+        expect(tokenAtStart).toMatch(/^[0-9a-f]{32}$/);
+        expect(tokenAfterTtl).toBe(tokenAtStart);
+        expect(await redisClient.exists(lockKey)).toBe(0);
+    });
+
     it("gives no boost, and keeps that for a minute at most, while the similarity data is not built", async () => {
         await heard("bg0", 5);
         await prisma.$executeRaw`DELETE FROM matching_state`;
