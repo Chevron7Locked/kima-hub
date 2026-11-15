@@ -1314,7 +1314,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playback.setDuration(durationS || resolved.duration || 0);
             playback.setCurrentTime(0);
             lastManualAdvanceAtRef.current = Date.now();
+            // The preload is used up; the entry now playing may be preloaded again as its own next (a one-song loop).
             pendingGaplessNextRef.current = null;
+            prewarmedKeyRef.current = null;
         };
 
         ctrl.on("gapless-advance", handleGaplessAdvance);

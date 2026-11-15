@@ -360,6 +360,18 @@ describe("the gapless preload follows the queue", () => {
         expect(probe.state.currentIndex).toBe(1);
     });
 
+    it("preloads again on every pass of a one-song queue that repeats", async () => {
+        await mountPage([A_B_A[0]]);
+        await act(async () => probe.controls.toggleRepeat()); // all
+        await startRow(0);
+        await act(async () => engine.emit("timeupdate", { time: 195 }));
+        expect(preloadedUrls()).toEqual(["/stream/A"]);
+        await act(async () => engine.emit("gapless-advance", { trackId: "A", durationS: 200 }));
+
+        await act(async () => engine.emit("timeupdate", { time: 195 })); // the second pass
+        expect(preloadedUrls()).toEqual(["/stream/A", "/stream/A"]);
+    });
+
     it("preloads the same entry again after the repeat mode dropped its preload", async () => {
         await preloadB();
 
