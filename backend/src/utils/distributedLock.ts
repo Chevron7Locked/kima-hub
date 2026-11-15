@@ -12,8 +12,9 @@ export type ReleaseOutcome = "released" | "lost" | "unreachable";
 /** A taken lock. Its token is drawn fresh at each acquire, so it lets go of, and renews, only its own take. */
 export interface LockLease {
   /**
-   * Aborts, with a LockLostError, once the lock is known to be lost: a renewal found it expired or another holder's,
-   * or Redis stayed unreachable for a whole ttl so it has expired. Work that must not run unlocked checks it.
+   * Aborts, with a LockLostError, once the lock is known to be lost: a renewal (see keepAlive) or the release found it
+   * expired or another holder's, or renewals could not reach Redis for a whole ttl so it has expired. Work that must
+   * not run unlocked checks it.
    */
   readonly signal: AbortSignal;
   /** Frees the lock if it is still this lease's. A lost lock is logged, once per lease. A second release answers as the first did. */
@@ -74,10 +75,10 @@ export class DistributedLock {
     let released: ReleaseOutcome | null = null;
     let confirmedAt = Date.now();
 
-    const markLost = () => {
+    const markLost = (why: string) => {
       if (!lostLogged) {
         lostLogged = true;
-        logger.warn(`[Lock] ${key} was lost: it expired or another holder took it while it was held`);
+        logger.warn(`[Lock] ${key} was lost: ${why}`);
       }
       if (!controller.signal.aborted) controller.abort(new LockLostError(key));
     };
@@ -85,33 +86,38 @@ export class DistributedLock {
     return {
       signal: controller.signal,
       release: async () => {
+        // "released" and "lost" are final. "unreachable" is not: a later release asks Redis again.
         if (released) return released;
         let outcome: ReleaseOutcome;
         try {
           outcome = (await this.redis.eval(RELEASE_SCRIPT, 1, lockKey, token)) === 1 ? "released" : "lost";
         } catch {
-          outcome = "unreachable";
+          logger.warn(`[Lock] ${key} could not be released, Redis is unreachable: it frees itself within ${ttlMs} ms`);
+          return "unreachable";
         }
         released = outcome;
-        if (outcome === "lost") markLost();
+        if (outcome === "lost") markLost("it expired or another holder took it before it was released");
         return outcome;
       },
       keepAlive: () => {
         let timer: NodeJS.Timeout | null = null;
         const renew = async () => {
           if (released) return;
+          // Stamped before asking: the key was extended no earlier than this, so the lock is never thought held longer than it is.
+          const askedAt = Date.now();
           try {
             const kept = await this.redis.eval(RENEW_SCRIPT, 1, lockKey, token, String(ttlMs));
             if (kept === 1) {
-              confirmedAt = Date.now();
+              confirmedAt = askedAt;
               return;
             }
-            markLost();
+            markLost("it expired or another holder took it while it was held");
             stop();
           } catch {
             // One missed renewal is retried on the next tick; the lock lasts its ttl from the last one that landed.
-            if (Date.now() - confirmedAt >= ttlMs) {
-              markLost();
+            // Lost once the next tick could land after the expiry, so the signal never fires late.
+            if (Date.now() - confirmedAt + Math.floor(ttlMs / 3) >= ttlMs) {
+              markLost(`Redis was unreachable for its whole ${ttlMs} ms lease`);
               stop();
             }
           }

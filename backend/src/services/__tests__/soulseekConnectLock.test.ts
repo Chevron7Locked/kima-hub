@@ -102,6 +102,36 @@ describe("the reconnect backoff", () => {
 
         expect(withLock).not.toHaveBeenCalled();
     });
+
+    it("goes back to the backoff when another caller made an attempt while it slept, and makes none of its own", async () => {
+        service().failedConnectionAttempts = 1;
+        service().lastConnectAttempt = Date.now();
+        const connect = jest.spyOn(service(), "connect").mockResolvedValue(undefined);
+        const withLock = jest.spyOn(distributedLock, "withLock");
+        const waiting = service().ensureConnected(false);
+        // Another caller's attempt starts and fails while this one sleeps, which lengthens the backoff.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        service().lastConnectAttempt = Date.now();
+        service().failedConnectionAttempts = 2;
+        const woke = Date.now();
+        // Pass the first wake-up (about 1 s) and see that it is still asleep at the old deadline.
+        const outcome = await Promise.race([
+            waiting.then(() => "done"),
+            new Promise((resolve) => setTimeout(() => resolve("asleep"), 1200)),
+        ]);
+
+        expect(outcome).toBe("asleep");
+        expect(withLock).not.toHaveBeenCalled();
+        expect(connect).not.toHaveBeenCalled();
+        // The caller is waiting out the new, longer backoff; let it end by connecting.
+        service().client = { loggedIn: true, server: { conn: { destroyed: false, writable: true } } };
+        try {
+            await waiting;
+        } finally {
+            service().client = null;
+        }
+        expect(Date.now() - woke).toBeGreaterThan(1200);
+    });
 });
 
 describe("a connect that loses the lock", () => {
@@ -128,6 +158,17 @@ describe("a connect that loses the lock", () => {
         expect(service.client).toBeNull();
         // A connect the lock was lost under is no failed attempt, so no backoff follows it.
         expect(service.failedConnectionAttempts).toBe(0);
+    });
+
+    it("tells of the loss, not of the connect error, when the connect then fails", async () => {
+        const service = soulseekService as any;
+        const aborted = new AbortController();
+        aborted.abort(new LockLostError("soulseek:connection"));
+        jest.spyOn(distributedLock, "withLock").mockImplementation((_key, _ttl, callback) => callback(aborted.signal));
+        jest.spyOn(service, "connect").mockRejectedValue(new Error("connect timed out"));
+
+        await expect(service.ensureConnected(true)).rejects.toBeInstanceOf(LockLostError);
+        service.failedConnectionAttempts = 0;
     });
 });
 

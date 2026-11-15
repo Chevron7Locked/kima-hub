@@ -490,19 +490,26 @@ class SoulseekService {
 
         // The backoff is slept before the lock is taken: the lock covers a connect (its connect and login timeouts
         // add up to 20 s) and is renewed while it runs, and a caller that finds it held waits for that connect.
+        // Sleepers wake at different times (the delay carries jitter). One that finds another attempt was made while it
+        // slept goes back to what that attempt left behind, a connected client or a longer backoff, and does not
+        // make an attempt of its own on top of it.
         if (!force) {
-            if (this.connecting && this.connectPromise) {
-                await this.connectPromise;
-                return;
-            }
-            await this.waitOutBackoff();
-            if (this.client && this.client.loggedIn && this.checkConnectionHealth()) {
-                return;
+            for (;;) {
+                if (this.connecting && this.connectPromise) {
+                    await this.connectPromise;
+                    return;
+                }
+                const attemptSeen = this.lastConnectAttempt;
+                await this.waitOutBackoff();
+                if (this.client && this.client.loggedIn && this.checkConnectionHealth()) {
+                    return;
+                }
+                if (this.lastConnectAttempt === attemptSeen) break;
             }
         }
 
         const lockKey = 'soulseek:connection';
-        const lockTtl = 60_000;
+        const lockTtl = 60000; // 3x a connect's worst case (CONNECT_TIMEOUT + LOGIN_TIMEOUT = 20 s), and renewed while it runs
 
         try {
             await distributedLock.withLock(lockKey, lockTtl, async (signal) => {
@@ -535,6 +542,11 @@ class SoulseekService {
                         `Connection failed (attempt #${this.failedConnectionAttempts}). Next retry delay: ${Math.round(this.getReconnectDelay() / 1000)}s`,
                         "ERROR"
                     );
+                    // A lost lock is what the caller needs to hear, over a connect error that may be its result.
+                    if (signal.aborted) {
+                        this.forceDisconnect();
+                        throw signal.reason;
+                    }
                     throw err;
                 } finally {
                     this.connecting = false;

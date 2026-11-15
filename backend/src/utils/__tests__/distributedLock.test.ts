@@ -61,7 +61,7 @@ describe("distributedLock.acquire", () => {
         }
     });
 
-    it("frees the key once the lease is released, and a second release does nothing", async () => {
+    it("frees the key once the lease is released, and a second release answers as the first did", async () => {
         const first = await distributedLock.acquire(KEY, 5000);
         if (first.outcome !== "acquired") throw new Error("expected the lock");
 
@@ -187,7 +187,7 @@ describe("lease.release says why it did not free the lock", () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
-    it("says unreachable, not lost, when Redis fails the release, and logs no loss", async () => {
+    it("says unreachable, not lost, when Redis fails the release, logs that once, and asks Redis again on a retry", async () => {
         const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
         const held = await distributedLock.acquire(KEY, 5000);
         if (held.outcome !== "acquired") throw new Error("expected the lock");
@@ -196,8 +196,9 @@ describe("lease.release says why it did not free the lock", () => {
         expect(await held.lease.release()).toBe("unreachable");
 
         expect(warn.mock.calls.filter(([message]) => String(message).includes("lost"))).toHaveLength(0);
-        jest.restoreAllMocks();
-        await redisClient.del(`lock:${KEY}`);
+        expect(warn.mock.calls.filter(([message]) => String(message).includes("unreachable"))).toHaveLength(1);
+        expect(await held.lease.release()).toBe("released");
+        expect(await redisClient.get(`lock:${KEY}`)).toBeNull();
     });
 });
 
