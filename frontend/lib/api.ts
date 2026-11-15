@@ -1498,6 +1498,8 @@ class ApiClient {
         audiobookId?: string | null;
         podcastId?: string | null;
         queue?: ApiData[];
+        /** The page whose play button started the queue (see `queue-source.ts`). Saved with `queue`; null clears it. */
+        queueSource?: string | null;
         currentIndex?: number;
         isShuffle?: boolean;
     }) {

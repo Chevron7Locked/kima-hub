@@ -138,6 +138,21 @@ describe("the parameters the Subsonic spec lets repeat act on every value", () =
         expect(state.trackId).toBe(songB);
     });
 
+    it("a queue a Subsonic app saves does not keep the web page it was saved from", async () => {
+        for (const save of [
+            `savePlayQueue.view?id=${songA}&id=${songB}&current=${songB}`,
+            `savePlayQueueByIndex.view?id=${songA}&id=${songB}&currentIndex=1`,
+        ]) {
+            await prisma.playbackState.upsert({
+                where: { userId: USER },
+                create: { userId: USER, playbackType: "track", queueSource: "album:a-1" },
+                update: { queueSource: "album:a-1" },
+            });
+            expect((await reply(save)).status).toBe("ok");
+            expect((await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } })).queueSource).toBeNull();
+        }
+    });
+
     it("scrobble records every id at its own time", async () => {
         const res = await reply(`scrobble.view?id=${songA}&time=1700000000000&id=${songB}&time=1700000100000`);
         expect(res.status).toBe("ok");

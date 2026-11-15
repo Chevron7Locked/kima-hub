@@ -398,6 +398,10 @@ model PlaybackState {
   audiobookId  String?
   podcastId    String?
   queue        Json?
+  /// The page whose play button started the queue ("album:<id>", "playlist:<id>", "discover" ...), set only while every
+  /// entry still came from it. Written with `queue`: a writer that does not send it (an older client, the iOS app,
+  /// Subsonic) clears it.
+  queueSource  String?
   currentIndex Int      @default(0)
   isShuffle    Boolean  @default(false)
   /// Offset into the current track, milliseconds. Subsonic clients

@@ -53,6 +53,7 @@ router.post("/", async (req, res) => {
             queue,
             currentIndex,
             isShuffle,
+            queueSource,
         } = req.body;
 
         if (!["track", "audiobook", "podcast"].includes(playbackType)) {
@@ -99,9 +100,17 @@ router.post("/", async (req, res) => {
               )
             : Math.max(0, currentIndex || 0);
 
+        // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and sends no
+        // source (an older client, the iOS app) clears it, and a save without a queue leaves it.
+        const safeQueueSource =
+            safeQueue !== null && typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= 200
+                ? queueSource
+                : null;
+
         const queueUpdate = queueProvided
             ? {
                   queue: safeQueue === null ? Prisma.DbNull : safeQueue,
+                  queueSource: safeQueueSource,
                   currentIndex: safeCurrentIndex,
               }
             : typeof currentIndex === "number"
@@ -126,6 +135,7 @@ router.post("/", async (req, res) => {
                 audiobookId: audiobookId || null,
                 podcastId: podcastId || null,
                 queue: safeQueue === null ? Prisma.DbNull : safeQueue,
+                queueSource: safeQueueSource,
                 currentIndex: safeCurrentIndex,
                 isShuffle: isShuffle || false,
             },

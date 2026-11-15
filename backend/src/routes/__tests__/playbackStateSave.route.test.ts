@@ -85,6 +85,44 @@ describe("POST /api/playback-state", () => {
     });
 });
 
+describe("POST /api/playback-state: where the queue came from", () => {
+    const queue = [{ id: "t1", title: "one", duration: 100 }, { id: "t2", title: "two", duration: 100 }];
+    const save = (userId: string, body: object) => request(app).post("/api/playback-state").set("x-user", userId).send(body);
+    const storedSource = async (userId: string) =>
+        ((await prisma.playbackState.findUnique({ where: { userId } })) as { queueSource?: string | null } | null)?.queueSource;
+
+    it("keeps the source saved with a queue, and answers it", async () => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-src`, passwordHash: "x", role: "user" } });
+        const res = await save(user.id, { playbackType: "track", queue, queueSource: "album:a-1" }).expect(200);
+        expect(res.body.queueSource).toBe("album:a-1");
+        expect(await storedSource(user.id)).toBe("album:a-1");
+    });
+
+    it("clears the source when a queue is saved without one, as an older client or the iOS app does", async () => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-src-clear`, passwordHash: "x", role: "user" } });
+        await save(user.id, { playbackType: "track", queue, queueSource: "playlist:p-1" }).expect(200);
+        await save(user.id, { playbackType: "track", queue }).expect(200);
+        expect(await storedSource(user.id)).toBeNull();
+    });
+
+    it("leaves the source alone on a save that sends no queue", async () => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-src-partial`, passwordHash: "x", role: "user" } });
+        await save(user.id, { playbackType: "track", queue, queueSource: "mix:m-1" }).expect(200);
+        await save(user.id, { playbackType: "track", isShuffle: true, currentIndex: 1 }).expect(200);
+        expect(await storedSource(user.id)).toBe("mix:m-1");
+    });
+
+    it("drops a source that is not a short string, and one saved with an empty queue", async () => {
+        const user = await prisma.user.create({ data: { username: `${PREFIX}-src-bad`, passwordHash: "x", role: "user" } });
+        await save(user.id, { playbackType: "track", queue, queueSource: { x: 1 } }).expect(200);
+        expect(await storedSource(user.id)).toBeNull();
+        await save(user.id, { playbackType: "track", queue, queueSource: "x".repeat(500) }).expect(200);
+        expect(await storedSource(user.id)).toBeNull();
+        await save(user.id, { playbackType: "track", queue: [], queueSource: "album:a-1" }).expect(200);
+        expect(await storedSource(user.id)).toBeNull();
+    });
+});
+
 describe("GET /api/playback-state/limit", () => {
     it("answers a newly saved limit at once, not one the server read earlier", async () => {
         const before = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { maxQueueLength: true } });

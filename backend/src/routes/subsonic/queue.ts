@@ -212,6 +212,8 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // A queue a Subsonic app saved did not come from a Kima page.
+            queueSource: null,
             currentIndex,
             isShuffle: false,
             position: storedPosition,
@@ -224,6 +226,8 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // A queue a Subsonic app saved did not come from a Kima page.
+            queueSource: null,
             currentIndex,
             isShuffle: false,
             position: storedPosition,
@@ -288,6 +292,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // A queue a Subsonic app saved did not come from a Kima page.
+            queueSource: null,
             currentIndex,
             isShuffle: false,
             position: storedPosition,
@@ -300,6 +306,8 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
             audiobookId: null,
             podcastId: null,
             queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // A queue a Subsonic app saved did not come from a Kima page.
+            queueSource: null,
             currentIndex,
             isShuffle: false,
             position: storedPosition,

@@ -706,6 +706,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             upNextInsertRef.current = next.upNextAt;
             shuffleInsertPosRef.current = next.shufflePos;
 
+            // Added to the queue, not replacing it: the queue still came from the page that started it.
+            state.extendQueueOrigin([track.queueKey!]);
             state.setQueue(next.queue);
             if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
         },
@@ -714,7 +716,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const appendToQueue = useCallback(
         (songs: Track[]) => {
-            const next = appendTracks(queueSnapshot(), freshQueueKeys(songs));
+            const added = freshQueueKeys(songs);
+            const next = appendTracks(queueSnapshot(), added);
+            state.extendQueueOrigin(added.map((song) => song.queueKey!));
             queueRef.current = next.queue;
             shuffleIndicesRef.current = next.shuffleIndices;
             state.setQueue(next.queue);
