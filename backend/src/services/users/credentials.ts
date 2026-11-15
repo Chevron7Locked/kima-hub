@@ -53,8 +53,20 @@ export async function spendTotpStep(userId: string, step: number): Promise<boole
     return spent.count === 1;
 }
 
-/** A recovery code is eight hex characters; an authenticator code is six numerals, so the two are never mistaken. */
-const RECOVERY_CODE = /^[A-F0-9]{8}$/i;
+/**
+ * A recovery code is sixteen hex characters (8 random bytes); lists made before that hold eight. An authenticator code is
+ * six numerals, so the two are never mistaken.
+ */
+const RECOVERY_CODE = /^([A-F0-9]{8}|[A-F0-9]{16})$/i;
+
+/**
+ * A second-factor code as a person types or pastes it: spaces and dashes (a copied "1234-5678" or "123 456") and the
+ * line break around it are dropped, and a recovery code is put in upper case. Whatever is left is checked as it stands.
+ */
+export function normalizeSecondFactor(typed: string): string {
+    const bare = typed.replace(/[\s-]/g, "");
+    return isRecoveryCodeShaped(bare) ? bare.toUpperCase() : bare;
+}
 
 /** Whether a code is shaped like a recovery code rather than an authenticator code. */
 export function isRecoveryCodeShaped(token: string): boolean {
@@ -111,12 +123,26 @@ export function newRecoveryCodes(): { codes: string[]; stored: string } {
     const codes: string[] = [];
     const hashes: string[] = [];
     for (let i = 0; i < 10; i++) {
-        // Eight hex characters, stored only as a hash.
-        const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+        // Sixteen hex characters, stored only as a hash.
+        const code = crypto.randomBytes(8).toString("hex").toUpperCase();
         codes.push(code);
         hashes.push(crypto.createHash("sha256").update(code).digest("hex"));
     }
     return { codes, stored: encrypt(hashes.join(",")) };
+}
+
+/**
+ * Replaces a person's whole recovery list with ten new codes, only if the list stored is still `readList`: the one the
+ * caller read after spending its own code. Returns the new codes to show once, or null when the list changed (or 2FA
+ * was turned off) in between, so two requests cannot both be told their list is the one in force.
+ */
+export async function replaceRecoveryCodes(userId: string, readList: string | null): Promise<string[] | null> {
+    const fresh = newRecoveryCodes();
+    const written = await prisma.user.updateMany({
+        where: { id: userId, twoFactorEnabled: true, twoFactorRecoveryCodes: readList },
+        data: { twoFactorRecoveryCodes: fresh.stored },
+    });
+    return written.count === 1 ? fresh.codes : null;
 }
 
 /** The most tries to spend a code while other sign-ins keep changing the list: each lost try means another spent one of ten. */

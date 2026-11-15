@@ -178,7 +178,7 @@ describe("turning it on", () => {
         const res = await enable(codeNow()).expect(200);
 
         expect(res.body.recoveryCodes).toHaveLength(10);
-        for (const code of res.body.recoveryCodes) expect(code).toMatch(/^[0-9A-F]{8}$/);
+        for (const code of res.body.recoveryCodes) expect(code).toMatch(/^[0-9A-F]{16}$/);
     });
 
     it("spends the code it was turned on with, so that code cannot then sign in, but the next step's can", async () => {
@@ -218,15 +218,37 @@ describe("turning it on while it is on", () => {
         expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
     });
 
-    it("keeps a step spent by turning it off spent when it is turned back on with an older step's code", async () => {
+    it("keeps the step that turned it on spent, so an earlier step's code cannot sign in", async () => {
         await twoFactorOn();
-        const spentByDisable = codeNow();
-        await disable(spentByDisable).expect(200);
+        await disable(codeNow()).expect(200);
 
         await setupDone();
-        await enable(codeAt(-1)).expect(200);
+        await enable(codeAt(1)).expect(200);
 
-        expect((await login(spentByDisable)).status).toBe(401);
+        expect((await login(codeAt(0))).status).toBe(401);
+    });
+});
+
+describe("turning it off clears the spent step", () => {
+    it("whichever kind of code turned it off: the step is back to nothing spent, with the secret gone", async () => {
+        const [recovery] = await twoFactorOn();
+        expect((await login(codeNow())).status).toBe(200);
+        expect((await stored()).twoFactorLastStep).toBeGreaterThan(0);
+
+        await disable(recovery).expect(200);
+        expect(await stored()).toMatchObject({ twoFactorEnabled: false, twoFactorSecret: null, twoFactorLastStep: 0 });
+
+        await twoFactorOn();
+        await disable(codeNow()).expect(200);
+        expect((await stored()).twoFactorLastStep).toBe(0);
+    });
+
+    it("leaves the session alone: the signed-in token still works afterwards", async () => {
+        await twoFactorOn();
+
+        await disable(codeNow()).expect(200);
+
+        await request(app).get("/auth/2fa/status").set("Authorization", bearer()).expect(200);
     });
 });
 
@@ -536,7 +558,7 @@ describe("new recovery codes", () => {
 
         const fresh: string[] = res.body.recoveryCodes;
         expect(fresh).toHaveLength(10);
-        for (const code of fresh) expect(code).toMatch(/^[0-9A-F]{8}$/);
+        for (const code of fresh) expect(code).toMatch(/^[0-9A-F]{16}$/);
         expect(fresh.some((code) => old.includes(code))).toBe(false);
         expect((await login(old[0])).status).toBe(401);
         expect((await login(fresh[0])).status).toBe(200);
@@ -603,6 +625,185 @@ describe("new recovery codes", () => {
         nextStep();
         expect((await login(res.body.recoveryCodes[0])).status).toBe(200);
         jest.mocked(logger.warn).mockRestore();
+    });
+});
+
+describe("what the log says about 2FA", () => {
+    let info: jest.SpyInstance;
+    beforeEach(() => { info = jest.spyOn(logger, "info").mockImplementation(() => undefined as never); });
+    afterEach(() => info.mockRestore());
+    const lines = () => info.mock.calls.map((call) => call.join(" "));
+    const about = (what: RegExp) => lines().filter((line) => line.includes(USER) && what.test(line));
+
+    it("names the person and what they did when they turn it on, make new recovery codes, and turn it off; never a code or secret", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+        const on = await enable(codeFor(made)).expect(200);
+        nextStep();
+        const fresh = (await newCodes(codeFor(made)).expect(200)).body.recoveryCodes as string[];
+        nextStep();
+        await disable(codeFor(made)).expect(200);
+
+        expect(about(/turned on 2FA/)).toHaveLength(1);
+        expect(about(/made new recovery codes/)).toHaveLength(1);
+        expect(about(/turned off 2FA/)).toHaveLength(1);
+        const everything = lines().join("\n");
+        for (const text of [made, ...on.body.recoveryCodes, ...fresh]) expect(everything).not.toContain(text);
+    });
+
+    it("says nothing when the request was refused", async () => {
+        await twoFactorOn();
+
+        await disable("000000").expect(400);
+        await newCodes("000000").expect(400);
+        await enable("000000").expect(400);
+
+        expect(lines().filter((line) => /2FA/.test(line))).toEqual([]);
+    });
+});
+
+describe("a recovery code of sixteen characters", () => {
+    it("is taken once at sign-in, in either case; a wrong one is a wrong recovery code", async () => {
+        await twoFactorOn();
+        const fresh: string[] = (await newCodes(codeNow()).expect(200)).body.recoveryCodes;
+
+        expect((await login(fresh[0].toLowerCase())).status).toBe(200);
+        const again = await login(fresh[0]);
+        expect([again.status, again.body.error]).toEqual([401, "Invalid recovery code"]);
+        const wrong = await login("0123456789ABCDEF");
+        expect([wrong.status, wrong.body.error]).toEqual([401, "Invalid recovery code"]);
+    });
+
+    it("is made by an eight-character code from an older list, and then turns 2FA off", async () => {
+        const [old] = await twoFactorOn();
+        const [long] = (await newCodes(old).expect(200)).body.recoveryCodes as string[];
+        expect(long).toHaveLength(16);
+
+        await disable(long).expect(200);
+
+        expect((await stored()).twoFactorEnabled).toBe(false);
+    });
+
+    it("leaves an older list's eight-character codes working until the list is replaced", async () => {
+        const [first, second] = await twoFactorOn();
+
+        expect((await login(first)).status).toBe(200);
+        await disable(second).expect(200);
+    });
+
+    it("is not confused with a length that is neither: twelve characters are read as an authenticator code", async () => {
+        await twoFactorOn();
+
+        const res = await login("0123456789AB");
+
+        expect([res.status, res.body.error]).toEqual([401, "Invalid 2FA token"]);
+    });
+});
+
+describe("a code typed the way people copy it", () => {
+    const spaced = (code: string) => `${code.slice(0, 4)} ${code.slice(4)}`;
+    const dashed = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+
+    it("signs in with a recovery code in lower case, spaced, dashed, or with either around it", async () => {
+        const codes = await twoFactorOn();
+
+        expect((await login(` ${codes[0].toLowerCase()} `)).status).toBe(200);
+        expect((await login(spaced(codes[1]))).status).toBe(200);
+        expect((await login(dashed(codes[2]).toLowerCase())).status).toBe(200);
+        expect((await login(`- ${dashed(codes[3])}\n`)).status).toBe(200);
+        expect((await login(codes[0])).status).toBe(401);
+    });
+
+    it("turns it on with an authenticator code typed as 123 456, and signs in with one typed 123-456", async () => {
+        const made = (await setup().expect(200)).body.secret as string;
+        const code = codeFor(made);
+
+        await enable(`${code.slice(0, 3)} ${code.slice(3)}`).expect(200);
+        nextStep();
+        const next = codeFor(made);
+        expect((await login(`${next.slice(0, 3)}-${next.slice(3)}`)).status).toBe(200);
+    });
+
+    it("turns it off, and makes new codes, with a spaced recovery code in lower case", async () => {
+        const codes = await twoFactorOn();
+        const typed = (code: string) => ` ${code.slice(0, 4)} ${code.slice(4).toLowerCase()}\n`;
+
+        await newCodes(typed(codes[0])).expect(200);
+        const fresh = await twoFactorOn();
+        await disable(typed(fresh[0])).expect(200);
+    });
+
+    it("answers 400 to a code that is nothing but spaces and dashes, and asks for the code at sign-in", async () => {
+        await twoFactorOn();
+
+        await enable(" - ").expect(400);
+        await disable("---").expect(400);
+        await newCodes("   ").expect(400);
+        expect((await login(" - ")).body.requires2FA).toBe(true);
+    });
+});
+
+describe("new recovery codes asked for together", () => {
+    it("leave exactly one list in force: the loser is told to try again, or its list was the one replaced", async () => {
+        await twoFactorOn();
+
+        const results = await Promise.all([newCodes(codeAt(-1)), newCodes(codeAt(0))]);
+
+        const lists = results.filter((r) => r.status === 200).map((r) => r.body.recoveryCodes as string[]);
+        expect(lists.length).toBeGreaterThanOrEqual(1);
+        for (const r of results.filter((r) => r.status !== 200)) expect([400, 409]).toContain(r.status);
+        const working = [];
+        for (const list of lists) if ((await login(list[0])).status === 200) working.push(list);
+        expect(working).toHaveLength(1);
+    });
+
+    /** Runs `change` once, right after the request has read the list it will write over (the read that selects only the list). */
+    function afterListIsRead(change: () => Promise<void>): jest.SpyInstance {
+        const real = prisma.user.findUnique.bind(prisma.user);
+        let done = false;
+        return jest.spyOn(prisma.user, "findUnique").mockImplementation(((args: any) => {
+            const result = real(args);
+            const keys = Object.keys(args?.select ?? {});
+            if (!done && keys.length === 1 && keys[0] === "twoFactorRecoveryCodes") {
+                done = true;
+                return result.then(async (r: any) => { await change(); return r; });
+            }
+            return result;
+        }) as any);
+    }
+
+    it("answers 409 to the one whose list was replaced after it read it, and keeps the list that replaced it", async () => {
+        await twoFactorOn();
+        const interloper = encrypt("not-a-hash");
+        const spy = afterListIsRead(async () => {
+            await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: interloper } });
+        });
+
+        const res = await newCodes(codeNow());
+        spy.mockRestore();
+
+        expect([res.status, res.body.error]).toEqual([409, "Recovery codes changed, try again"]);
+        expect((await stored()).twoFactorRecoveryCodes).toBe(interloper);
+    });
+
+    it("answers 409 as well when a sign-in spent one of the codes in between, and the sign-in's spend stands", async () => {
+        const codes = await twoFactorOn();
+        const spy = afterListIsRead(async () => { await login(codes[4]).expect(200); });
+
+        const res = await newCodes(codeNow());
+        spy.mockRestore();
+
+        expect(res.status).toBe(409);
+        expect((await login(codes[4])).status).toBe(401);
+        expect((await login(codes[5])).status).toBe(200);
+    });
+
+    it("writes over the list it read after spending a recovery code of its own, which is the usual case", async () => {
+        const [code] = await twoFactorOn();
+
+        const res = await newCodes(code).expect(200);
+
+        expect((await login(res.body.recoveryCodes[0])).status).toBe(200);
+        expect((await login(code)).status).toBe(401);
     });
 });
 

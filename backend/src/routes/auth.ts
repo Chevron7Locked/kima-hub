@@ -6,7 +6,7 @@ import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import jwt from "jsonwebtoken";
-import { isRecoveryCodeShaped, newRecoveryCodes, NO_ACCOUNT_PASSWORD_HASH, readPendingTwoFactorSecret, readTwoFactorSecret, spendSecondFactor, totpStep, warnIfRecoveryListUnreadable } from "../services/users/credentials";
+import { isRecoveryCodeShaped, newRecoveryCodes, NO_ACCOUNT_PASSWORD_HASH, normalizeSecondFactor, readPendingTwoFactorSecret, readTwoFactorSecret, replaceRecoveryCodes, spendSecondFactor, totpStep, warnIfRecoveryListUnreadable } from "../services/users/credentials";
 import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
@@ -28,10 +28,15 @@ const SETUP_AGAIN = "Start setup again: there is no 2FA setup waiting, or it tim
 const UNREADABLE_SECRET = "2FA is on but its secret cannot be read, so it was left on";
 const UNREADABLE_SECRET_CODES = "2FA is on but its secret cannot be read, so the recovery codes were left as they were";
 
+const RECOVERY_CHANGED = "Recovery codes changed, try again";
+
+/** A code as typed: spaces and dashes dropped, a recovery code in upper case. Nothing left is a 400. */
+const secondFactor = z.string().transform(normalizeSecondFactor).pipe(z.string().min(1));
+
 /** The bodies of the 2FA routes: strings only. Anything else is a 400. A `secret` the client still sends is ignored. */
 const setupBody = z.object({}).optional();
-const enableBody = z.object({ token: z.string().min(1) });
-const proveBody = z.object({ password: z.string().min(1), token: z.string().min(1) });
+const enableBody = z.object({ token: secondFactor });
+const proveBody = z.object({ password: z.string().min(1), token: secondFactor });
 
 /** A zod refusal as the 400 the routes answer; null when the error is something else. */
 function invalidBody(err: unknown, res: Response): Response | null {
@@ -48,8 +53,9 @@ const loginSchema = z.object({
 router.post("/login", async (req, res) => {
     try {
         const { username: given, password } = loginSchema.parse(req.body);
-        // The two-factor code, if sent; a client may send it as a number.
-        const token = req.body.token == null || req.body.token === "" ? undefined : String(req.body.token);
+        // The two-factor code, if sent; a client may send it as a number. A code that is only spaces counts as not sent.
+        const typed = req.body.token == null ? "" : normalizeSecondFactor(String(req.body.token));
+        const token = typed === "" ? undefined : typed;
 
         const user = await findUserByUsername(given, {
             id: true,
@@ -444,6 +450,8 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
             return res.status(400).json({ error: now?.twoFactorEnabled ? ALREADY_ENABLED : SETUP_AGAIN });
         }
 
+        logger.info(`[2FA] ${req.user!.id} turned on 2FA`);
+
         // Return the plain recovery codes to the user (only time they'll see them)
         res.json({
             message: "2FA enabled successfully",
@@ -500,8 +508,12 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
                 twoFactorRecoveryCodes: null,
                 twoFactorPendingSecret: null,
                 twoFactorPendingAt: null,
+                // Nothing is spent once there is no secret: a later setup starts from no spent step.
+                twoFactorLastStep: 0,
             },
         });
+
+        if (user.twoFactorEnabled) logger.info(`[2FA] ${user.id} turned off 2FA`);
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {
@@ -539,17 +551,21 @@ router.post("/2fa/recovery-codes", authLimiter, async (req, res) => {
             return res.status(400).json({ error: "Invalid 2FA token" });
         }
 
-        // The old list goes, readable or not: a person who proved a current code gets a list they can use.
-        const recovery = newRecoveryCodes();
-        const written = await prisma.user.updateMany({
-            where: { id: user.id, twoFactorEnabled: true },
-            data: { twoFactorRecoveryCodes: recovery.stored },
-        });
-        if (written.count !== 1) {
-            return res.status(400).json({ error: "2FA is not enabled" });
+        // The old list goes, readable or not: a person who proved a current code gets a list they can use. Spending a
+        // recovery code changed the list, so it is read again, and only that list is written over: if another request
+        // changed it since, this one is told to try again and nothing it made is kept.
+        const read = await prisma.user.findUnique({ where: { id: user.id }, select: { twoFactorRecoveryCodes: true } });
+        const codes = await replaceRecoveryCodes(user.id, read?.twoFactorRecoveryCodes ?? null);
+        if (codes === null) {
+            const now = await prisma.user.findUnique({ where: { id: user.id }, select: { twoFactorEnabled: true } });
+            return now?.twoFactorEnabled
+                ? res.status(409).json({ error: RECOVERY_CHANGED })
+                : res.status(400).json({ error: "2FA is not enabled" });
         }
 
-        res.json({ recoveryCodes: recovery.codes });
+        logger.info(`[2FA] ${user.id} made new recovery codes`);
+
+        res.json({ recoveryCodes: codes });
     } catch (error) {
         if (invalidBody(error, res)) return;
         logger.error("2FA recovery codes error:", error);
