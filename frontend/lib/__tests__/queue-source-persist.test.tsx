@@ -261,6 +261,18 @@ describe("jumping to another place in the queue", () => {
     });
 });
 
+describe("starting a queue at a place that is not in it", () => {
+    it.each([7, -1, 1.5, Number.NaN])("plays from the start for place %s, as the queue's own page", async (place) => {
+        await open();
+        await wait(50);
+        await act(async () => probe.controls.playTracks([t("c") as never, t("d") as never], place, { source: "album:al-2" }));
+        expect(probe.state.currentTrack?.id).toBe("c");
+        expect(probe.state.currentIndex).toBe(0);
+        expect(probe.state.queue.map((q) => q.id)).toEqual(["c", "d"]);
+        expect(probe.state.currentQueueSource).toBe("album:al-2");
+    });
+});
+
 describe("a queue adopted from another device", () => {
     it("brings that device's page with it", async () => {
         const tick = capturePoll();

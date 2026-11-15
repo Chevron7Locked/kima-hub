@@ -317,8 +317,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playTracks = useCallback(
-        (songs: Track[], startIndex = 0, { skipOperationCheck = false, source }: PlayTracksOptions = {}) => {
+        (songs: Track[], requestedIndex = 0, { skipOperationCheck = false, source }: PlayTracksOptions = {}) => {
             if (songs.length === 0) return;
+            // A place the list does not have (a stale index, a list that shrank) starts it from the top.
+            const startIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < songs.length ? requestedIndex : 0;
             const tracks = withQueueKeys(songs);
             state.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey!)) } : null);
             stationRef.current = null;
