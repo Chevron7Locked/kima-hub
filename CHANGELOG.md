@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A playback change made just before you close or hide the tab is saved instead of lost.
+- Picking up where another device left off no longer overwrites that device's newer playback with an older one.
+- A shared song's play is no longer kept open by a request the share refused, a shared play that never sent any audio is not counted against the link, and a database failure while counting a play no longer lets the next request play for free.
+- Moods and stations no longer move a borderline song in or out from one run to the next.
 - A shared song you are still listening to keeps its play when another request of the same play fails, so seeking never counts it twice.
 - Soulseek: a connection that cannot be closed cleanly is logged and dropped, so the next reconnect starts clean.
 - A saved mood mix no longer keeps songs removed from your library; a replaced file's copy takes its place.
