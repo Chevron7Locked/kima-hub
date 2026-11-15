@@ -2,6 +2,7 @@ import crypto from "crypto";
 import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
 import { decrypt, encrypt } from "../../utils/encryption";
+import { logger } from "../../utils/logger";
 
 /**
  * A bcrypt hash at the cost real ones use (10) that no password matches: checking a name that does not exist against
@@ -20,6 +21,24 @@ export function totpStep(secret: string, token: string): number | null {
     const now = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
     const match = speakeasy.totp.verifyDelta({ secret, encoding: "base32", token, window: 2, counter: now });
     return match ? now + match.delta : null;
+}
+
+/**
+ * The two-factor secret of an account that has it on, readable, or null when none is stored or the key cannot read it
+ * (an unreadable credential). Either way the stored value is left as it is, and the reason is logged, so the caller
+ * can refuse the request instead of treating the account as having no second factor.
+ */
+export function readTwoFactorSecret(userId: string, stored: string | null): string | null {
+    if (!stored) {
+        logger.warn(`[2FA] ${userId} has two-factor on but no secret stored; refusing`);
+        return null;
+    }
+    try {
+        return decrypt(stored);
+    } catch (error) {
+        logger.warn(`[2FA] ${userId} has a two-factor secret the current key cannot read; refusing, it is kept as stored:`, error);
+        return null;
+    }
 }
 
 /**
@@ -47,7 +66,14 @@ export async function spendRecoveryCode(userId: string, encryptedCodes: string |
     let current = encryptedCodes;
     for (let attempt = 0; attempt < MAX_SPEND_TRIES; attempt++) {
         if (!current) return false;
-        const codes = decrypt(current).split(",");
+        let codes: string[];
+        try {
+            codes = decrypt(current).split(",");
+        } catch (error) {
+            // An unreadable list is kept as it is, and no code is taken from it.
+            logger.warn(`[2FA] ${userId} has a recovery-code list the current key cannot read; refusing, it is kept as stored:`, error);
+            return false;
+        }
         const index = codes.indexOf(hash);
         if (index === -1) return false;
         codes.splice(index, 1);

@@ -16,6 +16,7 @@ import request from "supertest";
 import bcrypt from "bcrypt";
 import speakeasy from "speakeasy";
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { encrypt } from "../../utils/encryption";
 import { generateToken, clearUserCache } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -29,7 +30,11 @@ const bearer = () => `Bearer ${generateToken({ id: USER, username: USER, role: "
 const login = (token?: string) => request(app).post("/auth/login").send({ username: USER, password: PASSWORD, ...(token ? { token } : {}) });
 const enable = (token: string) => request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ secret, token });
 const disable = (token: string, password = PASSWORD) => request(app).post("/auth/2fa/disable").set("Authorization", bearer()).send({ password, token });
+const setup = () => request(app).post("/auth/2fa/setup").set("Authorization", bearer());
 const secret = speakeasy.generateSecret({ length: 20 }).base32;
+/** Stored text the key cannot open: the right format, but no sealed value under this key. */
+const UNREADABLE = "xc1." + Buffer.alloc(60, 7).toString("base64url");
+const stored = () => prisma.user.findUniqueOrThrow({ where: { id: USER }, select: { twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true, twoFactorLastStep: true } });
 
 const STEP_MS = 30_000;
 let clock = 1_800_000_000_000;
@@ -88,6 +93,115 @@ describe("turning it on", () => {
         expect((await login(enabling)).status).toBe(401);
         nextStep();
         expect((await login(codeNow())).status).toBe(200);
+    });
+});
+
+describe("turning it on while it is on", () => {
+    it("is refused at setup and at enable, and leaves the secret, the recovery codes and the spent step as they were", async () => {
+        const codes = await twoFactorOn();
+        const before = await stored();
+        const newSecret = speakeasy.generateSecret({ length: 20 }).base32;
+        const newCode = speakeasy.totp({ secret: newSecret, encoding: "base32", time: clock / 1000 });
+
+        expect((await setup()).status).toBe(400);
+        const res = await request(app).post("/auth/2fa/enable").set("Authorization", bearer()).send({ secret: newSecret, token: newCode });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/already enabled/i);
+        expect(await stored()).toEqual(before);
+        expect((await login(codes[0]).expect(200)).body.token).toEqual(expect.any(String));
+        nextStep();
+        expect((await login(codeNow())).status).toBe(200);
+    });
+
+    it("does not let two requests turn it on at once", async () => {
+        const first = speakeasy.generateSecret({ length: 20 }).base32;
+        const second = speakeasy.generateSecret({ length: 20 }).base32;
+        const send = (s: string) => request(app).post("/auth/2fa/enable").set("Authorization", bearer())
+            .send({ secret: s, token: speakeasy.totp({ secret: s, encoding: "base32", time: clock / 1000 }) });
+
+        const results = await Promise.all([send(first), send(second)]);
+
+        expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    });
+
+    it("keeps a step spent by turning it off spent when it is turned back on with an older step's code", async () => {
+        await twoFactorOn();
+        const spentByDisable = codeNow();
+        await disable(spentByDisable).expect(200);
+
+        await enable(codeAt(-1)).expect(200);
+
+        expect((await login(spentByDisable)).status).toBe(401);
+    });
+});
+
+describe("a credential the key cannot read", () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => { warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never); });
+    afterEach(() => warn.mockRestore());
+
+    it("refuses the sign-in cleanly, keeps the stored secret, and logs why once per attempt", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+        const before = await stored();
+
+        for (const attempt of [login(), login("123456")]) {
+            const res = await attempt;
+            expect(res.status).toBe(401);
+            expect(res.body.token).toBeUndefined();
+        }
+
+        expect(await stored()).toEqual(before);
+        expect(warn).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses a sign-in when 2FA is on but no secret is stored, rather than signing in without a code", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: null } });
+
+        const res = await login();
+
+        expect(res.status).toBe(401);
+        expect(res.body.token).toBeUndefined();
+        expect((await stored()).twoFactorEnabled).toBe(true);
+    });
+
+    it("refuses a recovery code when the list is unreadable, keeps the list, and still takes a current code", async () => {
+        const [code] = await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorRecoveryCodes: UNREADABLE } });
+
+        expect((await login(code)).status).toBe(401);
+        expect((await stored()).twoFactorRecoveryCodes).toBe(UNREADABLE);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect((await login(codeNow())).status).toBe(200);
+    });
+
+    it("is not turned off by the disable route, with or without a right code, and is left as it is", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+        const before = await stored();
+
+        expect((await disable(codeNow())).status).toBe(409);
+        expect((await disable("000000")).status).toBe(409);
+
+        expect(await stored()).toEqual(before);
+    });
+
+    it("is not turned off by the disable route when 2FA is on with no secret stored", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: null } });
+
+        expect((await disable("000000")).status).toBe(409);
+
+        expect((await stored()).twoFactorEnabled).toBe(true);
+    });
+
+    it("still asks a wrong password first, before saying anything about the credential", async () => {
+        await twoFactorOn();
+        await prisma.user.update({ where: { id: USER }, data: { twoFactorSecret: UNREADABLE } });
+
+        await disable(codeNow(), "wrong").expect(400);
     });
 });
 
@@ -220,6 +334,10 @@ describe("turning it off", () => {
         // The account has 2FA again; the code the disable used is older than the step that turned it back on.
         expect((await login(code)).status).toBe(401);
     });
+});
+
+it("answers a disable with 2FA already off as before, whatever code it carries", async () => {
+    await disable("000000").expect(200);
 });
 
 it("refuses an unknown name and a wrong password alike", async () => {

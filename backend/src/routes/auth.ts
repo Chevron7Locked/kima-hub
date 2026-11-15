@@ -7,7 +7,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import { NO_ACCOUNT_PASSWORD_HASH, spendRecoveryCode, spendTotpStep, totpStep } from "../services/users/credentials";
+import { NO_ACCOUNT_PASSWORD_HASH, readTwoFactorSecret, spendRecoveryCode, spendTotpStep, totpStep } from "../services/users/credentials";
 import { changePassword, createAccount, deleteAccount, findUserByUsername, LastAdminError, normalizeUsername, refusalMessage } from "../services/users/accounts";
 import {
     generateToken,
@@ -19,7 +19,7 @@ import {
 } from "../middleware/auth";
 import { authLimiter } from "../middleware/rateLimiter";
 import { passwordGuessSubject, webLoginGuesses } from "../services/users/guessLimits";
-import { encrypt, decrypt } from "../utils/encryption";
+import { encrypt } from "../utils/encryption";
 import { isTransactionConflict } from "../utils/dbConflict";
 
 const router = Router();
@@ -60,7 +60,14 @@ router.post("/login", async (req, res) => {
         }
 
         // Check if 2FA is enabled
-        if (user.twoFactorEnabled && user.twoFactorSecret) {
+        if (user.twoFactorEnabled) {
+            // A secret that is missing or the key cannot read is not "no second factor": the sign-in is refused and
+            // the stored value is left as it is.
+            const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
+            if (secret === null) {
+                return res.status(401).json({ error: "Two-factor sign-in is unavailable for this account" });
+            }
+
             if (!token) {
                 webLoginGuesses.giveBack(guess);
                 return res.status(200).json({
@@ -81,7 +88,7 @@ router.post("/login", async (req, res) => {
                 }
             } else {
                 // A code is spent by use: the same one, or an earlier step's, is refused a second time.
-                const step = totpStep(decrypt(user.twoFactorSecret), token);
+                const step = totpStep(secret, token);
                 if (step === null || !(await spendTotpStep(user.id, step))) {
                     return res.status(401).json({ error: "Invalid 2FA token" });
                 }
@@ -373,6 +380,19 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
                 .json({ error: "Secret and token are required" });
         }
 
+        // While it is on, it is turned off first (which needs the password and a current code); a new secret does
+        // not replace the one in use.
+        const current = await prisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { twoFactorEnabled: true, twoFactorLastStep: true },
+        });
+        if (!current) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        if (current.twoFactorEnabled) {
+            return res.status(400).json({ error: "2FA is already enabled" });
+        }
+
         const step = totpStep(secret, token);
         if (step === null) {
             return res
@@ -400,16 +420,21 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
 
         // Encrypt and save the secret
         const encryptedSecret = encrypt(secret);
-        await prisma.user.update({
-            where: { id: req.user!.id },
+        // Written only if it is still off, so two requests cannot both turn it on and the second overwrite the first.
+        const written = await prisma.user.updateMany({
+            where: { id: req.user!.id, twoFactorEnabled: false },
             data: {
                 twoFactorEnabled: true,
                 twoFactorSecret: encryptedSecret,
                 twoFactorRecoveryCodes: encryptedRecoveryCodes,
-                // The code that proved the secret is spent, so it cannot also sign in.
-                twoFactorLastStep: step,
+                // The code that proved the secret is spent, so it cannot also sign in. A step spent before stays
+                // spent: an older code does not move the mark back.
+                twoFactorLastStep: Math.max(step, current.twoFactorLastStep),
             },
         });
+        if (written.count !== 1) {
+            return res.status(400).json({ error: "2FA is already enabled" });
+        }
 
         // Return the plain recovery codes to the user (only time they'll see them)
         res.json({
@@ -435,7 +460,7 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
 
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },
-            select: { id: true, passwordHash: true, twoFactorSecret: true },
+            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true },
         });
 
         if (!user) {
@@ -448,9 +473,15 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
             return res.status(400).json({ error: "Invalid password" });
         }
 
-        if (user.twoFactorSecret) {
+        if (user.twoFactorEnabled) {
+            // A secret that is missing or unreadable cannot check a code, and is not a reason to skip the check:
+            // it stays on, stored as it is, until the key that reads it is restored.
+            const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
+            if (secret === null) {
+                return res.status(409).json({ error: "2FA is on but its secret cannot be read, so it was left on" });
+            }
             // Spent like a sign-in's code: one just used to sign in cannot also turn it off.
-            const step = totpStep(decrypt(user.twoFactorSecret), token);
+            const step = totpStep(secret, token);
             if (step === null || !(await spendTotpStep(user.id, step))) {
                 return res.status(400).json({ error: "Invalid 2FA token" });
             }
