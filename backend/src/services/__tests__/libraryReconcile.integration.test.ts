@@ -9,6 +9,7 @@ import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { reconcileDeletedTracks, transcodeArtifactPath, runReconcile } from "../libraryReconcile";
 import { eventBus, type SSEEvent } from "../eventBus";
+import { lockPlayHistory } from "../playRecording";
 
 const P = "recon";
 const MIN = 60_000;
@@ -281,6 +282,109 @@ describe("reconcileDeletedTracks", () => {
         } finally {
             spy.mockRestore();
         }
+    });
+
+    describe("moving plays to the copy of a replaced song", () => {
+        const OTHER = `${P}user2`;
+        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        async function seedReplacedSongPlayedBy(...users: string[]) {
+            await prisma.track.create({
+                data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,
+                    fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+            });
+            await prisma.track.create({
+                data: { id: `${P}flac`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
+                    fileModified: new Date(), fileSize: 1 },
+            });
+            for (const userId of users) {
+                if (userId === OTHER) {
+                    await prisma.user.create({ data: { id: OTHER, username: OTHER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+                }
+                await prisma.play.create({ data: { userId, trackId: `${P}mp3`, playedAt: new Date(Date.now() - 3 * MIN) } });
+            }
+        }
+
+        /** Holds one listener's play history exclusively, as the false-start repair does, until `release` is called. */
+        async function repairHolding(userId: string) {
+            let release!: () => void;
+            const released = new Promise<void>((resolve) => (release = resolve));
+            let locked!: () => void;
+            const holding = new Promise<void>((resolve) => (locked = resolve));
+            const done = prisma.$transaction(async (tx) => {
+                await lockPlayHistory(tx, userId, { exclusive: true });
+                locked();
+                await released;
+            }, { timeout: 30_000 });
+            await holding;
+            return { release, done };
+        }
+
+        afterEach(async () => {
+            await prisma.play.deleteMany({ where: { userId: OTHER } });
+            await prisma.user.deleteMany({ where: { id: OTHER } });
+        });
+
+        it("waits for a repair of that listener's history, then moves the plays: none moves in the middle of it", async () => {
+            await seedReplacedSongPlayedBy(`${P}user`);
+            const repair = await repairHolding(`${P}user`);
+            const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+            try {
+                let finished = false;
+                const sweep = runReconcile(scanStartedAt()).then((r) => ((finished = true), r));
+                await sleep(500);
+
+                expect(finished).toBe(false);
+                expect(await prisma.play.count({ where: { trackId: `${P}mp3` } })).toBe(1);
+
+                repair.release();
+                await repair.done;
+                expect((await sweep).removed).toBe(1);
+                expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(1);
+            } finally {
+                repair.release();
+                spy.mockRestore();
+            }
+        });
+
+        it("does not deadlock when another listener's repair is running while it moves two listeners' plays", async () => {
+            await seedReplacedSongPlayedBy(`${P}user`, OTHER);
+            // The sweep locks the first listener, then waits for the second. A repair of the first now queues behind the
+            // sweep's shared lock, and the sweep finishes once the second's repair lets go, so nothing waits in a circle.
+            const repair = await repairHolding(OTHER);
+            const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+            try {
+                const sweep = runReconcile(scanStartedAt());
+                await sleep(500);
+                const repairOfFirst = prisma.$transaction(async (tx) => {
+                    await lockPlayHistory(tx, `${P}user`, { exclusive: true });
+                    await tx.play.deleteMany({ where: { userId: `${P}user`, id: "never" } });
+                }, { timeout: 30_000 });
+                await sleep(300);
+                repair.release();
+
+                await Promise.all([repair.done, repairOfFirst]);
+                expect((await sweep).removed).toBe(1);
+                expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(2);
+            } finally {
+                repair.release();
+                spy.mockRestore();
+            }
+        });
+
+        it("is not held up by a repair of a listener whose plays it does not move", async () => {
+            await seedReplacedSongPlayedBy(`${P}user`);
+            await prisma.user.create({ data: { id: OTHER, username: OTHER, passwordHash: "x", role: "user", tokenVersion: 0 } });
+            const repair = await repairHolding(OTHER);
+            const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+            try {
+                expect((await runReconcile(scanStartedAt())).removed).toBe(1);
+            } finally {
+                repair.release();
+                await repair.done;
+                spy.mockRestore();
+            }
+        });
     });
 
     it("a playlist that held a retired song: its owner is told once, after the sweep commits", async () => {
