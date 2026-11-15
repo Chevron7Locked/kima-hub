@@ -547,7 +547,8 @@ class M3UReads {
   }
 
   /**
-   * The playable songs whose file is named `name` (the last part of the path), in id order, the case of letters and the
+   * The playable songs whose file is named `name` (the last part of the path, or the whole path of a song at the music
+   * root, which has no folder), in id order, the case of letters and the
    * Unicode form ignored. The database matches the name loosely (its own case-blind compare folds ASCII only, and a
    * wildcard in a name reaches further than it should) and the file names are compared here, so only a real match stays.
    * The same name in another case or form is one read.

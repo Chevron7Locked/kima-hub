@@ -178,6 +178,20 @@ describe("a song stored at the music root (no folder) is found by its file name"
     });
 });
 
+describe("a root song and a foldered namesake", () => {
+    beforeAll(() =>
+        seedSongs("mix", `${P}-mix band`, [
+            ["a", `${P} mix one`, "zzmix song_100%.flac"],
+            ["b", `${P} mix two`, `${P}/mix/ZZMIX Song_100%.flac`],
+        ]),
+    );
+
+    it("takes the one in the exact case written, and reads _ and % in a name as themselves", async () => {
+        expect(await match(entry("/x/zzmix song_100%.flac"))).toBe(`${P}-mix-a`);
+        expect(await match(entry("/x/ZZMIX Song_100%.flac"))).toBe(`${P}-mix-b`);
+    });
+});
+
 describe("tier 2 tries every reading of the path before skipping an entry", () => {
     beforeAll(() =>
         seedSongs("read", `${P}-read band`, [
