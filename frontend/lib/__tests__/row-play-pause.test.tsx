@@ -61,6 +61,7 @@ vi.mock("@/components/cards/MediaCard", () => ({ CoverArt: () => null }));
 import { TracksList } from "@/features/library/components/TracksList";
 import { TrackList as AlbumTrackList } from "@/features/album/components/TrackList";
 import { PopularTracks } from "@/features/artist/components/PopularTracks";
+import { TrackList as DiscoverTrackList } from "@/features/discover/components/TrackList";
 import MixPage from "@/app/mix/[id]/page";
 
 const dom = mountHost();
@@ -233,5 +234,36 @@ describe("a mix's song list", () => {
     behaves(
         () => act(() => dom.root.render(<MixPage />)),
         () => audio.playTracks.mock.calls.length,
+    );
+});
+
+describe("the Discover playlist's song list", () => {
+    const onPlayTrack = vi.fn();
+    beforeEach(() => onPlayTrack.mockClear());
+    const song = (id: string) => ({
+        id,
+        title: id,
+        artist: "Artist",
+        album: "Album",
+        albumId: `al-${id}`,
+        coverUrl: null,
+        duration: 100,
+        tier: "high",
+        isLiked: false,
+    });
+    behaves(
+        () => {
+            act(() =>
+                dom.root.render(
+                    <DiscoverTrackList
+                        tracks={[song("a"), song("b")] as never}
+                        currentTrack={audio.currentTrack}
+                        onPlayTrack={onPlayTrack}
+                        onLike={() => {}}
+                    />,
+                ),
+            );
+        },
+        () => onPlayTrack.mock.calls.length,
     );
 });

@@ -5,32 +5,26 @@ import { DiscoverTrack } from "../types";
 import { api } from "@/lib/api";
 import { tierColors, tierLabels } from "../constants";
 import { useDoubleTapList } from "@/hooks/useDoubleTap";
+import { usePlayRow } from "@/hooks/usePlayRow";
 
 interface TrackListProps {
     tracks: DiscoverTrack[];
     currentTrack?: { id: string } | null;
-    isPlaying: boolean;
     onPlayTrack: (index: number) => void;
-    onTogglePlay: () => void;
     onLike: (track: DiscoverTrack) => void;
 }
 
 export function TrackList({
     tracks,
     currentTrack,
-    isPlaying,
     onPlayTrack,
-    onTogglePlay,
     onLike,
 }: TrackListProps) {
-    const activate = (index: number) => {
-        if (isPlaying && currentTrack?.id === tracks[index]?.id) {
-            onTogglePlay();
-        } else {
-            onPlayTrack(index);
-        }
-    };
-    const onTouchEnd = useDoubleTapList(activate);
+    const { isPlaying, playRow } = usePlayRow();
+    // The song that is current pauses or resumes; any other starts the playlist from it. A double click or tap never pauses.
+    const activate = (index: number, gesture: "press" | "double" = "press") =>
+        playRow(currentTrack?.id === tracks[index]?.id, () => onPlayTrack(index), gesture);
+    const onTouchEnd = useDoubleTapList((index) => activate(index, "double"));
 
     return (
         <div className="w-full">
@@ -49,7 +43,7 @@ export function TrackList({
                         <TrackRow
                             key={track.id}
                             rowProps={{ "data-track-index": index }}
-                            onDoubleClick={() => activate(index)}
+                            onDoubleClick={() => activate(index, "double")}
                             onTouchEnd={onTouchEnd}
                             className="px-4"
                             columns="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_80px]"

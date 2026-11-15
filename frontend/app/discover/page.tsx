@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { cn } from "@/lib/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
+import { useAudioState } from "@/lib/audio-context";
 import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { usePreview } from "@/hooks/usePreview";
@@ -28,7 +28,6 @@ import { leaveActivityPanelSettings, openActivityPanel } from "@/hooks/useActivi
 export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
     const { setSettingsContent, settingsOwner } = useActivityPanelSettings();
     const queryClient = useQueryClient();
     const { canAcquire } = usePublicConfig();
@@ -39,7 +38,6 @@ export default function DiscoverWeeklyPage() {
         handleLike,
         handlePlayPlaylist,
         handlePlayTrack,
-        handleTogglePlay,
     } = useDiscoverActions(playlist, reloadData, isGenerating, refreshBatchStatus, setPendingGeneration, markGenerationStart, updateTrackLiked);
     const preview = usePreview();
     const [retryingUnavailable, setRetryingUnavailable] = useState(false);
@@ -198,9 +196,7 @@ export default function DiscoverWeeklyPage() {
                                     <TrackList
                                         tracks={playlist.tracks}
                                         currentTrack={currentTrack}
-                                        isPlaying={isPlaying}
                                         onPlayTrack={handlePlayTrack}
-                                        onTogglePlay={handleTogglePlay}
                                         onLike={handleLike}
                                     />
                                 </section>
