@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An import builds its playlist once**, even when a scan and a progress check finish at the same moment, and a song you dismissed while it waited is left out.
+- **Discover counts only albums in your library as already owned.** An album that is itself in Discover no longer stops Discover suggesting it, and a liked suggestion plays from your library copy.
+- **Deleting or pruning an album takes it out of Discover's already-owned check at once**, instead of after a few minutes.
 - **Turning two-factor on while it is already on is refused.** Turn it off first, which needs your password and a current code.
 - **An account whose two-factor secret the server can no longer read is refused at sign-in with a clear message** instead of an error, and the secret is kept until the encryption key is restored. Before, an account with two-factor on but no stored secret signed in without a code, and turning two-factor off skipped the code check.
 - **An M3U playlist entry naming a shorter artist no longer imports a longer-named artist's song**, and an entry of short artists joined by "&" is matched by their names.
