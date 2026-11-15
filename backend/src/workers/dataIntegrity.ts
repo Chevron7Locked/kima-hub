@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { markLibraryChangedQuietly } from "../services/libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
+import { forgetOwnedIndex } from "../services/discovery/ownedIndexVersion";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -147,6 +148,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                     where: { artistId: tempArtist.id },
                     data: { artistId: realArtist.id },
                 });
+                // The owned-album snapshot reads each album's artist.
+                forgetOwnedIndex();
 
                 await prisma.similarArtist.deleteMany({
                     where: { OR: [{ fromArtistId: tempArtist.id }, { toArtistId: tempArtist.id }] },

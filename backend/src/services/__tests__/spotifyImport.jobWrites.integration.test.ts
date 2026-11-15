@@ -138,12 +138,39 @@ describe("building the playlist", () => {
     });
 });
 
+describe("a build for a job that was cancelled", () => {
+    it("makes no playlist for a job that was cancelled while it matched", async () => {
+        const job = importJob([matched(), waiting(1)]);
+        jest.spyOn(deezerService, "getTrackPreview").mockImplementation(async () => {
+            await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "cancelled" } });
+            return null;
+        });
+
+        await (spotifyImportService as any).buildPlaylist(job);
+
+        expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(0);
+        expect(await prisma.playlistPendingTrack.count({ where: { playlist: { userId: USER } } })).toBe(0);
+        expect((await row()).status).toBe("cancelled");
+    });
+});
+
 describe("failing an import", () => {
+    it("leaves an import that completed meanwhile completed", async () => {
+        const job = importJob([matched(), waiting(1)]);
+        await (spotifyImportService as any).buildPlaylist(job);
+
+        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+
+        expect((await row()).status).toBe("completed");
+    });
+
     it("writes only the status and the error, not the counts or listing a dismissal changed since it read the job", async () => {
         const entries = [matched(), waiting(1), waiting(2)];
         const job = importJob(entries);
         await (spotifyImportService as any).buildPlaylist(job);
         const playlistId = job.createdPlaylistId!;
+        // A failure that reaches an import still running (a late scan step), not one that completed.
+        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "scanning" } });
         const entry = await prisma.playlistPendingTrack.findFirstOrThrow({ where: { playlistId, spotifyTitle: `${GHOST_TITLE}1` } });
 
         // The failure handler has read the job; a person dismisses an entry before it writes.

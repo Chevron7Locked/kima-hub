@@ -130,6 +130,9 @@ interface ImportJob {
   }>;
 }
 
+/** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
+class PlaylistNotWanted extends Error {}
+
 const IMPORT_JOB_KEY = (id: string) => `import:job:${id}`;
 const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
 
@@ -190,17 +193,17 @@ async function saveImportJob(job: ImportJob): Promise<void> {
     },
   });
 
+  await cacheAndAnnounceImportJob(job);
+}
+
+/** Cache a job for the worker and API processes to share, and tell the person's open import page. */
+async function cacheAndAnnounceImportJob(job: ImportJob): Promise<void> {
   try {
-    await redisClient.setex(
-      IMPORT_JOB_KEY(job.id),
-      IMPORT_JOB_TTL,
-      JSON.stringify(job),
-    );
+    await redisClient.setex(IMPORT_JOB_KEY(job.id), IMPORT_JOB_TTL, JSON.stringify(job));
   } catch (error) {
     logger.warn(`Failed to cache import job ${job.id} in Redis:`, error);
     // Continue - Redis is optional, DB is source of truth
   }
-
   announceImportProgress(job);
 }
 
@@ -212,9 +215,11 @@ async function saveImportJob(job: ImportJob): Promise<void> {
 async function updateImportJobFields(
   importJobId: string,
   data: Prisma.SpotifyImportJobUncheckedUpdateManyInput,
+  /** Rows in these states are left as they are. */
+  exceptStatuses: string[] = [],
 ): Promise<void> {
   await prisma.spotifyImportJob.updateMany({
-    where: { id: importJobId },
+    where: { id: importJobId, status: { notIn: exceptStatuses } },
     data: { ...data, updatedAt: new Date() },
   });
   await publishImportJob(importJobId);
@@ -223,15 +228,7 @@ async function updateImportJobFields(
 /** Cache an import's row as the database holds it and tell the person's open import page. */
 async function publishImportJob(importJobId: string): Promise<void> {
   const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId } });
-  if (!row) return;
-  const job = toImportJob(row);
-  try {
-    await redisClient.setex(IMPORT_JOB_KEY(importJobId), IMPORT_JOB_TTL, JSON.stringify(job));
-  } catch (error) {
-    logger.warn(`Failed to cache import job ${importJobId} in Redis:`, error);
-    // Continue - Redis is optional, DB is source of truth
-  }
-  announceImportProgress(job);
+  if (row) await cacheAndAnnounceImportJob(toImportJob(row));
 }
 
 function announceImportProgress(job: ImportJob): void {
@@ -2259,8 +2256,10 @@ class SpotifyImportService {
             data: waitingEntries.map((entry) => ({ ...entry, playlistId: made.id })),
           });
         }
-        await tx.spotifyImportJob.update({
-          where: { id: job.id },
+        // Only a job still waiting for its playlist takes the link: one another build already linked, one a person
+        // cancelled (its row is gone) or one that failed takes none, and this build's playlist is rolled back.
+        const linked = await tx.spotifyImportJob.updateMany({
+          where: { id: job.id, createdPlaylistId: null, status: { notIn: ["completed", "failed", "cancelled"] } },
           data: {
             createdPlaylistId: made.id,
             tracksMatched: matchedEntries.length,
@@ -2269,11 +2268,20 @@ class SpotifyImportService {
             updatedAt: new Date(),
           },
         });
+        if (linked.count === 0) throw new PlaylistNotWanted();
         return made;
       },
       // A long playlist is thousands of rows: well past the default five seconds.
       { timeout: 60_000, maxWait: 10_000 },
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof PlaylistNotWanted) return null;
+      throw error;
+    });
+    if (!playlist) {
+      jobLogger?.debug(`   Job ${job.id} no longer wants a playlist (cancelled, failed or already built), skipping`);
+      jobLoggers.delete(job.id);
+      return;
+    }
 
     job.createdPlaylistId = playlist.id;
     job.tracksMatched = matchedEntries.length;
@@ -3234,7 +3242,8 @@ class SpotifyImportService {
     }
 
     // Only the status and the error: the counts and the listing are whatever a dismissal or a scan left them.
-    await updateImportJobFields(importJobId, { status: "failed", error: errorMessage });
+    // A late failure handler does not turn an import that completed or was cancelled meanwhile into a failed one.
+    await updateImportJobFields(importJobId, { status: "failed", error: errorMessage }, ["completed", "cancelled"]);
   }
 }
 
