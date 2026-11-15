@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Turning two-factor on while it is already on is refused.** Turn it off first, which needs your password and a current code.
+- **An account whose two-factor secret the server can no longer read is refused at sign-in with a clear message** instead of an error, and the secret is kept until the encryption key is restored. Before, an account with two-factor on but no stored secret signed in without a code, and turning two-factor off skipped the code check.
+- **An M3U playlist entry naming a shorter artist no longer imports a longer-named artist's song**, and an entry of short artists joined by "&" is matched by their names.
+- **Edition notes like "- Remastered 2011" are cut from titles when matching, but a title such as "- Live and Let Die" is kept whole.**
 - **A two-factor code works once.** A code that has already signed you in, or turned two-factor off, is refused if sent again. After signing in with a code, turning two-factor off waits for the next code.
 - **Two different recovery codes used at the same moment both work.** One no longer refuses the other.
 - **A library scan that replaces a song no longer upsets a play-history repair** running at the same time.
