@@ -119,6 +119,28 @@ describe("GET /api/playback-state", () => {
         expect(stored!.trackId).toBe(`${P}gone`);
     });
 
+    it("shows each song as it is now: an edited title, artist name, album title and cover, while the stored entries stay as saved", async () => {
+        await save([`${P}ok1`, `${P}gone`, `${P}ok2`], 0, { trackId: `${P}ok1` });
+        await prisma.track.update({ where: { id: `${P}ok1` }, data: { title: "New File Title", displayTitle: "Edited Title" } });
+        await prisma.artist.update({ where: { id: `${P}art` }, data: { displayName: "Edited Artist" } });
+        await prisma.album.update({ where: { id: `${P}alb` }, data: { title: "Edited Album", coverUrl: "native:abc/cover.jpg" } });
+
+        const res = await get();
+        expect(res.body.queue.map((e: { id: string }) => e.id)).toEqual([`${P}ok1`, `${P}ok2`]);
+        expect(res.body.queue[0]).toMatchObject({
+            id: `${P}ok1`,
+            title: "New File Title",
+            displayTitle: "Edited Title",
+            duration: 200,
+            artist: { id: `${P}art`, name: "Edited Artist" },
+            album: { id: `${P}alb`, title: "Edited Album", coverArt: "native:abc/cover.jpg" },
+        });
+        expect(res.body.queue[1].title).toBe("ok2");
+
+        const stored = await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } });
+        expect((stored.queue as Array<{ title: string; displayTitle: string | null }>)[0]).toMatchObject({ title: `${P}ok1 title`, displayTitle: null });
+    });
+
     it("leaves a state with no queue exactly as stored", async () => {
         await prisma.playbackState.create({ data: { userId: USER, playbackType: "audiobook", audiobookId: "ab1", position: 1234 } });
         const res = await get();

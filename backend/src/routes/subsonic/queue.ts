@@ -1,8 +1,8 @@
 import { Request, Router } from "express";
-import { prisma, Prisma } from "../../utils/db";
+import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, coverArtId } from "./mappers";
-import { hydrateQueue, playableQueue, type QueueEntry } from "../../services/savedQueue";
+import { playableQueue, saveQueueOfIds, type QueueEntry } from "../../services/savedQueue";
 import { one, many } from "../../utils/subsonicParams";
 
 export const queueRouter = Router();
@@ -23,17 +23,6 @@ function mapQueueEntry(item: QueueEntry) {
         "@_coverArt": item.album?.id ? coverArtId(item.album.id, item.album.coverArt) : undefined,
         "@_duration": item.duration || 0,
     };
-}
-
-/**
- * Where the client's current song sits in the queue as stored, which leaves out the ids it did not know. The songs
- * before it that were dropped no longer count, so the stored index still names the client's current song.
- */
-function storedIndex(ids: string[], stored: QueueEntry[], clientIndex: number): number {
-    if (stored.length === 0) return 0;
-    const known = new Set(stored.map((item) => item.id));
-    const before = ids.slice(0, clientIndex).filter((id) => known.has(id)).length;
-    return Math.min(before, stored.length - 1);
 }
 
 /** The client writing the queue, stored so other devices see who changed it. */
@@ -102,41 +91,12 @@ queueRouter.all("/savePlayQueue.view", wrap(async (req, res) => {
         );
     }
 
-    const queueItems = await hydrateQueue(ids);
-    const currentIndex = current ? storedIndex(ids, queueItems, ids.indexOf(current)) : 0;
-    const currentTrackId = queueItems[currentIndex]?.id ?? null;
-    // A current song Kima does not know was dropped, so the song now current starts from its beginning.
-    const storedPosition = currentTrackId === current ? safePosition : 0;
-
-    await prisma.playbackState.upsert({
-        where: { userId },
-        update: {
-            playbackType: "track",
-            trackId: currentTrackId,
-            audiobookId: null,
-            podcastId: null,
-            queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            // A queue a Subsonic app saved did not come from a Kima page.
-            queueSource: null,
-            currentIndex,
-            isShuffle: false,
-            position: storedPosition,
-            changedBy: clientName(req),
-        },
-        create: {
-            userId,
-            playbackType: "track",
-            trackId: currentTrackId,
-            audiobookId: null,
-            podcastId: null,
-            queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            // A queue a Subsonic app saved did not come from a Kima page.
-            queueSource: null,
-            currentIndex,
-            isShuffle: false,
-            position: storedPosition,
-            changedBy: clientName(req),
-        },
+    await saveQueueOfIds(userId, {
+        ids,
+        clientIndex: current ? ids.indexOf(current) : 0,
+        currentId: current ?? null,
+        position: safePosition,
+        changedBy: clientName(req),
     });
 
     return subsonicOk(req, res);
@@ -182,41 +142,12 @@ queueRouter.all("/savePlayQueueByIndex.view", wrap(async (req, res) => {
         );
     }
 
-    const queueItems = await hydrateQueue(ids);
-    const currentIndex = storedIndex(ids, queueItems, parsedIndex);
-    const currentTrackId = queueItems[currentIndex]?.id ?? null;
-    // A current song Kima does not know was dropped, so the song now current starts from its beginning.
-    const storedPosition = ids.length > 0 && currentTrackId === ids[parsedIndex] ? safePosition : 0;
-
-    await prisma.playbackState.upsert({
-        where: { userId },
-        update: {
-            playbackType: "track",
-            trackId: currentTrackId,
-            audiobookId: null,
-            podcastId: null,
-            queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            // A queue a Subsonic app saved did not come from a Kima page.
-            queueSource: null,
-            currentIndex,
-            isShuffle: false,
-            position: storedPosition,
-            changedBy: clientName(req),
-        },
-        create: {
-            userId,
-            playbackType: "track",
-            trackId: currentTrackId,
-            audiobookId: null,
-            podcastId: null,
-            queue: queueItems.length > 0 ? (queueItems as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            // A queue a Subsonic app saved did not come from a Kima page.
-            queueSource: null,
-            currentIndex,
-            isShuffle: false,
-            position: storedPosition,
-            changedBy: clientName(req),
-        },
+    await saveQueueOfIds(userId, {
+        ids,
+        clientIndex: parsedIndex,
+        currentId: ids[parsedIndex] ?? null,
+        position: safePosition,
+        changedBy: clientName(req),
     });
 
     return subsonicOk(req, res);

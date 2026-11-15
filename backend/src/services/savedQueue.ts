@@ -4,6 +4,8 @@
  *
  * - An entry carries what a player needs to draw it (title, artist, album, cover), so a device lists the queue
  *   without asking for every song.
+ * - A client is shown each song as it is now (an edited title, a renamed artist, a new cover), not as the entry was
+ *   saved; the stored entries stay as saved.
  * - A client is shown only the playable songs of the stored queue (a song whose file went missing, or a Discover
  *   song, is left out). The stored queue itself is left as it is, so a song whose file comes back returns to it.
  *   When the current song is left out, the next playable one becomes current (else the last one before it), from its
@@ -13,8 +15,7 @@
  *   `indexIntoStoredQueue` for one that sends no queue and names the current song), and no index is stored past the
  *   stored queue's last entry.
  */
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../utils/db";
+import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 
 export type QueueEntry = {
@@ -42,48 +43,37 @@ export function entriesOf(queue: unknown): QueueEntry[] {
 export async function hydrateQueue(ids: string[], db: Pick<Prisma.TransactionClient, "track"> = prisma): Promise<QueueEntry[]> {
     if (ids.length === 0) return [];
 
-    const tracks = await db.track.findMany({
-        where: { id: { in: ids } },
+    const tracks = await db.track.findMany({ where: { id: { in: ids } }, select: DESCRIBED });
+    const byId = new Map(tracks.map((t) => [t.id, describeSong(t)]));
+    return ids.map((id) => byId.get(id)).filter((entry): entry is QueueEntry => entry != null);
+}
+
+/** What a song is read for when an entry is made of it: the one select, so a saved entry and a shown one agree. */
+const DESCRIBED = {
+    id: true,
+    title: true,
+    displayTitle: true,
+    duration: true,
+    album: {
         select: {
             id: true,
             title: true,
-            displayTitle: true,
-            duration: true,
-            album: {
-                select: {
-                    id: true,
-                    title: true,
-                    coverUrl: true,
-                    userCoverUrl: true,
-                    artist: { select: { id: true, name: true, displayName: true } },
-                },
-            },
+            coverUrl: true,
+            userCoverUrl: true,
+            artist: { select: { id: true, name: true, displayName: true } },
         },
-    });
+    },
+} satisfies Prisma.TrackSelect;
 
-    const byId = new Map(tracks.map((t) => [t.id, t]));
-    return ids
-        .map((id) => byId.get(id))
-        .filter((t): t is NonNullable<typeof t> => t != null)
-        .map((t) => ({
-            id: t.id,
-            title: t.title,
-            displayTitle: t.displayTitle,
-            duration: t.duration ?? undefined,
-            artist: t.album?.artist
-                ? {
-                      id: t.album.artist.id,
-                      name: t.album.artist.displayName || t.album.artist.name,
-                  }
-                : null,
-            album: t.album
-                ? {
-                      id: t.album.id,
-                      title: t.album.title,
-                      coverArt: t.album.userCoverUrl || t.album.coverUrl,
-                  }
-                : null,
-        }));
+function describeSong(t: Prisma.TrackGetPayload<{ select: typeof DESCRIBED }>): QueueEntry {
+    return {
+        id: t.id,
+        title: t.title,
+        displayTitle: t.displayTitle,
+        duration: t.duration ?? undefined,
+        artist: t.album?.artist ? { id: t.album.artist.id, name: t.album.artist.displayName || t.album.artist.name } : null,
+        album: t.album ? { id: t.album.id, title: t.album.title, coverArt: t.album.userCoverUrl || t.album.coverUrl } : null,
+    };
 }
 
 /** A whole, non-negative index from whatever a client sent. */
@@ -186,6 +176,50 @@ export async function indexIntoStoredQueue(
 /** A playback state row as stored. */
 export type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
 
+/**
+ * Where the client's current song sits in the queue as stored, which leaves out the ids Kima did not know. The songs
+ * before it that were dropped no longer count, so the stored index still names the client's current song.
+ */
+function storedIndexOf(ids: readonly string[], stored: readonly QueueEntry[], clientIndex: number): number {
+    if (stored.length === 0) return 0;
+    const known = new Set(stored.map((item) => item.id));
+    const before = ids.slice(0, clientIndex).filter((id) => known.has(id)).length;
+    return Math.min(before, stored.length - 1);
+}
+
+/**
+ * A queue a Subsonic app saves, as song ids and the one it is on (`clientIndex` counts `ids`; `currentId` is the song
+ * it names, when it names one). The state row is locked first and the songs are read, the index worked out and the
+ * queue written in the same transaction, so a library sweep retiring a song at the same moment finishes first and the
+ * queue never stores what it took out, and a web save meeting this one leaves one whole save. Ids Kima does not know are
+ * left out; a current song among them moves the current place to the song now there, from its start.
+ */
+export async function saveQueueOfIds(
+    userId: string,
+    save: { ids: string[]; clientIndex: number; currentId: string | null; position: number; changedBy: string },
+): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "userId" FROM "PlaybackState" WHERE "userId" = ${userId} FOR UPDATE`;
+        const queue = await hydrateQueue(save.ids, tx);
+        const currentIndex = storedIndexOf(save.ids, queue, save.clientIndex);
+        const trackId = queue[currentIndex]?.id ?? null;
+        const data = {
+            playbackType: "track",
+            trackId,
+            audiobookId: null,
+            podcastId: null,
+            queue: queue.length > 0 ? (queue as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // A queue a Subsonic app saved did not come from a Kima page.
+            queueSource: null,
+            currentIndex,
+            isShuffle: false,
+            position: trackId !== null && trackId === save.currentId ? save.position : 0,
+            changedBy: save.changedBy,
+        };
+        await tx.playbackState.upsert({ where: { userId }, update: data, create: { userId, ...data } });
+    });
+}
+
 /** The saved queue as a client is shown it. */
 export interface PlayableQueue {
     queue: QueueEntry[];
@@ -201,24 +235,22 @@ export async function playableQueue(
     const saved = entriesOf(state?.queue);
     const named = state?.trackId ?? null;
     const asked = [...saved.map((item) => item.id), ...(named !== null ? [named] : [])];
-    const playable = new Set(
+    const now = new Map(
         asked.length === 0
             ? []
-            : (
-                  await prisma.track.findMany({
-                      where: { id: { in: asked }, ...PLAYABLE_SONG },
-                      select: { id: true },
-                  })
-              ).map((t) => t.id),
+            : (await prisma.track.findMany({ where: { id: { in: asked }, ...PLAYABLE_SONG }, select: DESCRIBED })).map(
+                  (t) => [t.id, describeSong(t)] as const,
+              ),
     );
     const savedIndex = Math.min(Math.max(state?.currentIndex ?? 0, 0), Math.max(saved.length - 1, 0));
-    const shownBefore = saved.slice(0, savedIndex).filter((item) => playable.has(item.id)).length;
-    const queue = saved.filter((item) => playable.has(item.id));
-    const currentKept = saved.length > 0 && playable.has(saved[savedIndex].id);
+    const shownBefore = saved.slice(0, savedIndex).filter((item) => now.has(item.id)).length;
+    // Each song is shown as it is now (an edited title, a renamed artist, a new cover), not as it was when saved.
+    const queue = saved.flatMap((item) => now.get(item.id) ?? []);
+    const currentKept = saved.length > 0 && now.has(saved[savedIndex].id);
     const currentIndex = queue.length === 0 ? 0 : Math.min(shownBefore, queue.length - 1);
     // A song the state names that is not playable (gone, or on a Discover album) is never handed back: the song now
     // current stands in for it, and there is none when the queue shows nothing.
-    const trackId = named === null || playable.has(named) ? named : (queue[currentIndex]?.id ?? null);
+    const trackId = named === null || now.has(named) ? named : (queue[currentIndex]?.id ?? null);
     return {
         queue,
         currentIndex,
