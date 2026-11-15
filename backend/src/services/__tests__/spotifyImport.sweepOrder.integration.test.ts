@@ -14,6 +14,7 @@
  */
 import { prisma } from "../../utils/db";
 import { spotifyImportService, songsOfArtistsHoldingWord } from "../spotifyImport";
+import { m3uSongIds } from "../../__tests__/helpers/m3uImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -85,11 +86,8 @@ const previewMatch = async (artist: string, title: string) => {
 
 let m3uCount = 0;
 const m3uMatch = async (artist: string | null, title: string | null, filePath = `/nowhere/${P}-${m3uCount + 1}.mp3`) => {
-    const { playlistId } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++m3uCount}`, [
-        { filePath, durationSeconds: null, artist, title },
-    ]);
-    const items = await prisma.playlistItem.findMany({ where: { playlistId } });
-    return items.length ? items[0].trackId : null;
+    const [first] = await m3uSongIds(USER, `${P}-m3u-${++m3uCount}`, [{ filePath, durationSeconds: null, artist, title }]);
+    return first ?? null;
 };
 
 beforeAll(async () => {
@@ -344,9 +342,10 @@ describe("an M3U filename match agrees with the entry", () => {
         expect(await m3uMatch(null, null, `/nowhere/qzu-bare-name.flac`)).toBe(id);
     });
 
-    it("a matching title is enough when the artist differs", async () => {
+    it("a matching title is not enough when the entry names an artist that differs, but is when it names no artist", async () => {
         const title = `${P} title agrees`;
         const id = await seedOne("t-title", "qzvtitle artist", title, file("t-title", "qzv-title-name"));
-        expect(await m3uMatch("qzvwrong artist", title, `/nowhere/qzv-title-name.flac`)).toBe(id);
+        expect(await m3uMatch("qzvwrong artist", title, `/nowhere/qzv-title-name.flac`)).toBeNull();
+        expect(await m3uMatch(null, title, `/nowhere/qzv-title-name.flac`)).toBe(id);
     });
 });

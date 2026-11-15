@@ -259,13 +259,13 @@ class NotificationService {
     }
 
     /** A playlist import failed. One row per import: the import's own catch and the worker's failure handler both report it. */
-    async notifyImportFailed(userId: string, importJobId: string, playlistName: string, error: string) {
+    async notifyImportFailed(userId: string, importJobId: string, playlistName: string, error: string, href = "/import/playlist") {
         return this.create({
             userId,
             type: "error",
             title: "Import failed",
             message: `"${playlistName}": ${error}`,
-            metadata: { href: "/import/playlist" },
+            metadata: { href },
             groupKey: `import-failed:${importJobId}`,
         });
     }

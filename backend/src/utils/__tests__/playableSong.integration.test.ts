@@ -77,6 +77,7 @@ import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
 import { spotifyService } from "../../services/spotify";
 import { spotifyImportService } from "../../services/spotifyImport";
+import { M3UNothingMatched } from "../../services/m3uParser";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
 
 jest.setTimeout(120_000);
@@ -276,8 +277,10 @@ const sourceTrack = (over: Record<string, unknown>) => ({
 /** The songs an M3U import puts in its playlist for these entries. */
 async function m3uMatches(entries: { filePath: string; artist?: string; title?: string }[]): Promise<string[]> {
     const name = `${P}-m3u-${++importCount}`;
-    await spotifyImportService.importFromM3U(USER, name, entries.map((e) => ({ durationSeconds: 100, ...e })) as never);
-    return songsInPlaylistNamed(name);
+    const imported = await spotifyImportService
+        .importFromM3U(USER, name, entries.map((e) => ({ durationSeconds: 100, ...e })) as never)
+        .then(() => true, (error) => (error instanceof M3UNothingMatched ? false : Promise.reject(error)));
+    return imported ? songsInPlaylistNamed(name) : [];
 }
 
 /** Every interface that lists songs, each answering the ids it offers. */

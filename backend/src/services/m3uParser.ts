@@ -7,6 +7,14 @@ export interface M3UEntry {
     durationSeconds: number | null;
 }
 
+/** An M3U import in which no entry matched a playable song in the library: it makes no playlist. */
+export class M3UNothingMatched extends Error {
+    constructor(readonly total: number) {
+        super(`none of the ${total} ${total === 1 ? "entry" : "entries"} in this file matched a song in your library`);
+        this.name = "M3UNothingMatched";
+    }
+}
+
 interface ParseOptions {
     maxEntries?: number;
 }

@@ -9,7 +9,7 @@
  */
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
+import { m3uSongIds } from "../../__tests__/helpers/m3uImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -49,11 +49,8 @@ async function seedArtist(key: string, name: string, displayName: string | undef
 
 let m3uCount = 0;
 const m3uMatch = async (artist: string | null, title: string | null, filePath = `/nowhere/${P}-${m3uCount + 1}.mp3`) => {
-    const { playlistId } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++m3uCount}`, [
-        { filePath, durationSeconds: null, artist, title },
-    ]);
-    const items = await prisma.playlistItem.findMany({ where: { playlistId } });
-    return items.length ? items[0].trackId : null;
+    const [first] = await m3uSongIds(USER, `${P}-m3u-${++m3uCount}`, [{ filePath, durationSeconds: null, artist, title }]);
+    return first ?? null;
 };
 
 beforeAll(async () => {

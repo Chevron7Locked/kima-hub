@@ -38,7 +38,7 @@ import { titlesAgree } from "./albumIdentity";
 import { requireMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
-import { M3UEntry, caseSpellings, libraryFileNames, libraryPathReadings, unicodeForms } from "./m3uParser";
+import { M3UEntry, M3UNothingMatched, caseSpellings, libraryFileNames, libraryPathReadings, unicodeForms } from "./m3uParser";
 import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
@@ -2814,7 +2814,8 @@ class SpotifyImportService {
   /**
    * Import an M3U playlist, matching entries by file path, then filename, then
    * exact EXTINF artist and title, then fuzzy metadata (token_set_ratio >= 80). The metadata tiers read the name a
-   * person edited an artist or song to as well as the stored one.
+   * person edited an artist or song to as well as the stored one. A file in which no entry matches makes no playlist:
+   * it throws M3UNothingMatched, after telling the owner.
    */
   async importFromM3U(
     userId: string,
@@ -2839,25 +2840,31 @@ class SpotifyImportService {
       // Tier 2: Filename match (the name as typed, then as a player reads it: see libraryFileNames), the case of letters
       // and the Unicode form ignored; a file of the name in exactly the case written comes before one in another case.
       // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title, the
-      // file's artist or title must agree, each compared as tier 3 compares it, by the stored or the edited name
-      // (either one is enough here, where tier 3 needs both). A bare entry has nothing to disagree with.
-      const named = !!(entry.artist || entry.title);
+      // file's must agree, each compared as tier 3 compares it, by the stored or the edited name. An entry naming both
+      // needs both to agree; one naming a single field needs that one; a bare entry has nothing to disagree with.
+      // A file name with no folder in front of it that more than one agreeing song answers to is skipped, as Navidrome
+      // does (the lowest id is a guess), and no later tier guesses for it either.
+      let ambiguous = false;
       const agrees = (t: { title: string; displayTitle: string | null; album: { artist: { name: string; identityKey: string; displayName: string | null } } }) =>
-        !named ||
-        (!!entry.title && isTitled(t, entry.title)) ||
-        (!!entry.artist && isByArtistNamed(t.album.artist, entry.artist));
+        (!entry.title || isTitled(t, entry.title)) && (!entry.artist || isByArtistNamed(t.album.artist, entry.artist));
+      const bareName = readingsOf[at].every((reading) => !reading.replace(/^(\.\/)+/, "").includes("/"));
       if (!track) {
         for (const fileName of libraryFileNames(entry.filePath, readingsOf[at])) {
           if (path.basename(fileName, path.extname(fileName)).length < MIN_WORD_LENGTH) continue;
           const sameFile = await reads.songsNamed(fileName);
           const written = (t: { filePath: string }) => t.filePath.endsWith(`/${fileName}`);
-          track = [...sameFile.filter(written), ...sameFile.filter((t) => !written(t))].find(agrees) ?? null;
+          const agreeing = [...sameFile.filter(written), ...sameFile.filter((t) => !written(t))].filter(agrees);
+          if (bareName && agreeing.length > 1) {
+            ambiguous = true;
+            break;
+          }
+          track = agreeing[0] ?? null;
           if (track) break;
         }
       }
 
       // Tier 3: Exact metadata match (artist + title from EXTINF)
-      if (!track && entry.artist && entry.title) {
+      if (!track && !ambiguous && entry.artist && entry.title) {
         // The artist by its stored identity key, or by id when its edited name is the one named; the title by nameKey,
         // stored or edited: both fold case and accents in TypeScript.
         const entryTitle = entry.title;
@@ -2879,7 +2886,7 @@ class SpotifyImportService {
       }
 
       // Tier 4: Fuzzy metadata match (fuzzball >= 80 threshold)
-      if (!track && entry.artist && entry.title) {
+      if (!track && !ambiguous && entry.artist && entry.title) {
         const dbArtist = normalizeArtistName(entry.artist);
         const firstWord = dbArtist.split(" ")[0];
         if (firstWord.length >= MIN_WORD_LENGTH) {
@@ -2917,7 +2924,17 @@ class SpotifyImportService {
       }
     }
 
-    // Deduplicate
+    // Nothing in the file is in the library: an empty playlist helps nobody, so none is made and the owner is told
+    // the way a failed playlist import tells them.
+    if (matchedTrackIds.length === 0) {
+      const failure = new M3UNothingMatched(entries.length);
+      await notificationService
+        .notifyImportFailed(userId, `m3u-${randomUUID()}`, playlistName, failure.message, "/playlists")
+        .catch((e) => logger.error("[M3U Import] failure notification failed:", e));
+      throw failure;
+    }
+
+    // A playlist holds a song once (PlaylistItem is unique on playlist and song), so a song listed twice keeps its first place.
     const uniqueTrackIds = [...new Set(matchedTrackIds)];
 
     const playlist = await prisma.playlist.create({
@@ -2925,16 +2942,13 @@ class SpotifyImportService {
         userId,
         name: playlistName,
         isPublic: false,
-        items:
-          uniqueTrackIds.length > 0
-            ? {
-                create: uniqueTrackIds.map((trackId, index) => ({
-                  trackId,
-                  sort: index,
-                  rank: rankForPosition(index),
-                })),
-              }
-            : undefined,
+        items: {
+          create: uniqueTrackIds.map((trackId, index) => ({
+            trackId,
+            sort: index,
+            rank: rankForPosition(index),
+          })),
+        },
       },
     });
 

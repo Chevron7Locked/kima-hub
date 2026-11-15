@@ -7,7 +7,7 @@ import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
-import { decodeM3U, parseM3U } from "../services/m3uParser";
+import { M3UNothingMatched, decodeM3U, parseM3U } from "../services/m3uParser";
 import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE, MusicLink, MusicPlatform } from "../services/musicLink";
 
 const router = Router();
@@ -335,6 +335,10 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
 
         res.json(result);
     } catch (error: any) {
+        // The owner has been told in the notification tray; the form shows the same reason.
+        if (error instanceof M3UNothingMatched) {
+            return res.status(422).json({ error: error.message });
+        }
         if (error.message?.includes("exceeds maximum") || error.message?.includes("null bytes")) {
             return res.status(400).json({ error: error.message });
         }

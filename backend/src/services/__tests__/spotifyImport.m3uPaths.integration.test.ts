@@ -11,7 +11,7 @@
 import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
+import { m3uSongIds } from "../../__tests__/helpers/m3uImport";
 import type { M3UEntry } from "../m3uParser";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -55,11 +55,7 @@ type Entry = M3UEntry;
 
 let count = 0;
 const bare = (filePath: string): Entry => ({ filePath, durationSeconds: null, artist: null, title: null });
-const matches = async (entries: Entry[]) => {
-    const { playlistId } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++count}`, entries);
-    const items = await prisma.playlistItem.findMany({ where: { playlistId }, orderBy: { sort: "asc" } });
-    return items.map((i) => i.trackId);
-};
+const matches = (entries: Entry[]) => m3uSongIds(USER, `${P}-m3u-${++count}`, entries);
 const match = async (filePath: string) => (await matches([bare(filePath)]))[0] ?? null;
 
 beforeAll(async () => {
