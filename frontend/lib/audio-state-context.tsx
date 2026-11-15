@@ -204,6 +204,30 @@ function playbackKey(
     ]);
 }
 
+/** Where a queue is saved as coming from: the page it started from, while every entry in it (cut to the limit) did. */
+function savedSource(limitedQueue: Track[], origin: QueueOrigin | null): string | null {
+    return origin && limitedQueue.length > 0 && limitedQueue.every((entry) => entry.queueKey && origin.keys.has(entry.queueKey))
+        ? origin.source
+        : null;
+}
+
+/**
+ * Whether the queue and its source that the server holds are what this device would save: both cut to the server's
+ * limit first, since the server only ever holds the cut queue, and the source compared with it.
+ */
+function holdsSameQueue(
+    server: { queue?: Track[] | null; queueSource?: string | null },
+    local: Track[],
+    origin: QueueOrigin | null,
+    queueLimit: number,
+): boolean {
+    const limited = local.slice(0, queueLimit);
+    return (
+        JSON.stringify([withoutQueueKeys((server.queue ?? []).slice(0, queueLimit)), server.queueSource ?? null]) ===
+        JSON.stringify([withoutQueueKeys(limited), savedSource(limited, origin)])
+    );
+}
+
 /** Forget a stored item that the server no longer has. */
 function forgetStorage(key: string): void {
     if (typeof window === "undefined") return;
@@ -310,6 +334,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const lastServerSyncRef = useRef(lastServerSync);
     useEffect(() => { lastServerSyncRef.current = lastServerSync; }, [lastServerSync]);
     const queueRef = useRef(queue);
+    const queueOriginRef = useRef(queueOrigin);
+    useEffect(() => { queueOriginRef.current = queueOrigin; }, [queueOrigin]);
     // When the queue last changed on THIS device. The cross-device poller needs it to tell
     // "another device changed the queue" from "my own change has not been uploaded yet".
     const localChangedAtRef = useRef<Date>(new Date(0));
@@ -569,10 +595,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const limitedQueue = queue.slice(0, queueLimitRef.current);
         const adjustedIndex = Math.min(currentIndex, (limitedQueue.length || 1) - 1);
         // Where the queue came from is saved only while every entry in it did.
-        const queueSource =
-            queueOrigin && limitedQueue.length > 0 && limitedQueue.every((entry) => entry.queueKey && queueOrigin.keys.has(entry.queueKey))
-                ? queueOrigin.source
-                : null;
+        const queueSource = savedSource(limitedQueue, queueOrigin);
         const state = {
             playbackType,
             // Null, never omitted: the server leaves a field it was not sent alone, so a song cleared here would stay.
@@ -674,10 +697,15 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     return;
                 }
 
-                if (
+                // Whether the queue here is not the one the server holds (the same queue, source and cut to the limit).
+                const queueDiffers = () =>
+                    !holdsSameQueue(serverState, queueRef.current, queueOriginRef.current, queueLimitRef.current);
+                let adopted = false;
+
+                const mediaDiffers =
                     serverMediaId !== currentMediaId ||
-                    serverState.playbackType !== playbackType
-                ) {
+                    serverState.playbackType !== playbackType;
+                if (mediaDiffers) {
                     if (
                         serverState.playbackType === "track" &&
                         serverState.trackId
@@ -695,7 +723,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 serverState.queue &&
                                 serverState.queue.length > 0
                             ) {
-                                adoptQueue(serverState.queue, serverState.queueSource);
+                                // The place and shuffle always follow the song; the queue is replaced only when it differs.
+                                if (queueDiffers()) adoptQueue(serverState.queue, serverState.queueSource);
+                                adopted = true;
                                 setCurrentIndex(serverState.currentIndex || 0);
                                 setIsShuffle(serverState.isShuffle || false);
                             }
@@ -736,17 +766,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     }
 
-                    if (!mounted) return;
-                    if (
-                        serverIsNewer &&
-                        JSON.stringify(serverState.queue) !==
-                        JSON.stringify(withoutQueueKeys(queueRef.current))
-                    ) {
-                        adoptQueue(serverState.queue || [], serverState.queueSource);
-                        setCurrentIndex(serverState.currentIndex || 0);
-                        setIsShuffle(serverState.isShuffle || false);
-                    }
+                }
 
+                if (!mounted) return;
+                // Another device changed the queue, or the page it came from, while the same song plays here too.
+                if (!adopted && serverIsNewer && queueDiffers()) {
+                    adoptQueue(serverState.queue || [], serverState.queueSource);
+                    setCurrentIndex(serverState.currentIndex || 0);
+                    setIsShuffle(serverState.isShuffle || false);
+                    adopted = true;
+                }
+
+                if (mediaDiffers || adopted) {
                     serverKnownRef.current = playbackKey(serverState, queueLimitRef.current);
                     setLastServerSync(serverUpdatedAt);
                 }

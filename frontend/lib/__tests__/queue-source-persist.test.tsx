@@ -11,11 +11,12 @@ import React, { act, useEffect } from "react";
 const server = vi.hoisted(() => ({
     state: null as Record<string, unknown> | null,
     saves: [] as Array<Record<string, unknown>>,
+    limit: 1000,
 }));
 
 vi.mock("@/lib/api", () => {
     const named: Record<string, unknown> = {
-        getQueueLimit: async () => ({ maxQueueLength: 1000 }),
+        getQueueLimit: async () => ({ maxQueueLength: server.limit }),
         getPlaybackState: async () => server.state,
         getTrack: async (id: string) => ({ id, title: id, duration: 200, artist: { name: "Artist" }, album: { title: "Album" } }),
         savePlaybackState: async (state: Record<string, unknown>) => {
@@ -116,6 +117,7 @@ function capturePoll() {
 beforeEach(() => {
     localStorage.clear();
     server.saves = [];
+    server.limit = 1000;
     server.state = {
         playbackType: "track",
         trackId: "a",
@@ -309,5 +311,69 @@ describe("a queue adopted from another device", () => {
         await wait(50);
         expect(probe.state.currentTrack?.id).toBe("e");
         expect(probe.state.currentQueueSource).toBe("mix:m-1");
+    });
+
+    describe("while the same song plays on both", () => {
+        const newer = () => new Date(Date.now() + 5000).toISOString();
+        const poll = async (tick: () => () => unknown) => {
+            await act(async () => {
+                await tick()();
+            });
+            await wait(50);
+        };
+
+        it("takes a page the other device started the same queue from", async () => {
+            const tick = capturePoll();
+            await open();
+            await wait(50);
+            expect(probe.state.currentQueueSource).toBe("album:al-1");
+            server.state = { ...server.state, queueSource: "playlist:p-1", updatedAt: newer() };
+            await poll(tick);
+            expect(probe.state.currentQueueSource).toBe("playlist:p-1");
+        });
+
+        it("takes songs the other device added to the queue", async () => {
+            const tick = capturePoll();
+            await open();
+            await wait(50);
+            server.state = { ...server.state, queue: [t("a"), t("b"), t("z")], updatedAt: newer() };
+            await poll(tick);
+            expect(probe.state.queue.map((q) => q.id)).toEqual(["a", "b", "z"]);
+        });
+
+        it("keeps this device's queue when the server's is older than the change made here", async () => {
+            const tick = capturePoll();
+            await open();
+            await wait(50);
+            await act(async () => probe.controls.playTracks([t("a") as never, t("c") as never], 0));
+            server.state = { ...server.state, queue: [t("a"), t("b"), t("z")], updatedAt: new Date(Date.now() - 1000).toISOString() };
+            await poll(tick);
+            expect(probe.state.queue.map((q) => q.id)).toEqual(["a", "c"]);
+        });
+    });
+
+    it("keeps a queue that the server only holds cut to its limit", async () => {
+        const tick = capturePoll();
+        server.limit = 2;
+        server.state = { ...server.state, queue: [t("a"), t("b")], queueSource: null };
+        await open();
+        await wait(50);
+        await act(async () => probe.state.setQueue([t("a") as never, t("b") as never, t("c") as never]));
+        server.state = {
+            playbackType: "track",
+            trackId: "b",
+            queue: [t("a"), t("b")],
+            queueSource: null,
+            currentIndex: 1,
+            isShuffle: false,
+            updatedAt: new Date(Date.now() + 5000).toISOString(),
+        };
+        await act(async () => {
+            await tick()();
+        });
+        await wait(50);
+        expect(probe.state.currentTrack?.id).toBe("b");
+        expect(probe.state.currentIndex).toBe(1);
+        expect(probe.state.queue.map((q) => q.id)).toEqual(["a", "b", "c"]);
     });
 });
