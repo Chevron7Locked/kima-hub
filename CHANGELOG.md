@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A song replaced by another copy (an upgraded album, say) keeps its place in saved queues** instead of dropping out, and the queue's current song moves on to the next one when its song is removed.
+- **The web player's saved queue never shows songs that are gone or unplayable.**
 - **New recovery codes are 16 characters long**, so they are much harder to guess. Older 8-character codes keep working until you make new ones.
 - **Two-factor and recovery codes can be pasted with spaces or dashes, in any case**, at sign-in and in settings.
 - **Turning two-factor sign-in on or off, and making new recovery codes, are written to the server log** with the account.
