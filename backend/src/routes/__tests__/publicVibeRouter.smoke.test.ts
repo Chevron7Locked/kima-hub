@@ -197,8 +197,9 @@ describe("POST /search", () => {
     });
 
     it("refuses a query under two characters", async () => {
+        expectLog("warn");
         const res = await request(app).post("/api/public/vibe/search").set(auth).send({ query: "a" });
-        expect(res.status).toBe(400);
+        expect([res.status, res.body]).toEqual([400, { error: "query must be 2-500 characters" }]);
     });
 
     it("answers 503 when the text model is down", async () => {
@@ -243,8 +244,9 @@ describe("GET /cover/:trackId", () => {
     });
 
     it("refuses an id that is not a track id", async () => {
+        expectLog("warn");
         const res = await request(app).get("/api/public/vibe/cover/..%2Fetc").set(auth);
-        expect(res.status).toBe(400);
+        expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
     });
 
     it("serves the stored cover with an ETag, then 304 for it", async () => {

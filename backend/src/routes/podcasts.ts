@@ -33,6 +33,7 @@ import {
     type Snippet,
 } from "../services/podcastCatalog";
 import { proxyPreviewStream } from "../utils/previewProxy";
+import { wholeNumber } from "../utils/wholeNumber";
 
 const router = Router();
 
@@ -303,8 +304,8 @@ router.get("/discover/top", (req, res) => answerChart(req, res, null, req.query,
  * Apple's own categories are asked for, each once; an id that is not one is left out of the answer.
  */
 router.get("/discover/genres", async (req, res) => {
-    const ids = typeof req.query.genres === "string" ? req.query.genres.split(",").map((g) => Number(g.trim())) : [];
-    if (ids.length === 0 || ids.some((id) => !Number.isInteger(id))) {
+    const ids = typeof req.query.genres === "string" ? req.query.genres.split(",").map((g) => wholeNumber(g)) : [];
+    if (ids.length === 0 || ids.some((id) => Number.isNaN(id))) {
         return refuseRequest(req, res, "genres: comma-separated genre ids required");
     }
     try {

@@ -307,6 +307,15 @@ describe("POST /spotify/import/m3u refuses a file in words of its own, and keeps
         expect(logged.mock.calls.map((c) => String(c[0])).some((l) => l.includes("null bytes"))).toBe(true);
     });
 
+    it("tells a parser refusal by its type: a plain error that only says the same words is a server fault", async () => {
+        expectLog("error");
+        mockService.importFromM3U.mockRejectedValueOnce(new Error("M3U file exceeds maximum of 3 entries"));
+
+        const res = await upload(Buffer.from("a/b/1.flac\n"));
+
+        expect(res.status).toBe(500);
+    });
+
     it("gives a playlist with too many songs a fixed answer, and logs the parser's reason", async () => {
         const logged = expectLog("warn");
 

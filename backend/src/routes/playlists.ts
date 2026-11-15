@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { z } from "zod";
 import { requireAcquirePermission } from "../middleware/auth";
 import { prisma } from "../utils/db";
-import { invalidRequest, safeError } from "../utils/errors";
+import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 import {
     requirePlaylistOwner,
     requirePlaylistReader,
@@ -162,7 +162,7 @@ router.post("/", async (req, res) => {
 
         const key = req.get("Idempotency-Key") || undefined;
         if (key !== undefined && key.length > MAX_KEY_LENGTH) {
-            return res.status(400).json({ error: "Idempotency-Key is too long" });
+            return refuseRequest(req, res, "Idempotency-Key header: too long");
         }
 
         const playlist = await createPlaylist(userId, data, key);

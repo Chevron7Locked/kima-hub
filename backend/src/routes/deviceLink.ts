@@ -2,18 +2,11 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
-import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
+import { cleanDeviceName, createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
 import { approve, deny, waitForAnswer, waitingDevice } from "../services/users/deviceLinkApproval";
 import { refuseRequest } from "../utils/errors";
 
 const router = Router();
-
-const MAX_DEVICE_NAME = 100;
-
-/** The device name comes from whoever sent the request, and the code's owner reads it on the link page. */
-function cleanDeviceName(raw: unknown): string {
-    return typeof raw === "string" && raw ? raw.slice(0, MAX_DEVICE_NAME) : "Mobile Device";
-}
 
 /** The code the signed-in user was shown, or null when it is not theirs or does not exist. */
 function ownedCode(code: string, userId: string) {

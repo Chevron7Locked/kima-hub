@@ -26,6 +26,7 @@ import {
 import { artistSortName } from "../services/artistIdentity";
 import { albumIsListed, artistIsListed, markLibraryChanged, songIsListed } from "../services/libraryChanged";
 import { parseLimit, parseOffset } from "./library/paging";
+import { wholeNumber } from "../utils/wholeNumber";
 
 const router = Router();
 
@@ -109,7 +110,7 @@ router.post("/pause", async (_req, res) => {
       state,
     });
   } catch (error) {
-    safeError(res, "Pause enrichment", error, 400);
+    safeError(res, "Pause enrichment", error);
   }
 });
 
@@ -125,7 +126,7 @@ router.post("/resume", async (_req, res) => {
       state,
     });
   } catch (error) {
-    safeError(res, "Resume enrichment", error, 400);
+    safeError(res, "Resume enrichment", error);
   }
 });
 
@@ -141,7 +142,7 @@ router.post("/stop", async (_req, res) => {
       state,
     });
   } catch (error) {
-    safeError(res, "Stop enrichment", error, 400);
+    safeError(res, "Stop enrichment", error);
   }
 });
 
@@ -518,9 +519,8 @@ router.put("/albums/:id/metadata", async (req, res) => {
         updateData.sortName = artistSortName(effectiveTitle);
       }
       if (year !== undefined) {
-        // An emptied field arrives as null (parseInt("") is NaN, which JSON sends as
-        // null) and removes the override.
-        const parsedYear = year === null || year === "" ? null : parseInt(year, 10);
+        // An emptied field arrives as null (or an empty string) and removes the override.
+        const parsedYear = year === null || year === "" ? null : wholeNumber(year);
         if (parsedYear !== null && Number.isNaN(parsedYear)) {
           return refuseRequest(req, res, "year: must be a number");
         }
@@ -600,7 +600,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     if (trackNo !== undefined) {
       // Same as displayYear above: null clears the override, anything unparseable is the
       // caller's mistake and gets a 400 rather than a 500.
-      const parsedTrackNo = trackNo === null || trackNo === "" ? null : parseInt(trackNo, 10);
+      const parsedTrackNo = trackNo === null || trackNo === "" ? null : wholeNumber(trackNo);
       if (parsedTrackNo !== null && Number.isNaN(parsedTrackNo)) {
         return refuseRequest(req, res, "trackNo: must be a number");
       }

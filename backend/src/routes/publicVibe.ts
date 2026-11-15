@@ -19,6 +19,7 @@ import { searchTracksByText, TextSearchRow } from "../services/textEmbeddingBrid
 import { findAlbumArtwork } from "../services/artwork";
 import { getLocalImagePath, readPicture } from "../services/imageStorage";
 import { parseLimit } from "./library/paging";
+import { refuseRequest } from "../utils/errors";
 
 const TRACK_ID_RE = /^c[a-z0-9]{16,30}$/;
 const LIVE_STREAM_CAP = 4;
@@ -182,7 +183,7 @@ router.post(
     asyncHandler(async (req: Request, res: Response) => {
         const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
         if (query.length < 2 || query.length > 500) {
-            res.status(400).json({ error: "query must be 2-500 characters" });
+            refuseRequest(req, res, "query: 2-500 characters", "query must be 2-500 characters");
             return;
         }
         try {
@@ -211,7 +212,7 @@ router.get(
     asyncHandler(async (req: Request, res: Response) => {
         const { trackId } = req.params;
         if (!TRACK_ID_RE.test(trackId)) {
-            res.status(400).json({ error: "Invalid trackId format" });
+            refuseRequest(req, res, "trackId: not a track id");
             return;
         }
         const resolved = await resolveCoverBytes(trackId);

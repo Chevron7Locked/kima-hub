@@ -15,6 +15,7 @@ import { getAudioStreamingService } from "../services/audioStreaming";
 import { config } from "../config";
 import { redisClient } from "../utils/redis";
 import { pexpireIfToken } from "../utils/tokenGuardedKey";
+import { refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -445,9 +446,7 @@ router.post("/", async (req: Request, res: Response) => {
     try {
         const { entityType, entityId } = req.body;
         if (!entityType || !entityId) {
-            return res
-                .status(400)
-                .json({ error: "entityType and entityId are required" });
+            return refuseRequest(req, res, "entityType and entityId required");
         }
 
         // Creation lives in shareService so the Subsonic surface can create a

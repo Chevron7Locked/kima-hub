@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
 import { refuseRequest } from "../utils/errors";
-import { createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
+import { cleanDeviceName, createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
 
 const router = Router();
 
@@ -18,9 +18,10 @@ router.post("/", async (req, res) => {
         // The plaintext key is returned once, in the response below, and is
         // never stored -- the row keeps only a SHA-256 digest. createApiKey owns
         // both halves so the hashing cannot be forgotten at a call site.
-        const apiKey = await createApiKey(userId, deviceName.trim());
+        const name = cleanDeviceName(deviceName);
+        const apiKey = await createApiKey(userId, name);
 
-        logger.debug(`API key created for user ${userId}: ${deviceName}`);
+        logger.debug(`API key created for user ${userId}: ${name}`);
 
         res.status(201).json({
             apiKey: apiKey.key,

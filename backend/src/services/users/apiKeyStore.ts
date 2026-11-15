@@ -16,6 +16,17 @@ const PUBLIC_FIELDS = {
     createdAt: true,
 } as const;
 
+const MAX_DEVICE_NAME = 100;
+
+/**
+ * The name a key is stored and logged under, for both ways a device gets one (the key form and the device-link
+ * code): trimmed, at most 100 characters, and "Mobile Device" when nothing readable was sent.
+ */
+export function cleanDeviceName(raw: unknown): string {
+    const name = typeof raw === "string" ? raw.trim().slice(0, MAX_DEVICE_NAME).trim() : "";
+    return name || "Mobile Device";
+}
+
 /** 32 bytes, hex-encoded: 64 characters, 256 bits of entropy. */
 function generateApiKeyValue(): string {
     return crypto.randomBytes(32).toString("hex");

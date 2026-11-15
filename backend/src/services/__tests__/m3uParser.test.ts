@@ -1,4 +1,4 @@
-import { caseSpellings, decodeM3U, libraryFileNames, libraryPathReadings, longestSuffixMatches, parseM3U, unicodeForms } from "../m3uParser";
+import { M3UContainsNullBytes, M3UTooManyEntries, caseSpellings, decodeM3U, libraryFileNames, libraryPathReadings, longestSuffixMatches, parseM3U, unicodeForms } from "../m3uParser";
 
 describe("M3U Parser", () => {
     it("parses basic M3U (paths only, no metadata)", () => {
@@ -73,6 +73,12 @@ C:\\Music\\Artist\\Album\\01 - Title.mp3`;
     it("rejects content with null bytes", () => {
         const content = `/music/track\x00.mp3`;
         expect(() => parseM3U(content)).toThrow("null bytes");
+    });
+
+    it("refuses with errors a caller can tell apart by type, not by their wording", () => {
+        const many = Array.from({ length: 4 }, (_, i) => `/music/track${i}.mp3`).join("\n");
+        expect(() => parseM3U(many, { maxEntries: 3 })).toThrow(M3UTooManyEntries);
+        expect(() => parseM3U("/music/track\x00.mp3")).toThrow(M3UContainsNullBytes);
     });
 });
 

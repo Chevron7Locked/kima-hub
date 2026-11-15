@@ -28,6 +28,7 @@ import * as downloadJobs from "../services/downloads/jobs";
 import type { Prisma } from "@prisma/client";
 import { PLAYABLE_DISCOVER_SONG, PLAYABLE_SONG } from "../utils/playableSong";
 import { refuseRequest } from "../utils/errors";
+import { plainNumber, wholeNumber } from "../utils/wholeNumber";
 
 const router = Router();
 
@@ -882,7 +883,7 @@ router.patch("/config", async (req, res) => {
         } = {};
 
         if (playlistSize !== undefined) {
-            const size = parseInt(playlistSize, 10);
+            const size = wholeNumber(playlistSize);
             if (isNaN(size) || size < 5 || size > 50 || size % 5 !== 0) {
                 return refuseRequest(req, res, "playlistSize: 5-50 in steps of 5");
             }
@@ -890,7 +891,7 @@ router.patch("/config", async (req, res) => {
         }
 
         if (maxRetryAttempts !== undefined) {
-            const retries = parseInt(maxRetryAttempts, 10);
+            const retries = wholeNumber(maxRetryAttempts);
             if (isNaN(retries) || retries < 1 || retries > 10) {
                 return refuseRequest(req, res, "maxRetryAttempts: 1-10");
             }
@@ -898,7 +899,7 @@ router.patch("/config", async (req, res) => {
         }
 
         if (exclusionMonths !== undefined) {
-            const months = parseInt(exclusionMonths, 10);
+            const months = wholeNumber(exclusionMonths);
             if (isNaN(months) || months < 0 || months > 12) {
                 return refuseRequest(req, res, "exclusionMonths: 0-12");
             }
@@ -906,7 +907,7 @@ router.patch("/config", async (req, res) => {
         }
 
         if (downloadRatio !== undefined) {
-            const ratio = parseFloat(downloadRatio);
+            const ratio = plainNumber(downloadRatio);
             if (isNaN(ratio) || ratio < 1.0 || ratio > 2.0) {
                 return refuseRequest(req, res, "downloadRatio: 1.0-2.0");
             }

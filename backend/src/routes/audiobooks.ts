@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import * as fs from "fs";
 import { logger } from "../utils/logger";
-import { safeError, UserFacingError } from "../utils/errors";
+import { refuseRequest, safeError, UserFacingError } from "../utils/errors";
 import { audiobookCacheService } from "../services/audiobookCache";
 import { audiobookshelfService } from "../services/audiobookshelf";
 import { prisma } from "../utils/db";
@@ -223,7 +223,7 @@ router.get("/search", async (req, res) => {
         const { q } = req.query;
 
         if (!q || typeof q !== "string") {
-            return res.status(400).json({ error: "Query parameter required" });
+            return refuseRequest(req, res, "q: a search text required");
         }
 
         const results = await audiobookshelfService.searchAudiobooks(q);

@@ -26,7 +26,7 @@ import {
     moodMixState,
     saveMoodMixAsPlaylist,
 } from "../services/releases/moodMixes";
-import { invalidRequest } from "../utils/errors";
+import { invalidRequest, refuseRequest } from "../utils/errors";
 
 const router = Router();
 /** GET /whats-new/pending — the newest release, until this user closes it; older ones live on the changelog. */
@@ -165,7 +165,7 @@ router.post("/:version/choice", async (req, res) => {
             return invalidRequest(req, res, error);
         }
         if (error instanceof UnknownChoiceError) {
-            return res.status(400).json({ error: "Unknown choice" });
+            return refuseRequest(req, res, "key: not a choice Kima knows", "Unknown choice");
         }
         logger.error("[WhatsNew] choice failed:", error);
         res.status(500).json({ error: "Failed to record choice" });

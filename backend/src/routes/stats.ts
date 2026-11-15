@@ -16,6 +16,7 @@ import { playableSlice, type Slice } from "../services/stats/playable";
 import { asPeriod, withListens } from "../services/stats/listens";
 import { spokenStats } from "../services/stats/spoken";
 import { systemStats } from "../services/stats/system";
+import { wholeNumber } from "../utils/wholeNumber";
 import {
     auditFalseStarts,
     collapseDuplicateRows,
@@ -65,8 +66,8 @@ router.get("/", async (req, res) => {
  */
 router.get("/hour", async (req, res) => {
     try {
-        const dow = Number(req.query.dow);
-        const hour = Number(req.query.hour);
+        const dow = wholeNumber(req.query.dow);
+        const hour = wholeNumber(req.query.hour);
         if (!Number.isInteger(dow) || dow < 0 || dow > 6 ||
             !Number.isInteger(hour) || hour < 0 || hour > 23) {
             return refuseRequest(req, res, "dow must be 0-6 and hour 0-23");
@@ -130,8 +131,8 @@ router.get("/track/:id/plays", async (req, res) => {
 /** GET /stats/region?x=12&y=18 — what sits at one point of the taste plot. */
 router.get("/region", async (req, res) => {
     try {
-        const x = Number(req.query.x);
-        const y = Number(req.query.y);
+        const x = wholeNumber(req.query.x);
+        const y = wholeNumber(req.query.y);
         if (!Number.isInteger(x) || x < 1 || x > 24 || !Number.isInteger(y) || y < 1 || y > 24) {
             return refuseRequest(req, res, "x and y must be whole numbers 1-24");
         }

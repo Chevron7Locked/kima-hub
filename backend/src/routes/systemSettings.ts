@@ -16,7 +16,7 @@ import {
 import { configureLidarrWebhook } from "../services/lidarrWebhookSetup";
 import { config, musicFolderProblem, musicPathFixedByEnv, useMusicFolder } from "../config";
 import { createLidarrClient } from "../services/lidarrClient";
-import { invalidRequest, safeError } from "../utils/errors";
+import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 
 const router = Router();
 
@@ -209,7 +209,7 @@ router.post("/test-lidarr", async (req, res) => {
     logger.debug("[Lidarr Test] Testing connection to:", url);
 
     if (!url || !apiKey) {
-      return res.status(400).json({ error: "URL and API key are required" });
+      return refuseRequest(req, res, "url and apiKey required", "URL and API key are required");
     }
 
     const response = await createLidarrClient(url, apiKey, 10_000).get("/api/v1/system/status");
@@ -234,7 +234,7 @@ router.post("/lidarr-profiles", async (req, res) => {
   try {
     const { url, apiKey } = req.body;
     if (!url || !apiKey) {
-      return res.status(400).json({ error: "URL and API key are required" });
+      return refuseRequest(req, res, "url and apiKey required", "URL and API key are required");
     }
 
     const lidarr = createLidarrClient(url, apiKey, 10_000);
@@ -258,7 +258,7 @@ router.post("/test-fanart", async (req, res) => {
     const { fanartApiKey } = req.body;
 
     if (!fanartApiKey) {
-      return res.status(400).json({ error: "API key is required" });
+      return refuseRequest(req, res, "fanartApiKey required", "API key is required");
     }
 
     // Test with a known artist (The Beatles MBID)
@@ -288,7 +288,7 @@ router.post("/test-audiobookshelf", async (req, res) => {
     const { url, apiKey } = req.body;
 
     if (!url || !apiKey) {
-      return res.status(400).json({ error: "URL and API key are required" });
+      return refuseRequest(req, res, "url and apiKey required", "URL and API key are required");
     }
 
     const response = await axios.get(`${url}/api/libraries`, {
@@ -352,9 +352,7 @@ router.post("/test-soulseek", async (req, res) => {
 
     // P2P mode: Kima logs in with the user's own Soulseek credentials.
     if (!username || !password) {
-      return res.status(400).json({
-        error: "Soulseek username and password are required",
-      });
+      return refuseRequest(req, res, "username and password required", "Soulseek username and password are required");
     }
 
     logger.debug(`[SOULSEEK-TEST] Testing connection as "${username}"...`);

@@ -8,7 +8,7 @@ import { generateRefreshToken, generateToken, signedInUser } from "../middleware
 import { refusalMessage, signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
 import { runAsRequestWork } from "../utils/stopCheck";
-import { invalidRequest } from "../utils/errors";
+import { invalidRequest, refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -169,9 +169,7 @@ router.post("/soulseek", async (req, res) => {
         }
 
         if (!config.username || !config.password) {
-            return res.status(400).json({
-                error: "Soulseek username and password are required",
-            });
+            return refuseRequest(req, res, "username and password required", "Soulseek username and password are required");
         }
 
         const changed = await saveSystemSettings({ soulseekEnabled: true, soulseekUsername: config.username, soulseekPassword: config.password });

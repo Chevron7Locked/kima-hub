@@ -12,6 +12,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { internalSecret } from "../../utils/internalSecret";
 import { mountApi } from "../mounts";
+import { FULL_LINK_MESSAGE } from "../../services/musicLink";
 
 jest.setTimeout(60_000);
 
@@ -80,10 +81,13 @@ const ROUTES: Row[] = [
     ["podcasts: a chart for a blank category", "get", () => "/api/podcasts/charts?category=%20%20", undefined],
     ["podcasts: subscribe with neither a feed nor an iTunes id", "post", () => "/api/podcasts/subscribe", {}],
     ["podcasts: genres with none given", "get", () => "/api/podcasts/discover/genres", undefined],
+    ["podcasts: genres with an empty entry", "get", () => "/api/podcasts/discover/genres?genres=1,,2", undefined],
+    ["podcasts: genres that are only a comma", "get", () => "/api/podcasts/discover/genres?genres=,", undefined],
     ["podcasts: genres that are not numbers", "get", () => "/api/podcasts/discover/genres?genres=a,b", undefined],
     ["stats: an hour on a day that does not exist", "get", () => "/api/stats/hour?dow=9&hour=1", undefined],
     ["stats: tracks of a slice that does not exist", "get", () => "/api/stats/tracks?of=bogus", undefined],
     ["stats: plays of a track with too long an id", "get", () => `/api/stats/track/${"x".repeat(65)}/plays`, undefined],
+    ["stats: an hour left blank", "get", () => "/api/stats/hour?dow=&hour=", undefined],
     ["stats: a region off the grid", "get", () => "/api/stats/region?x=0&y=99", undefined],
     ["vibe: a path with no tracks", "post", () => "/api/vibe/path", {}],
     ["vibe: a path with ids that are not ids", "post", () => "/api/vibe/path", { startTrackId: "a", endTrackId: "b" }],
@@ -91,6 +95,10 @@ const ROUTES: Row[] = [
     ["vibe: a blend with nothing to add", "post", () => "/api/vibe/alchemy", {}],
     ["vibe: a blend of too many", "post", () => "/api/vibe/alchemy", { add: Array.from({ length: 11 }, () => CUID) }],
     ["vibe: a blend to subtract that is not a list", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: "x" }],
+    ["vibe: a blend to subtract that is zero", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: 0 }],
+    ["vibe: a blend to subtract that is empty text", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: "" }],
+    ["vibe: a blend to subtract that is null", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: null }],
+    ["vibe: a blend to subtract that is false", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: false }],
     ["vibe: a blend to add that are not ids", "post", () => "/api/vibe/alchemy", { add: ["nope"] }],
     ["vibe: a blend to subtract that are not ids", "post", () => "/api/vibe/alchemy", { add: [CUID], subtract: ["nope"] }],
     ["vibe: a search that is one letter", "post", () => "/api/vibe/search", { query: "a" }],
@@ -106,6 +114,11 @@ const ROUTES: Row[] = [
     ["discover: retry attempts out of range", "patch", () => "/api/discover/config", { maxRetryAttempts: 99 }],
     ["discover: exclusion months out of range", "patch", () => "/api/discover/config", { exclusionMonths: 99 }],
     ["discover: a download ratio out of range", "patch", () => "/api/discover/config", { downloadRatio: 9 }],
+    ["discover: a playlist size with trailing text", "patch", () => "/api/discover/config", { playlistSize: "10abc" }],
+    ["discover: a playlist size that is not whole", "patch", () => "/api/discover/config", { playlistSize: 10.5 }],
+    ["discover: retry attempts with trailing text", "patch", () => "/api/discover/config", { maxRetryAttempts: "2x" }],
+    ["discover: exclusion months with trailing text", "patch", () => "/api/discover/config", { exclusionMonths: "3x" }],
+    ["discover: a download ratio with trailing text", "patch", () => "/api/discover/config", { downloadRatio: "1.5x" }],
     ["discover: an on-switch that is not a boolean", "patch", () => "/api/discover/config", { enabled: "yes" }],
     ["analysis: a worker count that is not a number", "put", () => "/api/analysis/workers", { workers: "many" }],
     ["analysis: a clap worker count out of range", "put", () => "/api/analysis/clap-workers", { workers: 0 }],
@@ -114,6 +127,8 @@ const ROUTES: Row[] = [
     ["enrichment: failures of a type that does not exist", "get", () => "/api/enrichment/failures?entityType=bogus", undefined],
     ["enrichment: a retry with no ids", "post", () => "/api/enrichment/retry", {}],
     ["enrichment: an album year that is not a number", "put", () => "/api/enrichment/albums/none/metadata", { year: "abc" }],
+    ["enrichment: an album year with trailing text", "put", () => "/api/enrichment/albums/none/metadata", { year: "2020abc" }],
+    ["enrichment: a track number with trailing text", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: "3x" }],
     ["enrichment: a track number that is not a number", "put", () => "/api/enrichment/tracks/none/metadata", { trackNo: "abc" }],
     ["enrichment: a concurrency that is not a number", "put", () => "/api/enrichment/concurrency", {}],
     ["cover art: an id that is not a cover id", "get", () => "/api/library/cover-art/not-a-cover-id", undefined],
@@ -133,6 +148,8 @@ const ROUTES: Row[] = [
     ["api keys: a key with no device name", "post", () => "/api/api-keys", {}],
     ["api keys: a key with a device name that is a number", "post", () => "/api/api-keys", { deviceName: 5 }],
     ["auth: a sign-in with nothing", "post", () => "/api/auth/login", {}],
+    ["auth: a refresh with no token", "post", () => "/api/auth/refresh", {}],
+    ["share: a share with nothing to share", "post", () => "/api/share", {}],
     ["auth: 2fa enable with no code", "post", () => "/api/auth/2fa/enable", {}],
     ["auth: 2fa disable with no code", "post", () => "/api/auth/2fa/disable", { password: "x" }],
     ["auth: new recovery codes with no password", "post", () => "/api/auth/2fa/recovery-codes", { token: "123456" }],
@@ -144,6 +161,53 @@ describe("a request that does not parse", () => {
         const call = request(app)[method](path()).set("Authorization", bearer);
 
         const res = await (body === undefined ? call : call.send(body as object));
+
+        expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
+    });
+
+    it("is answered in plain words when a person typing a form reads them, and is still logged", async () => {
+        const logged = expectLog("warn");
+        const cases: [string, "post", string, unknown, string][] = [
+            ["auth: create user with nothing", "post", "/api/auth/create-user", {}, "Username and password are required"],
+            ["auth: create user with a role that does not exist", "post", "/api/auth/create-user", { username: "x", password: "abcdef", role: "root" }, "Invalid role"],
+            ["auth: change password with nothing", "post", "/api/auth/change-password", {}, "Current and new password are required"],
+            ["onboarding: soulseek on with no login", "post", "/api/onboarding/soulseek", { enabled: true }, "Soulseek username and password are required"],
+            ["system settings: test lidarr with nothing", "post", "/api/system-settings/test-lidarr", {}, "URL and API key are required"],
+            ["system settings: test audiobookshelf with nothing", "post", "/api/system-settings/test-audiobookshelf", {}, "URL and API key are required"],
+            ["system settings: test fanart with nothing", "post", "/api/system-settings/test-fanart", {}, "API key is required"],
+            ["spotify: a quick import of an address with no scheme", "post", "/api/spotify/import/quick", { url: "open.spotify.com/playlist/abc" }, FULL_LINK_MESSAGE],
+            ["spotify: an m3u import with no file", "post", "/api/spotify/import/m3u", {}, "No file uploaded"],
+            ["whats new: a choice no release has", "post", "/api/whats-new/1.11.0/choice", { key: "no-such-choice", enabled: true }, "Unknown choice"],
+        ];
+        for (const [name, method, path, body, answer] of cases) {
+            const res = await request(app)[method](path).set("Authorization", bearer).send(body as object);
+            expect([name, res.status, res.body]).toEqual([name, 400, { error: answer }]);
+        }
+        const lines = logged.mock.calls.map((call) => String(call[0]));
+        expect(lines.filter((line) => line.includes("[InvalidRequest]")).length).toBeGreaterThanOrEqual(cases.length);
+    });
+
+    it("refuses a playlist name sent twice in an m3u upload with 400, not a server fault", async () => {
+        expectLog("warn");
+
+        const res = await request(app)
+            .post("/api/spotify/import/m3u")
+            .set("Authorization", bearer)
+            .attach("file", Buffer.from("/music/a.mp3\n"), "list.m3u")
+            .field("playlistName", "one")
+            .field("playlistName", "two");
+
+        expect([res.status, res.body]).toEqual([400, { error: "playlistName is required (1-200 chars)" }]);
+    });
+
+    it("refuses an idempotency key that is too long to store, in a plain 400", async () => {
+        expectLog("warn");
+
+        const res = await request(app)
+            .post("/api/playlists")
+            .set("Authorization", bearer)
+            .set("Idempotency-Key", "k".repeat(500))
+            .send({ name: `${P}-keyed` });
 
         expect([res.status, res.body]).toEqual([400, { error: "Invalid request" }]);
     });

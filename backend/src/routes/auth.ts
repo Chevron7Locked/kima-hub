@@ -20,7 +20,7 @@ import { authLimiter } from "../middleware/rateLimiter";
 import { passwordGuessSubject, webLoginGuesses } from "../services/users/guessLimits";
 import { encrypt } from "../utils/encryption";
 import { isTransactionConflict } from "../utils/dbConflict";
-import { invalidRequest } from "../utils/errors";
+import { invalidRequest, refuseRequest } from "../utils/errors";
 
 const router = Router();
 
@@ -166,7 +166,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
-        return res.status(400).json({ error: "Refresh token required" });
+        return refuseRequest(req, res, "refreshToken required");
     }
 
     try {
@@ -238,9 +238,7 @@ router.post("/change-password", authLimiter, async (req, res) => {
         const { currentPassword, newPassword } = req.body;
 
         if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword || !newPassword) {
-            return res
-                .status(400)
-                .json({ error: "Current and new password are required" });
+            return refuseRequest(req, res, "currentPassword and newPassword: non-empty strings required", "Current and new password are required");
         }
 
         const changed = await changePassword({ userId: req.user!.id, currentPassword, newPassword });
@@ -295,13 +293,11 @@ router.post("/create-user", async (req, res) => {
         const { username, password, role } = req.body;
 
         if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
-            return res
-                .status(400)
-                .json({ error: "Username and password are required" });
+            return refuseRequest(req, res, "username and password: non-empty strings required", "Username and password are required");
         }
 
         if (role && !["user", "admin"].includes(role)) {
-            return res.status(400).json({ error: "Invalid role" });
+            return refuseRequest(req, res, "role: user or admin", "Invalid role");
         }
 
         // Skips onboarding: an admin made this account.

@@ -7,7 +7,7 @@ import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 import { z } from "zod";
 import { spotifyImportService, getImportJob } from "../services/spotifyImport";
-import { M3UNothingMatched, decodeM3U, parseM3U } from "../services/m3uParser";
+import { M3UContainsNullBytes, M3UNothingMatched, M3UTooManyEntries, decodeM3U, parseM3U } from "../services/m3uParser";
 import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE, MusicLink, MusicPlatform } from "../services/musicLink";
 
 const router = Router();
@@ -84,8 +84,10 @@ const QUICK_IMPORT_PATHS: Partial<Record<MusicPlatform, string[]>> = {
 const INVALID_URL = "Invalid URL. Supported: Spotify, Deezer, YouTube, SoundCloud, Mixcloud.";
 
 /** The 400 reply for an address that is not an importable music link. */
-function refuseLink(res: Response, raw: string) {
-    return res.status(400).json({ error: lacksLinkScheme(raw) ? FULL_LINK_MESSAGE : INVALID_URL });
+function refuseLink(req: Request, res: Response, raw: string) {
+    return lacksLinkScheme(raw)
+        ? refuseRequest(req, res, "url: not a full http or https address", FULL_LINK_MESSAGE)
+        : refuseRequest(req, res, "url: not an importable music link", INVALID_URL);
 }
 
 /** The address as a music link on a site playlists can be imported from, or null. */
@@ -136,7 +138,7 @@ router.post("/preview/start", async (req, res) => {
 
         const link = importableLink(url);
         if (!link) {
-            return refuseLink(res, url);
+            return refuseLink(req, res, url);
         }
 
         logger.debug(`[Playlist Import] Starting preview job for: ${link.url}`);
@@ -178,7 +180,7 @@ router.post("/import/quick", async (req, res) => {
 
         const link = quickImportableLink(url);
         if (!link) {
-            return refuseLink(res, url);
+            return refuseLink(req, res, url);
         }
 
         const { jobId } = await spotifyImportService.quickImport(link.url, req.user!.id, playlistName);
@@ -334,17 +336,17 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
     });
 }, async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+        if (!req.file) return refuseRequest(req, res, "file: an uploaded playlist file required", "No file uploaded");
 
-        const playlistName = req.body.playlistName?.trim();
+        const playlistName = typeof req.body.playlistName === "string" ? req.body.playlistName.trim() : "";
         if (!playlistName || playlistName.length > 200) {
-            return res.status(400).json({ error: "playlistName is required (1-200 chars)" });
+            return refuseRequest(req, res, "playlistName: 1-200 characters", "playlistName is required (1-200 chars)");
         }
 
         const entries = parseM3U(decodeM3U(req.file.buffer));
 
         if (entries.length === 0) {
-            return res.status(400).json({ error: "M3U file contains no entries" });
+            return refuseRequest(req, res, "file: no entries", "M3U file contains no entries");
         }
 
         const result = await spotifyImportService.importFromM3U(
@@ -359,10 +361,10 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
         if (error instanceof M3UNothingMatched) {
             return res.status(422).json({ error: error.message });
         }
-        if (error.message?.includes("exceeds maximum")) {
+        if (error instanceof M3UTooManyEntries) {
             return refuseRequest(req, res, error.message, "That playlist has too many songs");
         }
-        if (error.message?.includes("null bytes")) {
+        if (error instanceof M3UContainsNullBytes) {
             return refuseRequest(req, res, error.message, "That file is not a text playlist");
         }
         safeError(res, "M3U import", error);

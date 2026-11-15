@@ -1,7 +1,7 @@
 /** Soulseek routes: UI searches and track downloads over the vendored soulseek-ts connection. */
 
 import { logger } from "../utils/logger";
-import { safeError } from "../utils/errors";
+import { refuseRequest, safeError } from "../utils/errors";
 import { Router } from "express";
 import { requireAcquirePermission } from "../middleware/auth";
 import { soulseekService } from "../services/soulseek";
@@ -155,9 +155,7 @@ router.post(
             } else if (artist && title) {
                 searchQuery = `${artist} ${title}`;
             } else {
-                return res.status(400).json({
-                    error: "Either 'query' or both 'artist' and 'title' are required",
-                });
+                return refuseRequest(req, res, "query, or both artist and title, required", "Either 'query' or both 'artist' and 'title' are required");
             }
 
             logger.debug(
@@ -303,9 +301,7 @@ router.post(
             const { username, filepath, artist, title, album, filename } = req.body;
 
             if (!username || !filepath) {
-                return res.status(400).json({
-                    error: "username and filepath are required",
-                });
+                return refuseRequest(req, res, "username and filepath required", "username and filepath are required");
             }
 
             const fileName = filename || leafName(filepath) || "track.mp3";

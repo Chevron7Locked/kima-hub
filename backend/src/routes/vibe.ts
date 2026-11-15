@@ -147,7 +147,7 @@ router.post("/alchemy", async (req, res) => {
             return refuseRequest(req, res, "add: at most 10 tracks");
         }
 
-        if (subtract && (!Array.isArray(subtract) || subtract.length > 10)) {
+        if (subtract !== undefined && (!Array.isArray(subtract) || subtract.length > 10)) {
             return refuseRequest(req, res, "subtract: must be a list of at most 10 tracks");
         }
 
@@ -155,7 +155,7 @@ router.post("/alchemy", async (req, res) => {
             return refuseRequest(req, res, "add: not all track ids");
         }
 
-        if (subtract && !subtract.every((id: unknown) => typeof id === "string" && CUID_RE.test(id))) {
+        if (subtract !== undefined && !subtract.every((id: unknown) => typeof id === "string" && CUID_RE.test(id))) {
             return refuseRequest(req, res, "subtract: not all track ids");
         }
 

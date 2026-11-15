@@ -15,6 +15,22 @@ export class M3UNothingMatched extends Error {
     }
 }
 
+/** An M3U file with a null byte in it: not a text playlist. */
+export class M3UContainsNullBytes extends Error {
+    constructor() {
+        super("M3U content contains null bytes");
+        this.name = "M3UContainsNullBytes";
+    }
+}
+
+/** An M3U file with more entries than a playlist may hold. */
+export class M3UTooManyEntries extends Error {
+    constructor(readonly maxEntries: number) {
+        super(`M3U file exceeds maximum of ${maxEntries} entries`);
+        this.name = "M3UTooManyEntries";
+    }
+}
+
 interface ParseOptions {
     maxEntries?: number;
 }
@@ -23,7 +39,7 @@ export function parseM3U(content: string, options: ParseOptions = {}): M3UEntry[
     const { maxEntries = 10000 } = options;
 
     if (content.includes("\0")) {
-        throw new Error("M3U content contains null bytes");
+        throw new M3UContainsNullBytes();
     }
 
     const lines = content.replace(/\r\n/g, "\n").split("\n");
@@ -70,7 +86,7 @@ export function parseM3U(content: string, options: ParseOptions = {}): M3UEntry[
         pendingMeta = null;
 
         if (entries.length > maxEntries) {
-            throw new Error(`M3U file exceeds maximum of ${maxEntries} entries`);
+            throw new M3UTooManyEntries(maxEntries);
         }
     }
 
