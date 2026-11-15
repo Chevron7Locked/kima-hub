@@ -33,6 +33,12 @@ export interface StreamOptions {
     mp3Only?: boolean;
     /** The client's cap: a source within it is served as it is, whatever the tier. */
     keepUnderKbps?: number;
+    /**
+     * The bitrate the library scan stored for the file (`Track.bitrate`, kbps). When it is set the decision uses it and
+     * does not open the file; when it is not (a song the scan has not read since the column was added) the file's own
+     * header is read, as before. It does not make the request a Subsonic plan.
+     */
+    storedKbps?: number | null;
 }
 
 export function isQuality(value: unknown): value is Quality {
@@ -129,16 +135,16 @@ export class AudioStreamingService {
 
     /**
      * Whether a request is answered with the source file itself rather than an MP3: at "original", unless an MP3 was
-     * promised and the source is not one; otherwise when the source's own bitrate is within `keepUnderKbps` (the
-     * client's cap) or, without one, within the tier's. Subsonic's transcode decision asks this, so the stream keeps
-     * the decision's promise.
+     * promised and the source is not one; otherwise when the source's own bitrate (the stored one when given, else
+     * the file's header) is within `keepUnderKbps` (the client's cap) or, without one, within the tier's. Subsonic's
+     * transcode decision asks this, so the stream keeps the decision's promise.
      */
     async servesOriginal(sourceAbsolutePath: string, quality: Quality, options: StreamOptions = {}): Promise<boolean> {
         const sourceIsMp3 = path.extname(sourceAbsolutePath).toLowerCase() === ".mp3";
         if (options.mp3Only && !sourceIsMp3) return false;
         if (quality === "original") return true;
         const limit = options.keepUnderKbps ?? QUALITY_SETTINGS[quality].bitrate;
-        const kbps = await this.sourceKbps(sourceAbsolutePath);
+        const kbps = options.storedKbps ?? (await this.sourceKbps(sourceAbsolutePath));
         if (kbps !== null && kbps <= limit) {
             logger.debug(`[STREAM] Source bitrate (${kbps}kbps) <= ${limit}kbps, serving original`);
             return true;
@@ -191,7 +197,7 @@ export class AudioStreamingService {
         }
 
         // The web player's tiers: a source already within the tier is not upsampled.
-        if (!planned && (await this.servesOriginal(sourceAbsolutePath, target))) return original();
+        if (!planned && (await this.servesOriginal(sourceAbsolutePath, target, { storedKbps: options.storedKbps }))) return original();
 
         await this.trimCacheIfNearFull();
 

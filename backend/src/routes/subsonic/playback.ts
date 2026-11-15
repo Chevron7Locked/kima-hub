@@ -30,7 +30,7 @@ import { one, many } from "../../utils/subsonicParams";
 
 export const playbackRouter = Router();
 
-type SongTrack = { mime: string | null; filePath: string | null };
+type SongTrack = { mime: string | null; filePath: string | null; bitrate: number | null };
 
 /** Streams a playable song: the file as it is ("direct") or the MP3 `choose` names for it. Any other song is not found. */
 async function streamTrackById(
@@ -61,6 +61,7 @@ async function streamTrackById(
             : await streamingService.getStreamFilePath(track.id, pick.quality, track.fileModified, absolutePath, 0, {
                   mp3Only: pick.mp3Only,
                   keepUnderKbps: pick.capKbps ?? undefined,
+                  storedKbps: track.bitrate,
               });
         await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
     } catch (err) {

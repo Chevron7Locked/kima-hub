@@ -7,14 +7,14 @@ export type SubsonicPlan = { direct: true } | { direct: false; serve: SubsonicSe
 
 /**
  * The one rule for a song's stream, followed by getTranscodeDecision, getTranscodeStream and stream.view, from the
- * client's `format` and `maxBitRate`, the song's format as Kima lists it, and the file's own bitrate (read from the
- * file, see AudioStreamingService.servesOriginal). Kima makes only MP3s at 128/192/320 kbps, so another format is
+ * client's `format` and `maxBitRate`, the song's format as Kima lists it, and the file's own bitrate (the one the scan
+ * stored, else read from the file; see AudioStreamingService.servesOriginal). Kima makes only MP3s at 128/192/320 kbps, so another format is
  * only ever the file itself, and a cap under 128 can be met only by a file already within it.
  */
 export async function planSubsonicSong(
     format: string | undefined,
     maxBitRate: string | undefined,
-    track: { mime: string | null; filePath: string | null },
+    track: { mime: string | null; filePath: string | null; bitrate?: number | null },
     absolutePath: string,
 ): Promise<SubsonicPlan> {
     const wanted = format?.toLowerCase();
@@ -23,7 +23,7 @@ export async function planSubsonicSong(
     const source = songFormat(track);
     const streaming = getAudioStreamingService(config.music.transcodeCachePath, config.music.transcodeCacheMaxGb);
     const fits = (mp3Only: boolean) =>
-        streaming.servesOriginal(absolutePath, cap === null ? "original" : tierFor(cap), { mp3Only, keepUnderKbps: cap ?? undefined });
+        streaming.servesOriginal(absolutePath, cap === null ? "original" : tierFor(cap), { mp3Only, keepUnderKbps: cap ?? undefined, storedKbps: track.bitrate });
 
     if (wanted === "mp3") {
         if (await fits(true)) return { direct: true };

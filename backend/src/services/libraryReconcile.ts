@@ -319,8 +319,9 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
  * copy for history only: a queue or playlist is never pointed at a file a person could not play, but a fixed file has
  * its history waiting.
  *
- * Best means: playable, then a lossless codec, then the higher bitrate (file size over duration, not Track.bitrate,
- * which a row only has once its file was read since that column was added; a song of unknown duration ranks last), then the lower id, so every sweep chooses the same.
+ * Best means: playable, then a lossless codec, then the higher bitrate (the file's own, `Track.bitrate`, when the scan
+ * has read it; else its size over its duration, in kbps, which also counts tags and art; a copy with neither ranks last),
+ * then the lower id, so every sweep chooses the same.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
@@ -338,7 +339,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
          ORDER BY g.id,
                   (${playableSongSql("k", "ka")}) DESC,
                   (${losslessCodecSql(Prisma.sql`k.mime`)}) DESC,
-                  k."fileSize"::float8 / NULLIF(k.duration, 0) DESC NULLS LAST,
+                  COALESCE(k.bitrate::float8, k."fileSize"::float8 * 8 / 1000 / NULLIF(k.duration, 0)) DESC NULLS LAST,
                   k.id
     `;
     const pairs: Replacement[] = [];

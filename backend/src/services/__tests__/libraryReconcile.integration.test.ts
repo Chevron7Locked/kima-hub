@@ -855,7 +855,7 @@ describe("reconcileDeletedTracks", () => {
  * bitrate, then the lower id. A Discover copy gets nothing.
  */
 describe("which copy takes over", () => {
-    interface CopyOpts { corrupt?: boolean; missing?: boolean; album?: string; mime?: string; fileSize?: number; duration?: number }
+    interface CopyOpts { corrupt?: boolean; missing?: boolean; album?: string; mime?: string; fileSize?: number; duration?: number; bitrate?: number }
     const SLOT = { trackNo: 1, title: "Schema" };
 
     async function seedGone(id = "g") {
@@ -868,7 +868,7 @@ describe("which copy takes over", () => {
         await prisma.track.create({
             data: { id: `${P}${id}`, albumId: opts.album ?? `${P}alb`, ...SLOT, title: "SCHEMA", duration: opts.duration ?? 200,
                 filePath: `/tmp/${P}${id}.bin`, fileModified: new Date(), fileSize: opts.fileSize ?? 1, mime: opts.mime ?? "MPEG 1 Layer 3",
-                corrupt: opts.corrupt ?? false, ...(opts.missing ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
+                corrupt: opts.corrupt ?? false, bitrate: opts.bitrate ?? null, ...(opts.missing ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
         });
     }
     async function seedHistoryAndQueue(goneId = "g") {
@@ -967,6 +967,54 @@ describe("which copy takes over", () => {
         await sweep();
 
         expect(await where()).toMatchObject({ play: `${P}m-high`, queue: [`${P}m-high`] });
+    });
+
+    // The file's own bitrate, once the scan has read it, is the better measure: the size over the duration also counts
+    // tags, art and padding. A copy with none stored is ranked by size over duration, in the same kbps.
+    it("ranks by the stored bitrate when the copies have one, whatever their sizes", async () => {
+        await seedGone();
+        await seedCopy("a-big", { fileSize: 9_000_000, bitrate: 128 });
+        await seedCopy("b-small", { fileSize: 1_000_000, bitrate: 320 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}b-small`, queue: [`${P}b-small`] });
+    });
+
+    it("ranks a copy with no stored bitrate by its size over its duration, against one with a stored bitrate, in kbps", async () => {
+        // 200 s: 9 MB is 360 kbps, 2 MB is 80 kbps.
+        await seedGone();
+        await seedCopy("a-stored", { fileSize: 1, bitrate: 320 });
+        await seedCopy("b-unread", { fileSize: 9_000_000 });
+        await seedCopy("c-unread-low", { fileSize: 2_000_000 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}b-unread` });
+    });
+
+    it("a copy with no stored bitrate and a small size does not outrank a stored 128 kbps one", async () => {
+        await seedGone();
+        await seedCopy("a-unread", { fileSize: 2_000_000 });
+        await seedCopy("b-stored", { fileSize: 1, bitrate: 128 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}b-stored` });
+    });
+
+    it("a copy of unknown duration and no stored bitrate ranks last", async () => {
+        await seedGone();
+        await seedCopy("a-nodur", { duration: 0, fileSize: 9_000_000 });
+        await seedCopy("b-stored", { fileSize: 1, bitrate: 128 });
+        await seedHistoryAndQueue();
+
+        await sweep();
+
+        expect(await where()).toMatchObject({ play: `${P}b-stored` });
     });
 
     it("a copy of unknown duration ranks last by bitrate", async () => {

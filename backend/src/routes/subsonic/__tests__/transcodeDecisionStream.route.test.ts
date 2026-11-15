@@ -147,6 +147,22 @@ it("a file whose bitrate cannot be read is made into an MP3 under a cap", async 
     expect((await transcodeStream("mystery", d.transcodeParams)).headers["content-type"]).toBe("audio/mpeg");
 });
 
+// The scan stores each file's bitrate (Track.bitrate). The decision and the stream use it and do not open the file.
+it("the bitrate the scan stored decides, where the file's header says none", async () => {
+    await prisma.track.update({ where: { id: track("mystery") }, data: { bitrate: 96 } });
+    try {
+        const fits = await decide("mystery", "maxBitRate=128");
+        expect([fits.canDirectPlay, fits.transcodeParams]).toEqual([true, "q-original"]);
+        expect((await request(app()).get(`/rest/stream.view?id=${track("mystery")}&maxBitRate=128`)).headers["content-type"]).toBe("audio/flac");
+
+        await prisma.track.update({ where: { id: track("mystery") }, data: { bitrate: 900 } });
+        const over = await decide("mystery", "maxBitRate=320");
+        expect([over.canDirectPlay, over.transcodeParams]).toEqual([false, "q-high-320"]);
+    } finally {
+        await prisma.track.update({ where: { id: track("mystery") }, data: { bitrate: null } });
+    }
+});
+
 it("an asked-for MP3 is an MP3, even when the file is already under the cap", async () => {
     const uncapped = await decide("flac", "format=mp3");
     expect([uncapped.canDirectPlay, uncapped.transcodeParams]).toEqual([false, "mp3-high"]);

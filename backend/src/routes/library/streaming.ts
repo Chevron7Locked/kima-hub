@@ -8,7 +8,7 @@ import { resolveWithinMusicRoot } from "./trackPath";
 import path from "path";
 
 
-type StreamableTrack = { id: string; filePath: string; fileModified: Date };
+type StreamableTrack = { id: string; filePath: string; fileModified: Date; bitrate: number | null };
 
 // Shared by the primary quality attempt and the FFMPEG_NOT_FOUND fallback:
 // resolves the track's on-disk path (rejecting any escape from the music
@@ -40,6 +40,8 @@ async function resolveAndStream(
     quality as any,
     track.fileModified,
     absolutePath,
+    0,
+    { storedKbps: track.bitrate },
   );
 
   logger.debug(`[STREAM] Sending file: ${filePath}, mimeType: ${mimeType}`);
@@ -121,6 +123,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
         id: track.id,
         filePath: track.filePath,
         fileModified: track.fileModified,
+        bitrate: track.bitrate,
       };
 
       try {
@@ -203,6 +206,7 @@ router.post("/tracks/:id/prewarm", async (req, res) => {
       track.fileModified,
       absolutePath,
       -1,
+      { storedKbps: track.bitrate },
     ).catch(() => {});
 
     return res.status(202).json({ ok: true });

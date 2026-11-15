@@ -332,7 +332,7 @@ compatRouter.all("/getTranscodeDecision.view", wrap(async (req: Request, res: Re
 
     const track = await prisma.track.findFirst({
         where: { id: mediaId, ...PLAYABLE_SONG },
-        select: { filePath: true, mime: true },
+        select: { filePath: true, mime: true, bitrate: true },
     });
     const absolutePath = track?.filePath ? resolveWithinMusicRoot(track.filePath) : null;
     if (!track || !absolutePath) {

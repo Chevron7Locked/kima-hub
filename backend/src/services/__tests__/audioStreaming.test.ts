@@ -849,6 +849,55 @@ describe("a file's bitrate read", () => {
     });
 });
 
+describe("a bitrate the scan stored for the file", () => {
+    let tmpDir: string;
+    let svc: AudioStreamingService;
+    const { parseFile } = require("music-metadata");
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-stored-kbps-"));
+        svc = new AudioStreamingService(tmpDir, 10);
+        (parseFile as jest.Mock).mockReset();
+        // Whatever the file's own header says is made to disagree with the stored value, so which one was used shows.
+        (parseFile as jest.Mock).mockResolvedValue({ format: { bitrate: 320_000 } });
+    });
+
+    afterEach(() => {
+        svc.destroy();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    const song = () => {
+        const src = path.join(tmpDir, "song.m4a");
+        fs.writeFileSync(src, "audio data");
+        return src;
+    };
+
+    it("decides without reading the file: within the cap is served as it is", async () => {
+        expect(await svc.servesOriginal(song(), "medium", { keepUnderKbps: 128, storedKbps: 96 })).toBe(true);
+        expect(parseFile).not.toHaveBeenCalled();
+    });
+
+    it("decides without reading the file: over the cap is transcoded", async () => {
+        expect(await svc.servesOriginal(song(), "medium", { keepUnderKbps: 128, storedKbps: 256 })).toBe(false);
+        expect(parseFile).not.toHaveBeenCalled();
+    });
+
+    it("is used for the web player's tier too", async () => {
+        jest.spyOn(svc as any, "getCachedTranscode").mockResolvedValue(null);
+        const src = song();
+
+        expect(await svc.getStreamFilePath("t-stored", "medium", new Date(), src, 0, { storedKbps: 96 })).toEqual({ filePath: src, mimeType: "audio/mp4" });
+        expect(parseFile).not.toHaveBeenCalled();
+    });
+
+    it("leaves the file's own header to decide when none is stored", async () => {
+        expect(await svc.servesOriginal(song(), "medium", { keepUnderKbps: 128, storedKbps: null })).toBe(false);
+        expect(await svc.servesOriginal(song(), "medium", { keepUnderKbps: 128 })).toBe(false);
+        expect(parseFile).toHaveBeenCalled();
+    });
+});
+
 describe("transcode cache limit", () => {
     let dir: string;
     let service: AudioStreamingService;
