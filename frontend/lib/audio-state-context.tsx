@@ -8,12 +8,14 @@ import {
     useRef,
     ReactNode,
     useMemo,
+    useCallback,
     type SetStateAction,
 } from "react";
 import { api } from "@/lib/api";
 import { episodeForPlayer, type ShowWithEpisodes } from "./podcast-episode";
 import { STORAGE_KEYS } from "./storage-keys";
 import { useAudioController } from "./audio-controller-context";
+import { withQueueKeys, withoutQueueKeys } from "./queue-key";
 
 
 /** A song as the player holds it. */
@@ -27,6 +29,11 @@ export interface Track {
     displayTitle?: string | null;
     displayTrackNo?: number | null;
     hasUserOverrides?: boolean;
+    /**
+     * Which entry of the queue this is, so two entries of one song stay apart. The queue gives every entry one; a
+     * queue from a playlist uses the playlist item's id. Browser only: the server's copy of the queue has none.
+     */
+    queueKey?: string;
 }
 
 export interface AudiobookTrack {
@@ -88,6 +95,8 @@ interface AudioStateContextType {
     isShuffle: boolean;
     repeatMode: "off" | "one" | "all";
     shuffleIndices: number[];
+    /** The key of the queue entry that is playing, or null when no queue entry is. */
+    currentQueueKey: string | null;
 
     // UI state
     /** Whether the full-screen player is open over the page. */
@@ -154,13 +163,13 @@ function playbackKey(
         trackId?: string | null;
         audiobookId?: string | null;
         podcastId?: string | null;
-        queue?: Array<{ id: string }> | null;
+        queue?: Array<{ id: string; queueKey?: string }> | null;
         currentIndex?: number | null;
         isShuffle?: boolean | null;
     },
     queueLimit: number,
 ): string {
-    const queue = (state.queue ?? []).slice(0, queueLimit);
+    const queue = withoutQueueKeys((state.queue ?? []).slice(0, queueLimit));
     return JSON.stringify([
         state.playbackType ?? null,
         state.trackId ?? null,
@@ -198,7 +207,16 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         // Server state will re-set this if there was an active track.
         return stored === "track" ? null : stored;
     });
-    const [queue, setQueue] = useState<Track[]>([]);
+    const [queue, setQueueRaw] = useState<Track[]>([]);
+    // Every queue that is set has every entry keyed, whichever way it arrives (a play, an edit, a restore).
+    const setQueue = useCallback(
+        (action: SetStateAction<Track[]>) =>
+            // A queue given whole is keyed outside the updater, so the updater stays pure.
+            setQueueRaw(
+                typeof action === "function" ? (prev) => withQueueKeys(action(prev)) : withQueueKeys(action),
+            ),
+        [],
+    );
 
     /**
      * The server's queue ceiling, fetched once. A ref so its arrival does not
@@ -440,7 +458,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 restoreFailedRef.current = true;
             })
             .finally(() => setRestoreSettled(true));
-    }, []);
+    }, [setQueue]);
 
     // Save state to localStorage whenever it changes (debounced)
     useEffect(() => {
@@ -514,7 +532,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             trackId: currentTrack?.id ?? null,
             audiobookId: currentAudiobook?.id ?? null,
             podcastId: currentPodcast?.id ?? null,
-            queue: limitedQueue,
+            queue: withoutQueueKeys(limitedQueue),
             currentIndex: adjustedIndex,
             isShuffle,
         };
@@ -673,7 +691,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (
                         serverIsNewer &&
                         JSON.stringify(serverState.queue) !==
-                        JSON.stringify(queueRef.current)
+                        JSON.stringify(withoutQueueKeys(queueRef.current))
                     ) {
                         setQueue(serverState.queue || []);
                         setCurrentIndex(serverState.currentIndex || 0);
@@ -705,7 +723,14 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         currentTrack?.id,
         currentAudiobook?.id,
         currentPodcast?.id,
+        setQueue,
     ]);
+
+    // The playing entry is the queue's entry at the playing place, while it holds the song that is playing.
+    const currentQueueKey = useMemo(() => {
+        const entry = queue[currentIndex];
+        return playbackType === "track" && entry && entry.id === currentTrack?.id ? (entry.queueKey ?? null) : null;
+    }, [queue, currentIndex, currentTrack?.id, playbackType]);
 
     const value = useMemo(
         () => ({
@@ -718,6 +743,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
+            currentQueueKey,
             overlayOpen,
             volume,
             isMuted,
@@ -748,11 +774,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
+            currentQueueKey,
             overlayOpen,
             volume,
             isMuted,
             activeOperation,
             repeatOneCount,
+            setQueue,
         ]
     );
 

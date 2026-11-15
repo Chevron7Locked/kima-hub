@@ -26,6 +26,7 @@ import { dispatchQueryEvent } from "@/lib/query-events";
 import { notify } from "@/lib/notify";
 import { BookSession } from "@/lib/book-session";
 import { appendTracks, insertTrack, isLastInPlayOrder, removeTrack } from "@/lib/queue-edit";
+import { freshQueueKeys, indexOfEntry, withQueueKeys } from "@/lib/queue-key";
 import { refillAndResume, startStationSession, type StationSession } from "@/lib/station-refill";
 import { shuffleArray } from "@/lib/shuffle";
 import { playbackLength } from "@/lib/format";
@@ -192,7 +193,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastManualAdvanceAtRef = useRef(0);
     const lastSaveTimeRef = useRef(0);
     const errorClassifyingRef = useRef(false);
-    const prewarmFiredForRef = useRef<string | null>(null);
+    // The queue key of the entry last prewarmed.
+    const prewarmedKeyRef = useRef<string | null>(null);
     const stationRef = useRef<StationSession<Track> | null>(null);
     // Set when the last queued track ends and playback stops by itself; cleared when the playing track changes.
     const queueEndedRef = useRef(false);
@@ -273,7 +275,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playTrack = useCallback(
-        (track: Track) => {
+        (song: Track) => {
+            const [track] = withQueueKeys([song]);
             stationRef.current = null;
             if (state.activeOperation.type !== 'idle') {
                 const opTrackIds = operationTrackIds(state.activeOperation);
@@ -299,8 +302,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playTracks = useCallback(
-        (tracks: Track[], startIndex = 0, { skipOperationCheck = false } = {}) => {
-            if (tracks.length === 0) return;
+        (songs: Track[], startIndex = 0, { skipOperationCheck = false } = {}) => {
+            if (songs.length === 0) return;
+            const tracks = withQueueKeys(songs);
             stationRef.current = null;
 
             if (!skipOperationCheck && state.activeOperation.type !== 'idle') {
@@ -653,7 +657,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const addToQueue = useCallback(
-        (track: Track) => {
+        (song: Track) => {
+            // Each add is its own entry, so adding one song twice queues it twice.
+            const [track] = freshQueueKeys([song]);
             // This branch replaces the whole queue, so it runs only when the queue
             // is really empty, read from the ref rather than a stale closure.
             // playbackType is not part of the test: adding a track during a
@@ -693,8 +699,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const appendToQueue = useCallback(
-        (tracks: Track[]) => {
-            const next = appendTracks(queueSnapshot(), tracks);
+        (songs: Track[]) => {
+            const next = appendTracks(queueSnapshot(), freshQueueKeys(songs));
             queueRef.current = next.queue;
             shuffleIndicesRef.current = next.shuffleIndices;
             state.setQueue(next.queue);
@@ -1252,8 +1258,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 repeatModeRef.current
             );
             if (!nextTrack) return;
-            if (prewarmFiredForRef.current === nextTrack.id) return;
-            prewarmFiredForRef.current = nextTrack.id;
+            // Once per entry, not per song: a song queued twice in a row is preloaded for each of its entries.
+            if (prewarmedKeyRef.current === nextTrack.queueKey) return;
+            prewarmedKeyRef.current = nextTrack.queueKey ?? null;
             api.prewarmTrack(nextTrack.id);
 
             if (repeatModeRef.current === "one") return;
@@ -1277,22 +1284,21 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const handleGaplessAdvance = (data?: unknown) => {
             const { durationS, trackId } = (data ?? {}) as { durationS?: number; trackId?: string };
 
+            // The entry that was preloaded, found where the queue holds it now (an edit may have moved it). With
+            // none, the next entry in play order. Never the first entry that happens to be the same song.
             let resolved: (Track & { index: number }) | null = null;
-            if (pendingGaplessNextRef.current?.id === trackId) {
-                resolved = pendingGaplessNextRef.current;
+            const pending = pendingGaplessNextRef.current;
+            const pendingAt = pending && pending.id === trackId ? indexOfEntry(queueRef.current, pending.queueKey) : -1;
+            if (pendingAt >= 0) {
+                resolved = { ...queueRef.current[pendingAt], index: pendingAt };
             } else {
-                const queueIdx = queueRef.current.findIndex((t) => t.id === trackId);
-                if (queueIdx >= 0) {
-                    resolved = { ...queueRef.current[queueIdx], index: queueIdx };
-                } else {
-                    resolved = getNextTrackInfo(
-                        queueRef.current,
-                        currentIndexRef.current,
-                        isShuffleRef.current,
-                        shuffleIndicesRef.current,
-                        repeatModeRef.current
-                    );
-                }
+                resolved = getNextTrackInfo(
+                    queueRef.current,
+                    currentIndexRef.current,
+                    isShuffleRef.current,
+                    shuffleIndicesRef.current,
+                    repeatModeRef.current
+                );
             }
             if (!resolved) return;
 

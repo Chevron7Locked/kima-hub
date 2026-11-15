@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
-import { playablePlaylist, playlistTrackToAudio, type PlaylistEntry } from "@/lib/playlist-track";
+import { playablePlaylist, playingItemId, playlistTrackToAudio, type PlaylistEntry } from "@/lib/playlist-track";
 import { cn } from "@/lib/cn";
 import { shuffleArray } from "@/lib/shuffle";
 import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
@@ -142,7 +142,7 @@ export default function PlaylistDetailPage() {
     const params = useParams();
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { currentTrack } = useAudioState();
+    const { currentTrack, currentQueueKey } = useAudioState();
     const { format: trackFormat } = useTrackFormat();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue, pause, resumeWithGesture } = useAudioControls();
@@ -382,17 +382,13 @@ export default function PlaylistDetailPage() {
         }
     };
 
-    const playlistTrackIds = useMemo(() => {
-        return new Set(
-            playlist?.items?.filter((item: PlaylistItem) => !item.unavailable).map((item: PlaylistItem) => item.track.id) || []
-        );
-    }, [playlist?.items]);
+    // The one row that is playing: a song listed twice marks the row that was started, not both.
+    const playingItem = useMemo(
+        () => playingItemId(playlist?.items, currentQueueKey, currentTrack?.id),
+        [playlist?.items, currentQueueKey, currentTrack?.id],
+    );
 
-    const isThisPlaylistPlaying = useMemo(() => {
-        if (!isPlaying || !currentTrack || !playlist?.items?.length)
-            return false;
-        return playlistTrackIds.has(currentTrack.id);
-    }, [isPlaying, currentTrack, playlistTrackIds, playlist?.items?.length]);
+    const isThisPlaylistPlaying = isPlaying && playingItem !== null;
 
     const totalDuration = useMemo(() => {
         if (!playlist?.items) return 0;
@@ -632,7 +628,7 @@ export default function PlaylistDetailPage() {
 
         const playlistItem = item as PlaylistItem;
         const isUnavailable = !!playlistItem.unavailable;
-        const isCurrentlyPlaying = !isUnavailable && currentTrack?.id === playlistItem.track.id;
+        const isCurrentlyPlaying = !isUnavailable && playingItem === playlistItem.id;
         const trackIndex = playlist?.items?.findIndex(
             (i: PlaylistItem) => i.id === playlistItem.id
         ) ?? index;
@@ -641,6 +637,7 @@ export default function PlaylistDetailPage() {
             <div
                 key={playlistItem.id}
                 data-track-index={trackIndex}
+                aria-current={isCurrentlyPlaying ? "true" : undefined}
                 draggable={!!playlist?.isOwner}
                 onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", playlistItem.id);
