@@ -77,13 +77,23 @@ export function parseM3U(content: string, options: ParseOptions = {}): M3UEntry[
     return entries;
 }
 
-/** `value` with percent-escapes decoded, or `value` itself when it holds a malformed escape (a name with a stray "%"). */
+/**
+ * `value` with percent-escapes decoded, or `value` itself when it holds a malformed escape (a name with a stray "%").
+ * An encoded slash (%2F) stays as written: a file name cannot hold a "/", so it is never a folder either, and decoding
+ * it would turn one name into two path segments.
+ */
 function decoded(value: string): string {
-    try {
-        return decodeURIComponent(value);
-    } catch {
-        return value;
-    }
+    return value
+        .split(/(%2f)/i)
+        .map((part, at) => {
+            if (at % 2 === 1) return part;
+            try {
+                return decodeURIComponent(part);
+            } catch {
+                return part;
+            }
+        })
+        .join("");
 }
 
 /**
@@ -195,4 +205,34 @@ export function caseSpellings(text: string): string[] {
  */
 export function libraryFileNames(filePath: string, readings: string[]): string[] {
     return [...new Set([filePath, ...readings].map((path) => posix.basename(path)))];
+}
+
+/** A path's segments for comparing: no empty, `.` or `..` segment (a leading `/`, `./` or `../` is no folder), letter case and Unicode form ignored. */
+function segmentsOf(path: string): string[] {
+    return posix
+        .normalize(path)
+        .split("/")
+        .filter((segment) => segment !== "" && segment !== "." && segment !== "..")
+        .map((segment) => segment.normalize("NFC").toLowerCase());
+}
+
+/** How many segments, counted from the file name backwards, a library path and one reading of an entry's path share. */
+function sharedTrailingSegments(libraryPath: string, reading: string): number {
+    const ours = segmentsOf(libraryPath);
+    const theirs = segmentsOf(reading);
+    let shared = 0;
+    while (shared < ours.length && shared < theirs.length && ours[ours.length - 1 - shared] === theirs[theirs.length - 1 - shared]) shared++;
+    return shared;
+}
+
+/**
+ * Of `songs` (all of the entry's file name), those whose library path shares the most trailing path segments with any
+ * reading of the entry's path, as Navidrome picks a file for a playlist path: the longest matching suffix wins. A bare
+ * file name is a path of one segment, so it shares one with every song of that name. Several songs returned are
+ * equally good answers: the caller skips them rather than guess.
+ */
+export function longestSuffixMatches<T extends { filePath: string }>(songs: T[], readings: string[]): T[] {
+    const shared = songs.map((song) => Math.max(0, ...readings.map((reading) => sharedTrailingSegments(song.filePath, reading))));
+    const best = Math.max(0, ...shared);
+    return best === 0 ? [] : songs.filter((_, at) => shared[at] === best);
 }

@@ -1,4 +1,4 @@
-import { caseSpellings, decodeM3U, libraryFileNames, parseM3U, unicodeForms } from "../m3uParser";
+import { caseSpellings, decodeM3U, libraryFileNames, libraryPathReadings, longestSuffixMatches, parseM3U, unicodeForms } from "../m3uParser";
 
 describe("M3U Parser", () => {
     it("parses basic M3U (paths only, no metadata)", () => {
@@ -134,5 +134,50 @@ describe("libraryFileNames", () => {
 
     it("finds the file name of a backslash path", () => {
         expect(libraryFileNames("C:\\Music\\a.flac", ["C:\\Music\\a.flac", "C:/Music/a.flac"])).toEqual(["C:\\Music\\a.flac", "a.flac"]);
+    });
+});
+
+describe("libraryPathReadings and an encoded slash", () => {
+    it("keeps %2F inside its file name: it is not a folder", () => {
+        const readings = libraryPathReadings("Artist/AC%2FDC - Hells Bells.mp3", "/music");
+        expect(readings).toContain("Artist/AC%2FDC - Hells Bells.mp3");
+        expect(readings.some((r) => r.includes("AC/DC"))).toBe(false);
+        expect(libraryFileNames("Artist/AC%2fDC - Hells Bells.mp3", libraryPathReadings("Artist/AC%2fDC - Hells Bells.mp3", "/music"))).toEqual(["AC%2fDC - Hells Bells.mp3"]);
+    });
+
+    it("still decodes every other escape", () => {
+        expect(libraryPathReadings("A/S%C3%B3ng%20x.flac", "/music")).toContain("A/Sóng x.flac");
+    });
+});
+
+describe("longestSuffixMatches", () => {
+    const song = (filePath: string) => ({ filePath });
+
+    it("keeps the songs sharing the most trailing path segments with a reading", () => {
+        const songs = [song("A/Album/01.flac"), song("B/Album/01.flac"), song("A/Other/01.flac")];
+        expect(longestSuffixMatches(songs, ["Album/01.flac"])).toEqual([songs[0], songs[1]]);
+        expect(longestSuffixMatches(songs, ["A/Album/01.flac"])).toEqual([songs[0]]);
+    });
+
+    it("counts the file name alone as one segment, whatever the folders in front of it", () => {
+        const songs = [song("A/Album/01.flac"), song("B/Album/01.flac")];
+        expect(longestSuffixMatches(songs, ["/elsewhere/01.flac"])).toEqual(songs);
+    });
+
+    it("does not count a leading slash, ./ or ../ as a folder", () => {
+        const songs = [song("A/01.flac"), song("B/01.flac")];
+        expect(longestSuffixMatches(songs, ["/01.flac"])).toEqual(songs);
+        expect(longestSuffixMatches(songs, ["./01.flac"])).toEqual(songs);
+        expect(longestSuffixMatches(songs, ["../01.flac"])).toEqual(songs);
+    });
+
+    it("ignores letter case and Unicode form, and takes the best of several readings", () => {
+        const songs = [song("Café/x.flac"), song("Other/x.flac")];
+        expect(longestSuffixMatches(songs, ["CAFE\u0301/X.FLAC"])).toEqual([songs[0]]);
+        expect(longestSuffixMatches(songs, ["nothing/x.flac", "Other/x.flac"])).toEqual([songs[1]]);
+    });
+
+    it("gives nothing for no songs", () => {
+        expect(longestSuffixMatches([], ["a/b.flac"])).toEqual([]);
     });
 });

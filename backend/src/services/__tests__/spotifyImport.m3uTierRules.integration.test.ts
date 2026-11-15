@@ -3,7 +3,9 @@
  *
  * - Tier 2 (the file name): when the entry names both an artist and a title, both must agree with the song; one agreeing
  *   field is enough only when the entry has only that field. A miss can still match at tiers 3 and 4.
- * - A bare file name (no directory) that more than one library song answers to is skipped, not given to the lowest id.
+ * - A file name that more than one library song answers to is skipped, not given to the lowest id: the song sharing the
+ *   most trailing path with the entry wins, and equally long hits are skipped (a bare name is a path of one segment).
+ * - Tier 4 breaks a score tie by the exact artist, then the lowest id.
  * - When no entry matches, no playlist is made, the owner gets an "import failed" notification, and the import throws
  *   M3UNothingMatched.
  */
@@ -25,6 +27,7 @@ async function cleanup() {
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { identityKey: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { identityKey: { startsWith: artistIdentityKey(P) } } });
+    await prisma.artist.deleteMany({ where: { name: { startsWith: "zzquartz" } } });
 }
 
 /** One artist and album holding the songs given as [id suffix, title, file path stored relative to the music folder]. */
@@ -127,8 +130,63 @@ describe("a bare file name that more than one song answers to is skipped", () =>
         expect(await match(entry("zzsolo song.flac"))).toBe(`${P}-solo-a-only`);
     });
 
-    it("leaves a name with a directory as it was: the lowest id", async () => {
-        expect(await match(entry("/elsewhere/zzdup song.flac"))).toBe(`${P}-dup-a-first`);
+    it("skips a name whose folders in front of it match no song better than the others", async () => {
+        expect(await match(entry("/elsewhere/zzdup song.flac"))).toBeNull();
+    });
+});
+
+describe("tier 2 matches the longest trailing path, as Navidrome does", () => {
+    beforeAll(() =>
+        seedSongs("suf", `${P}-suf band`, [
+            ["a", `${P} suf first`, `${P}/suf/zzsufA/Disc1/zzsuf song.flac`],
+            ["b", `${P} suf second`, `${P}/suf/zzsufB/Disc1/zzsuf song.flac`],
+            ["c", `${P} suf third`, `${P}/suf/zzsufB/Disc2/zzsuf song.flac`],
+        ]),
+    );
+
+    it("takes the song whose path shares the most trailing folders with the entry", async () => {
+        expect(await match(entry("Whatever/zzsufA/Disc1/zzsuf song.flac"))).toBe(`${P}-suf-a`);
+        expect(await match(entry("Disc2/zzsuf song.flac"))).toBe(`${P}-suf-c`);
+        expect(await match(entry("C:\\Music\\zzsufB\\Disc2\\zzsuf song.flac"))).toBe(`${P}-suf-c`);
+    });
+
+    it("skips an entry when several songs share the longest trailing path", async () => {
+        expect(await match(entry("/x/Disc1/zzsuf song.flac"))).toBeNull();
+    });
+
+    it("lets the artist and title settle which of the equally long hits the entry means", async () => {
+        expect(await match(entry("/x/Disc1/zzsuf song.flac", `${P}-suf band`, `${P} suf second`))).toBe(`${P}-suf-b`);
+    });
+
+    it("does not count a leading slash or ./ as a folder", async () => {
+        expect(await match(entry("/zzsuf song.flac"))).toBeNull();
+        expect(await match(entry("./zzsuf song.flac"))).toBeNull();
+    });
+
+    it("does not read %2F in a name as a folder", async () => {
+        expect(await match(entry("zzsufB/Disc2%2Fzzsuf song.flac"))).toBeNull();
+        expect(await match(entry("zzsufB/Disc2/zzsuf%20song.flac"))).toBe(`${P}-suf-c`);
+    });
+});
+
+describe("tier 4 breaks a tie by the exact artist, then the lowest id", () => {
+    const names = { exact: "zzquartz band", wider: "zzquartz band extra" };
+    beforeAll(async () => {
+        // The lower id belongs to the wider artist name, which scores the same on the artist (a subset of words).
+        await seedSongs("t4a", names.wider, [["a-first", "zzquartz hello world remastered", `${P}/t4/wider/one.flac`]]);
+        await seedSongs("t4z", names.exact, [
+            ["c-late", "zzquartz hello world remastered", `${P}/t4/exact/two.flac`],
+            ["b-early", "zzquartz hello world remastered", `${P}/t4/exact/three.flac`],
+        ]);
+    });
+
+    it("prefers the exact artist over a lower id", async () => {
+        const got = await match(entry("/nowhere/zzquartz-nothing.flac", names.exact, "zzquartz hello world"));
+        expect(got).toMatch(new RegExp(`^${P}-t4z-`));
+    });
+
+    it("then takes the lowest id", async () => {
+        expect(await match(entry("/nowhere/zzquartz-nothing.flac", names.exact, "zzquartz hello world"))).toBe(`${P}-t4z-b-early`);
     });
 });
 

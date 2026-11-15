@@ -38,7 +38,7 @@ import { titlesAgree } from "./albumIdentity";
 import { requireMusicLink, MusicLink, MusicPlatform } from "./musicLink";
 import { eventBus } from "./eventBus";
 import { extractPlaylist as ytdlpExtractPlaylist } from "./ytdlp";
-import { M3UEntry, M3UNothingMatched, caseSpellings, libraryFileNames, libraryPathReadings, unicodeForms } from "./m3uParser";
+import { M3UEntry, M3UNothingMatched, caseSpellings, libraryFileNames, libraryPathReadings, longestSuffixMatches, unicodeForms } from "./m3uParser";
 import { announcePlaylistChange } from "./playlistEvents";
 import {
   matchTrackToLibrary,
@@ -2842,23 +2842,26 @@ class SpotifyImportService {
       // A file name alone is weak (many folders hold "01 - intro.mp3"): when the entry names an artist or a title, the
       // file's must agree, each compared as tier 3 compares it, by the stored or the edited name. An entry naming both
       // needs both to agree; one naming a single field needs that one; a bare entry has nothing to disagree with.
-      // A file name with no folder in front of it that more than one agreeing song answers to is skipped, as Navidrome
-      // does (the lowest id is a guess), and no later tier guesses for it either.
+      // Of the songs that agree, the one sharing the most trailing folders with the entry's path wins, as Navidrome
+      // picks it (longestSuffixMatches); of equally long hits, the one in exactly the case written wins, and several
+      // still equal (a bare name is a path of one segment) are skipped, since the lowest id would be a guess, and no
+      // later tier guesses for them either.
       let ambiguous = false;
       const agrees = (t: { title: string; displayTitle: string | null; album: { artist: { name: string; identityKey: string; displayName: string | null } } }) =>
         (!entry.title || isTitled(t, entry.title)) && (!entry.artist || isByArtistNamed(t.album.artist, entry.artist));
-      const bareName = readingsOf[at].every((reading) => !reading.replace(/^(\.\/)+/, "").includes("/"));
       if (!track) {
         for (const fileName of libraryFileNames(entry.filePath, readingsOf[at])) {
           if (path.basename(fileName, path.extname(fileName)).length < MIN_WORD_LENGTH) continue;
-          const sameFile = await reads.songsNamed(fileName);
-          const written = (t: { filePath: string }) => t.filePath.endsWith(`/${fileName}`);
-          const agreeing = [...sameFile.filter(written), ...sameFile.filter((t) => !written(t))].filter(agrees);
-          if (bareName && agreeing.length > 1) {
+          const agreeing = (await reads.songsNamed(fileName)).filter(agrees);
+          const longest = longestSuffixMatches(agreeing, readingsOf[at]);
+          // Of equally long hits, the one in exactly the case written comes first.
+          const exactCase = longest.filter((t) => t.filePath.endsWith(`/${fileName}`));
+          const best = longest.length > 1 && exactCase.length === 1 ? exactCase : longest;
+          if (best.length > 1) {
             ambiguous = true;
             break;
           }
-          track = agreeing[0] ?? null;
+          track = best[0] ?? null;
           if (track) break;
         }
       }
@@ -2900,15 +2903,21 @@ class SpotifyImportService {
 
           let bestMatch: { id: string } | null = null;
           let bestScore = 0;
+          let bestIsExact = false;
 
+          // A tie goes to the song whose artist is the one named (not merely holding the same words), then to the
+          // lowest id: the candidates come in id order, so the first of equals stays.
           for (const candidate of candidates) {
             // The title or artist name a person edited counts as well as the stored one.
             const titleScore = bestTokenSetScore(entry.title, [candidate.title, candidate.displayTitle]);
             const artistScore = bestTokenSetScore(entry.artist, [candidate.album.artist.name, candidate.album.artist.displayName]);
             const combined = titleScore * 0.6 + artistScore * 0.4;
-
-            if (combined > bestScore && combined >= 80) {
+            if (combined < 80) continue;
+            const isExact = [candidate.album.artist.name, candidate.album.artist.displayName].some((n) => n && normalizeArtistName(n) === dbArtist);
+            const tied = Math.abs(combined - bestScore) < 1e-9;
+            if (combined > bestScore + 1e-9 || (tied && isExact && !bestIsExact)) {
               bestScore = combined;
+              bestIsExact = isExact;
               bestMatch = { id: candidate.id };
             }
           }

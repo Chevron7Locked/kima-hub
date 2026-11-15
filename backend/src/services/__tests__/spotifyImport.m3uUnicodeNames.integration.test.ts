@@ -101,8 +101,8 @@ describe("tier 2 takes the file name from the decoded path and compares it case-
         ]);
         expect(await match("/elsewhere/zzexa.flac")).toBe(`${P}-exa-b-lower`);
         expect(await match("/elsewhere/ZZEXA.flac")).toBe(`${P}-exa-a-upper`);
-        // Neither is in the exact case: the lowest id.
-        expect(await match("/elsewhere/ZzExA.flac")).toBe(`${P}-exa-a-upper`);
+        // Neither is in the exact case: two equally good answers, so neither is taken.
+        expect(await match("/elsewhere/ZzExA.flac")).toBeNull();
     });
 
     it("a name of fewer than three letters is still too common to match", async () => {
