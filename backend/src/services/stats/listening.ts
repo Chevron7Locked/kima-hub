@@ -179,7 +179,7 @@ export async function listeningStats(
     };
 }
 
-/** Listens of one track, counted like the stats page so the player bar agrees with it. */
+/** Listens of one track, folded like the stats page's but with Discover plays kept: the player bar counts what was heard of the song playing, wherever it lives. */
 export async function trackPlayCount(userId: string, trackId: string): Promise<number> {
     const rows = await prisma.$queryRaw<Array<{ n: number }>>(Prisma.sql`
         ${listenRows(userId, "all", trackId)}

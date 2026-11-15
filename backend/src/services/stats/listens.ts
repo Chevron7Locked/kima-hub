@@ -18,6 +18,8 @@
  * Every question is scoped to one listener, except `albumsPlayedAtLeast`, which
  * asks of albums whoever played them. Which songs count is the caller's rule
  * (the playable-song rule, usually), passed in or composed in its own SQL.
+ * The stats page is the one reader that leaves out plays of Discover songs (`libraryOnly`, which `withListens` sets):
+ * a Discover play is in no statistic. Every other reader keeps its own meaning.
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  */
 
@@ -162,9 +164,8 @@ export interface FoldedListens {
 }
 
 /**
- * Fold the plays once and read the listens as often as `work` likes: the listens of songs on library albums only, since
- * a Discover play is in no statistic. A page that shows several figures from the
- * same listens would otherwise run the whole recursive fold once per figure, all at the same time, each holding a
+ * Fold the plays once and read the listens as often as `work` likes. Only songs on library albums are folded, since a
+ * Discover play is in no statistic. A page that shows several figures from the same listens would otherwise run the whole recursive fold once per figure, all at the same time, each holding a
  * connection. The fold lands in a temporary table that lives until the transaction ends. One request folds once: a
  * request with several sections calls this once and hands the result to each.
  */

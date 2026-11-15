@@ -21,7 +21,7 @@ async function cleanup() {
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE '${P}%'`);
 }
 
-/** The two sections as the stats route reads them. */
+/** The listening and signature sections, each read from one fold as the stats route reads them. */
 const overview = (period: Period = "all") => withListens(user, period, (l) => listeningStats(l, "UTC"));
 const signatureOf = () => withListens(user, "all", (l) => signature(l, "UTC"));
 
