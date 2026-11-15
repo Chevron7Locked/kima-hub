@@ -9,7 +9,7 @@
 import { Prisma } from "@prisma/client";
 
 /** The names a lossless codec goes by, in lower case: each is a whole word in the stored string. */
-export const LOSSLESS_CODECS = ["flac", "alac", "pcm", "wavpack", "ape", "monkey", "tta", "dsd", "lossless", "wav", "aiff"] as const;
+const LOSSLESS_CODECS =["flac", "alac", "pcm", "wavpack", "ape", "monkey", "tta", "dsd", "lossless", "wav", "wave", "aiff"] as const;
 
 /** The pattern both readers use: a name between two non-letters (or an end), whatever the case. */
 const LOSSLESS_PATTERN = `(^|[^a-z])(${LOSSLESS_CODECS.join("|")})([^a-z]|$)`;

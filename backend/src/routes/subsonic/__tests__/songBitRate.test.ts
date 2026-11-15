@@ -21,6 +21,9 @@ describe("a song's estimated bitRate", () => {
         ["audio/flac", 900],
         ["WAV", 1400],
         ["audio/x-wav", 1400],
+        ["audio/wave", 1400],
+        ["audio/vnd.wave", 1400],
+        ["wavpack", 900],
     ])("%s, lossless, is %i", (mime, expected) => expect(bitRate(mime)).toBe(expected));
 
     it.each([

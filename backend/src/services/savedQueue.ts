@@ -138,7 +138,7 @@ export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: unkn
     const shownAt = stored.flatMap((item, i) => (playable.has(item.id) ? [i] : []));
     const counted = Math.min(asked, stored.length - 1);
     const mapped = shownAt.length === 0 ? counted : shownAt[Math.min(asked, shownAt.length - 1)];
-    if (typeof trackId !== "string" || trackId === "") return mapped;
+    if (!namesSong(trackId)) return mapped;
     for (const at of [mapped, counted]) if (stored[at].id === trackId) return at;
     return placeNearest(stored, trackId, mapped) ?? mapped;
 }
@@ -150,18 +150,21 @@ function placeNearest(stored: readonly QueueEntry[], id: unknown, to: number): n
     return holding.reduce((best, i) => (Math.abs(i - to) < Math.abs(best - to) ? i : best));
 }
 
+const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
+
 /** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
 export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
-    return typeof clientIndex === "number" || (typeof trackId === "string" && trackId !== "");
+    return typeof clientIndex === "number" || namesSong(trackId);
 }
 
 /**
  * The index to store for a save that sends no queue, worked out against the queue as it stands. The state row is
  * locked first, so a queue being written at the same moment finishes first and the index points into that queue, and
- * the caller's write, in the same transaction, lands before any other. Stores 0 for a person with no stored queue.
+ * the caller's write, in the same transaction, lands before any other.
  *
- * A save that names the song but sends no index finds it in the stored queue (the place nearest the stored index, when
- * it sits twice); a song the stored queue does not hold leaves the stored index as it is, which is `null` here.
+ * With an index, a person with no stored queue gets 0. A save that names the song but sends no index finds it in the
+ * stored queue (the place nearest the stored index, when it sits twice); a song the stored queue does not hold (an
+ * empty queue holds none) leaves the stored index as it is, which is `null` here, and a first save then creates 0.
  */
 export async function indexIntoStoredQueue(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "playbackState" | "track">,

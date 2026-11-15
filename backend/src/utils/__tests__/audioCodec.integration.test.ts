@@ -10,7 +10,7 @@ import { isLosslessCodec, losslessCodecSql } from "../audioCodec";
 
 const LOSSLESS = [
     "FLAC", "flac", "ALAC", "PCM", "WavPack", "Monkey's Audio", "APE", "TTA", "DSD", "DSD64", "Lossless", "WAV", "AIFF",
-    "audio/flac", "audio/x-flac", "audio/wav", "audio/x-wav", "audio/aiff", "audio/x-aiff",
+    "audio/flac", "audio/x-flac", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave", "audio/aiff", "audio/x-aiff",
     "MPEG 4 Audio (ALAC)", "FLAC (Free Lossless Audio Codec)",
 ];
 const LOSSY = [

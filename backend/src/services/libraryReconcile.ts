@@ -224,7 +224,9 @@ async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: strin
  * A listener's saved mood mix, and the songs it was last served, name songs by id with no foreign key behind them, so a
  * retired song would stay in both for good. A song another copy took the history of is replaced there by that copy, in
  * its place (the mix reads its songs again, so a copy that cannot play is skipped until it can); one with no copy goes.
- * A copy the list already held is kept once, at its first place. A mix that held no retired song is not touched.
+ * A copy the list already held is kept once, at its first place (a list that held any retired song is kept once per id
+ * throughout; a mix never holds a song twice). A mix that held no retired song is not touched. `movedTo` is the
+ * history copy of each retired song that has one.
  */
 async function updateMoodMixes(tx: Prisma.TransactionClient, retired: string[], movedTo: Map<string, string>): Promise<void> {
     const gone = [...movedTo.keys()];

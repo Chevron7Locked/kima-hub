@@ -172,8 +172,10 @@ function normalizeMime(mime: string | null): string | null {
 function estimateBitrateFromMime(mime: string | null): number {
     const m = normalizeMime(mime);
     if (!m) return 192;
+    // Uncompressed wav is the one lossless codec estimated higher (1400); wavpack is compressed and stays with the rest.
     if (/wav(?!pack)/i.test(m)) return 1400;
-    // Lossless by the one vocabulary the library sweep prefers a copy by: flac, alac, pcm, wavpack, ape...
+    // Lossless by the one vocabulary the library sweep prefers a copy by. It reads the stored string, not the
+    // normalized type (ALAC normalizes to audio/mp4, which would read as lossy).
     if (isLosslessCodec(mime)) return 900;
     if (m.includes("aac") || m.includes("mp4")) return 256;
     if (m.includes("opus")) return 128;
