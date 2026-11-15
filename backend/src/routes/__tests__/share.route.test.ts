@@ -711,6 +711,34 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect(await playsOf(token)).toBe(1);
         });
 
+        it("a follow-up request keeps the play going: it renews the window, so a long song is one play", async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            await get(token, songs.playable);
+            const [key] = await redisClient.keys(`*${id}*`);
+            // Most of the window has passed, as it does when a listener seeks late in a long song.
+            await redisClient.expire(key, 3);
+
+            expect((await get(token, songs.playable, { Range: 'bytes=5-' })).status).toBe(206);
+
+            expect(await redisClient.ttl(key)).toBeGreaterThan(25);
+            expect(await playsOf(token)).toBe(1);
+        });
+
+        it('a request that is not a follow-up does not leave a window behind when it is refused', async () => {
+            const { token, id } = await own({ maxPlays: 0 });
+            await request(app).get(`/share/${token}/stream/${songs.playable}`);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
+        it.each([
+            ['a whole song', {}, 200],
+            ['a range', { Range: 'bytes=0-4' }, 206],
+        ])('sends %s with private, no-store, so a browser does not keep the audio', async (_name, headers, status) => {
+            const { token } = await own();
+            const res = await get(token, songs.playable, headers);
+            expect([res.status, res.headers['cache-control']]).toEqual([status, 'private, no-store']);
+        });
+
         it('does not count a play whose listener left while the count was being taken', async () => {
             const { token, id } = await own({ maxPlays: 1 });
             const count = prisma.$executeRaw.bind(prisma);
@@ -732,13 +760,13 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
         it('counts every request, as a first play, while Redis is down', async () => {
             const { token } = await own();
-            const exists = jest.spyOn(redisClient, 'exists').mockRejectedValue(new Error('down'));
+            const expire = jest.spyOn(redisClient, 'expire').mockRejectedValue(new Error('down'));
             const set = jest.spyOn(redisClient, 'set').mockRejectedValue(new Error('down'));
             try {
                 expect((await get(token, songs.playable)).status).toBe(200);
                 expect((await get(token, songs.playable, { Range: 'bytes=0-1' })).status).toBe(206);
             } finally {
-                exists.mockRestore();
+                expire.mockRestore();
                 set.mockRestore();
             }
 

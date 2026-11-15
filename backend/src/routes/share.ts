@@ -27,7 +27,8 @@ router.use((_req: Request, res: Response, next) => {
     next();
 });
 
-// One play is every request a listener makes for a song within this window: the browser asks again for each seek.
+// One play is every request a listener makes for a song while it goes on: the browser asks again for each seek. The play
+// ends this long after the last of them.
 const PLAY_WINDOW_SECONDS = 30;
 const playKeyFor = (shareId: string, trackId: string) => `share:play:${shareId}:${trackId}`;
 
@@ -100,10 +101,14 @@ async function loadUsableShareLink(token: string, res: Response) {
     return shareLink;
 }
 
-/** Whether a play of this song is already counted for the share. With Redis down no play is known: each request counts. */
-async function playAlreadyCounted(key: string): Promise<boolean> {
+/**
+ * Whether a play of this song is already counted for the share, and if so renews its window: a listener's requests keep one
+ * play going however long the song is, and it ends 30 s after the last of them. With Redis down no play is known: each
+ * request counts.
+ */
+async function continuePlay(key: string): Promise<boolean> {
     try {
-        return (await redisClient.exists(key)) === 1;
+        return (await redisClient.expire(key, PLAY_WINDOW_SECONDS)) === 1;
     } catch (error) {
         logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
         return false;
@@ -301,7 +306,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // A listener's follow-up requests (a seek, the next range) belong to a play already counted: they are not a new
         // play, and the limit, which that play may just have reached, does not apply to them. Expiry still does.
-        const followUp = await playAlreadyCounted(playKey);
+        const followUp = await continuePlay(playKey);
         if (!followUp && outOfPlays(shareLink)) {
             return sendEnded(res, "play-limit");
         }
@@ -365,7 +370,9 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             config.music.transcodeCachePath,
             config.music.transcodeCacheMaxGb,
         );
-        await streamingService.streamFileWithRangeSupport(req, res, fullPath, mimeType);
+        // The audio is not kept by the browser: a link that is revoked, expired or out of plays must stop playing, and every
+        // play must reach this route to be counted.
+        await streamingService.streamFileWithRangeSupport(req, res, fullPath, mimeType, { cacheControl: "private, no-store" });
     } catch (error: any) {
         logger.error(`[Share] Stream error: ${error.message}`);
         if (!res.headersSent) {

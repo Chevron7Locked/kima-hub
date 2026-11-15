@@ -521,8 +521,11 @@ export class AudioStreamingService {
         req: Request,
         res: Response,
         filePath: string,
-        mimeType: string
+        mimeType: string,
+        options: { cacheControl?: string } = {}
     ): Promise<void> {
+        // Callers may say how the audio is cached (a share's audio must not be kept); the default is the library player's.
+        const cacheControl = options.cacheControl ?? "private, max-age=3600, must-revalidate";
         let handle: FileHandle | undefined;
         try {
             // Get file stats for size
@@ -543,7 +546,7 @@ export class AudioStreamingService {
                 if (candidates.includes(etag) || candidates.includes("*")) {
                     res.status(304).set({
                         "ETag": etag,
-                        "Cache-Control": "private, max-age=3600, must-revalidate",
+                        "Cache-Control": cacheControl,
                     }).end();
                     return;
                 }
@@ -552,7 +555,7 @@ export class AudioStreamingService {
                 if (!Number.isNaN(ifModifiedSinceMs) && stats.mtime.getTime() <= ifModifiedSinceMs) {
                     res.status(304).set({
                         "ETag": etag,
-                        "Cache-Control": "private, max-age=3600, must-revalidate",
+                        "Cache-Control": cacheControl,
                     }).end();
                     return;
                 }
@@ -591,7 +594,7 @@ export class AudioStreamingService {
             const headers: Record<string, string> = {
                 "Content-Type": mimeType,
                 "Accept-Ranges": "bytes",
-                "Cache-Control": "private, max-age=3600, must-revalidate",
+                "Cache-Control": cacheControl,
                 "Content-Length": contentLength.toString(),
                 "ETag": etag,
                 "Last-Modified": lastModified,
@@ -635,6 +638,10 @@ export class AudioStreamingService {
                 logger.error(`[AudioStreaming] Stream error for ${filePath}:`, err);
                 if (!res.headersSent) {
                     res.status(500).end();
+                } else {
+                    // Part of the file went out: a pipe does not end its target on error, so without this the
+                    // listener waits on a response that never finishes. Closing the connection tells the player.
+                    res.destroy(err);
                 }
             });
 

@@ -463,6 +463,80 @@ describe("streamFileWithRangeSupport conditional requests", () => {
 });
 
 // ---------------------------------------------------------------------------
+// streamFileWithRangeSupport -- a caller's own Cache-Control, and a stream that fails
+// ---------------------------------------------------------------------------
+
+describe("streamFileWithRangeSupport caching and failure", () => {
+    let tmpDir: string;
+    let svc: AudioStreamingService;
+    let filePath: string;
+
+    beforeAll(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kima-cache-"));
+        svc = new AudioStreamingService(tmpDir, 10);
+        filePath = path.join(tmpDir, "song.mp3");
+        fs.writeFileSync(filePath, "X".repeat(500));
+    });
+
+    afterAll(() => {
+        svc.destroy();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it("sends the caller's Cache-Control on 200, 206 and 304", async () => {
+        const etag = `"${fs.statSync(filePath).ino}-${fs.statSync(filePath).size}-${fs.statSync(filePath).mtimeMs}"`;
+        for (const [headers, status] of [[{}, 200], [{ range: "bytes=0-9" }, 206], [{ "if-none-match": etag }, 304]] as const) {
+            const res = makeRes();
+            await svc.streamFileWithRangeSupport(makeReq({ ...headers }), res, filePath, "audio/mpeg", { cacheControl: "private, no-store" });
+            expect([status, res._status, res._headers["Cache-Control"]]).toEqual([status, status, "private, no-store"]);
+        }
+    });
+
+    /** A file whose read fails after the first chunk went out. */
+    const failingAfterFirstChunk = (res: any, headersGone: boolean) => {
+        const { Readable } = require("stream") as typeof import("stream");
+        const handle = {
+            createReadStream: () => {
+                const source = new Readable({ read() {} });
+                source.push("abc");
+                setImmediate(() => {
+                    res.headersSent = headersGone;
+                    source.destroy(new Error("disk went away"));
+                });
+                return source;
+            },
+            close: async () => undefined,
+        };
+        jest.spyOn(fs.promises, "open").mockResolvedValue(handle as any);
+    };
+
+    it("destroys the response when the file fails to read after the headers went out", async () => {
+        const res = makeRes();
+        res.on("error", () => undefined);
+        failingAfterFirstChunk(res, true);
+
+        await svc.streamFileWithRangeSupport(makeReq(), res, filePath, "audio/mpeg");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        expect(res.destroyed).toBe(true);
+    });
+
+    it("still answers 500 when the file fails to read before any header went out", async () => {
+        const res = makeRes();
+        failingAfterFirstChunk(res, false);
+
+        await svc.streamFileWithRangeSupport(makeReq(), res, filePath, "audio/mpeg");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        expect(res._status).toBe(500);
+        expect(res._ended).toBe(true);
+        expect(res.destroyed).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // getCachedTranscode freshness -- mtime equality + size
 // ---------------------------------------------------------------------------
 
