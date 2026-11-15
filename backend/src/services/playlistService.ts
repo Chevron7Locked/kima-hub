@@ -16,6 +16,8 @@ export interface AddTracksResult {
     added: number;
     /** Already present in the playlist; not an error. */
     duplicates: number;
+    /** The songs behind `duplicates`, so a client can ask about them. */
+    duplicateIds: string[];
     /** Requested but not a playable song: unknown, on a Discover album, missing or corrupt. */
     rejected: string[];
 }
@@ -149,7 +151,7 @@ export async function addTracks(
 ): Promise<AddTracksResult> {
     const requested = [...new Set(trackIds)].filter(Boolean);
     if (requested.length === 0) {
-        return { added: 0, duplicates: 0, rejected: [] };
+        return { added: 0, duplicates: 0, duplicateIds: [], rejected: [] };
     }
     if (requested.length > MAX_BULK_TRACKS) {
         throw new Error(
@@ -167,7 +169,7 @@ export async function addTracks(
     // Preserve the caller's order among the tracks we will actually add.
     const toAdd = requested.filter((id) => playableIds.has(id));
     if (toAdd.length === 0) {
-        return { added: 0, duplicates: 0, rejected };
+        return { added: 0, duplicates: 0, duplicateIds: [], rejected };
     }
 
     return prisma.$transaction(async (tx) => {
@@ -183,7 +185,7 @@ export async function addTracks(
         const fresh = toAdd.filter((id) => !alreadyThere.has(id));
 
         if (fresh.length === 0) {
-            return { added: 0, duplicates: alreadyThere.size, rejected };
+            return { added: 0, duplicates: alreadyThere.size, duplicateIds: [...alreadyThere], rejected };
         }
 
         const ranks = await allocateAppendRanks(tx, playlistId, fresh.length);
@@ -208,6 +210,7 @@ export async function addTracks(
         return {
             added: fresh.length,
             duplicates: alreadyThere.size,
+            duplicateIds: [...alreadyThere],
             rejected,
         };
     });

@@ -397,6 +397,7 @@ router.post("/:id/items", requirePlaylistOwner, async (req, res) => {
             added: result.added,
             duplicated: result.duplicates > 0,
             duplicates: result.duplicates,
+            duplicateIds: result.duplicateIds,
             rejected: result.rejected,
         });
     } catch (error) {

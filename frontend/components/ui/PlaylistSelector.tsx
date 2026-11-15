@@ -116,6 +116,7 @@ export function PlaylistSelector({
         }
     };
     const dialogRef = useRef<HTMLDivElement>(null);
+    const adding = useRef(false);
     useDialog(dialogRef, isOpen, onClose);
 
     useEffect(() => {
@@ -179,9 +180,7 @@ export function PlaylistSelector({
 
         if (trackIds.length === 0) return;
 
-        try {
-            setError(null);
-            setIsConfirming(true);
+        await whileAdding(async () => {
             const held = await heldSongs(playlistId);
             const repeated = trackIds.filter((id) => held.has(id));
             if (repeated.length > 0) {
@@ -189,10 +188,22 @@ export function PlaylistSelector({
                 return;
             }
             await addSongs(playlistId, trackIds, false);
+        });
+    };
+
+    /** One add at a time: a second click while one is in flight does nothing. A failure is reported and the dialog stays. */
+    const whileAdding = async (work: () => Promise<void>) => {
+        if (adding.current) return;
+        adding.current = true;
+        try {
+            setError(null);
+            setIsConfirming(true);
+            await work();
         } catch (error) {
             console.error("Failed to add to playlist:", error);
-            setError("Couldn't add to that playlist — try again.");
+            setError("couldn't add to that playlist — try again.");
         } finally {
+            adding.current = false;
             setIsConfirming(false);
         }
     };
@@ -209,11 +220,22 @@ export function PlaylistSelector({
         }
     };
 
+    /**
+     * Adds the songs. Without `allowRepeats` the server skips songs the playlist holds and names them: the read
+     * before the add can be stale or have failed, so those are put to the person now, and the dialog stays open.
+     */
     const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean) => {
-        await addToPlaylist(allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids });
+        const result = (await addToPlaylist(
+            allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids },
+        )) as { duplicateIds?: string[] } | undefined;
         window.dispatchEvent(
             new CustomEvent("playlist-updated", { detail: { playlistId } })
         );
+        const skipped = result?.duplicateIds ?? [];
+        if (!allowRepeats && skipped.length > 0) {
+            setQuestion({ playlistId, trackIds: skipped, repeated: skipped });
+            return;
+        }
         onAdded?.();
         onClose();
     };
@@ -225,21 +247,14 @@ export function PlaylistSelector({
             onClose();
             return;
         }
-        try {
-            setError(null);
-            setIsConfirming(true);
+        await whileAdding(async () => {
             if (choice === "again") {
                 await addSongs(question.playlistId, question.trackIds, true);
             } else {
                 const fresh = question.trackIds.filter((id) => !question.repeated.includes(id));
                 await addSongs(question.playlistId, fresh, false);
             }
-        } catch (error) {
-            console.error("Failed to add to playlist:", error);
-            setError("Couldn't add to that playlist — try again.");
-        } finally {
-            setIsConfirming(false);
-        }
+        });
     };
 
     const handleConfirm = async () => {

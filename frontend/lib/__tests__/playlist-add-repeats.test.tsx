@@ -136,12 +136,23 @@ describe("when something goes wrong", () => {
         expect(mutateAsync).toHaveBeenCalledWith({ playlistId: "pl-1", trackIds: ["a"] });
     });
 
+    it("asks after the fact when the server skipped a song the earlier read missed, and keeps the dialog open", async () => {
+        getPlaylist.mockRejectedValue(new Error("offline"));
+        mutateAsync.mockResolvedValueOnce({ added: 1, duplicates: 1, duplicateIds: ["a"], rejected: [] });
+        await open(["a", "b"]);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(text()).toContain("already in this playlist");
+        await click("add again");
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "pl-1", trackIds: ["a"], allowRepeats: true });
+        expect(onClose).toHaveBeenCalled();
+    });
+
     it("stays open and says so when the add fails after the answer", async () => {
         getPlaylist.mockResolvedValue(held("a"));
         mutateAsync.mockRejectedValue(new Error("nope"));
         await open(["a"]);
         await click("add again");
         expect(onClose).not.toHaveBeenCalled();
-        expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/couldn't add/i);
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't add");
     });
 });

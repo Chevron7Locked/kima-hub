@@ -35,7 +35,7 @@ describe("playlistService.addTracks across album locations", () => {
 
         const result = await addTracks(playlist.id, [track.id]);
 
-        expect(result).toEqual({ added: 0, duplicates: 0, rejected: [track.id] });
+        expect(result).toEqual({ added: 0, duplicates: 0, duplicateIds: [], rejected: [track.id] });
         expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id } })).toBe(0);
     });
 
@@ -63,8 +63,8 @@ describe("playlistService.addTracks across album locations", () => {
         const { track, playlist } = await fixture("LIBRARY");
         await addTracks(playlist.id, [track.id]);
 
-        expect(await addTracks(playlist.id, [track.id])).toEqual({ added: 0, duplicates: 1, rejected: [] });
-        expect(await addTracks(playlist.id, [track.id], { allowRepeats: true })).toEqual({ added: 1, duplicates: 0, rejected: [] });
+        expect(await addTracks(playlist.id, [track.id])).toEqual({ added: 0, duplicates: 1, duplicateIds: [track.id], rejected: [] });
+        expect(await addTracks(playlist.id, [track.id], { allowRepeats: true })).toEqual({ added: 1, duplicates: 0, duplicateIds: [], rejected: [] });
         expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id, trackId: track.id } })).toBe(2);
     });
 });

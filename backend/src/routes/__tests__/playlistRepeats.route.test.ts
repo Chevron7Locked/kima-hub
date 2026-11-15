@@ -176,7 +176,7 @@ describe("adding a song again on purpose (allowRepeats)", () => {
     it("still skips by default, and allowRepeats: false is the default", async () => {
         const [a, b] = songs;
         const id = await playlistWith("again-off", [a, b]);
-        expect((await add(id, { trackId: a })).body).toMatchObject({ added: 0, duplicated: true, duplicates: 1 });
+        expect((await add(id, { trackId: a })).body).toMatchObject({ added: 0, duplicated: true, duplicates: 1, duplicateIds: [a] });
         expect((await add(id, { trackId: a, allowRepeats: false })).body).toMatchObject({ added: 0, duplicates: 1 });
         expect(await held(id)).toEqual([a, b]);
     });
