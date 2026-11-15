@@ -85,6 +85,8 @@ export function PlaylistSelector({
     const [isCreating, setIsCreating] = useState(false);
     const [isLoading, setIsLoading] = useState(isOpen);
     const [error, setError] = useState<string | null>(null);
+    // Set when the list of playlists could not be loaded: the dialog says so, with a way to try again.
+    const [loadFailed, setLoadFailed] = useState(false);
     const [isAdding, setIsAdding] = useState(false);
     // Set while the person is being asked about songs the chosen playlist already holds.
     const [question, setQuestion] = useState<RepeatQuestion | null>(null);
@@ -111,6 +113,7 @@ export function PlaylistSelector({
             // Last time's list is not shown while this time's loads.
             setPlaylists([]);
             setIsLoading(true);
+            setLoadFailed(false);
             setError(null);
             setQuestion(null);
             setOutcome(null);
@@ -128,9 +131,14 @@ export function PlaylistSelector({
         return api
             .getPlaylists()
             .then((data) => {
-                if (load === loads.current) setPlaylists(Array.isArray(data) ? data : []);
+                if (load !== loads.current) return;
+                setPlaylists(Array.isArray(data) ? data : []);
+                setLoadFailed(false);
             })
-            .catch((error) => console.error("Failed to load playlists:", error))
+            .catch((error) => {
+                console.error("Failed to load playlists:", error);
+                if (load === loads.current) setLoadFailed(true);
+            })
             .finally(() => {
                 if (load === loads.current) setIsLoading(false);
             });
@@ -158,10 +166,28 @@ export function PlaylistSelector({
 
     // A playlist made, and a create key used, are for one set of songs in one opening.
     const songsKey = trackIds.join(",");
-    useEffect(() => {
+    // Set when the songs changed while an add or create was in flight: the change waits for it to settle.
+    const songsChanged = useRef(false);
+    const startAfresh = () => {
         createdId.current = null;
         createKey.current = null;
-    }, [isOpen, songsKey]);
+        songsChanged.current = false;
+    };
+    useEffect(startAfresh, [isOpen]);
+    useEffect(() => {
+        // A reset now would drop the key of a create in flight, and its retry could make a second playlist.
+        if (adding.current || creating.current) songsChanged.current = true;
+        else startAfresh();
+    }, [songsKey]);
+    /**
+     * An add or create has settled. If the songs changed meanwhile, a request that went through is over and the next one
+     * starts afresh; one that failed keeps its key and playlist, so the retry is the same request and makes no second playlist.
+     */
+    const settled = (wentThrough: boolean) => {
+        if (adding.current || creating.current || !songsChanged.current) return;
+        if (wentThrough) startAfresh();
+        else songsChanged.current = false;
+    };
 
     const handleCreatePlaylist = async () => {
         const name = newPlaylistName.trim();
@@ -169,6 +195,7 @@ export function PlaylistSelector({
         if (!name || creating.current || adding.current) return;
         creating.current = true;
         const mine = session.current;
+        let wentThrough = false;
         try {
             setIsCreating(true);
             setError(null);
@@ -202,6 +229,7 @@ export function PlaylistSelector({
                 createdId.current = null;
             }
 
+            wentThrough = true;
             setNewPlaylistName("");
             setIsPublic(false);
         } catch (error) {
@@ -211,6 +239,7 @@ export function PlaylistSelector({
             if (session.current === mine) {
                 creating.current = false;
                 setIsCreating(false);
+                settled(wentThrough);
             }
         }
     };
@@ -241,10 +270,12 @@ export function PlaylistSelector({
         if (adding.current) return false;
         adding.current = true;
         const mine = session.current;
+        let wentThrough = false;
         try {
             setError(null);
             setIsAdding(true);
             await work();
+            wentThrough = true;
             return true;
         } catch (error) {
             console.error("Failed to add to playlist:", error);
@@ -254,6 +285,7 @@ export function PlaylistSelector({
             if (session.current === mine) {
                 adding.current = false;
                 setIsAdding(false);
+                settled(wentThrough);
             }
         }
     };
@@ -387,11 +419,30 @@ export function PlaylistSelector({
                     <RepeatPrompt question={question} busy={isAdding} onAnswer={answer} />
                 ) : (<>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {loadFailed && !isLoading && (
+                        <div
+                            role="alert"
+                            className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-[var(--text-primary)]"
+                        >
+                            <span>couldn&apos;t load your playlists.</span>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                    setIsLoading(true);
+                                    setLoadFailed(false);
+                                    void loadPlaylists();
+                                }}
+                            >
+                                try again
+                            </Button>
+                        </div>
+                    )}
                     {isLoading ? (
                         <div className="flex items-center justify-center py-12">
                             <GradientSpinner size="md" />
                         </div>
-                    ) : playlists.length === 0 ? (
+                    ) : playlists.length === 0 && loadFailed ? null : playlists.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
                             <Music2 className="w-12 h-12 text-[var(--text-muted)] mb-3" />
                             <p className="text-[var(--text-secondary)]">no playlists yet</p>

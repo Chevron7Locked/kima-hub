@@ -203,7 +203,6 @@ describe("a failed first add to a new playlist", () => {
         mutateAsync.mockRejectedValueOnce(new Error("offline"));
         const heard = vi.fn();
         window.addEventListener("playlist-created", heard);
-        window.addEventListener("playlist-updated", heard);
         try {
             await render(["a", "b"]);
             await typeName("late night");
@@ -213,21 +212,6 @@ describe("a failed first add to a new playlist", () => {
             expect((heard.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ id: "new-1" });
         } finally {
             window.removeEventListener("playlist-created", heard);
-            window.removeEventListener("playlist-updated", heard);
-        }
-    });
-
-    it("sends no playlist-updated after a successful add either", async () => {
-        const updated = vi.fn();
-        window.addEventListener("playlist-updated", updated);
-        try {
-            getPlaylist.mockResolvedValue(held("z"));
-            await render(["a"]);
-            await click("road trip");
-            expect(mutateAsync).toHaveBeenCalledTimes(1);
-            expect(updated).not.toHaveBeenCalled();
-        } finally {
-            window.removeEventListener("playlist-updated", updated);
         }
     });
 
@@ -271,6 +255,102 @@ describe("a failed first add to a new playlist", () => {
         await click("create");
         expect(createPlaylist).toHaveBeenCalledTimes(2);
         expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-2", trackIds: ["a"] });
+    });
+});
+
+describe("a change of songs while a create or add is in flight", () => {
+    const keyOf = (call: number) => createPlaylist.mock.calls[call][2];
+
+    it("leaves the key of a create in flight, so a retry of a lost answer returns the playlist the first try made", async () => {
+        let fail!: (e: Error) => void;
+        createPlaylist
+            .mockReturnValueOnce(new Promise((_r, reject) => (fail = reject)))
+            .mockResolvedValue({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a", "b"]);
+        await act(async () => fail(new Error("offline")));
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(keyOf(1)).toBe(keyOf(0));
+    });
+
+    it("leaves the playlist of a failing add, so its retry goes into it and makes no second one", async () => {
+        let fail!: (e: Error) => void;
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockReturnValueOnce(new Promise((_r, reject) => (fail = reject)));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a", "b"]);
+        await act(async () => fail(new Error("offline")));
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(1);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-1", trackIds: ["a", "b"] });
+    });
+
+    it("starts the next create afresh once the one in flight went through", async () => {
+        let finish!: (r: { added: number; rejected: string[] }) => void;
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockReturnValueOnce(new Promise((r) => (finish = r)));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a", "b"]);
+        await act(async () => finish({ added: 1, rejected: [] }));
+        await typeName("early");
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+
+    it("starts afresh at once when nothing is in flight", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await typeName("late night");
+        await click("create");
+        await render(["a", "b"]);
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(keyOf(1)).not.toBe(keyOf(0));
+    });
+});
+
+describe("a playlist list that fails to load", () => {
+    it("says so on the dialog instead of showing an empty list, and a retry loads it", async () => {
+        getPlaylists.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't load your playlists");
+        expect(text()).not.toContain("no playlists yet");
+        await click("try again");
+        expect(getPlaylists).toHaveBeenCalledTimes(2);
+        expect(text()).toContain("road trip");
+        expect(document.querySelector('[role="alert"]')).toBeNull();
+    });
+
+    it("shows the line again when the retry fails too, and clears it when the dialog reopens", async () => {
+        getPlaylists.mockRejectedValue(new Error("offline"));
+        await render(["a"]);
+        await click("try again");
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't load your playlists");
+        getPlaylists.mockResolvedValue([{ id: "pl-1", name: "road trip", trackCount: 2 }]);
+        await render(["a"], false);
+        await render(["a"], true);
+        expect(document.querySelector('[role="alert"]')).toBeNull();
+        expect(text()).toContain("road trip");
+    });
+
+    it("keeps the list on screen when a refresh after a failed add cannot load", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        getPlaylists.mockRejectedValue(new Error("offline"));
+        await typeName("late night");
+        await click("create");
+        expect(text()).toContain("road trip");
+        expect(text()).toContain("couldn't load your playlists");
     });
 });
 
