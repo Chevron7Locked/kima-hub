@@ -7,6 +7,7 @@ import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createCoverLimiter, createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
+import { randomUUID } from "crypto";
 import fs from "fs";
 import { coverCacheControl, coverFileForSize, getLocalImagePath, parseStoredCover } from "../services/imageStorage";
 import { sendStoredFile } from "../utils/sendStoredFile";
@@ -137,32 +138,59 @@ async function renewPlayIfCounted(key: string): Promise<boolean> {
     }
 }
 
+/** Deletes the window only while it holds this claim's token: a window that ended and was taken again is another play's. */
+const RELEASE_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+/** Renews the window only while it holds this claim's token. */
+const RENEW_IF_MINE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`;
+
 /**
- * A listener who pauses holds one response open and may seek later, past the window. While a response of the play is
- * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play.
+ * The window a request took for its play. `token` is what the window holds, so the claim renews or gives back only its
+ * own window; null when Redis was down and there is no window to hold.
  */
-function keepWindowWhileOpen(res: Response, key: string): void {
-    const timer = setInterval(() => void track(renewPlayIfCounted(key)), PLAY_WINDOW_SECONDS * 1000 / 3);
-    timer.unref();
-    res.once("close", () => {
-        clearInterval(timer);
-        void track(renewPlayIfCounted(key));
-    });
+interface PlayClaim {
+    token: string | null;
 }
 
-/** Takes the window for this play. False when a request of the same play took it first; true too when Redis is down. */
-async function claimPlayWindow(key: string): Promise<boolean> {
+async function renewClaim(key: string, claim: PlayClaim): Promise<void> {
+    if (claim.token === null) return;
     try {
-        return (await redisClient.set(key, "1", "EX", PLAY_WINDOW_SECONDS, "NX")) === "OK";
+        await redisClient.eval(RENEW_IF_MINE, 1, key, claim.token, String(PLAY_WINDOW_SECONDS * 1000));
     } catch (error) {
-        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
-        return true;
+        logger.warn(`[Share] Could not renew a play window: ${(error as Error).message}`);
     }
 }
 
-async function releasePlayWindow(key: string): Promise<void> {
+/**
+ * A listener who pauses holds one response open and may seek later, past the window. While a response of the play is
+ * open, and once more as it closes, the window is renewed, so the seek is a follow-up and not a new play. The request that
+ * took the window renews only its own claim; a follow-up renews whichever window of the play is there.
+ */
+function keepWindowWhileOpen(res: Response, key: string, claim: PlayClaim | null): void {
+    const renew = (): Promise<unknown> => (claim ? renewClaim(key, claim) : renewPlayIfCounted(key));
+    const timer = setInterval(() => void track(renew()), PLAY_WINDOW_SECONDS * 1000 / 3);
+    timer.unref();
+    res.once("close", () => {
+        clearInterval(timer);
+        void track(renew());
+    });
+}
+
+/** Takes the window for this play. Null when a request of the same play took it first; a claim with no token when Redis is down. */
+async function claimPlayWindow(key: string): Promise<PlayClaim | null> {
+    const token = randomUUID();
     try {
-        await redisClient.del(key);
+        return (await redisClient.set(key, token, "EX", PLAY_WINDOW_SECONDS, "NX")) === "OK" ? { token } : null;
+    } catch (error) {
+        logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
+        return { token: null };
+    }
+}
+
+/** Frees the window if it is still this claim's. */
+async function releasePlayWindow(key: string, claim: PlayClaim): Promise<void> {
+    if (claim.token === null) return;
+    try {
+        await redisClient.eval(RELEASE_IF_MINE, 1, key, claim.token);
     } catch (error) {
         logger.warn(`[Share] Could not release a play window: ${(error as Error).message}`);
     }
@@ -212,7 +240,7 @@ async function undoWithinReason(undo: () => Promise<void>, shareId: string): Pro
  * ends: a client cannot follow up in between and slip into a window that is about to be freed. The response waits for it
  * only up to TAKE_BACK_WAIT_MS, so a stalled database cannot hold the connection open.
  */
-function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string): void {
+function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string, claim: PlayClaim): void {
     let undone: Promise<void> | null = null;
     const undo = () =>
         (undone ??= track((async () => {
@@ -223,7 +251,7 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, key: string)
             } catch (error) {
                 logger.error(`[Share] Could not give back a play: ${(error as Error).message}`);
             }
-            await releasePlayWindow(key);
+            await releasePlayWindow(key, claim);
         })()));
 
     const end = res.end.bind(res) as (...args: unknown[]) => Response;
@@ -413,17 +441,19 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // The first request of a play takes the window and counts it. A request that finds the window taken belongs to
         // that play: two requests arriving together are one play.
-        let ownsPlay = followUp;
-        if (!followUp && (await claimPlayWindow(playKey))) {
-            if (!(await countPlay(shareLink.id))) {
-                await releasePlayWindow(playKey);
-                return sendEnded(res, "play-limit");
+        let claim: PlayClaim | null = null;
+        if (!followUp) {
+            claim = await claimPlayWindow(playKey);
+            if (claim) {
+                if (!(await countPlay(shareLink.id))) {
+                    await releasePlayWindow(playKey, claim);
+                    return sendEnded(res, "play-limit");
+                }
+                keepPlayOnlyIfStreamStarts(res, shareLink.id, playKey, claim);
             }
-            keepPlayOnlyIfStreamStarts(res, shareLink.id, playKey);
-            ownsPlay = true;
         }
-        if (ownsPlay) {
-            keepWindowWhileOpen(res, playKey);
+        if (followUp || claim) {
+            keepWindowWhileOpen(res, playKey, claim);
         }
 
         const mimeType = getMimeType(track.filePath);
