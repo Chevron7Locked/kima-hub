@@ -43,7 +43,8 @@ import { startDiscoverWeeklyCron } from '../discoverCron';
 import { prisma } from '../../utils/db';
 import { discoverQueue } from '../queues';
 import { distributedLock } from '../../utils/distributedLock';
-import { LockHeldError, LockLostError } from '../../utils/lockErrors';
+import { LockHeldError, LockLostError, LockUnavailableError } from '../../utils/lockErrors';
+import { logger } from '../../utils/logger';
 
 const P = 'zz-discoverCron-';
 const USER_A = `${P}a`;
@@ -195,6 +196,53 @@ describe('discoverCron enqueue -- lock + stale-hash guard', () => {
         const addedUserIds = addCalls().map((c) => c[1]?.userId);
         expect(addedUserIds).not.toContain(USER_A);
         expect(addedUserIds).toContain(USER_B);
+    });
+
+    // With Redis unreachable the lock cannot say who holds it, and the job id is the same for a user and week, so a second
+    // enqueue is ignored by the queue: the user is queued, not skipped.
+    it('enqueues without the lock when Redis cannot be asked, under the same job id', async () => {
+        await seedUsers([{ id: USER_A, playlistSize: 25 }]);
+        withLock.mockImplementation(async (key: string) => {
+            throw new LockUnavailableError(key);
+        });
+
+        await tickCron()();
+
+        expect(addCalls()).toHaveLength(1);
+        expect(addCalls()[0][2].jobId).toMatch(new RegExp(`^discover-weekly-${P}a-\\d{4}-\\d{2}-\\d{2}$`));
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`${USER_A}`));
+    });
+
+    it('skips a user whose lock is held, and also when the unlocked enqueue itself fails', async () => {
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25 }]);
+        withLock.mockImplementation(async (key: string) => {
+            throw key.endsWith(USER_A) ? new LockHeldError(key) : new LockUnavailableError(key);
+        });
+        add.mockRejectedValue(new Error('queue down'));
+
+        await tickCron()();
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`enqueue skipped for ${USER_A}`));
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(`enqueue skipped for ${USER_B}`));
+    });
+
+    it('logs how many jobs were queued, not how many users were found', async () => {
+        await seedUsers([{ id: USER_A, playlistSize: 25 }, { id: USER_B, playlistSize: 25 }]);
+        withLock.mockImplementation(
+            async (key: string, _t: number, fn: (signal: AbortSignal) => Promise<unknown>) => {
+                if (key === `discover:generate:${USER_A}`) throw new LockHeldError(key);
+                return fn(new AbortController().signal);
+            }
+        );
+
+        await tickCron()();
+
+        const queued = (logger.debug as jest.Mock).mock.calls.map((c) => String(c[0])).filter((m) => m.includes('Queued'));
+        // Other files' users are in the database too, so the count is at least the one this file's user B made, and below the users found.
+        expect(queued).toHaveLength(1);
+        const [, queuedCount, foundCount] = queued[0].match(/Queued (\d+) of (\d+)/) ?? [];
+        expect(Number(queuedCount)).toBeGreaterThanOrEqual(1);
+        expect(Number(queuedCount)).toBeLessThan(Number(foundCount));
     });
 
     // The lock is taken before getJob and remove, not only around add.
