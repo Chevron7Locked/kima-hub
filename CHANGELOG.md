@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An artist picture you set now shows in Subsonic apps too: in artist lists, the artist page, search, artist info and cover art.
 - When you reopen the web player, the current song it shows always matches your place in the saved queue.
 - A queue that holds the same song twice is no longer saved one song short when the library removes a song at the same moment.
 - Saving your queue from the web player, the iOS app or a Subsonic app no longer drops songs whose file is missing or unreadable. They stay in the saved queue, hidden, and come back when the file is fixed.
