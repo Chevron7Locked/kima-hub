@@ -671,7 +671,7 @@ test.describe("Dogfood walkthrough", () => {
             // from the sidebar entry for the same playlist, which is a link -- and it does
             // not depend on guessing which wrapper element is the modal.
             await expect(
-                page.getByRole("heading", { name: "Add to Playlist" }),
+                page.getByRole("heading", { name: "add to playlist" }),
             ).toBeVisible({ timeout: 8_000 });
 
             const option = page.getByRole("button", { name: new RegExp(escapeRegExp(name)) });
@@ -734,7 +734,7 @@ test.describe("Dogfood walkthrough", () => {
                 await row.waitFor({ state: "visible", timeout: 10_000 });
                 await row.hover();
                 await row.getByLabel("Add to playlist").click();
-                await expect(page.getByRole("heading", { name: "Add to Playlist" })).toBeVisible({
+                await expect(page.getByRole("heading", { name: "add to playlist" })).toBeVisible({
                     timeout: 8_000,
                 });
                 await page.getByRole("button", { name: new RegExp(escapeRegExp(name)) }).click();

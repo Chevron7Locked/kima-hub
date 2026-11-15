@@ -7,11 +7,12 @@ import React, { act } from "react";
 const getPlaylists = vi.fn();
 const getPlaylist = vi.fn();
 const mutateAsync = vi.fn();
+const createPlaylist = vi.fn();
 vi.mock("@/lib/api", () => ({
     api: {
         getPlaylists: (...a: unknown[]) => getPlaylists(...a),
         getPlaylist: (...a: unknown[]) => getPlaylist(...a),
-        createPlaylist: vi.fn(),
+        createPlaylist: (...a: unknown[]) => createPlaylist(...a),
     },
 }));
 vi.mock("@/hooks/useQueries", () => ({ useAddToPlaylistMutation: () => ({ mutateAsync }) }));
@@ -154,5 +155,127 @@ describe("when something goes wrong", () => {
         await click("add again");
         expect(onClose).not.toHaveBeenCalled();
         expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't add");
+    });
+});
+
+/** What the api client throws for a non-2xx answer: an Error carrying the status and the parsed body. */
+const apiError = (status: number, data: Record<string, unknown>) =>
+    Object.assign(new Error(String(data.error)), { status, data });
+
+describe("songs the server could not add", () => {
+    it("says so and stays open when some were added and some rejected", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        mutateAsync.mockResolvedValue({ added: 2, duplicates: 0, rejected: ["c"] });
+        await open(["a", "b", "c"]);
+        expect(text()).toContain("added 2 songs");
+        expect(text()).toContain("1 song couldn't be added");
+        expect(onAdded).toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        await click("done");
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it("counts several rejected songs", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        mutateAsync.mockResolvedValue({ added: 0, duplicates: 0, rejected: ["a", "b"] });
+        await open(["a", "b"]);
+        expect(text()).toContain("2 songs couldn't be added");
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("says so, not a generic failure, when every song was rejected (the server answers 404 with the list)", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        mutateAsync.mockRejectedValue(apiError(404, { error: "No matching tracks in request", rejected: ["a"] }));
+        await open(["a"]);
+        expect(text()).toContain("1 song couldn't be added");
+        expect(document.querySelector('[role="alert"]')).toBeNull();
+        expect(onAdded).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("still reports rejections after the person answers the repeat question", async () => {
+        getPlaylist.mockResolvedValue(held("a"));
+        await open(["a", "b"]);
+        mutateAsync.mockResolvedValueOnce({ added: 1, duplicates: 0, rejected: ["x"] });
+        await click("add new ones");
+        expect(text()).toContain("1 song couldn't be added");
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes as before when nothing was rejected", async () => {
+        getPlaylist.mockResolvedValue(held("z"));
+        await open(["a"]);
+        expect(onClose).toHaveBeenCalled();
+    });
+});
+
+describe("creating a playlist to add to", () => {
+    const create = async (name: string) => {
+        const input = document.querySelector("input[type=text]") as HTMLInputElement;
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        await act(async () => {
+            set.call(input, name);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await click("create");
+    };
+    const render = async (trackIds: string[]) => {
+        root = createRoot(document.body.appendChild(document.createElement("div")));
+        await act(async () => root!.render(<PlaylistSelector isOpen onClose={onClose} onAdded={onAdded} trackIds={trackIds} />));
+    };
+
+    it("adds the songs to the new playlist", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        await render(["a"]);
+        await create("late night");
+        expect(createPlaylist).toHaveBeenCalledWith("late night", false);
+        expect(mutateAsync).toHaveBeenCalledWith({ playlistId: "new-1", trackIds: ["a"] });
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it("retries only the add, not the create, when the add fails", async () => {
+        createPlaylist.mockResolvedValue({ id: "new-1", name: "late night" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await create("late night");
+        expect(onClose).not.toHaveBeenCalled();
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't add");
+        await click("create");
+        expect(createPlaylist).toHaveBeenCalledTimes(1);
+        expect(mutateAsync).toHaveBeenCalledTimes(2);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-1", trackIds: ["a"] });
+        expect(onClose).toHaveBeenCalled();
+    });
+
+    it("makes a new playlist when the name was changed after a failed add", async () => {
+        createPlaylist.mockResolvedValueOnce({ id: "new-1", name: "late night" }).mockResolvedValueOnce({ id: "new-2", name: "early" });
+        mutateAsync.mockRejectedValueOnce(new Error("offline"));
+        await render(["a"]);
+        await create("late night");
+        await create("early");
+        expect(createPlaylist).toHaveBeenCalledTimes(2);
+        expect(mutateAsync).toHaveBeenLastCalledWith({ playlistId: "new-2", trackIds: ["a"] });
+    });
+
+    it("reports a failed create as a failed create", async () => {
+        createPlaylist.mockRejectedValue(new Error("nope"));
+        await render(["a"]);
+        await create("late night");
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain("couldn't create");
+        expect(mutateAsync).not.toHaveBeenCalled();
+    });
+});
+
+describe("the dialog's wording", () => {
+    it("is lowercase in source: title, hints, labels", async () => {
+        getPlaylists.mockResolvedValue([]);
+        root = createRoot(document.body.appendChild(document.createElement("div")));
+        await act(async () => root!.render(<PlaylistSelector isOpen onClose={onClose} trackIds={["a"]} />));
+        expect(document.querySelector("h2")?.textContent).toBe("add to playlist");
+        expect(text()).toBe(text().toLowerCase());
+        const placeholder = document.querySelector("input[type=text]")?.getAttribute("placeholder") ?? "";
+        expect(placeholder).toBe(placeholder.toLowerCase());
+        const label = document.querySelector("button[aria-label]")?.getAttribute("aria-label") ?? "";
+        expect(label).toBe(label.toLowerCase());
     });
 });

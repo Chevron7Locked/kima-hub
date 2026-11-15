@@ -86,7 +86,7 @@ export interface MoodMixReleaseState {
     playlist: { id: string; name: string } | null;
 }
 
-interface ApiError extends Error {
+export interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
 }
@@ -965,19 +965,12 @@ class ApiClient {
         });
     }
 
-    /** A song the playlist already holds is skipped, unless the person chose to add it again (`allowRepeats`). */
-    async addTrackToPlaylist(playlistId: string, trackId: string, allowRepeats = false) {
-        return this.request<ApiData>(`/playlists/${playlistId}/items`, {
-            method: "POST",
-            body: JSON.stringify(allowRepeats ? { trackId, allowRepeats } : { trackId }),
-        });
-    }
-
     /** Adds many tracks in one request; songs the playlist already holds are skipped unless `allowRepeats`. */
     async addTracksToPlaylist(playlistId: string, trackIds: string[], allowRepeats = false) {
         return this.request<{
             added: number;
             duplicates: number;
+            duplicateIds?: string[];
             rejected: string[];
         }>(`/playlists/${playlistId}/items`, {
             method: "POST",

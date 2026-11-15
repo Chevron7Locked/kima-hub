@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { api } from "@/lib/api";
+import { api, type ApiError } from "@/lib/api";
 import { X, Plus, Music2, Check } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
 import { Button } from "@/components/ui/Button";
@@ -33,6 +33,14 @@ interface RepeatQuestion {
     trackIds: string[];
     repeated: string[];
 }
+
+/** What an add that ended without closing the dialog has to tell: songs the server could not add. */
+interface AddOutcome {
+    added: number;
+    rejected: number;
+}
+
+const songs = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
 
 /** Asks what to do with songs the playlist already holds: one song or all of them get add again / skip, a mix gets add all / add new ones. */
 function RepeatPrompt({
@@ -87,6 +95,12 @@ export function PlaylistSelector({
     const [isConfirming, setIsConfirming] = useState(false);
     // Set while the person is being asked about songs the chosen playlist already holds.
     const [question, setQuestion] = useState<RepeatQuestion | null>(null);
+    // Set when an add ended with songs the server could not add: the dialog stays and says so.
+    const [outcome, setOutcome] = useState<AddOutcome | null>(null);
+    // What the add in progress has done so far, across the repeat question's answers.
+    const tally = useRef<AddOutcome>({ added: 0, rejected: 0 });
+    // A playlist made for these songs whose add failed: a retry adds to it instead of making another.
+    const created = useRef<{ id: string; name: string; isPublic: boolean } | null>(null);
     const { mutateAsync: addToPlaylist } = useAddToPlaylistMutation();
 
     const isMulti = mode === "multi";
@@ -101,6 +115,7 @@ export function PlaylistSelector({
             setSelected(new Set());
             setError(null);
             setQuestion(null);
+            setOutcome(null);
         }
     }
 
@@ -121,6 +136,7 @@ export function PlaylistSelector({
 
     useEffect(() => {
         if (!isOpen) return;
+        created.current = null;
         let cancelled = false;
         api.getPlaylists()
             .then((data) => {
@@ -133,32 +149,42 @@ export function PlaylistSelector({
     }, [isOpen]);
 
     const handleCreatePlaylist = async () => {
+        const name = newPlaylistName.trim();
         try {
             setIsCreating(true);
             setError(null);
-            const playlist = await api.createPlaylist(
-                newPlaylistName.trim(),
-                isPublic
-            );
+            // After a failed add the playlist is already made: the same name and setting adds to it again.
+            const pending = created.current;
+            const reuse = pending && pending.name === name && pending.isPublic === isPublic;
+            const playlist = reuse ? { id: pending.id } : await api.createPlaylist(name, isPublic);
+            if (!reuse) {
+                window.dispatchEvent(new CustomEvent("playlist-created", { detail: playlist }));
+            }
 
             if (isMulti) {
                 setSelected((prev) => new Set(prev).add(playlist.id));
                 await loadPlaylists();
             } else {
                 // A new playlist holds nothing yet, so there is nothing to ask.
-                if (trackIds.length > 0) await addSongs(playlist.id, trackIds, false);
-                else onClose();
+                if (trackIds.length === 0) {
+                    onClose();
+                } else {
+                    created.current = { id: playlist.id, name, isPublic };
+                    tally.current = { added: 0, rejected: 0 };
+                    const done = await whileAdding(() => addSongs(playlist.id, trackIds, false));
+                    if (!done) {
+                        await loadPlaylists();
+                        return;
+                    }
+                    created.current = null;
+                }
             }
 
             setNewPlaylistName("");
             setIsPublic(false);
-
-            window.dispatchEvent(
-                new CustomEvent("playlist-created", { detail: playlist })
-            );
         } catch (error) {
             console.error("Failed to create playlist:", error);
-            setError("Couldn't create that playlist — try again.");
+            setError("couldn't create that playlist — try again.");
         } finally {
             setIsCreating(false);
         }
@@ -180,6 +206,7 @@ export function PlaylistSelector({
 
         if (trackIds.length === 0) return;
 
+        tally.current = { added: 0, rejected: 0 };
         await whileAdding(async () => {
             const held = await heldSongs(playlistId);
             const repeated = trackIds.filter((id) => held.has(id));
@@ -192,16 +219,18 @@ export function PlaylistSelector({
     };
 
     /** One add at a time: a second click while one is in flight does nothing. A failure is reported and the dialog stays. */
-    const whileAdding = async (work: () => Promise<void>) => {
-        if (adding.current) return;
+    const whileAdding = async (work: () => Promise<void>): Promise<boolean> => {
+        if (adding.current) return false;
         adding.current = true;
         try {
             setError(null);
             setIsConfirming(true);
             await work();
+            return true;
         } catch (error) {
             console.error("Failed to add to playlist:", error);
             setError("couldn't add to that playlist — try again.");
+            return false;
         } finally {
             adding.current = false;
             setIsConfirming(false);
@@ -225,26 +254,47 @@ export function PlaylistSelector({
      * before the add can be stale or have failed, so those are put to the person now, and the dialog stays open.
      */
     const addSongs = async (playlistId: string, ids: string[], allowRepeats: boolean) => {
-        const result = (await addToPlaylist(
-            allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids },
-        )) as { duplicateIds?: string[] } | undefined;
+        let result: { added: number; duplicateIds?: string[]; rejected?: string[] };
+        try {
+            result = await addToPlaylist(
+                allowRepeats ? { playlistId, trackIds: ids, allowRepeats } : { playlistId, trackIds: ids },
+            );
+        } catch (error) {
+            // When every song is refused the server answers 404 and names them: that is not a failure to retry.
+            const refused = (error as ApiError).data?.rejected;
+            if ((error as ApiError).status !== 404 || !Array.isArray(refused)) throw error;
+            result = { added: 0, rejected: refused as string[] };
+        }
         window.dispatchEvent(
             new CustomEvent("playlist-updated", { detail: { playlistId } })
         );
-        const skipped = result?.duplicateIds ?? [];
+        tally.current.added += result.added ?? 0;
+        tally.current.rejected += result.rejected?.length ?? 0;
+        const skipped = result.duplicateIds ?? [];
         if (!allowRepeats && skipped.length > 0) {
             setQuestion({ playlistId, trackIds: skipped, repeated: skipped });
             return;
         }
-        onAdded?.();
-        onClose();
+        finish();
+    };
+
+    /** The add is over: close, unless songs were refused, which the dialog says before it goes. */
+    const finish = () => {
+        const { added, rejected } = tally.current;
+        if (added > 0) onAdded?.();
+        if (rejected === 0) {
+            onClose();
+            return;
+        }
+        setQuestion(null);
+        setOutcome({ added, rejected });
     };
 
     /** The person's answer: add the repeats too (`again`), only the songs that are new (`new`), or nothing (`skip`). */
     const answer = async (choice: "again" | "new" | "skip") => {
         if (!question) return;
         if (choice === "skip") {
-            onClose();
+            finish();
             return;
         }
         await whileAdding(async () => {
@@ -272,7 +322,7 @@ export function PlaylistSelector({
             onClose();
         } catch (error) {
             console.error("Failed to add to playlists:", error);
-            setError("Couldn't add to those playlists — try again.");
+            setError("couldn't add to those playlists — try again.");
         } finally {
             setIsConfirming(false);
         }
@@ -295,11 +345,11 @@ export function PlaylistSelector({
             >
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
                     <h2 id="playlist-selector-title" className="text-2xl font-bold text-white">
-                        Add to Playlist
+                        add to playlist
                     </h2>
                     <button
                         onClick={onClose}
-                        aria-label="Close"
+                        aria-label="close"
                         className="p-2 hover:bg-white/10 rounded-full transition-colors"
                     >
                         <X className="w-5 h-5 text-[var(--text-secondary)]" />
@@ -309,7 +359,7 @@ export function PlaylistSelector({
                 {isSaving && (
                     <div className="px-6 py-3 flex items-center gap-3 bg-black/30 border-b border-white/10 text-sm text-[var(--text-primary)]">
                         <GradientSpinner size="sm" />
-                        <span>{loadingMessage || "Adding..."}</span>
+                        <span>{loadingMessage || "adding..."}</span>
                     </div>
                 )}
 
@@ -322,7 +372,19 @@ export function PlaylistSelector({
                     </div>
                 )}
 
-                {question ? (
+                {outcome ? (
+                    <div className="p-6 space-y-4">
+                        <p className="text-white">
+                            {outcome.added > 0 && `added ${songs(outcome.added)}. `}
+                            {`${songs(outcome.rejected)} couldn't be added.`}
+                        </p>
+                        <div className="flex justify-end">
+                            <Button variant="primary" onClick={onClose}>
+                                done
+                            </Button>
+                        </div>
+                    </div>
+                ) : question ? (
                     <RepeatPrompt question={question} busy={isConfirming} onAnswer={answer} />
                 ) : (<>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -333,9 +395,9 @@ export function PlaylistSelector({
                     ) : playlists.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
                             <Music2 className="w-12 h-12 text-[var(--text-muted)] mb-3" />
-                            <p className="text-[var(--text-secondary)]">No playlists yet</p>
+                            <p className="text-[var(--text-secondary)]">no playlists yet</p>
                             <p className="text-[var(--text-muted)] text-sm mt-1">
-                                Create one below to get started
+                                create one below to get started
                             </p>
                         </div>
                     ) : (
@@ -406,9 +468,9 @@ export function PlaylistSelector({
                             {isConfirming ? (
                                 <GradientSpinner size="sm" />
                             ) : selected.size > 0 ? (
-                                `Add to ${selected.size} playlist${selected.size > 1 ? "s" : ""}`
+                                `add to ${selected.size} playlist${selected.size > 1 ? "s" : ""}`
                             ) : (
-                                "Select playlists"
+                                "select playlists"
                             )}
                         </Button>
                     </div>
@@ -416,12 +478,12 @@ export function PlaylistSelector({
 
                 <div className="p-6 border-t border-white/10 bg-[var(--bg-primary)]/50">
                     <p className="text-sm text-[var(--text-secondary)] mb-3 font-medium">
-                        Create New Playlist
+                        create new playlist
                     </p>
                     <div className="flex gap-2 mb-3">
                         <input
                             type="text"
-                            placeholder="Enter playlist name..."
+                            placeholder="enter playlist name..."
                             value={newPlaylistName}
                             onChange={(e) => setNewPlaylistName(e.target.value)}
                             onKeyDown={(e) =>
@@ -439,7 +501,7 @@ export function PlaylistSelector({
                             }
                         >
                             <Plus className="w-5 h-5" />
-                            <span className="hidden sm:inline">Create</span>
+                            <span className="hidden sm:inline">create</span>
                         </Button>
                     </div>
                     <label className="flex items-center gap-3 cursor-pointer group">
@@ -454,7 +516,7 @@ export function PlaylistSelector({
                             <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" />
                         </div>
                         <span className="text-sm text-[var(--text-secondary)] group-hover:text-gray-300 transition-colors">
-                            Share with other users
+                            share with other users
                         </span>
                     </label>
                 </div>
