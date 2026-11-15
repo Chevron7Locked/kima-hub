@@ -189,6 +189,21 @@ describe("a refresh that finds a waiting song", () => {
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
     });
 
+    it("matches a waiting entry the way a scan does: a listing with a version suffix finds the plain song, and a compilation's song is found by title", async () => {
+        const suffixed = listing(GHOST, `${GHOST_TITLE} - Remastered 2011`);
+        const onCompilation = listing("zzplaceother", `${P} compilation song`);
+        const playlistId = await importOf([suffixed, entry(0), onCompilation]);
+        await jobFor(playlistId, [suffixed, onCompilation]);
+        const x = await libraryGains();
+        const y = await prisma.track.create({
+            data: { title: `${P} compilation song`, albumId: ghostAlbumId, trackNo: 2, duration: 100, filePath: `${P}/ghost/2.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        const result = await spotifyImportService.refreshJobMatches(JOB);
+        expect(result.added).toBe(2);
+        expect(await held(playlistId)).toEqual([x.id, ids[0], y.id]);
+        expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
+    });
+
     it("does not bring back a waiting entry the person removed", async () => {
         const playlistId = await importOf([entry(0), waiting(), entry(1)]);
         await jobFor(playlistId, [waiting()]);

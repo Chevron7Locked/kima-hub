@@ -2343,6 +2343,55 @@ class SpotifyImportService {
   }
 
   /**
+   * The songs the library now has for waiting entries, each tied to the entry it answers. Scans and refreshes both
+   * match this way (the import's own pool and ladder, services/trackMatching), and an entry is its own listing: a song
+   * the playlist already holds does not answer it.
+   */
+  private async matchWaitingEntries(
+    waiting: Array<{ id: string; spotifyArtist: string; spotifyTitle: string }>,
+    shownArtists: Awaited<ReturnType<typeof ShownArtists.load>>,
+  ): Promise<FoundSong[]> {
+    const found: FoundSong[] = [];
+    for (const pendingTrack of waiting) {
+      const dbArtist = normalizeArtistName(pendingTrack.spotifyArtist);
+      const artistFirstWord = dbArtist.split(" ")[0];
+
+      // Same pool and ladder as the import itself (services/trackMatching).
+      const artistCandidateRows = await prisma.track.findMany({
+        where: await tracksOfArtistsStartingWith([artistFirstWord], shownArtists),
+        include: { album: { include: { artist: true } } },
+      });
+      const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);
+
+      let match = matchTrackToLibrary(
+        { title: pendingTrack.spotifyTitle, artist: pendingTrack.spotifyArtist },
+        artistCandidates,
+      );
+
+      // Title-only fallback, as in the import: any artist (compilations,
+      // Various Artists), and only for titles long enough to be distinctive.
+      if (!match && normalizeTrackTitle(pendingTrack.spotifyTitle).length >= MIN_TITLE_ONLY_LENGTH) {
+        const strippedTitle = stripTrackSuffix(pendingTrack.spotifyTitle);
+        const titleCandidateRows = await tracksTitledLike([strippedTitle.split(" ").slice(0, 4).join(" ")], {
+          album: { include: { artist: true } },
+        });
+        const titleCandidates: MatchCandidate[] = titleCandidateRows.flatMap(toMatchCandidates);
+        match = matchTrackToLibrary(
+          { title: pendingTrack.spotifyTitle, artist: pendingTrack.spotifyArtist },
+          titleCandidates,
+          { requireArtistMatch: false },
+        );
+      }
+
+      if (match) {
+        found.push({ trackId: match.candidate.id, pendingId: pendingTrack.id });
+        logger.debug(`   ✓ Matched: "${pendingTrack.spotifyTitle}" by ${pendingTrack.spotifyArtist}`);
+      }
+    }
+    return found;
+  }
+
+  /**
    * Re-match pending tracks and add newly downloaded ones to the playlist
    */
   async refreshJobMatches(
@@ -2364,31 +2413,7 @@ class SpotifyImportService {
       orderBy: { rank: "asc" },
     });
 
-    const uniqueArtists = [...new Set(waitingNow.map((w) => normalizeArtistName(w.spotifyArtist)))];
-    const allCandidates = uniqueArtists.length > 0
-      ? await prisma.track.findMany({
-          where: {
-            AND: [PLAYABLE_SONG, { album: { artist: { normalizedName: { in: uniqueArtists } } } }],
-          },
-          include: { album: { include: { artist: true } } },
-        })
-      : [];
-
-    // Index by normalized artist name for fast lookup
-    const candidatesByArtist = new Map<string, typeof allCandidates>();
-    for (const track of allCandidates) {
-      const key = track.album.artist.normalizedName ?? "";
-      const existing = candidatesByArtist.get(key) || [];
-      existing.push(track);
-      candidatesByArtist.set(key, existing);
-    }
-
-    const found: FoundSong[] = [];
-    for (const waiting of waitingNow) {
-      const candidates = candidatesByArtist.get(normalizeArtistName(waiting.spotifyArtist)) || [];
-      const localTrack = candidates.find((c) => c.title.toLowerCase() === waiting.spotifyTitle.toLowerCase());
-      if (localTrack) found.push({ trackId: localTrack.id, pendingId: waiting.id });
-    }
+    const found = await this.matchWaitingEntries(waitingNow, await ShownArtists.load());
 
     const placed = await placeFoundSongs(job.createdPlaylistId, found);
     const added = placed.length;
@@ -2559,57 +2584,7 @@ class SpotifyImportService {
     }
 
     for (const [playlistId, pendingTracks] of tracksByPlaylist) {
-      const found: FoundSong[] = [];
-
-      for (const pendingTrack of pendingTracks) {
-        const dbArtist = normalizeArtistName(pendingTrack.spotifyArtist);
-        const artistFirstWord = dbArtist.split(" ")[0];
-
-        // Same pool and ladder as the import itself (services/trackMatching).
-        const artistCandidateRows = await prisma.track.findMany({
-          where: await tracksOfArtistsStartingWith([artistFirstWord], shownArtists),
-          include: { album: { include: { artist: true } } },
-        });
-        const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);
-
-        let match = matchTrackToLibrary(
-          {
-            title: pendingTrack.spotifyTitle,
-            artist: pendingTrack.spotifyArtist,
-          },
-          artistCandidates,
-        );
-
-        // Title-only fallback, as in the import: any artist (compilations,
-        // Various Artists), and only for titles long enough to be distinctive.
-        if (!match && normalizeTrackTitle(pendingTrack.spotifyTitle).length >= MIN_TITLE_ONLY_LENGTH) {
-          const strippedTitle = stripTrackSuffix(pendingTrack.spotifyTitle);
-          const titleCandidateRows = await tracksTitledLike([strippedTitle.split(" ").slice(0, 4).join(" ")], {
-            album: { include: { artist: true } },
-          });
-          const titleCandidates: MatchCandidate[] = titleCandidateRows.flatMap(toMatchCandidates);
-          match = matchTrackToLibrary(
-            {
-              title: pendingTrack.spotifyTitle,
-              artist: pendingTrack.spotifyArtist,
-            },
-            titleCandidates,
-            { requireArtistMatch: false },
-          );
-        }
-
-        const localTrack = match
-          ? { id: match.candidate.id, title: match.candidate.title }
-          : null;
-
-        // A waiting entry is its own listing: a song the playlist already holds joins as another copy.
-        if (localTrack) {
-          found.push({ trackId: localTrack.id, pendingId: pendingTrack.id });
-          logger.debug(
-            `   ✓ Matched: "${pendingTrack.spotifyTitle}" by ${pendingTrack.spotifyArtist}`,
-          );
-        }
-      }
+      const found = await this.matchWaitingEntries(pendingTracks, shownArtists);
 
       // Each found song takes its waiting entry's place; one another scan already placed is not added twice.
       const placed = await placeFoundSongs(playlistId, found);
