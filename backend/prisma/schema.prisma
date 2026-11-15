@@ -427,12 +427,14 @@ model Playlist {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @default(now()) @updatedAt
   spotifyPlaylistId String?
+  idempotencyKey    String?
   hiddenByUsers     HiddenPlaylist[]
   user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   items             PlaylistItem[]
   pendingTracks     PlaylistPendingTrack[]
 
   @@unique([userId, mixId])
+  @@unique([userId, idempotencyKey])
   @@index([isPublic])
   @@index([spotifyPlaylistId])
   @@index([userId])

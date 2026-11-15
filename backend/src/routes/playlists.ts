@@ -11,6 +11,7 @@ import {
 } from "../middleware/playlistOwner";
 import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
+import { createPlaylist, MAX_KEY_LENGTH } from "../services/playlistCreate";
 import { announceImportCounts } from "../services/spotifyImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
@@ -154,13 +155,12 @@ router.post("/", async (req, res) => {
         const userId = req.user!.id;
         const data = createPlaylistSchema.parse(req.body);
 
-        const playlist = await prisma.playlist.create({
-            data: {
-                userId,
-                name: data.name,
-                isPublic: data.isPublic,
-            },
-        });
+        const key = req.get("Idempotency-Key") || undefined;
+        if (key !== undefined && key.length > MAX_KEY_LENGTH) {
+            return res.status(400).json({ error: "Idempotency-Key is too long" });
+        }
+
+        const playlist = await createPlaylist(userId, data, key);
 
         announcePlaylistChange(userId, playlist.id);
         res.json(playlist);
