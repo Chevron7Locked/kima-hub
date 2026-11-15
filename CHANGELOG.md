@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An artist picture or album cover address you type in the editor must be a full http or https address. Anything else is refused.
+- A saved name edit or reset no longer shows an error when a follow-up library update fails.
+- An admin turning off someone's two-factor sign-in now signs that person out on every device.
 - Saving the queue you are already on, from the web or the iOS app, keeps a Subsonic app's resume point. Only a changed queue or a different song resets it.
 - A queue save that names a song not in the saved queue is ignored, so the saved song and place never disagree.
 - A queue place that is negative or not a whole number is refused instead of being quietly moved.
