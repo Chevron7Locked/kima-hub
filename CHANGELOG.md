@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A shared song counts one play for each person who plays it, and one person's seeking stays one play.
+- A weekly Discover playlist that failed can be made again without the week ending up with no playlist at all.
+- Soulseek: a dropped connection closing late no longer cuts off the new one, and a failed connection says why it failed.
 - Turning off two-factor, or making new recovery codes, while the server is too busy now says to try again, and your code is not used up.
 - A request the server cannot read now gets a plain "invalid request" everywhere, without listing which fields were wrong.
 - **A saved queue's position never points past its end**, and a replaced song in a queue moves only to a copy that can play.
