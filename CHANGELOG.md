@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A library scan no longer stalls while a play-history repair runs.** A replaced song whose listener's history is being repaired is retired on the next scan instead.
+- **A play reported for a song at the moment a scan removes it is refused cleanly** instead of being recorded and then lost.
+- **Songs removed from the library leave saved play queues**, and the queue keeps its place.
+- **Other people's public playlists no longer carry private fields** such as the owner id or mix and Spotify links.
+- **The add-to-playlist dialog says when your playlists couldn't be loaded** and lets you try again.
+- **A queue changed on another device, or the page it came from, now follows to your other device** while the same song plays.
 - **An import builds its playlist once**, even when a scan and a progress check finish at the same moment, and a song you dismissed while it waited is left out.
 - **Discover counts only albums in your library as already owned.** An album that is itself in Discover no longer stops Discover suggesting it, and a liked suggestion plays from your library copy.
 - **Deleting or pruning an album takes it out of Discover's already-owned check at once**, instead of after a few minutes.
