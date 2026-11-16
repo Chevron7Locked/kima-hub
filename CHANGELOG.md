@@ -163,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A song path needs two songs that play.** A start or end song that is missing, unreadable or in Discover is refused as not found.
 - **Recommended artists fill the list.** Artists you already own no longer leave it short, the closest matches across all your top artists come first, and an artist you play most is never recommended back to you. For-you recommendations take a limit between 1 and 50 (10 by default).
 - **Vibe lookups refuse songs that don't play.** Mood and similar-song lookups answer not found for a Discover, missing or unreadable song and bad request for a malformed id, a song path with a length that is not a number is refused, and the public vibe site shows covers only for songs that play.
+- **Genre search and genre stations go by a song's own genres first.** A song tagged with genres is found by its own tags, and one without is found by its album's. A genre still finds the genres that contain it, so hip hop also finds alternative hip hop.
 - **Artist radio for an artist with nothing that plays** still starts, with songs by similar artists.
 
 #### Covers
