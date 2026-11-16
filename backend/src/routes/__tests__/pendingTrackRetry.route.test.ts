@@ -80,6 +80,7 @@ const jobsFor = (pendingTrackId: string) =>
     prisma.downloadJob.findMany({ where: { userId: OWNER, metadata: { path: ["pendingTrackId"], equals: pendingTrackId } }, orderBy: { createdAt: "asc" } });
 
 async function cleanup() {
+    await prisma.notification.deleteMany({ where: { userId: { in: [OWNER, OTHER] } } });
     await prisma.downloadJob.deleteMany({ where: { userId: { in: [OWNER, OTHER] } } });
     await prisma.user.deleteMany({ where: { id: { in: [OWNER, OTHER] } } });
 }
@@ -91,6 +92,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+    await prisma.notification.deleteMany({ where: { userId: OWNER } });
     await prisma.downloadJob.deleteMany({ where: { userId: OWNER } });
     await prisma.playlist.deleteMany({ where: { userId: OWNER } });
     playlistId = (await prisma.playlist.create({ data: { userId: OWNER, name: `${P} list` } })).id;
@@ -240,6 +242,71 @@ describe("POST /playlists/:id/pending/retry-all", () => {
         expect(await settled(made.id)).toMatchObject({ status: "completed" });
     });
 
+    /** The tray row retry-all leaves for this playlist once its background search has run, if it leaves one. */
+    async function trayRow(wait = true) {
+        for (let i = 0; i < (wait ? 100 : 5); i++) {
+            const row = await prisma.notification.findFirst({ where: { userId: OWNER, groupKey: `retry-pending:${playlistId}` } });
+            if (row) return row;
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        return null;
+    }
+    const retryAll = () => request(app).post(`/playlists/${playlistId}/pending/retry-all`).set(as(OWNER)).expect(200);
+
+    it("tells the person in the tray which songs Soulseek has no files for", async () => {
+        await pending("Canada");
+        await pending("Pissing");
+        await pending("Sunflower");
+        mockSearch.mockImplementation(async (_artist: string, title: string) => (title === "Sunflower" ? { found: true, allMatches: MATCH } : { found: false, allMatches: [] }));
+
+        await retryAll();
+
+        const row = await trayRow();
+        expect(row).toMatchObject({
+            type: "download_failed",
+            title: "soulseek has no files for 2 songs",
+            message: "Low - Canada, Low - Pissing",
+        });
+        expect(row?.metadata).toMatchObject({ href: `/playlist/${playlistId}` });
+    });
+
+    it("tells the person again when a second retry finds nothing", async () => {
+        await pending("Canada");
+        mockSearch.mockResolvedValue({ found: false, allMatches: [] });
+        await retryAll();
+        const first = await trayRow();
+        await prisma.notification.update({ where: { id: first!.id }, data: { read: true } });
+        const isRead = async () => (await prisma.notification.findUniqueOrThrow({ where: { id: first!.id } })).read;
+
+        await retryAll();
+
+        for (let i = 0; i < 100 && (await isRead()); i++) await new Promise((r) => setTimeout(r, 20));
+        expect(await isRead()).toBe(false);
+    });
+
+    it("says nothing when every song was found", async () => {
+        await pending("Canada");
+
+        await retryAll();
+
+        const [job] = await prisma.downloadJob.findMany({ where: { userId: OWNER } });
+        await settled(job.id);
+        expect(await trayRow(false)).toBeNull();
+    });
+
+    it("says Soulseek did not answer when the search itself fails", async () => {
+        await pending("Canada");
+        mockSearch.mockRejectedValue(new Error("slskd is down"));
+
+        await retryAll();
+
+        expect(await trayRow()).toMatchObject({
+            type: "download_failed",
+            title: "soulseek did not answer for 1 song",
+            message: "Low - Canada",
+        });
+    });
+
     it("queues nothing when Soulseek is not set up", async () => {
         const pt = await pending("Murderer");
         mockAvailable.mockResolvedValue(false);
@@ -261,6 +328,16 @@ describe("POST /notifications/downloads/:id/retry of a pending song", () => {
         });
     }
     const retryFromActivity = (jobId: string) => request(app).post(`/notifications/downloads/${jobId}/retry`).set(as(OWNER));
+
+    it("says so, with its code, when Soulseek has nothing", async () => {
+        const pt = await pending("Tonight");
+        const failed = await failedRetryOf(pt.id);
+        mockSearch.mockResolvedValue({ found: false, allMatches: [] });
+
+        const res = await retryFromActivity(failed.id).expect(404);
+
+        expect(res.body).toMatchObject({ success: false, error: "No matching files found", code: "NO_SOURCES" });
+    });
 
     it("starts a new job and clears the failed one", async () => {
         const pt = await pending("Words");

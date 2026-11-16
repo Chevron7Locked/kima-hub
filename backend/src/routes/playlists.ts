@@ -23,6 +23,7 @@ import {
     openRetryJob,
     soulseekTarget,
 } from "../services/pendingTrackRetry";
+import { notificationService } from "../services/notificationService";
 import { parseLimit } from "./library/paging";
 
 const router = Router();
@@ -549,6 +550,29 @@ router.get("/:id/pending/:trackId/preview/stream", async (req, res) => {
     }
 });
 
+const songs = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
+
+/**
+ * The songs of a retry-all that got no download started, one tray row per playlist. It comes back unread on every run:
+ * it answers a button the person pressed.
+ */
+async function tellRetryAllMisses(userId: string, playlistId: string, nothingFound: string[], searchFailed: string[]) {
+    if (nothingFound.length + searchFailed.length === 0) return;
+    const clauses = [
+        nothingFound.length > 0 && `has no files for ${songs(nothingFound.length)}`,
+        searchFailed.length > 0 && `did not answer for ${songs(searchFailed.length)}`,
+    ].filter(Boolean);
+    await notificationService.create({
+        userId,
+        type: "download_failed",
+        title: `soulseek ${clauses.join(", ")}`,
+        message: [...nothingFound, ...searchFailed].join(", "),
+        metadata: { href: `/playlist/${playlistId}` },
+        groupKey: `retry-pending:${playlistId}`,
+        renotify: true,
+    });
+}
+
 /**
  * POST /playlists/:id/pending/retry-all
  * Retries every pending song through Soulseek. Answers once the jobs exist; the songs are then fetched one at a time,
@@ -584,16 +608,24 @@ router.post("/:id/pending/retry-all", requireAcquirePermission, requirePlaylistO
         });
 
         void (async () => {
+            const nothingFound: string[] = [];
+            const searchFailed: string[] = [];
             for (const { job, pendingTrack } of retries) {
                 try {
                     const matches = await findSources(job, pendingTrack);
                     if (matches.length > 0) {
                         await downloadSources(job, pendingTrack, matches, target.musicPath, "retry-pending-track-batch");
+                    } else {
+                        nothingFound.push(job.subject);
                     }
                 } catch (error) {
                     logger.error(`[Pending retry] Search for job ${job.id} failed:`, error);
+                    searchFailed.push(job.subject);
                 }
             }
+            await tellRetryAllMisses(userId, req.params.id, nothingFound, searchFailed).catch((error) =>
+                logger.error(`[Pending retry] Could not tell user ${userId} about playlist ${req.params.id}:`, error)
+            );
         })();
     } catch (error) {
         logger.error("Retry all pending tracks error:", error);

@@ -14,6 +14,7 @@ import {
     failRetryJob,
     findSources,
     NO_SOURCES,
+    NO_SOURCES_CODE,
     retryJobTarget,
     soulseekTarget,
 } from "../services/pendingTrackRetry";
@@ -350,7 +351,7 @@ router.post(
                     return res.status(502).json({ success: false, newJobId: job.id, error: error?.message || "Soulseek search failed" });
                 }
                 if (matches.length === 0) {
-                    return res.status(404).json({ success: false, newJobId: job.id, error: NO_SOURCES });
+                    return res.status(404).json({ success: false, newJobId: job.id, error: NO_SOURCES, code: NO_SOURCES_CODE });
                 }
 
                 void downloadSources(job, pendingTrack, matches, target.musicPath, "retry-pending-track");
