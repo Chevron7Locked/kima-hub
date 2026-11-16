@@ -18,14 +18,10 @@ const router = Router();
 
 // An answer that refuses (not found, ended, not in the share) is never cached, so a link that is dead stays dead for the
 // browser and a proxy, and one that comes back is seen at once. Answers that serve keep the headers they set.
-router.use((_req: Request, res: Response, next) => {
-    const json = res.json.bind(res);
-    res.json = (body?: unknown) => {
-        if (res.statusCode >= 400 && !res.headersSent) res.setHeader("Cache-Control", "no-store");
-        return json(body);
-    };
-    next();
-});
+function refuse(res: Response, status: number, error: string): Response {
+    if (!res.headersSent) res.setHeader("Cache-Control", "no-store");
+    return res.status(status).json({ error });
+}
 
 const shareResolveLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
@@ -54,12 +50,12 @@ async function loadLiveShareLink(token: string, res: Response) {
     const shareLink = await prisma.shareLink.findUnique({ where: { token } });
 
     if (!shareLink) {
-        res.status(404).json({ error: "Share link not found" });
+        refuse(res, 404, "Share link not found");
         return null;
     }
 
     if (shareLink.expiresAt && shareLink.expiresAt < new Date()) {
-        res.status(410).json({ error: "Share link has expired" });
+        refuse(res, 410, "Share link has expired");
         return null;
     }
 
@@ -135,14 +131,14 @@ router.post("/", async (req: Request, res: Response) => {
                 : error.code === "NOT_FOUND" ? 404
                 : error.code === "FORBIDDEN" ? 403
                 : 429;
-            return res.status(status).json({ error: error.message });
+            return refuse(res, status, error.message);
         }
         // Both runs lost to another transaction: nothing was written, and asking again is safe.
         if (isTransactionConflict(error)) {
-            return res.status(409).json({ error: "Concurrent share change, please retry" });
+            return refuse(res, 409, "Concurrent share change, please retry");
         }
         logger.error(`[Share] Failed to create share link: ${error.message}`);
-        res.status(500).json({ error: "Failed to create share link" });
+        refuse(res, 500, "Failed to create share link");
     }
 });
 
@@ -165,7 +161,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
         }
 
         if (!entity) {
-            return res.status(404).json({ error: "Shared content no longer exists" });
+            return refuse(res, 404, "Shared content no longer exists");
         }
 
         // Only a person opening the page is a visit. A HEAD (a probe, a link checker) opens nothing, and the web server's
@@ -180,7 +176,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
         });
     } catch (error: any) {
         logger.error(`[Share] Failed to resolve share link: ${error.message}`);
-        res.status(500).json({ error: "Failed to load shared content" });
+        refuse(res, 500, "Failed to load shared content");
     }
 });
 
@@ -199,7 +195,7 @@ router.get("/:token/cover-art/:coverArtId", shareCoverLimiter, async (req: Reque
         const stored = parseStoredCover(coverArtId);
         const localPath = stored && getLocalImagePath(coverArtId);
         if (!stored || !localPath || !(await shareHoldsCover(shareLink, stored.relativePath))) {
-            return res.status(404).json({ error: "Cover art not found" });
+            return refuse(res, 404, "Cover art not found");
         }
 
         // The same width limits and stored-copy rules as the library cover route: a copy older than its cover is made again.
@@ -209,11 +205,11 @@ router.get("/:token/cover-art/:coverArtId", shareCoverLimiter, async (req: Reque
             res,
             file,
             { headers: { "Content-Type": "image/jpeg", "Cache-Control": coverCacheControl(stored.version) } },
-            () => void res.status(404).json({ error: "Cover art not found" }),
+            () => void refuse(res, 404, "Cover art not found"),
         );
     } catch (error: any) {
         logger.error(`[Share] Cover art error: ${error.message}`);
-        res.status(500).json({ error: "Failed to serve cover art" });
+        refuse(res, 500, "Failed to serve cover art");
     }
 });
 
@@ -230,10 +226,10 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         // Whatever the link covers, only a playable song streams: a missing, corrupt or Discover song is not found.
         const found = await songOfShare(shareLink, trackId);
         if (found === "not-covered") {
-            return res.status(403).json({ error: "Track not in shared content" });
+            return refuse(res, 403, "Track not in shared content");
         }
         if (found === "not-playable") {
-            return res.status(404).json({ error: "Track file not found" });
+            return refuse(res, 404, "Track file not found");
         }
         const track = found;
 
@@ -242,13 +238,13 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         const fullPath = path.resolve(resolvedMusicPath, track.filePath);
 
         if (!fullPath.startsWith(resolvedMusicPath + path.sep)) {
-            return res.status(403).json({ error: "Access denied" });
+            return refuse(res, 403, "Access denied");
         }
 
         try {
             await fs.promises.access(fullPath, fs.constants.R_OK);
         } catch {
-            return res.status(404).json({ error: "Audio file not found" });
+            return refuse(res, 404, "Audio file not found");
         }
 
         const mimeType = getMimeType(track.filePath);
@@ -261,7 +257,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
     } catch (error: any) {
         logger.error(`[Share] Stream error: ${error.message}`);
         if (!res.headersSent) {
-            res.status(500).json({ error: "Failed to stream audio" });
+            refuse(res, 500, "Failed to stream audio");
         }
     }
 });
@@ -276,11 +272,11 @@ router.delete("/:token", async (req: Request, res: Response) => {
         });
 
         if (!shareLink) {
-            return res.status(404).json({ error: "Share link not found" });
+            return refuse(res, 404, "Share link not found");
         }
 
         if (shareLink.createdBy !== req.user!.id) {
-            return res.status(403).json({ error: "Not the link owner" });
+            return refuse(res, 403, "Not the link owner");
         }
 
         await prisma.shareLink.delete({ where: { id: shareLink.id } });
@@ -288,7 +284,7 @@ router.delete("/:token", async (req: Request, res: Response) => {
         res.json({ message: "Share link revoked" });
     } catch (error: any) {
         logger.error(`[Share] Failed to revoke share link: ${error.message}`);
-        res.status(500).json({ error: "Failed to revoke share link" });
+        refuse(res, 500, "Failed to revoke share link");
     }
 });
 
