@@ -75,21 +75,23 @@ const clientNotificationSchema = z.object({
     title: z.string().trim().min(1).max(120),
     message: z.string().trim().max(500).optional(),
     href: z.string().regex(/^\/[^/\\]/).max(200).optional(),
+    // What a repeat replaces. Without one, the title is the key.
+    groupKey: z.string().trim().min(1).max(120).optional(),
 });
 
 const CLIENT_ROWS_PER_USER = 50;
 
 /**
  * POST /notifications
- * Record an outcome the browser saw. One row per title, so a repeat replaces it,
- * and only the newest 50 titles are kept.
+ * Record an outcome the browser saw. One row per group key (the title when none is given), so a repeat replaces it,
+ * and only the newest 50 keys are kept.
  */
 router.post("/", async (req: Request, res: Response) => {
     const parsed = clientNotificationSchema.safeParse(req.body);
     if (!parsed.success) {
         return invalidRequest(req, res, parsed.error);
     }
-    const { type, title, message, href } = parsed.data;
+    const { type, title, message, href, groupKey } = parsed.data;
     try {
         const notification = await notificationService.create({
             userId: req.user!.id,
@@ -97,7 +99,8 @@ router.post("/", async (req: Request, res: Response) => {
             title,
             message,
             metadata: href ? { href } : undefined,
-            groupKey: `client:${title}`,
+            // Under the client prefix whatever the browser sends, so it can never reach a server alert's row.
+            groupKey: `client:${groupKey ?? title}`,
             renotify: true,
         });
         await notificationService.trimGroup(req.user!.id, "client:", CLIENT_ROWS_PER_USER);

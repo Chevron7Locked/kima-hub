@@ -2112,6 +2112,7 @@ class ApiClient {
         title: string;
         message?: string;
         href?: string;
+        groupKey?: string;
     }): Promise<{ id: string }> {
         return this.post("/notifications", body);
     }

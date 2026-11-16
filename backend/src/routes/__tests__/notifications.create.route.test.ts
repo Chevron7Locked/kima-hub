@@ -105,6 +105,16 @@ describe("POST /notifications", () => {
         expect(all[0].metadata).toEqual({ href: "/playlist/p2" });
     });
 
+    it("keeps one row per group key when the browser sends one, whatever the titles say", async () => {
+        const app = makeApp();
+        await request(app).post("/notifications").send({ type: "error", title: "Could not save 3 songs", groupKey: "save-songs" });
+        await request(app).post("/notifications").send({ type: "error", title: "Could not save 4 songs", groupKey: "save-songs" });
+
+        const all = await rows();
+        expect(all).toHaveLength(1);
+        expect(all[0]).toMatchObject({ title: "Could not save 4 songs", groupKey: "client:save-songs" });
+    });
+
     it("brings a dismissed failure back when it happens again", async () => {
         const app = makeApp();
         await request(app).post("/notifications").send({ type: "error", title: "Failed to move track" });
@@ -143,6 +153,8 @@ describe("POST /notifications", () => {
             { type: "error", title: "x", href: "https://evil.example" },
             { type: "error", title: "x", href: "//evil.example" },
             { type: "error", title: "x", href: "/\\evil.example" },
+            { type: "error", title: "x", groupKey: "" },
+            { type: "error", title: "x", groupKey: "k".repeat(121) },
         ];
         for (const body of bad) {
             const res = await request(app).post("/notifications").send(body);
