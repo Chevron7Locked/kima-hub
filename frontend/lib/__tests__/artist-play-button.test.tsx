@@ -17,7 +17,8 @@ const audio = {
 const playAll = vi.fn();
 
 vi.mock("@/lib/audio-state-context", () => ({
-    useAudioState: () => ({ currentTrack: audio.currentTrack, currentQueueSource: audio.queueSource }),
+    useCurrentMedia: () => ({ currentTrack: audio.currentTrack }),
+    useQueueState: () => ({ currentQueueSource: audio.queueSource }),
 }));
 vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: audio.isPlaying }) }));
 vi.mock("@/lib/audio-controls-context", () => ({

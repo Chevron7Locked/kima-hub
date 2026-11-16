@@ -24,7 +24,7 @@ vi.mock("@/lib/audio-playback-context", () => ({
 }));
 
 vi.mock("@/lib/audio-state-context", () => ({
-    useAudioState: () => useContext(AudioCtx),
+    useCurrentMedia: () => useContext(AudioCtx),
 }));
 
 type MockApi = { getTrackLyrics: ReturnType<typeof vi.fn> } & Record<

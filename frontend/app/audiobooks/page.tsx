@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { api } from "@/lib/api";
-import { useAudioState, useAudioControls } from "@/lib/audio-context";
+import { useCurrentMedia, useAudioControls } from "@/lib/audio-context";
 import { notify } from "@/lib/notify";
 import { useAudiobooksQuery, queryKeys } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
@@ -73,7 +73,7 @@ function BookSection({
 
 export default function AudiobooksPage() {
     const router = useRouter();
-    const { currentAudiobook } = useAudioState();
+    const { currentAudiobook } = useCurrentMedia();
     const { pause } = useAudioControls();
 
     const queryClient = useQueryClient();

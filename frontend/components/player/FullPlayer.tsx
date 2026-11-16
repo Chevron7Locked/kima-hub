@@ -2,6 +2,7 @@
 
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { usePlayerControls } from "@/hooks/usePlayerControls";
+import { useQueueState } from "@/lib/audio-state-context";
 import { PlayCountLine } from "@/features/stats/PlayCountLine";
 import Link from "next/link";
 import {
@@ -38,8 +39,6 @@ export function FullPlayer() {
         isShuffle,
         repeatMode,
         activeOperation,
-        queue,
-        currentIndex,
         isPlaying,
         isBuffering,
         audioError,
@@ -59,6 +58,7 @@ export function FullPlayer() {
         toggleShuffle,
         toggleRepeat,
     } = usePlayerControls();
+    const { queue, currentIndex } = useQueueState();
 
     const { handleLyricsToggle, isLyricsActive } = useLyricsToggle({ inline: false });
 

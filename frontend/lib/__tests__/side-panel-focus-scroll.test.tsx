@@ -11,7 +11,7 @@ vi.mock("@/hooks/useNotifications", () => ({
     useNotifications: () => ({ unreadCount: 0 }),
     useActiveDownloads: () => ({ downloads: [] }),
 }));
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ queue: [], currentIndex: 0 }) }));
+vi.mock("@/lib/audio-state-context", () => ({ useCurrentMedia: () => ({ currentTrack: null, currentAudiobook: null, currentPodcast: null }), useQueueState: () => ({ queue: [], currentIndex: 0 }) }));
 vi.mock("@/components/activity/ActivityBody", () => ({
     ActivityOptions: () => null,
     ActivityPane: () => null,

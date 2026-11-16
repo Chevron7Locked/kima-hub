@@ -6,7 +6,7 @@ import React, { act } from "react";
 import { shownTitle } from "@/lib/track-title";
 
 const state = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
-vi.mock("@/lib/audio-context", () => ({ useAudioState: () => state.value }));
+vi.mock("@/lib/audio-context", () => ({ useCurrentMedia: () => state.value }));
 vi.mock("@/lib/api", () => ({ api: { getCoverArtUrl: (id: string) => `/cover/${id}` } }));
 
 import { useMediaInfo } from "@/hooks/useMediaInfo";

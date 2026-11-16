@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia, useQueueState } from "@/lib/audio-state-context";
 import { QueueTab } from "@/features/vibe/tabs/QueueTab";
 import { ArtistAbout, NowPlayingHero } from "@/features/vibe/tabs/NowPlayingTab";
 import { LyricsView } from "@/components/lyrics/LyricsView";
@@ -58,7 +58,8 @@ export function UnifiedPanel({ isOpen, onToggle }: UnifiedPanelProps) {
     const [showSettings, setShowSettings] = useState(false);
     const { settingsContent } = useActivityPanelSettings();
     const { any: hasActivity, unread, downloads } = useActivityCounts();
-    const { queue, currentIndex, currentTrack, currentAudiobook, currentPodcast } = useAudioState();
+    const { queue, currentIndex } = useQueueState();
+    const { currentTrack, currentAudiobook, currentPodcast } = useCurrentMedia();
     const playing = !!(currentTrack || currentAudiobook || currentPodcast);
     // Something starting settles this opening on listening, so clearing the queue leaves the panel where it is.
     if (chosen === null && playing) setChosen("listening");

@@ -10,6 +10,7 @@ import {
     ReactNode,
     useMemo,
     useCallback,
+    type Context,
     type SetStateAction,
 } from "react";
 import { api } from "@/lib/api";
@@ -94,18 +95,21 @@ export type VibeOperation =
     | { type: 'blend'; addTrackIds: string[]; subtractTrackIds: string[]; resultTrackIds: string[] }
     | { type: 'similar'; sourceTrackId: string; trackIds: string[] };
 
-interface AudioStateContextType {
-    // Media state
+type PlaybackType = "track" | "audiobook" | "podcast" | null;
+type RepeatMode = "off" | "one" | "all";
+
+/** What is loaded in the player. */
+interface CurrentMedia {
     currentTrack: Track | null;
     currentAudiobook: Audiobook | null;
     currentPodcast: Podcast | null;
-    playbackType: "track" | "audiobook" | "podcast" | null;
+    playbackType: PlaybackType;
+}
 
-    // Queue state
+/** The queue, where the player is in it, and the order shuffle plays it in. */
+interface QueueState {
     queue: Track[];
     currentIndex: number;
-    isShuffle: boolean;
-    repeatMode: "off" | "one" | "all";
     shuffleIndices: number[];
     /** The key of the queue entry that is playing, or null when no queue entry is. */
     currentQueueKey: string | null;
@@ -115,26 +119,33 @@ interface AudioStateContextType {
      * replaced does not. Saved with the queue, so a reload keeps it.
      */
     currentQueueSource: string | null;
+}
 
-    // UI state
-    /** Whether the full-screen player is open over the page. */
-    overlayOpen: boolean;
+/** How the queue is walked: shuffle, repeat, and how far into a repeat-one the player is. */
+interface PlayMode {
+    isShuffle: boolean;
+    repeatMode: RepeatMode;
+    repeatOneCount: number;
+}
+
+interface VolumeState {
     volume: number;
     isMuted: boolean;
+}
 
-    // Vibe operation state
+/** Every piece of player state at once, for handlers that must act on the newest of it. */
+export interface AudioStateSnapshot
+    extends CurrentMedia, QueueState, PlayMode, VolumeState {
+    /** Whether the full-screen player is open over the page. */
+    overlayOpen: boolean;
     activeOperation: VibeOperation;
+}
 
-    // Internal state
-    repeatOneCount: number;
-
-    // State setters (for controls context)
+export interface AudioSetters {
     setCurrentTrack: (track: SetStateAction<Track | null>) => void;
     setCurrentAudiobook: (audiobook: SetStateAction<Audiobook | null>) => void;
     setCurrentPodcast: (podcast: SetStateAction<Podcast | null>) => void;
-    setPlaybackType: (
-        type: SetStateAction<"track" | "audiobook" | "podcast" | null>
-    ) => void;
+    setPlaybackType: (type: SetStateAction<PlaybackType>) => void;
     setQueue: (queue: SetStateAction<Track[]>) => void;
     /** Records which entries a page's play button put in the queue. Entries a play replaced it with are not among them. */
     setQueueOrigin: (origin: QueueOrigin | null) => void;
@@ -142,7 +153,7 @@ interface AudioStateContextType {
     extendQueueOrigin: (keys: string[]) => void;
     setCurrentIndex: (index: SetStateAction<number>) => void;
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
-    setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
+    setRepeatMode: (mode: SetStateAction<RepeatMode>) => void;
     setShuffleIndices: (indices: SetStateAction<number[]>) => void;
     setOverlayOpen: (open: SetStateAction<boolean>) => void;
     setVolume: (volume: SetStateAction<number>) => void;
@@ -151,9 +162,16 @@ interface AudioStateContextType {
     setActiveOperation: (op: SetStateAction<VibeOperation>) => void;
 }
 
-const AudioStateContext = createContext<AudioStateContextType | undefined>(
-    undefined
-);
+// One context per question a component can ask, so a change re-renders only the components that asked it. The
+// setters and the live state never change identity.
+const CurrentMediaContext = createContext<CurrentMedia | undefined>(undefined);
+const QueueContext = createContext<QueueState | undefined>(undefined);
+const PlayModeContext = createContext<PlayMode | undefined>(undefined);
+const VolumeContext = createContext<VolumeState | undefined>(undefined);
+const OverlayContext = createContext<boolean | undefined>(undefined);
+const OperationContext = createContext<VibeOperation | undefined>(undefined);
+const SettersContext = createContext<AudioSetters | undefined>(undefined);
+const LiveStateContext = createContext<{ readonly current: AudioStateSnapshot } | undefined>(undefined);
 
 function readStorage(key: string): string | null {
     if (typeof window === "undefined") return null;
@@ -756,7 +774,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         currentAudiobook,
         currentPodcast,
         playbackType,
-        queue,
         currentIndex,
         isShuffle,
         repeatMode,
@@ -1182,24 +1199,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         [queueOrigin, currentQueueKey],
     );
 
-    const value = useMemo(
+    const setters = useMemo<AudioSetters>(
         () => ({
-            currentTrack,
-            currentAudiobook,
-            currentPodcast,
-            playbackType,
-            queue,
-            currentIndex,
-            isShuffle,
-            repeatMode,
-            shuffleIndices,
-            currentQueueKey,
-            currentQueueSource,
-            overlayOpen,
-            volume,
-            isMuted,
-            activeOperation,
-            repeatOneCount,
             setCurrentTrack,
             setCurrentAudiobook,
             setCurrentPodcast,
@@ -1217,40 +1218,111 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setRepeatOneCount,
             setActiveOperation,
         }),
-        [
-            currentTrack,
-            currentAudiobook,
-            currentPodcast,
-            playbackType,
-            queue,
-            currentIndex,
-            isShuffle,
-            repeatMode,
-            shuffleIndices,
-            currentQueueKey,
-            currentQueueSource,
-            overlayOpen,
-            volume,
-            isMuted,
-            activeOperation,
-            repeatOneCount,
-            setQueue,
-            setQueueOrigin,
-            extendQueueOrigin,
-        ]
+        // The setters are stable: useState setters and callbacks with no dependencies.
+        [setQueue, extendQueueOrigin],
     );
 
+    const media = useMemo(
+        () => ({ currentTrack, currentAudiobook, currentPodcast, playbackType }),
+        [currentTrack, currentAudiobook, currentPodcast, playbackType],
+    );
+    const queueState = useMemo(
+        () => ({ queue, currentIndex, shuffleIndices, currentQueueKey, currentQueueSource }),
+        [queue, currentIndex, shuffleIndices, currentQueueKey, currentQueueSource],
+    );
+    const playMode = useMemo(
+        () => ({ isShuffle, repeatMode, repeatOneCount }),
+        [isShuffle, repeatMode, repeatOneCount],
+    );
+    const volumeState = useMemo(() => ({ volume, isMuted }), [volume, isMuted]);
+
+    // Handlers that outlive a render read the newest state here instead of closing over one render's.
+    const live = useRef<AudioStateSnapshot>({
+        ...media,
+        ...queueState,
+        ...playMode,
+        ...volumeState,
+        overlayOpen,
+        activeOperation,
+    });
+    useLayoutEffect(() => {
+        live.current = {
+            ...media,
+            ...queueState,
+            ...playMode,
+            ...volumeState,
+            overlayOpen,
+            activeOperation,
+        };
+    });
+
     return (
-        <AudioStateContext.Provider value={value}>
-            {children}
-        </AudioStateContext.Provider>
+        <SettersContext.Provider value={setters}>
+            <LiveStateContext.Provider value={live}>
+                <CurrentMediaContext.Provider value={media}>
+                    <QueueContext.Provider value={queueState}>
+                        <PlayModeContext.Provider value={playMode}>
+                            <VolumeContext.Provider value={volumeState}>
+                                <OverlayContext.Provider value={overlayOpen}>
+                                    <OperationContext.Provider value={activeOperation}>
+                                        {children}
+                                    </OperationContext.Provider>
+                                </OverlayContext.Provider>
+                            </VolumeContext.Provider>
+                        </PlayModeContext.Provider>
+                    </QueueContext.Provider>
+                </CurrentMediaContext.Provider>
+            </LiveStateContext.Provider>
+        </SettersContext.Provider>
     );
 }
 
-export function useAudioState() {
-    const context = useContext(AudioStateContext);
-    if (!context) {
-        throw new Error("useAudioState must be used within AudioStateProvider");
+function useRequired<T>(context: Context<T | undefined>, hook: string): T {
+    const value = useContext(context);
+    if (value === undefined) {
+        throw new Error(`${hook} must be used within AudioStateProvider`);
     }
-    return context;
+    return value;
+}
+
+/** The song, audiobook or episode that is loaded, and which kind it is. */
+export function useCurrentMedia(): CurrentMedia {
+    return useRequired(CurrentMediaContext, "useCurrentMedia");
+}
+
+/** The queue and the position in it. */
+export function useQueueState(): QueueState {
+    return useRequired(QueueContext, "useQueueState");
+}
+
+/** Shuffle and repeat. */
+export function usePlayMode(): PlayMode {
+    return useRequired(PlayModeContext, "usePlayMode");
+}
+
+export function useVolumeState(): VolumeState {
+    return useRequired(VolumeContext, "useVolumeState");
+}
+
+/** Whether the full-screen player is open over the page. */
+export function useOverlayOpen(): boolean {
+    return useRequired(OverlayContext, "useOverlayOpen");
+}
+
+/** The vibe, drift, blend or similar queue in play, or idle. */
+export function useActiveOperation(): VibeOperation {
+    return useRequired(OperationContext, "useActiveOperation");
+}
+
+/** The state setters. They never change identity, so reading them never causes a re-render. */
+export function useAudioSetters(): AudioSetters {
+    return useRequired(SettersContext, "useAudioSetters");
+}
+
+/**
+ * The newest state of everything, for event handlers and callbacks. Reading it never causes a re-render, so it is
+ * only for use inside a handler, never while rendering.
+ */
+export function useLiveAudioState(): { readonly current: AudioStateSnapshot } {
+    return useRequired(LiveStateContext, "useLiveAudioState");
 }

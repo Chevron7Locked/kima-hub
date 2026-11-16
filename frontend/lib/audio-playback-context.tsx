@@ -10,7 +10,7 @@ import {
     ReactNode,
     useMemo,
 } from "react";
-import { useAudioState } from "./audio-state-context";
+import { useCurrentMedia, usePlayMode, useQueueState } from "./audio-state-context";
 import { useAudioController } from "./audio-controller-context";
 import type { EngineSnapshot } from "./audio-engine-policy";
 import { usePlayReporting } from "@/hooks/usePlayReporting";
@@ -49,28 +49,30 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         setCurrentTime(time);
     }, []);
 
-    const state = useAudioState();
+    const media = useCurrentMedia();
+    const queueState = useQueueState();
+    const playMode = usePlayMode();
 
     // Ref for trackOffset so the timeupdate handler always uses the latest value
     const trackOffsetRef = useRef(0);
     useEffect(() => {
-        trackOffsetRef.current = state.playbackType === "audiobook"
-            ? (state.currentAudiobook?.trackOffset ?? 0) : 0;
-    }, [state.playbackType, state.currentAudiobook?.trackOffset]);
+        trackOffsetRef.current = media.playbackType === "audiobook"
+            ? (media.currentAudiobook?.trackOffset ?? 0) : 0;
+    }, [media.playbackType, media.currentAudiobook?.trackOffset]);
 
     // Sync currentTime from audiobook/podcast progress when not playing
     const progressKey = !isPlaying
-        ? `${state.playbackType}-${state.currentAudiobook?.progress?.currentTime}-${state.currentPodcast?.progress?.currentTime}`
+        ? `${media.playbackType}-${media.currentAudiobook?.progress?.currentTime}-${media.currentPodcast?.progress?.currentTime}`
         : null;
     const [prevProgressKey, setPrevProgressKey] = useState<string | null>(progressKey);
 
     if (progressKey !== prevProgressKey) {
         setPrevProgressKey(progressKey);
         if (progressKey !== null) {
-            if (state.playbackType === "audiobook" && state.currentAudiobook?.progress?.currentTime) {
-                setCurrentTime(state.currentAudiobook.progress.currentTime);
-            } else if (state.playbackType === "podcast" && state.currentPodcast?.progress?.currentTime) {
-                setCurrentTime(state.currentPodcast.progress.currentTime);
+            if (media.playbackType === "audiobook" && media.currentAudiobook?.progress?.currentTime) {
+                setCurrentTime(media.currentAudiobook.progress.currentTime);
+            } else if (media.playbackType === "podcast" && media.currentPodcast?.progress?.currentTime) {
+                setCurrentTime(media.currentPodcast.progress.currentTime);
             }
         }
     }
@@ -81,16 +83,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     // this stops firing, play history silently stops growing.
     usePlayReporting(
         controller as Parameters<typeof usePlayReporting>[0],
-        state.currentTrack?.id ?? null,
-        state.currentTrack?.duration ?? duration,
+        media.currentTrack?.id ?? null,
+        media.currentTrack?.duration ?? duration,
     );
 
-    const liveTrack = state.playbackType === "track" ? state.currentTrack : null;
+    const liveTrack = media.playbackType === "track" ? media.currentTrack : null;
     const liveQueue = useMemo(
         () => liveTrack
-            ? upNext(state.queue, state.currentIndex, state.isShuffle, state.shuffleIndices, state.repeatMode)
+            ? upNext(queueState.queue, queueState.currentIndex, playMode.isShuffle, queueState.shuffleIndices, playMode.repeatMode)
             : [],
-        [liveTrack, state.queue, state.currentIndex, state.isShuffle, state.shuffleIndices, state.repeatMode],
+        [liveTrack, queueState.queue, queueState.currentIndex, playMode.isShuffle, queueState.shuffleIndices, playMode.repeatMode],
     );
     const { liveReporting } = useFeatures();
     useLiveReporting(

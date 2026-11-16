@@ -16,7 +16,8 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ isAuthenticated: true, user: { id: "u-1" } }) }));
 vi.mock("@/lib/audio-context", () => ({
-    useAudioState: () => ({ currentTrack: null }),
+    useCurrentMedia: () => ({ currentTrack: null }),
+    useQueueState: () => ({ currentQueueKey: null }),
     useAudioPlayback: () => ({ isPlaying: false }),
     useAudioControls: () => ({ playTracks: vi.fn(), addToQueue: vi.fn(), pause: vi.fn(), resumeWithGesture: vi.fn() }),
 }));

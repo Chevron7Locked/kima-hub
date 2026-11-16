@@ -20,7 +20,7 @@ import { cn } from "@/lib/cn";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { PageMessage } from "@/components/ui/PageMessage";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useVolumeState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Button } from "@/components/ui/Button";
@@ -60,7 +60,7 @@ export default function DeezerPlaylistDetailPage() {
     const [playlist, setPlaylist] = useState<DeezerPlaylistFull | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const { isMuted } = useAudioState();
+    const { isMuted } = useVolumeState();
     const { toggleMute } = useAudioControls();
     const preview = usePreview();
     const playingTrackId = preview.previewId;

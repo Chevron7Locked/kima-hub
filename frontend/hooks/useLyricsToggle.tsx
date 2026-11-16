@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useActivityPanelSettings } from "@/lib/activity-panel-settings-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { leaveActivityPanelSettings, openActivityPanel } from "@/hooks/useActivityPanel";
 import { LyricsPanel } from "@/components/lyrics/LyricsPanel";
 
@@ -13,7 +13,7 @@ interface UseLyricsToggleOptions {
 
 export function useLyricsToggle({ inline }: UseLyricsToggleOptions) {
     const { setSettingsContent, settingsOwner } = useActivityPanelSettings();
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
 
     const [inlineActive, setInlineActive] = useState(false);
 

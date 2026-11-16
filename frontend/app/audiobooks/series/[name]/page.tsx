@@ -6,7 +6,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatDuration, plural } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
-import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { useCurrentMedia, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { notify } from "@/lib/notify";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -24,7 +24,7 @@ import { coverArtUrl } from "@/lib/cover-art";
 export default function SeriesDetailPage() {
     const params = useParams();
     const { isAuthenticated } = useAuth();
-    const { currentAudiobook, playbackType } = useAudioState();
+    const { currentAudiobook, playbackType } = useCurrentMedia();
     const { isPlaying } = useAudioPlayback();
     const { playAudiobook, pause, resumeWithGesture } = useAudioControls();
 

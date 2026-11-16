@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useMemo, useState } from "react";
-import { useAudioState } from "@/lib/audio-context";
+import { useCurrentMedia } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
@@ -32,7 +32,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const { id } = use(params);
     const { canAcquire } = usePublicConfig();
     // Split hooks avoid re-renders from currentTime updates.
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
 
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [pendingTrackIds, setPendingTrackIds] = useState<string[]>([]);

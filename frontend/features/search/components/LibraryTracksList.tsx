@@ -2,7 +2,7 @@
 
 import { Play, Pause, Music } from "lucide-react";
 import Link from "next/link";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { usePlayRow } from "@/hooks/usePlayRow";
 import { api } from "@/lib/api";
@@ -19,7 +19,7 @@ interface LibraryTracksListProps {
 }
 
 export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const { isPlaying, playRow } = usePlayRow();
     const { playTracks } = useAudioControls();
 

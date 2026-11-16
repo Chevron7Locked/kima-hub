@@ -10,7 +10,7 @@ vi.mock("@/hooks/useNotifications", () => ({
     useNotifications: () => ({ unreadCount: 2 }),
     useActiveDownloads: () => ({ downloads: [{ id: "d1" }] }),
 }));
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ queue: [], currentIndex: 0 }) }));
+vi.mock("@/lib/audio-state-context", () => ({ useCurrentMedia: () => ({ currentTrack: null, currentAudiobook: null, currentPodcast: null }), useQueueState: () => ({ queue: [], currentIndex: 0 }) }));
 const { list } = vi.hoisted(() => ({
     list: (name: string) => () => <div data-testid="activity-content">{name}</div>,
 }));

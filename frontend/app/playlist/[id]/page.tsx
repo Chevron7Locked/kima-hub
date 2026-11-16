@@ -5,7 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
-import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { useCurrentMedia, useQueueState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { playablePlaylist, playingItemId, playlistTrackToAudio, type PlaylistEntry } from "@/lib/playlist-track";
 import { queueSource, useQueueFrom } from "@/lib/queue-source";
 import { cn } from "@/lib/cn";
@@ -146,7 +146,8 @@ export default function PlaylistDetailPage() {
     const params = useParams();
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { currentTrack, currentQueueKey } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
+    const { currentQueueKey } = useQueueState();
     const { format: trackFormat } = useTrackFormat();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue } = useAudioControls();

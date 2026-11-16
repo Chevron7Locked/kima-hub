@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia, useQueueState } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Music, Pause, Play } from "lucide-react";
@@ -15,7 +15,8 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { shownTitle } from "@/lib/track-title";
 
 export function NowPlayingTab() {
-    const { currentTrack, queue, currentIndex } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
+    const { queue, currentIndex } = useQueueState();
     const { isPlaying } = useAudioPlayback();
     const artistId = currentTrack?.artist?.id;
 
@@ -179,7 +180,7 @@ export function NowPlayingHero({ compact = false }: { compact?: boolean }) {
 
 /** What the panel knows about the playing song's artist. */
 export function ArtistAbout() {
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const artistId = currentTrack?.artist?.id;
     const bio = useArtistBio(artistId);
     if (!currentTrack) return <p className="px-3 py-4 text-xs text-[var(--text-muted)]">play something to see its artist here</p>;

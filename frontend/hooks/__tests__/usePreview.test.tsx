@@ -14,7 +14,7 @@ const controller = {
     subscribe: vi.fn(() => () => undefined),
 };
 vi.mock("@/lib/audio-controller-context", () => ({ useAudioController: () => controller }));
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ volume: 0.5, isMuted: false }) }));
+vi.mock("@/lib/audio-state-context", () => ({ useVolumeState: () => ({ volume: 0.5, isMuted: false }) }));
 const info = vi.fn();
 vi.mock("@/lib/notify", () => ({ notify: { info: (...a: unknown[]) => info(...a), error: vi.fn() } }));
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useAudioState } from "@/lib/audio-state-context";
+import { useActiveOperation, useAudioSetters, useCurrentMedia, useQueueState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useRef, useState } from "react";
@@ -44,7 +44,10 @@ function QueueCover({ coverArt }: { coverArt?: string | null }) {
 
 /** The queue. `withNowPlaying` false leaves out the playing row, for a panel that shows it above. */
 export function QueueTab({ withNowPlaying = true }: { withNowPlaying?: boolean }) {
-    const { currentTrack, queue, currentIndex, activeOperation, setQueue } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
+    const { queue, currentIndex } = useQueueState();
+    const activeOperation = useActiveOperation();
+    const { setQueue } = useAudioSetters();
     const { playQueueIndex, pause, resumeWithGesture, removeFromQueue, clearQueue } = useAudioControls();
     const { isPlaying } = useAudioPlayback();
     const [confirmClear, setConfirmClear] = useState(false);

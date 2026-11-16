@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef } from "react";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioController } from "@/lib/audio-controller-context";
@@ -41,7 +41,7 @@ export function useMediaSession() {
         currentAudiobook,
         currentPodcast,
         playbackType,
-    } = useAudioState();
+    } = useCurrentMedia();
     const { currentTime } = useAudioPlayback();
     const { next, previous, seek, pause } = useAudioControls();
 

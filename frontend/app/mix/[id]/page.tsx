@@ -5,7 +5,7 @@ import { TrackRow } from "@/components/ui/TrackRow";
 import { MediaActionButton, PlayDisc } from "@/components/ui/MediaActionBar";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { useCurrentMedia, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Music, Shuffle, Save, ListPlus } from "lucide-react";
 import { plural } from "@/lib/format";
@@ -42,7 +42,7 @@ export default function MixPage() {
     const router = useRouter();
     const mixId = params.id as string;
     // Use split hooks to avoid re-renders from currentTime updates
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const { isPlaying } = useAudioPlayback();
     const { playTracks, addToQueue } = useAudioControls();
     const { playRow } = usePlayRow();

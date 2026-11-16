@@ -9,7 +9,7 @@ import { AudioLines, ListPlus, Pause, Plus, Trash2, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime } from "@/lib/format";
 import { api } from "@/lib/api";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { usePlayRow } from "@/hooks/usePlayRow";
 import { useLatest } from "@/hooks/useLatest";
 import { useDoubleTap } from "@/hooks/useDoubleTap";
@@ -196,7 +196,7 @@ export function TracksList({
     onDelete,
     isLoading = false,
 }: TracksListProps) {
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const currentTrackId = currentTrack?.id;
     const { isPlaying, playRow } = usePlayRow();
 

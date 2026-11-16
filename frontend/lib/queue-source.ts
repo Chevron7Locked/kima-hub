@@ -1,4 +1,4 @@
-import { useAudioState } from "@/lib/audio-context";
+import { useQueueState } from "@/lib/audio-context";
 
 /**
  * Where a queue came from: the album, artist, mix, playlist or Discover playlist whose play button started it. The
@@ -15,5 +15,5 @@ export const queueSource = {
 
 /** Whether the loaded queue, with a song of it playing or paused, came from this source. */
 export function useQueueFrom(source: string): boolean {
-    return useAudioState().currentQueueSource === source;
+    return useQueueState().currentQueueSource === source;
 }

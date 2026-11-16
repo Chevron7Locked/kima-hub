@@ -17,7 +17,7 @@ const audio = {
     },
     playback: { currentTime: 0, duration: 0 },
 };
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => audio.state }));
+vi.mock("@/lib/audio-state-context", () => ({ useCurrentMedia: () => audio.state }));
 vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => audio.playback }));
 
 import { usePlaybackProgress } from "../usePlaybackProgress";

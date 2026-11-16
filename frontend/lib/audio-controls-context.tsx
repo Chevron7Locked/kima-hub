@@ -12,7 +12,12 @@ import {
     useMemo,
 } from "react";
 import {
-    useAudioState,
+    useAudioSetters,
+    useCurrentMedia,
+    useLiveAudioState,
+    usePlayMode,
+    useQueueState,
+    useVolumeState,
     Track,
     Audiobook,
     Podcast,
@@ -161,8 +166,14 @@ function operationName(type: string | undefined): string {
 }
 
 export function AudioControlsProvider({ children }: { children: ReactNode }) {
-    const state = useAudioState();
+    const media = useCurrentMedia();
+    const queueState = useQueueState();
+    const playMode = usePlayMode();
+    const volumeState = useVolumeState();
+    const setters = useAudioSetters();
+    const liveRef = useLiveAudioState();
     const playback = useAudioPlayback();
+    const { setDuration } = playback;
 
     const controller = useAudioController();
     const controllerRef = useRef(controller);
@@ -172,7 +183,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         currentTimeRef.current = playback.currentTime;
     }, [playback.currentTime]);
-    const currentIndexRef = useRef(state.currentIndex);
+    const currentIndexRef = useRef(queueState.currentIndex);
     const upNextInsertRef = useRef<number>(0);
     const shuffleInsertPosRef = useRef<number>(0);
     const lastCursorTrackIndexRef = useRef<number | null>(null);
@@ -182,18 +193,24 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const skipAccumulatorRef = useRef<number>(0);
     const skipBaseTimeRef = useRef<number>(0);
     const skipDebounceRef = useRef<NodeJS.Timeout | null>(null);
+    // A skip still waiting to seek must not fire after the player is gone.
+    useEffect(() => () => {
+        if (skipDebounceRef.current) clearTimeout(skipDebounceRef.current);
+    }, []);
     // Stable ref for setCurrentTime to avoid adding unstable `playback` to skip deps
     const setCurrentTimeRef = useRef(playback.setCurrentTime);
+    // The engine's duration, for seek to read without being rebuilt every time it changes.
+    const durationRef = useRef(playback.duration);
 
     // Refs for ended/canplay/error handlers
-    const playbackTypeRef = useRef(state.playbackType);
-    const currentTrackRef = useRef(state.currentTrack);
-    const currentAudiobookRef = useRef(state.currentAudiobook);
-    const currentPodcastRef = useRef(state.currentPodcast);
-    const repeatModeRef = useRef(state.repeatMode);
-    const queueRef = useRef(state.queue);
-    const isShuffleRef = useRef(state.isShuffle);
-    const shuffleIndicesRef = useRef(state.shuffleIndices);
+    const playbackTypeRef = useRef(media.playbackType);
+    const currentTrackRef = useRef(media.currentTrack);
+    const currentAudiobookRef = useRef(media.currentAudiobook);
+    const currentPodcastRef = useRef(media.currentPodcast);
+    const repeatModeRef = useRef(playMode.repeatMode);
+    const queueRef = useRef(queueState.queue);
+    const isShuffleRef = useRef(playMode.isShuffle);
+    const shuffleIndicesRef = useRef(queueState.shuffleIndices);
     const consecutiveErrorCountRef = useRef(0);
     // The item last saved as finished. While its file still sits at its end, a later save (a pause the engine
     // reports after the end, closing the page) would only record it as not finished again, so none is sent.
@@ -222,20 +239,20 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // Clear the session when the active book changes or playback leaves audiobook mode.
     const prevBookIdRef = useRef<string | null>(null);
     useEffect(() => {
-        const currentId = state.playbackType === "audiobook" ? state.currentAudiobook?.id ?? null : null;
+        const currentId = media.playbackType === "audiobook" ? media.currentAudiobook?.id ?? null : null;
         if (currentId !== prevBookIdRef.current) {
             if (currentId === null) {
                 bookSessionRef.current = null;
             }
             prevBookIdRef.current = currentId;
         }
-    }, [state.playbackType, state.currentAudiobook?.id]);
+    }, [media.playbackType, media.currentAudiobook?.id]);
 
     // Keep a stable "Up Next" insertion cursor like Spotify:
     // - When the current track changes, reset to "right after current"
     // - Each addToQueue inserts at the cursor and advances it
     useEffect(() => {
-        if (state.playbackType !== "track") {
+        if (media.playbackType !== "track") {
             upNextInsertRef.current = 0;
             shuffleInsertPosRef.current = 0;
             lastCursorTrackIndexRef.current = null;
@@ -244,19 +261,19 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
         const prevIdx = lastCursorTrackIndexRef.current;
         const prevShuffle = lastCursorIsShuffleRef.current;
-        const trackChanged = prevIdx !== state.currentIndex;
-        const shuffleToggled = prevShuffle !== state.isShuffle;
+        const trackChanged = prevIdx !== queueState.currentIndex;
+        const shuffleToggled = prevShuffle !== playMode.isShuffle;
 
         // Up-next cursor should never move backwards unless track changes / shuffle toggles
-        const baseUpNext = state.currentIndex + 1;
+        const baseUpNext = queueState.currentIndex + 1;
         upNextInsertRef.current =
             trackChanged || shuffleToggled
                 ? baseUpNext
                 : Math.max(upNextInsertRef.current, baseUpNext);
 
-        if (state.isShuffle) {
-            const currentShufflePos = state.shuffleIndices.indexOf(
-                state.currentIndex
+        if (playMode.isShuffle) {
+            const currentShufflePos = queueState.shuffleIndices.indexOf(
+                queueState.currentIndex
             );
             const baseShufflePos =
                 currentShufflePos >= 0 ? currentShufflePos + 1 : 0;
@@ -269,14 +286,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             shuffleInsertPosRef.current = 0;
         }
 
-        lastCursorTrackIndexRef.current = state.currentIndex;
-        lastCursorIsShuffleRef.current = state.isShuffle;
+        lastCursorTrackIndexRef.current = queueState.currentIndex;
+        lastCursorIsShuffleRef.current = playMode.isShuffle;
     }, [
-        state.currentIndex,
-        state.playbackType,
-        state.isShuffle,
-        state.shuffleIndices,
-        state.queue.length,
+        queueState.currentIndex,
+        media.playbackType,
+        playMode.isShuffle,
+        queueState.shuffleIndices,
+        queueState.queue.length,
     ]);
 
     const generateShuffleIndices = useCallback(
@@ -293,27 +310,27 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         (song: Track) => {
             const [track] = withQueueKeys([song]);
             stationRef.current = null;
-            if (state.activeOperation.type !== 'idle') {
-                const opTrackIds = operationTrackIds(state.activeOperation);
+            if (liveRef.current.activeOperation.type !== 'idle') {
+                const opTrackIds = operationTrackIds(liveRef.current.activeOperation);
                 if (!opTrackIds.includes(track.id)) {
-                    state.setActiveOperation({ type: 'idle' });
+                    setters.setActiveOperation({ type: 'idle' });
                 }
             }
 
-            state.setPlaybackType("track");
-            state.setCurrentTrack(track);
-            state.setCurrentAudiobook(null);
-            state.setCurrentPodcast(null);
-            state.setQueue([track]);
-            state.setCurrentIndex(0);
+            setters.setPlaybackType("track");
+            setters.setCurrentTrack(track);
+            setters.setCurrentAudiobook(null);
+            setters.setCurrentPodcast(null);
+            setters.setQueue([track]);
+            setters.setCurrentIndex(0);
             setCurrentTimeRef.current(0);
-            state.setShuffleIndices([0]);
-            state.setRepeatOneCount(0);
+            setters.setShuffleIndices([0]);
+            setters.setRepeatOneCount(0);
 
             const streamUrl = api.getStreamUrl(track.id);
             controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: track.duration });
         },
-        [state]
+        [setters, liveRef]
     );
 
     const playTracks = useCallback(
@@ -322,32 +339,32 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // A place the list does not have (a stale index, a list that shrank) starts it from the top.
             const startIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < songs.length ? requestedIndex : 0;
             const tracks = withQueueKeys(songs);
-            state.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey)) } : null);
+            setters.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey)) } : null);
             stationRef.current = null;
 
-            if (!skipOperationCheck && state.activeOperation.type !== 'idle') {
-                const opTrackIds = operationTrackIds(state.activeOperation);
+            if (!skipOperationCheck && liveRef.current.activeOperation.type !== 'idle') {
+                const opTrackIds = operationTrackIds(liveRef.current.activeOperation);
                 if (!opTrackIds.includes(tracks[startIndex]?.id)) {
-                    state.setActiveOperation({ type: 'idle' });
+                    setters.setActiveOperation({ type: 'idle' });
                 }
             }
 
-            state.setPlaybackType("track");
-            state.setCurrentAudiobook(null);
-            state.setCurrentPodcast(null);
-            state.setQueue(tracks);
-            state.setCurrentIndex(startIndex);
-            state.setCurrentTrack(tracks[startIndex]);
+            setters.setPlaybackType("track");
+            setters.setCurrentAudiobook(null);
+            setters.setCurrentPodcast(null);
+            setters.setQueue(tracks);
+            setters.setCurrentIndex(startIndex);
+            setters.setCurrentTrack(tracks[startIndex]);
             setCurrentTimeRef.current(0);
-            state.setRepeatOneCount(0);
-            state.setShuffleIndices(
+            setters.setRepeatOneCount(0);
+            setters.setShuffleIndices(
                 generateShuffleIndices(tracks.length, startIndex)
             );
 
             const streamUrl = api.getStreamUrl(tracks[startIndex].id);
             controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: tracks[startIndex].duration });
         },
-        [state, generateShuffleIndices]
+        [setters, liveRef, generateShuffleIndices]
     );
 
     const playStation = useCallback(
@@ -373,13 +390,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             bookSessionRef.current = session;
             const { file, fileTime } = session.locate(bookTime);
 
-            state.setPlaybackType("audiobook");
-            state.setCurrentTrack(null);
-            state.setCurrentPodcast(null);
-            state.setQueue([]);
-            state.setCurrentIndex(0);
-            state.setShuffleIndices([]);
-            state.setCurrentAudiobook({
+            setters.setPlaybackType("audiobook");
+            setters.setCurrentTrack(null);
+            setters.setCurrentPodcast(null);
+            setters.setQueue([]);
+            setters.setCurrentIndex(0);
+            setters.setShuffleIndices([]);
+            setters.setCurrentAudiobook({
                 ...audiobook,
                 tracks: [...session.files],
                 trackIndex: file.index,
@@ -392,7 +409,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 { autoplay: true, seekTo: fileTime }
             );
         },
-        [state]
+        [setters]
     );
 
     const playAudiobookAt = useCallback(
@@ -410,13 +427,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const playPodcast = useCallback(
         (podcast: Podcast) => {
-            state.setPlaybackType("podcast");
-            state.setCurrentPodcast(podcast);
-            state.setCurrentTrack(null);
-            state.setCurrentAudiobook(null);
-            state.setQueue([]);
-            state.setCurrentIndex(0);
-            state.setShuffleIndices([]);
+            setters.setPlaybackType("podcast");
+            setters.setCurrentPodcast(podcast);
+            setters.setCurrentTrack(null);
+            setters.setCurrentAudiobook(null);
+            setters.setQueue([]);
+            setters.setCurrentIndex(0);
+            setters.setShuffleIndices([]);
 
             const startTime = podcast.progress?.currentTime || 0;
             setCurrentTimeRef.current(startTime);
@@ -425,7 +442,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const streamUrl = api.getPodcastEpisodeStreamUrl(podcastId, episodeId);
             controllerRef.current?.load(streamUrl, { autoplay: true, seekTo: startTime });
         },
-        [state]
+        [setters]
     );
 
     const pause = useCallback(() => {
@@ -469,12 +486,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const ctrl = controllerRef.current;
         if (!ctrl || ctrl.getState().currentSrc) return false;
 
-        if (state.playbackType === "track" && state.currentTrack) {
-            ctrl.load(api.getStreamUrl(state.currentTrack.id), { expectedDurationS: state.currentTrack.duration });
+        if (liveRef.current.playbackType === "track" && liveRef.current.currentTrack) {
+            ctrl.load(api.getStreamUrl(liveRef.current.currentTrack.id), { expectedDurationS: liveRef.current.currentTrack.duration });
             return true;
         }
-        if (state.playbackType === "audiobook" && state.currentAudiobook) {
-            const persisted = state.currentAudiobook;
+        if (liveRef.current.playbackType === "audiobook" && liveRef.current.currentAudiobook) {
+            const persisted = liveRef.current.currentAudiobook;
             let session: BookSession;
             try {
                 session = await BookSession.open(persisted);
@@ -488,7 +505,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // Persisted trackIndex/trackOffset may be stale relative to the
             // saved position (progress synced from elsewhere); re-anchor state
             // to the located file so saves and ended-advance use real offsets.
-            state.setCurrentAudiobook((prev) =>
+            setters.setCurrentAudiobook((prev) =>
                 prev ? {
                     ...prev,
                     tracks: [...session.files],
@@ -496,17 +513,17 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     trackOffset: file.startOffset,
                 } : prev
             );
-            playback.setCurrentTime(resumeAt);
+            setCurrentTimeRef.current(resumeAt);
             ctrl.load(
                 api.getAudiobookStreamUrl(session.bookId, file.index),
                 { seekTo: fileTime }
             );
             return true;
         }
-        if (state.playbackType === "podcast" && state.currentPodcast) {
-            const startTime = state.currentPodcast.progress?.currentTime || 0;
-            playback.setCurrentTime(startTime);
-            const [podcastId, episodeId] = state.currentPodcast.id.split(":");
+        if (liveRef.current.playbackType === "podcast" && liveRef.current.currentPodcast) {
+            const startTime = liveRef.current.currentPodcast.progress?.currentTime || 0;
+            setCurrentTimeRef.current(startTime);
+            const [podcastId, episodeId] = liveRef.current.currentPodcast.id.split(":");
             ctrl.load(
                 api.getPodcastEpisodeStreamUrl(podcastId, episodeId),
                 { seekTo: startTime }
@@ -514,7 +531,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             return true;
         }
         return false;
-    }, [state, playback]);
+    }, [setters, liveRef]);
 
     // Play after a station's queue ended: try its refill again (one try per press), and play the new
     // tracks if it brings any, otherwise replay as before.
@@ -531,13 +548,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const seek = useCallback(
         (time: number) => {
             const mediaDuration =
-                state.playbackType === "podcast"
-                    ? state.currentPodcast?.duration || 0
-                    : state.playbackType === "audiobook"
-                    ? state.currentAudiobook?.duration || 0
-                    : state.currentTrack?.duration || 0;
-            const isMultiTrack = state.playbackType === "audiobook" && (state.currentAudiobook?.tracks?.length ?? 0) > 1;
-            const maxDuration = playbackLength({ multiFile: isMultiTrack, stored: mediaDuration, engine: playback.duration });
+                liveRef.current.playbackType === "podcast"
+                    ? liveRef.current.currentPodcast?.duration || 0
+                    : liveRef.current.playbackType === "audiobook"
+                    ? liveRef.current.currentAudiobook?.duration || 0
+                    : liveRef.current.currentTrack?.duration || 0;
+            const isMultiTrack = liveRef.current.playbackType === "audiobook" && (liveRef.current.currentAudiobook?.tracks?.length ?? 0) > 1;
+            const maxDuration = playbackLength({ multiFile: isMultiTrack, stored: mediaDuration, engine: durationRef.current });
             const clampedTime =
                 maxDuration > 0
                     ? Math.min(Math.max(time, 0), maxDuration)
@@ -545,13 +562,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             setCurrentTimeRef.current(clampedTime);
 
-            if (state.playbackType === "audiobook" && state.currentAudiobook) {
+            if (liveRef.current.playbackType === "audiobook" && liveRef.current.currentAudiobook) {
                 const session = bookSessionRef.current;
                 if (session) {
                     const { file, fileTime } = session.locate(clampedTime);
-                    const currentTrackIdx = state.currentAudiobook.trackIndex ?? 0;
+                    const currentTrackIdx = liveRef.current.currentAudiobook.trackIndex ?? 0;
 
-                    state.setCurrentAudiobook((prev) => prev ? {
+                    setters.setCurrentAudiobook((prev) => prev ? {
                         ...prev,
                         trackIndex: file.index,
                         trackOffset: file.startOffset,
@@ -561,7 +578,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     if (file.index !== currentTrackIdx) {
                         const wasPlaying = controllerRef.current?.isPlaying() ?? false;
                         controllerRef.current?.load(
-                            api.getAudiobookStreamUrl(state.currentAudiobook.id, file.index),
+                            api.getAudiobookStreamUrl(liveRef.current.currentAudiobook.id, file.index),
                             { autoplay: wasPlaying, seekTo: fileTime }
                         );
                     } else {
@@ -570,14 +587,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 } else {
                     // Degraded: no session (open failed or not yet restored).
                     // Plain element seek within the current file; never touch trackIndex.
-                    const trackOffset = state.currentAudiobook.trackOffset ?? 0;
+                    const trackOffset = liveRef.current.currentAudiobook.trackOffset ?? 0;
                     controllerRef.current?.seek(clampedTime - trackOffset);
                 }
             } else if (
-                state.playbackType === "podcast" &&
-                state.currentPodcast
+                liveRef.current.playbackType === "podcast" &&
+                liveRef.current.currentPodcast
             ) {
-                state.setCurrentPodcast((prev) =>
+                setters.setCurrentPodcast((prev) =>
                     prev ? { ...prev, progress: progressAt(clampedTime, prev.duration || 0, false) } : prev
                 );
                 controllerRef.current?.seek(clampedTime);
@@ -585,30 +602,30 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 controllerRef.current?.seek(clampedTime);
             }
         },
-        [state, playback.duration]
+        [setters, liveRef]
     );
 
     const next = useCallback(() => {
-        if (state.playbackType === "podcast") {
+        if (liveRef.current.playbackType === "podcast") {
             void nextPodcastEpisode();
             return;
         }
-        if (state.queue.length === 0) return;
+        if (liveRef.current.queue.length === 0) return;
 
-        if (state.repeatMode === "one" && state.repeatOneCount === 0) {
-            state.setRepeatOneCount(1);
+        if (liveRef.current.repeatMode === "one" && liveRef.current.repeatOneCount === 0) {
+            setters.setRepeatOneCount(1);
             seek(0);
             return;
         }
 
-        state.setRepeatOneCount(0);
+        setters.setRepeatOneCount(0);
 
         const nextTrack = getNextTrackInfo(
-            state.queue,
-            state.currentIndex,
-            state.isShuffle,
-            state.shuffleIndices,
-            state.repeatMode
+            liveRef.current.queue,
+            liveRef.current.currentIndex,
+            liveRef.current.isShuffle,
+            liveRef.current.shuffleIndices,
+            liveRef.current.repeatMode
         );
         if (!nextTrack) {
             controllerRef.current?.pause();
@@ -616,53 +633,53 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
         const nextIndex = nextTrack.index;
 
-        state.setCurrentIndex(nextIndex);
-        state.setCurrentTrack(state.queue[nextIndex]);
+        setters.setCurrentIndex(nextIndex);
+        setters.setCurrentTrack(liveRef.current.queue[nextIndex]);
         setCurrentTimeRef.current(0);
         lastManualAdvanceAtRef.current = Date.now();
 
-        const streamUrl = api.getStreamUrl(state.queue[nextIndex].id);
-        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: state.queue[nextIndex].duration });
-    }, [state, seek, nextPodcastEpisode]);
+        const streamUrl = api.getStreamUrl(liveRef.current.queue[nextIndex].id);
+        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: liveRef.current.queue[nextIndex].duration });
+    }, [setters, liveRef, seek, nextPodcastEpisode]);
 
     const previous = useCallback(() => {
-        if (state.queue.length === 0) return;
+        if (liveRef.current.queue.length === 0) return;
 
         if (currentTimeRef.current > 3) {
             seek(0);
             return;
         }
 
-        state.setRepeatOneCount(0);
+        setters.setRepeatOneCount(0);
 
         let prevIndex: number;
-        if (state.isShuffle) {
-            const currentShufflePos = state.shuffleIndices.indexOf(
-                state.currentIndex
+        if (liveRef.current.isShuffle) {
+            const currentShufflePos = liveRef.current.shuffleIndices.indexOf(
+                liveRef.current.currentIndex
             );
             if (currentShufflePos > 0) {
-                prevIndex = state.shuffleIndices[currentShufflePos - 1];
+                prevIndex = liveRef.current.shuffleIndices[currentShufflePos - 1];
             } else {
                 seek(0);
                 return;
             }
         } else {
-            if (state.currentIndex > 0) {
-                prevIndex = state.currentIndex - 1;
+            if (liveRef.current.currentIndex > 0) {
+                prevIndex = liveRef.current.currentIndex - 1;
             } else {
                 seek(0);
                 return;
             }
         }
 
-        state.setCurrentIndex(prevIndex);
-        state.setCurrentTrack(state.queue[prevIndex]);
+        setters.setCurrentIndex(prevIndex);
+        setters.setCurrentTrack(liveRef.current.queue[prevIndex]);
         setCurrentTimeRef.current(0);
         lastManualAdvanceAtRef.current = Date.now();
 
-        const streamUrl = api.getStreamUrl(state.queue[prevIndex].id);
-        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: state.queue[prevIndex].duration });
-    }, [state, seek]);
+        const streamUrl = api.getStreamUrl(liveRef.current.queue[prevIndex].id);
+        controllerRef.current?.load(streamUrl, { autoplay: true, expectedDurationS: liveRef.current.queue[prevIndex].duration });
+    }, [setters, liveRef, seek]);
 
     const queueSnapshot = useCallback(
         () => ({
@@ -683,14 +700,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // playbackType is not part of the test: adding a track during a
             // podcast starts a track queue below.
             if (queueRef.current.length === 0) {
-                state.setPlaybackType("track");
-                state.setQueue([track]);
-                state.setCurrentIndex(0);
-                state.setCurrentTrack(track);
-                state.setCurrentAudiobook(null);
-                state.setCurrentPodcast(null);
+                setters.setPlaybackType("track");
+                setters.setQueue([track]);
+                setters.setCurrentIndex(0);
+                setters.setCurrentTrack(track);
+                setters.setCurrentAudiobook(null);
+                setters.setCurrentPodcast(null);
                 setCurrentTimeRef.current(0);
-                state.setShuffleIndices([0]);
+                setters.setShuffleIndices([0]);
                 queueRef.current = [track];
                 currentIndexRef.current = 0;
                 shuffleIndicesRef.current = [0];
@@ -711,24 +728,24 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             shuffleInsertPosRef.current = next.shufflePos;
 
             // Added to the queue, not replacing it: the queue still came from the page that started it.
-            state.extendQueueOrigin([track.queueKey]);
-            state.setQueue(next.queue);
-            if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
+            setters.extendQueueOrigin([track.queueKey]);
+            setters.setQueue(next.queue);
+            if (isShuffleRef.current) setters.setShuffleIndices(next.shuffleIndices);
         },
-        [state, queueSnapshot]
+        [setters, queueSnapshot]
     );
 
     const appendToQueue = useCallback(
         (songs: Track[]) => {
             const added = freshQueueKeys(songs);
             const next = appendTracks(queueSnapshot(), added);
-            state.extendQueueOrigin(added.map((song) => song.queueKey));
+            setters.extendQueueOrigin(added.map((song) => song.queueKey));
             queueRef.current = next.queue;
             shuffleIndicesRef.current = next.shuffleIndices;
-            state.setQueue(next.queue);
-            if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
+            setters.setQueue(next.queue);
+            if (isShuffleRef.current) setters.setShuffleIndices(next.shuffleIndices);
         },
-        [state, queueSnapshot]
+        [setters, queueSnapshot]
     );
 
     const playQueueIndex = useCallback(
@@ -736,16 +753,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const track = queueRef.current[index];
             if (!track) return;
             currentIndexRef.current = index;
-            state.setPlaybackType("track");
-            state.setCurrentAudiobook(null);
-            state.setCurrentPodcast(null);
-            state.setCurrentIndex(index);
-            state.setCurrentTrack(track);
-            state.setRepeatOneCount(0);
+            setters.setPlaybackType("track");
+            setters.setCurrentAudiobook(null);
+            setters.setCurrentPodcast(null);
+            setters.setCurrentIndex(index);
+            setters.setCurrentTrack(track);
+            setters.setRepeatOneCount(0);
             setCurrentTimeRef.current(0);
             controllerRef.current?.load(api.getStreamUrl(track.id), { autoplay: true, expectedDurationS: track.duration });
         },
-        [state]
+        [setters]
     );
 
     // Refills the station from the live queue. If it fails the position can be tried again: on the next
@@ -778,16 +795,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     // A station refills when its last queued track starts.
     useEffect(() => {
         queueEndedRef.current = false;
-    }, [state.currentIndex, state.currentTrack?.id]);
+    }, [queueState.currentIndex, media.currentTrack?.id]);
 
     useEffect(() => {
         if (!stationRef.current) return;
-        if (state.playbackType !== "track") {
+        if (media.playbackType !== "track") {
             stationRef.current = null;
             return;
         }
         void refillStationNow();
-    }, [state, refillStationNow]);
+    }, [media, queueState, playMode, refillStationNow]);
 
     const removeFromQueue = useCallback(
         (index: number) => {
@@ -802,42 +819,42 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             upNextInsertRef.current = next.upNextAt;
             shuffleInsertPosRef.current = next.shufflePos;
 
-            state.setQueue(next.queue);
-            if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
-            state.setCurrentIndex(next.currentIndex);
-            if (next.currentTrack !== undefined) state.setCurrentTrack(next.currentTrack);
+            setters.setQueue(next.queue);
+            if (isShuffleRef.current) setters.setShuffleIndices(next.shuffleIndices);
+            setters.setCurrentIndex(next.currentIndex);
+            if (next.currentTrack !== undefined) setters.setCurrentTrack(next.currentTrack);
             if (next.currentTrack === null) controllerRef.current?.pause();
         },
-        [state, queueSnapshot]
+        [setters, queueSnapshot]
     );
 
     const clearQueue = useCallback(() => {
         stationRef.current = null;
-        state.setQueue([]);
-        state.setCurrentIndex(0);
-        state.setCurrentTrack(null);
+        setters.setQueue([]);
+        setters.setCurrentIndex(0);
+        setters.setCurrentTrack(null);
         controllerRef.current?.pause();
-        state.setShuffleIndices([]);
-    }, [state]);
+        setters.setShuffleIndices([]);
+    }, [setters]);
 
     // Set upcoming tracks without interrupting current playback
     // preserveOrder=true will skip shuffle index generation (used for vibe mode)
     const setUpcoming = useCallback(
         (tracks: Track[], preserveOrder = false) => {
             stationRef.current = null;
-            if (!state.currentTrack || state.playbackType !== "track") {
+            if (!liveRef.current.currentTrack || liveRef.current.playbackType !== "track") {
                 if (tracks.length > 0) {
-                    state.setQueue(tracks);
-                    state.setCurrentIndex(0);
-                    state.setCurrentTrack(tracks[0]);
-                    state.setPlaybackType("track");
-                    playback.setCurrentTime(0);
-                    if (!preserveOrder && state.activeOperation.type === 'idle') {
-                        state.setShuffleIndices(
+                    setters.setQueue(tracks);
+                    setters.setCurrentIndex(0);
+                    setters.setCurrentTrack(tracks[0]);
+                    setters.setPlaybackType("track");
+                    setCurrentTimeRef.current(0);
+                    if (!preserveOrder && liveRef.current.activeOperation.type === 'idle') {
+                        setters.setShuffleIndices(
                             generateShuffleIndices(tracks.length, 0)
                         );
                     } else {
-                        state.setShuffleIndices([]);
+                        setters.setShuffleIndices([]);
                     }
 
                     const streamUrl = api.getStreamUrl(tracks[0].id);
@@ -846,52 +863,50 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            state.setQueue((prev) => {
-                const currentTrack = prev[state.currentIndex];
+            setters.setQueue((prev) => {
+                const currentTrack = prev[liveRef.current.currentIndex];
                 if (!currentTrack) return tracks;
                 return [currentTrack, ...tracks];
             });
 
-            state.setCurrentIndex(0);
+            setters.setCurrentIndex(0);
 
-            if (state.isShuffle && !preserveOrder && state.activeOperation.type === 'idle') {
-                state.setShuffleIndices(
+            if (liveRef.current.isShuffle && !preserveOrder && liveRef.current.activeOperation.type === 'idle') {
+                setters.setShuffleIndices(
                     generateShuffleIndices(tracks.length + 1, 0)
                 );
             } else {
-                state.setShuffleIndices([]);
+                setters.setShuffleIndices([]);
             }
         },
-        [state, playback, generateShuffleIndices]
+        [setters, liveRef, generateShuffleIndices]
     );
 
     const toggleShuffle = useCallback(() => {
-        if (state.activeOperation.type !== 'idle') {
+        if (liveRef.current.activeOperation.type !== 'idle') {
             return;
         }
 
-        state.setIsShuffle((prev) => {
-            const newShuffle = !prev;
-            if (newShuffle && state.queue.length > 0) {
-                state.setShuffleIndices(
-                    generateShuffleIndices(
-                        state.queue.length,
-                        state.currentIndex
-                    )
-                );
-            }
-            return newShuffle;
-        });
-    }, [state, generateShuffleIndices]);
+        const newShuffle = !liveRef.current.isShuffle;
+        setters.setIsShuffle(newShuffle);
+        if (newShuffle && liveRef.current.queue.length > 0) {
+            setters.setShuffleIndices(
+                generateShuffleIndices(
+                    liveRef.current.queue.length,
+                    liveRef.current.currentIndex
+                )
+            );
+        }
+    }, [setters, liveRef, generateShuffleIndices]);
 
     const toggleRepeat = useCallback(() => {
-        state.setRepeatMode((prev) => {
+        setters.setRepeatMode((prev) => {
             if (prev === "off") return "all";
             if (prev === "all") return "one";
             return "off";
         });
-        state.setRepeatOneCount(0);
-    }, [state]);
+        setters.setRepeatOneCount(0);
+    }, [setters]);
 
     const updateCurrentTime = playback.setCurrentTime;
 
@@ -918,23 +933,23 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const skipForward = useCallback((seconds: number = 30) => skipBy(seconds), [skipBy]);
     const skipBackward = useCallback((seconds: number = 30) => skipBy(-seconds), [skipBy]);
 
-    const openOverlay = useCallback(() => state.setOverlayOpen(true), [state]);
-    const closeOverlay = useCallback(() => state.setOverlayOpen(false), [state]);
+    const openOverlay = useCallback(() => setters.setOverlayOpen(true), [setters]);
+    const closeOverlay = useCallback(() => setters.setOverlayOpen(false), [setters]);
 
     const setVolumeControl = useCallback(
         (newVolume: number) => {
             const clampedVolume = Math.max(0, Math.min(1, newVolume));
-            state.setVolume(clampedVolume);
+            setters.setVolume(clampedVolume);
             if (clampedVolume > 0) {
-                state.setIsMuted(false);
+                setters.setIsMuted(false);
             }
         },
-        [state]
+        [setters]
     );
 
     const toggleMute = useCallback(() => {
-        state.setIsMuted((prev) => !prev);
-    }, [state]);
+        setters.setIsMuted((prev) => !prev);
+    }, [setters]);
 
     type PendingReplacement = {
         currentOpName: string;
@@ -949,13 +964,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         newQueue: Track[],
         startIndex = 0,
     ): Promise<boolean> => {
-        const op = state.activeOperation;
+        const op = liveRef.current.activeOperation;
         // A vibe queue is an ordered journey: it always plays in order.
         const start = () => {
-            state.setActiveOperation(newOp);
+            setters.setActiveOperation(newOp);
             playTracks(newQueue, startIndex, { skipOperationCheck: true });
-            state.setIsShuffle(false);
-            state.setShuffleIndices([]);
+            setters.setIsShuffle(false);
+            setters.setShuffleIndices([]);
         };
 
         if (op.type === 'idle') {
@@ -963,7 +978,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             return true;
         }
 
-        const currentTrackId = state.currentTrack?.id;
+        const currentTrackId = liveRef.current.currentTrack?.id;
         const opTrackIds = operationTrackIds(op);
 
         if (!currentTrackId || !opTrackIds.includes(currentTrackId)) {
@@ -991,14 +1006,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             pendingReplacementRef.current = pending;
             setPendingReplacement(pending);
         });
-    }, [state, playTracks]);
+    }, [setters, liveRef, playTracks]);
 
     // Vibe mode controls - uses CLAP similarity API
     const startVibeMode = useCallback(async (): Promise<{
         success: boolean;
         trackCount: number;
     }> => {
-        const currentTrack = state.currentTrack;
+        const currentTrack = liveRef.current.currentTrack;
         if (!currentTrack?.id) {
             return { success: false, trackCount: 0 };
         }
@@ -1050,30 +1065,31 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             console.error("[Vibe] Failed to get similar tracks:", error);
             return { success: false, trackCount: 0 };
         }
-    }, [state, replaceOperation]);
+    }, [liveRef, replaceOperation]);
 
     const stopVibeMode = useCallback(() => {
-        state.setActiveOperation({ type: 'idle' });
-    }, [state]);
+        setters.setActiveOperation({ type: 'idle' });
+    }, [setters]);
 
     // -- Refs kept in sync for event handlers --
     const nextRef = useRef(next);
     const nextPodcastEpisodeRef = useRef(nextPodcastEpisode);
 
     useLayoutEffect(() => {
-        playbackTypeRef.current = state.playbackType;
-        currentTrackRef.current = state.currentTrack;
-        currentAudiobookRef.current = state.currentAudiobook;
-        currentPodcastRef.current = state.currentPodcast;
-        repeatModeRef.current = state.repeatMode;
+        playbackTypeRef.current = media.playbackType;
+        currentTrackRef.current = media.currentTrack;
+        currentAudiobookRef.current = media.currentAudiobook;
+        currentPodcastRef.current = media.currentPodcast;
+        repeatModeRef.current = playMode.repeatMode;
         nextRef.current = next;
         refillStationNowRef.current = refillStationNow;
         nextPodcastEpisodeRef.current = nextPodcastEpisode;
-        queueRef.current = state.queue;
-        currentIndexRef.current = state.currentIndex;
-        isShuffleRef.current = state.isShuffle;
-        shuffleIndicesRef.current = state.shuffleIndices;
+        queueRef.current = queueState.queue;
+        currentIndexRef.current = queueState.currentIndex;
+        isShuffleRef.current = playMode.isShuffle;
+        shuffleIndicesRef.current = queueState.shuffleIndices;
         setCurrentTimeRef.current = playback.setCurrentTime;
+        durationRef.current = playback.duration;
     });
 
     // -- Progress saving callbacks --
@@ -1100,7 +1116,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     bookDuration,
                     isFinished
                 );
-                state.setCurrentAudiobook((prev) => {
+                setters.setCurrentAudiobook((prev) => {
                     if (!prev || prev.id !== audiobook.id) return prev;
                     const dur = prev.duration || 0;
                     return { ...prev, progress: progressAt(isFinished ? dur : totalBookTime, dur, isFinished) };
@@ -1109,13 +1125,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             } catch (err) {
                 // Same as podcasts: gone means gone, so stop trying to save against it.
                 if ((err as { status?: number } | null)?.status === 404) {
-                    state.setCurrentAudiobook(null);
+                    setters.setCurrentAudiobook(null);
                     return;
                 }
                 console.error("[AudioControls] Failed to save audiobook progress:", err);
             }
         },
-        [state]
+        [setters]
     );
 
     const savePodcastProgress = useCallback(
@@ -1150,7 +1166,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     isFinished: finished,
                     lastPlayedAt: new Date(),
                 };
-                state.setCurrentPodcast((prev) => {
+                setters.setCurrentPodcast((prev) => {
                     if (!prev || prev.id !== podcast.id) return prev;
                     const dur = prev.duration || 0;
                     return { ...prev, progress: progressAt(isFinished ? dur : currentTime, dur, finished) };
@@ -1163,13 +1179,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 // than repeating the request every few seconds for the rest of the
                 // session -- which is what happens if you unsubscribe while listening.
                 if ((err as { status?: number } | null)?.status === 404) {
-                    state.setCurrentPodcast(null);
+                    setters.setCurrentPodcast(null);
                     return;
                 }
                 console.error("[AudioControls] Failed to save podcast progress:", err);
             }
         },
-        [state]
+        [setters]
     );
 
     const saveAudiobookProgressRef = useRef(saveAudiobookProgress);
@@ -1205,7 +1221,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
                     if (file && !session.isLastFile(file)) {
                         const nextFile = session.files[session.files.indexOf(file) + 1];
-                        state.setCurrentAudiobook((prev) =>
+                        setters.setCurrentAudiobook((prev) =>
                             prev ? { ...prev, trackIndex: nextFile.index, trackOffset: nextFile.startOffset } : prev
                         );
                         ctrl.load(
@@ -1253,16 +1269,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            state.setCurrentIndex(nextTrack.index);
-            state.setCurrentTrack(nextTrack);
-            playback.setCurrentTime(0);
+            setters.setCurrentIndex(nextTrack.index);
+            setters.setCurrentTrack(nextTrack);
+            setCurrentTimeRef.current(0);
 
             ctrl.load(api.getStreamUrl(nextTrack.id), { autoplay: true, expectedDurationS: nextTrack.duration });
         };
 
         ctrl.on("ended", handleEnded);
         return () => ctrl.off("ended", handleEnded);
-    }, [controller, state, playback]);
+    }, [controller, setters]);
 
     // Once per upcoming track, with 30s or less left, prewarms it and starts the
     // controller's gapless preload. Skipped on repeat-one, which has no next.
@@ -1328,10 +1344,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
             if (!resolved) return;
 
-            state.setCurrentIndex(resolved.index);
-            state.setCurrentTrack(resolved);
-            playback.setDuration(durationS || resolved.duration || 0);
-            playback.setCurrentTime(0);
+            setters.setCurrentIndex(resolved.index);
+            setters.setCurrentTrack(resolved);
+            setDuration(durationS || resolved.duration || 0);
+            setCurrentTimeRef.current(0);
             lastManualAdvanceAtRef.current = Date.now();
             // The preload is used up; the entry now playing may be preloaded again as its own next (a one-song loop).
             pendingGaplessNextRef.current = null;
@@ -1340,16 +1356,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         ctrl.on("gapless-advance", handleGaplessAdvance);
         return () => ctrl.off("gapless-advance", handleGaplessAdvance);
-    }, [controller, state, playback]);
+    }, [controller, setters, setDuration]);
 
     // -- Clear a stale gapless preload expectation --
     // Once playback leaves "track" mode or repeat flips to "one", any
     // preloaded next-track buffer can no longer be swapped in validly.
     useEffect(() => {
-        if (state.playbackType !== "track" || state.repeatMode === "one") {
+        if (media.playbackType !== "track" || playMode.repeatMode === "one") {
             dropExpectedNext();
         }
-    }, [state.playbackType, state.repeatMode, dropExpectedNext]);
+    }, [media.playbackType, playMode.repeatMode, dropExpectedNext]);
 
     // Gapless follows the queue: when an edit, a reorder, a shuffle or a replaced queue leaves the preloaded entry
     // no longer next, the engine would still swap to it while the player shows the entry that is next. Dropping
@@ -1358,14 +1374,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const pending = pendingGaplessNextRef.current;
         if (!pending) return;
         const next = getNextTrackInfo(
-            state.queue,
-            state.currentIndex,
-            state.isShuffle,
-            state.shuffleIndices,
-            state.repeatMode
+            queueState.queue,
+            queueState.currentIndex,
+            playMode.isShuffle,
+            queueState.shuffleIndices,
+            playMode.repeatMode
         );
         if (next?.queueKey !== pending.queueKey) dropExpectedNext();
-    }, [state.queue, state.currentIndex, state.isShuffle, state.shuffleIndices, state.repeatMode, dropExpectedNext]);
+    }, [queueState.queue, queueState.currentIndex, playMode.isShuffle, queueState.shuffleIndices, playMode.repeatMode, dropExpectedNext]);
 
     // -- Canplay handler: duration update only --
     useEffect(() => {
@@ -1381,12 +1397,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 currentTrackRef.current?.duration ||
                 currentAudiobookRef.current?.duration ||
                 currentPodcastRef.current?.duration || 0;
-            playback.setDuration(audiobookDuration || dur || fallback);
+            setDuration(audiobookDuration || dur || fallback);
         };
 
         ctrl.on("canplay", handleCanPlay);
         return () => ctrl.off("canplay", handleCanPlay);
-    }, [controller, playback]);
+    }, [controller, setDuration]);
 
     // -- Error handler --
     useEffect(() => {
@@ -1412,8 +1428,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     // Single track: retain + allow indefinite retry.
                     return;
                 } else if (consecutiveErrorCountRef.current >= 3) {
-                    state.setCurrentTrack(null);
-                    state.setPlaybackType(null);
+                    setters.setCurrentTrack(null);
+                    setters.setPlaybackType(null);
                 } else {
                     // Multi-track: skip the bad track.
                     nextRef.current();
@@ -1515,7 +1531,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             unsubscribePlayReset();
             ctrl.off("error", handleError);
         };
-    }, [controller, state]);
+    }, [controller, setters]);
 
     // Save every 15s on a wall-clock timer while playing: iOS suspends
     // timeupdate with the screen off. Unchanged positions are de-duped.
@@ -1570,8 +1586,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     }, [controller]);
 
     // -- Volume/mute sync --
-    useEffect(() => { controllerRef.current?.setVolume(state.volume); }, [state.volume]);
-    useEffect(() => { controllerRef.current?.setMuted(state.isMuted); }, [state.isMuted]);
+    useEffect(() => { controllerRef.current?.setVolume(volumeState.volume); }, [volumeState.volume]);
+    useEffect(() => { controllerRef.current?.setMuted(volumeState.isMuted); }, [volumeState.isMuted]);
 
     // -- Foreground recovery --
     // Uses both visibilitychange and pageshow/pagehide for iOS PWA reliability.

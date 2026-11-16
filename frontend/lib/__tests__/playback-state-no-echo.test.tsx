@@ -126,7 +126,13 @@ vi.mock("@/lib/features-context", () => ({ useFeatures: () => ({ liveReporting: 
 
 import { AudioControllerContext } from "@/lib/audio-controller-context";
 import type { AudioController } from "@/lib/audio-controller";
-import { AudioStateProvider, useAudioState } from "@/lib/audio-state-context";
+import {
+    AudioStateProvider,
+    useAudioSetters,
+    useCurrentMedia,
+    useQueueState,
+    type AudioSetters,
+} from "@/lib/audio-state-context";
 import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
 import { AudioControlsProvider, useAudioControls } from "@/lib/audio-controls-context";
 
@@ -158,10 +164,10 @@ function fakeController(): AudioController {
     return engine as unknown as AudioController;
 }
 
-const probe = {} as { controls: ReturnType<typeof useAudioControls>; state: ReturnType<typeof useAudioState> };
+const probe = {} as { controls: ReturnType<typeof useAudioControls>; state: ReturnType<typeof useCurrentMedia> & ReturnType<typeof useQueueState> & AudioSetters };
 function Probe() {
     const controls = useAudioControls();
-    const state = useAudioState();
+    const state = { ...useCurrentMedia(), ...useQueueState(), ...useAudioSetters() };
     useEffect(() => {
         probe.controls = controls;
         probe.state = state;

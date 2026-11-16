@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import React, { act } from "react";
 import { mountHost } from "./helpers/dom";
 
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => ({ currentTrack: null, currentQueueSource: null }) }));
+vi.mock("@/lib/audio-state-context", () => ({
+    useCurrentMedia: () => ({ currentTrack: null }),
+    useQueueState: () => ({ currentQueueSource: null }),
+}));
 vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: false }) }));
 vi.mock("@/lib/audio-controls-context", () => ({
     useAudioControls: () => ({ pause: vi.fn(), resumeWithGesture: vi.fn(async () => undefined) }),

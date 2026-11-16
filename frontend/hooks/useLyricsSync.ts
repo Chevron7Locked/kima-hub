@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { api } from "@/lib/api";
 import { parseLRC, type LyricLine } from "@/lib/lyrics-utils";
 
@@ -25,7 +25,7 @@ interface LyricsSyncState {
 
 export function useLyricsSync(): LyricsSyncState {
     const { currentTime } = useAudioPlayback();
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
 
     const trackId = currentTrack?.id ?? null;
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { notify } from "@/lib/notify";
 import { useAudioController } from "@/lib/audio-controller-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useVolumeState } from "@/lib/audio-state-context";
 
 /**
  * The page's one preview: a song, or the start of a podcast episode. Starting one stops any other and pauses the
@@ -10,7 +10,7 @@ import { useAudioState } from "@/lib/audio-state-context";
  */
 export function usePreview() {
     const controller = useAudioController();
-    const { volume, isMuted } = useAudioState();
+    const { volume, isMuted } = useVolumeState();
     const [previewId, setPreviewId] = useState<string | null>(null);
     const [playing, setPlaying] = useState(false);
     const current = useRef<{ id: string; audio: HTMLAudioElement } | null>(null);

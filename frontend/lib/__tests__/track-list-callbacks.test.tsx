@@ -9,7 +9,8 @@ import { mountHost } from "./helpers/dom";
 
 const audio = { isPlaying: false, currentTrack: null as { id: string } | null };
 vi.mock("@/lib/audio-state-context", () => ({
-    useAudioState: () => ({ currentTrack: audio.currentTrack, currentQueueSource: null }),
+    useCurrentMedia: () => ({ currentTrack: audio.currentTrack }),
+    useQueueState: () => ({ currentQueueSource: null }),
 }));
 vi.mock("@/lib/audio-playback-context", () => ({ useAudioPlayback: () => ({ isPlaying: audio.isPlaying }) }));
 vi.mock("@/lib/audio-controls-context", () => ({

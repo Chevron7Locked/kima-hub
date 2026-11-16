@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useActiveOperation, useCurrentMedia } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { notify } from "@/lib/notify";
 
 export function useVibeToggle() {
-    const { currentTrack, activeOperation } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
+    const activeOperation = useActiveOperation();
     const { startVibeMode, stopVibeMode } = useAudioControls();
     const [isVibeLoading, setIsVibeLoading] = useState(false);
 

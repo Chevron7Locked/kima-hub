@@ -10,7 +10,7 @@ import React, { act } from "react";
 const audio = vi.hoisted(() => ({ queue: [], currentIndex: 0, currentTrack: { id: "t1" } as { id: string } | null }));
 
 vi.mock("@/lib/activity-panel-settings-context", () => ({ useActivityPanelSettings: () => ({ settingsContent: null }) }));
-vi.mock("@/lib/audio-state-context", () => ({ useAudioState: () => audio }));
+vi.mock("@/lib/audio-state-context", () => ({ useCurrentMedia: () => audio, useQueueState: () => audio }));
 vi.mock("@/features/vibe/tabs/QueueTab", () => ({ QueueTab: () => <div data-testid="queue">queue</div> }));
 vi.mock("@/features/vibe/tabs/NowPlayingTab", () => ({
     NowPlayingHero: () => <div data-testid="strip" />,

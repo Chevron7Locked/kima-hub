@@ -12,7 +12,7 @@ import { TrackPanel } from "@/features/vibe/TrackPanel";
 import { TrackMenu } from "@/features/vibe/TrackMenu";
 import { MoodLegend } from "@/features/vibe/MoodLegend";
 import { buildLibraryIndex, searchLibrary } from "@/features/vibe/librarySearch";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useActiveOperation, useCurrentMedia, useQueueState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
 import type { Track, VibeOperation } from "@/lib/audio-state-context";
@@ -102,7 +102,9 @@ export default function VibePage() {
     } = useVibeMap();
     const rebuild = useSoundRebuild();
 
-    const { currentTrack, queue, activeOperation } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
+    const { queue } = useQueueState();
+    const activeOperation = useActiveOperation();
     const { playTrack, replaceOperation } = useAudioControls();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();

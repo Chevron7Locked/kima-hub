@@ -1,4 +1,4 @@
-import { useAudioState } from "@/lib/audio-state-context";
+import { useCurrentMedia } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { clampTime, playbackLength } from "@/lib/format";
 
@@ -13,7 +13,7 @@ export function usePlaybackProgress() {
         currentAudiobook,
         currentPodcast,
         playbackType,
-    } = useAudioState();
+    } = useCurrentMedia();
 
     const {
         currentTime,

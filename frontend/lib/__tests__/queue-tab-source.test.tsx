@@ -12,13 +12,10 @@ const { queue, playTracks, playQueueIndex } = vi.hoisted(() => ({
     playQueueIndex: vi.fn(),
 }));
 vi.mock("@/lib/audio-state-context", () => ({
-    useAudioState: () => ({
-        currentTrack: queue[0],
-        queue,
-        currentIndex: 0,
-        activeOperation: { type: "none" },
-        setQueue: () => {},
-    }),
+    useCurrentMedia: () => ({ currentTrack: queue[0] }),
+    useQueueState: () => ({ queue, currentIndex: 0 }),
+    useActiveOperation: () => ({ type: "none" }),
+    useAudioSetters: () => ({ setQueue: () => {} }),
 }));
 vi.mock("@/lib/audio-controls-context", () => ({
     useAudioControls: () => ({

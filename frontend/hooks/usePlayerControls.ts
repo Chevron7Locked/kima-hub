@@ -1,6 +1,11 @@
 "use client";
 
-import { useAudioState } from "@/lib/audio-state-context";
+import {
+    useActiveOperation,
+    useCurrentMedia,
+    usePlayMode,
+    useVolumeState,
+} from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { usePlaybackProgress } from "@/hooks/usePlaybackProgress";
@@ -10,19 +15,10 @@ import { usePlaybackProgress } from "@/hooks/usePlaybackProgress";
  * stay split so a currentTime tick re-renders only progress readers.
  */
 export function usePlayerControls() {
-    const {
-        currentTrack,
-        currentAudiobook,
-        currentPodcast,
-        playbackType,
-        volume,
-        isMuted,
-        isShuffle,
-        repeatMode,
-        activeOperation,
-        queue,
-        currentIndex,
-    } = useAudioState();
+    const { currentTrack, currentAudiobook, currentPodcast, playbackType } = useCurrentMedia();
+    const { volume, isMuted } = useVolumeState();
+    const { isShuffle, repeatMode } = usePlayMode();
+    const activeOperation = useActiveOperation();
 
     const { isPlaying, isBuffering, audioError } = useAudioPlayback();
 
@@ -54,8 +50,6 @@ export function usePlayerControls() {
         isShuffle,
         repeatMode,
         activeOperation,
-        queue,
-        currentIndex,
         isPlaying,
         isBuffering,
         audioError,

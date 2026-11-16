@@ -1,7 +1,7 @@
 "use client";
 
 import { AudioWaveform, Loader2 } from "lucide-react";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useActiveOperation } from "@/lib/audio-state-context";
 import { useFeatures } from "@/lib/features-context";
 import { useVibeToggle } from "@/hooks/useVibeToggle";
 import { cn } from "@/lib/cn";
@@ -26,7 +26,7 @@ export function VibeToggleButton({
     idleClassName,
     activeClassName,
 }: VibeToggleButtonProps) {
-    const { activeOperation } = useAudioState();
+    const activeOperation = useActiveOperation();
     const { vibeEmbeddings, loading } = useFeatures();
     const { handleVibeToggle, isVibeLoading } = useVibeToggle();
 

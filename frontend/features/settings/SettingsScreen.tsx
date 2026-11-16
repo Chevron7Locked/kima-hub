@@ -4,7 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/cn";
-import { useAudioState } from "@/lib/audio-context";
+import { useCurrentMedia } from "@/lib/audio-context";
 import { useAuth } from "@/lib/auth-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
@@ -54,7 +54,7 @@ export function SettingsScreen({ slug }: { slug: SettingsPageSlug }) {
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const hasPhoneChrome = isMobile || isTablet;
-    const { currentTrack, currentAudiobook, currentPodcast } = useAudioState();
+    const { currentTrack, currentAudiobook, currentPodcast } = useCurrentMedia();
     const hasMiniPlayer = !!(currentTrack || currentAudiobook || currentPodcast);
 
     // An admin page is an admin's; anyone else lands on their own.

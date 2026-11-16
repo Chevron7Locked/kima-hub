@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { usePublicConfig } from "@/hooks/useQueries";
 import {
-    useAudioState,
+    useCurrentMedia,
     useAudioControls,
 } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -32,7 +32,7 @@ import { PageMessage } from "@/components/ui/PageMessage";
 
 export default function ArtistPage() {
     // Use split hooks to avoid re-renders from currentTime updates
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const { playTracks, playStation } = useAudioControls();
     const { isPendingByMbid } = useDownloadContext();
 

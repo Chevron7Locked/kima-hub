@@ -1,34 +1,43 @@
 "use client";
 
-import { useAudioState } from "./audio-state-context";
+import {
+    useActiveOperation,
+    useCurrentMedia,
+    useOverlayOpen,
+    usePlayMode,
+    useVolumeState,
+} from "./audio-state-context";
 import { useAudioPlayback } from "./audio-playback-context";
 import { useAudioControls } from "./audio-controls-context";
 
 /**
- * All three audio contexts in one hook. Prefer useAudioState, useAudioPlayback
- * or useAudioControls where only one is needed: playback re-renders often.
+ * The audio state in one hook, minus the queue: a queue edit must not re-render the readers of this. Prefer the
+ * slice hooks (useCurrentMedia, useVolumeState, ...), useAudioPlayback or useAudioControls where only one is needed:
+ * playback re-renders often. The queue is read through useQueueState.
  */
 export function useAudio() {
-    const state = useAudioState();
+    const media = useCurrentMedia();
+    const mode = usePlayMode();
+    const volume = useVolumeState();
+    const overlayOpen = useOverlayOpen();
+    const activeOperation = useActiveOperation();
     const playback = useAudioPlayback();
     const controls = useAudioControls();
 
     return {
         // State
-        currentTrack: state.currentTrack,
-        currentAudiobook: state.currentAudiobook,
-        currentPodcast: state.currentPodcast,
-        playbackType: state.playbackType,
-        queue: state.queue,
-        currentIndex: state.currentIndex,
-        isShuffle: state.isShuffle,
-        repeatMode: state.repeatMode,
-        overlayOpen: state.overlayOpen,
-        volume: state.volume,
-        isMuted: state.isMuted,
+        currentTrack: media.currentTrack,
+        currentAudiobook: media.currentAudiobook,
+        currentPodcast: media.currentPodcast,
+        playbackType: media.playbackType,
+        isShuffle: mode.isShuffle,
+        repeatMode: mode.repeatMode,
+        overlayOpen,
+        volume: volume.volume,
+        isMuted: volume.isMuted,
 
         // Vibe operation state
-        activeOperation: state.activeOperation,
+        activeOperation,
 
         // Playback
         isPlaying: playback.isPlaying,

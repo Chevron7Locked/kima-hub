@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioSetters } from "@/lib/audio-state-context";
 import { notify } from "@/lib/notify";
 import { api } from "@/lib/api";
 import type { Audiobook } from "../types";
@@ -25,7 +25,7 @@ export function useAudiobookActions(
     seek,
   } = useAudio();
   const { playAudiobookAt } = useAudioControls();
-  const { setCurrentAudiobook } = useAudioState();
+  const { setCurrentAudiobook } = useAudioSetters();
 
   const isThisBookPlaying =
     currentAudiobook?.id === audiobookId && playbackType === "audiobook";

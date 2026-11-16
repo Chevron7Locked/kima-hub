@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { cn } from "@/lib/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { useAudioState } from "@/lib/audio-context";
+import { useCurrentMedia } from "@/lib/audio-context";
 import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { usePreview } from "@/hooks/usePreview";
@@ -27,7 +27,7 @@ import { leaveActivityPanelSettings, openActivityPanel } from "@/hooks/useActivi
 
 export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
-    const { currentTrack } = useAudioState();
+    const { currentTrack } = useCurrentMedia();
     const { setSettingsContent, settingsOwner } = useActivityPanelSettings();
     const queryClient = useQueryClient();
     const { canAcquire } = usePublicConfig();

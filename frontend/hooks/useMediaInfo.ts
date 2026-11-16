@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useAudioState } from "@/lib/audio-context";
+import { useCurrentMedia } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 import { shownTitle } from "@/lib/track-title";
 
@@ -19,7 +19,7 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
         currentAudiobook,
         currentPodcast,
         playbackType,
-    } = useAudioState();
+    } = useCurrentMedia();
 
     return useMemo(() => {
         const hasMedia = !!(currentTrack || currentAudiobook || currentPodcast);
