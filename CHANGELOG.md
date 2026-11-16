@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A shared link's play counts only once audio reaches the listener.** A listener who disconnects before the audio starts, or an app that only checks the song, no longer uses up one of the link's plays.
 - **Subsonic apps show the same album year as the web:** your own year edit first, then the original release year, in album lists, year filters, random songs and sorting.
 - **Albums in Subsonic apps show the album's own genres,** falling back to the artist's.
 - **Year and genre changes reach Subsonic apps:** editing or resetting an album's year or genres, and years or genres filled in by identification or enrichment, show up once the edit or enrichment cycle finishes.
