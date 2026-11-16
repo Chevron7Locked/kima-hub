@@ -9,7 +9,8 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { markLibraryChangedQuietly } from "../services/libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { forgetOwnedIndex } from "../services/discovery/ownedIndexVersion";
+import { deleteArtists, deleteEmptyArtists } from "../services/library/albumDelete";
+import { updateArtistCounts } from "../services/artistCountsService";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -148,15 +149,11 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                     where: { artistId: tempArtist.id },
                     data: { artistId: realArtist.id },
                 });
-                // The owned-album snapshot reads each album's artist.
-                forgetOwnedIndex();
-
-                await prisma.similarArtist.deleteMany({
-                    where: { OR: [{ fromArtistId: tempArtist.id }, { toArtistId: tempArtist.id }] },
-                });
-                await prisma.artist.delete({
-                    where: { id: tempArtist.id },
-                });
+                // Its keeps go to the real artist (a keep cannot outlive its artist), then it goes with its similar links.
+                await deleteArtists([tempArtist.id], { keepsTo: realArtist.id });
+                await updateArtistCounts(realArtist.id).catch((error) =>
+                    logger.warn("[DataIntegrity] Artist counts not updated after a temp artist merge:", error),
+                );
 
                 report.consolidatedArtists++;
                 logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
@@ -166,17 +163,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         if (libraryAlbumsMoved > 0) await markLibraryChangedQuietly("temp artists merged into real ones");
     }
 
-    // Artists with no albums go, with their similar-artist links.
-    const orphanedArtistIds = (
-        await prisma.artist.findMany({ where: { albums: { none: {} } }, select: { id: true } })
-    ).map((a) => a.id);
-    if (orphanedArtistIds.length > 0) {
-        await prisma.similarArtist.deleteMany({
-            where: { OR: [{ fromArtistId: { in: orphanedArtistIds } }, { toArtistId: { in: orphanedArtistIds } }] },
-        });
-        await prisma.artist.deleteMany({ where: { id: { in: orphanedArtistIds } } });
-        report.orphanedArtists = orphanedArtistIds.length;
-    }
+    // Artists with no albums go, with their similar-artist links; one holding a keep stays (see services/library/albumDelete.ts).
+    report.orphanedArtists = await deleteEmptyArtists();
 
     // Notifications are news, not history: anything older than 30 days goes.
     const thirtyDaysAgo = new Date();
