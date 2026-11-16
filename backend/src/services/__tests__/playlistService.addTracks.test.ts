@@ -4,7 +4,7 @@
  */
 
 import { prisma } from "../../utils/db";
-import { addTracks } from "../playlistService";
+import { addTracks, lockPlaylist } from "../playlistService";
 import { createTrackChain, deleteFixtures } from "./helpers/trackChainFixture";
 
 const PREFIX = "pl-addtracks-test";
@@ -66,5 +66,30 @@ describe("playlistService.addTracks across album locations", () => {
         expect(await addTracks(playlist.id, [track.id])).toEqual({ added: 0, duplicates: 1, duplicateIds: [track.id], rejected: [] });
         expect(await addTracks(playlist.id, [track.id], { allowRepeats: true })).toEqual({ added: 1, duplicates: 0, duplicateIds: [], rejected: [] });
         expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id, trackId: track.id } })).toBe(2);
+    });
+
+    it("lists a song deleted while the add waited for the playlist as rejected, not an error", async () => {
+        const { track, playlist } = await fixture("LIBRARY");
+        const other = await fixture("LIBRARY");
+
+        // Another writer holds the playlist while the add queues behind it, and deletes one of the songs meanwhile.
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let locked!: () => void;
+        const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+        const holder = prisma.$transaction(async (tx) => {
+            await lockPlaylist(tx, playlist.id);
+            locked();
+            await held;
+            await tx.track.delete({ where: { id: track.id } });
+        });
+        await isLocked;
+        const adding = addTracks(playlist.id, [track.id, other.track.id]);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        release();
+        await holder;
+
+        await expect(adding).resolves.toMatchObject({ added: 1, rejected: [track.id] });
+        expect(await prisma.playlistItem.count({ where: { playlistId: playlist.id } })).toBe(1);
     });
 });

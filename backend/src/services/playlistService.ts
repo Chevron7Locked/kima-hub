@@ -8,7 +8,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { rankAfter, rankBetween, rankForPosition, rankSequence, ranksBetween } from "../utils/lexoRank";
-import { PLAYABLE_SONG } from "../utils/playableSong";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 
 /** Cap on a single bulk operation, so one request cannot pin a connection. */
 const MAX_BULK_TRACKS = 1000;
@@ -160,21 +160,23 @@ export async function addTracks(
         );
     }
 
-    const playable = await prisma.track.findMany({
-        where: { id: { in: requested }, ...PLAYABLE_SONG },
-        select: { id: true },
-    });
-    const playableIds = new Set(playable.map((t) => t.id));
-    const rejected = requested.filter((id) => !playableIds.has(id));
-
-    // Preserve the caller's order among the tracks we will actually add.
-    const toAdd = requested.filter((id) => playableIds.has(id));
-    if (toAdd.length === 0) {
-        return { added: 0, duplicates: 0, duplicateIds: [], rejected };
-    }
-
     return prisma.$transaction(async (tx) => {
         await lockPlaylist(tx, playlistId);
+
+        // Checked after the lock and held with a key lock, so a song deleted while this add waited is rejected here
+        // and one that is playable now cannot be deleted before the rows that point at it are written.
+        const playable = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+            WHERE t.id = ANY(${requested}::text[]) AND ${playableSongSql("t", "al")}
+            ORDER BY t.id FOR KEY SHARE OF t`;
+        const playableIds = new Set(playable.map((t) => t.id));
+        const rejected = requested.filter((id) => !playableIds.has(id));
+
+        // Preserve the caller's order among the tracks we will actually add.
+        const toAdd = requested.filter((id) => playableIds.has(id));
+        if (toAdd.length === 0) {
+            return { added: 0, duplicates: 0, duplicateIds: [], rejected };
+        }
 
         const existing = allowRepeats
             ? []
