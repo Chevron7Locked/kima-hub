@@ -2,7 +2,6 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
-import { playableSongSql } from "../utils/playableSong";
 import { listenedArtists } from "../services/stats/listens";
 import { parseLimit } from "./library/paging";
 import type { Artist } from "@prisma/client";
@@ -17,26 +16,26 @@ router.get("/for-you", async (req, res) => {
         const limitNum = parseLimit(req.query.limit, 10, 50);
 
         // Get the artists of the user's newest listens
-        // Listens of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
-        // missing or corrupt one nothing until it is back.
-        const playArtists = await listenedArtists(userId, { song: playableSongSql("t", "al"), take: 50 });
+        // Every listen of a library song counts, whatever the state of its file: a song whose file has gone still says what
+        // this person likes. A Discover song feeds nothing until its album is liked into the library.
+        const listenArtists = await listenedArtists(userId, { take: 50 });
 
         // Count listens per artist (one entry per listen)
-        const artistPlayCounts = new Map<
+        const artistListenCounts = new Map<
             string,
             { artist: Artist; count: number }
         >();
-        for (const artist of playArtists) {
-            const existing = artistPlayCounts.get(artist.id);
+        for (const artist of listenArtists) {
+            const existing = artistListenCounts.get(artist.id);
             if (existing) {
                 existing.count++;
             } else {
-                artistPlayCounts.set(artist.id, { artist, count: 1 });
+                artistListenCounts.set(artist.id, { artist, count: 1 });
             }
         }
 
         // Sort by listen count and get top 3 seed artists
-        const topArtists = Array.from(artistPlayCounts.values())
+        const topArtists = Array.from(artistListenCounts.values())
             .sort((a, b) => b.count - a.count)
             .slice(0, 3);
 

@@ -9,7 +9,7 @@ import { z } from "zod";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { invalidRequest, refuseRequest } from "../utils/errors";
-import { hourDetail, listeningStats, regionDetail, trackPlayCount } from "../services/stats/listening";
+import { hourDetail, listeningStats, regionDetail, trackListenCount } from "../services/stats/listening";
 import { shelfStats } from "../services/stats/shelf";
 import { signature } from "../services/stats/signature";
 import { playableSlice, type Slice } from "../services/stats/playable";
@@ -121,7 +121,7 @@ router.get("/track/:id/plays", async (req, res) => {
     try {
         const id = String(req.params.id ?? "");
         if (!id || id.length > 64) return refuseRequest(req, res, "id: empty or over 64 characters");
-        res.json({ plays: await trackPlayCount(req.user!.id, id) });
+        res.json({ plays: await trackListenCount(req.user!.id, id) });
     } catch (error) {
         logger.error("[Stats] track play count failed:", error);
         res.status(500).json({ error: "Couldn't count that track" });

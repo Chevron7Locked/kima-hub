@@ -19,7 +19,7 @@ import { audiobookCoverAddress } from "../../services/imageStorage";
 import { selectRadioTracks } from "../../services/mixes/stationSelection";
 import { moodStationList } from "../../services/mixes/stations";
 import { spreadByArtist } from "../../utils/artistSpread";
-import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE } from "../../services/libraryFilters";
+import { PLAYABLE_ALBUM_WHERE } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
@@ -48,12 +48,12 @@ router.get("/recently-listened", async (req, res) => {
       await Promise.all([
         // Listens, not Play rows, and one entry per artist, so `limit` cards come back
         // whenever that many artists were listened to. Various Artists and Unknown Artist
-        // name no one, so their listens give no artist card. Plays of Discover songs are left out by the album's
-        // location, Subsonic scrobbles by their source.
+        // name no one, so their listens give no artist card. Listens of Discover songs are in no library read, Subsonic
+        // scrobbles are left out by their source.
         recentListenArtists(userId, {
           take: limitNum,
           sources: ["LIBRARY"],
-          where: Prisma.sql`al.location = ${LIBRARY_LOCATION}::"AlbumLocation" AND ar."identityKey" NOT IN (${Prisma.join(noOneKeys())})`,
+          where: Prisma.sql`ar."identityKey" NOT IN (${Prisma.join(noOneKeys())})`,
         }),
         prisma.audiobookProgress.findMany({
           where: {

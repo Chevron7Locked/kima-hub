@@ -112,7 +112,7 @@ describe("night songs", () => {
         await play(lib.user1, songs[4], 2, NIGHT, false);
         await play(lib.user2, songs[5], 4);
         const found = await nightSongs(lib.user1, "UTC");
-        expect(found.map((s) => [s.id, s.plays])).toEqual([[songs[0], 3], [songs[4], 2], [songs[1], 1]]);
+        expect(found.map((s) => [s.id, s.listens])).toEqual([[songs[0], 3], [songs[4], 2], [songs[1], 1]]);
     });
 
     it("move with the zone: 23:00 UTC is 08:00 in Tokyo and 19:00 in New York, but 00:00 in Lagos", async () => {
@@ -135,7 +135,7 @@ describe("night songs", () => {
             await play(lib.user1, copy.id, 3);
             const found = await nightSongs(lib.user1, "UTC");
             expect(found).toHaveLength(1);
-            expect(found[0]).toMatchObject({ id: copy.id, plays: 5 });
+            expect(found[0]).toMatchObject({ id: copy.id, listens: 5 });
         } finally {
             await prisma.track.update({ where: { id: copy.id }, data: { title: original } });
         }

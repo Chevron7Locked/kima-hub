@@ -95,7 +95,7 @@ it("the shelf counts a song, album and artist heard once any listen of it exists
 
 it("the familiar seeds are the songs listened to, most listens first and then the most recent, s1's two rows one listen", async () => {
     const seeds = (await seedsOf(U, new Date())).filter((s) => s.id.startsWith(P));
-    expect(seeds.map((s) => [s.id, s.plays])).toEqual([
+    expect(seeds.map((s) => [s.id, s.listens])).toEqual([
         [song("s1"), 3], [song("s3"), 2], [song("s6"), 1], [song("s5"), 1], [song("s2"), 1],
     ]);
 });

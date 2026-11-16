@@ -162,13 +162,13 @@ describe("the order", () => {
         ]);
     });
 
-    it("carries each song's own play count, the person's alone", async () => {
+    it("carries each song's own listen count, the person's alone", async () => {
         listenBrainzAnswers();
         const songs = await ask();
         const by = (t: string) => songs.find((s) => s.title === t)!;
-        expect(by("Karma Police")).toMatchObject({ trackId: id("karma"), userPlayCount: 2, listeners: 310000, playCount: 5200000 });
-        expect(by("Airbag")).toMatchObject({ userPlayCount: 3, playCount: 3 });
-        expect(by("Exit Music (For a Film)").userPlayCount).toBe(0);
+        expect(by("Karma Police")).toMatchObject({ trackId: id("karma"), userListens: 2, listeners: 310000, playCount: 5200000 });
+        expect(by("Airbag")).toMatchObject({ userListens: 3, playCount: 3 });
+        expect(by("Exit Music (For a Film)").userListens).toBe(0);
     });
 
     it("gives the first-release date of the songs it ordered by it", async () => {

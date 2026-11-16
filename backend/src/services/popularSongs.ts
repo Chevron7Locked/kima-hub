@@ -55,12 +55,12 @@ export interface PopularSong {
     title: string;
     /** The tier that placed it. */
     source: PopularSource;
-    /** Sitewide plays (ListenBrainz) or Deezer's rank; for the own tier, this person's plays. */
+    /** Sitewide plays (ListenBrainz) or Deezer's rank; for the own tier, this person's listens. */
     playCount: number;
     /** Sitewide listeners (ListenBrainz); 0 from any other tier. */
     listeners: number;
-    /** This person's own plays of the song. */
-    userPlayCount: number;
+    /** This person's own listens of the song. */
+    userListens: number;
     /** The first-release date the song was placed by (release tier only); null when nothing dated it. */
     releaseDate?: string | null;
     preview: PopularPreview | null;
@@ -220,7 +220,7 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
         listenCounts(args.userId, { song: Prisma.sql`${playableSongSql("t", "al")} AND al."artistId" = ${args.artist.id}` }),
         globalRanking(args, deadlineMs),
     ]);
-    const plays = new Map(listens.map((l) => [l.trackId, l.listens]));
+    const listensByTrack = new Map(listens.map((l) => [l.trackId, l.listens]));
     const byId = new Map<string, OwnedSong>(owned.map((t) => [t.id, t]));
     const byMbid = new Map<string, OwnedSong>();
     const byTitle = new Map<string, OwnedSong>();
@@ -241,7 +241,7 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
         source,
         playCount: 0,
         listeners: 0,
-        userPlayCount: plays.get(t.id) ?? 0,
+        userListens: listensByTrack.get(t.id) ?? 0,
         preview: null,
         ...extra,
     });
@@ -262,7 +262,7 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
                 source: "global",
                 playCount: r.playCount,
                 listeners: r.listeners,
-                userPlayCount: 0,
+                userListens: 0,
                 preview: {
                     key: r.key,
                     previewUrl: r.previewUrl ?? null,

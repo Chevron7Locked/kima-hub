@@ -52,7 +52,7 @@ const familiarLockKey = (userId: string) => `${FAMILIAR_KEY_PREFIX}-lock:${userI
 
 interface SeedRow {
     id: string;
-    plays: number;
+    listens: number;
 }
 
 /**
@@ -62,7 +62,7 @@ interface SeedRow {
 export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
     const since = new Date(now.getTime() - FAMILIAR_LOOKBACK_DAYS * 86_400_000);
     const counts = await listenCounts(userId, { song: playableSongSql("t", "al"), since, take: FAMILIAR_SEEDS });
-    return counts.map((c) => ({ id: c.trackId, plays: c.listens }));
+    return counts.map((c) => ({ id: c.trackId, listens: c.listens }));
 }
 
 /** Which songs are the seeds, whatever their weights. */
@@ -207,11 +207,11 @@ async function closestToSeeds(seeds: SeedRow[], signal?: AbortSignal): Promise<F
     signal?.throwIfAborted();
     const withData = seeds.filter((s) => ctx.tracks.has(s.id));
     if (withData.length === 0) return null;
-    const total = withData.reduce((sum, s) => sum + s.plays, 0);
+    const total = withData.reduce((sum, s) => sum + s.listens, 0);
     const matches = Math.min(FAMILIAR_MATCHES, Math.max(1, Math.ceil(ctx.state.trackCount * FAMILIAR_SHARE)));
     const closest = await topScores(
         ctx,
-        withData.map((s) => ({ trackId: s.id, weight: s.plays / total })),
+        withData.map((s) => ({ trackId: s.id, weight: s.listens / total })),
         matches,
         withData.map((s) => s.id),
     );

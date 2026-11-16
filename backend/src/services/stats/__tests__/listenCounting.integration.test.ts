@@ -9,6 +9,7 @@ import { playableSongSql } from "../../../utils/playableSong";
 import {
     albumsListenedAtLeast,
     hasListenedSql,
+    librarySong,
     listenCounts,
     listenedArtists,
     listenedMoreThanSql,
@@ -16,7 +17,7 @@ import {
     neverListenedSql,
     recentListenArtists,
 } from "../listens";
-import { trackPlayCount } from "../listening";
+import { trackListenCount } from "../listening";
 
 jest.setTimeout(60_000);
 
@@ -180,10 +181,38 @@ describe("listen rows", () => {
         expect(counts.get(id("s1"))).toBe(5);
     });
 
-    it("name one song with trackId, its kept plays included, and only a library song", async () => {
+    it("name one song with trackId, its kept plays included", async () => {
         expect((await perSong(A, { trackId: id("s2") })).get(id("s2"))).toBe(2);
         expect([...(await perSong(A, { trackId: id("s1") })).keys()]).toEqual([id("s1")]);
-        expect(await rows(A, { trackId: id("d1") })).toEqual([]);
+    });
+
+    it("fold a kept play no song is found for by its names as the library folds them: another case, accent or punctuation is one song", async () => {
+        const first = kept(A, ago(5 * DAY), { title: "Lost", artist: "Counting y", album: "Lost Album" });
+        const again = kept(A, ago(5 * DAY - 10 * SECOND), { title: "lost! ", artist: "COUNTING Y", album: "Löst Album" });
+        const other = kept(A, ago(4 * DAY), { title: "Lost Too", artist: "Counting y", album: "Lost Album" });
+        await prisma.play.createMany({ data: [first, again, other] });
+        try {
+            // The two spellings of one song ten seconds apart are one listen; the other title is its own.
+            const lost = (await rows(A)).filter((r) => r.kept_title !== null);
+            expect(lost.filter((r) => r.kept_title !== "Lost Too")).toHaveLength(2);
+            expect(lost.filter((r) => r.kept_title === "Lost Too")).toHaveLength(1);
+        } finally {
+            await prisma.play.deleteMany({ where: { id: { in: [first.id, again.id, other.id] } } });
+        }
+    });
+
+    it("count a kept play of an artist the library lists nowhere under one artist and album however its names are spelled", async () => {
+        const first = kept(A, ago(5 * DAY), { title: "Ghost One", artist: "Nobody Home", album: "Empty Room" });
+        const again = kept(A, ago(4 * DAY), { title: "Ghost Two", artist: "nobody-home!", album: "empty room" });
+        await prisma.play.createMany({ data: [first, again] });
+        try {
+            const keys = await prisma.$queryRaw<Array<{ artist_key: string; album_key: string }>>(Prisma.sql`
+                ${listenRows(A)}
+                SELECT DISTINCT p.artist_key, p.album_key FROM p WHERE p.kept_title IN ('Ghost One', 'Ghost Two')`);
+            expect(keys).toHaveLength(1);
+        } finally {
+            await prisma.play.deleteMany({ where: { id: { in: [first.id, again.id] } } });
+        }
     });
 
     it("start at since: only the listens that began then or later", async () => {
@@ -196,20 +225,25 @@ describe("listen rows", () => {
     });
 });
 
-describe("Discover listens", () => {
-    it("are asked for by name: only the listens of songs on a Discover album, this person's own, no kept plays", async () => {
-        const a = await rows(A, { discover: true });
-        expect(a.map((r) => r.fkey)).toEqual([id("d1")]);
-        expect((await rows(B, { discover: true })).map((r) => r.fkey)).toEqual([id("d1")]);
-        expect(a.every((r) => r.kept_title === null)).toBe(true);
+describe("a song's own listens", () => {
+    it("are read wherever its album is: a library song's and a Discover song's, this person's own, with no kept plays", async () => {
+        const discover = await rows(A, { trackId: id("d1") });
+        expect(discover.map((r) => r.fkey)).toEqual([id("d1")]);
+        expect(discover.every((r) => r.kept_title === null)).toBe(true);
+        expect((await rows(B, { trackId: id("d1") })).map((r) => r.fkey)).toEqual([id("d1")]);
+        expect((await rows(A, { trackId: id("s1") })).map((r) => r.fkey)).toEqual(Array(5).fill(id("s1")));
     });
 
-    it("count a song on whichever album it is: the player bar's count of a library song and of a Discover song", async () => {
-        expect(await trackPlayCount(A, id("s1"))).toBe(5);
-        expect(await trackPlayCount(A, id("s2"))).toBe(2);
-        expect(await trackPlayCount(A, id("d1"))).toBe(1);
-        expect(await trackPlayCount(B, id("s1"))).toBe(0);
-        expect(await trackPlayCount(A, id("nothing"))).toBe(0);
+    it("are the player bar's count: a library song's and a Discover song's", async () => {
+        expect(await trackListenCount(A, id("s1"))).toBe(5);
+        expect(await trackListenCount(A, id("s2"))).toBe(2);
+        expect(await trackListenCount(A, id("d1"))).toBe(1);
+        expect(await trackListenCount(B, id("s1"))).toBe(0);
+        expect(await trackListenCount(A, id("nothing"))).toBe(0);
+    });
+
+    it("leave a Discover song out of every read that is not about that song", async () => {
+        expect((await perSong(A)).has(id("d1"))).toBe(false);
     });
 });
 
@@ -269,7 +303,7 @@ describe("listen counts", () => {
     it("lets through only the songs the rule given does: Discover, missing and corrupt songs are not offered", async () => {
         const ids = (await listenCounts(A, { song: playable })).map((c) => c.trackId);
         for (const gone of ["d1", "m1", "c1"]) expect(ids).not.toContain(id(gone));
-        const all = (await listenCounts(A, { song: Prisma.sql`TRUE` })).map((c) => c.trackId);
+        const all = (await listenCounts(A, { song: librarySong })).map((c) => c.trackId);
         expect(all).toEqual(expect.arrayContaining([id("m1"), id("c1")]));
         expect(all).not.toContain(id("d1"));
     });
@@ -286,23 +320,46 @@ describe("listen counts", () => {
 });
 
 describe("the artists of listens", () => {
-    const playable = playableSongSql("t", "al");
-
     it("is one artist per listen, newest first, so an artist listened to often appears often", async () => {
-        // Newest three of A's playable listens: s5 (1h), the Subsonic s4 (5h), the kept play of s6 (6h).
-        expect((await listenedArtists(A, { song: playable, take: 3 })).map((a) => a.id)).toEqual([id("art_y"), id("art_x"), id("art_y")]);
+        // Newest three of A's listens of library songs: s5 (1h), the missing m1 (3h), the corrupt c1 (4h). The Discover song d1 (2h) is no library listen.
+        expect((await listenedArtists(A, { take: 3 })).map((a) => a.id)).toEqual([id("art_y"), id("art_x"), id("art_x")]);
     });
 
-    it("leaves out Discover, missing and corrupt songs, counts repeats once, and goes back only as far as since", async () => {
-        const all = await listenedArtists(A, { song: playable });
+    it("counts every listen of a library song whatever the state of its file, repeats once, and goes back only as far as since", async () => {
+        const all = await listenedArtists(A);
         expect(all.map((a) => a.id)).not.toContain(id("art_z"));
-        // s1 x5, s2 x2, s3, s4, s5 x2, s6, w1 x2, v1: c1 and m1 stay out, and so does the kept play with no song.
-        expect(all).toHaveLength(15);
-        expect(await listenedArtists(A, { song: playable, since: ago(2 * HOUR) })).toHaveLength(1);
+        // x: s1 x5, s2 x2, s3, s4, m1 and c1 (a missing or corrupt file is still a song listened to) = 11; y: s5 x2, s6 and the
+        // kept play with no song, counted with the library artist of its name = 4; w1 x2; v1.
+        const per = new Map<string, number>();
+        for (const a of all) per.set(a.id, (per.get(a.id) ?? 0) + 1);
+        expect([...per.entries()].sort()).toEqual([[id("art_v"), 1], [id("art_w"), 2], [id("art_x"), 11], [id("art_y"), 4]]);
+        expect(await listenedArtists(A, { since: ago(2 * HOUR) })).toHaveLength(1);
+    });
+
+    it("counts a kept play whose song is gone toward the library artist of the same name, however the name is written", async () => {
+        const mine = kept(A, ago(12 * HOUR), { title: "Nothing", artist: "COUNTING  V", album: "Gone V Album" });
+        await prisma.play.create({ data: mine });
+        try {
+            const all = (await listenedArtists(A)).map((a) => a.id);
+            expect(all.filter((a) => a === id("art_v"))).toHaveLength(2);
+        } finally {
+            await prisma.play.delete({ where: { id: mine.id } });
+        }
+    });
+
+    it("leaves out a kept play whose artist the library does not list", async () => {
+        const nobody = kept(A, ago(30 * SECOND), { title: "Nothing", artist: "Nobody Listed", album: "Nowhere" });
+        await prisma.play.create({ data: nobody });
+        try {
+            expect((await listenedArtists(A, { take: 1 })).map((a) => a.id)).toEqual([id("art_y")]);
+            expect(await listenedArtists(A)).toHaveLength(18);
+        } finally {
+            await prisma.play.delete({ where: { id: nobody.id } });
+        }
     });
 
     it("is this person's own", async () => {
-        expect((await listenedArtists(B, { song: playable })).map((a) => a.id)).toEqual([id("art_x"), id("art_w"), id("art_w")]);
+        expect((await listenedArtists(B)).map((a) => a.id)).toEqual([id("art_x"), id("art_w"), id("art_w")]);
     });
 });
 
@@ -314,10 +371,27 @@ describe("artists of recent listens", () => {
         expect(new Set(result.map((r) => r.artistId)).size).toBe(result.length);
     });
 
-    it("counts a kept play toward the song it is found by", async () => {
-        const result = await recentListenArtists(A, { take: 1, where: Prisma.sql`t.id = ${id("s6")}` });
+    it("keeps the listens of one artist when asked, by a condition on the artist", async () => {
+        const result = await recentListenArtists(A, { take: 1, where: Prisma.sql`ar.id = ${id("art_y")}` });
         expect(result.map((r) => r.artistId)).toEqual([id("art_y")]);
-        expect(Math.abs(result[0].lastListenedAt.getTime() - ago(6 * HOUR).getTime())).toBeLessThan(5000);
+        expect(Math.abs(result[0].lastListenedAt.getTime() - ago(HOUR).getTime())).toBeLessThan(5000);
+    });
+
+    it("keeps only the sources asked for", async () => {
+        expect((await recentListenArtists(A, { take: 10, sources: ["SUBSONIC"] })).map((r) => r.artistId)).toEqual([id("art_x")]);
+    });
+
+    it("counts a kept play whose song is gone toward the library artist of the same name", async () => {
+        const mine = kept(A, ago(12 * HOUR), { title: "Nothing", artist: "Counting v", album: "Gone V Album" });
+        await prisma.play.create({ data: mine });
+        try {
+            const result = await recentListenArtists(A, { take: 10, where: Prisma.sql`ar.id = ${id("art_v")}` });
+            expect(result.map((r) => r.artistId)).toEqual([id("art_v")]);
+            // v1's own listens were a day back: the kept play is the newer.
+            expect(Math.abs(result[0].lastListenedAt.getTime() - ago(12 * HOUR).getTime())).toBeLessThan(5000);
+        } finally {
+            await prisma.play.delete({ where: { id: mine.id } });
+        }
     });
 
     it("answers the same from the recent walk and from the whole history", async () => {

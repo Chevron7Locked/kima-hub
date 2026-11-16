@@ -10,11 +10,15 @@
  * played this", reads listens (`listenRows`, `hasListenedSql`, `neverListenedSql`,
  * `listenedMoreThanSql`, `listenCounts`, `listenedArtists`, `recentListenArtists`,
  * `albumsListenedAtLeast`, `withListens`), of one person's own plays of songs on
- * a library album. A play of a Discover song is in no library count; a reader
- * that wants Discover listens asks for them by name (`listenRows` with
- * `discover`). Which of those songs a reader offers is the caller's rule (the
- * playable-song rule, usually), passed in or composed in its own SQL. The `heard`
- * flag a play is stored with is not read by any count.
+ * a library album. A play of a Discover song is in no library count; the one
+ * read that wants a Discover song's listens is a single song's (`listenRows`
+ * with `trackId`), which reads that song's listens wherever its album is. Which
+ * of those songs a reader offers is the caller's rule: what is offered to play
+ * passes the playable-song rule, and a taste read (`listenedArtists`,
+ * `recentListenArtists`, and the readers that seed from them) counts every
+ * library song listened to whatever the state of its file, named `librarySong`.
+ * The `heard` flag a play is stored with is recorded by the listen rule and read
+ * only by the history audit and repair, never by a count.
  *
  * Kept plays: a song removed with no copy to take its history leaves its plays
  * (`Play.trackId` null, with the song's title, artist, album, recording and
@@ -23,10 +27,12 @@
  * - to the present song with its recording id, else with its title, album and
  *   artist names (a library song whose file is there, the best copy when there are
  *   several): it folds with that song's own plays and every count of that song
- *   includes it;
- * - with no such song, under its stored names, in the stats page's counts (an
- *   artist or album of that name that the library lists now, else the stored
- *   name). What needs the song's audio (the taste plot, drift, key, shape) or the
+ *   includes it; when several copies carry the name, the one whose edited title it
+ *   carries wins before the better copy that only has that file title;
+ * - with no such song, under its stored names (folded as `nameKeySql` folds them,
+ *   so spellings of one song are one), in the counts of the stats page and of the
+ *   artist readers (an artist or album of that name that the library lists now,
+ *   else the stored name). What needs the song's audio (the taste plot, drift, key, shape) or the
  *   song itself (top songs, the songs of an hour or a region) reads the songs
  *   that are there.
  *
@@ -42,8 +48,15 @@
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
-import { assertSqlName, bestCopyFirst } from "../../utils/playableSong";
+import { assertSqlName, bestCopyFirst, LIBRARY_LOCATION } from "../../utils/playableSong";
 import { artistHasPlayableSongSql } from "../libraryFilters";
+
+/**
+ * A song on a library album, whatever the state of its file: a condition on the album alias `al`. What a person listened to
+ * is a fact about the listening, so the readers that learn a taste from it (Discover seeding, the artist-similar mix,
+ * recommendations) pass this where the readers that offer songs to play pass the playable-song rule.
+ */
+export const librarySong = Prisma.sql`al.location = ${LIBRARY_LOCATION}::"AlbumLocation"`;
 
 /** A table alias written in code, checked before it goes into SQL text. */
 function alias(name: string, fn: string): Prisma.Sql {
@@ -92,16 +105,20 @@ export interface ListenScope {
     period?: Period;
     /** Only the listens that began at or after it. The walk is narrowed to the songs touched since, each walked whole, so the listens are exact. */
     since?: Date;
-    /** Only this song's listens, the narrowest walk. */
+    /** Only this song's listens, the narrowest walk, wherever its album is: a Discover song has listens too, though no library count holds them. */
     trackId?: string;
-    /** The listens of songs on a Discover album instead of a library one. A Discover song has no kept plays. */
-    discover?: true;
+}
+
+/** Every character from `from` to `to` inclusive, as the characters themselves. */
+function codePoints(from: number, to: number): string[] {
+    return Array.from({ length: to - from + 1 }, (_, i) => String.fromCodePoint(from + i));
 }
 
 /**
  * Punctuation, spaces and invisible marks outside ASCII that `unaccent` leaves alone and a C-ctype database's `[:punct:]` cannot see (it
  * knows ASCII only). Listed whole, not as a character set: on a database whose encoding is not UTF8 (SQL_ASCII) every
  * byte is a character, so a set would also take bytes out of other letters, while a whole sequence only matches itself.
+ * Full-width letters and digits (U+FF10-FF19, U+FF21-FF3A, U+FF41-FF5A) are letters of their script and stay.
  */
 const WIDE_PUNCTUATION_AND_SPACE = [
     "\u00a0", // no-break space
@@ -117,6 +134,13 @@ const WIDE_PUNCTUATION_AND_SPACE = [
     "\u205f", // medium mathematical space
     "\u3000", // ideographic space
     "\u30fb", // katakana middle dot
+    ...codePoints(0x3001, 0x3003), // ideographic comma and full stop, ditto mark
+    ...codePoints(0x3008, 0x3011), // CJK angle, double angle, corner, white corner and black lenticular brackets
+    ...codePoints(0x3014, 0x301f), // CJK tortoise-shell, white lenticular and other brackets, wave dash, quotation marks
+    ...codePoints(0xff01, 0xff0f), // full-width ! to /
+    ...codePoints(0xff1a, 0xff20), // full-width : to @
+    ...codePoints(0xff3b, 0xff40), // full-width [ to `
+    ...codePoints(0xff5b, 0xff65), // full-width { to the half-width ideographic and katakana punctuation
 ].join("|");
 
 /**
@@ -128,21 +152,26 @@ const WIDE_PUNCTUATION_AND_SPACE = [
  * false one.
  * A name with nothing left keeps itself, so "!!!" still finds "!!!" rather than every other name made of symbols. The
  * argument is a fixed column expression written in code, never a value (it is exported only so the fold can be checked
- * against `nameKey` on a real database). Unlike `nameKey` it does not compose decomposed text first: Postgres can only
- * do that on a UTF8 database, and this must run on any.
+ * against `nameKey` on a real database). Decomposed text is composed first (NFC, as `nameKey` does) on a database whose
+ * encoding is UTF8, the only one Postgres can compose on; the all-in-one image's is SQL_ASCII, where the fold leaves it
+ * decomposed. The branch is Postgres's own answer to `server_encoding`, so one statement is right on either. The argument
+ * must be a column or expression of one, not a constant: Postgres evaluates `normalize` of a constant while planning,
+ * even in a branch that is not taken.
  */
 export function nameKeySql(expr: string): Prisma.Sql {
+    const composed = `CASE WHEN current_setting('server_encoding') = 'UTF8' THEN normalize(${expr}, NFC) ELSE ${expr} END`;
     return Prisma.raw(
-        `coalesce(nullif(regexp_replace(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '${WIDE_PUNCTUATION_AND_SPACE}', '', 'g'), '[[:space:][:punct:]]', '', 'g'), ''), ${expr})`,
+        `coalesce(nullif(regexp_replace(regexp_replace(lower(unaccent(kima_text_trim(${composed}))), '${WIDE_PUNCTUATION_AND_SPACE}', '', 'g'), '[[:space:][:punct:]]', '', 'g'), ''), ${composed})`,
     );
 }
 
 /**
  * The folded edited title and the folded file title of the album or song a table alias names, as a set-returning function
  * to put after `CROSS JOIN LATERAL`, so a kept name is compared with either by a plain equality the planner can hash.
+ * Name its columns `(key, ord)`: `ord` is 1 for the edited title (which has no key when there is none) and 2 for the file's.
  */
 function shownOrFileTitleKeys(table: "ka" | "k" | "b"): Prisma.Sql {
-    return Prisma.sql`unnest(ARRAY[${nameKeySql(`${table}."displayTitle"`)}, ${nameKeySql(`${table}.title`)}])`;
+    return Prisma.sql`unnest(ARRAY[${nameKeySql(`${table}."displayTitle"`)}, ${nameKeySql(`${table}.title`)}]) WITH ORDINALITY`;
 }
 
 /**
@@ -179,14 +208,16 @@ function keptCtes(userId: string): Prisma.Sql {
             SELECT DISTINCT ON (kp.id) kp.id AS play_id, k.id
             FROM kept_plays kp
             JOIN "Album" ka ON ka.location = 'LIBRARY'
-            CROSS JOIN LATERAL ${shownOrFileTitleKeys("ka")} AS ak(key)
+            CROSS JOIN LATERAL ${shownOrFileTitleKeys("ka")} AS ak(key, ord)
             JOIN "Track" k ON k."albumId" = ka.id
-            CROSS JOIN LATERAL ${shownOrFileTitleKeys("k")} AS tk(key)
+            CROSS JOIN LATERAL ${shownOrFileTitleKeys("k")} AS tk(key, ord)
             WHERE ak.key = kp.album_key AND tk.key = kp.title_key
               AND k."missingSince" IS NULL
               AND NOT EXISTS (SELECT 1 FROM kept_by_recording br WHERE br."recordingMbid" = kp."keptRecordingMbid")
               AND EXISTS (SELECT 1 FROM "Artist" a WHERE a.id = ka."artistId" AND ${nameKeySql("a.name")} = kp.artist_key)
-            ORDER BY kp.id, ${bestCopyFirst()}
+            -- The copy carrying the edited title a person gave wins before the better copy that only has that file title:
+            -- the kept play names that very song.
+            ORDER BY kp.id, tk.ord, ak.ord, ${bestCopyFirst()}
         ),
         -- The artist and album the library lists now under a kept play's names, for a play no present song is found for.
         -- A Discover-only artist is not one. Resolved here once per distinct name rather than once per kept play.
@@ -202,7 +233,7 @@ function keptCtes(userId: string): Prisma.Sql {
             FROM (SELECT DISTINCT artist_key, album_key FROM kept_plays) kn
             JOIN kept_artist_ids kai ON kai.artist_key = kn.artist_key
             JOIN "Album" b ON b."artistId" = kai.id AND b.location = 'LIBRARY'
-            CROSS JOIN LATERAL ${shownOrFileTitleKeys("b")} AS bk(key)
+            CROSS JOIN LATERAL ${shownOrFileTitleKeys("b")} AS bk(key, ord)
             WHERE bk.key = kn.album_key
             ORDER BY kn.artist_key, kn.album_key, b.id
         ),
@@ -223,12 +254,13 @@ function keptSongsSql(userId: string): Prisma.Sql {
  * A `WITH RECURSIVE` chain ending in `p`, one row per listen of this person's plays of songs on library albums, kept plays
  * attributed as the header says; append the rest of the query (extra CTEs with a leading comma). The date window applies
  * after the walk, or a listen starting before it would look like one starting inside it. `trackId` can narrow the input
- * because the walk is per song (a song on a Discover album has no listens); so can `since`, which walks only the songs with a
- * row at or after it, then keeps the listens that began at or after it.
+ * because the walk is per song, and then the song's listens are read wherever its album is (a Discover song's included,
+ * which no other read holds); so can `since`, which walks only the songs with a row at or after it, then keeps the
+ * listens that began at or after it.
  * Every row carries `artist_key`, `album_key`, `kept_title` and `kept_artist`: what the stats page counts artists and albums by.
  */
 export function listenRows(userId: string, scope: ListenScope = {}): Prisma.Sql {
-    const { period = "all", since, trackId, discover } = scope;
+    const { period = "all", since, trackId } = scope;
     const touched = since
         ? Prisma.sql`AND (p."trackId" IN (SELECT r."trackId" FROM "Play" r WHERE r."userId" = ${userId} AND r."playedAt" >= ${since})
                      OR p."trackId" IN (SELECT kr.matched FROM kept_resolved kr WHERE kr.matched IS NOT NULL AND kr."playedAt" >= ${since}))`
@@ -241,12 +273,12 @@ export function listenRows(userId: string, scope: ListenScope = {}): Prisma.Sql 
                    lib."artistId" AS artist_key, t."albumId" AS album_key, NULL::text AS kept_title, NULL::text AS kept_artist
             FROM "Play" p
             JOIN "Track" t ON t.id = p."trackId"
-            JOIN "Album" lib ON lib.id = t."albumId" AND lib.location = ${discover ? Prisma.sql`'DISCOVER'` : Prisma.sql`'LIBRARY'`}::"AlbumLocation"
+            JOIN "Album" lib ON lib.id = t."albumId" ${trackId ? Prisma.empty : Prisma.sql`AND lib.location = 'LIBRARY'`}
             WHERE p."userId" = ${userId}
               ${trackId ? Prisma.sql`AND p."trackId" = ${trackId}` : Prisma.empty}
               ${touched}`;
     // A kept play found for a song folds under that song, with its columns.
-    const found = discover ? Prisma.empty : Prisma.sql`
+    const found = Prisma.sql`
           UNION ALL
             SELECT kr.id, mt.id, mt.id, kr."playedAt", kr.source,
                    mt.duration, mt."albumId", mt."trackNo",
@@ -259,17 +291,19 @@ export function listenRows(userId: string, scope: ListenScope = {}): Prisma.Sql 
             ${trackId ? Prisma.sql`WHERE mt.id = ${trackId}` : Prisma.empty}`;
     // One found for no song keeps its stored names. Its artist and album are the ones of that name that the library lists
     // now (a Discover-only artist is not one), so its listen counts with theirs; with none, the stored names stand in for
-    // them. Its audio features are not kept, so only the counts that need none read it.
-    const lost = trackId || discover
+    // them. Its audio features are not kept, so only the counts that need none read it. Plays of one song fold together
+    // by recording id, else by its names as `nameKeySql` folds them, so a song spelled two ways is one song here as it is
+    // when a present song is found for it.
+    const lost = trackId
         ? Prisma.empty
         : Prisma.sql`
           UNION ALL
             SELECT kr.id, NULL, 'kept:' || coalesce(kr."keptRecordingMbid",
-                       concat_ws(chr(31), kr."keptArtistName", kr."keptAlbumTitle", kr."keptTitle")),
+                       concat_ws(chr(31), kr.artist_key, kr.album_key, kr.title_key)),
                    kr."playedAt", kr.source, kr."keptDuration", kbi.id, NULL,
                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                   coalesce(kai.id, 'kept:' || kr."keptArtistName"),
-                   coalesce(kbi.id, 'kept:' || concat_ws(chr(31), kr."keptArtistName", kr."keptAlbumTitle")),
+                   coalesce(kai.id, 'kept:' || kr.artist_key),
+                   coalesce(kbi.id, 'kept:' || concat_ws(chr(31), kr.artist_key, kr.album_key)),
                    kr."keptTitle", kr."keptArtistName"
             FROM kept_resolved kr
             LEFT JOIN kept_artist_ids kai ON kai.artist_key = kr.artist_key
@@ -436,22 +470,22 @@ export async function listenCounts(
 }
 
 /**
- * The album artist of each of this listener's listens of songs `song` lets through (a condition on `t` and `al`, as
- * `listenCounts`), newest listen first: one entry per listen, so an artist listened to often appears often. `since` keeps
+ * The album artist of each of this listener's listens of library songs, newest listen first: one entry per listen, so an
+ * artist listened to often appears often. It is a taste read, so every listen counts whatever the state of the song's file
+ * (the playable-song rule is for what is offered to play, not for what was listened to), and a kept play whose song is gone
+ * counts toward the library artist of its name; one whose artist the library does not list reads no artist. `since` keeps
  * the listens that began at or after it; `take` stops after that many listens.
  */
 export async function listenedArtists(
     userId: string,
-    args: { song: Prisma.Sql; since?: Date; take?: number },
+    args: { since?: Date; take?: number } = {},
 ): Promise<Artist[]> {
     const take = args.take === undefined ? Prisma.empty : Prisma.sql`LIMIT ${args.take}`;
     const rows = await prisma.$queryRaw<Array<{ artistId: string }>>(Prisma.sql`
         ${listenRows(userId, { since: args.since })}
-        SELECT al."artistId" AS "artistId"
+        SELECT p.artist_key AS "artistId"
         FROM p
-        JOIN "Track" t ON t.id = p."trackId"
-        JOIN "Album" al ON al.id = t."albumId"
-        WHERE (${args.song})
+        JOIN "Artist" ar ON ar.id = p.artist_key
         ORDER BY p."playedAt" DESC, p.id
         ${take}`);
     if (rows.length === 0) return [];
@@ -639,8 +673,8 @@ export async function keptRecordings(
 /**
  * The artists of this listener's newest listens, one entry per artist, each stamped with when their newest listen began,
  * newest first: `take` artists whenever that many were listened to, however often one of them was. `sources` keeps only
- * listens from those sources. `where` is a condition on the listen's song (`t`), album (`al`) and album artist (`ar`),
- * composed by the caller.
+ * listens from those sources. `where` is a condition on the album artist (`ar`), composed by the caller. A kept play whose
+ * song is gone counts toward the library artist of its name, as in `listenedArtists`.
  */
 export async function recentListenArtists(
     userId: string,
@@ -654,14 +688,12 @@ export async function recentListenArtists(
     const newest = (since?: Date) =>
         prisma.$queryRaw<Array<{ artistId: string; lastListenedAt: Date }>>(Prisma.sql`
             ${listenRows(userId, { since })}
-            SELECT al."artistId" AS "artistId", max(p."playedAt") AS "lastListenedAt"
+            SELECT ar.id AS "artistId", max(p."playedAt") AS "lastListenedAt"
             FROM p
-            JOIN "Track" t ON t.id = p."trackId"
-            JOIN "Album" al ON al.id = t."albumId"
-            JOIN "Artist" ar ON ar.id = al."artistId"
+            JOIN "Artist" ar ON ar.id = p.artist_key
             WHERE TRUE ${sources} ${where}
-            GROUP BY al."artistId"
-            ORDER BY max(p."playedAt") DESC, al."artistId"
+            GROUP BY ar.id
+            ORDER BY max(p."playedAt") DESC, ar.id
             LIMIT ${args.take}`);
     // Walk only the songs heard lately first: a song untouched since the cutoff has no listen after it, so when `take`
     // artists already came back from after it, nobody outside the walk can beat them. Else walk the whole history.

@@ -115,7 +115,7 @@ beforeAll(async () => {
             ...plays(CROWDED, "q", 4),
             ...plays(WIDE, "z1", 3), ...plays(WIDE, "z2", 2),
             ...plays(ME, "x", 5), ...plays(ME, "y", 2),
-            // Heard most, but not of a playable song.
+            // Heard most: a Discover song (never taste) and a library song whose file is missing (still taste).
             ...plays(ME, "d", 9), ...plays(ME, "w", 9),
             ...plays(OTHER, "o", 9),
         ],
@@ -133,10 +133,10 @@ function appFor(user: string) {
 
 const seeded = (body: { artists: Array<{ id: string }> }) => body.artists.map((a) => a.id).filter((i) => i.startsWith(P)).sort();
 
-it("recommends the similar artists of the artists this listener plays, leaving out Discover and missing songs", async () => {
+it("recommends the similar artists of the artists this listener plays, counting a missing song and leaving out Discover", async () => {
     const res = await request(appFor(ME)).get("/recommendations/for-you?limit=10");
     expect(res.status).toBe(200);
-    expect(seeded(res.body)).toEqual([id("sim_x"), id("sim_y")]);
+    expect(seeded(res.body)).toEqual([id("sim_w"), id("sim_x"), id("sim_y")]);
 });
 
 it("is the listener's own: another listener's plays seed their recommendations, not mine", async () => {

@@ -90,9 +90,9 @@ describe("More Like", () => {
         expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More y");
     });
 
-    it("leaves a missing song's listens out", async () => {
+    it("counts a missing song's listens: what a listener played says what they like, whether or not the file is there", async () => {
         await prisma.play.createMany({ data: [...times(ME, "x0", 1), ...times(ME, "m0", 3)] });
-        expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More x");
+        expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More m");
     });
 
     it("counts a repeat ten seconds after a listen as the same listen", async () => {

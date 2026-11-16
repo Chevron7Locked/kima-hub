@@ -82,19 +82,19 @@ export async function generateRediscoverMix(
 export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    const playArtists = await listenedArtists(userId, {
-        song: playableSongSql("t", "al"),
+    // The seed is the artist listened to most: every listen of a library song counts, whatever the state of its file.
+    const listenArtists = await listenedArtists(userId, {
         since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 
-    if (playArtists.length === 0) return null;
+    if (listenArtists.length === 0) return null;
 
-    const artistPlayCounts = new Map<string, number>();
-    for (const artist of playArtists) {
-        artistPlayCounts.set(artist.id, (artistPlayCounts.get(artist.id) || 0) + 1);
+    const artistListenCounts = new Map<string, number>();
+    for (const artist of listenArtists) {
+        artistListenCounts.set(artist.id, (artistListenCounts.get(artist.id) || 0) + 1);
     }
 
-    const topArtistId = Array.from(artistPlayCounts.entries()).sort(
+    const topArtistId = Array.from(artistListenCounts.entries()).sort(
         (a, b) => b[1] - a[1]
     )[0][0];
 

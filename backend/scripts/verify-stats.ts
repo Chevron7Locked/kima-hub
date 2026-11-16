@@ -10,7 +10,7 @@ import { prisma } from "../src/utils/db";
 import { redisClient } from "../src/utils/redis";
 import { closeClient } from "../src/utils/closeRedisClient";
 import { auditFalseStarts } from "../src/services/playHistoryRepair";
-import { listeningStats, trackPlayCount, PLAY_CREDIT_CAP_SECONDS } from "../src/services/stats/listening";
+import { listeningStats, trackListenCount, PLAY_CREDIT_CAP_SECONDS } from "../src/services/stats/listening";
 import { shelfStats } from "../src/services/stats/shelf";
 import { signature } from "../src/services/stats/signature";
 import { withListens, type Period } from "../src/services/stats/listens";
@@ -325,14 +325,14 @@ async function main() {
     console.log("\nplayer bar");
     const topTrack = L.topTracks[0];
     if (topTrack) {
-        const single = await trackPlayCount(user.id, topTrack.id);
+        const single = await trackListenCount(user.id, topTrack.id);
         check("track count matches the top-tracks list", single, topTrack.plays,
             `"${topTrack.title}"`);
         const byHand = listens.filter((r) => r.trackId === topTrack.id).length;
         check("track count matches an independent recount", single, byHand);
     } else note("player bar", "no plays to check against");
 
-    const unknown = await trackPlayCount(user.id, "no-such-track-id");
+    const unknown = await trackListenCount(user.id, "no-such-track-id");
     check("an unknown track counts zero rather than throwing", unknown, 0);
 
     /* ── numbers the interface repeats back ────────────────────────────── */

@@ -24,6 +24,10 @@
  *    included, so a corrupt song's stages are offered again to be retried or closed rather than hidden from the
  *    offer, the pending counts and the one-at-a-time check.
  *
+ * A taste read is not an exception either, because it picks no song: Discover seeding, the artist-similar mix and
+ * /recommendations count a person's listens of any library song (`librarySong` in stats/listens.ts), missing and
+ * corrupt included, since what someone played says what they like whatever the file's state now.
+ *
  * Discover's own song lookups are not an exception. The Discover Weekly playlist builder and GET /discover/current
  * look up the songs of a week's Discover albums, and there PLAYABLE_DISCOVER_SONG is the rule: the same
  * file-there-and-read test, on a DISCOVER album instead of a library one (/current uses PLAYABLE_SONG for a liked

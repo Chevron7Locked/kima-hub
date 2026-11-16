@@ -609,7 +609,7 @@ router.get("/artists/:id", async (req, res) => {
           ...track,
           playCount: song.playCount,
           listeners: song.listeners,
-          userPlayCount: song.userPlayCount,
+          userPlayCount: song.userListens,
           ...popularitySource,
           ...(song.source === "release" ? { releaseDate: song.releaseDate } : {}),
           album: { ...track.album, coverArt: track.album.coverUrl },

@@ -1,6 +1,5 @@
 /** Seed artists for discovery (recent plays, else the library) and album ownership checks. */
 
-import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/db';
 import { logger } from '../../utils/logger';
 import { lidarrService } from '../lidarr';
@@ -8,7 +7,7 @@ import { subWeeks } from 'date-fns';
 import { normalizeForMatching, stringSimilarity } from '../../utils/normalization';
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { hasRealArtistId, sameArtist } from './discoverEvidence';
-import { listenCounts } from '../stats/listens';
+import { librarySong, listenCounts } from '../stats/listens';
 import { ownedIndexVersion } from './ownedIndexVersion';
 import { ACTIVE_STATUSES } from '../downloads/jobStatuses';
 
@@ -31,8 +30,8 @@ interface OwnedAlbumIndex {
 
 export class DiscoverySeeding {
     private readonly DEFAULT_SEED_COUNT = 10;
-    private readonly MIN_PLAYS_THRESHOLD = 5;
-    private readonly RECENT_PLAYS_LIMIT = 50;
+    private readonly MIN_LISTENS_THRESHOLD = 5;
+    private readonly RECENT_LISTENS_LIMIT = 50;
     private readonly OWNED_INDEX_TTL_MS = 5 * 60 * 1000; // one discovery run's worth of candidate checks
     /** The snapshot, with when and under which `ownedIndexVersion` it was read. */
     private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number; version: number }) | null = null;
@@ -47,11 +46,11 @@ export class DiscoverySeeding {
         const recentListens = await listenCounts(userId, {
             since: fourWeeksAgo,
             // A seed is about taste: a song whose file has gone still says what this person likes, so every library song counts.
-            song: Prisma.sql`TRUE`,
+            song: librarySong,
             sources: ['LIBRARY'],
         });
 
-        const weightedPlays = recentListens
+        const weightedListens = recentListens
             .map(listen => {
                 const weight = listen.lastListenedAt >= twoWeeksAgo ? 2 : 1;
                 return {
@@ -60,17 +59,17 @@ export class DiscoverySeeding {
                     rawCount: listen.listens,
                 };
             })
-            .filter(p => p.rawCount >= this.MIN_PLAYS_THRESHOLD) // Filter <5 listens
+            .filter(p => p.rawCount >= this.MIN_LISTENS_THRESHOLD) // Filter <5 listens
             .sort((a, b) => b.weightedCount - a.weightedCount)
-            .slice(0, this.RECENT_PLAYS_LIMIT);
+            .slice(0, this.RECENT_LISTENS_LIMIT);
 
-        if (weightedPlays.length < this.MIN_PLAYS_THRESHOLD) {
+        if (weightedListens.length < this.MIN_LISTENS_THRESHOLD) {
             return this.getFallbackSeedArtists(limit);
         }
 
         const tracks = await prisma.track.findMany({
             where: {
-                id: { in: weightedPlays.map((p) => p.trackId) },
+                id: { in: weightedListens.map((p) => p.trackId) },
                 album: { location: LIBRARY_LOCATION },
             },
             include: { album: { include: { artist: true } } },
@@ -79,7 +78,7 @@ export class DiscoverySeeding {
         // Most played first: the rows come back in the database's order, so the plays' rank is walked, not the rows'.
         const trackById = new Map(tracks.map((track) => [track.id, track]));
         const artistMap = new Map<string, SeedArtist>();
-        for (const { trackId } of weightedPlays) {
+        for (const { trackId } of weightedListens) {
             const track = trackById.get(trackId);
             if (!track) continue;
             const artist = track.album.artist;

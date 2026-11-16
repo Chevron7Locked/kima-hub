@@ -96,9 +96,9 @@ async function listensByTrack(): Promise<Map<string, number>> {
     const userId = await sharingUserId();
     if (!userId) return new Map();
     const before = startOfTodayUtc();
-    const rows = await prisma.$queryRaw<Array<{ trackId: string; plays: number }>>(Prisma.sql`${listenRows(userId)}
-        SELECT p."trackId", COUNT(*)::int AS plays FROM p WHERE p."trackId" IS NOT NULL AND p."playedAt" < ${before} GROUP BY 1`);
-    return new Map(rows.map((r) => [r.trackId, r.plays]));
+    const rows = await prisma.$queryRaw<Array<{ trackId: string; listens: number }>>(Prisma.sql`${listenRows(userId)}
+        SELECT p."trackId", COUNT(*)::int AS listens FROM p WHERE p."trackId" IS NOT NULL AND p."playedAt" < ${before} GROUP BY 1`);
+    return new Map(rows.map((r) => [r.trackId, r.listens]));
 }
 
 async function fingerprint(moodSignature: string): Promise<string> {

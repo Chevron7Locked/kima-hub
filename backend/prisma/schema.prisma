@@ -381,7 +381,7 @@ model Play {
   trackId  String?
   playedAt DateTime     @default(now())
   source   ListenSource @default(LIBRARY)
-  /// Recorded by the listen rule (enough of the track was heard), so a listen by construction.
+  /// Recorded by the listen rule; read only by the history audit and repair, never by a count.
   heard    Boolean      @default(false)
   /// A kept play's song, as it was when a library song left: written by the delete module, in the delete's own transaction,
   /// and cleared when the play attaches to a song again. All null on a play that has its song.

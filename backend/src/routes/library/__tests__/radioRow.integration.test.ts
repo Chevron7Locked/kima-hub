@@ -87,14 +87,18 @@ beforeAll(async () => {
     await addAlbum(100, "DISCOVER", DISCOVER_TRACKS, DISCOVER_COVER, 1990);
     // Seven more genres and decades of 15 songs each, past the home row's six genres and four decades.
     for (let n = 0; n < 7; n++) await addAlbum(200 + n, "LIBRARY", 15, coverOf(200 + n), 1920 + n * 10, `rcvextra${n}`);
+    // Noon UTC two days ago, so these plays are never night plays whatever the hour the suite runs at (Late Night reads 22:00-04:00).
+    const noon = new Date();
+    noon.setUTCDate(noon.getUTCDate() - 2);
+    noon.setUTCHours(12, 0, 0, 0);
     // Favorites are the listener's own plays (a's): library songs of albums 0-5, and some Discover ones that must never count.
     await prisma.$executeRaw`
-        INSERT INTO "Play" (id, "userId", "trackId")
-        SELECT ${P + "fav_"} || n || '_' || i, ${P + "a"}, ${P + "trk_"} || n || '_' || lpad(i::text, 3, '0')
+        INSERT INTO "Play" (id, "userId", "trackId", "playedAt")
+        SELECT ${P + "fav_"} || n || '_' || i, ${P + "a"}, ${P + "trk_"} || n || '_' || lpad(i::text, 3, '0'), ${noon}
         FROM generate_series(0, 5) AS n, generate_series(0, 2) AS i`;
     await prisma.$executeRaw`
-        INSERT INTO "Play" (id, "userId", "trackId")
-        SELECT ${P + "dfav_"} || i, ${P + "a"}, ${P + "trk_100_"} || lpad(i::text, 3, '0')
+        INSERT INTO "Play" (id, "userId", "trackId", "playedAt")
+        SELECT ${P + "dfav_"} || i, ${P + "a"}, ${P + "trk_100_"} || lpad(i::text, 3, '0'), ${noon}
         FROM generate_series(0, 29) AS i`;
     // Late Night plays the listener's own plays from after dark (23:30 UTC yesterday, read in UTC): a on album 1, b on album 2.
     const night = new Date();

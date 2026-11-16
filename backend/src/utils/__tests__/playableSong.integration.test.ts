@@ -903,16 +903,23 @@ it("measures the shelf's sound in the stats page's signature from playable songs
     }
 });
 
-it("recommends artists from plays of playable songs only", async () => {
+// Taste reads what a person listened to, not what is offered to play: a song whose file is missing or unreadable still
+// says what the listener likes. A Discover song is not their library, so it says nothing.
+it("recommends artists from listens of library songs, missing and corrupt included, and never of a Discover song", async () => {
     const listener = `${P}-recs`;
     const stranger = `${P}-stranger-ar`;
+    const recommended = async () => (await web("/api/recommendations/for-you", listener)).artists.map((a: { id: string }) => a.id);
     await prisma.artist.create({ data: { id: stranger, name: `${P} stranger`, normalizedName: normalizeArtistName(`${P} stranger`), identityKey: stranger } });
     await prisma.similarArtist.create({ data: { fromArtistId: `${P}-ar`, toArtistId: stranger } });
     await prisma.user.create({ data: { id: listener, username: listener, passwordHash: "x", role: "user", tokenVersion: 0 } });
-    await prisma.play.createMany({ data: UNPLAYABLE.map((trackId) => ({ userId: listener, trackId, playedAt: LISTENED, heard: true })) });
-    expect((await web("/api/recommendations/for-you", listener)).artists).toEqual([]);
-    await prisma.play.create({ data: { userId: listener, trackId: SONG.playable, playedAt: LISTENED, heard: true } });
-    expect((await web("/api/recommendations/for-you", listener)).artists.map((a: { id: string }) => a.id)).toEqual([stranger]);
+    await prisma.play.create({ data: { userId: listener, trackId: SONG.discover, playedAt: LISTENED, heard: true } });
+    expect(await recommended()).toEqual([]);
+    await prisma.play.create({ data: { userId: listener, trackId: SONG.missing, playedAt: LISTENED, heard: true } });
+    expect(await recommended()).toEqual([stranger]);
+    await prisma.play.deleteMany({ where: { userId: listener, trackId: SONG.missing } });
+    expect(await recommended()).toEqual([]);
+    await prisma.play.create({ data: { userId: listener, trackId: SONG.corrupt, playedAt: LISTENED, heard: true } });
+    expect(await recommended()).toEqual([stranger]);
 });
 
 // An artist whose every song is missing still has a radio: the similar artists' share.

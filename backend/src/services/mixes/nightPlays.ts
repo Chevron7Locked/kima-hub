@@ -47,7 +47,7 @@ const NIGHT_LOOKBACK_DAYS = 365;
 
 /** A song the listener played at night, with how often. */
 export interface NightSong extends StationSong {
-    plays: number;
+    listens: number;
     /** 1 if the song's tempo (double or half counts) is inside the pace band on a steady beat, 0 if outside, else 0.5. */
     pace: number;
     /** 1 if its energy is in the middle half of the library, 0 outside, 0.5 when it has no energy reading. */
@@ -111,7 +111,7 @@ export async function nightSongs(
 ): Promise<NightSong[]> {
     const since = new Date(now.getTime() - NIGHT_LOOKBACK_DAYS * 86_400_000);
     const rows = await prisma.$queryRaw<
-        Array<{ id: string; artist_key: string; title_key: string; plays: number; pace: number; arousal: number | null }>
+        Array<{ id: string; artist_key: string; title_key: string; listens: number; pace: number; arousal: number | null }>
     >(Prisma.sql`
         ${listenRows(userId, { since })},
         night AS (
@@ -125,7 +125,7 @@ export async function nightSongs(
               AND (EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) >= ${NIGHT_START_HOUR}
                    OR EXTRACT(HOUR FROM p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${zone}) < ${NIGHT_END_HOUR})
         )
-        SELECT id, artist_key, title_key, pace, arousal, count(*)::int AS plays
+        SELECT id, artist_key, title_key, pace, arousal, count(*)::int AS listens
         FROM night GROUP BY id, artist_key, title_key, pace, arousal
     `);
     // The band is looked up only for a listener who has night songs to place in it.
@@ -137,17 +137,17 @@ export async function nightSongs(
         const key = `${r.title_key}\0${r.artist_key}`;
         const seen = byTitle.get(key);
         if (!seen) {
-            byTitle.set(key, { id: r.id, artistId: r.artist_key, plays: r.plays, pace: r.pace, energy: energyOf(r.arousal), best: r.plays });
+            byTitle.set(key, { id: r.id, artistId: r.artist_key, listens: r.listens, pace: r.pace, energy: energyOf(r.arousal), best: r.listens });
         } else {
-            seen.plays += r.plays;
-            if (r.plays > seen.best || (r.plays === seen.best && r.id < seen.id)) {
-                Object.assign(seen, { id: r.id, pace: r.pace, energy: energyOf(r.arousal), best: r.plays });
+            seen.listens += r.listens;
+            if (r.listens > seen.best || (r.listens === seen.best && r.id < seen.id)) {
+                Object.assign(seen, { id: r.id, pace: r.pace, energy: energyOf(r.arousal), best: r.listens });
             }
         }
     }
     return [...byTitle.values()]
         .map(({ best: _best, ...song }) => song)
-        .sort((a, b) => b.plays - a.plays || (a.id < b.id ? -1 : 1));
+        .sort((a, b) => b.listens - a.listens || (a.id < b.id ? -1 : 1));
 }
 
 /**
@@ -160,10 +160,10 @@ async function similarSongs(seeds: NightSong[], count: number, counted?: string[
     if (!ctx) return [];
     const withData = seeds.filter((s) => ctx.tracks.has(s.id));
     if (withData.length === 0) return [];
-    const total = withData.reduce((sum, s) => sum + s.plays, 0);
+    const total = withData.reduce((sum, s) => sum + s.listens, 0);
     const ranked = await rankMatches(
         ctx,
-        withData.map((s) => ({ trackId: s.id, weight: s.plays / total })),
+        withData.map((s) => ({ trackId: s.id, weight: s.listens / total })),
         // The seeds take places in their album and artist caps unless the caller says none do (a caller that caps the
         // merged list itself).
         { limit: count, counted: counted ?? withData.map((s) => s.id) },
@@ -235,7 +235,7 @@ export async function nightStationPool(
 ): Promise<StationSong[]> {
     if (!userId) return fallbackSongs(fallbackRecipe);
     const own = await nightSongs(userId, await nightZone(requestedZone));
-    const repeated = own.filter((s) => s.plays >= 2);
+    const repeated = own.filter((s) => s.listens >= 2);
     if (own.length >= COLD_START_SONGS) {
         return repeated.length >= COLD_START_SONGS ? repeated : own;
     }
@@ -264,13 +264,13 @@ export async function nightMixTracks(
     const fit = (s: NightSong) => (spec.ranking === "drive" ? s.pace + s.energy : 0);
     let ordered: NightSong[];
     if (own.length >= COLD_START_SONGS) {
-        ordered = weightedOrder(own, (s) => s.plays * (1 + fit(s)), { seed, idOf: (s) => s.id });
+        ordered = weightedOrder(own, (s) => s.listens * (1 + fit(s)), { seed, idOf: (s) => s.id });
     } else {
         // Every song gets a place in the day's seeded order, with no artist cap (the cap is applied once, below, to
         // the ranked list): a song a cap would leave out of the order must not default to first place every day.
         const tie = new Map(seededOrder(own, seed, (s) => s.id).map((s, i) => [s.id, i]));
         ordered = [...own].sort(
-            (a, b) => fit(b) - fit(a) || b.plays - a.plays || tie.get(a.id)! - tie.get(b.id)!,
+            (a, b) => fit(b) - fit(a) || b.listens - a.listens || tie.get(a.id)! - tie.get(b.id)!,
         );
     }
     const known = new Map<string, StationSong>(ordered.map((s) => [s.id, s]));

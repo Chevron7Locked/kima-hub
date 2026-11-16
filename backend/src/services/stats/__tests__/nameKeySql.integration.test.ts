@@ -5,8 +5,9 @@
  * Three differences are by design or by the database, and asserted here as such:
  * - a name with no letters or digits has no `nameKey` ("") but keeps itself in SQL, so a kept "!!!" finds "!!!" and not
  *   every other symbol-only name;
- * - SQL does not compose decomposed text first (Postgres can only do that on a UTF8 database, and this must run on any),
- *   so a letter that only exists composed folds apart from its decomposed form there, while `nameKey` joins them;
+ * - SQL composes decomposed text first only on a UTF8 database (Postgres can do that on no other, and the suite's is not
+ *   one; nameKeySqlUtf8.integration.test.ts runs the fold on one), so here a letter that only exists composed folds apart
+ *   from its decomposed form, while `nameKey` joins them;
  * - a database with a C ctype (the all-in-one image's, and the suite's) cannot tell a letter outside ASCII from a symbol,
  *   so the fold removes only what it knows is punctuation or space and keeps every other letter. A name in another
  *   script keeps its own letters there, and keeps its case (`lower` does not fold them), so "Би-2" and "би-2" are two
@@ -102,12 +103,51 @@ describe("nameKeySql", () => {
         expect(await sqlKeys(names)).toEqual(names.map((n) => nameKey(n)));
     });
 
-    it("does not compose a decomposed letter that has no unaccented form, where nameKey does", async () => {
+    it("composes a decomposed letter that has no unaccented form as nameKey does on a UTF8 database, and not on any other", async () => {
+        // The composing is `normalize`, which Postgres runs on a UTF8 database only (nameKeySqlUtf8.integration.test.ts).
+        const [{ encoding }] = await prisma.$queryRaw<Array<{ encoding: string }>>`SELECT current_setting('server_encoding') AS encoding`;
         const composed = "Ай";
         const decomposed = "Ай";
 
         expect(nameKey(decomposed)).toBe(nameKey(composed));
         const [sqlComposed, sqlDecomposed] = await sqlKeys([composed, decomposed]);
-        expect(sqlDecomposed).not.toBe(sqlComposed);
+        if (encoding === "UTF8") expect(sqlDecomposed).toBe(sqlComposed);
+        else expect(sqlDecomposed).not.toBe(sqlComposed);
+    });
+});
+
+describe("nameKeySql and full-width punctuation", () => {
+    // CJK and full-width punctuation that `unaccent` leaves alone and a C-ctype `[:punct:]` cannot see.
+    const PUNCTUATION: Array<[number, number]> = [
+        [0x3001, 0x3003], [0x3008, 0x3011], [0x3014, 0x301f], [0xff01, 0xff0f], [0xff1a, 0xff20], [0xff3b, 0xff40], [0xff5b, 0xff65],
+    ];
+    // Full-width digits and letters are letters of their script, so they stay.
+    const LETTERS: Array<[number, number]> = [[0xff10, 0xff19], [0xff21, 0xff3a], [0xff41, 0xff5a]];
+    const chars = (ranges: Array<[number, number]>) =>
+        ranges.flatMap(([from, to]) => Array.from({ length: to - from + 1 }, (_, i) => String.fromCodePoint(from + i)));
+    const hex = (c: string) => c.codePointAt(0)!.toString(16);
+
+    it("drops every CJK and full-width punctuation mark between letters, as nameKey does", async () => {
+        const marks = chars(PUNCTUATION);
+        const keys = await sqlKeys(marks.map((m) => `a${m}b`));
+
+        expect(marks.filter((_, i) => keys[i] !== "ab").map(hex)).toEqual([]);
+        expect(marks.filter((m) => nameKey(`a${m}b`) !== "ab").map(hex)).toEqual([]);
+    });
+
+    it("joins one name written with and without them", async () => {
+        const [plain, spaced, quoted] = await sqlKeys(["宇多田ヒカル", "宇多田、ヒカル", "「宇多田」ヒカル！"]);
+
+        expect(plain).toBe("宇多田ヒカル");
+        expect(spaced).toBe(plain);
+        expect(quoted).toBe(plain);
+    });
+
+    it("keeps full-width letters and digits, as nameKey does", async () => {
+        const letters = chars(LETTERS);
+        const keys = await sqlKeys(letters.map((l) => `a${l}b`));
+
+        expect(letters.filter((_, i) => keys[i] === "ab").map(hex)).toEqual([]);
+        expect(keys).toEqual(letters.map((l) => nameKey(`a${l}b`)));
     });
 });

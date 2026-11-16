@@ -1,14 +1,15 @@
 /**
  * What the listens module does with kept plays: the plays of songs that left the library with no copy to take them.
  * The stats page's totals are the same before and after a delete; the readers that need a song count a kept play only
- * toward a present song it is found by; the audit still sees them in order. Real database; no mocks.
+ * toward a present song it is found by, and the artist readers also count one no song is found for toward the library
+ * artist of its name; the audit still sees them in order. Real database; no mocks.
  */
 import { prisma } from "../../../utils/db";
 import { deleteAlbums, deleteArtists, deleteSongs } from "../../library/albumDelete";
-import { Prisma } from "@prisma/client";
 import { playableSongSql } from "../../../utils/playableSong";
 import {
     countPlaysBefore,
+    librarySong,
     listenCounts,
     listenedArtists,
     listenedMoreThanSql,
@@ -198,13 +199,13 @@ describe("the readers that need a song", () => {
         SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND ${neverListenedSql(USER)}`;
 
     it("leave a kept play no present song matches out of per-song counts and never see a null song", async () => {
-        const counted = await listenCounts(USER, { song: Prisma.sql`TRUE` });
+        const counted = await listenCounts(USER, { song: librarySong });
         // The Discover song z1 is no library listen, so it is in no count.
         expect(counted.map((c) => c.trackId).sort()).toEqual([id("x1"), id("x2"), id("y1")].sort());
 
         await deleteSongs([id("x1")]);
 
-        const after = await listenCounts(USER, { song: Prisma.sql`TRUE` });
+        const after = await listenCounts(USER, { song: librarySong });
         expect(after.map((c) => c.trackId).sort()).toEqual([id("x2"), id("y1")].sort());
         const over = await prisma.$queryRaw<Array<{ id: string }>>`
             SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND t.id NOT IN (${listenedMoreThanSql(USER, 0)})`;
@@ -227,11 +228,17 @@ describe("the readers that need a song", () => {
         expect((await never()).map((r) => r.id)).not.toContain(id("x9"));
     });
 
-    it("read no artist for a kept play no present song matches", async () => {
+    it("count a kept play no present song matches toward the library artist of its name, and read no artist for one that has none", async () => {
         await deleteSongs([id("x1")]);
-        const artists = await listenedArtists(USER, { song: rule });
-        expect(artists.map((a) => a.id).sort()).toEqual([id("art_x"), id("art_y"), id("art_y")]);
+        // x1's kept plays are two listens (the first two rows fold into one): they count with art_x, which the library still lists.
+        const artists = await listenedArtists(USER);
+        expect(artists.map((a) => a.id).sort()).toEqual([id("art_x"), id("art_x"), id("art_x"), id("art_y"), id("art_y")]);
         expect((await recentListenArtists(USER, { take: 10 })).map((a) => a.artistId).sort()).toEqual([id("art_x"), id("art_y")]);
+
+        await deleteAlbums([id("alb_x")]);
+        await deleteArtists([id("art_x")]);
+        expect((await listenedArtists(USER)).map((a) => a.id)).toEqual([id("art_y"), id("art_y")]);
+        expect((await recentListenArtists(USER, { take: 10 })).map((a) => a.artistId)).toEqual([id("art_y")]);
     });
 
     it("count every play, kept ones included, before a moment", async () => {
@@ -328,6 +335,28 @@ describe("the readers that find a kept play's song by its stored names", () => {
         await prisma.album.update({ where: { id: id("alb_n9") }, data: { displayTitle: "An Album Someone Edited" } });
 
         expect(await listensOf(song)).toBe(1);
+    });
+
+    it("gives a kept play to the copy whose edited title it carries before the better copy that only has that file title", async () => {
+        await gone();
+        const edited = await copy("n12", { artist: `${P}Artist x`, album: `${P}alb_x`, title: "A Different File Title" });
+        await prisma.track.update({ where: { id: edited }, data: { displayTitle: `${P}Song x2`, bitrate: 128 } });
+        const better = await copy("n13", { artist: `${P}Artist x`, album: `${P}alb_x`, title: `${P}Song x2` });
+        await prisma.track.update({ where: { id: better }, data: { bitrate: 320 } });
+
+        expect(await listensOf(edited)).toBe(1);
+        expect(await listensOf(better)).toBeUndefined();
+    });
+
+    it("gives it to the best copy when no copy carries the edited title, or several do", async () => {
+        await gone();
+        const low = await copy("n14", { artist: `${P}Artist x`, album: `${P}alb_x`, title: `${P}Song x2` });
+        await prisma.track.update({ where: { id: low }, data: { bitrate: 128 } });
+        const high = await copy("n15", { artist: `${P}Artist x`, album: `${P}alb_x`, title: `${P}Song x2` });
+        await prisma.track.update({ where: { id: high }, data: { bitrate: 320 } });
+
+        expect(await listensOf(high)).toBe(1);
+        expect(await listensOf(low)).toBeUndefined();
     });
 
     it("counts a gone song's plays under the album the library lists after that album is given an edited title", async () => {

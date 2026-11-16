@@ -902,7 +902,7 @@ describe("familiarity: songs that sound like what the listener plays most", () =
         await prisma.play.createMany({
             data: Array.from({ length: 20 }, (_, k) => ({ userId: USER_ID, trackId: id("bg0"), playedAt: new Date(at - k * 10_000) })),
         });
-        expect((await seedsOf(USER_ID, new Date())).map((x) => [x.id, x.plays])).toEqual([[id("bg0"), 1]]);
+        expect((await seedsOf(USER_ID, new Date())).map((x) => [x.id, x.listens])).toEqual([[id("bg0"), 1]]);
     });
 
     it("does nothing for a recipe without a familiarity share", async () => {

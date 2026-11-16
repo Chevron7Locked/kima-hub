@@ -115,9 +115,9 @@ export async function selectRadioTracks(
             ...(await sampleTrackIds({ where: {}, take: limitNum * 10 })),
           ]),
         ];
-        const playsOf = await listensOf(listener, candidates);
+        const listensByTrack = await listensOf(listener, candidates);
         trackIds = candidates
-          .sort((a, b) => (playsOf.get(a) ?? 0) - (playsOf.get(b) ?? 0))
+          .sort((a, b) => (listensByTrack.get(a) ?? 0) - (listensByTrack.get(b) ?? 0))
           .slice(0, limitNum * 2);
       }
       break;
@@ -126,9 +126,9 @@ export async function selectRadioTracks(
     case "favorites": {
       if (!listener) return { reply: SIGN_IN_REQUIRED };
       // This listener's own listens, drawn in proportion to how many each song has.
-      const mostPlayedTracks = await prisma.$queryRaw<{ id: string; play_count: number }[]>(Prisma.sql`
+      const mostListenedTracks = await prisma.$queryRaw<{ id: string; listen_count: number }[]>(Prisma.sql`
         ${listenRows(listener)}
-        SELECT t.id, count(*)::int AS play_count
+        SELECT t.id, count(*)::int AS listen_count
         FROM p
         JOIN "Track" t ON t.id = p."trackId"
         JOIN "Album" a ON a.id = t."albumId"
@@ -137,8 +137,8 @@ export async function selectRadioTracks(
         ORDER BY -LN(1 - random()) / count(*) ASC
         LIMIT ${limitNum * 2}`);
 
-      if (mostPlayedTracks.length > 0) {
-        trackIds = mostPlayedTracks.map((t) => t.id);
+      if (mostListenedTracks.length > 0) {
+        trackIds = mostListenedTracks.map((t) => t.id);
       } else {
         logger.debug(
           "[Radio:favorites] No plays by this listener, returning random tracks",
